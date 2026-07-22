@@ -21,3 +21,7 @@ streamlit run app.py
 
 ## Important
 This code cannot connect to a brokerage or execute real trades. Prices entered in Sprint 1 are manual. Automated market-price ingestion and approval-based rebalancing belong to Sprint 2.
+
+
+## Sprint 2 Intelligence Core
+See `docs/SPRINT_2_INTELLIGENCE.md`. Run `python run_intelligence.py` to archive a complete demonstration decision.

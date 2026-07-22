@@ -1,0 +1,239 @@
+{
+  "as_of": "2026-07-22T16:00:00-07:00",
+  "source": "sample",
+  "metadata": {
+    "description": "Neutral demonstration inputs; replace with refreshed provider data."
+  },
+  "signals": {
+    "growth": 52,
+    "inflation": 48,
+    "employment": 54,
+    "policy_support": 46,
+    "earnings": 55,
+    "equity_trend": 58,
+    "breadth": 53,
+    "momentum": 56,
+    "volatility": 45,
+    "credit": 52,
+    "yield_curve": 49,
+    "duration": 50,
+    "liquidity": 51,
+    "dollar": 50,
+    "commodities": 48,
+    "global_relative_strength": 50,
+    "valuation": 43,
+    "quality": 60,
+    "sentiment": 54,
+    "positioning": 52
+  },
+  "opportunity_features": {
+    "SPY": {
+      "trend": 60,
+      "relative_strength": 58,
+      "breadth": 55,
+      "valuation": 42,
+      "quality": 72,
+      "risk": 62
+    },
+    "VTI": {
+      "trend": 59,
+      "relative_strength": 57,
+      "breadth": 56,
+      "valuation": 45,
+      "quality": 70,
+      "risk": 60
+    },
+    "QQQ": {
+      "trend": 64,
+      "relative_strength": 65,
+      "breadth": 50,
+      "valuation": 32,
+      "quality": 74,
+      "risk": 72
+    },
+    "IWM": {
+      "trend": 52,
+      "relative_strength": 48,
+      "breadth": 51,
+      "valuation": 58,
+      "quality": 45,
+      "risk": 70
+    },
+    "VEA": {
+      "trend": 54,
+      "relative_strength": 52,
+      "breadth": 54,
+      "valuation": 62,
+      "quality": 60,
+      "risk": 62
+    },
+    "VWO": {
+      "trend": 51,
+      "relative_strength": 49,
+      "breadth": 50,
+      "valuation": 68,
+      "quality": 48,
+      "risk": 76
+    },
+    "EWJ": {
+      "trend": 57,
+      "relative_strength": 58,
+      "breadth": 56,
+      "valuation": 60,
+      "quality": 62,
+      "risk": 64
+    },
+    "INDA": {
+      "trend": 61,
+      "relative_strength": 63,
+      "breadth": 59,
+      "valuation": 38,
+      "quality": 58,
+      "risk": 78
+    },
+    "SGOV": {
+      "trend": 50,
+      "relative_strength": 48,
+      "breadth": 50,
+      "valuation": 50,
+      "quality": 90,
+      "risk": 8
+    },
+    "IEF": {
+      "trend": 47,
+      "relative_strength": 45,
+      "breadth": 48,
+      "valuation": 53,
+      "quality": 88,
+      "risk": 28
+    },
+    "LQD": {
+      "trend": 51,
+      "relative_strength": 50,
+      "breadth": 52,
+      "valuation": 55,
+      "quality": 78,
+      "risk": 35
+    },
+    "GLD": {
+      "trend": 56,
+      "relative_strength": 55,
+      "breadth": 54,
+      "valuation": 50,
+      "quality": 65,
+      "risk": 45
+    },
+    "DBC": {
+      "trend": 48,
+      "relative_strength": 46,
+      "breadth": 49,
+      "valuation": 55,
+      "quality": 48,
+      "risk": 68
+    },
+    "VNQ": {
+      "trend": 49,
+      "relative_strength": 47,
+      "breadth": 48,
+      "valuation": 60,
+      "quality": 58,
+      "risk": 65
+    },
+    "XLK": {
+      "trend": 63,
+      "relative_strength": 64,
+      "breadth": 52,
+      "valuation": 34,
+      "quality": 75,
+      "risk": 70
+    },
+    "XLI": {
+      "trend": 60,
+      "relative_strength": 59,
+      "breadth": 58,
+      "valuation": 54,
+      "quality": 66,
+      "risk": 58
+    },
+    "XLV": {
+      "trend": 53,
+      "relative_strength": 51,
+      "breadth": 55,
+      "valuation": 57,
+      "quality": 74,
+      "risk": 42
+    },
+    "XLF": {
+      "trend": 55,
+      "relative_strength": 54,
+      "breadth": 56,
+      "valuation": 63,
+      "quality": 58,
+      "risk": 57
+    },
+    "XLE": {
+      "trend": 50,
+      "relative_strength": 49,
+      "breadth": 50,
+      "valuation": 67,
+      "quality": 54,
+      "risk": 65
+    },
+    "XLP": {
+      "trend": 51,
+      "relative_strength": 48,
+      "breadth": 52,
+      "valuation": 46,
+      "quality": 72,
+      "risk": 30
+    },
+    "XLU": {
+      "trend": 49,
+      "relative_strength": 47,
+      "breadth": 50,
+      "valuation": 52,
+      "quality": 69,
+      "risk": 32
+    },
+    "SMH": {
+      "trend": 66,
+      "relative_strength": 68,
+      "breadth": 52,
+      "valuation": 28,
+      "quality": 70,
+      "risk": 82
+    },
+    "CIBR": {
+      "trend": 60,
+      "relative_strength": 61,
+      "breadth": 55,
+      "valuation": 35,
+      "quality": 67,
+      "risk": 76
+    },
+    "BOTZ": {
+      "trend": 58,
+      "relative_strength": 57,
+      "breadth": 52,
+      "valuation": 38,
+      "quality": 60,
+      "risk": 79
+    },
+    "XBI": {
+      "trend": 48,
+      "relative_strength": 46,
+      "breadth": 49,
+      "valuation": 62,
+      "quality": 45,
+      "risk": 84
+    },
+    "ARKK": {
+      "trend": 55,
+      "relative_strength": 54,
+      "breadth": 47,
+      "valuation": 30,
+      "quality": 40,
+      "risk": 92
+    }
+  }
+}

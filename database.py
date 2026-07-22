@@ -4,7 +4,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = ROOT / "database" / "cio_paper_funds.db"
+import os
+DEFAULT_DB_PATH = ROOT / "database" / "cio_paper_funds.db"
+
+def database_path() -> Path:
+    return Path(os.environ.get("AI_CIO_DB_PATH", DEFAULT_DB_PATH))
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -85,6 +89,51 @@ CREATE TABLE IF NOT EXISTS cio_decisions (
     notes TEXT
 );
 
+CREATE TABLE IF NOT EXISTS market_snapshots (
+    snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    as_of TEXT NOT NULL,
+    source TEXT NOT NULL,
+    signals_json TEXT NOT NULL,
+    features_json TEXT NOT NULL,
+    metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS intelligence_decisions (
+    intelligence_decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    primary_regime TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    composite_risk_score REAL NOT NULL,
+    decision_json TEXT NOT NULL,
+    FOREIGN KEY(snapshot_id) REFERENCES market_snapshots(snapshot_id)
+);
+
+CREATE TABLE IF NOT EXISTS council_opinions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    intelligence_decision_id INTEGER NOT NULL,
+    specialist_id TEXT NOT NULL,
+    score REAL NOT NULL,
+    confidence REAL NOT NULL,
+    recommendation TEXT NOT NULL,
+    opinion_json TEXT NOT NULL,
+    FOREIGN KEY(intelligence_decision_id) REFERENCES intelligence_decisions(intelligence_decision_id)
+);
+
+CREATE TABLE IF NOT EXISTS opportunity_scores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    intelligence_decision_id INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    rank INTEGER NOT NULL,
+    opportunity_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    score REAL NOT NULL,
+    confidence REAL NOT NULL,
+    score_json TEXT NOT NULL,
+    FOREIGN KEY(intelligence_decision_id) REFERENCES intelligence_decisions(intelligence_decision_id)
+);
+
 CREATE TABLE IF NOT EXISTS journal (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
@@ -96,8 +145,9 @@ CREATE TABLE IF NOT EXISTS journal (
 
 @contextmanager
 def connection():
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    path = database_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
         yield conn

@@ -1,0 +1,294 @@
+{
+  "asset_classes": [
+    {
+      "id": "us_equity",
+      "label": "U.S. Equities",
+      "symbol": "VTI",
+      "risk": "high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ],
+      "defensive_tags": []
+    },
+    {
+      "id": "developed_equity",
+      "label": "Developed International",
+      "symbol": "VEA",
+      "risk": "high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ],
+      "defensive_tags": []
+    },
+    {
+      "id": "emerging_equity",
+      "label": "Emerging Markets",
+      "symbol": "VWO",
+      "risk": "very_high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ],
+      "defensive_tags": []
+    },
+    {
+      "id": "short_treasury",
+      "label": "Short Treasuries",
+      "symbol": "SGOV",
+      "risk": "very_low",
+      "macro_tags": [
+        "Slowdown",
+        "Recession",
+        "High Volatility"
+      ],
+      "defensive_tags": [
+        "Recession",
+        "High Volatility"
+      ]
+    },
+    {
+      "id": "intermediate_treasury",
+      "label": "Intermediate Treasuries",
+      "symbol": "IEF",
+      "risk": "low",
+      "macro_tags": [
+        "Slowdown",
+        "Recession",
+        "Deflation Risk"
+      ],
+      "defensive_tags": [
+        "Recession",
+        "Deflation Risk"
+      ]
+    },
+    {
+      "id": "investment_grade",
+      "label": "Investment Grade Credit",
+      "symbol": "LQD",
+      "risk": "moderate",
+      "macro_tags": [
+        "Expansion",
+        "Slowdown"
+      ],
+      "defensive_tags": []
+    },
+    {
+      "id": "gold",
+      "label": "Gold",
+      "symbol": "GLD",
+      "risk": "moderate",
+      "macro_tags": [
+        "Inflation Shock",
+        "High Volatility",
+        "Deflation Risk"
+      ],
+      "defensive_tags": [
+        "High Volatility"
+      ]
+    },
+    {
+      "id": "commodities",
+      "label": "Broad Commodities",
+      "symbol": "DBC",
+      "risk": "high",
+      "macro_tags": [
+        "Inflation Shock",
+        "Late Expansion"
+      ],
+      "defensive_tags": []
+    },
+    {
+      "id": "real_estate",
+      "label": "U.S. Real Estate",
+      "symbol": "VNQ",
+      "risk": "high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ],
+      "defensive_tags": []
+    }
+  ],
+  "regions": [
+    {
+      "id": "united_states",
+      "label": "United States",
+      "symbol": "SPY",
+      "risk": "high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "developed_ex_us",
+      "label": "Developed ex-U.S.",
+      "symbol": "VEA",
+      "risk": "high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "emerging_markets",
+      "label": "Emerging Markets",
+      "symbol": "VWO",
+      "risk": "very_high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "japan",
+      "label": "Japan",
+      "symbol": "EWJ",
+      "risk": "high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "india",
+      "label": "India",
+      "symbol": "INDA",
+      "risk": "very_high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    }
+  ],
+  "sectors": [
+    {
+      "id": "technology",
+      "label": "Technology",
+      "symbol": "XLK",
+      "risk": "very_high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "industrials",
+      "label": "Industrials",
+      "symbol": "XLI",
+      "risk": "high",
+      "macro_tags": [
+        "Expansion",
+        "Late Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "healthcare",
+      "label": "Healthcare",
+      "symbol": "XLV",
+      "risk": "moderate",
+      "macro_tags": [
+        "Slowdown",
+        "Recession",
+        "High Volatility"
+      ]
+    },
+    {
+      "id": "financials",
+      "label": "Financials",
+      "symbol": "XLF",
+      "risk": "high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "energy",
+      "label": "Energy",
+      "symbol": "XLE",
+      "risk": "high",
+      "macro_tags": [
+        "Late Expansion",
+        "Inflation Shock"
+      ]
+    },
+    {
+      "id": "consumer_staples",
+      "label": "Consumer Staples",
+      "symbol": "XLP",
+      "risk": "low",
+      "macro_tags": [
+        "Slowdown",
+        "Recession",
+        "High Volatility"
+      ]
+    },
+    {
+      "id": "utilities",
+      "label": "Utilities",
+      "symbol": "XLU",
+      "risk": "low",
+      "macro_tags": [
+        "Slowdown",
+        "Recession",
+        "High Volatility"
+      ]
+    }
+  ],
+  "innovation": [
+    {
+      "id": "semiconductors",
+      "label": "Semiconductors",
+      "symbol": "SMH",
+      "risk": "very_high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "cybersecurity",
+      "label": "Cybersecurity",
+      "symbol": "CIBR",
+      "risk": "very_high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "robotics_ai",
+      "label": "Robotics & AI",
+      "symbol": "BOTZ",
+      "risk": "very_high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    },
+    {
+      "id": "biotechnology",
+      "label": "Biotechnology",
+      "symbol": "XBI",
+      "risk": "very_high",
+      "macro_tags": [
+        "Recovery",
+        "Expansion"
+      ]
+    },
+    {
+      "id": "disruptive_innovation",
+      "label": "Disruptive Innovation",
+      "symbol": "ARKK",
+      "risk": "very_high",
+      "macro_tags": [
+        "Expansion",
+        "Recovery"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "version": "2.0.0",
+  "normalization": {
+    "neutral": 50,
+    "floor": 0,
+    "ceiling": 100
+  },
+  "regimes": [
+    "Expansion",
+    "Late Expansion",
+    "Slowdown",
+    "Recession",
+    "Recovery",
+    "Inflation Shock",
+    "Deflation Risk",
+    "High Volatility"
+  ],
+  "regime_temperature": 12.0,
+  "council_weights": {
+    "chief_economist": 0.14,
+    "chief_equity_strategist": 0.1,
+    "chief_fixed_income_strategist": 0.09,
+    "chief_technical_strategist": 0.1,
+    "chief_risk_officer": 0.13,
+    "chief_quantitative_strategist": 0.09,
+    "chief_global_strategist": 0.07,
+    "chief_commodity_strategist": 0.06,
+    "chief_valuation_officer": 0.06,
+    "chief_quality_officer": 0.06,
+    "chief_behavioral_officer": 0.05,
+    "chief_sector_rotation_officer": 0.05
+  },
+  "minimum_decision_confidence": 0.6,
+  "opportunity_weights": {
+    "trend": 0.25,
+    "relative_strength": 0.2,
+    "breadth": 0.15,
+    "macro_fit": 0.15,
+    "valuation": 0.1,
+    "quality": 0.1,
+    "risk": 0.05
+  },
+  "risk_penalties": {
+    "very_low": 0.55,
+    "low": 0.35,
+    "moderate": 0.15,
+    "high": 0.05,
+    "very_high": 0.0
+  }
+}

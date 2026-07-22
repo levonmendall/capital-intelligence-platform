@@ -10,6 +10,9 @@ from core.execution_engine import ExecutionError, execute_paper_trade
 from core.performance_engine import mandate_metrics
 from core.portfolio_engine import all_portfolios, portfolio_snapshot
 from core.seed import seed_mandates
+from intelligence.providers import JSONSnapshotProvider
+from intelligence.pipeline import IntelligencePipeline
+from pathlib import Path
 
 st.set_page_config(
     page_title="AI Chief Investment Office",
@@ -33,7 +36,7 @@ seed_mandates()
 st.sidebar.title("AI CIO")
 page = st.sidebar.radio(
     "Command Center",
-    ["Executive Dashboard", "Mandates", "CIO Decision", "Paper Trade", "Decision Ledger", "System"],
+    ["Executive Dashboard", "Mandates", "Intelligence Center", "CIO Decision", "Paper Trade", "Decision Ledger", "System"],
 )
 
 portfolios = all_portfolios()
@@ -94,6 +97,29 @@ elif page == "Mandates":
         st.dataframe(pd.DataFrame(snap.positions), use_container_width=True, hide_index=True)
     else:
         st.warning("This mandate is currently 100% virtual cash and has not made its first paper trade.")
+
+elif page == "Intelligence Center":
+    st.title("Intelligence Center")
+    st.caption("Probabilistic regime analysis, 12-member investment council, and ranked opportunities.")
+    pipeline = IntelligencePipeline(JSONSnapshotProvider(Path(__file__).resolve().parent / "data/sample_market_snapshot.json"))
+    decision, _ = pipeline.run(persist=False)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Primary Regime", decision.regime.primary_regime)
+    c2.metric("Decision Confidence", f"{decision.confidence:.0%}")
+    c3.metric("Council Risk Score", f"{decision.composite_risk_score:.1f}/100")
+    st.write(decision.summary)
+    st.subheader("Regime Probabilities")
+    regime_df = pd.DataFrame([{"Regime": k, "Probability": v} for k,v in sorted(decision.regime.probabilities.items(), key=lambda x:x[1], reverse=True)])
+    st.dataframe(regime_df.style.format({"Probability":"{:.1%}"}), use_container_width=True, hide_index=True)
+    st.subheader("Investment Council")
+    council_df = pd.DataFrame([{"Specialist":o.specialist_name,"Score":o.score,"Confidence":o.confidence,"Recommendation":o.recommendation} for o in decision.council])
+    st.dataframe(council_df.style.format({"Score":"{:.1f}","Confidence":"{:.0%}"}),use_container_width=True,hide_index=True)
+    category=st.selectbox("Opportunity category",list(decision.opportunity_rankings))
+    opp_df=pd.DataFrame([{"Rank":i+1,"Opportunity":o.label,"Symbol":o.symbol,"Score":o.score,"Confidence":o.confidence} for i,o in enumerate(decision.opportunity_rankings[category])])
+    st.dataframe(opp_df.style.format({"Score":"{:.1f}","Confidence":"{:.0%}"}),use_container_width=True,hide_index=True)
+    if st.button("Archive complete intelligence decision",type="primary"):
+        archived, did = pipeline.run(persist=True)
+        st.success(f"Intelligence decision #{did} archived with snapshot, council opinions, and rankings.")
 
 elif page == "CIO Decision":
     st.title("CIO Decision Engine")
