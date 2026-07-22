@@ -1,0 +1,23 @@
+{
+  "system_name": "AI Chief Investment Office",
+  "inception_date": "2026-07-22",
+  "paper_trading_only": true,
+  "currency": "USD",
+  "execution": {
+    "commission_per_trade": 0.0,
+    "spread_bps": 3.0,
+    "slippage_bps": 2.0,
+    "sell_regulatory_fee_bps": 0.0278,
+    "minimum_trade_value": 100.0,
+    "fractional_shares": true
+  },
+  "cash": {
+    "annual_yield": 0.0,
+    "day_count": 365
+  },
+  "rebalance": {
+    "minimum_drift": 0.025,
+    "minimum_confidence": 0.6,
+    "approval_required": true
+  }
+}

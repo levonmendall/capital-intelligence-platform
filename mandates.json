@@ -1,0 +1,154 @@
+{
+  "capital_preservation": {
+    "display_name": "AI Capital Preservation",
+    "starting_capital": 25000,
+    "benchmark": "SGOV",
+    "risk_level": "Very Low",
+    "target_volatility": 0.04,
+    "max_drawdown_target": 0.05,
+    "max_equity": 0.25,
+    "max_single_position": 0.3,
+    "min_cash": 0.1,
+    "turnover_limit_annual": 0.5,
+    "factor_weights": {
+      "quality": 0.3,
+      "income": 0.25,
+      "momentum": 0.05,
+      "value": 0.15,
+      "defense": 0.25
+    }
+  },
+  "income_stability": {
+    "display_name": "AI Income & Stability",
+    "starting_capital": 25000,
+    "benchmark": "AOM",
+    "risk_level": "Low",
+    "target_volatility": 0.07,
+    "max_drawdown_target": 0.08,
+    "max_equity": 0.5,
+    "max_single_position": 0.25,
+    "min_cash": 0.05,
+    "turnover_limit_annual": 0.75,
+    "factor_weights": {
+      "quality": 0.25,
+      "income": 0.35,
+      "momentum": 0.1,
+      "value": 0.15,
+      "defense": 0.15
+    }
+  },
+  "balanced_allocation": {
+    "display_name": "AI Balanced Allocation",
+    "starting_capital": 25000,
+    "benchmark": "AOR",
+    "risk_level": "Moderate",
+    "target_volatility": 0.1,
+    "max_drawdown_target": 0.12,
+    "max_equity": 0.7,
+    "max_single_position": 0.22,
+    "min_cash": 0.03,
+    "turnover_limit_annual": 1.0,
+    "factor_weights": {
+      "quality": 0.2,
+      "income": 0.15,
+      "momentum": 0.2,
+      "value": 0.2,
+      "defense": 0.1,
+      "global": 0.15
+    }
+  },
+  "growth_opportunities": {
+    "display_name": "AI Growth Opportunities",
+    "starting_capital": 25000,
+    "benchmark": "SPY",
+    "risk_level": "High",
+    "target_volatility": 0.16,
+    "max_drawdown_target": 0.22,
+    "max_equity": 1.0,
+    "max_single_position": 0.25,
+    "min_cash": 0.0,
+    "turnover_limit_annual": 1.5,
+    "factor_weights": {
+      "quality": 0.2,
+      "momentum": 0.35,
+      "growth": 0.35,
+      "value": 0.05,
+      "global": 0.05
+    }
+  },
+  "tactical_rotation": {
+    "display_name": "AI Tactical Rotation",
+    "starting_capital": 25000,
+    "benchmark": "SPY",
+    "risk_level": "Dynamic",
+    "target_volatility": 0.14,
+    "max_drawdown_target": 0.15,
+    "max_equity": 1.0,
+    "max_single_position": 0.35,
+    "min_cash": 0.0,
+    "turnover_limit_annual": 3.0,
+    "factor_weights": {
+      "momentum": 0.45,
+      "regime": 0.25,
+      "breadth": 0.15,
+      "liquidity": 0.15
+    }
+  },
+  "opportunistic_value": {
+    "display_name": "AI Opportunistic Value",
+    "starting_capital": 25000,
+    "benchmark": "IWD",
+    "risk_level": "Moderate-High",
+    "target_volatility": 0.14,
+    "max_drawdown_target": 0.2,
+    "max_equity": 0.95,
+    "max_single_position": 0.25,
+    "min_cash": 0.05,
+    "turnover_limit_annual": 1.0,
+    "factor_weights": {
+      "value": 0.35,
+      "quality": 0.3,
+      "mean_reversion": 0.15,
+      "momentum": 0.1,
+      "income": 0.1
+    }
+  },
+  "global_opportunities": {
+    "display_name": "AI Global Opportunities",
+    "starting_capital": 25000,
+    "benchmark": "ACWI",
+    "risk_level": "High",
+    "target_volatility": 0.16,
+    "max_drawdown_target": 0.22,
+    "max_equity": 1.0,
+    "max_single_position": 0.25,
+    "min_cash": 0.0,
+    "turnover_limit_annual": 1.5,
+    "factor_weights": {
+      "global": 0.35,
+      "momentum": 0.25,
+      "quality": 0.15,
+      "valuation": 0.15,
+      "currency": 0.1
+    }
+  },
+  "innovation_disruption": {
+    "display_name": "AI Innovation & Disruption",
+    "starting_capital": 25000,
+    "benchmark": "QQQ",
+    "risk_level": "Very High",
+    "target_volatility": 0.22,
+    "max_drawdown_target": 0.3,
+    "max_equity": 1.0,
+    "max_single_position": 0.25,
+    "min_cash": 0.0,
+    "turnover_limit_annual": 1.75,
+    "factor_weights": {
+      "innovation": 0.4,
+      "growth": 0.25,
+      "momentum": 0.2,
+      "quality": 0.1,
+      "valuation": 0.05
+    }
+  }
+}

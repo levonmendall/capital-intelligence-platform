@@ -1,0 +1,9 @@
+display_name,benchmark,risk_level,inception_date,starting_capital,starting_cash
+AI Balanced Allocation,AOR,Moderate,2026-07-22,25000.0,25000.0
+AI Capital Preservation,SGOV,Very Low,2026-07-22,25000.0,25000.0
+AI Global Opportunities,ACWI,High,2026-07-22,25000.0,25000.0
+AI Growth Opportunities,SPY,High,2026-07-22,25000.0,25000.0
+AI Income & Stability,AOM,Low,2026-07-22,25000.0,25000.0
+AI Innovation & Disruption,QQQ,Very High,2026-07-22,25000.0,25000.0
+AI Opportunistic Value,IWD,Moderate-High,2026-07-22,25000.0,25000.0
+AI Tactical Rotation,SPY,Dynamic,2026-07-22,25000.0,25000.0
