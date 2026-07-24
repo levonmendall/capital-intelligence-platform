@@ -30,6 +30,21 @@ python run_regime.py \
 The journal is separate from mutable portfolio tables. It rejects update and
 delete operations and verifies a hash chain across recorded events.
 
+To carry the same point-in-time assessment through the existing six-specialist
+investment committee and journal both records together:
+
+```bash
+python run_regime.py \
+  --govern \
+  --journal database/institutional_journal.db \
+  --code-version YOUR_COMMIT_SHA
+```
+
+Governance applies explicit coverage, evidence-quality, and confidence gates
+before committee review. It can approve, require modification, reject,
+escalate material dissent, or record a formal no-action decision. Committee
+approval remains non-executing and cannot bypass portfolio constraints.
+
 See:
 
 - [Architecture](ARCHITECTURE.md)

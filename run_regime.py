@@ -6,6 +6,10 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
+from committee import (
+    RegimeCommitteeDecision,
+    RegimeGovernanceWorkflow,
+)
 from intelligence.regime_pipeline import (
     InstitutionalRegimeRun,
     SeriesLoadState,
@@ -78,6 +82,50 @@ def format_run(run: InstitutionalRegimeRun) -> str:
     return "\n".join(lines)
 
 
+def format_decision(decision: RegimeCommitteeDecision) -> str:
+    """Return a concise governed committee disposition."""
+
+    lines = [
+        "Regime Committee Governance",
+        "---------------------------",
+        f"Decision: {decision.decision_identifier}",
+        f"Outcome: {decision.outcome.value}",
+        f"Policy: {decision.policy_version}",
+        (
+            "Recommendation: "
+            f"{decision.recommendation.action.value} "
+            f"{decision.recommendation.target}"
+        ),
+        f"Rationale: {decision.rationale}",
+    ]
+    if decision.committee_result is not None:
+        committee_decision = (
+            decision.committee_result.decision
+        )
+        lines.extend(
+            (
+                (
+                    "Committee consensus: "
+                    f"{committee_decision.consensus.value}"
+                ),
+                (
+                    "Committee confidence: "
+                    f"{committee_decision.confidence:.0%}"
+                ),
+                (
+                    "Specialist opinions: "
+                    f"{committee_decision.opinion_count}"
+                ),
+            )
+        )
+    if decision.no_action is not None:
+        lines.append(
+            "Next review: "
+            f"{decision.no_action.review_at.isoformat()}"
+        )
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -107,14 +155,26 @@ def main() -> int:
             "a journaled run."
         ),
     )
+    parser.add_argument(
+        "--govern",
+        action="store_true",
+        help=(
+            "Translate the regime assessment into a recommendation "
+            "and run committee governance. No trades are executed."
+        ),
+    )
     arguments = parser.parse_args()
     as_of = _parse_as_of(arguments.as_of)
     run = build_fred_regime_pipeline().run(as_of=as_of)
     print(format_run(run))
+    decision = None
+    if arguments.govern:
+        decision = RegimeGovernanceWorkflow().evaluate(run)
+        print("")
+        print(format_decision(decision))
     if arguments.journal is not None:
-        event = SQLiteAppendOnlyJournal(
-            arguments.journal
-        ).append_regime_run(
+        journal = SQLiteAppendOnlyJournal(arguments.journal)
+        event = journal.append_regime_run(
             run,
             code_version=arguments.code_version,
         )
@@ -124,6 +184,17 @@ def main() -> int:
             f"{event.event_identifier} "
             f"(sequence {event.sequence})"
         )
+        if decision is not None:
+            decision_event = (
+                journal.append_regime_committee_decision(
+                    decision
+                )
+            )
+            print(
+                "Decision journal event: "
+                f"{decision_event.event_identifier} "
+                f"(sequence {decision_event.sequence})"
+            )
     return 0
 
 

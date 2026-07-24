@@ -3,9 +3,10 @@
 ## Scope
 
 This document defines the target sequence from evidence to portfolio action.
-Only the recommendation-to-committee-result segment is fully orchestrated
-today. Unimplemented segments are contracts for future milestones, not claims
-of production readiness.
+The point-in-time regime path is now orchestrated from canonical evidence
+through recommendation governance and append-only recording. Other
+unimplemented segments are contracts for future milestones, not claims of
+production readiness.
 
 ## Sequence
 
@@ -37,6 +38,25 @@ InvestmentRecommendation
 
 The result enforces that the report references the same decision and that the
 workflow timestamp is timezone-aware.
+
+## Regime governance boundary
+
+`committee.regime_governance.RegimeGovernanceWorkflow` connects the canonical
+`InstitutionalRegimeRun` to that implemented committee boundary:
+
+```text
+InstitutionalRegimeRun
+    -> evidence coverage / quality / confidence gates
+    -> InvestmentRecommendation
+    -> InstitutionalDecisionWorkflow
+    -> approve / modify / reject / escalate / no action
+    -> append-only journal
+```
+
+The adapter produces a macro recommendation; it does not produce portfolio
+weights or orders. A failed evidence gate creates a typed `NoActionDecision`
+with a review date and action triggers. Material open dissent is retained and
+escalates an otherwise valid committee result instead of being averaged away.
 
 ## Non-negotiable boundaries
 
