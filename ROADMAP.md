@@ -116,6 +116,11 @@ cross-venue consolidation.
 - [x] Make no action a formal terminal committee outcome.
 - [x] Define evidence-trust dimensions and disclosed scoring.
 - [x] Define scenario shocks and versioned cross-asset transmission maps.
+- [x] Compare consecutive regime decisions under versioned materiality rules.
+- [x] Separate continuous analysis from selective portfolio alerts.
+- [x] Produce plain-language directional portfolio impact.
+- Schedule monitoring cycles and connect user-selected delivery channels after
+  application authentication is implemented.
 
 ## Milestone 6 — Stock intelligence
 

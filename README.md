@@ -45,6 +45,21 @@ before committee review. It can approve, require modification, reject,
 escalate material dissent, or record a formal no-action decision. Committee
 approval remains non-executing and cannot bypass portfolio constraints.
 
+## Continuous intelligence, selective alerts
+
+`monitoring.ContinuousRegimeMonitor` is the application boundary for scheduled
+analysis. Every cycle retrieves new point-in-time evidence, evaluates the
+regime, runs governance, compares the result with the prior decision, and can
+record that comparison. Notification is a separate policy decision.
+
+The default material-change policy remains silent when the market view is
+unchanged or when only one moderate signal moves. It notifies only when the
+portfolio warrants review and marks a prior view urgent when a critical regime
+or risk threshold is crossed. User-facing output is deliberately compressed to
+a short headline, a plain-language explanation, and the affected portfolio
+exposures. Directional portfolio impact never selects position sizes or
+bypasses mandate constraints.
+
 See:
 
 - [Architecture](ARCHITECTURE.md)

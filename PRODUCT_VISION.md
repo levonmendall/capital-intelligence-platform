@@ -74,6 +74,9 @@ Initial analytical depth will remain deliberately uneven:
   outcome from a bad process with a lucky outcome.
 - **Cross-asset context:** macro regime and liquidity can influence equity and
   crypto assessments without erasing asset-specific risks.
+- **Continuous intelligence, selective attention:** analysis can run in the
+  background, but the product interrupts the user only when a change is
+  material enough to reconsider portfolio risk.
 - **AI restraint:** generative AI explains, queries, and summarizes structured
   results but cannot invent observations or bypass policy.
 

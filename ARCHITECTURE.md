@@ -23,6 +23,7 @@ policy, or choose unconstrained position sizes.
 | `analytics` | Returns, attribution, risk, and decision-quality measurement | Ex-ante recommendations |
 | `portfolio` | Mandates, constraints, sizing, risk budgets, rebalancing | Analytical score generation |
 | `backtesting` | Walk-forward simulation and bias controls | Live order execution |
+| `monitoring` | Consecutive-analysis comparison, materiality policy, portfolio-impact direction, alert eligibility | Data retrieval scheduling, notification transport, position sizing |
 | `api` and `dashboard` | Application delivery and input validation | Domain rules |
 
 Only contexts implemented in the repository are importable today. The
@@ -199,6 +200,26 @@ normalized observations, score calculations, lineage, rule versions,
 classification, coverage, and quality. Retrospective decision-quality reviews
 are appended against their decision identifier rather than modifying the
 original record.
+
+## Continuous-monitoring integration
+
+`monitoring.material_change` compares consecutive canonical regime runs and
+their governed decisions. It detects regime, recommendation, governance,
+evidence-quality, confidence, and signal changes under a versioned materiality
+policy. Every comparison produces a typed assessment; notification eligibility
+is an explicit output rather than an incidental side effect.
+
+`monitoring.service.ContinuousRegimeMonitor` runs the analytical cycle whenever
+an external scheduler invokes it. The assessment sink receives every result,
+including silent ones. The alert sink receives only assessments marked
+`notify` or `urgent`. Scheduling cadence and delivery channels remain
+application concerns and do not alter domain policy.
+
+Portfolio impact is directional and intentionally simple: hold, review,
+increase risk, reduce risk, or rebalance. It identifies affected exposures,
+including a crypto risk budget where relevant, but cannot choose position
+sizes. Actual holdings, mandates, concentration limits, and risk budgets belong
+to the future canonical `portfolio` context.
 
 Database triggers reject `UPDATE` and `DELETE` operations on journal events.
 Every event also includes the prior event hash in a global SHA-256 chain, so

@@ -17,6 +17,7 @@ from typing import Any
 from committee.regime_governance import RegimeCommitteeDecision
 from evaluation import DecisionQualityReview
 from intelligence.regime_pipeline import InstitutionalRegimeRun
+from monitoring import MarketChangeAssessment
 
 
 class JournalEventType(str, Enum):
@@ -24,6 +25,7 @@ class JournalEventType(str, Enum):
 
     REGIME_RUN = "regime_run"
     REGIME_COMMITTEE_DECISION = "regime_committee_decision"
+    MARKET_CHANGE_ASSESSMENT = "market_change_assessment"
     DECISION_QUALITY_REVIEW = "decision_quality_review"
 
 
@@ -402,6 +404,49 @@ def serialize_regime_committee_decision(
     }
 
 
+def serialize_market_change_assessment(
+    assessment: MarketChangeAssessment,
+) -> dict[str, Any]:
+    """Serialize analysis even when notification policy stays silent."""
+
+    if not isinstance(assessment, MarketChangeAssessment):
+        raise TypeError(
+            "assessment must be a MarketChangeAssessment"
+        )
+    return {
+        "identifier": assessment.identifier,
+        "previous_as_of": assessment.previous_as_of.isoformat(),
+        "current_as_of": assessment.current_as_of.isoformat(),
+        "analyzed_at": assessment.analyzed_at.isoformat(),
+        "policy_version": assessment.policy_version,
+        "state": assessment.state.value,
+        "alert_level": assessment.alert_level.value,
+        "should_alert": assessment.should_alert,
+        "headline": assessment.headline,
+        "explanation": assessment.explanation,
+        "portfolio_impact": {
+            "direction": assessment.portfolio_impact.direction.value,
+            "affected_exposures": list(
+                assessment.portfolio_impact.affected_exposures
+            ),
+            "explanation": (
+                assessment.portfolio_impact.explanation
+            ),
+        },
+        "changes": [
+            {
+                "category": change.category.value,
+                "severity": change.severity.value,
+                "summary": change.summary,
+                "previous_value": change.previous_value,
+                "current_value": change.current_value,
+                "portfolio_relevant": change.portfolio_relevant,
+            }
+            for change in assessment.changes
+        ],
+    }
+
+
 class SQLiteAppendOnlyJournal:
     """SQLite event ledger protected by triggers and a hash chain."""
 
@@ -653,6 +698,20 @@ class SQLiteAppendOnlyJournal:
             schema_version="regime-committee-decision.v1",
         )
 
+    def append_market_change_assessment(
+        self,
+        assessment: MarketChangeAssessment,
+    ) -> JournalEvent:
+        """Record one comparison whether or not it emits an alert."""
+
+        return self.append(
+            event_type=JournalEventType.MARKET_CHANGE_ASSESSMENT,
+            aggregate_identifier="market-monitor:regime",
+            occurred_at=assessment.analyzed_at,
+            payload=serialize_market_change_assessment(assessment),
+            schema_version="market-change-assessment.v1",
+        )
+
     def events(
         self,
         *,
@@ -788,6 +847,7 @@ __all__ = [
     "JournalIntegrityError",
     "SQLiteAppendOnlyJournal",
     "serialize_decision_quality_review",
+    "serialize_market_change_assessment",
     "serialize_regime_committee_decision",
     "serialize_regime_run",
 ]
