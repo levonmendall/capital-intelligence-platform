@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from pathlib import Path
 
 from intelligence.regime_pipeline import (
     InstitutionalRegimeRun,
     SeriesLoadState,
     build_fred_regime_pipeline,
 )
+from journal import SQLiteAppendOnlyJournal
 
 
 def _parse_as_of(value: str | None) -> datetime:
@@ -90,10 +92,38 @@ def main() -> int:
             "Defaults to the current UTC time."
         ),
     )
+    parser.add_argument(
+        "--journal",
+        type=Path,
+        help=(
+            "Optional SQLite path for appending the complete "
+            "regime run to the tamper-evident journal."
+        ),
+    )
+    parser.add_argument(
+        "--code-version",
+        help=(
+            "Optional release or commit identifier recorded with "
+            "a journaled run."
+        ),
+    )
     arguments = parser.parse_args()
     as_of = _parse_as_of(arguments.as_of)
     run = build_fred_regime_pipeline().run(as_of=as_of)
     print(format_run(run))
+    if arguments.journal is not None:
+        event = SQLiteAppendOnlyJournal(
+            arguments.journal
+        ).append_regime_run(
+            run,
+            code_version=arguments.code_version,
+        )
+        print("")
+        print(
+            "Journal event: "
+            f"{event.event_identifier} "
+            f"(sequence {event.sequence})"
+        )
     return 0
 
 

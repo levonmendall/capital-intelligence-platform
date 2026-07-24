@@ -28,7 +28,8 @@ replaced by a placeholder; the pull request documents the observed baseline.
   governance.
 - [ ] Migrate repository callers to canonical committee imports.
 - [ ] Move implementation files only after compatibility paths are proven.
-- [ ] Add observation provenance and append-only decision persistence.
+- [x] Add append-only regime evidence and decision-quality persistence.
+- [ ] Extend the journal to committee, mandate, and portfolio-response events.
 
 ## Milestone 2 — Economic-regime productionization
 
@@ -136,7 +137,8 @@ implementation baseline.
   controls, transaction costs, benchmarks, and attribution.
 - [x] Separate process quality from realized investment outcome.
 - [x] Define disciplined/lucky and flawed/unlucky decision classifications.
-- Persist append-only decision-quality reviews and aggregate learning metrics.
+- [x] Persist append-only decision-quality reviews.
+- Aggregate learning metrics across reviewed decisions.
 
 ## Milestone 8 — Application
 

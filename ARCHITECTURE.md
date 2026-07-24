@@ -193,6 +193,18 @@ Every persisted recommendation and decision should eventually include:
 Historical records are append-only. Corrections create a new version linked to
 the prior record.
 
+`journal.append_only` implements the first institutional persistence boundary
+as a separate SQLite event ledger. Regime runs retain acquisition outcomes,
+normalized observations, score calculations, lineage, rule versions,
+classification, coverage, and quality. Retrospective decision-quality reviews
+are appended against their decision identifier rather than modifying the
+original record.
+
+Database triggers reject `UPDATE` and `DELETE` operations on journal events.
+Every event also includes the prior event hash in a global SHA-256 chain, so
+out-of-band database changes are detectable by an integrity scan. This ledger
+is intentionally separate from mutable operational tables such as holdings.
+
 ## Security and reliability
 
 - Secrets are supplied through environment or secret stores and never committed.

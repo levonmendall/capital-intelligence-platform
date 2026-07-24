@@ -141,3 +141,9 @@ Retrospective reviews separately record process verdict and realized outcome.
 The decision-quality ledger classifies disciplined-positive,
 disciplined-negative, flawed-positive, and flawed-negative cases, with
 unresolved or flat outcomes remaining inconclusive.
+
+The first persisted event schemas are `regime-run.v1` and
+`decision-quality-review.v1`. They are stored in the separate institutional
+journal with database-level update/delete guards and a tamper-evident hash
+chain. Future committee, mandate, and portfolio-response events will extend the
+ledger through new schema versions rather than changing prior payloads.
