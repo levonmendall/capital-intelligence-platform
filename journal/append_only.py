@@ -14,6 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from committee.regime_governance import RegimeCommitteeDecision
 from evaluation import DecisionQualityReview
 from intelligence.regime_pipeline import InstitutionalRegimeRun
 
@@ -22,6 +23,7 @@ class JournalEventType(str, Enum):
     """Versioned event types supported by the institutional ledger."""
 
     REGIME_RUN = "regime_run"
+    REGIME_COMMITTEE_DECISION = "regime_committee_decision"
     DECISION_QUALITY_REVIEW = "decision_quality_review"
 
 
@@ -237,6 +239,166 @@ def serialize_decision_quality_review(
         "outcome_evidence": list(review.outcome_evidence),
         "lessons": list(review.lessons),
         "reviewer": review.reviewer,
+    }
+
+
+def serialize_regime_committee_decision(
+    decision: RegimeCommitteeDecision,
+) -> dict[str, Any]:
+    """Serialize a governed regime disposition and its committee record."""
+
+    if not isinstance(decision, RegimeCommitteeDecision):
+        raise TypeError(
+            "decision must be a RegimeCommitteeDecision"
+        )
+    recommendation = decision.recommendation
+    committee_result = decision.committee_result
+    no_action = decision.no_action
+    return {
+        "decision_identifier": decision.decision_identifier,
+        "regime_run_identifier": decision.regime_run_identifier,
+        "decided_at": decision.decided_at.isoformat(),
+        "policy_version": decision.policy_version,
+        "outcome": decision.outcome.value,
+        "rationale": decision.rationale,
+        "recommendation": {
+            "identifier": recommendation.identifier,
+            "title": recommendation.title,
+            "level": recommendation.level.value,
+            "target": recommendation.target,
+            "action": recommendation.action.value,
+            "magnitude": recommendation.magnitude.value,
+            "status": recommendation.status.value,
+            "confidence": recommendation.confidence,
+            "source_thesis_identifier": (
+                recommendation.source_thesis_identifier
+            ),
+            "rationale": recommendation.rationale,
+            "supporting_evidence": list(
+                recommendation.supporting_evidence
+            ),
+            "contradicting_evidence": list(
+                recommendation.contradicting_evidence
+            ),
+            "catalysts": list(recommendation.catalysts),
+            "risks": list(recommendation.risks),
+            "invalidation_conditions": list(
+                recommendation.invalidation_conditions
+            ),
+            "expected_return": recommendation.expected_return.value,
+            "expected_risk": recommendation.expected_risk.value,
+            "expected_duration_months": (
+                recommendation.expected_duration_months
+            ),
+        },
+        "committee": (
+            None
+            if committee_result is None
+            else {
+                "consensus": (
+                    committee_result.decision.consensus.value
+                ),
+                "confidence": committee_result.decision.confidence,
+                "strengths": list(
+                    committee_result.decision.strengths
+                ),
+                "concerns": list(
+                    committee_result.decision.concerns
+                ),
+                "required_changes": list(
+                    committee_result.decision.required_changes
+                ),
+                "opinion_count": (
+                    committee_result.decision.opinion_count
+                ),
+                "opinions": [
+                    {
+                        "member": opinion.member.value,
+                        "vote": opinion.vote.value,
+                        "confidence": opinion.confidence,
+                        "rationale": opinion.rationale,
+                        "strengths": list(opinion.strengths),
+                        "concerns": list(opinion.concerns),
+                        "suggested_changes": list(
+                            opinion.suggested_changes
+                        ),
+                        "veto_exercised": (
+                            opinion
+                            in committee_result.decision.vetoes
+                        ),
+                    }
+                    for opinion in (
+                        committee_result.decision.opinions
+                    )
+                ],
+                "statistics": {
+                    "supportive_count": (
+                        committee_result.statistics.supportive_count
+                    ),
+                    "neutral_count": (
+                        committee_result.statistics.neutral_count
+                    ),
+                    "opposed_count": (
+                        committee_result.statistics.opposed_count
+                    ),
+                    "support_ratio": (
+                        committee_result.statistics.support_ratio
+                    ),
+                    "opposition_ratio": (
+                        committee_result.statistics.opposition_ratio
+                    ),
+                    "agreement_score": (
+                        committee_result.statistics.agreement_score
+                    ),
+                    "split_decision": (
+                        committee_result.statistics.split_decision
+                    ),
+                    "veto_count": (
+                        committee_result.statistics.veto_count
+                    ),
+                    "dissenting_roles": [
+                        role.value
+                        for role in (
+                            committee_result.statistics.dissenting_roles
+                        )
+                    ],
+                },
+                "generated_at": (
+                    committee_result.generated_at.isoformat()
+                ),
+            }
+        ),
+        "no_action": (
+            None
+            if no_action is None
+            else {
+                "reason": no_action.reason.value,
+                "rationale": no_action.rationale,
+                "review_at": no_action.review_at.isoformat(),
+                "evidence_identifiers": list(
+                    no_action.evidence_identifiers
+                ),
+                "action_triggers": list(no_action.action_triggers),
+            }
+        ),
+        "dissents": [
+            {
+                "member": dissent.member,
+                "specialty": dissent.specialty,
+                "position": dissent.position,
+                "rationale": dissent.rationale,
+                "evidence_identifiers": list(
+                    dissent.evidence_identifiers
+                ),
+                "resolution_conditions": list(
+                    dissent.resolution_conditions
+                ),
+                "materiality": dissent.materiality,
+                "recorded_at": dissent.recorded_at.isoformat(),
+                "disposition": dissent.disposition.value,
+            }
+            for dissent in decision.dissents
+        ],
     }
 
 
@@ -477,6 +639,20 @@ class SQLiteAppendOnlyJournal:
             schema_version="decision-quality-review.v1",
         )
 
+    def append_regime_committee_decision(
+        self,
+        decision: RegimeCommitteeDecision,
+    ) -> JournalEvent:
+        """Append a decision linked to its canonical regime run."""
+
+        return self.append(
+            event_type=JournalEventType.REGIME_COMMITTEE_DECISION,
+            aggregate_identifier=decision.regime_run_identifier,
+            occurred_at=decision.decided_at,
+            payload=serialize_regime_committee_decision(decision),
+            schema_version="regime-committee-decision.v1",
+        )
+
     def events(
         self,
         *,
@@ -612,5 +788,6 @@ __all__ = [
     "JournalIntegrityError",
     "SQLiteAppendOnlyJournal",
     "serialize_decision_quality_review",
+    "serialize_regime_committee_decision",
     "serialize_regime_run",
 ]

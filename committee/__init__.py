@@ -9,6 +9,13 @@ from committee.decision_discipline import (
 from committee.meeting import CommitteeMeeting, InvestmentCommittee
 from committee.member import CommitteeMember
 from committee.opinion import CommitteeOpinion
+from committee.regime_governance import (
+    RegimeCommitteeDecision,
+    RegimeGovernanceOutcome,
+    RegimeGovernancePolicy,
+    RegimeGovernanceWorkflow,
+    build_regime_recommendation,
+)
 
 __all__ = [
     "CommitteeConsensus",
@@ -20,5 +27,10 @@ __all__ = [
     "InvestmentCommittee",
     "NoActionDecision",
     "NoActionReason",
+    "RegimeCommitteeDecision",
+    "RegimeGovernanceOutcome",
+    "RegimeGovernancePolicy",
+    "RegimeGovernanceWorkflow",
     "StructuredDissent",
+    "build_regime_recommendation",
 ]
