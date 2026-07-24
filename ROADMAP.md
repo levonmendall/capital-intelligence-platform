@@ -35,6 +35,7 @@ replaced by a placeholder; the pull request documents the observed baseline.
 - [x] Map normalized provider observations to regime inputs.
 - [x] Add observation dates, vintages, provider provenance, and score lineage.
 - [x] Add point-in-time fixtures for every supported regime archetype.
+- [x] Add canonical multi-series retrieval with explicit partial failures.
 - Calibrate and version thresholds without look-ahead data.
 - Add regime-transition tests and committee consumption.
 - Render Markdown, JSON, and HTML regime reports.

@@ -96,6 +96,12 @@ anniversary inside an explicit tolerance. This matters for weekly series such
 as WALCL, where matching by calendar month can create an inconsistent
 comparison window.
 
+The canonical regime pipeline requests 18 observations for monthly growth,
+inflation, and policy series, 60 for weekly balance-sheet liquidity, and eight
+for the current weekly stress level. Each request receives the same
+timezone-aware decision boundary. Individual provider failures are retained as
+typed unavailable results; they are not replaced with sample observations.
+
 The version-controlled fixtures exercise historically recognizable regime
 archetypes but are deterministic scenarios, not claims to reproduce an official
 historical vintage. Empirical calibration against archived ALFRED vintages

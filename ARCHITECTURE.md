@@ -98,6 +98,15 @@ remain separate. Missing inputs reduce coverage; cached, fixture, stale, and
 fallback dependencies reduce the evidence-quality multiplier. This prevents a
 complete-looking regime result from hiding degraded source quality.
 
+`intelligence.regime_pipeline` is the canonical application service for this
+path. It requests frequency-appropriate FRED histories at one decision
+timestamp, records a typed load result for every required signal, and passes
+only successfully retrieved canonical observations into the evidence builder.
+Provider failure never triggers synthetic sample substitution: missing series
+remain unavailable, reduce coverage and quality, and are visible on the final
+run result. `run_regime.py` is the first explicit institutional entry point;
+the older `run_intelligence.py` remains a compatibility workflow.
+
 `data.security` separates issuers, instruments, identifiers, and venue
 listings. The instrument model is multi-asset: equities, funds, fixed income,
 commodities, FX, and crypto may share identity infrastructure without inheriting
