@@ -89,6 +89,13 @@ one requires a new version rather than silently rewriting prior decisions.
 Every computed signal retains observation date, release time, retrieval time,
 provider, series identifier, quality state, and raw value.
 
+Evidence identity is provider-qualified: the initial rule set accepts
+`("FRED", series_identifier)` inputs rather than trusting a bare series name.
+Year-over-year comparisons select the observation nearest the prior-year
+anniversary inside an explicit tolerance. This matters for weekly series such
+as WALCL, where matching by calendar month can create an inconsistent
+comparison window.
+
 The version-controlled fixtures exercise historically recognizable regime
 archetypes but are deterministic scenarios, not claims to reproduce an official
 historical vintage. Empirical calibration against archived ALFRED vintages

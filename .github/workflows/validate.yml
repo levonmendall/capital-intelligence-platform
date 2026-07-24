@@ -17,7 +17,6 @@ jobs:
 
     env:
       PYTHONPATH: ${{ github.workspace }}
-      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
 
     steps:
       - name: Check out repository
@@ -36,7 +35,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Compile Python files
-        run: python -m compileall -q core intelligence committee economic_regime providers
+        run: python -m compileall -q .
 
       - name: Initialize platform
         run: python initialize.py

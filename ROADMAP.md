@@ -3,7 +3,7 @@
 ## Current release
 
 Foundation 1.x is the validated baseline in GitHub. The active milestone is
-repository consolidation and economic-regime integration.
+economic-regime productionization and canonical pipeline integration.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -13,7 +13,7 @@ repository consolidation and economic-regime integration.
 - [x] Add governing architecture, roadmap, data, and decision documents.
 - [x] Add an explainable economic-regime bounded context.
 - [x] Preserve the legacy allocation interface through a compatibility facade.
-- [ ] Establish the CI baseline on the integration pull request.
+- [x] Establish the CI baseline on the integration pull request.
 
 Acceptance: the full repository test suite passes; no working implementation is
 replaced by a placeholder; the pull request documents the observed baseline.

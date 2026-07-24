@@ -89,6 +89,9 @@ INDPRO growth, CPI inflation, the real federal-funds stance, Federal Reserve
 balance-sheet liquidity, and STLFSI4 stress into bounded scores using a named,
 versioned rule set. Each score carries the exact provider observations used in
 its calculation. Evidence released after the decision timestamp is excluded.
+Inputs are keyed by provider and series identifier, and year-over-year
+baselines are chosen nearest the prior-year anniversary within a versioned
+tolerance so weekly and monthly frequencies cannot be conflated.
 
 The classifier's statistical confidence and the evidence-quality adjustment
 remain separate. Missing inputs reduce coverage; cached, fixture, stale, and
