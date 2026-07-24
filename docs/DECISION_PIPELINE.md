@@ -58,6 +58,22 @@ weights or orders. A failed evidence gate creates a typed `NoActionDecision`
 with a review date and action triggers. Material open dissent is retained and
 escalates an otherwise valid committee result instead of being averaged away.
 
+## User-facing decision card
+
+`reporting.decision_card` consumes the completed regime run, governed decision,
+and optional material-change assessment. It produces one immutable
+`CIODecisionCard` and deterministic JSON, Markdown, and HTML representations.
+
+The card intentionally separates the primary answer from supporting detail:
+
+1. What should I do?
+2. Why does it matter now?
+3. How could it affect the portfolio?
+4. What evidence, risks, and conditions sit behind the answer?
+
+Reporting cannot change a score or decision. Mandate-aware sizing remains a
+separate portfolio responsibility.
+
 ## Non-negotiable boundaries
 
 - Recommendations never execute trades.

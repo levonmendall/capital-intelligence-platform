@@ -60,6 +60,23 @@ a short headline, a plain-language explanation, and the affected portfolio
 exposures. Directional portfolio impact never selects position sizes or
 bypasses mandate constraints.
 
+## CIO decision card
+
+The reporting layer compresses a governed run into one mobile-first decision
+artifact without recalculating evidence or changing the committee result.
+
+```bash
+python run_regime.py \
+  --decision-card html \
+  --card-output reports/latest-decision.html
+```
+
+`--decision-card` supports `markdown`, `json`, and `html` and automatically
+enables governance. The primary view shows only the decision, why it matters
+now, and the directional portfolio effect. Evidence, risks, and review
+conditions remain available as progressive detail. The HTML renderer is
+responsive, supports light and dark appearance, and requires no JavaScript.
+
 See:
 
 - [Architecture](ARCHITECTURE.md)

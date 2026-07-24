@@ -16,6 +16,12 @@ from intelligence.regime_pipeline import (
     build_fred_regime_pipeline,
 )
 from journal import SQLiteAppendOnlyJournal
+from reporting import (
+    build_cio_decision_card,
+    render_decision_card_html,
+    render_decision_card_json,
+    render_decision_card_markdown,
+)
 
 
 def _parse_as_of(value: str | None) -> datetime:
@@ -126,6 +132,29 @@ def format_decision(decision: RegimeCommitteeDecision) -> str:
     return "\n".join(lines)
 
 
+def render_card(
+    run: InstitutionalRegimeRun,
+    decision: RegimeCommitteeDecision,
+    *,
+    output_format: str,
+) -> str:
+    """Render one governed run as a CIO decision card."""
+
+    card = build_cio_decision_card(run, decision)
+    renderers = {
+        "markdown": render_decision_card_markdown,
+        "json": render_decision_card_json,
+        "html": render_decision_card_html,
+    }
+    try:
+        renderer = renderers[output_format]
+    except KeyError as error:
+        raise ValueError(
+            "output_format must be markdown, json, or html"
+        ) from error
+    return renderer(card)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -163,15 +192,56 @@ def main() -> int:
             "and run committee governance. No trades are executed."
         ),
     )
+    parser.add_argument(
+        "--decision-card",
+        choices=("markdown", "json", "html"),
+        help=(
+            "Render the governed result as a concise CIO decision "
+            "card. This option also enables governance."
+        ),
+    )
+    parser.add_argument(
+        "--card-output",
+        type=Path,
+        help=(
+            "Optional file path for the decision card. Without this "
+            "option the card is printed."
+        ),
+    )
     arguments = parser.parse_args()
+    if (
+        arguments.card_output is not None
+        and arguments.decision_card is None
+    ):
+        parser.error("--card-output requires --decision-card")
     as_of = _parse_as_of(arguments.as_of)
     run = build_fred_regime_pipeline().run(as_of=as_of)
     print(format_run(run))
     decision = None
-    if arguments.govern:
+    if arguments.govern or arguments.decision_card is not None:
         decision = RegimeGovernanceWorkflow().evaluate(run)
         print("")
         print(format_decision(decision))
+    if arguments.decision_card is not None:
+        card_output = render_card(
+            run,
+            decision,
+            output_format=arguments.decision_card,
+        )
+        if arguments.card_output is None:
+            print("")
+            print(card_output)
+        else:
+            arguments.card_output.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            arguments.card_output.write_text(
+                card_output,
+                encoding="utf-8",
+            )
+            print("")
+            print(f"Decision card: {arguments.card_output}")
     if arguments.journal is not None:
         journal = SQLiteAppendOnlyJournal(arguments.journal)
         event = journal.append_regime_run(
