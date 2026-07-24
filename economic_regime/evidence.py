@@ -70,6 +70,7 @@ class RegimeScoringRules:
     real_policy_full_scale_percent: float = 4.0
     liquidity_full_scale_percent: float = 20.0
     stress_full_scale_index: float = 4.0
+    year_over_year_tolerance_days: int = 45
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -92,6 +93,21 @@ class RegimeScoringRules:
                 raise TypeError(f"{field_name} must be numeric")
             if not isfinite(float(value)) or float(value) <= 0:
                 raise ValueError(f"{field_name} must be positive")
+        if (
+            isinstance(self.year_over_year_tolerance_days, bool)
+            or not isinstance(
+                self.year_over_year_tolerance_days,
+                int,
+            )
+        ):
+            raise TypeError(
+                "year_over_year_tolerance_days must be an int"
+            )
+        if not 0 <= self.year_over_year_tolerance_days <= 183:
+            raise ValueError(
+                "year_over_year_tolerance_days must be between "
+                "0 and 183"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,11 +291,14 @@ class RegimeEvidenceBuilder:
     """Build versioned regime inputs from canonical observations."""
 
     _SERIES = {
-        RegimeSignalName.GROWTH: "INDPRO",
-        RegimeSignalName.INFLATION: "CPIAUCSL",
-        RegimeSignalName.POLICY: "FEDFUNDS",
-        RegimeSignalName.LIQUIDITY: "WALCL",
-        RegimeSignalName.FINANCIAL_STRESS: "STLFSI4",
+        RegimeSignalName.GROWTH: ("FRED", "INDPRO"),
+        RegimeSignalName.INFLATION: ("FRED", "CPIAUCSL"),
+        RegimeSignalName.POLICY: ("FRED", "FEDFUNDS"),
+        RegimeSignalName.LIQUIDITY: ("FRED", "WALCL"),
+        RegimeSignalName.FINANCIAL_STRESS: (
+            "FRED",
+            "STLFSI4",
+        ),
     }
 
     def __init__(
@@ -370,8 +389,14 @@ class RegimeEvidenceBuilder:
         observations: Iterable[NormalizedObservation],
         *,
         as_of: datetime,
-    ) -> dict[str, list[NormalizedObservation]]:
-        grouped: dict[str, list[NormalizedObservation]] = {}
+    ) -> dict[
+        tuple[str, str],
+        list[NormalizedObservation],
+    ]:
+        grouped: dict[
+            tuple[str, str],
+            list[NormalizedObservation],
+        ] = {}
         for observation in observations:
             if not isinstance(observation, NormalizedObservation):
                 raise TypeError(
@@ -380,10 +405,11 @@ class RegimeEvidenceBuilder:
                 )
             if not observation.is_available_at(as_of):
                 continue
-            series_id = (
+            source_key = (
+                observation.provenance.provider,
                 observation.provenance.series_identifier
             )
-            grouped.setdefault(series_id, []).append(observation)
+            grouped.setdefault(source_key, []).append(observation)
         for values in grouped.values():
             values.sort(
                 key=lambda item: (
@@ -397,14 +423,20 @@ class RegimeEvidenceBuilder:
     def _year_over_year_signal(
         self,
         name: RegimeSignalName,
-        grouped: dict[str, list[NormalizedObservation]],
+        grouped: dict[
+            tuple[str, str],
+            list[NormalizedObservation],
+        ],
         *,
         scale: float,
         offset: float,
         as_of: datetime,
     ) -> RegimeSignalEvidence:
         pair = self._year_over_year_pair(
-            grouped.get(self._SERIES[name], [])
+            grouped.get(self._SERIES[name], []),
+            tolerance_days=(
+                self.rules.year_over_year_tolerance_days
+            ),
         )
         if pair is None:
             return RegimeSignalEvidence(
@@ -444,7 +476,10 @@ class RegimeEvidenceBuilder:
 
     def _policy_signal(
         self,
-        grouped: dict[str, list[NormalizedObservation]],
+        grouped: dict[
+            tuple[str, str],
+            list[NormalizedObservation],
+        ],
         inflation: RegimeSignalEvidence,
         *,
         as_of: datetime,
@@ -457,7 +492,10 @@ class RegimeEvidenceBuilder:
             grouped.get(
                 self._SERIES[RegimeSignalName.INFLATION],
                 [],
-            )
+            ),
+            tolerance_days=(
+                self.rules.year_over_year_tolerance_days
+            ),
         )
         if not policy_values or inflation_pair is None:
             return RegimeSignalEvidence(
@@ -501,7 +539,10 @@ class RegimeEvidenceBuilder:
     def _level_signal(
         self,
         name: RegimeSignalName,
-        grouped: dict[str, list[NormalizedObservation]],
+        grouped: dict[
+            tuple[str, str],
+            list[NormalizedObservation],
+        ],
         *,
         scale: float,
         as_of: datetime,
@@ -529,6 +570,8 @@ class RegimeEvidenceBuilder:
     @staticmethod
     def _year_over_year_pair(
         values: list[NormalizedObservation],
+        *,
+        tolerance_days: int,
     ) -> tuple[
         NormalizedObservation,
         NormalizedObservation,
@@ -536,19 +579,38 @@ class RegimeEvidenceBuilder:
         if len(values) < 2:
             return None
         current = values[0]
-        target_year = current.observation_date.year - 1
-        target_month = current.observation_date.month
+        try:
+            target = current.observation_date.replace(
+                year=current.observation_date.year - 1
+            )
+        except ValueError:
+            target = current.observation_date.replace(
+                year=current.observation_date.year - 1,
+                day=28,
+            )
         candidates = [
             value
             for value in values[1:]
             if (
-                value.observation_date.year == target_year
-                and value.observation_date.month == target_month
+                value.observation_date
+                < current.observation_date
+                and abs(
+                    (value.observation_date - target).days
+                )
+                <= tolerance_days
             )
         ]
         if not candidates:
             return None
-        return current, candidates[0]
+        prior = min(
+            candidates,
+            key=lambda value: (
+                abs((value.observation_date - target).days),
+                -value.observation_date.toordinal(),
+                -value.provenance.released_at.timestamp(),
+            ),
+        )
+        return current, prior
 
 
 __all__ = [

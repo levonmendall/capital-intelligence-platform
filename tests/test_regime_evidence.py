@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -47,13 +47,15 @@ def _observation(
     *,
     released_at: datetime | None = None,
     retrieved_at: datetime | None = None,
+    provider: str = "FRED",
     quality_state: DataQualityState = DataQualityState.FIXTURE,
 ) -> NormalizedObservation:
     series = FRED_SERIES[series_name]
+    release_date = observation_date + timedelta(days=20)
     release = released_at or datetime(
-        observation_date.year,
-        min(observation_date.month + 1, 12),
-        15,
+        release_date.year,
+        release_date.month,
+        release_date.day,
         12,
         tzinfo=timezone.utc,
     )
@@ -69,7 +71,7 @@ def _observation(
         frequency=series.frequency,
         observation_date=observation_date,
         provenance=ObservationProvenance(
-            provider="FRED",
+            provider=provider,
             series_identifier=(
                 series.provider_series_identifier
             ),
@@ -312,3 +314,126 @@ def test_temporally_expired_live_evidence_is_treated_as_stale() -> None:
 
     assert stress.lineage[0].quality_state is DataQualityState.STALE
     assert snapshot.quality_score == 0.9
+
+
+def test_weekly_year_over_year_uses_nearest_anniversary() -> None:
+    scenario = _scenarios()[0]
+    observations = _scenario_observations(scenario)
+    observations = [
+        item
+        for item in observations
+        if item.provenance.series_identifier != "WALCL"
+    ]
+    observations.extend(
+        [
+            _observation(
+                "federal_reserve_total_assets",
+                100.0,
+                date(2024, 12, 4),
+            ),
+            _observation(
+                "federal_reserve_total_assets",
+                80.0,
+                date(2024, 12, 25),
+            ),
+            _observation(
+                "federal_reserve_total_assets",
+                104.0,
+                date(2025, 12, 3),
+            ),
+        ]
+    )
+
+    snapshot = RegimeEvidenceBuilder().build(
+        observations,
+        as_of=AS_OF,
+    )
+    liquidity = next(
+        signal
+        for signal in snapshot.signals
+        if signal.name is RegimeSignalName.LIQUIDITY
+    )
+
+    assert liquidity.score == 0.2
+    assert liquidity.lineage[1].observation_date == date(
+        2024,
+        12,
+        4,
+    )
+
+
+def test_provider_collision_cannot_supply_fred_signal() -> None:
+    scenario = _scenarios()[0]
+    observations = [
+        item
+        for item in _scenario_observations(scenario)
+        if item.provenance.series_identifier != "INDPRO"
+    ]
+    observations.extend(
+        [
+            _observation(
+                "industrial_production",
+                100.0,
+                PRIOR_DATE,
+                provider="OTHER",
+            ),
+            _observation(
+                "industrial_production",
+                110.0,
+                CURRENT_DATE,
+                provider="OTHER",
+            ),
+        ]
+    )
+
+    snapshot = RegimeEvidenceBuilder().build(
+        observations,
+        as_of=AS_OF,
+    )
+    growth = next(
+        signal
+        for signal in snapshot.signals
+        if signal.name is RegimeSignalName.GROWTH
+    )
+
+    assert growth.score is None
+    assert growth.lineage == ()
+
+
+def test_year_over_year_pair_respects_tolerance() -> None:
+    scenario = _scenarios()[0]
+    observations = [
+        item
+        for item in _scenario_observations(scenario)
+        if item.provenance.series_identifier != "INDPRO"
+    ]
+    observations.extend(
+        [
+            _observation(
+                "industrial_production",
+                100.0,
+                date(2024, 9, 1),
+            ),
+            _observation(
+                "industrial_production",
+                102.0,
+                CURRENT_DATE,
+            ),
+        ]
+    )
+
+    snapshot = RegimeEvidenceBuilder(
+        RegimeScoringRules(
+            year_over_year_tolerance_days=45
+        )
+    ).build(
+        observations,
+        as_of=AS_OF,
+    )
+    growth = next(
+        signal
+        for signal in snapshot.signals
+        if signal.name is RegimeSignalName.GROWTH
+    )
+
+    assert growth.score is None
