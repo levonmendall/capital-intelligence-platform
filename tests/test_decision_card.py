@@ -12,6 +12,10 @@ from monitoring import (
     PortfolioImpactDirection,
     RegimeMaterialChangeEngine,
 )
+from portfolio import (
+    PortfolioFitGate,
+    PortfolioFitOutcome,
+)
 from reporting import (
     build_cio_decision_card,
     decision_card_to_dict,
@@ -25,6 +29,11 @@ from tests.test_material_change_monitoring import (
     SECOND_AS_OF,
     _decision,
     _run,
+)
+from tests.test_portfolio_fit_gate import (
+    _mandate,
+    _portfolio,
+    _proposal,
 )
 from run_regime import render_card
 
@@ -203,3 +212,73 @@ def test_canonical_command_renderer_supports_all_card_formats() -> None:
         decision,
         output_format="html",
     ).startswith("<!doctype html>")
+
+
+def test_card_makes_smaller_fit_the_primary_portfolio_answer() -> None:
+    run = _run(
+        ChangedRegimeProvider(),
+        as_of=FIRST_AS_OF,
+    )
+    decision = _decision(run)
+    fit = PortfolioFitGate(
+        clock=lambda: FIRST_AS_OF
+    ).evaluate(
+        decision,
+        _proposal(
+            decision,
+            target="SPY",
+            weight_delta=0.10,
+            risk_delta=0.10,
+            tags=("large_cap_equity",),
+        ),
+        _portfolio(),
+        _mandate(),
+    )
+
+    card = build_cio_decision_card(
+        run,
+        decision,
+        portfolio_fit=fit,
+    )
+    payload = decision_card_to_dict(card)
+
+    assert fit.outcome is PortfolioFitOutcome.FIT_SMALLER
+    assert card.headline == "Use a smaller portfolio change"
+    assert card.decision == (
+        "Limit the change to 5.0% of the portfolio."
+    )
+    assert (
+        card.portfolio_direction
+        is PortfolioImpactDirection.INCREASE_RISK
+    )
+    assert payload["portfolio"]["fit"]["outcome"] == "fit_smaller"
+    assert payload["portfolio"]["fit"][
+        "permitted_weight_delta"
+    ] == 0.05
+
+
+def test_card_keeps_portfolio_still_when_risk_budget_is_full() -> None:
+    run = _run(
+        ChangedRegimeProvider(),
+        as_of=FIRST_AS_OF,
+    )
+    decision = _decision(run)
+    fit = PortfolioFitGate(
+        clock=lambda: FIRST_AS_OF
+    ).evaluate(
+        decision,
+        _proposal(decision),
+        _portfolio(risk_budget_used=0.90),
+        _mandate(),
+    )
+
+    card = build_cio_decision_card(
+        run,
+        decision,
+        portfolio_fit=fit,
+    )
+
+    assert fit.outcome is PortfolioFitOutcome.NO_RISK_BUDGET
+    assert card.headline == "No room for more portfolio risk"
+    assert card.decision == "Keep the portfolio unchanged."
+    assert card.portfolio_direction is PortfolioImpactDirection.HOLD

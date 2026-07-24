@@ -137,8 +137,12 @@ implementation baseline.
 
 ## Milestone 7 — Portfolio and validation
 
-- Add constrained position sizing, risk budgets, concentration controls,
-  rebalancing, and paper trading.
+- [x] Define canonical point-in-time snapshots, positions, proposals, asset
+  buckets, and versioned mandate constraints.
+- [x] Gate approved proposals through direction, liquidity, concentration,
+  cash-reserve, risk-budget, and overlap controls.
+- Add portfolio optimization, transaction costs, rebalancing orchestration,
+  and paper trading behind the fit gate.
 - Add walk-forward backtests, point-in-time fundamentals, survivorship-bias
   controls, transaction costs, benchmarks, and attribution.
 - [x] Separate process quality from realized investment outcome.
