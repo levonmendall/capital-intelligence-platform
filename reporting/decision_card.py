@@ -19,6 +19,10 @@ from monitoring import (
     MarketChangeAssessment,
     PortfolioImpactDirection,
 )
+from portfolio import (
+    PortfolioFitDecision,
+    PortfolioFitOutcome,
+)
 
 
 def _required_text(value: object, *, field_name: str) -> str:
@@ -72,6 +76,9 @@ class CIODecisionCard:
     committee_outcome: str
     portfolio_direction: PortfolioImpactDirection
     portfolio_explanation: str
+    portfolio_fit_outcome: PortfolioFitOutcome | None
+    portfolio_fit_explanation: str | None
+    permitted_weight_delta: float | None
     affected_exposures: tuple[str, ...]
     key_evidence: tuple[str, ...]
     key_risks: tuple[str, ...]
@@ -127,6 +134,61 @@ class CIODecisionCard:
             )
         if not isinstance(self.alert_level, AlertLevel):
             raise TypeError("alert_level must be an AlertLevel")
+        if self.portfolio_fit_outcome is not None and not isinstance(
+            self.portfolio_fit_outcome,
+            PortfolioFitOutcome,
+        ):
+            raise TypeError(
+                "portfolio_fit_outcome must be a "
+                "PortfolioFitOutcome or None"
+            )
+        if self.portfolio_fit_explanation is not None:
+            object.__setattr__(
+                self,
+                "portfolio_fit_explanation",
+                _required_text(
+                    self.portfolio_fit_explanation,
+                    field_name="portfolio_fit_explanation",
+                ),
+            )
+        if (
+            self.portfolio_fit_outcome is None
+            and (
+                self.portfolio_fit_explanation is not None
+                or self.permitted_weight_delta is not None
+            )
+        ):
+            raise ValueError(
+                "portfolio fit details require portfolio_fit_outcome"
+            )
+        if (
+            self.portfolio_fit_outcome is not None
+            and self.portfolio_fit_explanation is None
+        ):
+            raise ValueError(
+                "portfolio_fit_outcome requires an explanation"
+            )
+        if self.permitted_weight_delta is not None:
+            if isinstance(
+                self.permitted_weight_delta,
+                bool,
+            ) or not isinstance(
+                self.permitted_weight_delta,
+                (int, float),
+            ):
+                raise TypeError(
+                    "permitted_weight_delta must be numeric or None"
+                )
+            if not -1.0 <= float(self.permitted_weight_delta) <= 1.0:
+                raise ValueError(
+                    "permitted_weight_delta must be between "
+                    "-1.0 and 1.0"
+                )
+            object.__setattr__(
+                self,
+                "permitted_weight_delta",
+                round(float(self.permitted_weight_delta), 6),
+            )
         for field_name in (
             "affected_exposures",
             "key_evidence",
@@ -163,6 +225,7 @@ def build_cio_decision_card(
     decision: RegimeCommitteeDecision,
     *,
     change: MarketChangeAssessment | None = None,
+    portfolio_fit: PortfolioFitDecision | None = None,
 ) -> CIODecisionCard:
     """Compress existing results without recalculating their conclusions."""
 
@@ -184,15 +247,32 @@ def build_cio_decision_card(
             raise ValueError(
                 "change must use run as its current analysis"
             )
+    if portfolio_fit is not None:
+        if not isinstance(portfolio_fit, PortfolioFitDecision):
+            raise TypeError(
+                "portfolio_fit must be a PortfolioFitDecision"
+            )
+        if (
+            portfolio_fit.source_decision_identifier
+            != decision.decision_identifier
+        ):
+            raise ValueError(
+                "portfolio_fit must reference decision"
+            )
 
     confidence = run.assessment.confidence
     data_status = _data_status(run)
     committee_outcome = _COMMITTEE_LABELS[decision.outcome]
-    portfolio_direction = _portfolio_direction(decision, change)
+    portfolio_direction = _portfolio_direction(
+        decision,
+        change,
+        portfolio_fit,
+    )
     portfolio_explanation = _portfolio_explanation(
         portfolio_direction,
         decision,
         change,
+        portfolio_fit,
     )
     affected_exposures = _affected_exposures(decision, change)
     review_at = (
@@ -203,8 +283,8 @@ def build_cio_decision_card(
     return CIODecisionCard(
         identifier=f"cio-decision-card:{timestamp}",
         as_of=run.as_of,
-        headline=_headline(decision, change),
-        decision=_decision_summary(decision),
+        headline=_headline(decision, change, portfolio_fit),
+        decision=_decision_summary(decision, portfolio_fit),
         why_now=_why_now(run, decision, change),
         regime=run.assessment.result.regime.value,
         evidence_confidence=confidence,
@@ -212,6 +292,21 @@ def build_cio_decision_card(
         committee_outcome=committee_outcome,
         portfolio_direction=portfolio_direction,
         portfolio_explanation=portfolio_explanation,
+        portfolio_fit_outcome=(
+            portfolio_fit.outcome
+            if portfolio_fit is not None
+            else None
+        ),
+        portfolio_fit_explanation=(
+            portfolio_fit.explanation
+            if portfolio_fit is not None
+            else None
+        ),
+        permitted_weight_delta=(
+            portfolio_fit.permitted_weight_delta
+            if portfolio_fit is not None
+            else None
+        ),
         affected_exposures=affected_exposures,
         key_evidence=tuple(
             decision.recommendation.supporting_evidence[:3]
@@ -245,7 +340,10 @@ def _data_status(run: InstitutionalRegimeRun) -> str:
 def _headline(
     decision: RegimeCommitteeDecision,
     change: MarketChangeAssessment | None,
+    portfolio_fit: PortfolioFitDecision | None,
 ) -> str:
+    if portfolio_fit is not None:
+        return portfolio_fit.headline
     if change is not None:
         return change.headline
     if decision.outcome is RegimeGovernanceOutcome.NO_ACTION:
@@ -259,7 +357,29 @@ def _headline(
     return "Portfolio action approved"
 
 
-def _decision_summary(decision: RegimeCommitteeDecision) -> str:
+def _decision_summary(
+    decision: RegimeCommitteeDecision,
+    portfolio_fit: PortfolioFitDecision | None,
+) -> str:
+    if portfolio_fit is not None:
+        if portfolio_fit.outcome is PortfolioFitOutcome.FIT_SMALLER:
+            permitted = abs(
+                portfolio_fit.permitted_weight_delta or 0.0
+            )
+            return (
+                f"Limit the change to {permitted:.1%} of the portfolio."
+            )
+        if (
+            portfolio_fit.outcome
+            is PortfolioFitOutcome.REPLACE_OVERLAP
+        ):
+            return "Replace overlapping exposure before adding more risk."
+        if portfolio_fit.outcome in {
+            PortfolioFitOutcome.POLICY_BLOCKED,
+            PortfolioFitOutcome.NO_RISK_BUDGET,
+            PortfolioFitOutcome.NO_ACTION,
+        }:
+            return "Keep the portfolio unchanged."
     if decision.outcome is RegimeGovernanceOutcome.NO_ACTION:
         return "Keep the portfolio unchanged."
     if decision.outcome is RegimeGovernanceOutcome.ESCALATE:
@@ -317,7 +437,24 @@ def _why_now(
 def _portfolio_direction(
     decision: RegimeCommitteeDecision,
     change: MarketChangeAssessment | None,
+    portfolio_fit: PortfolioFitDecision | None,
 ) -> PortfolioImpactDirection:
+    if portfolio_fit is not None:
+        if portfolio_fit.outcome in {
+            PortfolioFitOutcome.POLICY_BLOCKED,
+            PortfolioFitOutcome.NO_RISK_BUDGET,
+            PortfolioFitOutcome.NO_ACTION,
+        }:
+            return PortfolioImpactDirection.HOLD
+        if (
+            portfolio_fit.outcome
+            is PortfolioFitOutcome.REPLACE_OVERLAP
+        ):
+            return PortfolioImpactDirection.REVIEW
+        if (portfolio_fit.permitted_weight_delta or 0.0) > 0:
+            return PortfolioImpactDirection.INCREASE_RISK
+        if (portfolio_fit.permitted_weight_delta or 0.0) < 0:
+            return PortfolioImpactDirection.REDUCE_RISK
     if change is not None:
         return change.portfolio_impact.direction
     if decision.outcome in {
@@ -349,7 +486,10 @@ def _portfolio_explanation(
     direction: PortfolioImpactDirection,
     decision: RegimeCommitteeDecision,
     change: MarketChangeAssessment | None,
+    portfolio_fit: PortfolioFitDecision | None,
 ) -> str:
+    if portfolio_fit is not None:
+        return portfolio_fit.explanation
     if change is not None:
         return change.portfolio_impact.explanation
     if direction is PortfolioImpactDirection.HOLD:
@@ -408,6 +548,19 @@ def decision_card_to_dict(card: CIODecisionCard) -> dict[str, Any]:
             "direction": card.portfolio_direction.value,
             "explanation": card.portfolio_explanation,
             "affected_exposures": list(card.affected_exposures),
+            "fit": (
+                None
+                if card.portfolio_fit_outcome is None
+                else {
+                    "outcome": card.portfolio_fit_outcome.value,
+                    "explanation": (
+                        card.portfolio_fit_explanation
+                    ),
+                    "permitted_weight_delta": (
+                        card.permitted_weight_delta
+                    ),
+                }
+            ),
         },
         "key_evidence": list(card.key_evidence),
         "key_risks": list(card.key_risks),
@@ -489,6 +642,16 @@ def render_decision_card_markdown(card: CIODecisionCard) -> str:
                 f"Next scheduled review: {card.review_at.isoformat()}",
             )
         )
+    if card.portfolio_fit_outcome is not None:
+        lines.extend(
+            (
+                "",
+                (
+                    "Portfolio fit: "
+                    f"{card.portfolio_fit_outcome.value.replace('_', ' ')}"
+                ),
+            )
+        )
     lines.extend(("", "</details>", ""))
     return "\n".join(lines)
 
@@ -509,6 +672,15 @@ def render_decision_card_html(card: CIODecisionCard) -> str:
         else (
             "<p class=\"review\"><strong>Next review:</strong> "
             f"{escape(card.review_at.isoformat())}</p>"
+        )
+    )
+    fit = (
+        ""
+        if card.portfolio_fit_outcome is None
+        else (
+            "<span><strong>Portfolio fit</strong><br>"
+            f"{escape(card.portfolio_fit_outcome.value.replace('_', ' '))}"
+            "</span>"
         )
     )
     return f"""<!doctype html>
@@ -612,6 +784,7 @@ def render_decision_card_html(card: CIODecisionCard) -> str:
       <span><strong>Confidence</strong><br>{card.evidence_confidence:.0%}</span>
       <span><strong>Data</strong><br>{escape(card.data_status)}</span>
       <span><strong>Committee</strong><br>{escape(card.committee_outcome)}</span>
+      {fit}
     </section>
     <details>
       <summary>Evidence, risks, and review conditions</summary>

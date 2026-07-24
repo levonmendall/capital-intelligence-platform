@@ -74,6 +74,23 @@ The card intentionally separates the primary answer from supporting detail:
 Reporting cannot change a score or decision. Mandate-aware sizing remains a
 separate portfolio responsibility.
 
+## Portfolio-fit boundary
+
+`portfolio.PortfolioFitGate` implements the first portion of step 10:
+
+```text
+Approved committee decision
+    + proposed portfolio expression
+    + point-in-time portfolio snapshot
+    + versioned mandate
+    -> fit / smaller / replace / blocked / no budget / no action
+```
+
+The proposed expression is separate from the analytical recommendation. The
+gate can cap a requested weight under explicit constraints, but it cannot
+create an order or mutate holdings. Every result can be appended to the
+institutional journal and passed to the CIO decision card.
+
 ## Non-negotiable boundaries
 
 - Recommendations never execute trades.

@@ -77,6 +77,26 @@ now, and the directional portfolio effect. Evidence, risks, and review
 conditions remain available as progressive detail. The HTML renderer is
 responsive, supports light and dark appearance, and requires no JavaScript.
 
+## Portfolio-fit gate
+
+Committee approval does not flow directly into a portfolio weight. The
+canonical `portfolio.PortfolioFitGate` evaluates a separate proposal against a
+point-in-time portfolio snapshot and versioned mandate.
+
+The user receives one of six simple answers:
+
+- fits the portfolio;
+- use a smaller size;
+- replace overlapping exposure;
+- blocked by policy;
+- no available risk budget; or
+- no action because committee approval is incomplete.
+
+The gate checks proposal direction, prohibited exposure, liquidity, position
+and asset-bucket concentration, minimum cash, risk-budget capacity, and
+existing exposure overlap. It can permit a bounded proposal, but it never
+executes a trade.
+
 See:
 
 - [Architecture](ARCHITECTURE.md)
@@ -84,6 +104,7 @@ See:
 - [Roadmap](ROADMAP.md)
 - [Data sources and governance](DATA_SOURCES.md)
 - [Institutional decision engine](DECISION_ENGINE.md)
+- [Portfolio-fit gate](docs/PORTFOLIO_FIT.md)
 
 ## Core Objectives
 

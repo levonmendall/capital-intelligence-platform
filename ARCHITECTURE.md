@@ -218,16 +218,35 @@ application concerns and do not alter domain policy.
 Portfolio impact is directional and intentionally simple: hold, review,
 increase risk, reduce risk, or rebalance. It identifies affected exposures,
 including a crypto risk budget where relevant, but cannot choose position
-sizes. Actual holdings, mandates, concentration limits, and risk budgets belong
-to the future canonical `portfolio` context.
+sizes.
+
+## Portfolio-fit integration
+
+`portfolio.models` defines immutable point-in-time portfolio snapshots,
+positions, proposals, asset buckets, and versioned mandates.
+`portfolio.fit.PortfolioFitGate` is the first canonical `portfolio` decision
+boundary. It consumes an approved committee decision plus a separate proposed
+portfolio expression.
+
+The gate applies recommendation direction, prohibited-exposure, liquidity,
+position, asset-bucket, cash-reserve, risk-budget, and overlap controls. Its
+result is fit, fit smaller, replace overlap, policy blocked, no risk budget, or
+no action. A fit result contains only the maximum proposal permitted by the
+tested constraints; it does not execute a trade.
+
+The proposal remains distinct from the recommendation. This prevents
+analytical confidence from becoming a position size and allows different
+mandates to respond differently to the same committee decision. Adapters from
+the legacy holdings database, portfolio optimization, transaction-cost
+analysis, and paper execution remain future work.
 
 ## Decision-card reporting
 
 `reporting.decision_card` builds a `CIODecisionCard` from one canonical regime
-run, its governed decision, and an optional material-change assessment. The
-card is a presentation contract: it may select and simplify existing fields,
-but it cannot score evidence, change confidence, alter governance, or choose a
-position size.
+run, its governed decision, an optional material-change assessment, and an
+optional portfolio-fit decision. The card is a presentation contract: it may
+select and simplify existing fields, but it cannot score evidence, change
+confidence, alter governance, or choose an unconstrained position size.
 
 The same immutable card renders to schema-versioned JSON, compact Markdown, or
 self-contained mobile HTML. The primary surface contains the decision, why it

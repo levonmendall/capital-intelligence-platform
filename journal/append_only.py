@@ -18,6 +18,7 @@ from committee.regime_governance import RegimeCommitteeDecision
 from evaluation import DecisionQualityReview
 from intelligence.regime_pipeline import InstitutionalRegimeRun
 from monitoring import MarketChangeAssessment
+from portfolio import PortfolioFitDecision
 
 
 class JournalEventType(str, Enum):
@@ -26,6 +27,7 @@ class JournalEventType(str, Enum):
     REGIME_RUN = "regime_run"
     REGIME_COMMITTEE_DECISION = "regime_committee_decision"
     MARKET_CHANGE_ASSESSMENT = "market_change_assessment"
+    PORTFOLIO_FIT_DECISION = "portfolio_fit_decision"
     DECISION_QUALITY_REVIEW = "decision_quality_review"
 
 
@@ -447,6 +449,46 @@ def serialize_market_change_assessment(
     }
 
 
+def serialize_portfolio_fit_decision(
+    decision: PortfolioFitDecision,
+) -> dict[str, Any]:
+    """Serialize one mandate-aware, non-executing fit decision."""
+
+    if not isinstance(decision, PortfolioFitDecision):
+        raise TypeError(
+            "decision must be a PortfolioFitDecision"
+        )
+    return {
+        "identifier": decision.identifier,
+        "source_decision_identifier": (
+            decision.source_decision_identifier
+        ),
+        "proposal_identifier": decision.proposal_identifier,
+        "portfolio_identifier": decision.portfolio_identifier,
+        "portfolio_as_of": decision.portfolio_as_of.isoformat(),
+        "mandate_identifier": decision.mandate_identifier,
+        "assessed_at": decision.assessed_at.isoformat(),
+        "mandate_version": decision.mandate_version,
+        "policy_version": decision.policy_version,
+        "outcome": decision.outcome.value,
+        "headline": decision.headline,
+        "explanation": decision.explanation,
+        "binding_constraints": list(
+            decision.binding_constraints
+        ),
+        "overlapping_positions": list(
+            decision.overlapping_positions
+        ),
+        "permitted_weight_delta": (
+            decision.permitted_weight_delta
+        ),
+        "permitted_risk_budget_delta": (
+            decision.permitted_risk_budget_delta
+        ),
+        "permits_expression": decision.permits_expression,
+    }
+
+
 class SQLiteAppendOnlyJournal:
     """SQLite event ledger protected by triggers and a hash chain."""
 
@@ -712,6 +754,22 @@ class SQLiteAppendOnlyJournal:
             schema_version="market-change-assessment.v1",
         )
 
+    def append_portfolio_fit_decision(
+        self,
+        decision: PortfolioFitDecision,
+    ) -> JournalEvent:
+        """Append the portfolio gate result without executing it."""
+
+        return self.append(
+            event_type=JournalEventType.PORTFOLIO_FIT_DECISION,
+            aggregate_identifier=(
+                f"portfolio:{decision.portfolio_identifier}"
+            ),
+            occurred_at=decision.assessed_at,
+            payload=serialize_portfolio_fit_decision(decision),
+            schema_version="portfolio-fit-decision.v1",
+        )
+
     def events(
         self,
         *,
@@ -848,6 +906,7 @@ __all__ = [
     "SQLiteAppendOnlyJournal",
     "serialize_decision_quality_review",
     "serialize_market_change_assessment",
+    "serialize_portfolio_fit_decision",
     "serialize_regime_committee_decision",
     "serialize_regime_run",
 ]
