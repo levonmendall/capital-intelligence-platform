@@ -4,11 +4,22 @@ An explainable, AI-assisted investment operating system for disciplined research
 
 ## Current Release
 
-Foundation Version 1.0
+Foundation Version 1.x
 
-The active integration milestone adds a deterministic, explainable
-`economic_regime` bounded context while preserving the legacy allocation
-interface. See:
+The active milestone productionizes a deterministic, point-in-time
+`economic_regime` path while preserving the legacy allocation interface.
+The canonical institutional command is:
+
+```bash
+python run_regime.py
+```
+
+It retrieves the required FRED series when `FRED_API_KEY` is configured. If a
+series or credential is unavailable, the command reports the missing evidence
+and reduced coverage; it never silently substitutes sample data. The legacy
+compatibility workflow remains available through `python run_intelligence.py`.
+
+See:
 
 - [Architecture](ARCHITECTURE.md)
 - [Product vision](PRODUCT_VISION.md)

@@ -48,9 +48,33 @@ _EXPORTS = {
         "intelligence.cio",
         "GuidanceSynthesizer",
     ),
+    "InstitutionalRegimePipeline": (
+        "intelligence.regime_pipeline",
+        "InstitutionalRegimePipeline",
+    ),
+    "InstitutionalRegimeRun": (
+        "intelligence.regime_pipeline",
+        "InstitutionalRegimeRun",
+    ),
+    "RegimeSeriesLoad": (
+        "intelligence.regime_pipeline",
+        "RegimeSeriesLoad",
+    ),
+    "RegimeSeriesRequest": (
+        "intelligence.regime_pipeline",
+        "RegimeSeriesRequest",
+    ),
     "ScenarioProbability": (
         "intelligence.cio_guidance",
         "ScenarioProbability",
+    ),
+    "SeriesLoadState": (
+        "intelligence.regime_pipeline",
+        "SeriesLoadState",
+    ),
+    "build_fred_regime_pipeline": (
+        "intelligence.regime_pipeline",
+        "build_fred_regime_pipeline",
     ),
 }
 
