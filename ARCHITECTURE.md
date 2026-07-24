@@ -221,6 +221,21 @@ including a crypto risk budget where relevant, but cannot choose position
 sizes. Actual holdings, mandates, concentration limits, and risk budgets belong
 to the future canonical `portfolio` context.
 
+## Decision-card reporting
+
+`reporting.decision_card` builds a `CIODecisionCard` from one canonical regime
+run, its governed decision, and an optional material-change assessment. The
+card is a presentation contract: it may select and simplify existing fields,
+but it cannot score evidence, change confidence, alter governance, or choose a
+position size.
+
+The same immutable card renders to schema-versioned JSON, compact Markdown, or
+self-contained mobile HTML. The primary surface contains the decision, why it
+matters now, and its directional portfolio implication. Supporting evidence,
+risks, and review conditions are secondary detail. Because the card is
+deterministically derived from journaled inputs, it does not require a separate
+source-of-truth persistence model.
+
 Database triggers reject `UPDATE` and `DELETE` operations on journal events.
 Every event also includes the prior event hash in a global SHA-256 chain, so
 out-of-band database changes are detectable by an integrity scan. This ledger

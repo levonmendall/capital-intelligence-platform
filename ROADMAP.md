@@ -39,7 +39,8 @@ replaced by a placeholder; the pull request documents the observed baseline.
 - [x] Add canonical multi-series retrieval with explicit partial failures.
 - Calibrate and version thresholds without look-ahead data.
 - Add regime-transition tests and committee consumption.
-- Render Markdown, JSON, and HTML regime reports.
+- [x] Render a governed CIO decision card as Markdown, JSON, and mobile HTML.
+- Render full analytical regime reports for specialist review.
 
 Acceptance: at least one historically representative fixture exists for every
 supported regime, classifications are reproducible, and missing data cannot
