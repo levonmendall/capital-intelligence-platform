@@ -19,6 +19,17 @@ series or credential is unavailable, the command reports the missing evidence
 and reduced coverage; it never silently substitutes sample data. The legacy
 compatibility workflow remains available through `python run_intelligence.py`.
 
+To append the complete run to the tamper-evident institutional journal:
+
+```bash
+python run_regime.py \
+  --journal database/institutional_journal.db \
+  --code-version YOUR_COMMIT_SHA
+```
+
+The journal is separate from mutable portfolio tables. It rejects update and
+delete operations and verifies a hash chain across recorded events.
+
 See:
 
 - [Architecture](ARCHITECTURE.md)
