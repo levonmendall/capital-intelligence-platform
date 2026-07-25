@@ -14,9 +14,9 @@ from delivery import (
     DeliveryPreference,
     SelectiveAlertPlanner,
 )
+from personal_cio.brief_service import build_personal_cio_brief
 from personal_cio.brief_store import SQLitePersonalCIOBriefStore
 from personal_cio.models import ActionStatus
-from personal_cio.service import build_personal_cio_brief
 from personal_cio.store import SQLiteInvestmentPolicyStore
 from security import UserRole
 
