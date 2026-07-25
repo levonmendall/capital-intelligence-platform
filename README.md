@@ -60,6 +60,26 @@ a short headline, a plain-language explanation, and the affected portfolio
 exposures. Directional portfolio impact never selects position sizes or
 bypasses mandate constraints.
 
+## Daily Capital Intelligence experience
+
+The Streamlit application now opens with one canonical daily snapshot rather
+than assembling unrelated dashboard values. The same point-in-time regime run
+and governed committee decision produce the Capital Intelligence Score,
+Environment Brief, portfolio impact, and supporting CIO Decision Card.
+
+```bash
+streamlit run app.py
+```
+
+The primary navigation is deliberately limited to Today, Environment,
+Portfolio, and History. Daily score records are stored in the append-only
+`database/daily_intelligence_snapshots.db` history. Current, incomplete, stale,
+and unavailable evidence states are shown explicitly. Score movement does not
+independently trigger an alert; notification remains governed by the material
+change policy.
+
+See [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md).
+
 ## CIO decision card
 
 The reporting layer compresses a governed run into one mobile-first decision
