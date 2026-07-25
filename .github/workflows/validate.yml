@@ -47,7 +47,16 @@ jobs:
         run: python run_regime.py
 
       - name: Run automated tests
-        run: pytest -q
+        run: pytest -q --junitxml=pytest-results.xml
+
+      - name: Publish automated test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: pytest-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build hardened runtime image
         run: docker build --tag capital-intelligence:validation .
