@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -37,10 +37,10 @@ def _observation(
     released_at = datetime(
         observation_date.year,
         observation_date.month,
-        min(observation_date.day + 1, 28),
+        observation_date.day,
         12,
         tzinfo=timezone.utc,
-    )
+    ) + timedelta(days=1)
     return NormalizedObservation(
         indicator=series.indicator,
         category=series.category,
