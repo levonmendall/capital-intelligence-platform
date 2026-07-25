@@ -110,8 +110,9 @@ def create_app(
 
     protected = [Depends(require_principal)]
     app.include_router(health_router)
-    app.include_router(authentication_router)
-    app.include_router(users_router)
+    if resolved_authentication.required:
+        app.include_router(authentication_router)
+        app.include_router(users_router)
     app.include_router(daily_router, dependencies=protected)
     app.include_router(environment_router, dependencies=protected)
     app.include_router(decisions_router, dependencies=protected)
