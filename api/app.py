@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from datetime import timedelta
+
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.config import ApiSettings
+from api.dependencies import require_principal
 from api.repositories import (
     ApiResources,
     RepositoryConflictError,
@@ -14,6 +17,7 @@ from api.repositories import (
     build_resources,
 )
 from api.routes import (
+    authentication_router,
     daily_router,
     decisions_router,
     environment_router,
@@ -21,24 +25,41 @@ from api.routes import (
     personal_router,
     portfolios_router,
     replays_router,
+    users_router,
 )
+from security import AuthenticationService, SQLiteIdentityStore
 
 
 def create_app(
     settings: ApiSettings | None = None,
     resources: ApiResources | None = None,
+    authentication: AuthenticationService | None = None,
 ) -> FastAPI:
-    """Create a read-only API with explicit injectable dependencies."""
+    """Create the API with explicit injectable data and identity dependencies."""
 
     resolved_settings = settings or ApiSettings.from_env()
     resolved_resources = resources or build_resources(resolved_settings)
+    resolved_authentication = authentication or AuthenticationService(
+        SQLiteIdentityStore(
+            resolved_settings.identity_database,
+            access_ttl=timedelta(minutes=resolved_settings.access_token_minutes),
+            refresh_ttl=timedelta(days=resolved_settings.refresh_token_days),
+            password_minimum_length=resolved_settings.password_minimum_length,
+        ),
+        required=resolved_settings.authentication_required,
+    )
+    resolved_authentication.store.bootstrap_administrator(
+        email=resolved_settings.bootstrap_admin_email,
+        password=resolved_settings.bootstrap_admin_password,
+        display_name=resolved_settings.bootstrap_admin_name,
+    )
     app = FastAPI(
         title=resolved_settings.application_name,
         version=resolved_settings.application_version,
         description=(
-            "Read-only access to governed Capital Intelligence snapshots, "
-            "decisions, replays, personal CIO memory, conviction trends, "
-            "and virtual portfolios."
+            "Authenticated access to governed Capital Intelligence snapshots, "
+            "decisions, replays, personal CIO memory, conviction trends, and "
+            "mandate-authorized virtual portfolios."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -46,14 +67,20 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.resources = resolved_resources
+    app.state.authentication = resolved_authentication
 
     if resolved_settings.allowed_origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(resolved_settings.allowed_origins),
             allow_credentials=False,
-            allow_methods=["GET"],
-            allow_headers=["Accept", "Content-Type", "X-Request-ID"],
+            allow_methods=["GET", "POST"],
+            allow_headers=[
+                "Accept",
+                "Authorization",
+                "Content-Type",
+                "X-Request-ID",
+            ],
         )
 
     @app.middleware("http")
@@ -62,6 +89,7 @@ def create_app(
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
     @app.exception_handler(RepositoryUnavailableError)
@@ -80,13 +108,16 @@ def create_app(
         del request
         return JSONResponse(status_code=409, content={"detail": str(error)})
 
+    protected = [Depends(require_principal)]
     app.include_router(health_router)
-    app.include_router(daily_router)
-    app.include_router(environment_router)
-    app.include_router(decisions_router)
-    app.include_router(replays_router)
-    app.include_router(personal_router)
-    app.include_router(portfolios_router)
+    app.include_router(authentication_router)
+    app.include_router(users_router)
+    app.include_router(daily_router, dependencies=protected)
+    app.include_router(environment_router, dependencies=protected)
+    app.include_router(decisions_router, dependencies=protected)
+    app.include_router(replays_router, dependencies=protected)
+    app.include_router(personal_router, dependencies=protected)
+    app.include_router(portfolios_router, dependencies=protected)
     return app
 
 
