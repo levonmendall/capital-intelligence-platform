@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
@@ -25,13 +25,21 @@ def _path(value: str | None, *, default: Path) -> Path:
 
 @dataclass(frozen=True, slots=True)
 class ApiSettings:
-    """Versioned runtime settings with safe local defaults."""
+    """Versioned runtime settings with secure environment-loaded defaults."""
 
     snapshot_database: Path = Path("database/daily_intelligence_snapshots.db")
     portfolio_database: Path = Path("database/capital_intelligence.db")
     investor_memory_database: Path = Path("database/investor_memory.db")
+    identity_database: Path = Path("database/identity.db")
     journal_database: Path = Path("database/institutional_journal.db")
     replay_directory: Path | None = Path("database/decision_replays")
+    authentication_required: bool = False
+    access_token_minutes: int = 15
+    refresh_token_days: int = 30
+    password_minimum_length: int = 12
+    bootstrap_admin_email: str | None = None
+    bootstrap_admin_password: str | None = field(default=None, repr=False)
+    bootstrap_admin_name: str = "Platform Administrator"
     require_journal: bool = False
     require_live_provider: bool = False
     allowed_origins: tuple[str, ...] = ()
@@ -40,13 +48,14 @@ class ApiSettings:
     conviction_default_lookback: int = 7
     conviction_max_lookback: int = 30
     application_name: str = "Capital Intelligence API"
-    application_version: str = "1.1.0"
+    application_version: str = "1.2.0"
 
     def __post_init__(self) -> None:
         for field_name in (
             "snapshot_database",
             "portfolio_database",
             "investor_memory_database",
+            "identity_database",
             "journal_database",
         ):
             value = getattr(self, field_name)
@@ -57,6 +66,20 @@ class ApiSettings:
             Path,
         ):
             raise TypeError("replay_directory must be a pathlib.Path or None")
+        if not 1 <= self.access_token_minutes <= 1440:
+            raise ValueError("access_token_minutes must be between 1 and 1440")
+        if not 1 <= self.refresh_token_days <= 365:
+            raise ValueError("refresh_token_days must be between 1 and 365")
+        if self.refresh_token_days * 1440 <= self.access_token_minutes:
+            raise ValueError("refresh token lifetime must exceed access token lifetime")
+        if not 10 <= self.password_minimum_length <= 128:
+            raise ValueError("password_minimum_length must be between 10 and 128")
+        if bool(self.bootstrap_admin_email) != bool(self.bootstrap_admin_password):
+            raise ValueError(
+                "bootstrap administrator email and password must be supplied together"
+            )
+        if not self.bootstrap_admin_name.strip():
+            raise ValueError("bootstrap_admin_name cannot be empty")
         if not 1 <= self.history_default_limit <= self.history_max_limit:
             raise ValueError(
                 "history_default_limit must be between 1 and history_max_limit"
@@ -118,11 +141,38 @@ class ApiSettings:
                 values.get("CAPITAL_INTELLIGENCE_INVESTOR_MEMORY_DATABASE"),
                 default=data_dir / "investor_memory.db",
             ),
+            identity_database=_path(
+                values.get("CAPITAL_INTELLIGENCE_IDENTITY_DATABASE"),
+                default=data_dir / "identity.db",
+            ),
             journal_database=_path(
                 values.get("CAPITAL_INTELLIGENCE_JOURNAL_DATABASE"),
                 default=data_dir / "institutional_journal.db",
             ),
             replay_directory=replay_directory,
+            authentication_required=_boolean(
+                values.get("CAPITAL_INTELLIGENCE_AUTHENTICATION_REQUIRED"),
+                default=True,
+            ),
+            access_token_minutes=int(
+                values.get("CAPITAL_INTELLIGENCE_ACCESS_TOKEN_MINUTES", "15")
+            ),
+            refresh_token_days=int(
+                values.get("CAPITAL_INTELLIGENCE_REFRESH_TOKEN_DAYS", "30")
+            ),
+            password_minimum_length=int(
+                values.get("CAPITAL_INTELLIGENCE_PASSWORD_MINIMUM_LENGTH", "12")
+            ),
+            bootstrap_admin_email=(
+                values.get("CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_EMAIL") or None
+            ),
+            bootstrap_admin_password=(
+                values.get("CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_PASSWORD") or None
+            ),
+            bootstrap_admin_name=values.get(
+                "CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_NAME",
+                "Platform Administrator",
+            ),
             require_journal=_boolean(
                 values.get("CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL")
             ),
@@ -148,7 +198,7 @@ class ApiSettings:
             ),
             application_version=values.get(
                 "CAPITAL_INTELLIGENCE_API_VERSION",
-                "1.1.0",
+                "1.2.0",
             ),
         )
 

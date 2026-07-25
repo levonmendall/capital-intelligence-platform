@@ -3,7 +3,8 @@
 ## Current release
 
 Foundation 1.x is the validated baseline in GitHub. The active milestone is
-authentication and scheduled delivery on top of the personal CIO API.
+scheduled daily intelligence and selective alert delivery on top of authenticated,
+mandate-authorized application services.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -24,9 +25,8 @@ replaced by a placeholder; the pull request documents the observed baseline.
 - [x] Add an ownership-correct recommendation-governance facade.
 - [x] Add a canonical recommendation-to-result workflow.
 - [x] Preserve existing intelligence imports during migration.
-- [x] Document the distinction between briefing meetings and recommendation
-  governance.
-- [ ] Migrate repository callers to canonical committee imports.
+- [x] Document briefing meetings versus recommendation governance.
+- [ ] Migrate remaining repository callers to canonical committee imports.
 - [ ] Move implementation files only after compatibility paths are proven.
 - [x] Add append-only regime evidence and decision-quality persistence.
 - [ ] Extend the journal to committee, mandate, and portfolio-response events.
@@ -37,10 +37,10 @@ replaced by a placeholder; the pull request documents the observed baseline.
 - [x] Add observation dates, vintages, provider provenance, and score lineage.
 - [x] Add point-in-time fixtures for every supported regime archetype.
 - [x] Add canonical multi-series retrieval with explicit partial failures.
-- Calibrate and version thresholds without look-ahead data.
-- Add regime-transition tests and committee consumption.
+- [ ] Calibrate and version thresholds without look-ahead data.
+- [ ] Add regime-transition tests and committee consumption.
 - [x] Render a governed CIO decision card as Markdown, JSON, and mobile HTML.
-- Render full analytical regime reports for specialist review.
+- [ ] Render full analytical regime reports for specialist review.
 
 Acceptance: at least one historically representative fixture exists for every
 supported regime, classifications are reproducible, and missing data cannot
@@ -63,8 +63,7 @@ produce false precision.
 - [x] Support crypto networks, contract addresses, trading pairs,
   perpetuals, and continuous 24/7 listings.
 - [x] Define provider-neutral quotes, trades, and OHLCV bars.
-- [x] Define explicit corporate-action, funding-rate, and open-interest
-  records.
+- [x] Define explicit corporate-action, funding-rate, and open-interest records.
 - [x] Enforce market-data decision-time and venue boundaries.
 - [x] Preserve the legacy latest-quote interface during migration.
 - [x] Add current SEC security-master snapshots with ambiguity protection.
@@ -72,15 +71,14 @@ produce false precision.
 - [x] Enforce SEC acceptance timestamps and preserve amended filings.
 - [x] Implement resilient FRED retrieval with caching, rate-limit handling,
   freshness rules, stale-if-error disclosure, and local fixtures.
-- Retrieve older SEC submission archive files and dimensional XBRL metadata.
-- Add historical identifiers, corporate actions, and delisted securities from
-  a licensed reference provider.
-- Select licensed equity and crypto market-data providers after contract
-  evaluation.
-- Define versioned price-adjustment and cross-venue consolidation policies.
-- Persist observation time, release time, revision/vintage, unit, frequency,
-  transformation, and provenance.
-- Add deterministic fallback and data-quality policies.
+- [ ] Retrieve older SEC submission archives and dimensional XBRL metadata.
+- [ ] Add historical identifiers, corporate actions, and delisted securities
+  from a licensed reference provider.
+- [ ] Select licensed equity and crypto providers after contract evaluation.
+- [ ] Define versioned price-adjustment and cross-venue consolidation policies.
+- [ ] Persist complete observation, release, revision, transformation, and
+  provenance metadata.
+- [ ] Add deterministic fallback and data-quality policies.
 
 Acceptance: tests run without network access and live data is never confused
 with cached, fixture, or fallback data.
@@ -100,18 +98,13 @@ Implement, in order:
 Each engine must publish a typed result with score, confidence, coverage,
 evidence, risks, and versioned rules.
 
-Market-data contracts must support exchange-session and 24/7 instruments,
-venue-specific spot and derivative prices, quote and settlement currencies,
-funding rates, open interest, liquidations, and explicitly governed
-cross-venue consolidation.
-
 ## Milestone 5 — Institutional market decision
 
-- Normalize engine results.
-- Produce separate opportunity, risk, confidence, and data-quality scores.
-- Configure and version weights.
-- Apply missing-data and veto policies.
-- Submit assessments to committee governance.
+- [ ] Normalize engine results.
+- [ ] Produce separate opportunity, risk, confidence, and data-quality scores.
+- [ ] Configure and version weights.
+- [ ] Apply missing-data and veto policies.
+- [ ] Submit all engine assessments to committee governance.
 - [x] Define append-only thesis lifecycle and falsification triggers.
 - [x] Define structured dissent and resolution conditions.
 - [x] Make no action a formal terminal committee outcome.
@@ -120,20 +113,19 @@ cross-venue consolidation.
 - [x] Compare consecutive regime decisions under versioned materiality rules.
 - [x] Separate continuous analysis from selective portfolio alerts.
 - [x] Produce plain-language directional portfolio impact.
-- [x] Track conviction direction and component drivers across canonical daily snapshots.
-- Schedule monitoring cycles and connect user-selected delivery channels after
-  application authentication is implemented.
+- [x] Track conviction direction and component drivers across daily snapshots.
+- [ ] Schedule monitoring cycles and connect user-selected delivery channels.
 
 ## Milestone 6 — Stock intelligence
 
-- [x] Establish issuer/listing identity and raw point-in-time SEC fact models.
-- Build normalized company and financial-statement models from canonical facts.
-- Add quality, financial strength, growth, earnings quality, valuation,
-  momentum, regime-fit, and company-risk engines.
-- Generate an institutional stock report.
-- Add comparison, ranking, screening, and watchlists.
+- [x] Establish issuer/listing identity and point-in-time SEC fact models.
+- [ ] Build normalized company and financial-statement models.
+- [ ] Add quality, strength, growth, earnings-quality, valuation, momentum,
+  regime-fit, and company-risk engines.
+- [ ] Generate an institutional stock report.
+- [ ] Add comparison, ranking, screening, and watchlists.
 
-The uploaded stock v1 archive is a specification scaffold, not an
+The uploaded stock v1 archive remains a specification scaffold, not an
 implementation baseline.
 
 ## Milestone 7 — Portfolio and validation
@@ -143,14 +135,14 @@ implementation baseline.
 - [x] Gate approved proposals through direction, liquidity, concentration,
   cash-reserve, risk-budget, and overlap controls.
 - [x] Explain opportunity cost using excess cash and explicit funding candidates.
-- Add portfolio optimization, transaction costs, rebalancing orchestration,
+- [ ] Add portfolio optimization, transaction costs, rebalancing orchestration,
   and paper trading behind the fit gate.
-- Add walk-forward backtests, point-in-time fundamentals, survivorship-bias
+- [ ] Add walk-forward backtests, point-in-time fundamentals, survivorship-bias
   controls, transaction costs, benchmarks, and attribution.
 - [x] Separate process quality from realized investment outcome.
 - [x] Define disciplined/lucky and flawed/unlucky decision classifications.
 - [x] Persist append-only decision-quality reviews.
-- Aggregate learning metrics across reviewed decisions.
+- [ ] Aggregate learning metrics across reviewed decisions.
 
 ## Milestone 8 — Application
 
@@ -160,9 +152,10 @@ implementation baseline.
   current, incomplete, stale, and unavailable states.
 - [x] Make Today, Environment, Portfolio, and History the primary Streamlit
   application surfaces.
-- [x] Provide a read-only FastAPI boundary for daily snapshots, history,
-  environments, decisions, replay artifacts, portfolios, health, and readiness.
-- [x] Add append-only Investor Memory and read-only conviction and memory endpoints.
-- Add authentication and mandate-aware authorization.
-- Add scheduled monitoring and user-selected alert delivery.
-- Add deployment, observability, backups, and operational hardening.
+- [x] Provide a FastAPI boundary for daily snapshots, history, environments,
+  decisions, replay artifacts, portfolios, health, and readiness.
+- [x] Add append-only Investor Memory and conviction and memory endpoints.
+- [x] Add revocable authentication, users, roles, investor ownership, and
+  mandate-aware authorization across API and Streamlit surfaces.
+- [ ] Add scheduled monitoring and user-selected alert delivery.
+- [ ] Add deployment, observability, backups, and operational hardening.

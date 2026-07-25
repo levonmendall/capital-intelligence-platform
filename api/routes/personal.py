@@ -1,4 +1,4 @@
-"""Read-only personal CIO memory and conviction routes."""
+"""Authorized personal CIO memory and conviction routes."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.config import ApiSettings
-from api.dependencies import get_settings
+from api.dependencies import get_settings, require_principal
 from api.schemas import (
     ConvictionTrendResponse,
     InvestorMemoryHistoryResponse,
@@ -23,9 +23,18 @@ from reporting.conviction_trend import (
     build_conviction_trend_from_store,
     conviction_trend_to_dict,
 )
+from security import AuthenticatedPrincipal
 
 
 router = APIRouter(prefix="/v1", tags=["personal CIO"])
+
+
+def _authorize_investor(
+    principal: AuthenticatedPrincipal,
+    investor_identifier: str,
+) -> None:
+    if not principal.can_access_investor(investor_identifier):
+        raise HTTPException(status_code=404, detail="investor memory was not found")
 
 
 @router.get(
@@ -59,7 +68,9 @@ def latest_conviction(
 def investor_memory_profile(
     investor_identifier: str,
     settings: ApiSettings = Depends(get_settings),
+    principal: AuthenticatedPrincipal = Depends(require_principal),
 ) -> dict[str, object]:
+    _authorize_investor(principal, investor_identifier)
     if not settings.investor_memory_database.exists():
         profile = build_investor_memory_profile(investor_identifier, ())
         return investor_memory_profile_to_dict(profile)
@@ -85,7 +96,9 @@ def investor_memory_events(
     investor_identifier: str,
     limit: int = Query(default=50, ge=1, le=200),
     settings: ApiSettings = Depends(get_settings),
+    principal: AuthenticatedPrincipal = Depends(require_principal),
 ) -> dict[str, object]:
+    _authorize_investor(principal, investor_identifier)
     if not settings.investor_memory_database.exists():
         return {"items": [], "total": 0}
     try:
@@ -104,6 +117,3 @@ def investor_memory_events(
         "items": [investor_memory_event_to_dict(event) for event in events],
         "total": total,
     }
-
-
-__all__ = ["router"]
