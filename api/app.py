@@ -23,12 +23,19 @@ from api.routes import (
     decisions_router,
     environment_router,
     health_router,
+    operations_router,
     personal_router,
     portfolios_router,
     replays_router,
     users_router,
 )
 from delivery import SQLiteAlertStore
+from operations import (
+    MetricRegistry,
+    OperationalSettings,
+    configure_logging,
+    install_operational_middleware,
+)
 from security import AuthenticationService, SQLiteIdentityStore
 
 
@@ -37,10 +44,16 @@ def create_app(
     resources: ApiResources | None = None,
     authentication: AuthenticationService | None = None,
     alert_store: SQLiteAlertStore | None = None,
+    operational_settings: OperationalSettings | None = None,
+    metrics: MetricRegistry | None = None,
 ) -> FastAPI:
-    """Create the API with explicit injectable data, identity, and alert stores."""
+    """Create the API with explicit injectable runtime dependencies."""
 
     resolved_settings = settings or ApiSettings.from_env()
+    resolved_operations = operational_settings or OperationalSettings.from_env()
+    configure_logging(resolved_operations)
+    resolved_operations.backup_directory.mkdir(parents=True, exist_ok=True)
+    resolved_operations.worker_heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
     resolved_resources = resources or build_resources(resolved_settings)
     resolved_authentication = authentication or AuthenticationService(
         SQLiteIdentityStore(
@@ -61,6 +74,7 @@ def create_app(
         or resolved_settings.snapshot_database.with_name("alerts.db")
     )
     resolved_alert_store = alert_store or SQLiteAlertStore(alert_path)
+    resolved_metrics = metrics or MetricRegistry()
     app = FastAPI(
         title=resolved_settings.application_name,
         version=resolved_settings.application_version,
@@ -74,9 +88,11 @@ def create_app(
         openapi_url="/openapi.json",
     )
     app.state.settings = resolved_settings
+    app.state.operational_settings = resolved_operations
     app.state.resources = resolved_resources
     app.state.authentication = resolved_authentication
     app.state.alert_store = resolved_alert_store
+    app.state.metrics = resolved_metrics
 
     if resolved_settings.allowed_origins:
         app.add_middleware(
@@ -91,15 +107,7 @@ def create_app(
                 "X-Request-ID",
             ],
         )
-
-    @app.middleware("http")
-    async def security_headers(request: Request, call_next):
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        return response
+    install_operational_middleware(app, resolved_operations, resolved_metrics)
 
     @app.exception_handler(RepositoryUnavailableError)
     async def unavailable_handler(
@@ -119,6 +127,7 @@ def create_app(
 
     protected = [Depends(require_principal)]
     app.include_router(health_router)
+    app.include_router(operations_router)
     if resolved_authentication.required:
         app.include_router(authentication_router)
         app.include_router(users_router)
