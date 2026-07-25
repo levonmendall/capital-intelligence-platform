@@ -19,6 +19,7 @@ from delivery import (
     ScheduledDailyIntelligenceWorker,
 )
 from intelligence.business_cycle import build_fred_business_cycle_engine
+from intelligence.credit_cycle import build_fred_credit_cycle_engine
 from intelligence.engine_cycle import AnalyticalEngineCycleExecutor
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.global_liquidity import build_fred_global_liquidity_engine
@@ -55,6 +56,7 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
         (
             build_fred_global_liquidity_engine(),
             build_fred_business_cycle_engine(),
+            build_fred_credit_cycle_engine(),
         ),
         analytical_store,
     )
