@@ -15,9 +15,11 @@ def build_manager() -> SQLiteBackupManager:
     operations = OperationalSettings.from_env()
     alert_path = api.alert_database or api.snapshot_database.with_name("alerts.db")
     policy_path = api.investor_memory_database.with_name("investment_policy.db")
+    analytical_path = api.snapshot_database.with_name("analytical_engines.db")
     return SQLiteBackupManager(
         {
             "daily_intelligence": api.snapshot_database,
+            "analytical_engines": analytical_path,
             "portfolio": api.portfolio_database,
             "investor_memory": api.investor_memory_database,
             "investment_policy": policy_path,

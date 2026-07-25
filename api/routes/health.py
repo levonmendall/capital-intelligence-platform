@@ -21,6 +21,7 @@ from api.schemas import (
     ReadinessResponse,
 )
 from delivery import SQLiteAlertStore
+from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from operations import OperationalSettings
 from personal_cio import SQLiteInvestmentPolicyStore
 from security import AuthenticationService
@@ -95,6 +96,23 @@ def ready(
         ready=policy_ready,
         detail=policy_detail,
     )
+    engine_path = settings.snapshot_database.with_name("analytical_engines.db")
+    if engine_path.exists():
+        engine_ready, engine_detail = SQLiteAnalyticalEngineStore(
+            engine_path,
+            read_only=True,
+        ).readiness()
+    else:
+        engine_ready = True
+        engine_detail = (
+            "global liquidity history has not been created; the core daily "
+            "intelligence path remains available"
+        )
+    components["analytical_engines"] = ReadinessComponentResponse(
+        required=False,
+        ready=engine_ready,
+        detail=engine_detail,
+    )
     backup_ready = operations.backup_directory.exists() and os.access(
         operations.backup_directory,
         os.W_OK,
@@ -119,9 +137,7 @@ def ready(
         ),
     )
     ready_state = all(
-        item.ready
-        for item in components.values()
-        if item.required
+        item.ready for item in components.values() if item.required
     )
     if not ready_state:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
