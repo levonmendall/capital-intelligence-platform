@@ -79,6 +79,7 @@ GET  /v1/investment-policy/{investor_identifier}/history
 GET  /v1/goals/{investor_identifier}
 POST /v1/goals/{investor_identifier}
 GET  /v1/personal-cio/{investor_identifier}/latest
+GET  /v1/personal-cio/{investor_identifier}/history
 ```
 
 Unauthorized investor identifiers return `404` to avoid disclosing another
@@ -91,7 +92,20 @@ questions. Objective editing remains in the sidebar so it does not create a
 fifth primary screen. Evidence, committee detail, score history, and review
 conditions remain available as progressive detail.
 
+## Selective alerts and history
+
+The scheduled worker continues to use the governed material-change policy as the
+primary alert gate. Before delivery, it evaluates the result against the
+investor's recorded objectives and authorized mandates. Broader material changes
+retain delivery with objective-aware wording. A portfolio-review-only alert may
+be suppressed when the formal personalized outcome is `no_action`.
+
+Each scheduled Personal CIO Brief is stored immutably with its daily snapshot,
+policy version, evidence identifiers, and Decision Replay references. This
+allows later review without rewriting the investor context active at the time.
+
 ## Operational treatment
 
-The objective database is included in encrypted backups and readiness reporting.
-It is stored beside Investor Memory as `database/investment_policy.db` by default.
+The objective and brief-history database is included in encrypted backups and
+readiness reporting. It is stored beside Investor Memory as
+`database/investment_policy.db` by default.
