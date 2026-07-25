@@ -23,6 +23,7 @@ from api.routes import (
     decisions_router,
     environment_router,
     health_router,
+    liquidity_router,
     objectives_router,
     operations_router,
     personal_router,
@@ -85,9 +86,9 @@ def create_app(
         version=resolved_settings.application_version,
         description=(
             "Authenticated access to governed Capital Intelligence snapshots, "
-            "investor objectives, Personal CIO briefs, decisions, replays, "
-            "personal memory, conviction trends, mandate-authorized portfolios, "
-            "and selective alert delivery."
+            "global liquidity intelligence, investor objectives, Personal CIO "
+            "briefs, decisions, replays, personal memory, conviction trends, "
+            "mandate-authorized portfolios, and selective alert delivery."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -142,6 +143,7 @@ def create_app(
         app.include_router(personal_cio_history_router, dependencies=protected)
     app.include_router(daily_router, dependencies=protected)
     app.include_router(environment_router, dependencies=protected)
+    app.include_router(liquidity_router, dependencies=protected)
     app.include_router(decisions_router, dependencies=protected)
     app.include_router(replays_router, dependencies=protected)
     app.include_router(personal_router, dependencies=protected)
