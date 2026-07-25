@@ -48,3 +48,6 @@ jobs:
 
       - name: Run automated tests
         run: pytest -q
+
+      - name: Build hardened runtime image
+        run: docker build --tag capital-intelligence:validation .
