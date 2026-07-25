@@ -23,6 +23,7 @@ from intelligence.credit_cycle import build_fred_credit_cycle_engine
 from intelligence.engine_cycle import AnalyticalEngineCycleExecutor
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.global_liquidity import build_fred_global_liquidity_engine
+from intelligence.market_breadth import build_configured_market_breadth_engine
 from intelligence.regime_pipeline import build_fred_regime_pipeline
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
 from personal_cio import PersonalCIOAlertPlanner
@@ -57,6 +58,7 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
             build_fred_global_liquidity_engine(),
             build_fred_business_cycle_engine(),
             build_fred_credit_cycle_engine(),
+            build_configured_market_breadth_engine(),
         ),
         analytical_store,
     )
