@@ -96,6 +96,20 @@ contract. Missing, stale, and incomplete data remain explicit in the response.
 
 See [Production API](docs/PRODUCTION_API.md).
 
+## Personal CIO intelligence
+
+The product now pairs the daily Capital Intelligence Score with a conviction
+trend, append-only Investor Memory, and explicit opportunity-cost analysis.
+Investor Memory summarizes only preferences, actions, mistakes, and lessons that
+were deliberately recorded. Opportunity-cost analysis uses cash above reserve
+and explicitly approved funding candidates; it never selects a sale silently.
+
+The read-only API exposes conviction and Investor Memory profiles, while local
+reflection writes stay inside the trusted application boundary until
+authentication and authorization are implemented.
+
+See [Personal CIO intelligence](docs/PERSONAL_CIO.md).
+
 ## CIO decision card
 
 The reporting layer compresses a governed run into one mobile-first decision
