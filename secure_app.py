@@ -1,4 +1,4 @@
-"""Authenticated Streamlit entrypoint with mandate-scoped compatibility adapters."""
+"""Authenticated Streamlit entrypoint with per-session authorization adapters."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from pathlib import Path
 import streamlit as st
 
 from api.config import ApiSettings
+from core import portfolio as portfolio_services
+from personalization import SQLiteInvestorMemoryStore as BaseInvestorMemoryStore
 from security import (
     AuthenticationService,
     InvalidCredentialsError,
@@ -99,16 +101,12 @@ def _login_screen() -> None:
     st.stop()
 
 
-def _install_scoped_adapters(principal) -> None:
-    """Scope legacy Streamlit reads while the UI migrates to API clients."""
-
-    import core.portfolio as portfolio_services
-    import personalization
+def _authorized_bindings(principal) -> dict[str, object]:
+    """Build session-local portfolio and memory adapters for app.py."""
 
     original_get_mandates = portfolio_services.get_mandates
     original_get_details = portfolio_services.get_mandate_details
     original_get_trades = portfolio_services.get_trade_history
-    original_memory_store = personalization.SQLiteInvestorMemoryStore
 
     def authorized_mandates() -> list[dict]:
         return [
@@ -152,7 +150,7 @@ def _install_scoped_adapters(principal) -> None:
 
     investor_identifier = principal.investor_identifier or principal.user_id
 
-    class AuthorizedMemoryStore(original_memory_store):
+    class AuthorizedMemoryStore(BaseInvestorMemoryStore):
         def profile(self, ignored_identifier: str):
             del ignored_identifier
             return super().profile(investor_identifier)
@@ -172,14 +170,38 @@ def _install_scoped_adapters(principal) -> None:
                 replace(event, investor_identifier=investor_identifier)
             )
 
-    portfolio_services.get_mandates = authorized_mandates
-    portfolio_services.get_all_mandates = authorized_mandates
-    portfolio_services.get_mandate_details = authorized_details
-    portfolio_services.get_mandate = authorized_details
-    portfolio_services.get_trade_history = authorized_trades
-    portfolio_services.get_portfolio_totals = authorized_totals
-    portfolio_services.portfolio_totals = authorized_totals
-    personalization.SQLiteInvestorMemoryStore = AuthorizedMemoryStore
+    return {
+        "get_mandate_details": authorized_details,
+        "get_mandates": authorized_mandates,
+        "get_portfolio_totals": authorized_totals,
+        "get_trade_history": authorized_trades,
+        "SQLiteInvestorMemoryStore": AuthorizedMemoryStore,
+    }
+
+
+def _authorized_source() -> str:
+    source = Path("app.py").read_text(encoding="utf-8")
+    source = source.replace(
+        """st.set_page_config(\n    page_title=\"Capital Intelligence Platform\",\n    page_icon=\"📊\",\n    layout=\"wide\",\n)\n\n\n""",
+        "",
+        1,
+    )
+    source = source.replace(
+        """from core.portfolio import (\n    get_mandate_details,\n    get_mandates,\n    get_portfolio_totals,\n    get_trade_history,\n)\n""",
+        "",
+        1,
+    )
+    source = source.replace(
+        "    SQLiteInvestorMemoryStore,\n",
+        "",
+        1,
+    )
+    source = source.replace(
+        "@st.cache_resource\ndef investor_memory_store",
+        "def investor_memory_store",
+        1,
+    )
+    return source
 
 
 principal = _principal()
@@ -195,14 +217,8 @@ with st.sidebar:
         _clear_session()
         st.rerun()
 
-_install_scoped_adapters(principal)
-
-# app.py owns the current product experience. Disable its second page-config call
-# and execute it after authentication and data-scope adapters are installed.
-_original_set_page_config = st.set_page_config
-st.set_page_config = lambda **kwargs: None
-try:
-    source = Path("app.py").read_text(encoding="utf-8")
-    exec(compile(source, "app.py", "exec"), {"__name__": "__main__"})
-finally:
-    st.set_page_config = _original_set_page_config
+execution_globals = {
+    "__name__": "__main__",
+    **_authorized_bindings(principal),
+}
+exec(compile(_authorized_source(), "app.py", "exec"), execution_globals)
