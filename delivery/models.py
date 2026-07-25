@@ -268,6 +268,7 @@ class AlertDelivery:
     status: DeliveryStatus
     subject: str
     body: str
+    email_address: str | None
     created_at: datetime
     updated_at: datetime
     attempts: int
@@ -295,6 +296,11 @@ class AlertDelivery:
             value = getattr(self, field_name)
             if value is not None:
                 _aware(value, field_name)
+        if self.channel is AlertChannel.EMAIL:
+            if self.email_address is None or "@" not in self.email_address:
+                raise ValueError("email delivery must contain a valid email_address")
+        elif self.email_address is not None and "@" not in self.email_address:
+            raise ValueError("email_address must be valid")
         if isinstance(self.attempts, bool) or not isinstance(self.attempts, int):
             raise TypeError("attempts must be an int")
         if self.attempts < 0:
