@@ -20,6 +20,7 @@ from delivery import (
 )
 from intelligence.regime_pipeline import build_fred_regime_pipeline
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
+from personal_cio import PersonalCIOAlertPlanner
 from reporting import build_conviction_trend_from_store
 from security import SQLiteIdentityStore
 
@@ -42,8 +43,25 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
         daily_service,
         conviction_change_reader=conviction_change,
     )
-    alert_path = settings.alert_database or settings.snapshot_database.with_name("alerts.db")
+    alert_path = (
+        settings.alert_database
+        or settings.snapshot_database.with_name("alerts.db")
+    )
     alert_store = SQLiteAlertStore(alert_path)
+    identity_store = SQLiteIdentityStore(
+        settings.identity_database,
+        access_ttl=timedelta(minutes=settings.access_token_minutes),
+        refresh_ttl=timedelta(days=settings.refresh_token_days),
+        password_minimum_length=settings.password_minimum_length,
+    )
+    planner = PersonalCIOAlertPlanner(
+        identity_store=identity_store,
+        snapshot_database=settings.snapshot_database,
+        portfolio_database=settings.portfolio_database,
+        policy_database=settings.investor_memory_database.with_name(
+            "investment_policy.db"
+        ),
+    )
     dispatchers = {}
     if settings.smtp_host and settings.smtp_from_address:
         dispatchers[AlertChannel.EMAIL] = SMTPEmailDispatcher(
@@ -56,15 +74,10 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
         )
     alert_service = AlertDeliveryService(
         alert_store,
+        planner=planner,
         dispatchers=dispatchers,
         maximum_attempts=settings.alert_maximum_attempts,
         base_retry_delay=timedelta(minutes=settings.alert_retry_minutes),
-    )
-    identity_store = SQLiteIdentityStore(
-        settings.identity_database,
-        access_ttl=timedelta(minutes=settings.access_token_minutes),
-        refresh_ttl=timedelta(days=settings.refresh_token_days),
-        password_minimum_length=settings.password_minimum_length,
     )
     return ScheduledDailyIntelligenceWorker(
         executor,
@@ -84,14 +97,17 @@ def _run_pass(worker, heartbeat: WorkerHeartbeatStore) -> int:
         deliveries = worker.alert_service.dispatch_pending()
     except Exception as error:
         heartbeat.write("failed", detail=str(error)[:1000])
-        logging.getLogger("capital_intelligence.scheduler").exception("scheduler pass failed")
+        logging.getLogger("capital_intelligence.scheduler").exception(
+            "scheduler pass failed"
+        )
         return 1
     status = "degraded" if result.status == "failed" else "healthy"
     heartbeat.write(
         status,
         cycle_key=result.cycle_key,
         detail=(
-            f"cycle_status={result.status}; deliveries_processed={len(deliveries)}; "
+            f"cycle_status={result.status}; "
+            f"deliveries_processed={len(deliveries)}; "
             f"snapshot={result.snapshot_identifier or '-'}"
         ),
     )
@@ -126,7 +142,10 @@ def main() -> int:
     settings = ApiSettings.from_env()
     operational = OperationalSettings.from_env()
     if operational.service_name == "capital-intelligence-api":
-        operational = replace(operational, service_name="capital-intelligence-scheduler")
+        operational = replace(
+            operational,
+            service_name="capital-intelligence-scheduler",
+        )
     configure_logging(operational)
     heartbeat = WorkerHeartbeatStore(operational.worker_heartbeat_path)
     worker = build_worker(settings)

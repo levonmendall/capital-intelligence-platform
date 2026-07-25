@@ -14,11 +14,13 @@ def build_manager() -> SQLiteBackupManager:
     api = ApiSettings.from_env()
     operations = OperationalSettings.from_env()
     alert_path = api.alert_database or api.snapshot_database.with_name("alerts.db")
+    policy_path = api.investor_memory_database.with_name("investment_policy.db")
     return SQLiteBackupManager(
         {
             "daily_intelligence": api.snapshot_database,
             "portfolio": api.portfolio_database,
             "investor_memory": api.investor_memory_database,
+            "investment_policy": policy_path,
             "identity": api.identity_database,
             "alerts": alert_path,
             "institutional_journal": api.journal_database,
@@ -31,8 +33,14 @@ def build_manager() -> SQLiteBackupManager:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Back up Capital Intelligence data stores.")
-    parser.add_argument("--loop", action="store_true", help="Run backups continuously.")
+    parser = argparse.ArgumentParser(
+        description="Back up Capital Intelligence data stores."
+    )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Run backups continuously.",
+    )
     parser.add_argument("--interval-hours", type=int, default=None)
     args = parser.parse_args()
     operational = OperationalSettings.from_env()

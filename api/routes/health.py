@@ -15,9 +15,14 @@ from api.dependencies import (
     get_settings,
 )
 from api.repositories import ApiResources
-from api.schemas import HealthResponse, ReadinessComponentResponse, ReadinessResponse
+from api.schemas import (
+    HealthResponse,
+    ReadinessComponentResponse,
+    ReadinessResponse,
+)
 from delivery import SQLiteAlertStore
 from operations import OperationalSettings
+from personal_cio import SQLiteInvestmentPolicyStore
 from security import AuthenticationService
 
 router = APIRouter(tags=["operations"])
@@ -71,8 +76,28 @@ def ready(
         ready=alert_ready,
         detail=alert_detail + email_detail,
     )
+    policy_path = settings.investor_memory_database.with_name(
+        "investment_policy.db"
+    )
+    if policy_path.exists():
+        policy_ready, policy_detail = SQLiteInvestmentPolicyStore(
+            policy_path,
+            read_only=True,
+        ).readiness()
+    else:
+        policy_ready = True
+        policy_detail = (
+            "no investor objectives have been recorded; personalized guidance "
+            "will disclose incomplete context"
+        )
+    components["investment_policy"] = ReadinessComponentResponse(
+        required=False,
+        ready=policy_ready,
+        detail=policy_detail,
+    )
     backup_ready = operations.backup_directory.exists() and os.access(
-        operations.backup_directory, os.W_OK
+        operations.backup_directory,
+        os.W_OK,
     )
     components["backup_target"] = ReadinessComponentResponse(
         required=True,
@@ -88,11 +113,16 @@ def ready(
         ready=True,
         detail=(
             f"environment={operations.environment}; https_enforced="
-            f"{str(operations.enforce_https).lower()}; encrypted_backups_required="
+            f"{str(operations.enforce_https).lower()}; "
+            "encrypted_backups_required="
             f"{str(operations.require_encrypted_backups).lower()}"
         ),
     )
-    ready_state = all(item.ready for item in components.values() if item.required)
+    ready_state = all(
+        item.ready
+        for item in components.values()
+        if item.required
+    )
     if not ready_state:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadinessResponse(ready=ready_state, components=components)

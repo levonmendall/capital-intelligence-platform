@@ -3,9 +3,9 @@
 ## Current release
 
 Foundation 1.x now has a deployable, observable, backed-up, and operationally
-hardened application baseline. The next product milestones return to deeper
-analytical coverage, calibrated decision engines, stock intelligence, and
-portfolio validation.
+hardened application baseline plus a versioned investor-objective and Personal
+CIO communication layer. The next product milestone is deeper analytical
+coverage, beginning with global liquidity.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -97,7 +97,8 @@ Implement, in order:
 7. Risk
 
 Each engine must publish a typed result with score, confidence, coverage,
-evidence, risks, and versioned rules.
+evidence, risks, and versioned rules. Every engine must feed the Personal CIO
+Brief rather than create an independent primary dashboard.
 
 ## Milestone 5 — Institutional market decision
 
@@ -163,3 +164,24 @@ implementation baseline.
 - [x] Add container deployment, structured logs, request IDs, metrics, worker
   health, encrypted backups, restore verification, operational runbooks,
   security scanning, and production request hardening.
+- [x] Add versioned investor goals and Investment Policy Profiles.
+- [x] Add objective-aware Portfolio Alignment without presenting it as a goal
+  success probability.
+- [x] Add the four-question Personal CIO Brief with formal action and no-action
+  outcomes, evidence lineage, and review conditions.
+- [x] Add authenticated objective onboarding, objective history, and
+  cross-investor authorization.
+
+## Milestone 9 — Personal CIO product contract
+
+- [x] Adopt the Personal CIO North Star in the governing product vision.
+- [x] Require primary interactions to answer what changed, why it matters, how it
+  affects the portfolio, and whether action is needed.
+- [x] Keep Capital Intelligence Score, Conviction Trend, and Portfolio Alignment
+  as separate measures with distinct meanings.
+- [x] Treat missing objectives as incomplete context rather than inferred facts.
+- [x] Treat `no_action` as a formal and valuable recommendation.
+- [x] Include investor-objective history in encrypted backups and readiness.
+- [x] Feed objective relevance into scheduled alert wording and suppression.
+- [x] Link historical Personal CIO Briefs to daily snapshots, policy versions,
+  evidence lineage, and Decision Replay references.
