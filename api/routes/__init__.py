@@ -2,6 +2,7 @@
 
 from api.routes.alerts import router as alerts_router
 from api.routes.authentication import router as authentication_router
+from api.routes.business_cycle import router as business_cycle_router
 from api.routes.daily import router as daily_router
 from api.routes.decisions import router as decisions_router
 from api.routes.environment import router as environment_router
@@ -18,6 +19,7 @@ from api.routes.users import router as users_router
 __all__ = [
     "alerts_router",
     "authentication_router",
+    "business_cycle_router",
     "daily_router",
     "decisions_router",
     "environment_router",
