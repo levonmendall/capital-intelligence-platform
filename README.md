@@ -16,6 +16,8 @@ Foundation Version 1.x now includes:
 - mandate-aware opportunity-cost analysis;
 - revocable authentication and mandate authorization;
 - scheduled daily intelligence with selective alert delivery;
+- structured observability, worker health, and encrypted backup/restore;
+- a hardened, containerized API, scheduler, backup, and Streamlit topology;
 - an authenticated FastAPI boundary; and
 - an authenticated four-screen Streamlit experience.
 
@@ -55,7 +57,7 @@ tables and verifies a hash chain across recorded events.
 ## Authentication and authorization
 
 Runtime settings loaded from the environment require authentication by default.
-Before the first API, Streamlit, or scheduler start, configure the initial
+Before the first API, Streamlit, scheduler, or backup start, configure the initial
 administrator:
 
 ```bash
@@ -131,17 +133,52 @@ exponential retry and records append-only attempt history.
 
 See [Scheduled intelligence and alerts](docs/SCHEDULING_AND_ALERTS.md).
 
-## Production API
+## Deployment and operational hardening
+
+Copy a staging configuration, replace every placeholder secret, and start the
+four-service topology:
 
 ```bash
-uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000
+cp deploy/staging.env.example deploy/staging.env
+docker compose up --build -d
 ```
 
-Public operational endpoints:
+The same immutable image runs the API, authenticated web app, scheduler, and
+backup service. Containers run as a non-root user with a read-only root
+filesystem, dropped capabilities, explicit writable volumes, and loopback-only
+host ports by default.
+
+Operational endpoints:
 
 ```text
 GET /health
 GET /ready
+GET /live
+GET /worker/health
+GET /metrics
+```
+
+Every request receives an `X-Request-ID` and a structured JSON log. The API
+exports Prometheus-compatible request metrics, enforces trusted hosts, request
+size limits, rate limits, defensive headers, and production HTTPS policy.
+
+Create a verified backup or restore drill with:
+
+```bash
+python run_backup.py
+python run_restore.py backups/<archive>.tar.gz.fernet --verify-only
+python run_restore.py backups/<archive>.tar.gz.fernet --target restored-database
+```
+
+Production settings require HTTPS enforcement, a protected metrics endpoint,
+and encrypted backups. See [Deployment and operations](docs/OPERATIONS.md),
+[Backup and restore](docs/BACKUP_RESTORE.md), and
+[Incident response](docs/INCIDENT_RESPONSE.md).
+
+## Production API
+
+```bash
+uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
 Session endpoints:
@@ -232,6 +269,9 @@ trade.
 - [Authentication and authorization](docs/AUTHENTICATION_AND_AUTHORIZATION.md)
 - [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Scheduled intelligence and alerts](docs/SCHEDULING_AND_ALERTS.md)
+- [Deployment and operations](docs/OPERATIONS.md)
+- [Backup and restore](docs/BACKUP_RESTORE.md)
+- [Incident response](docs/INCIDENT_RESPONSE.md)
 - [Production API](docs/PRODUCTION_API.md)
 - [Personal CIO intelligence](docs/PERSONAL_CIO.md)
 - [Portfolio-fit gate](docs/PORTFOLIO_FIT.md)
