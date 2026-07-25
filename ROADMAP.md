@@ -182,5 +182,6 @@ implementation baseline.
 - [x] Treat missing objectives as incomplete context rather than inferred facts.
 - [x] Treat `no_action` as a formal and valuable recommendation.
 - [x] Include investor-objective history in encrypted backups and readiness.
-- [ ] Feed objective relevance into scheduled alert wording and suppression.
-- [ ] Link historical Personal CIO Briefs directly into Decision Replay.
+- [x] Feed objective relevance into scheduled alert wording and suppression.
+- [x] Link historical Personal CIO Briefs to daily snapshots, policy versions,
+  evidence lineage, and Decision Replay references.
