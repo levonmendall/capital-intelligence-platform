@@ -1,25 +1,36 @@
 # Capital Intelligence Platform
 
-An explainable, AI-assisted investment operating system for disciplined research, portfolio management, and paper trading.
+An explainable, AI-assisted investment operating system for disciplined market
+research, governed portfolio decisions, personal investor memory, and paper
+trading.
 
-## Current Release
+## Current release
 
-Foundation Version 1.x
+Foundation Version 1.x now includes:
 
-The active milestone productionizes a deterministic, point-in-time
-`economic_regime` path while preserving the legacy allocation interface.
-The canonical institutional command is:
+- point-in-time economic-regime intelligence;
+- six-specialist committee governance;
+- a daily Capital Intelligence Score and conviction trend;
+- a concise Environment Brief and CIO Decision Card;
+- append-only daily history, Decision Replay, and Investor Memory;
+- mandate-aware opportunity-cost analysis;
+- an authenticated FastAPI boundary; and
+- an authenticated four-screen Streamlit experience.
+
+The software remains research and paper-trading software. It does not execute
+live trades or bypass mandate constraints.
+
+## Canonical intelligence workflow
 
 ```bash
 python run_regime.py
 ```
 
-It retrieves the required FRED series when `FRED_API_KEY` is configured. If a
-series or credential is unavailable, the command reports the missing evidence
-and reduced coverage; it never silently substitutes sample data. The legacy
-compatibility workflow remains available through `python run_intelligence.py`.
+When `FRED_API_KEY` is configured, the command retrieves the required FRED
+series. Missing credentials or observations reduce disclosed coverage; the
+canonical pipeline never silently substitutes sample data.
 
-To append the complete run to the tamper-evident institutional journal:
+To journal a complete run:
 
 ```bash
 python run_regime.py \
@@ -27,11 +38,7 @@ python run_regime.py \
   --code-version YOUR_COMMIT_SHA
 ```
 
-The journal is separate from mutable portfolio tables. It rejects update and
-delete operations and verifies a hash chain across recorded events.
-
-To carry the same point-in-time assessment through the existing six-specialist
-investment committee and journal both records together:
+To run governance and journal the regime assessment plus committee decision:
 
 ```bash
 python run_regime.py \
@@ -40,80 +47,116 @@ python run_regime.py \
   --code-version YOUR_COMMIT_SHA
 ```
 
-Governance applies explicit coverage, evidence-quality, and confidence gates
-before committee review. It can approve, require modification, reject,
-escalate material dissent, or record a formal no-action decision. Committee
-approval remains non-executing and cannot bypass portfolio constraints.
+The append-only institutional journal is separate from mutable paper-portfolio
+tables and verifies a hash chain across recorded events.
 
-## Continuous intelligence, selective alerts
+## Authentication and authorization
 
-`monitoring.ContinuousRegimeMonitor` is the application boundary for scheduled
-analysis. Every cycle retrieves new point-in-time evidence, evaluates the
-regime, runs governance, compares the result with the prior decision, and can
-record that comparison. Notification is a separate policy decision.
+Runtime settings loaded from the environment require authentication by default.
+Before the first API or Streamlit start, configure the initial administrator:
 
-The default material-change policy remains silent when the market view is
-unchanged or when only one moderate signal moves. It notifies only when the
-portfolio warrants review and marks a prior view urgent when a critical regime
-or risk threshold is crossed. User-facing output is deliberately compressed to
-a short headline, a plain-language explanation, and the affected portfolio
-exposures. Directional portfolio impact never selects position sizes or
-bypasses mandate constraints.
+```bash
+export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_EMAIL="admin@example.com"
+export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_PASSWORD="replace-with-a-long-random-password"
+export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_NAME="Platform Administrator"
+```
+
+Remove the bootstrap password from the environment after the first account is
+created.
+
+Passwords use scrypt with unique salts. Access and refresh credentials are
+opaque and stored only as hashes. Refresh rotates both credentials; logout and
+account disabling revoke sessions.
+
+Users receive explicit roles, mandate grants, and—when needed—investor-profile
+grants. Portfolio lists, holdings, trades, values, and Investor Memory are
+filtered at the service boundary rather than merely hidden in the interface.
+
+See [Authentication and mandate authorization](docs/AUTHENTICATION_AND_AUTHORIZATION.md).
 
 ## Daily Capital Intelligence experience
 
-The Streamlit application now opens with one canonical daily snapshot rather
-than assembling unrelated dashboard values. The same point-in-time regime run
-and governed committee decision produce the Capital Intelligence Score,
-Environment Brief, portfolio impact, and supporting CIO Decision Card.
+Run the authenticated Streamlit entrypoint:
 
 ```bash
-streamlit run app.py
+streamlit run secure_app.py
 ```
 
-The primary navigation is deliberately limited to Today, Environment,
-Portfolio, and History. Daily score records are stored in the append-only
+The primary navigation remains deliberately limited to:
+
+1. **Today** — Capital Intelligence Score, conviction, environment, risk,
+   committee stance, portfolio impact, and what changed;
+2. **Environment** — the concise brief plus supporting economic evidence;
+3. **Portfolio** — authorized mandates, holdings, paper trades, value history,
+   and non-executing opportunity-cost analysis; and
+4. **History** — score and conviction trends, Decision Replay, Investor Memory,
+   and the authorized paper-trade journal.
+
+Daily score records are stored in the append-only
 `database/daily_intelligence_snapshots.db` history. Current, incomplete, stale,
-and unavailable evidence states are shown explicitly. Score movement does not
-independently trigger an alert; notification remains governed by the material
-change policy.
+and unavailable evidence states remain explicit. Score movement alone does not
+trigger an alert; notification remains governed by material-change policy.
 
 See [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md).
 
 ## Production API
 
-The read-only FastAPI boundary serves the same governed daily snapshot,
-environment, decisions, replay artifacts, and virtual portfolios without
-rerunning intelligence or exposing trade mutation routes.
-
 ```bash
 uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
-Use `/health` for process health, `/ready` for backing-store readiness, `/docs`
-for interactive documentation, and `/openapi.json` for the deterministic API
-contract. Missing, stale, and incomplete data remain explicit in the response.
+Public operational endpoints:
+
+```text
+GET /health
+GET /ready
+```
+
+Session endpoints:
+
+```text
+POST /v1/auth/login
+POST /v1/auth/refresh
+POST /v1/auth/logout
+GET  /v1/auth/me
+```
+
+Authenticated intelligence endpoints include daily snapshots, history,
+environment, decisions, replays, conviction, Investor Memory, and authorized
+portfolios. Administrator-only routes provision users, assign mandate and
+investor grants, and disable accounts.
+
+Use `/docs` for interactive documentation and `/openapi.json` for the
+deterministic contract. Missing, stale, incomplete, and unavailable data remain
+explicit.
 
 See [Production API](docs/PRODUCTION_API.md).
 
 ## Personal CIO intelligence
 
-The product now pairs the daily Capital Intelligence Score with a conviction
-trend, append-only Investor Memory, and explicit opportunity-cost analysis.
-Investor Memory summarizes only preferences, actions, mistakes, and lessons that
-were deliberately recorded. Opportunity-cost analysis uses cash above reserve
-and explicitly approved funding candidates; it never selects a sale silently.
+The product pairs the daily Capital Intelligence Score with:
 
-The read-only API exposes conviction and Investor Memory profiles, while local
-reflection writes stay inside the trusted application boundary until
-authentication and authorization are implemented.
+- a conviction trend derived from evidence confidence, committee support, and
+  committee agreement;
+- append-only Investor Memory built only from deliberately recorded preferences,
+  actions, mistakes, and lessons; and
+- explicit opportunity-cost analysis that uses excess cash and user-selected
+  funding candidates without silently choosing a sale.
 
 See [Personal CIO intelligence](docs/PERSONAL_CIO.md).
 
-## CIO decision card
+## Continuous intelligence, selective alerts
 
-The reporting layer compresses a governed run into one mobile-first decision
-artifact without recalculating evidence or changing the committee result.
+`monitoring.ContinuousRegimeMonitor` is the application boundary for scheduled
+analysis. Every cycle can retrieve new point-in-time evidence, evaluate the
+regime, run governance, compare the result with the prior decision, and record
+the comparison. Notification remains a separate policy decision.
+
+The default material-change policy stays quiet when the working view is
+unchanged or only one moderate signal moves. It surfaces portfolio review only
+when the evidence crosses governed materiality thresholds.
+
+## CIO decision card
 
 ```bash
 python run_regime.py \
@@ -121,103 +164,31 @@ python run_regime.py \
   --card-output reports/latest-decision.html
 ```
 
-`--decision-card` supports `markdown`, `json`, and `html` and automatically
-enables governance. The primary view shows only the decision, why it matters
-now, and the directional portfolio effect. Evidence, risks, and review
-conditions remain available as progressive detail. The HTML renderer is
-responsive, supports light and dark appearance, and requires no JavaScript.
+`--decision-card` supports Markdown, JSON, and responsive HTML. The primary view
+shows the decision, why it matters now, and the directional portfolio effect;
+evidence, risks, and review conditions remain available as progressive detail.
 
-## Portfolio-fit gate
+## Portfolio-fit and opportunity-cost gates
 
 Committee approval does not flow directly into a portfolio weight. The
-canonical `portfolio.PortfolioFitGate` evaluates a separate proposal against a
-point-in-time portfolio snapshot and versioned mandate.
+`portfolio.PortfolioFitGate` evaluates a proposal against a point-in-time
+portfolio snapshot and versioned mandate.
 
-The user receives one of six simple answers:
+The gate checks direction, prohibited exposure, liquidity, concentration,
+minimum cash, risk budget, and overlap. Opportunity-cost analysis then explains
+whether the proposal can use excess cash, which explicitly approved reduction
+could fund it, and what trade-offs would result. Neither component executes a
+trade.
 
-- fits the portfolio;
-- use a smaller size;
-- replace overlapping exposure;
-- blocked by policy;
-- no available risk budget; or
-- no action because committee approval is incomplete.
-
-The gate checks proposal direction, prohibited exposure, liquidity, position
-and asset-bucket concentration, minimum cash, risk-budget capacity, and
-existing exposure overlap. It can permit a bounded proposal, but it never
-executes a trade.
-
-See:
+## Documentation
 
 - [Architecture](ARCHITECTURE.md)
 - [Product vision](PRODUCT_VISION.md)
 - [Roadmap](ROADMAP.md)
 - [Data sources and governance](DATA_SOURCES.md)
 - [Institutional decision engine](DECISION_ENGINE.md)
+- [Authentication and authorization](docs/AUTHENTICATION_AND_AUTHORIZATION.md)
+- [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
+- [Production API](docs/PRODUCTION_API.md)
+- [Personal CIO intelligence](docs/PERSONAL_CIO.md)
 - [Portfolio-fit gate](docs/PORTFOLIO_FIT.md)
-
-## Core Objectives
-
-- Analyze changing market conditions
-- Identify probable economic and market regimes
-- Produce transparent CIO recommendations
-- Manage multiple virtual investment mandates
-- Record decisions and supporting rationale
-- Measure portfolio performance over time
-
-## Planned Architecture
-intelligence = analysis and individual committee judgment
-committee = meeting orchestration and collective governance
-
-## Governance Architecture
-
-The governance system is divided into two layers.
-
-### `intelligence`
-
-The `intelligence` package owns analytical judgment produced by individual
-committee members. It includes:
-
-- committee assessments
-- score adjustments
-- adjustment policies
-- decision thresholds
-- committee roles and votes
-- individual committee opinions
-- specialized members such as the Macro Committee
-
-### `committee`
-
-The `committee` package owns collective institutional governance. It includes:
-
-- committee meetings
-- opinion collection
-- quorum
-- voting weights
-- veto handling
-- consensus
-- final committee decisions
-
-The intended flow is:
-
-Recommendation
-→ Individual committee assessments
-→ Individual committee opinions
-→ Committee meeting
-→ Consensus decision
-→ Portfolio action
-
-```text
-app.py
-initialize.py
-run_intelligence.py
-
-core/
-intelligence/
-dashboard/
-config/
-database/
-economic_regime/
-tests/
-docs/
-.github/workflows/
