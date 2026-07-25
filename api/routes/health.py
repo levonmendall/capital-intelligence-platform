@@ -105,7 +105,7 @@ def ready(
     else:
         engine_ready = True
         engine_detail = (
-            "global liquidity history has not been created; the core daily "
+            "analytical engine history has not been created; the core daily "
             "intelligence path remains available"
         )
     components["analytical_engines"] = ReadinessComponentResponse(
