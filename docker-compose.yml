@@ -1,0 +1,92 @@
+services:
+  api:
+    build: .
+    image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
+    command: ["uvicorn", "api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"]
+    env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - capital_data:/app/database
+      - capital_backups:/app/backups
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  scheduler:
+    image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
+    build: .
+    command: ["python", "run_scheduler.py"]
+    env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
+    volumes:
+      - capital_data:/app/database
+      - capital_backups:/app/backups
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
+    build: .
+    command: ["streamlit", "run", "secure_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+    env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - capital_data:/app/database
+      - capital_backups:/app/backups
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /home/capital/.streamlit:size=16m,mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  backup:
+    image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
+    build: .
+    command: ["python", "run_backup.py", "--loop"]
+    env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
+    volumes:
+      - capital_data:/app/database:ro
+      - capital_backups:/app/backups
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  capital_data:
+  capital_backups:
