@@ -23,6 +23,7 @@ from api.routes import (
     decisions_router,
     environment_router,
     health_router,
+    objectives_router,
     operations_router,
     personal_router,
     portfolios_router,
@@ -53,7 +54,10 @@ def create_app(
     resolved_operations = operational_settings or OperationalSettings.from_env()
     configure_logging(resolved_operations)
     resolved_operations.backup_directory.mkdir(parents=True, exist_ok=True)
-    resolved_operations.worker_heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_operations.worker_heartbeat_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
     resolved_resources = resources or build_resources(resolved_settings)
     resolved_authentication = authentication or AuthenticationService(
         SQLiteIdentityStore(
@@ -80,8 +84,9 @@ def create_app(
         version=resolved_settings.application_version,
         description=(
             "Authenticated access to governed Capital Intelligence snapshots, "
-            "decisions, replays, personal CIO memory, conviction trends, "
-            "mandate-authorized portfolios, and selective alert delivery."
+            "investor objectives, Personal CIO briefs, decisions, replays, "
+            "personal memory, conviction trends, mandate-authorized portfolios, "
+            "and selective alert delivery."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -137,6 +142,7 @@ def create_app(
     app.include_router(decisions_router, dependencies=protected)
     app.include_router(replays_router, dependencies=protected)
     app.include_router(personal_router, dependencies=protected)
+    app.include_router(objectives_router, dependencies=protected)
     app.include_router(portfolios_router, dependencies=protected)
     return app
 
