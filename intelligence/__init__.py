@@ -16,6 +16,18 @@ _EXPORTS = {
         "intelligence.analytical_engine",
         "AnalyticalEngineResult",
     ),
+    "AnalyticalEngineCycleExecutor": (
+        "intelligence.engine_cycle",
+        "AnalyticalEngineCycleExecutor",
+    ),
+    "BusinessCycleEngine": (
+        "intelligence.business_cycle",
+        "BusinessCycleEngine",
+    ),
+    "BusinessCycleRun": (
+        "intelligence.business_cycle",
+        "BusinessCycleRun",
+    ),
     "ChangeCondition": (
         "intelligence.cio_guidance",
         "ChangeCondition",
@@ -104,6 +116,10 @@ _EXPORTS = {
         "intelligence.regime_pipeline",
         "SeriesLoadState",
     ),
+    "build_fred_business_cycle_engine": (
+        "intelligence.business_cycle",
+        "build_fred_business_cycle_engine",
+    ),
     "build_fred_global_liquidity_engine": (
         "intelligence.global_liquidity",
         "build_fred_global_liquidity_engine",
@@ -127,7 +143,10 @@ def __getattr__(name: str) -> Any:
             f"module {__name__!r} has no attribute {name!r}"
         ) from exc
 
-    value = getattr(import_module(module_name), attribute_name)
+    value = getattr(
+        import_module(module_name),
+        attribute_name,
+    )
     globals()[name] = value
     return value
 

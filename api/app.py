@@ -19,6 +19,7 @@ from api.repositories import (
 from api.routes import (
     alerts_router,
     authentication_router,
+    business_cycle_router,
     daily_router,
     decisions_router,
     environment_router,
@@ -86,9 +87,10 @@ def create_app(
         version=resolved_settings.application_version,
         description=(
             "Authenticated access to governed Capital Intelligence snapshots, "
-            "global liquidity intelligence, investor objectives, Personal CIO "
-            "briefs, decisions, replays, personal memory, conviction trends, "
-            "mandate-authorized portfolios, and selective alert delivery."
+            "global liquidity and business-cycle intelligence, investor "
+            "objectives, Personal CIO briefs, decisions, replays, personal "
+            "memory, conviction trends, mandate-authorized portfolios, and "
+            "selective alert delivery."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -143,6 +145,7 @@ def create_app(
         app.include_router(personal_cio_history_router, dependencies=protected)
     app.include_router(daily_router, dependencies=protected)
     app.include_router(environment_router, dependencies=protected)
+    app.include_router(business_cycle_router, dependencies=protected)
     app.include_router(liquidity_router, dependencies=protected)
     app.include_router(decisions_router, dependencies=protected)
     app.include_router(replays_router, dependencies=protected)

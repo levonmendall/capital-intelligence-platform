@@ -20,6 +20,17 @@ from personal_cio.models import (
 from personal_cio.service import build_personal_cio_brief as _build_base_brief
 
 
+_ENGINE_ORDER = ("global_liquidity", "business_cycle")
+_ENGINE_LABELS = {
+    "global_liquidity": "Global liquidity",
+    "business_cycle": "Business cycle",
+}
+_ENGINE_TRANSMISSION_LABELS = {
+    "global_liquidity": "Liquidity transmission",
+    "business_cycle": "Business-cycle transmission",
+}
+
+
 def _default_analytical_database() -> Path:
     explicit = os.environ.get("CAPITAL_INTELLIGENCE_ANALYTICAL_ENGINE_DATABASE")
     if explicit and explicit.strip():
@@ -41,62 +52,73 @@ def _latest_analytical_results(
     if not path.exists():
         return ()
     try:
-        result = SQLiteAnalyticalEngineStore(path, read_only=True).latest(
-            "global_liquidity",
-            at_or_before=as_of,
+        store = SQLiteAnalyticalEngineStore(path, read_only=True)
+        results = tuple(
+            result
+            for engine in _ENGINE_ORDER
+            if (
+                result := store.latest(
+                    engine,
+                    at_or_before=as_of,
+                )
+            )
+            is not None
         )
     except (OSError, ValueError, sqlite3.Error):
         return ()
-    return () if result is None else (result,)
+    return results
 
 
 def _attach_analytical_context(
     brief: PersonalCIOBrief,
     results: tuple[AnalyticalEngineResult, ...],
 ) -> PersonalCIOBrief:
-    liquidity = next(
-        (item for item in results if item.engine == "global_liquidity"),
-        None,
-    )
-    if liquidity is None:
-        return brief
-
+    by_engine = {item.engine: item for item in results}
+    why_parts: list[str] = []
+    transmission_parts: list[str] = []
     evidence = list(brief.evidence_identifiers)
-    evidence.append(liquidity.identifier)
-    evidence.extend(item.identifier for item in liquidity.evidence)
     conditions = list(brief.review_conditions)
-    conditions.extend(liquidity.review_conditions)
 
-    if liquidity.data_status is EngineDataStatus.UNAVAILABLE:
-        conditions.append(
-            "Global liquidity evidence is unavailable and should not influence action."
-        )
-        return replace(
-            brief,
-            review_conditions=tuple(dict.fromkeys(conditions)),
-            evidence_identifiers=tuple(dict.fromkeys(evidence)),
-        )
+    for engine in _ENGINE_ORDER:
+        result = by_engine.get(engine)
+        if result is None:
+            continue
+        label = _ENGINE_LABELS[engine]
+        evidence.append(result.identifier)
+        evidence.extend(item.identifier for item in result.evidence)
+        conditions.extend(result.review_conditions)
 
-    liquidity_context = (
-        f" Global liquidity: {liquidity.summary} {liquidity.explanation}"
+        if result.data_status is EngineDataStatus.UNAVAILABLE:
+            conditions.append(
+                f"{label} evidence is unavailable and should not influence action."
+            )
+            continue
+
+        why_parts.append(f"{label}: {result.summary} {result.explanation}")
+        if result.transmission_channels:
+            transmission_parts.append(
+                f"{_ENGINE_TRANSMISSION_LABELS[engine]}: "
+                + result.transmission_channels[0]
+            )
+        if result.data_status is EngineDataStatus.STALE:
+            conditions.append(
+                f"Refresh {label.lower()} evidence before relying on its direction."
+            )
+        elif result.data_status is EngineDataStatus.INCOMPLETE:
+            conditions.append(
+                f"Treat the {label.lower()} conclusion cautiously because coverage is incomplete."
+            )
+
+    if not by_engine:
+        return brief
+    why_suffix = " " + " ".join(why_parts) if why_parts else ""
+    portfolio_suffix = (
+        " " + " ".join(transmission_parts) if transmission_parts else ""
     )
-    transmission = (
-        ""
-        if not liquidity.transmission_channels
-        else " Liquidity transmission: " + liquidity.transmission_channels[0]
-    )
-    if liquidity.data_status is EngineDataStatus.STALE:
-        conditions.append(
-            "Refresh global liquidity evidence before relying on its direction."
-        )
-    elif liquidity.data_status is EngineDataStatus.INCOMPLETE:
-        conditions.append(
-            "Treat the global liquidity conclusion cautiously because coverage is incomplete."
-        )
     return replace(
         brief,
-        why_it_matters=(brief.why_it_matters + liquidity_context).strip(),
-        portfolio_effect=(brief.portfolio_effect + transmission).strip(),
+        why_it_matters=(brief.why_it_matters + why_suffix).strip(),
+        portfolio_effect=(brief.portfolio_effect + portfolio_suffix).strip(),
         review_conditions=tuple(dict.fromkeys(conditions)),
         evidence_identifiers=tuple(dict.fromkeys(evidence)),
     )
@@ -142,7 +164,9 @@ def build_personal_cio_brief(
     results = (
         _latest_analytical_results(brief.as_of, analytical_engine_database)
         if analytical_results is None
-        else tuple(item for item in analytical_results if item.as_of <= brief.as_of)
+        else tuple(
+            item for item in analytical_results if item.as_of <= brief.as_of
+        )
     )
     return _attach_analytical_context(brief, results)
 

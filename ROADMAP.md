@@ -3,9 +3,9 @@
 ## Current release
 
 Foundation 1.x now has a deployable, observable, backed-up, and operationally
-hardened application baseline plus a versioned investor-objective and Personal
-CIO communication layer. The next product milestone is deeper analytical
-coverage, beginning with global liquidity.
+hardened application baseline, a versioned investor-objective and Personal CIO
+communication layer, and the first two reusable macro engines: Global Liquidity
+and Business Cycle. The next analytical milestone is Credit Cycle intelligence.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -88,13 +88,13 @@ with cached, fixture, or fallback data.
 
 Implement, in order:
 
-1. Global liquidity
-2. Business cycle
-3. Credit cycle
-4. Market breadth
-5. Valuation
-6. Technical and momentum
-7. Risk
+1. [x] Global liquidity
+2. [x] Business cycle
+3. [ ] Credit cycle
+4. [ ] Market breadth
+5. [ ] Valuation
+6. [ ] Technical and momentum
+7. [ ] Risk
 
 Each engine must publish a typed result with score, confidence, coverage,
 evidence, risks, and versioned rules. Every engine must feed the Personal CIO
