@@ -84,17 +84,97 @@ class PortfolioListResponse(StrictModel):
     total: int
 
 
+class ConvictionDriverResponse(StrictModel):
+    component: str
+    change_points: int
+
+
+class ConvictionHistoryItem(StrictModel):
+    as_of: str
+    conviction: int = Field(ge=0, le=100)
+    capital_intelligence_score: int = Field(ge=0, le=100)
+
+
+class ConvictionTrendResponse(StrictModel):
+    schema_version: str
+    as_of: str | None
+    current: int | None = Field(default=None, ge=0, le=100)
+    previous: int | None = Field(default=None, ge=0, le=100)
+    change_points: int | None
+    net_change_points: int | None
+    direction: str
+    streak: int
+    capital_intelligence_score: int | None = Field(default=None, ge=0, le=100)
+    score_change_points: int | None
+    drivers: list[ConvictionDriverResponse]
+    history: list[ConvictionHistoryItem]
+    explanation: str
+    policy_version: str
+
+
+class InvestorPatternResponse(StrictModel):
+    code: str
+    label: str
+    count: int
+    recorded_as_mistake: bool | None = None
+
+
+class InvestorActionTendencyResponse(StrictModel):
+    action: str
+    count: int
+
+
+class InvestorMemoryResponse(StrictModel):
+    schema_version: str
+    investor_identifier: str
+    as_of: str | None
+    total_events: int
+    preferred_risk_level: str | None
+    recurring_patterns: list[InvestorPatternResponse]
+    recurring_mistakes: list[InvestorPatternResponse]
+    lessons: list[str]
+    action_tendencies: list[InvestorActionTendencyResponse]
+    memory_is_explicit: bool
+
+
+class InvestorMemoryEventResponse(StrictModel):
+    schema_version: str
+    identifier: str
+    investor_identifier: str
+    recorded_at: str
+    event_type: str
+    summary: str
+    source_decision_identifier: str | None
+    action: str | None
+    risk_level: str | None
+    behavior_tags: list[str]
+    lesson: str | None
+
+
+class InvestorMemoryHistoryResponse(StrictModel):
+    items: list[InvestorMemoryEventResponse]
+    total: int
+
+
 class ErrorResponse(StrictModel):
     detail: str
 
 
 __all__ = [
+    "ConvictionDriverResponse",
+    "ConvictionHistoryItem",
+    "ConvictionTrendResponse",
     "DailyHistoryItem",
     "DailyHistoryResponse",
     "DecisionResponse",
     "EnvironmentResponse",
     "ErrorResponse",
     "HealthResponse",
+    "InvestorActionTendencyResponse",
+    "InvestorMemoryEventResponse",
+    "InvestorMemoryHistoryResponse",
+    "InvestorMemoryResponse",
+    "InvestorPatternResponse",
     "PortfolioListResponse",
     "ReadinessComponentResponse",
     "ReadinessResponse",
