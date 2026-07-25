@@ -3,7 +3,7 @@
 ## Current release
 
 Foundation 1.x is the validated baseline in GitHub. The active milestone is
-economic-regime productionization and canonical pipeline integration.
+canonical application integration around the daily intelligence experience.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -152,6 +152,13 @@ implementation baseline.
 
 ## Milestone 8 — Application
 
-- Provide FastAPI endpoints and a dashboard for assessments, reports,
-  committee decisions, portfolios, and history.
-- Add authentication, authorization, monitoring, alerts, and deployment.
+- [x] Assemble one canonical daily snapshot from the regime, committee,
+  material-change, portfolio-fit, score, environment, and decision-card layers.
+- [x] Add append-only score history with prior-snapshot deltas and honest
+  current, incomplete, stale, and unavailable states.
+- [x] Make Today, Environment, Portfolio, and History the primary Streamlit
+  application surfaces.
+- Provide FastAPI endpoints for assessments, reports, committee decisions,
+  portfolios, daily snapshots, and history.
+- Add authentication, authorization, scheduled monitoring, user-selected
+  alerts, and deployment.
