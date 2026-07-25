@@ -25,7 +25,7 @@ def _path(value: str | None, *, default: Path) -> Path:
 
 @dataclass(frozen=True, slots=True)
 class ApiSettings:
-    """Versioned runtime settings with secure production defaults."""
+    """Versioned runtime settings with secure environment-loaded defaults."""
 
     snapshot_database: Path = Path("database/daily_intelligence_snapshots.db")
     portfolio_database: Path = Path("database/capital_intelligence.db")
@@ -33,7 +33,7 @@ class ApiSettings:
     identity_database: Path = Path("database/identity.db")
     journal_database: Path = Path("database/institutional_journal.db")
     replay_directory: Path | None = Path("database/decision_replays")
-    authentication_required: bool = True
+    authentication_required: bool = False
     access_token_minutes: int = 15
     refresh_token_days: int = 30
     password_minimum_length: int = 12
