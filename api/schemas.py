@@ -28,6 +28,68 @@ class ReadinessResponse(StrictModel):
     components: dict[str, ReadinessComponentResponse]
 
 
+class LoginRequest(StrictModel):
+    email: str
+    password: str
+
+
+class RefreshRequest(StrictModel):
+    refresh_token: str
+
+
+class TokenResponse(StrictModel):
+    access_token: str
+    refresh_token: str
+    token_type: str
+    access_expires_at: str
+    refresh_expires_at: str
+
+
+class MandateGrantResponse(StrictModel):
+    mandate_code: str
+    permission: str
+
+
+class InvestorGrantResponse(StrictModel):
+    investor_identifier: str
+    permission: str
+
+
+class CurrentUserResponse(StrictModel):
+    user_id: str
+    email: str
+    display_name: str
+    investor_identifier: str | None
+    is_active: bool
+    roles: list[str]
+    mandates: list[MandateGrantResponse]
+    investor_access: list[InvestorGrantResponse]
+    created_at: str
+
+
+class UserListResponse(StrictModel):
+    items: list[CurrentUserResponse]
+    total: int
+
+
+class CreateUserRequest(StrictModel):
+    email: str
+    display_name: str
+    password: str
+    investor_identifier: str | None = None
+    roles: list[str] = Field(default_factory=lambda: ["investor"], min_length=1)
+
+
+class AssignMandateRequest(StrictModel):
+    mandate_code: str
+    permission: str = "view"
+
+
+class AssignInvestorRequest(StrictModel):
+    investor_identifier: str
+    permission: str = "view"
+
+
 class DailyHistoryItem(StrictModel):
     identifier: str
     as_of: str
@@ -161,9 +223,13 @@ class ErrorResponse(StrictModel):
 
 
 __all__ = [
+    "AssignInvestorRequest",
+    "AssignMandateRequest",
     "ConvictionDriverResponse",
     "ConvictionHistoryItem",
     "ConvictionTrendResponse",
+    "CreateUserRequest",
+    "CurrentUserResponse",
     "DailyHistoryItem",
     "DailyHistoryResponse",
     "DecisionResponse",
@@ -171,13 +237,19 @@ __all__ = [
     "ErrorResponse",
     "HealthResponse",
     "InvestorActionTendencyResponse",
+    "InvestorGrantResponse",
     "InvestorMemoryEventResponse",
     "InvestorMemoryHistoryResponse",
     "InvestorMemoryResponse",
     "InvestorPatternResponse",
+    "LoginRequest",
+    "MandateGrantResponse",
     "PortfolioListResponse",
     "ReadinessComponentResponse",
     "ReadinessResponse",
+    "RefreshRequest",
     "ReplayListResponse",
     "ReplayReference",
+    "TokenResponse",
+    "UserListResponse",
 ]
