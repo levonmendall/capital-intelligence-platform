@@ -8,6 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from api.config import ApiSettings
 from api.repositories import ApiResources
 from delivery import SQLiteAlertStore
+from operations import OperationalSettings
 from security import (
     AuthenticatedPrincipal,
     AuthenticationService,
@@ -15,12 +16,15 @@ from security import (
     UserRole,
 )
 
-
 _bearer = HTTPBearer(auto_error=False)
 
 
 def get_settings(request: Request) -> ApiSettings:
     return request.app.state.settings
+
+
+def get_operational_settings(request: Request) -> OperationalSettings:
+    return request.app.state.operational_settings
 
 
 def get_resources(request: Request) -> ApiResources:
@@ -81,6 +85,7 @@ __all__ = [
     "get_alert_store",
     "get_authentication",
     "get_bearer_token",
+    "get_operational_settings",
     "get_resources",
     "get_settings",
     "require_principal",
