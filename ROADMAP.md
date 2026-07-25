@@ -3,7 +3,7 @@
 ## Current release
 
 Foundation 1.x is the validated baseline in GitHub. The active milestone is
-authentication and scheduled delivery on top of the production API.
+authentication and scheduled delivery on top of the personal CIO API.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -120,6 +120,7 @@ cross-venue consolidation.
 - [x] Compare consecutive regime decisions under versioned materiality rules.
 - [x] Separate continuous analysis from selective portfolio alerts.
 - [x] Produce plain-language directional portfolio impact.
+- [x] Track conviction direction and component drivers across canonical daily snapshots.
 - Schedule monitoring cycles and connect user-selected delivery channels after
   application authentication is implemented.
 
@@ -141,6 +142,7 @@ implementation baseline.
   buckets, and versioned mandate constraints.
 - [x] Gate approved proposals through direction, liquidity, concentration,
   cash-reserve, risk-budget, and overlap controls.
+- [x] Explain opportunity cost using excess cash and explicit funding candidates.
 - Add portfolio optimization, transaction costs, rebalancing orchestration,
   and paper trading behind the fit gate.
 - Add walk-forward backtests, point-in-time fundamentals, survivorship-bias
@@ -160,6 +162,7 @@ implementation baseline.
   application surfaces.
 - [x] Provide a read-only FastAPI boundary for daily snapshots, history,
   environments, decisions, replay artifacts, portfolios, health, and readiness.
+- [x] Add append-only Investor Memory and read-only conviction and memory endpoints.
 - Add authentication and mandate-aware authorization.
 - Add scheduled monitoring and user-selected alert delivery.
 - Add deployment, observability, backups, and operational hardening.

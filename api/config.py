@@ -29,6 +29,7 @@ class ApiSettings:
 
     snapshot_database: Path = Path("database/daily_intelligence_snapshots.db")
     portfolio_database: Path = Path("database/capital_intelligence.db")
+    investor_memory_database: Path = Path("database/investor_memory.db")
     journal_database: Path = Path("database/institutional_journal.db")
     replay_directory: Path | None = Path("database/decision_replays")
     require_journal: bool = False
@@ -36,13 +37,16 @@ class ApiSettings:
     allowed_origins: tuple[str, ...] = ()
     history_default_limit: int = 30
     history_max_limit: int = 100
+    conviction_default_lookback: int = 7
+    conviction_max_lookback: int = 30
     application_name: str = "Capital Intelligence API"
-    application_version: str = "1.0.0"
+    application_version: str = "1.1.0"
 
     def __post_init__(self) -> None:
         for field_name in (
             "snapshot_database",
             "portfolio_database",
+            "investor_memory_database",
             "journal_database",
         ):
             value = getattr(self, field_name)
@@ -59,6 +63,12 @@ class ApiSettings:
             )
         if not 1 <= self.history_max_limit <= 1000:
             raise ValueError("history_max_limit must be between 1 and 1000")
+        if not 2 <= self.conviction_default_lookback <= self.conviction_max_lookback:
+            raise ValueError(
+                "conviction_default_lookback must be between 2 and conviction_max_lookback"
+            )
+        if not 2 <= self.conviction_max_lookback <= 90:
+            raise ValueError("conviction_max_lookback must be between 2 and 90")
         for value in self.allowed_origins:
             if not isinstance(value, str) or not value.strip():
                 raise ValueError("allowed_origins must contain non-empty strings")
@@ -104,6 +114,10 @@ class ApiSettings:
                 values.get("CAPITAL_INTELLIGENCE_PORTFOLIO_DATABASE"),
                 default=data_dir / "capital_intelligence.db",
             ),
+            investor_memory_database=_path(
+                values.get("CAPITAL_INTELLIGENCE_INVESTOR_MEMORY_DATABASE"),
+                default=data_dir / "investor_memory.db",
+            ),
             journal_database=_path(
                 values.get("CAPITAL_INTELLIGENCE_JOURNAL_DATABASE"),
                 default=data_dir / "institutional_journal.db",
@@ -122,13 +136,19 @@ class ApiSettings:
             history_max_limit=int(
                 values.get("CAPITAL_INTELLIGENCE_HISTORY_MAX_LIMIT", "100")
             ),
+            conviction_default_lookback=int(
+                values.get("CAPITAL_INTELLIGENCE_CONVICTION_DEFAULT_LOOKBACK", "7")
+            ),
+            conviction_max_lookback=int(
+                values.get("CAPITAL_INTELLIGENCE_CONVICTION_MAX_LOOKBACK", "30")
+            ),
             application_name=values.get(
                 "CAPITAL_INTELLIGENCE_API_NAME",
                 "Capital Intelligence API",
             ),
             application_version=values.get(
                 "CAPITAL_INTELLIGENCE_API_VERSION",
-                "1.0.0",
+                "1.1.0",
             ),
         )
 

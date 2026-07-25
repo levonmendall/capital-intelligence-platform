@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -18,7 +19,25 @@ from core.seed import seed_mandates
 from dashboard import build_daily_intelligence_view
 from intelligence.pipeline import run_intelligence
 from intelligence.regime_pipeline import build_fred_regime_pipeline
+from personalization import (
+    InvestorBehaviorTag,
+    InvestorDecisionAction,
+    InvestorMemoryEvent,
+    InvestorMemoryEventType,
+    InvestorRiskLevel,
+    SQLiteInvestorMemoryStore,
+)
+from portfolio import (
+    AssetBucket,
+    FundingCandidate,
+    PortfolioMandate,
+    PortfolioPosition,
+    PortfolioProposal,
+    PortfolioSnapshot,
+    assess_opportunity_cost,
+)
 from providers.economic_snapshot import load_dashboard_data
+from reporting import build_conviction_trend_from_store
 
 
 st.set_page_config(
@@ -26,6 +45,9 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
 )
+
+
+INVESTOR_IDENTIFIER = "primary"
 
 
 def format_currency(value: float) -> str:
@@ -40,22 +62,6 @@ def format_percent(value: float) -> str:
     return f"{float(value):+.2%}"
 
 
-def build_allocation_table(decision) -> pd.DataFrame:
-    """Build a display table from the legacy CIO allocation decision."""
-
-    return pd.DataFrame(
-        [
-            {"Asset Class": "Equities", "Weight": float(decision.equities)},
-            {"Asset Class": "Bonds", "Weight": float(decision.bonds)},
-            {"Asset Class": "Cash", "Weight": float(decision.cash)},
-            {
-                "Asset Class": "Alternatives",
-                "Weight": float(decision.alternatives),
-            },
-        ]
-    )
-
-
 def decision_bucket(now: datetime) -> datetime:
     """Return a stable fifteen-minute canonical decision timestamp."""
 
@@ -65,17 +71,18 @@ def decision_bucket(now: datetime) -> datetime:
 
 @st.cache_resource
 def daily_snapshot_store() -> SQLiteDailySnapshotStore:
-    """Return the shared append-only daily history store."""
-
     return SQLiteDailySnapshotStore(
         Path("database/daily_intelligence_snapshots.db")
     )
 
 
+@st.cache_resource
+def investor_memory_store() -> SQLiteInvestorMemoryStore:
+    return SQLiteInvestorMemoryStore(Path("database/investor_memory.db"))
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def load_daily_snapshot(as_of_text: str):
-    """Run one canonical cycle per fifteen-minute decision bucket."""
-
     as_of = datetime.fromisoformat(as_of_text)
     service = DailyCapitalIntelligenceService(
         build_fred_regime_pipeline(),
@@ -83,6 +90,80 @@ def load_daily_snapshot(as_of_text: str):
         clock=lambda: as_of,
     )
     return service.run(as_of=as_of).snapshot
+
+
+def _legacy_portfolio_snapshot(mandate: dict, *, as_of: datetime) -> PortfolioSnapshot:
+    """Build a weight-only context for the non-executing opportunity-cost view."""
+
+    nav = float(mandate["nav"])
+    cash_weight = max(0.0, min(1.0, float(mandate["cash"]) / nav))
+    positions: list[PortfolioPosition] = []
+    for holding in mandate["holdings"]:
+        market_value = float(holding["market_value"])
+        weight = max(0.0, market_value / nav)
+        if weight <= 0.0:
+            continue
+        symbol = str(holding["symbol"])
+        positions.append(
+            PortfolioPosition(
+                identifier=symbol,
+                bucket=AssetBucket.EQUITY,
+                weight=weight,
+                risk_budget_usage=0.0,
+                liquidity_score=1.0,
+                exposure_tags=(symbol.lower(),),
+            )
+        )
+    invested = sum(position.weight for position in positions)
+    total = cash_weight + invested
+    if total <= 0:
+        return PortfolioSnapshot(
+            identifier=f"display:{mandate['code']}:{as_of.isoformat()}",
+            as_of=as_of,
+            nav=nav,
+            cash_weight=1.0,
+            risk_budget_used=0.0,
+            positions=(),
+        )
+    cash_weight = round(cash_weight / total, 6)
+    normalized_positions = tuple(
+        PortfolioPosition(
+            identifier=position.identifier,
+            bucket=position.bucket,
+            weight=round(position.weight / total, 6),
+            risk_budget_usage=0.0,
+            liquidity_score=1.0,
+            exposure_tags=position.exposure_tags,
+        )
+        for position in positions
+    )
+    difference = round(
+        1.0 - cash_weight - sum(item.weight for item in normalized_positions),
+        6,
+    )
+    if normalized_positions and difference:
+        first, *rest = normalized_positions
+        normalized_positions = (
+            PortfolioPosition(
+                identifier=first.identifier,
+                bucket=first.bucket,
+                weight=round(first.weight + difference, 6),
+                risk_budget_usage=first.risk_budget_usage,
+                liquidity_score=first.liquidity_score,
+                exposure_tags=first.exposure_tags,
+            ),
+            *rest,
+        )
+    else:
+        cash_weight = round(cash_weight + difference, 6)
+    return PortfolioSnapshot(
+        identifier=f"display:{mandate['code']}:{as_of.isoformat()}",
+        as_of=as_of,
+        nav=nav,
+        cash_weight=cash_weight,
+        risk_budget_used=0.0,
+        positions=normalized_positions,
+    )
 
 
 initialize_database()
@@ -96,19 +177,24 @@ now = datetime.now(timezone.utc)
 updated_time = now.strftime("%B %d, %Y at %H:%M UTC")
 canonical_error: str | None = None
 try:
-    daily_snapshot = load_daily_snapshot(
-        decision_bucket(now).isoformat()
-    )
+    daily_snapshot = load_daily_snapshot(decision_bucket(now).isoformat())
     daily_history = daily_snapshot_store().history(limit=30)
-    daily_view = build_daily_intelligence_view(
-        daily_snapshot,
-        daily_history,
+    daily_view = build_daily_intelligence_view(daily_snapshot, daily_history)
+    conviction_trend = build_conviction_trend_from_store(
+        daily_snapshot_store().path,
+        lookback=7,
     )
 except Exception as error:  # pragma: no cover - application safety boundary
     daily_snapshot = None
     daily_history = ()
     daily_view = None
+    conviction_trend = None
     canonical_error = str(error)
+
+try:
+    memory_profile = investor_memory_store().profile(INVESTOR_IDENTIFIER)
+except Exception:  # pragma: no cover - application safety boundary
+    memory_profile = None
 
 
 st.title("Capital Intelligence Platform")
@@ -141,10 +227,10 @@ if page == "Today":
         )
         fallback3.metric("Risk Posture", legacy_decision.risk_posture)
     else:
-        score_column, environment_column, risk_column = st.columns(
-            [1.25, 1, 1]
+        score_column, conviction_column, environment_column, risk_column = (
+            st.columns([1.25, 1, 1, 1])
         )
-        delta = (
+        score_delta = (
             None
             if daily_snapshot.score_delta is None
             else f"{daily_snapshot.score_delta:+d}"
@@ -152,24 +238,35 @@ if page == "Today":
         score_column.metric(
             "Capital Intelligence",
             daily_view.score,
-            delta=delta,
+            delta=score_delta,
             help=(
-                "A 0–100 measure of evidence quality, confidence, "
-                "committee support, agreement, and risk-adjusted opportunity."
+                "A 0–100 measure of evidence quality, confidence, committee "
+                "support, agreement, and risk-adjusted opportunity."
             ),
         )
         score_column.caption(daily_view.score_label)
-        environment_column.metric(
-            "Environment",
-            daily_view.environment,
-        )
+        if conviction_trend is None or conviction_trend.current is None:
+            conviction_column.metric("Conviction", "—")
+            conviction_column.caption("No trend history yet")
+        else:
+            conviction_delta = (
+                None
+                if conviction_trend.change_points is None
+                else f"{conviction_trend.change_points:+d}"
+            )
+            conviction_column.metric(
+                "Conviction",
+                conviction_trend.current,
+                delta=conviction_delta,
+            )
+            conviction_column.caption(
+                conviction_trend.direction.value.title()
+            )
+        environment_column.metric("Environment", daily_view.environment)
         risk_column.metric("Risk", daily_view.risk)
 
         status_messages = {
-            "current": (
-                "success",
-                "Current evidence and decision cycle.",
-            ),
+            "current": ("success", "Current evidence and decision cycle."),
             "incomplete": (
                 "warning",
                 "Some evidence is incomplete. The score discloses reduced confidence.",
@@ -186,14 +283,16 @@ if page == "Today":
         message_type, message = status_messages[daily_view.status]
         getattr(st, message_type)(message)
 
+        if conviction_trend is not None:
+            st.caption(conviction_trend.explanation)
+
         st.markdown("### Committee")
         st.write(daily_view.committee)
 
         st.markdown("### Portfolio impact")
         st.write(daily_view.portfolio_impact)
-        if daily_view.considerations:
-            for consideration in daily_view.considerations:
-                st.write(f"• {consideration}")
+        for consideration in daily_view.considerations:
+            st.write(f"• {consideration}")
 
         st.markdown("### What changed?")
         if daily_view.should_alert:
@@ -206,19 +305,14 @@ if page == "Today":
                 daily_view.history,
                 columns=["as_of", "score"],
             )
-            history_frame["as_of"] = pd.to_datetime(
-                history_frame["as_of"]
-            )
+            history_frame["as_of"] = pd.to_datetime(history_frame["as_of"])
             st.line_chart(history_frame.set_index("as_of")["score"])
 
     st.divider()
     overview1, overview2, overview3, overview4 = st.columns(4)
     overview1.metric("Virtual AUM", format_currency(totals["nav"]))
     overview2.metric("Available Cash", format_currency(totals["cash"]))
-    overview3.metric(
-        "Platform Return",
-        format_percent(totals["total_return"]),
-    )
+    overview3.metric("Platform Return", format_percent(totals["total_return"]))
     overview4.metric("Active Mandates", totals["mandate_count"])
     st.caption(f"Daily intelligence refreshed {updated_time}")
 
@@ -244,9 +338,7 @@ elif page == "Environment":
         st.write(
             f"**Portfolio:** {daily_snapshot.environment.portfolio_impact}"
         )
-        exposures = ", ".join(
-            daily_snapshot.environment.affected_exposures
-        )
+        exposures = ", ".join(daily_snapshot.environment.affected_exposures)
         st.caption(f"Affected exposures: {exposures or 'none'}")
         if daily_snapshot.environment.review_conditions:
             with st.expander("Review conditions"):
@@ -276,32 +368,21 @@ elif page == "Environment":
             "Federal Funds Rate",
             f"{readings.federal_funds_rate:.2f}%",
         )
-
         column4, column5, column6 = st.columns(3)
-        column4.metric(
-            "2-Year Treasury",
-            f"{readings.two_year_yield:.2f}%",
-        )
-        column5.metric(
-            "10-Year Treasury",
-            f"{readings.ten_year_yield:.2f}%",
-        )
+        column4.metric("2-Year Treasury", f"{readings.two_year_yield:.2f}%")
+        column5.metric("10-Year Treasury", f"{readings.ten_year_yield:.2f}%")
         column6.metric(
             "Yield Curve Spread",
             f"{readings.yield_curve_spread:.2f}%",
         )
-
         if readings.yield_curve_spread < 0:
             st.warning(
                 "The Treasury yield curve is inverted. "
                 "Short-term yields exceed long-term yields."
             )
         else:
-            st.success(
-                "The Treasury yield curve is positively sloped."
-            )
+            st.success("The Treasury yield curve is positively sloped.")
         st.info(f"Data source: {dashboard_data.data_source}")
-
     st.caption(f"Environment refreshed {updated_time}")
 
 
@@ -351,17 +432,16 @@ elif page == "Portfolio":
             )
         else:
             holdings_frame = pd.DataFrame(holdings)
-            holdings_frame["quantity"] = holdings_frame[
-                "quantity"
-            ].map(lambda value: f"{value:,.4f}")
-            currency_columns = [
+            holdings_frame["quantity"] = holdings_frame["quantity"].map(
+                lambda value: f"{value:,.4f}"
+            )
+            for column in (
                 "average_cost",
                 "current_price",
                 "cost_basis",
                 "market_value",
                 "unrealized_gain",
-            ]
-            for column in currency_columns:
+            ):
                 holdings_frame[column] = holdings_frame[column].map(
                     format_currency
                 )
@@ -393,6 +473,99 @@ elif page == "Portfolio":
                 hide_index=True,
             )
 
+        with st.expander("Compare the opportunity cost of a new allocation"):
+            st.caption(
+                "This is a non-executing comparison. Cash reserve and any "
+                "position reduction are explicit inputs; the platform does not "
+                "choose a sale silently."
+            )
+            target = st.text_input(
+                "Proposed exposure",
+                value="New risk asset exposure",
+            )
+            requested_percent = st.slider(
+                "Requested portfolio increase",
+                min_value=1,
+                max_value=20,
+                value=3,
+                step=1,
+            )
+            reserve_percent = st.slider(
+                "Minimum cash reserve",
+                min_value=0,
+                max_value=30,
+                value=5,
+                step=1,
+            )
+            holding_symbols = [str(item["symbol"]) for item in holdings]
+            selected_funding = st.selectbox(
+                "Explicit position reduction after excess cash",
+                options=["None", *holding_symbols],
+            )
+            reduction_percent = 0
+            if selected_funding != "None":
+                reduction_percent = st.slider(
+                    "Maximum position reduction",
+                    min_value=1,
+                    max_value=20,
+                    value=3,
+                    step=1,
+                )
+            if st.button("Explain opportunity cost"):
+                context = _legacy_portfolio_snapshot(mandate, as_of=now)
+                mandate_policy = PortfolioMandate(
+                    identifier=f"display:{selected_code}",
+                    version="display-opportunity-cost.v1",
+                    maximum_position_weight=1.0,
+                    minimum_cash_weight=reserve_percent / 100,
+                    maximum_risk_budget=1.0,
+                    minimum_liquidity_score=0.0,
+                    bucket_limits=(),
+                )
+                proposal = PortfolioProposal(
+                    identifier=f"display-proposal:{uuid4()}",
+                    source_decision_identifier=(
+                        daily_snapshot.score.decision_identifier
+                        if daily_snapshot is not None
+                        else "legacy-display-decision"
+                    ),
+                    target_identifier=target,
+                    bucket=AssetBucket.EQUITY,
+                    requested_weight_delta=requested_percent / 100,
+                    estimated_risk_budget_delta=requested_percent / 100,
+                    liquidity_score=1.0,
+                )
+                candidates: tuple[FundingCandidate, ...] = ()
+                if selected_funding != "None":
+                    candidates = (
+                        FundingCandidate(
+                            position_identifier=selected_funding,
+                            maximum_reduction=reduction_percent / 100,
+                            priority=1,
+                            reason="explicitly selected as the funding source",
+                            trade_off=(
+                                f"The portfolio may forgo future upside and "
+                                f"diversification from {selected_funding}."
+                            ),
+                        ),
+                    )
+                assessment = assess_opportunity_cost(
+                    context,
+                    mandate_policy,
+                    proposal,
+                    funding_candidates=candidates,
+                )
+                st.write(assessment.summary)
+                for source in assessment.funding_sources:
+                    st.write(f"• {source.explanation}")
+                for trade_off in assessment.trade_offs:
+                    st.warning(trade_off)
+                if assessment.alternative_sources:
+                    st.caption(
+                        "Overlapping positions worth reviewing: "
+                        + ", ".join(assessment.alternative_sources)
+                    )
+
         st.divider()
         st.subheader("Recent mandate trades")
         trades = mandate["trades"]
@@ -400,9 +573,7 @@ elif page == "Portfolio":
             st.info("No paper trades have been recorded for this mandate.")
         else:
             trades_frame = pd.DataFrame(trades)
-            trades_frame["price"] = trades_frame["price"].map(
-                format_currency
-            )
+            trades_frame["price"] = trades_frame["price"].map(format_currency)
             trades_frame["gross_amount"] = trades_frame[
                 "gross_amount"
             ].map(format_currency)
@@ -442,9 +613,7 @@ elif page == "Portfolio":
                 snapshot_frame["created_at"]
             )
             snapshot_frame = snapshot_frame.sort_values("created_at")
-            st.line_chart(
-                snapshot_frame.set_index("created_at")["nav"]
-            )
+            st.line_chart(snapshot_frame.set_index("created_at")["nav"])
 
 
 else:
@@ -474,6 +643,128 @@ else:
     else:
         st.info("No canonical daily snapshots have been recorded yet.")
 
+    if conviction_trend is not None and conviction_trend.observations:
+        st.markdown("### Conviction trend")
+        conviction_frame = pd.DataFrame(
+            [
+                {
+                    "As of": observation.as_of,
+                    "Conviction": observation.conviction,
+                    "Capital Intelligence": (
+                        observation.capital_intelligence_score
+                    ),
+                }
+                for observation in conviction_trend.observations
+            ]
+        )
+        st.line_chart(
+            conviction_frame.set_index("As of")[
+                ["Conviction", "Capital Intelligence"]
+            ]
+        )
+        st.caption(conviction_trend.explanation)
+
+    st.markdown("### Investor Memory")
+    if memory_profile is None or memory_profile.total_events == 0:
+        st.info(
+            "No investor behavior has been recorded yet. Memory is built only "
+            "from explicit reflections and preferences."
+        )
+    else:
+        memory1, memory2 = st.columns(2)
+        memory1.metric(
+            "Preferred risk",
+            (
+                memory_profile.preferred_risk_level.value.title()
+                if memory_profile.preferred_risk_level is not None
+                else "Not recorded"
+            ),
+        )
+        memory2.metric("Recorded events", memory_profile.total_events)
+        if memory_profile.recurring_mistakes:
+            st.markdown("**Recurring mistakes**")
+            for pattern in memory_profile.recurring_mistakes:
+                st.write(f"• {pattern.label} ({pattern.count} records)")
+        elif memory_profile.recurring_patterns:
+            st.markdown("**Recurring patterns**")
+            for pattern in memory_profile.recurring_patterns:
+                st.write(f"• {pattern.label} ({pattern.count} records)")
+        if memory_profile.lessons:
+            st.markdown("**Lessons to carry forward**")
+            for lesson in memory_profile.lessons:
+                st.write(f"• {lesson}")
+
+    with st.expander("Add an investor reflection"):
+        risk_level = st.selectbox(
+            "Preferred risk level",
+            [level.value for level in InvestorRiskLevel],
+            index=1,
+        )
+        if st.button("Save risk preference"):
+            event = InvestorMemoryEvent(
+                identifier=f"investor-memory:{uuid4()}",
+                investor_identifier=INVESTOR_IDENTIFIER,
+                recorded_at=datetime.now(timezone.utc),
+                event_type=InvestorMemoryEventType.RISK_PREFERENCE,
+                summary=f"Preferred risk level set to {risk_level}.",
+                risk_level=InvestorRiskLevel(risk_level),
+            )
+            investor_memory_store().append(event)
+            st.success("Risk preference recorded.")
+            st.rerun()
+
+        action = st.selectbox(
+            "How did you respond to the latest decision?",
+            [value.value for value in InvestorDecisionAction],
+        )
+        tag_options = {
+            tag.value: tag for tag in InvestorBehaviorTag
+        }
+        selected_tags = st.multiselect(
+            "Behavior patterns observed",
+            options=list(tag_options),
+        )
+        recorded_mistake = st.checkbox(
+            "Record this as a mistake to learn from"
+        )
+        reflection = st.text_area(
+            "Lesson or reflection",
+            placeholder="What should the personal CIO remember next time?",
+        )
+        if st.button("Save decision reflection"):
+            tags = tuple(tag_options[value] for value in selected_tags)
+            event_type = (
+                InvestorMemoryEventType.MISTAKE
+                if recorded_mistake
+                else InvestorMemoryEventType.DECISION_ACTION
+            )
+            if recorded_mistake and (not tags or not reflection.strip()):
+                st.error(
+                    "A mistake record needs at least one pattern and a lesson."
+                )
+            else:
+                event = InvestorMemoryEvent(
+                    identifier=f"investor-memory:{uuid4()}",
+                    investor_identifier=INVESTOR_IDENTIFIER,
+                    recorded_at=datetime.now(timezone.utc),
+                    event_type=event_type,
+                    summary=(
+                        reflection.strip()
+                        or f"Latest decision response: {action}."
+                    ),
+                    source_decision_identifier=(
+                        daily_snapshot.score.decision_identifier
+                        if daily_snapshot is not None
+                        else None
+                    ),
+                    action=InvestorDecisionAction(action),
+                    behavior_tags=tags,
+                    lesson=reflection.strip() or None,
+                )
+                investor_memory_store().append(event)
+                st.success("Decision reflection recorded.")
+                st.rerun()
+
     st.markdown("### Decision Replay")
     replay_identifiers = (
         daily_view.replay_identifiers if daily_view is not None else ()
@@ -501,9 +792,9 @@ else:
     else:
         trade_frame = pd.DataFrame(trades)
         trade_frame["price"] = trade_frame["price"].map(format_currency)
-        trade_frame["gross_amount"] = trade_frame[
-            "gross_amount"
-        ].map(format_currency)
+        trade_frame["gross_amount"] = trade_frame["gross_amount"].map(
+            format_currency
+        )
         trade_frame = trade_frame.rename(
             columns={
                 "created_at": "Date",
@@ -541,11 +832,9 @@ else:
         st.success("SQLite databases initialized")
         st.success("Canonical daily intelligence service operational")
         st.success("Append-only score history operational")
-        st.success("Portfolio reporting API operational")
-        st.success("Paper-trading engine operational")
-        st.write(
-            f"Current economic source: **{dashboard_data.data_source}**"
-        )
+        st.success("Append-only investor memory operational")
+        st.success("Read-only production API operational")
+        st.write(f"Current economic source: **{dashboard_data.data_source}**")
         st.write(
             "Virtual assets under management: "
             f"**{format_currency(totals['nav'])}**"

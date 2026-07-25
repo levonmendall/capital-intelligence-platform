@@ -18,6 +18,7 @@ from api.routes import (
     decisions_router,
     environment_router,
     health_router,
+    personal_router,
     portfolios_router,
     replays_router,
 )
@@ -36,7 +37,8 @@ def create_app(
         version=resolved_settings.application_version,
         description=(
             "Read-only access to governed Capital Intelligence snapshots, "
-            "decisions, replays, and virtual portfolios."
+            "decisions, replays, personal CIO memory, conviction trends, "
+            "and virtual portfolios."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -83,6 +85,7 @@ def create_app(
     app.include_router(environment_router)
     app.include_router(decisions_router)
     app.include_router(replays_router)
+    app.include_router(personal_router)
     app.include_router(portfolios_router)
     return app
 

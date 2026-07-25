@@ -14,10 +14,24 @@ from portfolio.models import (
     PortfolioProposal,
     PortfolioSnapshot,
 )
+from portfolio.opportunity_cost import (
+    CapitalFundingSource,
+    FundingCandidate,
+    FundingSourceType,
+    OpportunityCostAssessment,
+    OpportunityCostPolicy,
+    assess_opportunity_cost,
+    opportunity_cost_to_dict,
+)
 
 __all__ = [
     "AssetBucket",
     "AssetBucketLimit",
+    "CapitalFundingSource",
+    "FundingCandidate",
+    "FundingSourceType",
+    "OpportunityCostAssessment",
+    "OpportunityCostPolicy",
     "PortfolioFitDecision",
     "PortfolioFitGate",
     "PortfolioFitOutcome",
@@ -26,4 +40,6 @@ __all__ = [
     "PortfolioPosition",
     "PortfolioProposal",
     "PortfolioSnapshot",
+    "assess_opportunity_cost",
+    "opportunity_cost_to_dict",
 ]
