@@ -52,6 +52,14 @@ _EXPORTS = {
         "intelligence.cio_guidance",
         "ConfidenceScores",
     ),
+    "CreditCycleEngine": (
+        "intelligence.credit_cycle",
+        "CreditCycleEngine",
+    ),
+    "CreditCycleRun": (
+        "intelligence.credit_cycle",
+        "CreditCycleRun",
+    ),
     "DocumentMetadata": (
         "intelligence.metadata",
         "DocumentMetadata",
@@ -119,6 +127,10 @@ _EXPORTS = {
     "build_fred_business_cycle_engine": (
         "intelligence.business_cycle",
         "build_fred_business_cycle_engine",
+    ),
+    "build_fred_credit_cycle_engine": (
+        "intelligence.credit_cycle",
+        "build_fred_credit_cycle_engine",
     ),
     "build_fred_global_liquidity_engine": (
         "intelligence.global_liquidity",
