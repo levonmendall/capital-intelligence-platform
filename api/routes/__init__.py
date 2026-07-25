@@ -9,6 +9,7 @@ from api.routes.health import router as health_router
 from api.routes.objectives import router as objectives_router
 from api.routes.operations import router as operations_router
 from api.routes.personal import router as personal_router
+from api.routes.personal_cio_history import router as personal_cio_history_router
 from api.routes.portfolios import router as portfolios_router
 from api.routes.replays import router as replays_router
 from api.routes.users import router as users_router
@@ -23,6 +24,7 @@ __all__ = [
     "objectives_router",
     "operations_router",
     "personal_router",
+    "personal_cio_history_router",
     "portfolios_router",
     "replays_router",
     "users_router",
