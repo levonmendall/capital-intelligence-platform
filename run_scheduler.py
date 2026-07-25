@@ -18,9 +18,10 @@ from delivery import (
     SQLiteAlertStore,
     ScheduledDailyIntelligenceWorker,
 )
+from intelligence.business_cycle import build_fred_business_cycle_engine
+from intelligence.engine_cycle import AnalyticalEngineCycleExecutor
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.global_liquidity import build_fred_global_liquidity_engine
-from intelligence.liquidity_cycle import LiquidityAwareCycleExecutor
 from intelligence.regime_pipeline import build_fred_regime_pipeline
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
 from personal_cio import PersonalCIOAlertPlanner
@@ -49,9 +50,12 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
     analytical_store = SQLiteAnalyticalEngineStore(
         settings.snapshot_database.with_name("analytical_engines.db")
     )
-    executor = LiquidityAwareCycleExecutor(
+    executor = AnalyticalEngineCycleExecutor(
         canonical_executor,
-        build_fred_global_liquidity_engine(),
+        (
+            build_fred_global_liquidity_engine(),
+            build_fred_business_cycle_engine(),
+        ),
         analytical_store,
     )
     alert_path = (
