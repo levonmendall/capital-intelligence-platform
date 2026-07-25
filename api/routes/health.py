@@ -3,13 +3,19 @@
 from fastapi import APIRouter, Depends, Response, status
 
 from api.config import ApiSettings
-from api.dependencies import get_authentication, get_resources, get_settings
+from api.dependencies import (
+    get_alert_store,
+    get_authentication,
+    get_resources,
+    get_settings,
+)
 from api.repositories import ApiResources
 from api.schemas import (
     HealthResponse,
     ReadinessComponentResponse,
     ReadinessResponse,
 )
+from delivery import SQLiteAlertStore
 from security import AuthenticationService
 
 
@@ -34,6 +40,8 @@ def ready(
     response: Response,
     resources: ApiResources = Depends(get_resources),
     authentication: AuthenticationService = Depends(get_authentication),
+    alert_store: SQLiteAlertStore = Depends(get_alert_store),
+    settings: ApiSettings = Depends(get_settings),
 ) -> ReadinessResponse:
     checks = list(resources.readiness())
     identity = authentication.readiness()
@@ -49,6 +57,17 @@ def ready(
         required=identity.required,
         ready=identity.ready,
         detail=identity.detail,
+    )
+    alert_ready, alert_detail = alert_store.readiness()
+    email_detail = (
+        " SMTP email delivery is configured."
+        if settings.smtp_host and settings.smtp_from_address
+        else " Email delivery is disabled; in-app delivery remains available."
+    )
+    components["scheduled_alerts"] = ReadinessComponentResponse(
+        required=True,
+        ready=alert_ready,
+        detail=alert_detail + email_detail,
     )
     ready_state = all(item.ready for item in components.values() if item.required)
     if not ready_state:
