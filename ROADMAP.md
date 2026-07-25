@@ -3,8 +3,8 @@
 ## Current release
 
 Foundation 1.x is the validated baseline in GitHub. The active milestone is
-scheduled daily intelligence and selective alert delivery on top of authenticated,
-mandate-authorized application services.
+deployment, observability, backups, and operational hardening for the
+authenticated API, Streamlit application, and persistent scheduler worker.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -114,7 +114,7 @@ evidence, risks, and versioned rules.
 - [x] Separate continuous analysis from selective portfolio alerts.
 - [x] Produce plain-language directional portfolio impact.
 - [x] Track conviction direction and component drivers across daily snapshots.
-- [ ] Schedule monitoring cycles and connect user-selected delivery channels.
+- [x] Schedule monitoring cycles and connect user-selected delivery channels.
 
 ## Milestone 6 — Stock intelligence
 
@@ -157,5 +157,6 @@ implementation baseline.
 - [x] Add append-only Investor Memory and conviction and memory endpoints.
 - [x] Add revocable authentication, users, roles, investor ownership, and
   mandate-aware authorization across API and Streamlit surfaces.
-- [ ] Add scheduled monitoring and user-selected alert delivery.
+- [x] Add idempotent scheduled cycles, authenticated preferences, in-app alerts,
+  optional email delivery, deduplication, retries, and delivery history.
 - [ ] Add deployment, observability, backups, and operational hardening.
