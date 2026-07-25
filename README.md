@@ -80,6 +80,22 @@ change policy.
 
 See [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md).
 
+## Production API
+
+The read-only FastAPI boundary serves the same governed daily snapshot,
+environment, decisions, replay artifacts, and virtual portfolios without
+rerunning intelligence or exposing trade mutation routes.
+
+```bash
+uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+Use `/health` for process health, `/ready` for backing-store readiness, `/docs`
+for interactive documentation, and `/openapi.json` for the deterministic API
+contract. Missing, stale, and incomplete data remain explicit in the response.
+
+See [Production API](docs/PRODUCTION_API.md).
+
 ## CIO decision card
 
 The reporting layer compresses a governed run into one mobile-first decision

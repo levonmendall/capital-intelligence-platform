@@ -3,7 +3,7 @@
 ## Current release
 
 Foundation 1.x is the validated baseline in GitHub. The active milestone is
-canonical application integration around the daily intelligence experience.
+authentication and scheduled delivery on top of the production API.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -158,7 +158,8 @@ implementation baseline.
   current, incomplete, stale, and unavailable states.
 - [x] Make Today, Environment, Portfolio, and History the primary Streamlit
   application surfaces.
-- Provide FastAPI endpoints for assessments, reports, committee decisions,
-  portfolios, daily snapshots, and history.
-- Add authentication, authorization, scheduled monitoring, user-selected
-  alerts, and deployment.
+- [x] Provide a read-only FastAPI boundary for daily snapshots, history,
+  environments, decisions, replay artifacts, portfolios, health, and readiness.
+- Add authentication and mandate-aware authorization.
+- Add scheduled monitoring and user-selected alert delivery.
+- Add deployment, observability, backups, and operational hardening.
