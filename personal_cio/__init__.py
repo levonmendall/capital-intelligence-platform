@@ -1,5 +1,7 @@
 """Investor objectives, portfolio alignment, and Personal CIO briefing."""
 
+from personal_cio.alerts import PersonalCIOAlertPlanner
+from personal_cio.brief_store import SQLitePersonalCIOBriefStore
 from personal_cio.models import (
     ActionStatus,
     GoalPriority,
@@ -27,11 +29,13 @@ __all__ = [
     "GoalType",
     "InvestmentPolicyProfile",
     "InvestorGoal",
+    "PersonalCIOAlertPlanner",
     "PersonalCIOBrief",
     "PortfolioAlignment",
     "RiskCapacity",
     "RiskPreference",
     "SQLiteInvestmentPolicyStore",
+    "SQLitePersonalCIOBriefStore",
     "alignment_to_dict",
     "brief_to_dict",
     "build_personal_cio_brief",
