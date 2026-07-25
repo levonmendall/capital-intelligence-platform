@@ -1,23 +1,24 @@
 """Process health and deployment readiness routes."""
 
+from __future__ import annotations
+
+import os
+
 from fastapi import APIRouter, Depends, Response, status
 
 from api.config import ApiSettings
 from api.dependencies import (
     get_alert_store,
     get_authentication,
+    get_operational_settings,
     get_resources,
     get_settings,
 )
 from api.repositories import ApiResources
-from api.schemas import (
-    HealthResponse,
-    ReadinessComponentResponse,
-    ReadinessResponse,
-)
+from api.schemas import HealthResponse, ReadinessComponentResponse, ReadinessResponse
 from delivery import SQLiteAlertStore
+from operations import OperationalSettings
 from security import AuthenticationService
-
 
 router = APIRouter(tags=["operations"])
 
@@ -42,6 +43,7 @@ def ready(
     authentication: AuthenticationService = Depends(get_authentication),
     alert_store: SQLiteAlertStore = Depends(get_alert_store),
     settings: ApiSettings = Depends(get_settings),
+    operations: OperationalSettings = Depends(get_operational_settings),
 ) -> ReadinessResponse:
     checks = list(resources.readiness())
     identity = authentication.readiness()
@@ -68,6 +70,27 @@ def ready(
         required=True,
         ready=alert_ready,
         detail=alert_detail + email_detail,
+    )
+    backup_ready = operations.backup_directory.exists() and os.access(
+        operations.backup_directory, os.W_OK
+    )
+    components["backup_target"] = ReadinessComponentResponse(
+        required=True,
+        ready=backup_ready,
+        detail=(
+            f"backup target is writable: {operations.backup_directory}"
+            if backup_ready
+            else f"backup target is unavailable: {operations.backup_directory}"
+        ),
+    )
+    components["operational_policy"] = ReadinessComponentResponse(
+        required=True,
+        ready=True,
+        detail=(
+            f"environment={operations.environment}; https_enforced="
+            f"{str(operations.enforce_https).lower()}; encrypted_backups_required="
+            f"{str(operations.require_encrypted_backups).lower()}"
+        ),
     )
     ready_state = all(item.ready for item in components.values() if item.required)
     if not ready_state:
