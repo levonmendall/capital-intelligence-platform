@@ -138,13 +138,13 @@ def create_app(
         app.include_router(authentication_router)
         app.include_router(users_router)
         app.include_router(alerts_router, dependencies=protected)
+        app.include_router(objectives_router, dependencies=protected)
+        app.include_router(personal_cio_history_router, dependencies=protected)
     app.include_router(daily_router, dependencies=protected)
     app.include_router(environment_router, dependencies=protected)
     app.include_router(decisions_router, dependencies=protected)
     app.include_router(replays_router, dependencies=protected)
     app.include_router(personal_router, dependencies=protected)
-    app.include_router(objectives_router, dependencies=protected)
-    app.include_router(personal_cio_history_router, dependencies=protected)
     app.include_router(portfolios_router, dependencies=protected)
     return app
 
