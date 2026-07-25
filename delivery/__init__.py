@@ -12,8 +12,8 @@ from delivery.models import (
     DeliveryStatus,
     ScheduledCycleRecord,
 )
+from delivery.dispatch import AlertDeliveryService
 from delivery.service import (
-    AlertDeliveryService,
     AlertPlanningResult,
     CanonicalCycleResult,
     CanonicalDailyCycleExecutor,
