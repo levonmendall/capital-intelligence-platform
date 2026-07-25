@@ -2,9 +2,10 @@
 
 ## Current release
 
-Foundation 1.x is the validated baseline in GitHub. The active milestone is
-deployment, observability, backups, and operational hardening for the
-authenticated API, Streamlit application, and persistent scheduler worker.
+Foundation 1.x now has a deployable, observable, backed-up, and operationally
+hardened application baseline. The next product milestones return to deeper
+analytical coverage, calibrated decision engines, stock intelligence, and
+portfolio validation.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -159,4 +160,6 @@ implementation baseline.
   mandate-aware authorization across API and Streamlit surfaces.
 - [x] Add idempotent scheduled cycles, authenticated preferences, in-app alerts,
   optional email delivery, deduplication, retries, and delivery history.
-- [ ] Add deployment, observability, backups, and operational hardening.
+- [x] Add container deployment, structured logs, request IDs, metrics, worker
+  health, encrypted backups, restore verification, operational runbooks,
+  security scanning, and production request hardening.
