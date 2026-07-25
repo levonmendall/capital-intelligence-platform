@@ -20,14 +20,16 @@ from personal_cio.models import (
 from personal_cio.service import build_personal_cio_brief as _build_base_brief
 
 
-_ENGINE_ORDER = ("global_liquidity", "business_cycle")
+_ENGINE_ORDER = ("global_liquidity", "business_cycle", "credit_cycle")
 _ENGINE_LABELS = {
     "global_liquidity": "Global liquidity",
     "business_cycle": "Business cycle",
+    "credit_cycle": "Credit cycle",
 }
 _ENGINE_TRANSMISSION_LABELS = {
     "global_liquidity": "Liquidity transmission",
     "business_cycle": "Business-cycle transmission",
+    "credit_cycle": "Credit-cycle transmission",
 }
 
 
