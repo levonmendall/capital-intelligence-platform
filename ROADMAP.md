@@ -4,8 +4,9 @@
 
 Foundation 1.x now has a deployable, observable, backed-up, and operationally
 hardened application baseline, a versioned investor-objective and Personal CIO
-communication layer, and the first two reusable macro engines: Global Liquidity
-and Business Cycle. The next analytical milestone is Credit Cycle intelligence.
+communication layer, and the first three reusable macro engines: Global
+Liquidity, Business Cycle, and Credit Cycle. The next analytical milestone is
+Market Breadth intelligence.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -90,7 +91,7 @@ Implement, in order:
 
 1. [x] Global liquidity
 2. [x] Business cycle
-3. [ ] Credit cycle
+3. [x] Credit cycle
 4. [ ] Market breadth
 5. [ ] Valuation
 6. [ ] Technical and momentum
