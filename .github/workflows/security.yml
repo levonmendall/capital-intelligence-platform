@@ -32,7 +32,7 @@ jobs:
       - run: python -m pip install --upgrade pip pip-audit
       - run: pip-audit -r requirements.txt --progress-spinner off
       - run: docker build -t capital-intelligence:security .
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: capital-intelligence:security
           format: table
