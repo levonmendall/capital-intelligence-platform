@@ -90,6 +90,54 @@ class AssignInvestorRequest(StrictModel):
     permission: str = "view"
 
 
+class AlertPreferenceRequest(StrictModel):
+    timezone_name: str = "UTC"
+    delivery_hour: int = Field(default=8, ge=0, le=23)
+    channels: list[str] = Field(default_factory=lambda: ["in_app"], min_length=1)
+    topics: list[str] = Field(
+        default_factory=lambda: [
+            "urgent_risk",
+            "environment_transition",
+            "committee_change",
+            "portfolio_review",
+            "conviction_change",
+            "data_quality",
+        ],
+        min_length=1,
+    )
+    email_address: str | None = None
+    minimum_conviction_change: int = Field(default=5, ge=1, le=100)
+
+
+class AlertPreferenceResponse(AlertPreferenceRequest):
+    user_id: str
+    updated_at: str | None
+
+
+class AlertDeliveryResponse(StrictModel):
+    delivery_id: str
+    snapshot_identifier: str
+    channel: str
+    topics: list[str]
+    priority: str
+    status: str
+    subject: str
+    body: str
+    created_at: str
+    updated_at: str
+    attempts: int
+    next_attempt_at: str | None
+    sent_at: str | None
+    acknowledged_at: str | None
+    error: str | None
+
+
+class AlertDeliveryListResponse(StrictModel):
+    items: list[AlertDeliveryResponse]
+    total: int
+    unread: int
+
+
 class DailyHistoryItem(StrictModel):
     identifier: str
     as_of: str
@@ -223,6 +271,10 @@ class ErrorResponse(StrictModel):
 
 
 __all__ = [
+    "AlertDeliveryListResponse",
+    "AlertDeliveryResponse",
+    "AlertPreferenceRequest",
+    "AlertPreferenceResponse",
     "AssignInvestorRequest",
     "AssignMandateRequest",
     "ConvictionDriverResponse",

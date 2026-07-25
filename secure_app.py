@@ -10,6 +10,13 @@ import streamlit as st
 
 from api.config import ApiSettings
 from core import portfolio as portfolio_services
+from delivery import (
+    AlertChannel,
+    AlertTopic,
+    DeliveryPreference,
+    DeliveryStatus,
+    SQLiteAlertStore,
+)
 from personalization import SQLiteInvestorMemoryStore as BaseInvestorMemoryStore
 from security import (
     AuthenticationService,
@@ -26,8 +33,13 @@ st.set_page_config(
 
 
 @st.cache_resource
+def runtime_settings() -> ApiSettings:
+    return ApiSettings.from_env()
+
+
+@st.cache_resource
 def authentication_service() -> AuthenticationService:
-    settings = ApiSettings.from_env()
+    settings = runtime_settings()
     service = AuthenticationService(
         SQLiteIdentityStore(
             settings.identity_database,
@@ -43,6 +55,13 @@ def authentication_service() -> AuthenticationService:
         display_name=settings.bootstrap_admin_name,
     )
     return service
+
+
+@st.cache_resource
+def alert_store() -> SQLiteAlertStore:
+    settings = runtime_settings()
+    path = settings.alert_database or settings.snapshot_database.with_name("alerts.db")
+    return SQLiteAlertStore(path)
 
 
 def _clear_session() -> None:
@@ -99,6 +118,102 @@ def _login_screen() -> None:
             st.session_state.refresh_token = tokens.refresh_token
             st.rerun()
     st.stop()
+
+
+def _render_alert_controls(principal) -> None:
+    store = alert_store()
+    settings = runtime_settings()
+    preference = store.get_preference(
+        principal.user_id,
+        fallback_email=principal.email,
+    )
+    unread = store.unread_count(principal.user_id)
+    with st.expander(f"Notifications ({unread} unread)"):
+        deliveries = store.list_deliveries(principal.user_id, limit=10)
+        visible = [
+            item
+            for item in deliveries
+            if item.channel is AlertChannel.IN_APP
+            and item.status in {DeliveryStatus.SENT, DeliveryStatus.ACKNOWLEDGED}
+        ]
+        if not visible:
+            st.caption("No in-app alerts yet.")
+        for item in visible:
+            st.markdown(f"**{item.subject}**")
+            st.caption(item.created_at.strftime("%B %d, %Y at %H:%M UTC"))
+            st.write(item.body)
+            if item.status is DeliveryStatus.SENT:
+                if st.button("Mark reviewed", key=f"ack-{item.delivery_id}"):
+                    store.acknowledge(item.delivery_id, user_id=principal.user_id)
+                    st.rerun()
+            st.divider()
+
+    with st.expander("Alert preferences"):
+        timezone_name = st.text_input(
+            "Timezone",
+            value=preference.timezone_name,
+            help="Use an IANA timezone such as America/Los_Angeles.",
+        )
+        delivery_hour = st.slider(
+            "Preferred local delivery hour",
+            min_value=0,
+            max_value=23,
+            value=preference.delivery_hour,
+        )
+        channel_values = [value.value for value in AlertChannel]
+        selected_channels = st.multiselect(
+            "Delivery channels",
+            options=channel_values,
+            default=[value.value for value in preference.channels],
+        )
+        topic_values = [value.value for value in AlertTopic]
+        selected_topics = st.multiselect(
+            "Notify me about",
+            options=topic_values,
+            default=[value.value for value in preference.topics],
+        )
+        email_address = st.text_input(
+            "Email address",
+            value=preference.email_address or principal.email,
+            disabled=AlertChannel.EMAIL.value not in selected_channels,
+        )
+        minimum_conviction_change = st.slider(
+            "Minimum conviction change",
+            min_value=1,
+            max_value=25,
+            value=min(preference.minimum_conviction_change, 25),
+            help="Conviction changes smaller than this remain silent.",
+        )
+        if AlertChannel.EMAIL.value in selected_channels and not settings.smtp_host:
+            st.warning(
+                "Email delivery is not configured in this environment. "
+                "In-app alerts remain available."
+            )
+        if st.button("Save alert preferences"):
+            try:
+                channels = tuple(AlertChannel(value) for value in selected_channels)
+                topics = tuple(AlertTopic(value) for value in selected_topics)
+                if AlertChannel.EMAIL in channels and not settings.smtp_host:
+                    raise ValueError("email delivery is not configured")
+                updated = DeliveryPreference(
+                    user_id=principal.user_id,
+                    timezone_name=timezone_name,
+                    delivery_hour=delivery_hour,
+                    channels=channels,
+                    topics=topics,
+                    email_address=(
+                        email_address
+                        if AlertChannel.EMAIL in channels
+                        else principal.email
+                    ),
+                    minimum_conviction_change=minimum_conviction_change,
+                )
+                store.save_preference(updated)
+            except (TypeError, ValueError) as error:
+                st.error(str(error))
+            else:
+                st.success("Alert preferences saved.")
+                st.rerun()
 
 
 def _authorized_bindings(principal) -> dict[str, object]:
@@ -182,12 +297,25 @@ def _authorized_bindings(principal) -> dict[str, object]:
 def _authorized_source() -> str:
     source = Path("app.py").read_text(encoding="utf-8")
     source = source.replace(
-        """st.set_page_config(\n    page_title=\"Capital Intelligence Platform\",\n    page_icon=\"📊\",\n    layout=\"wide\",\n)\n\n\n""",
+        '''st.set_page_config(
+    page_title="Capital Intelligence Platform",
+    page_icon="📊",
+    layout="wide",
+)
+
+
+''',
         "",
         1,
     )
     source = source.replace(
-        """from core.portfolio import (\n    get_mandate_details,\n    get_mandates,\n    get_portfolio_totals,\n    get_trade_history,\n)\n""",
+        '''from core.portfolio import (
+    get_mandate_details,
+    get_mandates,
+    get_portfolio_totals,
+    get_trade_history,
+)
+''',
         "",
         1,
     )
@@ -210,6 +338,7 @@ if principal is None:
 
 with st.sidebar:
     st.caption(f"Signed in as **{principal.display_name}**")
+    _render_alert_controls(principal)
     if st.button("Sign out"):
         token = st.session_state.get("access_token")
         if token:

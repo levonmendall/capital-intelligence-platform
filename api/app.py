@@ -17,6 +17,7 @@ from api.repositories import (
     build_resources,
 )
 from api.routes import (
+    alerts_router,
     authentication_router,
     daily_router,
     decisions_router,
@@ -27,6 +28,7 @@ from api.routes import (
     replays_router,
     users_router,
 )
+from delivery import SQLiteAlertStore
 from security import AuthenticationService, SQLiteIdentityStore
 
 
@@ -34,8 +36,9 @@ def create_app(
     settings: ApiSettings | None = None,
     resources: ApiResources | None = None,
     authentication: AuthenticationService | None = None,
+    alert_store: SQLiteAlertStore | None = None,
 ) -> FastAPI:
-    """Create the API with explicit injectable data and identity dependencies."""
+    """Create the API with explicit injectable data, identity, and alert stores."""
 
     resolved_settings = settings or ApiSettings.from_env()
     resolved_resources = resources or build_resources(resolved_settings)
@@ -53,13 +56,18 @@ def create_app(
         password=resolved_settings.bootstrap_admin_password,
         display_name=resolved_settings.bootstrap_admin_name,
     )
+    alert_path = (
+        resolved_settings.alert_database
+        or resolved_settings.snapshot_database.with_name("alerts.db")
+    )
+    resolved_alert_store = alert_store or SQLiteAlertStore(alert_path)
     app = FastAPI(
         title=resolved_settings.application_name,
         version=resolved_settings.application_version,
         description=(
             "Authenticated access to governed Capital Intelligence snapshots, "
-            "decisions, replays, personal CIO memory, conviction trends, and "
-            "mandate-authorized virtual portfolios."
+            "decisions, replays, personal CIO memory, conviction trends, "
+            "mandate-authorized portfolios, and selective alert delivery."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -68,13 +76,14 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.resources = resolved_resources
     app.state.authentication = resolved_authentication
+    app.state.alert_store = resolved_alert_store
 
     if resolved_settings.allowed_origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(resolved_settings.allowed_origins),
             allow_credentials=False,
-            allow_methods=["GET", "POST"],
+            allow_methods=["GET", "POST", "PUT"],
             allow_headers=[
                 "Accept",
                 "Authorization",
@@ -113,6 +122,7 @@ def create_app(
     if resolved_authentication.required:
         app.include_router(authentication_router)
         app.include_router(users_router)
+        app.include_router(alerts_router, dependencies=protected)
     app.include_router(daily_router, dependencies=protected)
     app.include_router(environment_router, dependencies=protected)
     app.include_router(decisions_router, dependencies=protected)

@@ -14,6 +14,8 @@ Foundation Version 1.x now includes:
 - a concise Environment Brief and CIO Decision Card;
 - append-only daily history, Decision Replay, and Investor Memory;
 - mandate-aware opportunity-cost analysis;
+- revocable authentication and mandate authorization;
+- scheduled daily intelligence with selective alert delivery;
 - an authenticated FastAPI boundary; and
 - an authenticated four-screen Streamlit experience.
 
@@ -53,7 +55,8 @@ tables and verifies a hash chain across recorded events.
 ## Authentication and authorization
 
 Runtime settings loaded from the environment require authentication by default.
-Before the first API or Streamlit start, configure the initial administrator:
+Before the first API, Streamlit, or scheduler start, configure the initial
+administrator:
 
 ```bash
 export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_EMAIL="admin@example.com"
@@ -69,8 +72,9 @@ opaque and stored only as hashes. Refresh rotates both credentials; logout and
 account disabling revoke sessions.
 
 Users receive explicit roles, mandate grants, and—when needed—investor-profile
-grants. Portfolio lists, holdings, trades, values, and Investor Memory are
-filtered at the service boundary rather than merely hidden in the interface.
+grants. Portfolio lists, holdings, trades, values, Investor Memory, alert
+preferences, and in-app alerts are filtered at the service boundary rather than
+merely hidden in the interface.
 
 See [Authentication and mandate authorization](docs/AUTHENTICATION_AND_AUTHORIZATION.md).
 
@@ -92,12 +96,40 @@ The primary navigation remains deliberately limited to:
 4. **History** — score and conviction trends, Decision Replay, Investor Memory,
    and the authorized paper-trade journal.
 
+The authenticated sidebar includes the user's in-app alert inbox and delivery
+preferences without adding a fifth primary screen.
+
 Daily score records are stored in the append-only
 `database/daily_intelligence_snapshots.db` history. Current, incomplete, stale,
 and unavailable evidence states remain explicit. Score movement alone does not
 trigger an alert; notification remains governed by material-change policy.
 
 See [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md).
+
+## Scheduled intelligence and selective alerts
+
+Run the persistent worker:
+
+```bash
+python run_scheduler.py
+```
+
+Run one due-cycle and delivery pass:
+
+```bash
+python run_scheduler.py --once
+```
+
+The worker claims one idempotent cycle per configured market date, runs the
+canonical intelligence chain, records every cycle, and applies the existing
+material-change policy before delivery. Unchanged conditions remain quiet and
+produce an auditable suppression record. Users may opt into a daily summary.
+
+In-app delivery is available by default. Email requires both explicit user
+selection and SMTP runtime configuration. Failed delivery uses bounded
+exponential retry and records append-only attempt history.
+
+See [Scheduled intelligence and alerts](docs/SCHEDULING_AND_ALERTS.md).
 
 ## Production API
 
@@ -121,10 +153,19 @@ POST /v1/auth/logout
 GET  /v1/auth/me
 ```
 
+Authenticated alert endpoints:
+
+```text
+GET  /v1/alerts/preferences
+PUT  /v1/alerts/preferences
+GET  /v1/alerts
+POST /v1/alerts/{delivery_id}/acknowledge
+```
+
 Authenticated intelligence endpoints include daily snapshots, history,
-environment, decisions, replays, conviction, Investor Memory, and authorized
-portfolios. Administrator-only routes provision users, assign mandate and
-investor grants, and disable accounts.
+environment, decisions, replays, conviction, Investor Memory, authorized
+portfolios, and the user's alert inbox. Administrator-only routes provision
+users, assign mandate and investor grants, and disable accounts.
 
 Use `/docs` for interactive documentation and `/openapi.json` for the
 deterministic contract. Missing, stale, incomplete, and unavailable data remain
@@ -147,14 +188,15 @@ See [Personal CIO intelligence](docs/PERSONAL_CIO.md).
 
 ## Continuous intelligence, selective alerts
 
-`monitoring.ContinuousRegimeMonitor` is the application boundary for scheduled
-analysis. Every cycle can retrieve new point-in-time evidence, evaluate the
-regime, run governance, compare the result with the prior decision, and record
-the comparison. Notification remains a separate policy decision.
+`monitoring.ContinuousRegimeMonitor` remains the analytical boundary separating
+continuous analysis from notification. `run_scheduler.py` adds durable cycle
+claims, authenticated preferences, deduplicated delivery, retries, and delivery
+history around that governed result.
 
 The default material-change policy stays quiet when the working view is
 unchanged or only one moderate signal moves. It surfaces portfolio review only
-when the evidence crosses governed materiality thresholds.
+when evidence crosses governed materiality thresholds, unless the user has
+explicitly enabled a daily summary.
 
 ## CIO decision card
 
@@ -189,6 +231,7 @@ trade.
 - [Institutional decision engine](DECISION_ENGINE.md)
 - [Authentication and authorization](docs/AUTHENTICATION_AND_AUTHORIZATION.md)
 - [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
+- [Scheduled intelligence and alerts](docs/SCHEDULING_AND_ALERTS.md)
 - [Production API](docs/PRODUCTION_API.md)
 - [Personal CIO intelligence](docs/PERSONAL_CIO.md)
 - [Portfolio-fit gate](docs/PORTFOLIO_FIT.md)

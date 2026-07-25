@@ -4,7 +4,8 @@
 
 The API serves previously governed Capital Intelligence outputs without running
 a new market cycle, recalculating a score, creating orders, or executing trades.
-Authentication, users, and resource grants now protect the production boundary.
+Authentication, users, resource grants, alert preferences, and the authenticated
+in-app inbox protect the production boundary.
 
 The primary market contract remains `daily-capital-intelligence.v1`. Clients
 receive the same score, environment, committee decision, portfolio impact,
@@ -34,9 +35,10 @@ POST /v1/auth/refresh
 ```
 
 `/health` proves only that the process is running. `/ready` checks daily
-snapshots, portfolios, identity, optional replay artifacts, the optional or
-required institutional journal, and optional or required provider credentials.
-A secured runtime is not ready until at least one user exists.
+snapshots, portfolios, identity, scheduled-alert persistence, optional replay
+artifacts, the optional or required institutional journal, and optional or
+required provider credentials. A secured runtime is not ready until at least one
+user exists.
 
 ## Authenticated endpoints
 
@@ -54,11 +56,17 @@ GET  /v1/portfolios/{portfolio_code}
 GET  /v1/conviction/latest?lookback=7
 GET  /v1/investor-memory/{investor_identifier}
 GET  /v1/investor-memory/{investor_identifier}/events?limit=50
+GET  /v1/alerts/preferences
+PUT  /v1/alerts/preferences
+GET  /v1/alerts?limit=50&include_suppressed=false
+POST /v1/alerts/{delivery_id}/acknowledge
 ```
 
 Portfolio list and detail responses are filtered by mandate grants. Investor
-Memory requires ownership or an explicit investor-profile grant. Unauthorized
-resource access returns `404` to avoid disclosing another user's resources.
+Memory requires ownership or an explicit investor-profile grant. Alert
+preferences, delivery history, unread counts, and acknowledgement are always
+scoped to the authenticated user. Unauthorized resource access returns `404` to
+avoid disclosing another user's resources.
 
 ## Administrator endpoints
 
@@ -85,12 +93,24 @@ Use the access credential as:
 Authorization: Bearer ci_access_...
 ```
 
+## Alerts
+
+New users receive in-app delivery only and do not receive a daily summary unless
+they explicitly enable it. Material notifications continue to rely on the
+existing governed material-change result. Email preferences are rejected with
+`409` until SMTP is configured in the runtime.
+
+The alert list hides suppressed delivery records by default. Clients may request
+them for audit purposes. Only sent in-app alerts can be acknowledged.
+
+See [Scheduled intelligence and alerts](SCHEDULING_AND_ALERTS.md).
+
 ## Personal CIO
 
 Conviction reads canonical daily snapshot history without rerunning analysis.
-Investor Memory remains read-only through the API in PR23. Authenticated
-reflection writes are available through the secured Streamlit boundary and are
-restricted to the investor's own identity or an explicit `reflect` grant.
+Investor Memory remains read-only through the API. Authenticated reflection
+writes are available through the secured Streamlit boundary and are restricted
+to the investor's own identity or an explicit `reflect` grant.
 
 A missing authorized memory store returns an empty profile, not an invented
 preference.
@@ -103,8 +123,10 @@ preference.
 - `204` — logout completed;
 - `401` — credentials are missing, invalid, expired, or revoked;
 - `403` — the user is authenticated but lacks a required administrative role;
-- `404` — an unknown or unauthorized decision, replay, investor, or mandate;
-- `409` — an immutable identity or replay identifier conflicts;
+- `404` — an unknown or unauthorized decision, replay, investor, mandate, or
+  alert;
+- `409` — an immutable identity or replay conflicts, an alert cannot transition,
+  or a requested channel is unavailable;
 - `422` — invalid or out-of-policy request parameters; and
 - `503` — a required backing store is unavailable or not ready.
 
@@ -122,6 +144,7 @@ are supplied.
 | `CAPITAL_INTELLIGENCE_PORTFOLIO_DATABASE` | `database/capital_intelligence.db` | Virtual mandate and portfolio data. |
 | `CAPITAL_INTELLIGENCE_INVESTOR_MEMORY_DATABASE` | `database/investor_memory.db` | Append-only investor behavior and lessons. |
 | `CAPITAL_INTELLIGENCE_IDENTITY_DATABASE` | `database/identity.db` | Users, grants, sessions, and authentication audit. |
+| `CAPITAL_INTELLIGENCE_ALERT_DATABASE` | `database/alerts.db` | Preferences, cycle claims, delivery records, and attempts. |
 | `CAPITAL_INTELLIGENCE_JOURNAL_DATABASE` | `database/institutional_journal.db` | Institutional journal readiness target. |
 | `CAPITAL_INTELLIGENCE_REPLAY_DIRECTORY` | `database/decision_replays` | Immutable Decision Replay artifacts. |
 | `CAPITAL_INTELLIGENCE_AUTHENTICATION_REQUIRED` | `true` | Require authenticated application access. |
@@ -130,6 +153,14 @@ are supplied.
 | `CAPITAL_INTELLIGENCE_PASSWORD_MINIMUM_LENGTH` | `12` | Password minimum length. |
 | `CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_EMAIL` | unset | Initial administrator email. |
 | `CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_PASSWORD` | unset | Initial administrator password. |
+| `CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE` | `America/New_York` | Scheduled market-date timezone. |
+| `CAPITAL_INTELLIGENCE_SCHEDULER_HOUR` | `7` | Local daily cycle hour. |
+| `CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS` | `60` | Persistent worker polling interval. |
+| `CAPITAL_INTELLIGENCE_ALERT_MAXIMUM_ATTEMPTS` | `4` | Maximum delivery attempts. |
+| `CAPITAL_INTELLIGENCE_ALERT_RETRY_MINUTES` | `5` | Base delivery retry delay. |
+| `CAPITAL_INTELLIGENCE_SMTP_HOST` | unset | SMTP host; unset disables email. |
+| `CAPITAL_INTELLIGENCE_SMTP_PORT` | `587` | SMTP port. |
+| `CAPITAL_INTELLIGENCE_SMTP_FROM_ADDRESS` | unset | Required sender when SMTP is enabled. |
 | `CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL` | `false` | Require journal readiness. |
 | `CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER` | `false` | Require `FRED_API_KEY`. |
 | `CAPITAL_INTELLIGENCE_ALLOWED_ORIGINS` | empty | Comma-separated CORS origins. |
@@ -138,7 +169,7 @@ are supplied.
 | `CAPITAL_INTELLIGENCE_CONVICTION_DEFAULT_LOOKBACK` | `7` | Default conviction observations. |
 | `CAPITAL_INTELLIGENCE_CONVICTION_MAX_LOOKBACK` | `30` | Maximum conviction observations. |
 | `CAPITAL_INTELLIGENCE_API_NAME` | `Capital Intelligence API` | OpenAPI service name. |
-| `CAPITAL_INTELLIGENCE_API_VERSION` | `1.2.0` | OpenAPI service version. |
+| `CAPITAL_INTELLIGENCE_API_VERSION` | `1.3.0` | OpenAPI service version. |
 
 ## Replay artifacts
 
@@ -150,8 +181,8 @@ return a conflict instead of silently selecting one version.
 
 - Passwords use scrypt and are never stored in plaintext.
 - Access and refresh tokens are stored only as hashes and are revocable.
-- Authentication audit history is append-only.
-- Portfolio and Investor Memory authorization is enforced server-side.
+- Authentication audit and delivery-attempt history are append-only.
+- Portfolio, Investor Memory, preferences, and alerts are enforced server-side.
 - SQLite market and portfolio repositories remain read-only/query-only in the
   production API.
 - No trade or allocation mutation route exists.
