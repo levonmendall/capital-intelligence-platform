@@ -26,6 +26,7 @@ from api.routes import (
     objectives_router,
     operations_router,
     personal_router,
+    personal_cio_history_router,
     portfolios_router,
     replays_router,
     users_router,
@@ -143,6 +144,7 @@ def create_app(
     app.include_router(replays_router, dependencies=protected)
     app.include_router(personal_router, dependencies=protected)
     app.include_router(objectives_router, dependencies=protected)
+    app.include_router(personal_cio_history_router, dependencies=protected)
     app.include_router(portfolios_router, dependencies=protected)
     return app
 
