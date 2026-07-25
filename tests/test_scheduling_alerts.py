@@ -18,6 +18,7 @@ from delivery import (
     DeliveryStatus,
     SQLiteAlertStore,
     ScheduledDailyIntelligenceWorker,
+    SelectiveAlertPlanner,
 )
 from delivery.service import CanonicalCycleResult
 
@@ -125,6 +126,43 @@ def test_material_alert_uses_enabled_topics_and_deduplicates(tmp_path) -> None:
     assert all(item.status is DeliveryStatus.SENT for item in dispatched)
     assert len(sent) == 1
     assert store.unread_count("user:1") == 1
+
+
+def test_email_dispatcher_receives_persisted_recipient(tmp_path) -> None:
+    store = SQLiteAlertStore(tmp_path / "alerts.db")
+    store.save_preference(
+        DeliveryPreference(
+            user_id="user:1",
+            channels=(AlertChannel.EMAIL,),
+            topics=(AlertTopic.PORTFOLIO_REVIEW,),
+            email_address="user@example.com",
+        ),
+        now=NOW,
+    )
+    recipients: list[str] = []
+
+    def send(delivery) -> None:
+        recipients.append(delivery.email_address)
+
+    service = AlertDeliveryService(
+        store,
+        dispatchers={AlertChannel.EMAIL: send},
+        clock=lambda: NOW,
+    )
+    account = SimpleNamespace(
+        user_id="user:1",
+        email="user@example.com",
+        is_active=True,
+    )
+    service.queue_for_accounts(
+        _snapshot(should_alert=True, categories=("signal",)),
+        (account,),
+    )
+
+    delivered = service.dispatch_pending()
+
+    assert recipients == ["user@example.com"]
+    assert delivered[0].status is DeliveryStatus.SENT
 
 
 def test_email_failures_retry_then_dead_letter(tmp_path) -> None:
