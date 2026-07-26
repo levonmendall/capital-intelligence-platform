@@ -27,6 +27,7 @@ Expose ports only through a TLS reverse proxy in shared environments. The compos
 - `GET /ready` — required stores, authentication, alert persistence, backup target, and operational-policy readiness;
 - `GET /live` — minimal process liveness;
 - `GET /worker/health` — scheduler heartbeat freshness and last cycle status;
+- `GET /operations/slo` — current governed operational-objective assessment, protected by the metrics bearer token when configured;
 - `GET /metrics` — Prometheus text format, protected by the metrics bearer token when configured.
 
 A stale or failed scheduler heartbeat returns HTTP 503 without marking the API process itself dead.
@@ -45,13 +46,40 @@ Production full-universe screening must call the activated-catalog boundary. It 
 
 See [Security-master ingestion and activation](SECURITY_MASTER_OPERATIONS.md).
 
+## Governed operational SLOs
+
+Production readiness evaluates four process objectives from authoritative stores:
+
+1. the activated security-master source is intact and within the configured freshness limit;
+2. the complete eligible universe is screened by the scheduled deadline using the currently active catalog;
+3. every monitored living thesis is reviewed within its configured grace period; and
+4. every frozen decision-evidence snapshot is evaluated within its configured grace period after the decision horizon ends.
+
+Run an assessment without mutating history:
+
+```bash
+python run_slos.py
+```
+
+Record an immutable assessment and fail the command when required objectives are not ready:
+
+```bash
+python run_slos.py --record-assessment --require-ready
+```
+
+Terminal full-universe cycles are recorded through the same CLI using `--cycle-status` and the cycle identity, timing, catalog, universe-snapshot, and coverage fields. In production, `CAPITAL_INTELLIGENCE_REQUIRE_OPERATIONAL_SLOS=true` makes the assessment a required `/ready` component. Missing authoritative stores, invalid hash chains, stale providers, late or incomplete cycles, overdue thesis reviews, and overdue evaluations fail closed.
+
+Deadline boundaries are inclusive: an action completed exactly at its deadline is compliant; it becomes breached only after the deadline passes. Historical late records remain auditable, while current readiness reflects the latest required process state.
+
+See [Operational service-level objectives](OPERATIONAL_SLOS.md).
+
 ## Logs and correlation
 
 Every API request receives an `X-Request-ID`. A valid inbound ID is preserved; otherwise a new UUID is generated. JSON logs include timestamp, severity, service, environment, release, request ID, path, status, duration, and client address. Passwords, tokens, authorization headers, and secrets are never added as structured fields.
 
 ## Metrics
 
-The API exports request counts, duration sums, rate-limit rejections, and unhandled exceptions. Scrape `/metrics` using:
+The API exports request counts, duration sums, rate-limit rejections, unhandled exceptions, overall operational-SLO readiness, objective readiness, objective state, actual latency or age, and configured thresholds. Scrape `/metrics` using:
 
 ```http
 Authorization: Bearer <CAPITAL_INTELLIGENCE_METRICS_TOKEN>

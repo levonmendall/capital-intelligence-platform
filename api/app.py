@@ -42,9 +42,12 @@ from api.routes import (
 from delivery import SQLiteAlertStore
 from operations import (
     MetricRegistry,
+    OperationalSLOService,
     OperationalSettings,
+    build_operational_slo_service,
     configure_logging,
     install_operational_middleware,
+    operational_slo_policy_from_settings,
 )
 from security import AuthenticationService, SQLiteIdentityStore
 
@@ -56,6 +59,7 @@ def create_app(
     alert_store: SQLiteAlertStore | None = None,
     operational_settings: OperationalSettings | None = None,
     metrics: MetricRegistry | None = None,
+    operational_slo_service: OperationalSLOService | None = None,
 ) -> FastAPI:
     """Create the API with explicit injectable runtime dependencies."""
 
@@ -88,6 +92,13 @@ def create_app(
     )
     resolved_alert_store = alert_store or SQLiteAlertStore(alert_path)
     resolved_metrics = metrics or MetricRegistry()
+    resolved_slo_service = operational_slo_service or build_operational_slo_service(
+        security_master_database=resolved_operations.security_master_database,
+        journal_database=resolved_settings.journal_database,
+        slo_database=resolved_operations.operational_slo_database,
+        policy=operational_slo_policy_from_settings(resolved_operations),
+        initialize_store=False,
+    )
     app = FastAPI(
         title=resolved_settings.application_name,
         version=resolved_settings.application_version,
@@ -108,6 +119,7 @@ def create_app(
     app.state.authentication = resolved_authentication
     app.state.alert_store = resolved_alert_store
     app.state.metrics = resolved_metrics
+    app.state.operational_slo_service = resolved_slo_service
 
     if resolved_settings.allowed_origins:
         app.add_middleware(

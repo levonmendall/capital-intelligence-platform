@@ -130,6 +130,15 @@ Run the economic-regime research pipeline:
 python run_regime.py
 ```
 
+Assess or record the production operational objectives:
+
+```bash
+python run_slos.py
+python run_slos.py --record-assessment --require-ready
+```
+
+The SLO authority measures authoritative provider freshness, complete eligible-universe cycle completion, living-thesis review latency, and point-in-time decision-evaluation latency. It does not create recommendations or relax data and governance requirements. Production readiness fails closed when a required objective is blocked or breached.
+
 Run the persistent scheduler:
 
 ```bash
@@ -158,6 +167,7 @@ GET /health
 GET /ready
 GET /live
 GET /worker/health
+GET /operations/slo
 GET /metrics
 ```
 
@@ -207,4 +217,5 @@ Production investment reliance still requires broader live and licensed data cov
 - [Production API](docs/PRODUCTION_API.md)
 - [Legacy authority isolation](docs/LEGACY_AUTHORITY_ISOLATION.md)
 - [Data sources and governance](DATA_SOURCES.md)
+- [Operational service levels](docs/OPERATIONAL_SLOS.md)
 - [Operations](docs/OPERATIONS.md)

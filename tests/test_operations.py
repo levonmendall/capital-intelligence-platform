@@ -30,6 +30,7 @@ def test_production_settings_require_https_metrics_and_encrypted_backups() -> No
     )
     assert settings.environment == "production"
     assert settings.allowed_hosts == ("api.example.com",)
+    assert settings.require_operational_slos is True
 
 
 def test_rate_limiter_resets_after_window() -> None:
