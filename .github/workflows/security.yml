@@ -55,13 +55,23 @@ jobs:
       - name: Build security image
         run: docker build -t capital-intelligence:security .
 
-      - name: Report high and critical container findings
+      - name: Capture high and critical container findings
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: capital-intelligence:security
-          format: table
+          format: json
+          output: trivy-results.json
           severity: CRITICAL,HIGH
           exit-code: "0"
+
+      - name: Publish container scan evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: trivy-results
+          path: trivy-results.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Block critical container findings
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
