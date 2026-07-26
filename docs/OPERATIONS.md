@@ -113,3 +113,14 @@ Use a secret manager or orchestrator secret facility. Do not commit populated `.
 5. Promote the identical image to production.
 6. Monitor errors, cycle completion, worker freshness, and backup completion.
 7. Roll back to the prior image if readiness or user-critical checks fail.
+
+## Thesis-monitoring cycle
+
+```bash
+python run_thesis_monitoring.py \
+  --evidence-provider production_thesis_provider:create_provider \
+  --as-of 2026-07-27T00:00:00+00:00 \
+  --require-all-success
+```
+
+Scheduled and event-driven reviews are append-only. Stable reviews satisfy the thesis-review SLO without notifying the user. Material reviews create a CIO queue item but cannot alter portfolio construction or execution. See [Production thesis monitoring](THESIS_MONITORING_OPERATIONS.md).

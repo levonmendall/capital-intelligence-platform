@@ -68,3 +68,5 @@ CAPITAL_INTELLIGENCE_SLO_EVALUATION_GRACE_HOURS=48
 ```
 
 Production settings require SLO enforcement. Development, test, and staging may keep the component advisory while building the licensed data and full-universe operating history.
+
+Thesis-review SLO evidence is normally produced automatically by `run_thesis_monitoring.py`, which appends a later immutable thesis snapshot after every successful scheduled or event-driven review. A stable no-action review is valid SLO completion and does not require a user notification.

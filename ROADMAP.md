@@ -140,7 +140,8 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Classify strengthening, stable, weakening, stale-evidence, replacement-opportunity, exit-review, and invalidated states.
 - [x] Compare active ownership with qualified replacement opportunities.
 - [x] Require CIO review before any action-oriented monitoring proposal.
-- [ ] Complete production event-driven and scheduled monitoring across the full eligible universe.
+- [x] Add production scheduled and event-driven thesis-review orchestration with immutable retries, materiality, deduplication, CIO escalation, and selective notification.
+- [ ] Operate continuous thesis monitoring across the full eligible universe using certified point-in-time evidence.
 - [ ] Validate alert usefulness and false-positive rates across extended live paper operation.
 
 ## Milestone 10 — Daily Capital Intelligence and product surfaces
