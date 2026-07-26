@@ -20,6 +20,10 @@ _EXPORTS = {
         "intelligence.engine_cycle",
         "AnalyticalEngineCycleExecutor",
     ),
+    "BASIS_POINTS": (
+        "intelligence.synthesis_weights",
+        "BASIS_POINTS",
+    ),
     "BusinessCycleEngine": (
         "intelligence.business_cycle",
         "BusinessCycleEngine",
@@ -60,6 +64,10 @@ _EXPORTS = {
         "intelligence.credit_cycle",
         "CreditCycleRun",
     ),
+    "DEFAULT_SYNTHESIS_WEIGHT_POLICY": (
+        "intelligence.synthesis_weights",
+        "DEFAULT_SYNTHESIS_WEIGHT_POLICY",
+    ),
     "DocumentMetadata": (
         "intelligence.metadata",
         "DocumentMetadata",
@@ -83,6 +91,10 @@ _EXPORTS = {
     "EngineNormalizationPolicy": (
         "intelligence.normalization",
         "EngineNormalizationPolicy",
+    ),
+    "EngineSynthesisWeight": (
+        "intelligence.synthesis_weights",
+        "EngineSynthesisWeight",
     ),
     "EXPECTED_ENGINE_ORDER": (
         "intelligence.normalization",
@@ -120,6 +132,10 @@ _EXPORTS = {
         "intelligence.market_breadth",
         "MarketBreadthRun",
     ),
+    "MissingWeightPolicy": (
+        "intelligence.synthesis_weights",
+        "MissingWeightPolicy",
+    ),
     "MultiEngineNormalizationBundle": (
         "intelligence.normalization",
         "MultiEngineNormalizationBundle",
@@ -127,6 +143,14 @@ _EXPORTS = {
     "MultiEngineNormalizer": (
         "intelligence.normalization",
         "MultiEngineNormalizer",
+    ),
+    "MultiEngineSynthesisResult": (
+        "intelligence.synthesis_weights",
+        "MultiEngineSynthesisResult",
+    ),
+    "MultiEngineSynthesizer": (
+        "intelligence.synthesis_weights",
+        "MultiEngineSynthesizer",
     ),
     "NORMALIZATION_POLICY_VERSION": (
         "intelligence.normalization",
@@ -164,6 +188,10 @@ _EXPORTS = {
         "intelligence.normalization_store",
         "SQLiteNormalizationStore",
     ),
+    "SQLiteSynthesisStore": (
+        "intelligence.synthesis_store",
+        "SQLiteSynthesisStore",
+    ),
     "ScenarioProbability": (
         "intelligence.cio_guidance",
         "ScenarioProbability",
@@ -171,6 +199,18 @@ _EXPORTS = {
     "SeriesLoadState": (
         "intelligence.regime_pipeline",
         "SeriesLoadState",
+    ),
+    "SYNTHESIS_WEIGHT_POLICY_VERSION": (
+        "intelligence.synthesis_weights",
+        "SYNTHESIS_WEIGHT_POLICY_VERSION",
+    ),
+    "SynthesisStatus": (
+        "intelligence.synthesis_weights",
+        "SynthesisStatus",
+    ),
+    "SynthesisWeightPolicy": (
+        "intelligence.synthesis_weights",
+        "SynthesisWeightPolicy",
     ),
     "TechnicalMomentumEngine": (
         "intelligence.technical_momentum",
@@ -187,6 +227,10 @@ _EXPORTS = {
     "ValuationRun": (
         "intelligence.valuation",
         "ValuationRun",
+    ),
+    "WeightedEngineContribution": (
+        "intelligence.synthesis_weights",
+        "WeightedEngineContribution",
     ),
     "build_configured_market_breadth_engine": (
         "intelligence.market_breadth",
