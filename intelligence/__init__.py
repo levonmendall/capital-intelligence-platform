@@ -120,6 +120,14 @@ _EXPORTS = {
         "intelligence.regime_pipeline",
         "RegimeSeriesRequest",
     ),
+    "RiskEngine": (
+        "intelligence.risk",
+        "RiskEngine",
+    ),
+    "RiskRun": (
+        "intelligence.risk",
+        "RiskRun",
+    ),
     "SQLiteAnalyticalEngineStore": (
         "intelligence.engine_store",
         "SQLiteAnalyticalEngineStore",
@@ -151,6 +159,10 @@ _EXPORTS = {
     "build_configured_market_breadth_engine": (
         "intelligence.market_breadth",
         "build_configured_market_breadth_engine",
+    ),
+    "build_configured_risk_engine": (
+        "intelligence.risk",
+        "build_configured_risk_engine",
     ),
     "build_configured_technical_momentum_engine": (
         "intelligence.technical_momentum",
