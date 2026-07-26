@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 
 from cio import (
     CandidateAssetClass,
@@ -28,6 +29,7 @@ class CompanyExpectedReturnPolicy:
     minimum_bear_spread: float = 0.12
     maximum_base_return: float = 0.40
     minimum_base_return: float = -0.25
+    full_liquidity_score_dollar_volume: float = 50_000_000.0
 
     def __post_init__(self) -> None:
         if not self.version.strip():
@@ -52,6 +54,10 @@ class CompanyExpectedReturnPolicy:
             raise ValueError("scenario spreads must be positive")
         if self.minimum_base_return >= self.maximum_base_return:
             raise ValueError("minimum_base_return must be below maximum")
+        if self.full_liquidity_score_dollar_volume <= 0.0:
+            raise ValueError(
+                "full_liquidity_score_dollar_volume must be positive"
+            )
 
 
 class CompanyCandidateBuilder:
@@ -83,7 +89,6 @@ class CompanyCandidateBuilder:
         if review_days < 1:
             raise ValueError("review_days must be positive")
         market = analysis.market
-        latest = analysis.history.latest
         valuation = analysis.factor(CompanyFactor.VALUATION)
         quality = analysis.factor(CompanyFactor.QUALITY)
         growth = analysis.factor(CompanyFactor.GROWTH)
@@ -96,7 +101,9 @@ class CompanyCandidateBuilder:
         earnings_yield = metrics.get("earnings_yield")
         shareholder_yield = metrics.get("dividend_yield", 0.0)
         cash_yield = max(
-            value for value in (fcf_yield, earnings_yield, 0.0) if value is not None
+            value
+            for value in (fcf_yield, earnings_yield, 0.0)
+            if value is not None
         )
         revenue_growth = analysis.history.cagr("revenue") or 0.0
         sustainable_growth = _clip(revenue_growth, -0.10, 0.20)
@@ -214,7 +221,8 @@ class CompanyCandidateBuilder:
             contradictory_evidence=contradictory,
             evidence_quality=analysis.evidence_quality,
             liquidity_score=_clip(
-                market.average_daily_dollar_volume / 100_000_000,
+                market.average_daily_dollar_volume
+                / self.policy.full_liquidity_score_dollar_volume,
                 0.0,
                 1.0,
             ),
@@ -230,8 +238,7 @@ class CompanyCandidateBuilder:
                 "Valuation yields and relative momentum",
                 "Leverage, volatility, drawdown, and regime fit",
             ),
-            review_at=analysis.as_of
-            + __import__("datetime").timedelta(days=review_days),
+            review_at=analysis.as_of + timedelta(days=review_days),
             evidence_identifiers=analysis.evidence_identifiers,
             model_versions=(
                 analysis.history.normalization_version,
