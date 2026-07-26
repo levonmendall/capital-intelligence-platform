@@ -50,7 +50,11 @@ def _dataset(
             continue
         base = 0.025 + 0.003 * index
         for offset in range(18):
-            observation_date = _month(2024, 6, offset)
+            observation_date = _month(
+                2023 if stale else 2024,
+                12 if stale else 6,
+                offset,
+            )
             available_at = datetime(
                 observation_date.year,
                 observation_date.month,
