@@ -33,6 +33,7 @@ from api.routes import (
     personal_cio_history_router,
     portfolios_router,
     replays_router,
+    technical_momentum_router,
     users_router,
     valuation_router,
 )
@@ -90,10 +91,10 @@ def create_app(
         version=resolved_settings.application_version,
         description=(
             "Authenticated access to governed Capital Intelligence snapshots, "
-            "global liquidity, business-cycle, credit-cycle, market-breadth, and "
-            "valuation intelligence, investor objectives, Personal CIO briefs, "
-            "decisions, replays, personal memory, conviction trends, "
-            "mandate-authorized portfolios, and selective alert delivery."
+            "global liquidity, business-cycle, credit-cycle, market-breadth, "
+            "valuation, and technical-momentum intelligence, investor objectives, "
+            "Personal CIO briefs, decisions, replays, personal memory, conviction "
+            "trends, mandate-authorized portfolios, and selective alert delivery."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -153,6 +154,7 @@ def create_app(
     app.include_router(liquidity_router, dependencies=protected)
     app.include_router(market_breadth_router, dependencies=protected)
     app.include_router(valuation_router, dependencies=protected)
+    app.include_router(technical_momentum_router, dependencies=protected)
     app.include_router(decisions_router, dependencies=protected)
     app.include_router(replays_router, dependencies=protected)
     app.include_router(personal_router, dependencies=protected)
