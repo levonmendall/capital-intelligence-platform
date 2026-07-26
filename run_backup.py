@@ -38,20 +38,41 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Back up Capital Intelligence data stores."
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--loop",
         action="store_true",
         help="Run backups continuously.",
     )
+    mode.add_argument(
+        "--healthcheck",
+        action="store_true",
+        help="Verify that the newest backup is recent, encrypted when required, and valid.",
+    )
     parser.add_argument("--interval-hours", type=int, default=None)
+    parser.add_argument("--maximum-age-hours", type=int, default=None)
     args = parser.parse_args()
     operational = OperationalSettings.from_env()
     configure_logging(operational)
     logger = logging.getLogger("capital_intelligence.backup")
+    manager = build_manager()
+
+    if args.healthcheck:
+        maximum_age_hours = args.maximum_age_hours or max(
+            1,
+            operational.backup_interval_hours * 2,
+        )
+        if maximum_age_hours < 1:
+            parser.error("--maximum-age-hours must be positive")
+        healthy, detail, _ = manager.latest_backup_health(
+            maximum_age_seconds=maximum_age_hours * 3600,
+        )
+        print(detail)
+        return 0 if healthy else 1
+
     interval = args.interval_hours or operational.backup_interval_hours
     if interval < 1:
         parser.error("--interval-hours must be positive")
-    manager = build_manager()
     while True:
         try:
             result = manager.create_backup()
