@@ -67,7 +67,7 @@ Record an immutable assessment and fail the command when required objectives are
 python run_slos.py --record-assessment --require-ready
 ```
 
-Terminal full-universe cycles are recorded through the same CLI using `--cycle-status` and the cycle identity, timing, catalog, universe-snapshot, and coverage fields. In production, `CAPITAL_INTELLIGENCE_REQUIRE_OPERATIONAL_SLOS=true` makes the assessment a required `/ready` component. Missing authoritative stores, invalid hash chains, stale providers, late or incomplete cycles, overdue thesis reviews, and overdue evaluations fail closed.
+`run_full_universe_screening.py` records completed and failed terminal cycle evidence automatically. A completed cycle includes the certified active catalog, immutable universe snapshot, exact eligible and screened counts, publication identifier, and completion timestamp. A failed or incomplete cycle records its error but cannot publish candidates, an opportunity queue, or CIO-journal evidence. `run_slos.py --cycle-status` remains an administrative repair interface for independently verified historical evidence, not the normal screening path. In production, `CAPITAL_INTELLIGENCE_REQUIRE_OPERATIONAL_SLOS=true` makes the assessment a required `/ready` component. Missing authoritative stores, invalid hash chains, stale providers, late or incomplete cycles, overdue thesis reviews, and overdue evaluations fail closed.
 
 Deadline boundaries are inclusive: an action completed exactly at its deadline is compliant; it becomes breached only after the deadline passes. Historical late records remain auditable, while current readiness reflects the latest required process state.
 
