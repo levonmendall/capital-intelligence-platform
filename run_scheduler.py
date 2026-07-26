@@ -25,6 +25,7 @@ from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.global_liquidity import build_fred_global_liquidity_engine
 from intelligence.market_breadth import build_configured_market_breadth_engine
 from intelligence.regime_pipeline import build_fred_regime_pipeline
+from intelligence.valuation import build_configured_valuation_engine
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
 from personal_cio import PersonalCIOAlertPlanner
 from reporting import build_conviction_trend_from_store
@@ -59,6 +60,7 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
             build_fred_business_cycle_engine(),
             build_fred_credit_cycle_engine(),
             build_configured_market_breadth_engine(),
+            build_configured_valuation_engine(),
         ),
         analytical_store,
     )

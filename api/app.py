@@ -34,6 +34,7 @@ from api.routes import (
     portfolios_router,
     replays_router,
     users_router,
+    valuation_router,
 )
 from delivery import SQLiteAlertStore
 from operations import (
@@ -89,10 +90,10 @@ def create_app(
         version=resolved_settings.application_version,
         description=(
             "Authenticated access to governed Capital Intelligence snapshots, "
-            "global liquidity, business-cycle, credit-cycle, and market-breadth "
-            "intelligence, investor objectives, Personal CIO briefs, decisions, "
-            "replays, personal memory, conviction trends, mandate-authorized "
-            "portfolios, and selective alert delivery."
+            "global liquidity, business-cycle, credit-cycle, market-breadth, and "
+            "valuation intelligence, investor objectives, Personal CIO briefs, "
+            "decisions, replays, personal memory, conviction trends, "
+            "mandate-authorized portfolios, and selective alert delivery."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -151,6 +152,7 @@ def create_app(
     app.include_router(credit_cycle_router, dependencies=protected)
     app.include_router(liquidity_router, dependencies=protected)
     app.include_router(market_breadth_router, dependencies=protected)
+    app.include_router(valuation_router, dependencies=protected)
     app.include_router(decisions_router, dependencies=protected)
     app.include_router(replays_router, dependencies=protected)
     app.include_router(personal_router, dependencies=protected)

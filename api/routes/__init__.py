@@ -17,6 +17,7 @@ from api.routes.personal_cio_history import router as personal_cio_history_route
 from api.routes.portfolios import router as portfolios_router
 from api.routes.replays import router as replays_router
 from api.routes.users import router as users_router
+from api.routes.valuation import router as valuation_router
 
 __all__ = [
     "alerts_router",
@@ -36,4 +37,5 @@ __all__ = [
     "portfolios_router",
     "replays_router",
     "users_router",
+    "valuation_router",
 ]
