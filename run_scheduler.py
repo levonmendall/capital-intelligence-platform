@@ -28,6 +28,8 @@ from intelligence.normalization import MultiEngineNormalizer
 from intelligence.normalization_store import SQLiteNormalizationStore
 from intelligence.regime_pipeline import build_fred_regime_pipeline
 from intelligence.risk import build_configured_risk_engine
+from intelligence.synthesis_store import SQLiteSynthesisStore
+from intelligence.synthesis_weights import MultiEngineSynthesizer
 from intelligence.technical_momentum import (
     build_configured_technical_momentum_engine,
 )
@@ -61,6 +63,7 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
     )
     analytical_store = SQLiteAnalyticalEngineStore(analytical_path)
     normalization_store = SQLiteNormalizationStore(analytical_path)
+    synthesis_store = SQLiteSynthesisStore(analytical_path)
     executor = AnalyticalEngineCycleExecutor(
         canonical_executor,
         (
@@ -75,6 +78,8 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
         analytical_store,
         normalizer=MultiEngineNormalizer(),
         normalization_store=normalization_store,
+        synthesizer=MultiEngineSynthesizer(),
+        synthesis_store=synthesis_store,
     )
     alert_path = (
         settings.alert_database
