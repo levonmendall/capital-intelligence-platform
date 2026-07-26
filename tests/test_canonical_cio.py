@@ -48,6 +48,8 @@ def _instrument(
         average_daily_dollar_volume=volume,
         data_age_hours=data_age_hours,
         analytical_coverage=coverage,
+        security_master_snapshot_identifier="security-master:fixture:v1",
+        security_master_record_identifiers=("security-master-record:fixture",),
         is_us_treasury=treasury,
         effective_duration_years=duration,
     )

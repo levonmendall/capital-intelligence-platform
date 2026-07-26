@@ -451,6 +451,8 @@ def test_company_candidate_populates_common_quantitative_schema() -> None:
         analysis,
         instrument_id="instrument:acme",
         venue="NASDAQ",
+        security_master_snapshot_identifier="security-master:fixture:v1",
+        security_master_record_identifiers=("security-master-record:fixture",),
         opportunity_cost_return=0.04,
         maximum_position_weight=0.08,
     )
@@ -481,6 +483,8 @@ def test_strong_company_candidate_can_enter_opportunity_queue() -> None:
         analysis,
         instrument_id="instrument:acme",
         venue="NASDAQ",
+        security_master_snapshot_identifier="security-master:fixture:v1",
+        security_master_record_identifiers=("security-master-record:fixture",),
         opportunity_cost_return=0.04,
         maximum_position_weight=0.08,
     )
@@ -518,6 +522,8 @@ def test_company_candidate_policy_is_versioned_hypothesis_not_hidden_precision()
         analysis,
         instrument_id="instrument:acme",
         venue="NASDAQ",
+        security_master_snapshot_identifier="security-master:fixture:v1",
+        security_master_record_identifiers=("security-master-record:fixture",),
         opportunity_cost_return=0.04,
         maximum_position_weight=0.08,
     )

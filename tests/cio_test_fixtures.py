@@ -44,6 +44,8 @@ def build_candidate(
         average_daily_dollar_volume=50_000_000.0,
         data_age_hours=1.0,
         analytical_coverage=0.96,
+        security_master_snapshot_identifier="security-master:fixture:v1",
+        security_master_record_identifiers=("security-master-record:fixture",),
     )
     return CandidateDecisionRecord(
         identifier=f"candidate:{symbol.lower()}:2026-07-26",

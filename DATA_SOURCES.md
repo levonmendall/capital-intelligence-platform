@@ -140,6 +140,16 @@ The initial adapter covers the `filings.recent` section of the submissions
 payload. Older submission archive files, filing-document parsing, dimensional
 XBRL normalization, and network resilience remain separate milestones.
 
+## Point-in-time security master
+
+`data.security_master` is the canonical temporal identity and universe-membership layer. It separates stable issuer and instrument identity from symbols, venues, listing states, and corporate actions that change through time. Every snapshot carries both an economic `as_of` timestamp and a `knowledge_cutoff`, so later corrections can improve later replays without rewriting what was knowable at the original decision time.
+
+The append-only `SQLiteSecurityMasterStore` preserves complete source catalogs with canonical JSON and a SHA-256 event chain. `Version1UniverseBuilder` combines a point-in-time catalog with liquidity, freshness, Treasury-duration, and analytical-coverage metrics available by the same cutoff. It then applies the versioned `RecommendationUniversePolicy` and emits both eligible constituents and explicit exclusions. Candidate records preserve the exact security-master snapshot and record identifiers used for classification.
+
+A provider is authoritative for full-universe decisions only when its `SecurityMasterCoverage` confirms licensed use, complete universe coverage, historical identifiers, listing history, delistings, corporate actions, complete provenance, and a defined service level. The SEC ticker-exchange feed fails that gate by design: it is current-only reference data, not a historical or survivorship-safe universe.
+
+See [Point-in-time security master](docs/POINT_IN_TIME_SECURITY_MASTER.md).
+
 ## Crypto market requirements
 
 Crypto is a first-class market domain, not an equity symbol extension. Canonical
