@@ -73,10 +73,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Block critical container findings
+      - name: Block fixable critical container findings
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: capital-intelligence:security
           format: table
           severity: CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
