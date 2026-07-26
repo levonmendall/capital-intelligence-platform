@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 
 from company.models import FinancialHistory, NormalizedAnnualFinancials
 from data.filing import CompanyFact
@@ -45,15 +45,24 @@ _INSTANT_TAGS: dict[str, tuple[str, ...]] = {
     "current_liabilities": ("LiabilitiesCurrent",),
 }
 
-_DEBT_TAGS = (
-    "LongTermDebtCurrent",
-    "LongTermDebtNoncurrent",
-    "LongTermDebtAndFinanceLeaseObligationsCurrent",
-    "LongTermDebtAndFinanceLeaseObligationsNoncurrent",
-    "ShortTermBorrowings",
+# Each group represents overlapping concepts. Select at most one preferred tag
+# per group so an issuer reporting both a combined debt concept and an older
+# narrower concept cannot be double counted.
+_DEBT_TAG_GROUPS: tuple[tuple[str, ...], ...] = (
+    (
+        "LongTermDebtAndFinanceLeaseObligationsCurrent",
+        "LongTermDebtCurrent",
+    ),
+    (
+        "LongTermDebtAndFinanceLeaseObligationsNoncurrent",
+        "LongTermDebtNoncurrent",
+    ),
+    ("ShortTermBorrowings",),
 )
 
-_ALLOWED_FORMS = frozenset({"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"})
+_ALLOWED_FORMS = frozenset(
+    {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+)
 
 
 def _fact_identifier(fact: CompanyFact) -> str:
@@ -171,7 +180,9 @@ class CompanyFactNormalizer:
         accessions = tuple(
             dict.fromkeys(fact.accession_number for fact in relevant)
         )
-        fact_ids = tuple(dict.fromkeys(_fact_identifier(fact) for fact in relevant))
+        fact_ids = tuple(
+            dict.fromkeys(_fact_identifier(fact) for fact in relevant)
+        )
         debt = sum(fact.value for fact in debt_facts) if debt_facts else None
 
         return NormalizedAnnualFinancials(
@@ -227,24 +238,16 @@ class CompanyFactNormalizer:
                 )
         return None
 
-    @staticmethod
+    @classmethod
     def _select_debt_components(
+        cls,
         facts: tuple[CompanyFact, ...],
     ) -> tuple[CompanyFact, ...]:
         selected: list[CompanyFact] = []
-        for tag in _DEBT_TAGS:
-            matches = tuple(fact for fact in facts if fact.tag == tag)
-            if matches:
-                selected.append(
-                    max(
-                        matches,
-                        key=lambda fact: (
-                            fact.accepted_at,
-                            fact.filed_at,
-                            fact.accession_number,
-                        ),
-                    )
-                )
+        for preferred_tags in _DEBT_TAG_GROUPS:
+            fact = cls._select_preferred(facts, preferred_tags)
+            if fact is not None:
+                selected.append(fact)
         return tuple(selected)
 
 
