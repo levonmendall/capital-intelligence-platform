@@ -27,6 +27,7 @@ _ENGINE_ORDER = (
     "market_breadth",
     "valuation",
     "technical_momentum",
+    "risk",
 )
 _ENGINE_LABELS = {
     "global_liquidity": "Global liquidity",
@@ -35,6 +36,7 @@ _ENGINE_LABELS = {
     "market_breadth": "Market breadth",
     "valuation": "Valuation",
     "technical_momentum": "Technical and momentum",
+    "risk": "Risk",
 }
 _ENGINE_TRANSMISSION_LABELS = {
     "global_liquidity": "Liquidity transmission",
@@ -43,6 +45,7 @@ _ENGINE_TRANSMISSION_LABELS = {
     "market_breadth": "Breadth transmission",
     "valuation": "Valuation transmission",
     "technical_momentum": "Technical transmission",
+    "risk": "Risk transmission",
 }
 
 
