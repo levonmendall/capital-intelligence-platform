@@ -52,6 +52,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Add append-only hash-chained CIO history.
 - [x] Freeze every decision’s complete evidence package and original alternative set.
 - [x] Add point-in-time replay and look-ahead rejection tests.
+- [x] Add a temporal identifier, listing, delisting, corporate-action, and append-only catalog substrate with cutoff-aware replay.
 - [ ] Add licensed historical identifiers, corporate actions, delisted securities, and complete cross-venue adjustment policy.
 - [ ] Expand derivative-evidence lineage and source-family de-duplication across every production provider.
 
@@ -63,6 +64,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Block unsupported asset classes from ranking, CIO action, sizing, and implementation.
 - [x] Retain broader markets as evidence and regime inputs.
 - [x] Test eligibility and blocking behavior.
+- [x] Build validated point-in-time security-master snapshots and Version 1 membership with explicit authoritative-coverage gating.
 - [ ] Operate a complete production-quality point-in-time security master for the full eligible universe.
 
 ## Milestone 4 — Common candidate decision schema
@@ -87,6 +89,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Rank by return, downside, evidence, liquidity, costs, opportunity cost, and portfolio contribution.
 - [x] Reject weak, stale, redundant, illiquid, cost-disadvantaged, or infeasible candidates before committee review.
 - [x] Detect replacement opportunities and weakening active theses.
+- [x] Build reproducible Version 1 universe snapshots from security-master identity plus point-in-time liquidity and analytical-coverage metrics.
 - [ ] Screen the complete eligible universe continuously with production-grade provider coverage.
 - [ ] Complete institutional reports, comparisons, screens, and watchlists across that full universe.
 

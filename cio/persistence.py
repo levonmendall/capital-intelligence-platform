@@ -165,6 +165,12 @@ def serialize_candidate_decision(
             ),
             "data_age_hours": instrument.data_age_hours,
             "analytical_coverage": instrument.analytical_coverage,
+            "security_master_snapshot_identifier": (
+                instrument.security_master_snapshot_identifier
+            ),
+            "security_master_record_identifiers": list(
+                instrument.security_master_record_identifiers
+            ),
             "is_us_treasury": instrument.is_us_treasury,
             "effective_duration_years": instrument.effective_duration_years,
         },

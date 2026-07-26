@@ -65,6 +65,8 @@ def _candidate(
             average_daily_dollar_volume=250_000_000.0,
             data_age_hours=1.0,
             analytical_coverage=0.95,
+            security_master_snapshot_identifier="security-master:fixture:v1",
+            security_master_record_identifiers=("security-master-record:fixture",),
         ),
         current_price=100.0,
         decision_horizon_days=365,

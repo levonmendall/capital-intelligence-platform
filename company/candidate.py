@@ -75,6 +75,8 @@ class CompanyCandidateBuilder:
         *,
         instrument_id: str,
         venue: str,
+        security_master_snapshot_identifier: str,
+        security_master_record_identifiers: tuple[str, ...],
         opportunity_cost_return: float,
         maximum_position_weight: float,
         current_portfolio_weight: float = 0.0,
@@ -173,6 +175,12 @@ class CompanyCandidateBuilder:
             average_daily_dollar_volume=market.average_daily_dollar_volume,
             data_age_hours=market.data_age_hours,
             analytical_coverage=analysis.evidence_quality.completeness,
+            security_master_snapshot_identifier=(
+                security_master_snapshot_identifier
+            ),
+            security_master_record_identifiers=(
+                security_master_record_identifiers
+            ),
         )
         return CandidateDecisionRecord(
             identifier=(

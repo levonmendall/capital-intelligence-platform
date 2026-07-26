@@ -44,6 +44,8 @@ def _instrument(
         average_daily_dollar_volume=volume,
         data_age_hours=age,
         analytical_coverage=coverage,
+        security_master_snapshot_identifier="security-master:fixture:v1",
+        security_master_record_identifiers=("security-master-record:fixture",),
     )
 
 
@@ -189,6 +191,8 @@ def test_weak_stale_illiquid_or_incomplete_candidate_is_rejected() -> None:
             average_daily_dollar_volume=100_000,
             data_age_hours=72,
             analytical_coverage=0.40,
+            security_master_snapshot_identifier="security-master:fixture:v1",
+            security_master_record_identifiers=("security-master-record:fixture",),
         ),
     )
 

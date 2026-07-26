@@ -22,6 +22,8 @@ from data import (
     InstrumentIdentifier,
     InstrumentType,
     Issuer,
+    SecurityMasterCatalog,
+    SecurityMasterCoverage,
     SecurityMasterSnapshot,
     TradingCalendar,
     VenueListing,
@@ -165,6 +167,37 @@ class SECEdgarProvider:
             instruments=tuple(instruments),
             listings=tuple(listings),
             source=self.name,
+        )
+
+    def fetch_security_master_catalog(self) -> SecurityMasterCatalog:
+        """Return a current-only catalog with explicit non-authoritative coverage.
+
+        The public SEC ticker-exchange file is useful identity evidence, but it
+        does not provide licensed full-universe coverage, historical symbols,
+        delistings, venue history, or a complete corporate-action history.
+        """
+
+        snapshot = self.fetch_security_master()
+        return SecurityMasterCatalog.from_current_snapshot(
+            snapshot,
+            identifier=(
+                "security-master:sec-edgar-current:"
+                + snapshot.retrieved_at.isoformat()
+            ),
+            version="security-master.sec-current.v1",
+            coverage=SecurityMasterCoverage(
+                source=self.name,
+                source_version="sec-company-tickers-exchange.current.v1",
+                licensed=False,
+                complete_universe=False,
+                point_in_time=True,
+                historical_identifiers=False,
+                listing_history=False,
+                delistings=False,
+                corporate_actions=False,
+                provenance_complete=True,
+                service_level_defined=False,
+            ),
         )
 
     def fetch_filings(

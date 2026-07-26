@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 import requests
 
-from data import FilingProvider, FilingQuery
+from data import FilingProvider, FilingQuery, SecurityMasterError
 from providers.sec_edgar import (
     SEC_COMPANY_FACTS_URL,
     SEC_SUBMISSIONS_URL,
@@ -310,3 +310,23 @@ def test_provider_wraps_network_failures() -> None:
 
     with pytest.raises(SECEdgarProviderError, match="request failed"):
         provider.fetch_security_master()
+
+
+def test_sec_security_master_catalog_is_explicitly_current_only() -> None:
+    provider, _ = provider_for(
+        {
+            SEC_TICKERS_URL: {
+                "fields": ["cik", "name", "ticker", "exchange"],
+                "data": [[320193, "Apple Inc.", "AAPL", "Nasdaq"]],
+            }
+        }
+    )
+
+    catalog = provider.fetch_security_master_catalog()
+
+    assert catalog.coverage.authoritative is False
+    assert "historical identifiers" in catalog.coverage.deficiencies
+    snapshot = catalog.snapshot(as_of=RETRIEVED_AT)
+    assert snapshot.resolve_symbol("AAPL", venue="NASDAQ").name == "Apple Inc."
+    with pytest.raises(SecurityMasterError, match="not authoritative"):
+        catalog.snapshot(as_of=RETRIEVED_AT, require_authoritative=True)

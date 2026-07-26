@@ -215,6 +215,8 @@ class CandidateInstrument:
     average_daily_dollar_volume: float
     data_age_hours: float
     analytical_coverage: float
+    security_master_snapshot_identifier: str
+    security_master_record_identifiers: tuple[str, ...]
     is_us_treasury: bool = False
     effective_duration_years: float | None = None
 
@@ -233,6 +235,23 @@ class CandidateInstrument:
             if field_name in {"symbol", "venue", "country_code"}:
                 normalized = normalized.upper()
             object.__setattr__(self, field_name, normalized)
+        object.__setattr__(
+            self,
+            "security_master_snapshot_identifier",
+            _required_text(
+                self.security_master_snapshot_identifier,
+                field_name="security_master_snapshot_identifier",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "security_master_record_identifiers",
+            _text_tuple(
+                self.security_master_record_identifiers,
+                field_name="security_master_record_identifiers",
+                minimum=1,
+            ),
+        )
         if not isinstance(self.asset_class, CandidateAssetClass):
             raise TypeError("asset_class must be a CandidateAssetClass")
         object.__setattr__(
