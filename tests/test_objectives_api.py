@@ -1,4 +1,4 @@
-"""API contract tests for investor objectives and Personal CIO briefs."""
+"""Architecture tests proving personal goals are outside the active API."""
 
 from tests.test_authentication_authorization import (
     INVESTOR_PASSWORD,
@@ -8,29 +8,43 @@ from tests.test_authentication_authorization import (
 )
 
 
-def test_missing_objectives_are_disclosed_without_assumptions(tmp_path) -> None:
+DEPRECATED_PATHS = (
+    "/v1/investment-policy/investor-a",
+    "/v1/investment-policy/investor-a/history",
+    "/v1/goals/investor-a",
+    "/v1/personal-cio/investor-a/latest",
+    "/v1/personal-cio/investor-a/history",
+)
+
+
+def test_goal_based_routes_are_not_registered(tmp_path) -> None:
     client, _, _, _, _ = _secured_client(tmp_path)
     tokens = _login(
         client,
         "investor-a@example.com",
         INVESTOR_PASSWORD,
     )
+    headers = _headers(tokens)
 
-    response = client.get(
-        "/v1/personal-cio/investor-a/latest",
-        headers=_headers(tokens),
-    )
+    for path in DEPRECATED_PATHS:
+        assert client.get(path, headers=headers).status_code == 404
+        assert client.post(path, headers=headers, json={}).status_code == 404
 
-    assert response.status_code == 200, response.text
+
+def test_openapi_excludes_goal_and_personal_cio_contracts(tmp_path) -> None:
+    client, _, _, _, _ = _secured_client(tmp_path)
+
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
     payload = response.json()
-    assert payload["action_status"] == "monitor"
-    assert payload["portfolio_alignment"]["score"] is None
-    assert payload["portfolio_alignment"][
-        "is_goal_success_probability"
-    ] is False
+    paths = set(payload["paths"])
+    assert not any("investment-policy" in path for path in paths)
+    assert not any("/goals/" in path for path in paths)
+    assert not any("personal-cio" in path for path in paths)
 
 
-def test_investor_can_record_policy_goal_and_receive_brief(tmp_path) -> None:
+def test_core_cio_api_remains_available_without_objectives(tmp_path) -> None:
     client, _, _, _, _ = _secured_client(tmp_path)
     tokens = _login(
         client,
@@ -39,52 +53,16 @@ def test_investor_can_record_policy_goal_and_receive_brief(tmp_path) -> None:
     )
     headers = _headers(tokens)
 
-    policy = client.post(
-        "/v1/investment-policy/investor-a",
-        headers=headers,
-        json={
-            "primary_objective": "long_term_growth",
-            "time_horizon_years": 15,
-            "risk_capacity": "high",
-            "risk_preference": "moderate",
-            "required_return": 0.06,
-            "maximum_tolerable_drawdown": 0.2,
-            "minimum_liquidity_months": 12,
-        },
-    )
-    goal = client.post(
-        "/v1/goals/investor-a",
-        headers=headers,
-        json={
-            "goal_key": "retirement",
-            "name": "Retirement",
-            "goal_type": "retirement",
-            "priority": "essential",
-            "target_date": "2041-07-25",
-            "target_amount": 1_000_000,
-            "funded_amount": 300_000,
-            "portfolio_codes": ["GROWTH"],
-            "liquidity_required": False,
-        },
-    )
-    brief = client.get(
-        "/v1/personal-cio/investor-a/latest",
-        headers=headers,
-    )
+    daily = client.get("/v1/daily/latest", headers=headers)
+    environment = client.get("/v1/environment/latest", headers=headers)
+    portfolios = client.get("/v1/portfolios", headers=headers)
 
-    assert policy.status_code == 200, policy.text
-    assert goal.status_code == 200, goal.text
-    assert brief.status_code == 200, brief.text
-    payload = brief.json()
-    assert payload["what_changed"]
-    assert payload["why_it_matters"]
-    assert payload["portfolio_effect"]
-    assert payload["recommended_action"]
-    assert payload["policy_identifier"] == policy.json()["identifier"]
-    assert payload["portfolio_alignment"]["score"] is not None
+    assert daily.status_code == 200, daily.text
+    assert environment.status_code == 200, environment.text
+    assert portfolios.status_code == 200, portfolios.text
 
 
-def test_objectives_cannot_cross_investor_boundaries(tmp_path) -> None:
+def test_investor_boundary_still_protects_portfolios(tmp_path) -> None:
     client, _, _, _, _ = _secured_client(tmp_path)
     tokens = _login(
         client,
@@ -93,58 +71,5 @@ def test_objectives_cannot_cross_investor_boundaries(tmp_path) -> None:
     )
     headers = _headers(tokens)
 
-    assert client.get(
-        "/v1/investment-policy/investor-b",
-        headers=headers,
-    ).status_code == 404
-    assert client.post(
-        "/v1/investment-policy/investor-b",
-        headers=headers,
-        json={
-            "primary_objective": "growth",
-            "time_horizon_years": 10,
-            "risk_capacity": "high",
-            "risk_preference": "moderate",
-        },
-    ).status_code == 404
-    assert client.get(
-        "/v1/personal-cio/investor-b/latest",
-        headers=headers,
-    ).status_code == 404
-
-
-def test_policy_updates_append_history_instead_of_rewriting(tmp_path) -> None:
-    client, _, _, _, _ = _secured_client(tmp_path)
-    tokens = _login(
-        client,
-        "investor-a@example.com",
-        INVESTOR_PASSWORD,
-    )
-    headers = _headers(tokens)
-    base = {
-        "primary_objective": "long_term_growth",
-        "time_horizon_years": 15,
-        "risk_capacity": "high",
-        "risk_preference": "moderate",
-    }
-
-    first = client.post(
-        "/v1/investment-policy/investor-a",
-        headers=headers,
-        json=base,
-    )
-    second = client.post(
-        "/v1/investment-policy/investor-a",
-        headers=headers,
-        json={**base, "time_horizon_years": 12},
-    )
-    history = client.get(
-        "/v1/investment-policy/investor-a/history",
-        headers=headers,
-    )
-
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert history.status_code == 200
-    assert history.json()["total"] == 2
-    assert second.json()["supersedes_identifier"] == first.json()["identifier"]
+    assert client.get("/v1/portfolios/GROWTH", headers=headers).status_code == 200
+    assert client.get("/v1/portfolios/INCOME", headers=headers).status_code == 404
