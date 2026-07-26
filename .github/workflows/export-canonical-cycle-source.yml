@@ -1,0 +1,29 @@
+name: Export canonical cycle source
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/export-canonical-cycle-source.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out canonical cycle branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/canonical-cio-cycle-daily-briefing
+
+      - name: Create exact source archive
+        run: zip -qr canonical-cycle-source.zip . -x '.git/*' 'canonical-cycle-source.zip'
+
+      - name: Upload exact source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-cycle-source
+          path: canonical-cycle-source.zip
+          if-no-files-found: error
+          retention-days: 1
