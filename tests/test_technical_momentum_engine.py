@@ -275,10 +275,10 @@ def test_json_provider_excludes_future_bars_and_fingerprints_source(
         ]
         + [
             {
-                "start_at": AS_OF + timedelta(hours=1),
-                "end_at": AS_OF + timedelta(hours=7),
-                "observed_at": AS_OF + timedelta(hours=7),
-                "retrieved_at": AS_OF + timedelta(hours=7),
+                "start_at": (AS_OF + timedelta(hours=1)).isoformat(),
+                "end_at": (AS_OF + timedelta(hours=7)).isoformat(),
+                "observed_at": (AS_OF + timedelta(hours=7)).isoformat(),
+                "retrieved_at": (AS_OF + timedelta(hours=7)).isoformat(),
                 "open": 200,
                 "high": 202,
                 "low": 198,
