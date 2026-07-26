@@ -25,6 +25,7 @@ from delivery import SQLiteAlertStore
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.normalization_store import SQLiteNormalizationStore
 from intelligence.risk import risk_source_readiness
+from intelligence.synthesis_store import SQLiteSynthesisStore
 from intelligence.technical_momentum import (
     technical_momentum_source_readiness,
 )
@@ -113,6 +114,10 @@ def ready(
             engine_path,
             read_only=True,
         ).readiness()
+        synthesis_ready, synthesis_detail = SQLiteSynthesisStore(
+            engine_path,
+            read_only=True,
+        ).readiness()
     else:
         engine_ready = True
         engine_detail = (
@@ -124,6 +129,11 @@ def ready(
             "normalization history has not been created; raw analytical engine "
             "results remain available"
         )
+        synthesis_ready = True
+        synthesis_detail = (
+            "weighted synthesis history has not been created; normalization "
+            "remains available"
+        )
     components["analytical_engines"] = ReadinessComponentResponse(
         required=False,
         ready=engine_ready,
@@ -133,6 +143,11 @@ def ready(
         required=False,
         ready=normalization_ready,
         detail=normalization_detail,
+    )
+    components["multi_engine_synthesis"] = ReadinessComponentResponse(
+        required=False,
+        ready=synthesis_ready,
+        detail=synthesis_detail,
     )
     breadth_source = os.environ.get(
         "CAPITAL_INTELLIGENCE_MARKET_BREADTH_FILE"
