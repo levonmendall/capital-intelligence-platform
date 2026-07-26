@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
@@ -17,7 +16,6 @@ from delivery import (
     DeliveryStatus,
     SQLiteAlertStore,
 )
-from personalization import SQLiteInvestorMemoryStore as BaseInvestorMemoryStore
 from security import (
     AuthenticationService,
     InvalidCredentialsError,
@@ -218,7 +216,7 @@ def _render_alert_controls(principal) -> None:
 
 
 def _authorized_bindings(principal) -> dict[str, object]:
-    """Build session-local portfolio and decision-review adapters for app.py."""
+    """Build session-local authorized portfolio adapters for app.py."""
 
     original_get_mandates = portfolio_services.get_mandates
     original_get_details = portfolio_services.get_mandate_details
@@ -246,9 +244,7 @@ def _authorized_bindings(principal) -> dict[str, object]:
             return original_get_trades(mandate_code, limit=limit)
         items: list[dict] = []
         for mandate in authorized_mandates():
-            items.extend(
-                original_get_trades(str(mandate["code"]), limit=limit)
-            )
+            items.extend(original_get_trades(str(mandate["code"]), limit=limit))
         items.sort(key=lambda item: int(item.get("id", 0)), reverse=True)
         return items[:limit]
 
@@ -266,41 +262,11 @@ def _authorized_bindings(principal) -> dict[str, object]:
             "total_return": ((nav / starting) - 1 if starting else 0.0),
         }
 
-    investor_identifier = principal.investor_identifier or principal.user_id
-
-    class AuthorizedMemoryStore(BaseInvestorMemoryStore):
-        """Compatibility-only access to historical decision-review records."""
-
-        def profile(self, ignored_identifier: str):
-            del ignored_identifier
-            return super().profile(investor_identifier)
-
-        def events(self, ignored_identifier: str, *, limit: int = 100):
-            del ignored_identifier
-            return super().events(investor_identifier, limit=limit)
-
-        def count(self, ignored_identifier: str | None = None):
-            del ignored_identifier
-            return super().count(investor_identifier)
-
-        def append(self, event):
-            if not principal.can_access_investor(
-                investor_identifier,
-                write=True,
-            ):
-                raise PermissionError(
-                    "decision-review journal access is not authorized"
-                )
-            return super().append(
-                replace(event, investor_identifier=investor_identifier)
-            )
-
     return {
         "get_mandate_details": authorized_details,
         "get_mandates": authorized_mandates,
         "get_portfolio_totals": authorized_totals,
         "get_trade_history": authorized_trades,
-        "SQLiteInvestorMemoryStore": AuthorizedMemoryStore,
     }
 
 
@@ -327,16 +293,6 @@ def _authorized_source() -> str:
 )
 ''',
         "",
-        1,
-    )
-    source = source.replace(
-        "    SQLiteInvestorMemoryStore,\n",
-        "",
-        1,
-    )
-    source = source.replace(
-        "@st.cache_resource\ndef investor_memory_store",
-        "def investor_memory_store",
         1,
     )
     return source
