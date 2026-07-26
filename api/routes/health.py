@@ -23,6 +23,7 @@ from api.schemas import (
 )
 from delivery import SQLiteAlertStore
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
+from intelligence.risk import risk_source_readiness
 from intelligence.technical_momentum import (
     technical_momentum_source_readiness,
 )
@@ -151,6 +152,12 @@ def ready(
         required=False,
         ready=technical_ready,
         detail=technical_detail,
+    )
+    risk_ready, risk_detail = risk_source_readiness()
+    components["risk_source"] = ReadinessComponentResponse(
+        required=False,
+        ready=risk_ready,
+        detail=risk_detail,
     )
     backup_ready = operations.backup_directory.exists() and os.access(
         operations.backup_directory,
