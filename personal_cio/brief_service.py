@@ -26,6 +26,7 @@ _ENGINE_ORDER = (
     "credit_cycle",
     "market_breadth",
     "valuation",
+    "technical_momentum",
 )
 _ENGINE_LABELS = {
     "global_liquidity": "Global liquidity",
@@ -33,6 +34,7 @@ _ENGINE_LABELS = {
     "credit_cycle": "Credit cycle",
     "market_breadth": "Market breadth",
     "valuation": "Valuation",
+    "technical_momentum": "Technical and momentum",
 }
 _ENGINE_TRANSMISSION_LABELS = {
     "global_liquidity": "Liquidity transmission",
@@ -40,6 +42,7 @@ _ENGINE_TRANSMISSION_LABELS = {
     "credit_cycle": "Credit-cycle transmission",
     "market_breadth": "Breadth transmission",
     "valuation": "Valuation transmission",
+    "technical_momentum": "Technical transmission",
 }
 
 
