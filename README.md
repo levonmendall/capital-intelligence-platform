@@ -150,6 +150,17 @@ python run_full_universe_screening.py \
 
 The cycle requires a currently certified and activated catalog, exact point-in-time metrics for the security master, and terminal screening results for every eligible constituent. Failed or incomplete partitions are retained for audit but cannot create an opportunity queue or CIO evidence.
 
+Run scheduled and event-driven thesis monitoring:
+
+```bash
+python run_thesis_monitoring.py \
+  --evidence-provider production_thesis_provider:create_provider \
+  --as-of 2026-07-27T00:00:00+00:00 \
+  --require-all-success
+```
+
+Monitoring appends point-in-time reviews and new living-thesis snapshots. Stable reviews remain silent; material invalidation, exit, reduction, evidence, replacement, or increase proposals enter a prioritized CIO review queue. The monitoring layer cannot resize positions, create orders, or issue the final CIO action.
+
 Run the economic-regime research pipeline:
 
 ```bash
@@ -240,6 +251,7 @@ Production investment reliance still requires broader live and licensed data cov
 - [Security-master ingestion and activation](docs/SECURITY_MASTER_OPERATIONS.md)
 - [Security-master provider certification](docs/PROVIDER_CERTIFICATION.md)
 - [Complete-universe screening](docs/FULL_UNIVERSE_SCREENING.md)
+- [Production thesis monitoring](docs/THESIS_MONITORING_OPERATIONS.md)
 - [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
 - [Daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Production API](docs/PRODUCTION_API.md)
