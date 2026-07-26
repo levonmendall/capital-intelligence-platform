@@ -23,6 +23,7 @@ from api.schemas import (
 )
 from delivery import SQLiteAlertStore
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
+from intelligence.valuation import valuation_source_readiness
 from operations import OperationalSettings
 from personal_cio import SQLiteInvestmentPolicyStore
 from security import AuthenticationService
@@ -135,6 +136,12 @@ def ready(
         required=False,
         ready=breadth_ready,
         detail=breadth_detail,
+    )
+    valuation_ready, valuation_detail = valuation_source_readiness()
+    components["valuation_source"] = ReadinessComponentResponse(
+        required=False,
+        ready=valuation_ready,
+        detail=valuation_detail,
     )
     backup_ready = operations.backup_directory.exists() and os.access(
         operations.backup_directory,
