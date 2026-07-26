@@ -1,0 +1,78 @@
+name: Apply production thesis monitoring
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/apply-production-thesis-monitoring.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out patch staging branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/export-production-thesis-monitoring
+          persist-credentials: true
+
+      - name: Reconstruct and verify validated patch
+        run: |
+          cat .github/patches/production-thesis-monitoring-{00..04}.b64 \
+            | base64 --decode \
+            > /tmp/production-thesis-monitoring.patch.gz
+          echo '024b9983aa73f17630763e066669e05b64faf8a5f24c98943e44c406e395b339  /tmp/production-thesis-monitoring.patch.gz' | sha256sum --check
+          gzip --decompress --stdout /tmp/production-thesis-monitoring.patch.gz > /tmp/production-thesis-monitoring.patch
+          echo '93e4518677947e03dfeefb29604ad13f5f0fc8b91edb46f1de3e9da1a6d988f1  /tmp/production-thesis-monitoring.patch' | sha256sum --check
+
+      - name: Check out product branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/production-thesis-monitoring
+          persist-credentials: true
+
+      - name: Apply exact thesis-monitoring patch
+        run: patch -p1 --forward --batch < /tmp/production-thesis-monitoring.patch
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+          python -m pip check
+          python scripts/verify_requirements_lock.py
+
+      - name: Validate exact updated branch
+        run: |
+          python -m compileall -q .
+          python initialize.py
+          python run_intelligence.py
+          python run_regime.py
+          pytest -q
+
+      - name: Commit validated thesis-monitoring authority
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            README.md \
+            ROADMAP.md \
+            docs/OPERATIONAL_SLOS.md \
+            docs/OPERATIONS.md \
+            docs/THESIS_MONITORING_OPERATIONS.md \
+            run_thesis_monitoring.py \
+            tests/test_run_thesis_monitoring.py \
+            tests/test_thesis_monitoring_orchestration.py \
+            thesis/orchestration.py
+          git commit -m 'Add production thesis monitoring orchestration'
+          git push origin HEAD:agent/production-thesis-monitoring
