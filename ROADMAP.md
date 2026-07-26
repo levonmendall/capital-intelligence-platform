@@ -4,10 +4,9 @@
 
 Foundation 1.x now has a deployable, observable, backed-up, and operationally
 hardened application baseline, a versioned investor-objective and Personal CIO
-communication layer, and seven reusable analytical engines: Global Liquidity,
-Business Cycle, Credit Cycle, Market Breadth, Valuation, Technical and Momentum,
-and Risk. The next milestone is governed institutional multi-engine decision
-normalization.
+communication layer, seven reusable analytical engines, and an append-only
+multi-engine normalization contract. The next milestone is versioned synthesis
+weights without changing the Capital Intelligence Score or committee authority.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -104,8 +103,9 @@ Brief rather than create an independent primary dashboard.
 
 ## Milestone 5 — Institutional market decision
 
-- [ ] Normalize engine results.
-- [ ] Produce separate opportunity, risk, confidence, and data-quality scores.
+- [x] Normalize engine results.
+- [ ] Produce separate aggregate opportunity, risk, confidence, and data-quality
+  scores.
 - [ ] Configure and version weights.
 - [ ] Apply missing-data and veto policies.
 - [ ] Submit all engine assessments to committee governance.
@@ -119,6 +119,11 @@ Brief rather than create an independent primary dashboard.
 - [x] Produce plain-language directional portfolio impact.
 - [x] Track conviction direction and component drivers across daily snapshots.
 - [x] Schedule monitoring cycles and connect user-selected delivery channels.
+
+Normalization is intentionally non-aggregating: it preserves each source engine,
+publishes comparable per-engine opportunity, risk, confidence, data-quality,
+freshness, coverage, and materiality dimensions, and applies no weights, vetoes,
+committee judgment, market stance, or Capital Intelligence Score changes.
 
 ## Milestone 6 — Stock intelligence
 

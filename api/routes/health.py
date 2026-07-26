@@ -23,6 +23,7 @@ from api.schemas import (
 )
 from delivery import SQLiteAlertStore
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
+from intelligence.normalization_store import SQLiteNormalizationStore
 from intelligence.risk import risk_source_readiness
 from intelligence.technical_momentum import (
     technical_momentum_source_readiness,
@@ -108,16 +109,30 @@ def ready(
             engine_path,
             read_only=True,
         ).readiness()
+        normalization_ready, normalization_detail = SQLiteNormalizationStore(
+            engine_path,
+            read_only=True,
+        ).readiness()
     else:
         engine_ready = True
         engine_detail = (
             "analytical engine history has not been created; the core daily "
             "intelligence path remains available"
         )
+        normalization_ready = True
+        normalization_detail = (
+            "normalization history has not been created; raw analytical engine "
+            "results remain available"
+        )
     components["analytical_engines"] = ReadinessComponentResponse(
         required=False,
         ready=engine_ready,
         detail=engine_detail,
+    )
+    components["multi_engine_normalization"] = ReadinessComponentResponse(
+        required=False,
+        ready=normalization_ready,
+        detail=normalization_detail,
     )
     breadth_source = os.environ.get(
         "CAPITAL_INTELLIGENCE_MARKET_BREADTH_FILE"

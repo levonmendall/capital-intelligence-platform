@@ -24,6 +24,8 @@ from intelligence.engine_cycle import AnalyticalEngineCycleExecutor
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.global_liquidity import build_fred_global_liquidity_engine
 from intelligence.market_breadth import build_configured_market_breadth_engine
+from intelligence.normalization import MultiEngineNormalizer
+from intelligence.normalization_store import SQLiteNormalizationStore
 from intelligence.regime_pipeline import build_fred_regime_pipeline
 from intelligence.risk import build_configured_risk_engine
 from intelligence.technical_momentum import (
@@ -54,9 +56,11 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
         daily_service,
         conviction_change_reader=conviction_change,
     )
-    analytical_store = SQLiteAnalyticalEngineStore(
-        settings.snapshot_database.with_name("analytical_engines.db")
+    analytical_path = settings.snapshot_database.with_name(
+        "analytical_engines.db"
     )
+    analytical_store = SQLiteAnalyticalEngineStore(analytical_path)
+    normalization_store = SQLiteNormalizationStore(analytical_path)
     executor = AnalyticalEngineCycleExecutor(
         canonical_executor,
         (
@@ -69,6 +73,8 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
             build_configured_risk_engine(),
         ),
         analytical_store,
+        normalizer=MultiEngineNormalizer(),
+        normalization_store=normalization_store,
     )
     alert_path = (
         settings.alert_database

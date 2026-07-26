@@ -80,6 +80,14 @@ _EXPORTS = {
         "intelligence.analytical_engine",
         "EngineEvidence",
     ),
+    "EngineNormalizationPolicy": (
+        "intelligence.normalization",
+        "EngineNormalizationPolicy",
+    ),
+    "EXPECTED_ENGINE_ORDER": (
+        "intelligence.normalization",
+        "EXPECTED_ENGINE_ORDER",
+    ),
     "GlobalLiquidityEngine": (
         "intelligence.global_liquidity",
         "GlobalLiquidityEngine",
@@ -112,6 +120,22 @@ _EXPORTS = {
         "intelligence.market_breadth",
         "MarketBreadthRun",
     ),
+    "MultiEngineNormalizationBundle": (
+        "intelligence.normalization",
+        "MultiEngineNormalizationBundle",
+    ),
+    "MultiEngineNormalizer": (
+        "intelligence.normalization",
+        "MultiEngineNormalizer",
+    ),
+    "NORMALIZATION_POLICY_VERSION": (
+        "intelligence.normalization",
+        "NORMALIZATION_POLICY_VERSION",
+    ),
+    "NormalizedEngineAssessment": (
+        "intelligence.normalization",
+        "NormalizedEngineAssessment",
+    ),
     "RegimeSeriesLoad": (
         "intelligence.regime_pipeline",
         "RegimeSeriesLoad",
@@ -128,9 +152,17 @@ _EXPORTS = {
         "intelligence.risk",
         "RiskRun",
     ),
+    "ScoreOrientation": (
+        "intelligence.normalization",
+        "ScoreOrientation",
+    ),
     "SQLiteAnalyticalEngineStore": (
         "intelligence.engine_store",
         "SQLiteAnalyticalEngineStore",
+    ),
+    "SQLiteNormalizationStore": (
+        "intelligence.normalization_store",
+        "SQLiteNormalizationStore",
     ),
     "ScenarioProbability": (
         "intelligence.cio_guidance",
