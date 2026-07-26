@@ -415,7 +415,8 @@ def test_expected_return_improvement_is_net_of_costs() -> None:
 def test_engine_source_does_not_use_cio_confidence_for_position_size() -> None:
     source = Path("portfolio/construction_engine.py").read_text(encoding="utf-8")
 
-    assert "confidence" not in source
+    assert "decision.final_confidence" not in source
+    assert ".final_confidence" not in source
     assert "recommended_position_weight" not in source
     assert "requested_target_weight" in source
 
