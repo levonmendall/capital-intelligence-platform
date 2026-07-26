@@ -2,15 +2,19 @@
 
 Capital Intelligence is an explainable, evidence-governed AI Chief Investment Officer designed to maximize long-term compounded portfolio returns.
 
-The platform continuously converts point-in-time global financial intelligence into qualified opportunities, independent specialist analyses, a final CIO decision, portfolio implementation, thesis monitoring, and outcome evaluation.
+> **Every recommendation is compared against all other available uses of capital, implemented at the portfolio level, continuously monitored against an explicit thesis, and evaluated afterward using the exact evidence available when the decision was made.**
 
-> **Governing objective: maximize long-term compounded portfolio returns.**
-
-Risk, liquidity, concentration, transaction costs, slippage, turnover, leverage, drawdown, evidence quality, data freshness, model confidence, and execution feasibility are operating constraints. Individual financial goals are not investment objectives and do not belong in the recommendation or portfolio-construction process.
+That sentence is the operating rule for the product. A security is never evaluated in isolation, analytical confidence never becomes position size, ownership never exists without a falsifiable thesis, and retrospective evaluation never substitutes hindsight data for the original evidence package.
 
 The binding product contract is [GOVERNING_SPECIFICATION.md](GOVERNING_SPECIFICATION.md).
 
-## Version 1 scope
+## Governing objective and constraints
+
+The objective is to maximize long-term compounded portfolio returns.
+
+Risk, liquidity, concentration, correlation, factor exposure, turnover, transaction costs, slippage, leverage, drawdown, evidence quality, data freshness, and implementation feasibility are constraints that protect compounding. Individual financial goals, retirement dates, preferred investment philosophies, behavioral memory, and personal risk preferences are not investment objectives and do not enter candidate ranking, specialist analysis, CIO synthesis, portfolio construction, or alerts.
+
+## Version 1 recommendation universe
 
 Direct recommendation and allocation eligibility is limited to:
 
@@ -18,46 +22,33 @@ Direct recommendation and allocation eligibility is limited to:
 - liquid U.S.-listed ETFs; and
 - cash or short-duration Treasury equivalents.
 
-Government bonds, credit, commodities, currencies, options, international indexes, global ETFs, crypto, volatility, and other markets may be analyzed as evidence. They are not direct recommendation targets until dedicated asset-specific frameworks have been validated.
+Other markets may be analyzed as evidence or regime inputs. They cannot become direct CIO recommendations until dedicated asset-specific frameworks are validated and added to the versioned recommendation-universe policy.
 
-## Current foundation
-
-Foundation 1.x currently includes:
-
-- point-in-time economic-regime intelligence;
-- normalized provenance-aware economic, market, security, and filing contracts;
-- seven reusable analytical engines;
-- append-only institutional history and Decision Replay foundations;
-- committee-governance and portfolio-fit foundations;
-- a daily environment and decision-card experience;
-- continuous analysis with selective material-change alerts;
-- authenticated FastAPI and four-surface Streamlit delivery;
-- encrypted backup and restore verification;
-- reproducible dependency locks and blocking security controls; and
-- research and paper-trading boundaries.
-
-The platform is not yet a complete production investment system. Opportunity ranking, the specified specialist committee, CIO synthesis, quantitative candidate schema, portfolio optimization, thesis monitoring, walk-forward validation, attribution, and confidence calibration remain active roadmap work.
-
-## Canonical decision loop
+## Implemented canonical loop
 
 ```text
-Global Financial Intelligence
-        -> Data Normalization, Provenance, and Point-in-Time Storage
-        -> Signal and Evidence Generation
-        -> Opportunity Detection and Ranking
-        -> Independent Specialist Analysis
-        -> Chief Investment Officer Decision
-        -> Portfolio Construction and Implementation
-        -> Continuous Thesis Monitoring
-        -> Daily Capital Intelligence
-        -> Evaluation, Attribution, and Confidence Calibration
+Point-in-time financial evidence
+        -> normalized provenance and availability boundaries
+        -> quantitative candidate records
+        -> comparison with cash, current holdings, and every supplied alternative
+        -> qualification and opportunity ranking
+        -> five independent specialist analyses
+        -> CIO synthesis, dissent preservation, vetoes, or abstention
+        -> portfolio-level sizing, funding, costs, and constraint checks
+        -> explicit living thesis and falsification conditions
+        -> Daily Capital Intelligence briefing
+        -> point-in-time outcome evaluation, attribution, and calibration
 ```
 
-The system is a continuous decision loop rather than a reporting pipeline.
+The core loop is implemented and enforced through typed contracts, a tamper-evident append-only journal, integration tests, and architecture tests.
 
-## Committee contract
+### Opportunity comparison
 
-The governing committee contains:
+Every candidate is evaluated against the complete point-in-time capital-alternative set supplied to the cycle, including cash, current holdings, and other qualified candidates. Weak, stale, redundant, illiquid, cost-disadvantaged, or infeasible candidates are rejected before specialist review. No superior opportunity is a valid result.
+
+### Independent specialist committee
+
+The committee contains:
 
 1. Macro & Economic Strategist
 2. Market Strategist
@@ -66,52 +57,19 @@ The governing committee contains:
 5. Evidence & Governance Officer
 6. Chief Investment Officer
 
-The first five analyze independently. The Evidence & Governance Officer may veto inadequate or irreproducible evidence. The Portfolio & Risk Manager may reject infeasible implementations. Only the CIO issues the final user-facing investment decision.
+The first five complete independent first-pass analyses. The Evidence & Governance Officer may veto inadequate or irreproducible evidence. The Portfolio & Risk Manager may reject an infeasible expression. Only the CIO issues the final user-facing investment decision. Weighted consensus is retained only in isolated legacy research modules and is not decision authority.
 
-Weighted specialist consensus is not the final authority. Material dissent is preserved and provided to the CIO.
+### Portfolio implementation
 
-## Permitted CIO decisions
+An approved CIO action is translated into a separate construction request. The construction engine determines feasible target weights and funding sources under cash, position, liquidity, sector, factor, correlation, turnover, cost, and minimum-retained-weight controls. CIO confidence is not used as a sizing input. The result remains a paper proposal and does not submit broker orders.
 
-- Buy
-- Increase
-- Hold
-- Reduce
-- Exit
-- Watch
-- Insufficient evidence
-- No superior opportunity
-- No material change
+### Living thesis
 
-No action is a valid and often preferable result.
+Implemented ownership requires an explicit thesis containing the original rationale, expected return, horizon, assumptions, catalysts, risks, invalidation conditions, monitoring indicators, evidence lineage, confidence, and review timing. Monitoring may classify the thesis as strengthening, stable, weakening, stale, replacement-opportunity, exit-review, or invalidated. It may propose CIO review but cannot trade or silently rewrite the original thesis.
 
-## Canonical intelligence workflow
+### Point-in-time evaluation
 
-Run the current economic-regime pipeline:
-
-```bash
-python run_regime.py
-```
-
-When `FRED_API_KEY` is configured, the command retrieves required FRED series. Missing credentials or observations reduce disclosed coverage; the pipeline never silently substitutes sample data.
-
-Journal a complete run:
-
-```bash
-python run_regime.py \
-  --journal database/institutional_journal.db \
-  --code-version YOUR_COMMIT_SHA
-```
-
-Run governance and journal the assessment and decision:
-
-```bash
-python run_regime.py \
-  --govern \
-  --journal database/institutional_journal.db \
-  --code-version YOUR_COMMIT_SHA
-```
-
-The append-only institutional journal is separate from mutable paper-portfolio tables and verifies a hash chain across recorded events.
+Every CIO decision receives an immutable decision-evidence snapshot. The snapshot freezes the original alternatives, evidence cutoff, prices, expected returns, risks, probability, specialist packet, models, policies, portfolio implementation, and thesis. Later evaluation compares realized results with the best alternative that was actually available at decision time, separates process quality from outcome, reconciles selection, sizing, timing, and costs, and supports confidence calibration without automatically changing governance.
 
 ## Daily Capital Intelligence
 
@@ -121,20 +79,49 @@ Run the authenticated Streamlit entrypoint:
 streamlit run secure_app.py
 ```
 
-The primary navigation remains deliberately limited to:
+The product retains four deliberately simple screens:
 
-1. **Today** — the material CIO briefing: what changed, why it matters, portfolio implication, action or disciplined no-action, confidence, and review conditions;
-2. **Environment** — concise market and economic context with supporting evidence;
-3. **Portfolio** — authorized holdings, paper activity, constraints, and non-executing implementation analysis; and
-4. **History** — decision history, score context, Decision Replay, thesis history, and paper activity.
+1. **Today** — the canonical CIO briefing: what changed, why it matters, the opportunity or risk, whether the portfolio should change, confidence, and evidence that would change the conclusion.
+2. **Environment** — diagnostic economic and market evidence that informs analysis but cannot issue a recommendation.
+3. **Portfolio** — canonical construction, authorized holdings, paper activity, costs, constraints, and implementation blocks.
+4. **History** — CIO briefings, point-in-time evaluations, living theses, and paper-trade records.
 
-The Capital Intelligence Score is a supporting environment/evidence indicator. It is not the governing product identity, an expected-return estimate, or a trading signal.
+There is no score-first opening screen, legacy recommendation fallback, conviction-trend authority, or Investor Memory decision control. If the canonical journal has no governed decision, the interface shows an honest no-decision state.
 
-The default experience is not a news feed and does not expose internal committee mechanics unless the user drills into analytical or audit detail.
+## Production API
 
-## Scheduled intelligence and selective alerts
+Run the API:
 
-Run the persistent worker:
+```bash
+uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+The primary institutional read endpoints are:
+
+```text
+GET /v1/cio/latest
+GET /v1/cio/history
+GET /v1/cio/decisions/latest
+GET /v1/cio/construction/latest
+GET /v1/cio/evidence/latest
+GET /v1/cio/evaluations/latest
+GET /v1/cio/theses
+GET /v1/cio/process
+```
+
+The API reads from the append-only CIO journal in query-only mode and returns journal sequence and content-hash metadata. It exposes no trade or allocation mutation route. `/v1/daily` and legacy replay/decision surfaces remain deprecated diagnostics. Personal CIO, conviction, goal, investment-policy, and Investor Memory route families are not registered.
+
+See [Production API](docs/PRODUCTION_API.md).
+
+## Canonical intelligence and operations
+
+Run the economic-regime research pipeline:
+
+```bash
+python run_regime.py
+```
+
+Run the persistent scheduler:
 
 ```bash
 python run_scheduler.py
@@ -146,32 +133,14 @@ Run one due cycle and delivery pass:
 python run_scheduler.py --once
 ```
 
-The worker records every analytical cycle and applies versioned material-change policy before delivery. Unchanged conditions remain quiet and produce an auditable suppression record. Alerts must be based on material opportunity, risk, thesis, evidence, or CIO-decision changes—not individual financial goals.
+Material-change delivery may reflect evidence, opportunity, risk, thesis, implementation, confidence, or CIO-decision changes. Score movement alone and individual financial goals cannot trigger investment alerts.
 
-## Authentication and authorization
-
-Authentication is required by default. Configure the initial administrator before the first API, Streamlit, scheduler, or backup start:
-
-```bash
-export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_EMAIL="admin@example.com"
-export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_PASSWORD="replace-with-a-long-random-password"
-export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_NAME="Platform Administrator"
-```
-
-Remove the bootstrap password after the first account is created.
-
-Users receive explicit roles and portfolio or mandate grants. Authorization controls access to portfolios, holdings, paper trades, value history, alerts, and audit records. Access controls do not create personalized investment objectives.
-
-See [Authentication and mandate authorization](docs/AUTHENTICATION_AND_AUTHORIZATION.md).
-
-## Deployment and operational hardening
+Deployment:
 
 ```bash
 cp deploy/staging.env.example deploy/staging.env
 docker compose up --build -d
 ```
-
-The same immutable image runs the API, web app, scheduler, and backup service. Containers run as a non-root user with a read-only root filesystem, dropped capabilities, explicit writable volumes, and loopback-only host ports by default.
 
 Operational endpoints:
 
@@ -183,65 +152,48 @@ GET /worker/health
 GET /metrics
 ```
 
-Create or verify backups with:
+Backup verification:
 
 ```bash
 python run_backup.py
 python run_backup.py --healthcheck
 python run_restore.py backups/<archive>.tar.gz.fernet --verify-only
-python run_restore.py backups/<archive>.tar.gz.fernet --target restored-database
 ```
 
-See [Deployment and operations](docs/OPERATIONS.md), [Backup and restore](docs/BACKUP_RESTORE.md), and [Incident response](docs/INCIDENT_RESPONSE.md).
+## Engineering invariants
 
-## Production API
+Every active recommendation path must:
 
-```bash
-uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000
-```
-
-Session endpoints:
-
-```text
-POST /v1/auth/login
-POST /v1/auth/refresh
-POST /v1/auth/logout
-GET  /v1/auth/me
-```
-
-Authenticated intelligence endpoints include daily snapshots, history, environment, decisions, replay artifacts, conviction context, authorized portfolios, and alerts. Goal-based investment-policy endpoints are compatibility surfaces scheduled for removal from the active decision path.
-
-Use `/docs` for interactive documentation and `/openapi.json` for the deterministic contract.
-
-## Engineering rules
-
-Every core change must:
-
-- improve long-term capital compounding;
+- optimize the governing objective subject to versioned constraints;
 - use traceable point-in-time evidence;
-- preserve source independence and contradictory evidence;
-- integrate with the common decision schema;
-- respect Version 1 recommendation eligibility;
-- preserve specialist independence and CIO-only action authority;
-- support no-action and insufficient-evidence outcomes;
-- keep sizing and execution separate from analytical conviction;
-- produce a falsifiable thesis and monitoring plan; and
-- support later attribution and confidence calibration.
+- compare the candidate with every available use of capital;
+- preserve contradictory evidence and source independence;
+- enforce Version 1 recommendation eligibility;
+- preserve specialist independence, vetoes, implementation blocks, and dissent;
+- attribute the user-facing action only to the CIO;
+- support disciplined no-action and insufficient-evidence outcomes;
+- keep confidence, sizing, and execution as separate authorities;
+- implement approved actions at portfolio level;
+- create and continuously challenge an explicit thesis; and
+- evaluate process and outcomes from the frozen decision-time evidence package.
+
+Architecture tests prevent active application and API entrypoints from importing personal-goal, Investor Memory, legacy weighted-committee, or score-first recommendation authority.
+
+## Status boundary
+
+The canonical institutional decision architecture is implemented. The software remains research and paper-trading software and does not execute live trades.
+
+Production investment reliance still requires broader live and licensed data coverage, comprehensive point-in-time Version 1 universe screening, extended walk-forward evidence across regimes, operational monitoring at production scale, paper-trading performance sufficient for governance approval, and a separately controlled execution system. The repository does not claim proven alpha or production brokerage readiness.
 
 ## Documentation
 
 - [Governing specification](GOVERNING_SPECIFICATION.md)
-- [Product vision](PRODUCT_VISION.md)
-- [Roadmap](ROADMAP.md)
 - [Architecture](ARCHITECTURE.md)
-- [Data sources and governance](DATA_SOURCES.md)
-- [Institutional decision engine](DECISION_ENGINE.md)
-- [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
-- [Portfolio-fit gate](docs/PORTFOLIO_FIT.md)
-- [Dependency management](docs/DEPENDENCIES.md)
+- [Roadmap](ROADMAP.md)
+- [Point-in-time evaluation](docs/POINT_IN_TIME_EVALUATION.md)
+- [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
+- [Daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Production API](docs/PRODUCTION_API.md)
+- [Legacy authority isolation](docs/LEGACY_AUTHORITY_ISOLATION.md)
+- [Data sources and governance](DATA_SOURCES.md)
 - [Operations](docs/OPERATIONS.md)
-
-## Status boundary
-
-The software remains research and paper-trading software. It does not execute live trades. Real-money reliance requires completion and validation of the remaining opportunity, portfolio, backtesting, attribution, and confidence-calibration layers.
