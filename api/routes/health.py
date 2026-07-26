@@ -23,6 +23,7 @@ from api.schemas import (
 )
 from delivery import SQLiteAlertStore
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
+from intelligence.governance_store import SQLiteGovernanceStore
 from intelligence.normalization_store import SQLiteNormalizationStore
 from intelligence.risk import risk_source_readiness
 from intelligence.synthesis_store import SQLiteSynthesisStore
@@ -118,6 +119,10 @@ def ready(
             engine_path,
             read_only=True,
         ).readiness()
+        governance_ready, governance_detail = SQLiteGovernanceStore(
+            engine_path,
+            read_only=True,
+        ).readiness()
     else:
         engine_ready = True
         engine_detail = (
@@ -134,6 +139,11 @@ def ready(
             "weighted synthesis history has not been created; normalization "
             "remains available"
         )
+        governance_ready = True
+        governance_detail = (
+            "governance history has not been created; weighted synthesis remains "
+            "available"
+        )
     components["analytical_engines"] = ReadinessComponentResponse(
         required=False,
         ready=engine_ready,
@@ -148,6 +158,11 @@ def ready(
         required=False,
         ready=synthesis_ready,
         detail=synthesis_detail,
+    )
+    components["multi_engine_governance"] = ReadinessComponentResponse(
+        required=False,
+        ready=governance_ready,
+        detail=governance_detail,
     )
     breadth_source = os.environ.get(
         "CAPITAL_INTELLIGENCE_MARKET_BREADTH_FILE"

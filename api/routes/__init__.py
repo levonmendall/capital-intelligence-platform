@@ -7,6 +7,7 @@ from api.routes.credit_cycle import router as credit_cycle_router
 from api.routes.daily import router as daily_router
 from api.routes.decisions import router as decisions_router
 from api.routes.environment import router as environment_router
+from api.routes.governance import router as governance_router
 from api.routes.health import router as health_router
 from api.routes.liquidity import router as liquidity_router
 from api.routes.market_breadth import router as market_breadth_router
@@ -31,6 +32,7 @@ __all__ = [
     "daily_router",
     "decisions_router",
     "environment_router",
+    "governance_router",
     "health_router",
     "liquidity_router",
     "market_breadth_router",
