@@ -1,0 +1,29 @@
+name: Export SLO base source
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/export-slo-base.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+
+      - name: Create exact source archive
+        run: zip -qr slo-base.zip . -x '.git/*' 'slo-base.zip'
+
+      - name: Upload exact source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: slo-base
+          path: slo-base.zip
+          if-no-files-found: error
+          retention-days: 1
