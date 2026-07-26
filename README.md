@@ -115,6 +115,15 @@ See [Production API](docs/PRODUCTION_API.md).
 
 ## Canonical intelligence and operations
 
+Run or inspect security-master ingestion:
+
+```bash
+SEC_USER_AGENT="Capital Intelligence operations@example.com" python run_security_master.py
+python run_security_master.py --status
+```
+
+The public SEC current feed is stored for discovery but cannot pass the full-universe activation gate. Licensed historical coverage remains a separate production requirement.
+
 Run the economic-regime research pipeline:
 
 ```bash
@@ -191,6 +200,8 @@ Production investment reliance still requires broader live and licensed data cov
 - [Architecture](ARCHITECTURE.md)
 - [Roadmap](ROADMAP.md)
 - [Point-in-time evaluation](docs/POINT_IN_TIME_EVALUATION.md)
+- [Point-in-time security master](docs/POINT_IN_TIME_SECURITY_MASTER.md)
+- [Security-master ingestion and activation](docs/SECURITY_MASTER_OPERATIONS.md)
 - [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
 - [Daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Production API](docs/PRODUCTION_API.md)

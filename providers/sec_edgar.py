@@ -23,6 +23,8 @@ from data import (
     InstrumentType,
     Issuer,
     SecurityMasterCatalog,
+    SecurityMasterCatalogDelivery,
+    SecurityMasterIngestionQuery,
     SecurityMasterCoverage,
     SecurityMasterSnapshot,
     TradingCalendar,
@@ -169,7 +171,26 @@ class SECEdgarProvider:
             source=self.name,
         )
 
-    def fetch_security_master_catalog(self) -> SecurityMasterCatalog:
+    def fetch_security_master_delivery(
+        self,
+        query: SecurityMasterIngestionQuery,
+    ) -> SecurityMasterCatalogDelivery:
+        """Retrieve a current-only catalog with explicit delivery timestamps."""
+
+        if not isinstance(query, SecurityMasterIngestionQuery):
+            raise TypeError("query must be SecurityMasterIngestionQuery")
+        snapshot = self.fetch_security_master()
+        return SecurityMasterCatalogDelivery(
+            catalog=self._security_master_catalog(snapshot),
+            observed_at=snapshot.observed_at,
+            retrieved_at=snapshot.retrieved_at,
+            request_identifier=query.identifier,
+        )
+
+    def fetch_security_master_catalog(
+        self,
+        query: SecurityMasterIngestionQuery | None = None,
+    ) -> SecurityMasterCatalog:
         """Return a current-only catalog with explicit non-authoritative coverage.
 
         The public SEC ticker-exchange file is useful identity evidence, but it
@@ -177,7 +198,14 @@ class SECEdgarProvider:
         delistings, venue history, or a complete corporate-action history.
         """
 
-        snapshot = self.fetch_security_master()
+        if query is not None:
+            return self.fetch_security_master_delivery(query).catalog
+        return self._security_master_catalog(self.fetch_security_master())
+
+    def _security_master_catalog(
+        self,
+        snapshot: SecurityMasterSnapshot,
+    ) -> SecurityMasterCatalog:
         return SecurityMasterCatalog.from_current_snapshot(
             snapshot,
             identifier=(

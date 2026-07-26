@@ -93,8 +93,8 @@ Delisted securities remain present in historical snapshots when they were active
 
 A credible backtest must still obtain authoritative historical catalogs and market/fundamental data from licensed providers. The domain prevents look-ahead and survivorship errors in software; it cannot supply missing commercial history.
 
-## Current boundary and next step
+## Operational ingestion and current boundary
 
-The repository now has the complete temporal model, authoritative-coverage gate, append-only store, Version 1 universe builder, candidate lineage enforcement, and deterministic tests. It does **not** yet operate a complete licensed full-universe master.
+The repository now has the temporal model, provider-delivery contract, deterministic source reconciliation, coverage and freshness diagnostics, append-only catalog and activation histories, expiring activation, Version 1 universe construction, candidate lineage enforcement, and deterministic tests. See [Security-master ingestion and activation](SECURITY_MASTER_OPERATIONS.md).
 
-The next data step is provider integration for historical identifiers, venue history, delistings, corporate actions, instrument classification, and service-level monitoring. Only after that coverage is validated should continuous full-universe screening be enabled.
+It does **not** yet operate a complete licensed full-universe master. The remaining data step is integration and contractual validation of a provider supplying historical identifiers, venue history, delistings, corporate actions, complete instrument classification, full eligible-universe coverage, and a production service level. Only an explicitly activated catalog may enable continuous full-universe screening.
