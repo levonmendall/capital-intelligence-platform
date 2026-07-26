@@ -132,9 +132,21 @@ _EXPORTS = {
         "intelligence.regime_pipeline",
         "SeriesLoadState",
     ),
+    "ValuationEngine": (
+        "intelligence.valuation",
+        "ValuationEngine",
+    ),
+    "ValuationRun": (
+        "intelligence.valuation",
+        "ValuationRun",
+    ),
     "build_configured_market_breadth_engine": (
         "intelligence.market_breadth",
         "build_configured_market_breadth_engine",
+    ),
+    "build_configured_valuation_engine": (
+        "intelligence.valuation",
+        "build_configured_valuation_engine",
     ),
     "build_fred_business_cycle_engine": (
         "intelligence.business_cycle",
