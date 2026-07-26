@@ -21,6 +21,7 @@ from api.routes import (
     authentication_router,
     business_cycle_router,
     credit_cycle_router,
+    cio_router,
     daily_router,
     decisions_router,
     environment_router,
@@ -30,7 +31,6 @@ from api.routes import (
     market_breadth_router,
     normalization_router,
     operations_router,
-    personal_router,
     portfolios_router,
     replays_router,
     risk_router,
@@ -147,6 +147,7 @@ def create_app(
         app.include_router(authentication_router)
         app.include_router(users_router)
         app.include_router(alerts_router, dependencies=protected)
+    app.include_router(cio_router, dependencies=protected)
     app.include_router(daily_router, dependencies=protected)
     app.include_router(environment_router, dependencies=protected)
     app.include_router(business_cycle_router, dependencies=protected)
@@ -161,7 +162,6 @@ def create_app(
     app.include_router(governance_router, dependencies=protected)
     app.include_router(decisions_router, dependencies=protected)
     app.include_router(replays_router, dependencies=protected)
-    app.include_router(personal_router, dependencies=protected)
     app.include_router(portfolios_router, dependencies=protected)
     return app
 

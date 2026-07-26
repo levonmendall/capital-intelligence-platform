@@ -12,7 +12,7 @@ from cio import (
     ChiefInvestmentOfficer,
     IndependentSpecialistPacket,
 )
-from cio.persistence import SQLiteCIOJournal
+from cio.persistence import CIOJournalEventType, SQLiteCIOJournal
 from committee.specialists import (
     CandidateSpecialistContext,
     IndependentSpecialistService,
@@ -466,6 +466,19 @@ class CanonicalCIOCycle:
             construction=construction,
             theses=theses,
         )
+        if self.journal is not None:
+            self.journal.append(
+                event_type=CIOJournalEventType.DAILY_CIO_BRIEFING,
+                aggregate_identifier=cycle_identifier,
+                occurred_at=portfolio.as_of,
+                payload={
+                    **briefing.to_dict(),
+                    "cycle_identifier": cycle_identifier,
+                    "code_version": code_version or "unknown",
+                },
+                schema_version="daily-cio-briefing.v1",
+                event_identifier=f"event:daily-cio:{cycle_identifier}",
+            )
         return CanonicalCIOCycleResult(
             identifier=cycle_identifier,
             as_of=portfolio.as_of,

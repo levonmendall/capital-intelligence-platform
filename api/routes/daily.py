@@ -9,7 +9,11 @@ from api.dependencies import get_resources, get_settings
 from api.repositories import ApiResources
 from api.schemas import DailyHistoryResponse, ErrorResponse
 
-router = APIRouter(prefix="/v1/daily", tags=["daily intelligence"])
+router = APIRouter(
+    prefix="/v1/daily",
+    tags=["legacy daily diagnostics"],
+    deprecated=True,
+)
 
 
 @router.get(

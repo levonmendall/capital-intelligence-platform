@@ -161,6 +161,33 @@ class DailyHistoryResponse(StrictModel):
     total: int
 
 
+class CIOBriefingResponse(StrictModel):
+    identifier: str
+    as_of: str
+    status: str
+    what_changed: str
+    why_it_matters: str
+    opportunity_or_risk: str
+    portfolio_decision: str
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    evidence_that_changes_conclusion: list[str]
+    material_developments: list[str]
+    candidate_identifier: str | None
+    decision_identifier: str | None
+    construction_status: str | None
+    thesis_identifiers: list[str]
+    cycle_identifier: str
+    code_version: str
+    journal: dict[str, Any]
+
+
+class CIOBriefingHistoryResponse(StrictModel):
+    items: list[CIOBriefingResponse]
+    limit: int
+    offset: int
+    total: int
+
+
 class EnvironmentResponse(StrictModel):
     snapshot_identifier: str
     as_of: str
@@ -280,6 +307,8 @@ __all__ = [
     "ConvictionDriverResponse",
     "ConvictionHistoryItem",
     "ConvictionTrendResponse",
+    "CIOBriefingHistoryResponse",
+    "CIOBriefingResponse",
     "CreateUserRequest",
     "CurrentUserResponse",
     "DailyHistoryItem",

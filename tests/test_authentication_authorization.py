@@ -186,7 +186,7 @@ def test_portfolio_list_and_detail_are_mandate_scoped(tmp_path) -> None:
     ).status_code == 200
 
 
-def test_investor_memory_cannot_cross_identity_boundaries(tmp_path) -> None:
+def test_retired_investor_memory_routes_cannot_be_reactivated_by_identity(tmp_path) -> None:
     client, _, _, _, _ = _secured_client(tmp_path)
     investor_a = _login(client, "investor-a@example.com", INVESTOR_PASSWORD)
 
@@ -198,8 +198,7 @@ def test_investor_memory_cannot_cross_identity_boundaries(tmp_path) -> None:
         "/v1/investor-memory/investor-b",
         headers=_headers(investor_a),
     )
-    assert own.status_code == 200
-    assert own.json()["investor_identifier"] == "investor-a"
+    assert own.status_code == 404
     assert other.status_code == 404
 
 
@@ -238,7 +237,7 @@ def test_administrator_can_create_users_and_assign_access(tmp_path) -> None:
     ).status_code == 200
     assert client.get(
         "/v1/investor-memory/investor-a", headers=_headers(advisor)
-    ).status_code == 200
+    ).status_code == 404
     assert client.get("/v1/users", headers=_headers(advisor)).status_code == 403
 
 

@@ -433,11 +433,25 @@ class ReplayRepository:
 
 
 class JournalRepository:
-    """Readiness check for the institutional journal."""
+    """Read canonical CIO events from the append-only journal."""
+
+    _TABLE = "cio_journal_events"
 
     def __init__(self, path: Path, *, required: bool) -> None:
         self.path = path
         self.required = required
+
+    @staticmethod
+    def _has_table(connection: sqlite3.Connection) -> bool:
+        row = connection.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            """,
+            (JournalRepository._TABLE,),
+        ).fetchone()
+        return row is not None
 
     def check(self) -> ReadinessComponent:
         if not self.path.exists() and not self.required:
@@ -445,11 +459,11 @@ class JournalRepository:
                 name="institutional_journal",
                 required=False,
                 ready=True,
-                detail="journal is optional and has not been created",
+                detail="CIO journal is optional and has not been created",
             )
         try:
             with _read_only_connection(self.path) as connection:
-                connection.execute("SELECT 1").fetchone()
+                has_table = self._has_table(connection)
         except (sqlite3.Error, RepositoryUnavailableError) as error:
             return ReadinessComponent(
                 name="institutional_journal",
@@ -457,12 +471,146 @@ class JournalRepository:
                 ready=False,
                 detail=str(error),
             )
+        if not has_table:
+            return ReadinessComponent(
+                name="institutional_journal",
+                required=self.required,
+                ready=not self.required,
+                detail=(
+                    "canonical CIO journal table has not been created"
+                    if not self.required
+                    else "canonical CIO journal table is required but missing"
+                ),
+            )
         return ReadinessComponent(
             name="institutional_journal",
             required=self.required,
             ready=True,
-            detail="institutional journal is readable",
+            detail="append-only canonical CIO journal is readable",
         )
+
+    @staticmethod
+    def _payload(row: sqlite3.Row) -> dict[str, Any]:
+        payload = _decode_object(
+            str(row["payload_json"]),
+            source=f"cio-journal:{row['event_identifier']}",
+        )
+        return {
+            **payload,
+            "journal": {
+                "sequence": int(row["sequence"]),
+                "event_identifier": str(row["event_identifier"]),
+                "aggregate_identifier": str(row["aggregate_identifier"]),
+                "event_type": str(row["event_type"]),
+                "occurred_at": str(row["occurred_at"]),
+                "recorded_at": str(row["recorded_at"]),
+                "schema_version": str(row["schema_version"]),
+                "content_hash": str(row["content_hash"]),
+            },
+        }
+
+    def latest_payload(
+        self,
+        event_type: str,
+        *,
+        aggregate_identifier: str | None = None,
+    ) -> dict[str, Any] | None:
+        clauses = ["event_type = ?"]
+        parameters: list[object] = [event_type]
+        if aggregate_identifier is not None:
+            clauses.append("aggregate_identifier = ?")
+            parameters.append(aggregate_identifier)
+        try:
+            with _read_only_connection(self.path) as connection:
+                if not self._has_table(connection):
+                    return None
+                row = connection.execute(
+                    f"""
+                    SELECT * FROM {self._TABLE}
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY sequence DESC
+                    LIMIT 1
+                    """,
+                    tuple(parameters),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise RepositoryUnavailableError(
+                "canonical CIO journal cannot be queried"
+            ) from error
+        return None if row is None else self._payload(row)
+
+    def history(
+        self,
+        event_type: str,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> tuple[dict[str, Any], ...]:
+        try:
+            with _read_only_connection(self.path) as connection:
+                if not self._has_table(connection):
+                    return ()
+                rows = connection.execute(
+                    f"""
+                    SELECT * FROM {self._TABLE}
+                    WHERE event_type = ?
+                    ORDER BY sequence DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (event_type, limit, offset),
+                ).fetchall()
+        except sqlite3.Error as error:
+            raise RepositoryUnavailableError(
+                "canonical CIO journal history cannot be queried"
+            ) from error
+        return tuple(self._payload(row) for row in rows)
+
+    def latest_per_aggregate(
+        self,
+        event_type: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[dict[str, Any], ...]:
+        try:
+            with _read_only_connection(self.path) as connection:
+                if not self._has_table(connection):
+                    return ()
+                rows = connection.execute(
+                    f"""
+                    SELECT event.*
+                    FROM {self._TABLE} AS event
+                    JOIN (
+                        SELECT aggregate_identifier, MAX(sequence) AS sequence
+                        FROM {self._TABLE}
+                        WHERE event_type = ?
+                        GROUP BY aggregate_identifier
+                    ) AS latest
+                    ON event.sequence = latest.sequence
+                    ORDER BY event.sequence DESC
+                    LIMIT ?
+                    """,
+                    (event_type, limit),
+                ).fetchall()
+        except sqlite3.Error as error:
+            raise RepositoryUnavailableError(
+                "canonical CIO journal aggregates cannot be queried"
+            ) from error
+        return tuple(self._payload(row) for row in rows)
+
+    def count(self, event_type: str) -> int:
+        try:
+            with _read_only_connection(self.path) as connection:
+                if not self._has_table(connection):
+                    return 0
+                row = connection.execute(
+                    f"SELECT COUNT(*) AS count FROM {self._TABLE} WHERE event_type = ?",
+                    (event_type,),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise RepositoryUnavailableError(
+                "canonical CIO journal count cannot be queried"
+            ) from error
+        return int(row["count"])
 
 
 @dataclass(frozen=True, slots=True)
