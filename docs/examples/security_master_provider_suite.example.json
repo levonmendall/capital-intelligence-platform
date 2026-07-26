@@ -1,0 +1,22 @@
+[
+  {
+    "identifier": "historical-symbol-change-sample",
+    "kind": "symbol_change",
+    "description": "The pre-change and post-change symbols must be reproduced at their exact effective boundaries.",
+    "required": true,
+    "query": {
+      "identifier": "historical-symbol-change-sample",
+      "as_of": "2024-01-02T21:00:00+00:00",
+      "knowledge_cutoff": "2024-01-02T21:00:00+00:00",
+      "requested_at": "2026-07-26T18:00:00+00:00"
+    },
+    "expected_symbols": ["NEW"],
+    "excluded_symbols": ["OLD"],
+    "expected_listings": [
+      {"symbol": "NEW", "venue": "NASDAQ", "status": "active"}
+    ],
+    "expected_action_types": ["symbol_change"],
+    "minimum_instrument_count": 1,
+    "maximum_future_known_records": 0
+  }
+]

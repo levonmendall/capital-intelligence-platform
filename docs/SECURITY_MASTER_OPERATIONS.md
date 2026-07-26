@@ -26,9 +26,10 @@ Observation and retrieval timestamps are distinct from record-effective timestam
 3. append the catalog to `SQLiteSecurityMasterStore`;
 4. verify the catalog hash chain;
 5. construct the requested point-in-time snapshot;
-6. evaluate coverage, classification, identifiers, listings, future-known records, and source freshness;
-7. append the ingestion result to `SQLiteSecurityMasterOperationalStore`; and
-8. append a separate activation event only when every policy check passes.
+6. load the latest append-only provider certification report;
+7. evaluate certification, coverage, classification, identifiers, listings, future-known records, and source freshness;
+8. append the ingestion result to `SQLiteSecurityMasterOperationalStore`; and
+9. append a separate activation event only when every policy check passes.
 
 The three activation modes are:
 
@@ -43,6 +44,7 @@ Provider failure, reconciliation conflict, catalog rejection, and activation rej
 `SecurityMasterActivationPolicy` can require:
 
 - authoritative `SecurityMasterCoverage`;
+- a latest provider certification that is approved, unexpired, source-matched, and integrity-valid;
 - verified catalog-store integrity;
 - a maximum source-observation age;
 - a minimum active instrument count;
@@ -60,8 +62,12 @@ Activation is append-only but not permanent. `active_catalog()` rechecks:
 
 - the catalog hash chain;
 - the operational-event hash chain;
+- the provider-certification hash chain;
+- the latest certification decision and expiration;
 - authoritative coverage; and
 - current source age.
+
+A newly approved renewal does not silently inherit an old activation. The catalog must be ingested and activated again under the new certification identifier, preserving the exact authority used at activation time.
 
 A stale catalog automatically becomes unavailable for screening without deleting or rewriting its activation history. `status()` reports the latest ingestion, latest activation, source age, integrity state, readiness, and blocking reasons.
 
@@ -99,8 +105,14 @@ python run_security_master.py --status
 
 The default database is `database/security_master.db`. Override it with `CAPITAL_INTELLIGENCE_SECURITY_MASTER_DATABASE` or `--database`.
 
+## Provider certification boundary
+
+Before activation, run the machine-readable capability manifest and historical scenario suite through `run_provider_certification.py`. The manifest and suite schemas, append-only registry, exit codes, renewal rules, and revocation semantics are documented in [Provider Certification](PROVIDER_CERTIFICATION.md).
+
+Conditional approval is not sufficient for activation. A later rejected report is a revocation event, and an expired report blocks the active catalog immediately.
+
 ## Production activation boundary
 
-A licensed provider can be integrated through the same protocol, but it must not be marked authoritative merely because an adapter exists. Production activation requires verified contractual rights, point-in-time historical delivery, complete eligible-universe coverage, delisted securities, corporate actions, identifier and venue history, classification quality, provenance, and an operational SLA.
+A licensed provider can be integrated through the same protocol, but it must not be marked authoritative merely because an adapter exists. Production activation requires verified contractual rights, point-in-time historical delivery, complete eligible-universe coverage, delisted securities, corporate actions, identifier and venue history, classification quality, provenance, an operational SLA, and an approved current certification report.
 
 Continuous full-universe screening must consume only `active_catalog()`. Reading the latest stored catalog directly would bypass the activation authority and is prohibited for investment decisions.

@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cio.persistence import CIOJournalIntegrityError, SQLiteCIOJournal
 from data.security import SecurityMasterError
+from data.security_master_certification import SQLiteProviderCertificationStore
 from data.security_master_ingestion import (
     SQLiteSecurityMasterOperationalStore,
     SecurityMasterActivationPolicy,
@@ -1460,6 +1461,9 @@ class SQLiteOperationalSLOSource:
                     maximum_catalog_age_hours=(
                         policy.provider_maximum_age_hours
                     ),
+                ),
+                certification_store=SQLiteProviderCertificationStore(
+                    self.security_master_database
                 ),
             )
             status = service.status(evaluated_at=evaluated_at)

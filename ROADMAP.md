@@ -54,7 +54,8 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Add point-in-time replay and look-ahead rejection tests.
 - [x] Add a temporal identifier, listing, delisting, corporate-action, and append-only catalog substrate with cutoff-aware replay.
 - [x] Add provider-neutral delivery timestamps, deterministic source reconciliation, coverage diagnostics, and append-only ingestion history.
-- [ ] Add licensed historical identifiers, corporate actions, delisted securities, and complete cross-venue adjustment policy.
+- [x] Add machine-readable provider manifests, deterministic historical certification scenarios, append-only approval history, renewal, and revocation controls.
+- [ ] Add licensed historical identifiers, corporate actions, delisted securities, and complete cross-venue adjustment policy through a certified provider.
 - [ ] Expand derivative-evidence lineage and source-family de-duplication across every production provider.
 
 ## Milestone 3 — Version 1 recommendation universe
@@ -66,8 +67,8 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Retain broader markets as evidence and regime inputs.
 - [x] Test eligibility and blocking behavior.
 - [x] Build validated point-in-time security-master snapshots and Version 1 membership with explicit authoritative-coverage gating.
-- [x] Add expiring activation that prevents incomplete, stale, conflicting, or integrity-invalid catalogs from powering screening.
-- [ ] Operate a complete production-quality point-in-time security master for the full eligible universe.
+- [x] Add expiring activation that prevents incomplete, stale, conflicting, integrity-invalid, uncertified, conditionally approved, rejected, or expired catalogs from powering screening.
+- [ ] Operate a complete production-quality point-in-time security master for the full eligible universe using an approved commercial provider.
 
 ## Milestone 4 — Common candidate decision schema
 
