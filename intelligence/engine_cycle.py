@@ -8,6 +8,8 @@ from typing import Any
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.normalization import MultiEngineNormalizer
 from intelligence.normalization_store import SQLiteNormalizationStore
+from intelligence.synthesis_store import SQLiteSynthesisStore
+from intelligence.synthesis_weights import MultiEngineSynthesizer
 
 
 class AnalyticalEngineCycleExecutor:
@@ -21,6 +23,8 @@ class AnalyticalEngineCycleExecutor:
         *,
         normalizer: MultiEngineNormalizer | None = None,
         normalization_store: SQLiteNormalizationStore | None = None,
+        synthesizer: MultiEngineSynthesizer | None = None,
+        synthesis_store: SQLiteSynthesisStore | None = None,
     ) -> None:
         resolved = tuple(engines)
         if not resolved:
@@ -36,6 +40,12 @@ class AnalyticalEngineCycleExecutor:
             raise ValueError(
                 "normalizer and normalization_store must be provided together"
             )
+        if (synthesizer is None) != (synthesis_store is None):
+            raise ValueError(
+                "synthesizer and synthesis_store must be provided together"
+            )
+        if synthesizer is not None and normalizer is None:
+            raise ValueError("weighted synthesis requires normalization")
         if normalizer is not None and not isinstance(
             normalizer,
             MultiEngineNormalizer,
@@ -48,11 +58,23 @@ class AnalyticalEngineCycleExecutor:
             raise TypeError(
                 "normalization_store must be a SQLiteNormalizationStore"
             )
+        if synthesizer is not None and not isinstance(
+            synthesizer,
+            MultiEngineSynthesizer,
+        ):
+            raise TypeError("synthesizer must be a MultiEngineSynthesizer")
+        if synthesis_store is not None and not isinstance(
+            synthesis_store,
+            SQLiteSynthesisStore,
+        ):
+            raise TypeError("synthesis_store must be a SQLiteSynthesisStore")
         self.canonical_executor = canonical_executor
         self.engines = resolved
         self.store = store
         self.normalizer = normalizer
         self.normalization_store = normalization_store
+        self.synthesizer = synthesizer
+        self.synthesis_store = synthesis_store
 
     def run(self, *, as_of):
         analytical_results = tuple(
@@ -64,6 +86,10 @@ class AnalyticalEngineCycleExecutor:
         if self.normalizer is not None and self.normalization_store is not None:
             bundle = self.normalizer.normalize(analytical_results, as_of=as_of)
             self.normalization_store.append(bundle)
+            if self.synthesizer is not None and self.synthesis_store is not None:
+                synthesis = self.synthesizer.synthesize(bundle)
+                self.synthesis_store.append_policy(self.synthesizer.policy)
+                self.synthesis_store.append(synthesis)
         return canonical
 
 
