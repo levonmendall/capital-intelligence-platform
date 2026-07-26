@@ -1,0 +1,82 @@
+name: Apply security-master ingestion and activation
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/apply-security-master-ingestion.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out patch staging branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/export-security-master-ingestion
+          persist-credentials: true
+
+      - name: Reconstruct and verify validated patch
+        run: |
+          cat .github/patches/security-master-ingestion-{00..03}.b64 \
+            | base64 --decode \
+            > /tmp/security-master-ingestion.patch.gz
+          echo '1011fa7af1844cc8edf6a0e0edb2afb26f572f88532ef3076f96b3b1b77b12b1  /tmp/security-master-ingestion.patch.gz' | sha256sum --check
+          gzip --decompress --stdout /tmp/security-master-ingestion.patch.gz > /tmp/security-master-ingestion.patch
+          echo 'b3ea0e697e9766ac1547c6e2f3fdb0d59a5d43bb363d6177e408999b3dc627ca  /tmp/security-master-ingestion.patch' | sha256sum --check
+
+      - name: Check out product branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/security-master-ingestion-activation
+          persist-credentials: true
+
+      - name: Apply exact operational patch
+        run: patch -p1 --forward --batch < /tmp/security-master-ingestion.patch
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+          python -m pip check
+          python scripts/verify_requirements_lock.py
+
+      - name: Validate exact updated branch
+        run: |
+          python -m compileall -q .
+          python initialize.py
+          python run_intelligence.py
+          python run_regime.py
+          pytest -q
+
+      - name: Commit validated operational layer
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            DATA_SOURCES.md \
+            README.md \
+            ROADMAP.md \
+            data/__init__.py \
+            data/security_master_ingestion.py \
+            docs/OPERATIONS.md \
+            docs/POINT_IN_TIME_SECURITY_MASTER.md \
+            docs/SECURITY_MASTER_OPERATIONS.md \
+            providers/sec_edgar.py \
+            run_security_master.py \
+            tests/test_run_security_master.py \
+            tests/test_sec_edgar_provider.py \
+            tests/test_security_master_ingestion.py
+          git commit -m 'Operationalize security-master ingestion and activation'
+          git push origin HEAD:agent/security-master-ingestion-activation
