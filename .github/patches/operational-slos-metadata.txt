@@ -1,0 +1,4 @@
+patch_sha256=f7cbc6952370565f07a320f9278d5b34a034d4b28f93464198803942efb12d41
+compressed_sha256=2ff5bd15fdda81374c53e11b02560f72890341ad93c49c9026128b55ce9400a0
+validated_tests=880
+product_branch=agent/production-operational-slos
