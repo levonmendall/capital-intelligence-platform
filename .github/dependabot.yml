@@ -5,13 +5,38 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
+    groups:
+      python-routine-updates:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: numpy
+        versions:
+          - ">=2.5"
+
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: python
+        versions:
+          - ">=3.12"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    groups:
+      actions-routine-updates:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
