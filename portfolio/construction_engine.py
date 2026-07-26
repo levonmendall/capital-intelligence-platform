@@ -24,7 +24,7 @@ from portfolio.construction_models import (
 )
 
 
-_EPSILON = 1e-7
+_EPSILON = 1e-9
 
 
 @dataclass(frozen=True, slots=True)
@@ -489,9 +489,28 @@ class PortfolioConstructionEngine:
     ) -> float:
         magnitude = abs(desired_change)
         direction = 1.0 if desired_change >= 0.0 else -1.0
+        starting = target.get(symbol, 0.0)
+
+        # Prefer the exact requested change when it is feasible. This avoids
+        # returning a value infinitesimally below a binding boundary.
+        exact = round(magnitude, 8)
+        exact_proposal = dict(target)
+        exact_proposal[symbol] = round(
+            starting + direction * exact,
+            10,
+        )
+        if (
+            exact_proposal[symbol] >= -_EPSILON
+            and self._is_feasible(
+                request=request,
+                target=exact_proposal,
+                assets=assets,
+            )
+        ):
+            return exact
+
         low = 0.0
         high = magnitude
-        starting = target.get(symbol, 0.0)
         for _ in range(55):
             middle = (low + high) / 2.0
             proposal = dict(target)
@@ -507,7 +526,25 @@ class PortfolioConstructionEngine:
                 low = middle
             else:
                 high = middle
-        return round(low, 8)
+
+        # Quantization can move the rounded result just beyond a binding
+        # limit. Step down by one weight quantum until the returned change is
+        # demonstrably feasible under the same complete constraint set.
+        candidate = round(low, 8)
+        while candidate > 0.0:
+            proposal = dict(target)
+            proposal[symbol] = round(
+                starting + direction * candidate,
+                10,
+            )
+            if self._is_feasible(
+                request=request,
+                target=proposal,
+                assets=assets,
+            ):
+                return candidate
+            candidate = round(max(0.0, candidate - 0.00000001), 8)
+        return 0.0
 
     def _is_feasible(
         self,
@@ -529,7 +566,11 @@ class PortfolioConstructionEngine:
             item.symbol: item.current_weight for item in request.positions
         }
         for symbol, weight in target.items():
-            if weight > self.policy.maximum_position_weight + _EPSILON:
+            effective_position_limit = max(
+                self.policy.maximum_position_weight,
+                current.get(symbol, 0.0),
+            )
+            if weight > effective_position_limit + _EPSILON:
                 return False
             trade_weight = abs(weight - current.get(symbol, 0.0))
             if trade_weight > self._liquidity_trade_limit(
@@ -543,15 +584,32 @@ class PortfolioConstructionEngine:
                 request.portfolio_value,
             ) + _EPSILON:
                 return False
+        current_sectors = self._sector_weights(current, assets)
         for sector, weight in self._sector_weights(target, assets).items():
-            if weight > self.policy.sector_limit(sector) + _EPSILON:
+            effective_limit = max(
+                self.policy.sector_limit(sector),
+                current_sectors.get(sector, 0.0),
+            )
+            if weight > effective_limit + _EPSILON:
                 return False
+        current_buckets = self._correlation_weights(current, assets)
         for bucket, weight in self._correlation_weights(target, assets).items():
-            if weight > self.policy.correlation_limit(bucket) + _EPSILON:
+            effective_limit = max(
+                self.policy.correlation_limit(bucket),
+                current_buckets.get(bucket, 0.0),
+            )
+            if weight > effective_limit + _EPSILON:
                 return False
+        current_factors = self._factor_exposures(current, assets)
         for factor, exposure in self._factor_exposures(target, assets).items():
-            limit = self.policy.factor_limit(factor)
-            if limit is not None and abs(exposure) > limit + _EPSILON:
+            policy_limit = self.policy.factor_limit(factor)
+            if policy_limit is None:
+                continue
+            effective_limit = max(
+                policy_limit,
+                abs(current_factors.get(factor, 0.0)),
+            )
+            if abs(exposure) > effective_limit + _EPSILON:
                 return False
         return True
 
@@ -601,15 +659,19 @@ class PortfolioConstructionEngine:
             item.symbol: item.current_weight for item in request.positions
         }
         for symbol, weight in sorted(target.items()):
+            effective_position_limit = max(
+                self.policy.maximum_position_weight,
+                current.get(symbol, 0.0),
+            )
             checks.append(
                 ConstraintCheck(
                     name=f"position:{symbol}",
-                    satisfied=weight <= self.policy.maximum_position_weight + _EPSILON,
+                    satisfied=weight <= effective_position_limit + _EPSILON,
                     value=weight,
-                    limit=self.policy.maximum_position_weight,
+                    limit=effective_position_limit,
                     detail=(
                         f"{symbol} target {weight:.2%} must not exceed "
-                        f"{self.policy.maximum_position_weight:.2%}"
+                        f"the effective {effective_position_limit:.2%} limit"
                     ),
                 )
             )
@@ -630,8 +692,10 @@ class PortfolioConstructionEngine:
                     ),
                 )
             )
+        current_sectors = self._sector_weights(current, assets)
         for sector, weight in sorted(self._sector_weights(target, assets).items()):
-            limit = self.policy.sector_limit(sector)
+            policy_limit = self.policy.sector_limit(sector)
+            limit = max(policy_limit, current_sectors.get(sector, 0.0))
             checks.append(
                 ConstraintCheck(
                     name=f"sector:{sector}",
@@ -640,14 +704,16 @@ class PortfolioConstructionEngine:
                     limit=limit,
                     detail=(
                         f"{sector} exposure {weight:.2%} must not exceed "
-                        f"{limit:.2%}"
+                        f"the effective {limit:.2%} limit"
                     ),
                 )
             )
+        current_buckets = self._correlation_weights(current, assets)
         for bucket, weight in sorted(
             self._correlation_weights(target, assets).items()
         ):
-            limit = self.policy.correlation_limit(bucket)
+            policy_limit = self.policy.correlation_limit(bucket)
+            limit = max(policy_limit, current_buckets.get(bucket, 0.0))
             checks.append(
                 ConstraintCheck(
                     name=f"correlation:{bucket}",
@@ -656,16 +722,21 @@ class PortfolioConstructionEngine:
                     limit=limit,
                     detail=(
                         f"{bucket} correlated exposure {weight:.2%} must not "
-                        f"exceed {limit:.2%}"
+                        f"exceed the effective {limit:.2%} limit"
                     ),
                 )
             )
+        current_factors = self._factor_exposures(current, assets)
         for factor, exposure in sorted(
             self._factor_exposures(target, assets).items()
         ):
-            limit = self.policy.factor_limit(factor)
-            if limit is None:
+            policy_limit = self.policy.factor_limit(factor)
+            if policy_limit is None:
                 continue
+            limit = max(
+                policy_limit,
+                abs(current_factors.get(factor, 0.0)),
+            )
             checks.append(
                 ConstraintCheck(
                     name=f"factor:{factor}",
@@ -674,7 +745,7 @@ class PortfolioConstructionEngine:
                     limit=limit,
                     detail=(
                         f"absolute {factor} exposure {abs(exposure):.2%} must "
-                        f"not exceed {limit:.2%}"
+                        f"not exceed the effective {limit:.2%} limit"
                     ),
                 )
             )
