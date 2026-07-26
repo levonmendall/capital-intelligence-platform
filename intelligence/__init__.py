@@ -12,6 +12,10 @@ from typing import Any
 
 
 _EXPORTS = {
+    "ActiveGovernanceVeto": (
+        "intelligence.governance",
+        "ActiveGovernanceVeto",
+    ),
     "AnalyticalEngineResult": (
         "intelligence.analytical_engine",
         "AnalyticalEngineResult",
@@ -64,6 +68,10 @@ _EXPORTS = {
         "intelligence.credit_cycle",
         "CreditCycleRun",
     ),
+    "DEFAULT_MULTI_ENGINE_GOVERNANCE_POLICY": (
+        "intelligence.governance",
+        "DEFAULT_MULTI_ENGINE_GOVERNANCE_POLICY",
+    ),
     "DEFAULT_SYNTHESIS_WEIGHT_POLICY": (
         "intelligence.synthesis_weights",
         "DEFAULT_SYNTHESIS_WEIGHT_POLICY",
@@ -108,6 +116,18 @@ _EXPORTS = {
         "intelligence.global_liquidity",
         "GlobalLiquidityRun",
     ),
+    "GOVERNANCE_POLICY_VERSION": (
+        "intelligence.governance",
+        "GOVERNANCE_POLICY_VERSION",
+    ),
+    "GovernanceIssue": (
+        "intelligence.governance",
+        "GovernanceIssue",
+    ),
+    "GovernanceStatus": (
+        "intelligence.governance",
+        "GovernanceStatus",
+    ),
     "GuidanceSynthesizer": (
         "intelligence.cio",
         "GuidanceSynthesizer",
@@ -119,6 +139,10 @@ _EXPORTS = {
     "InstitutionalRegimeRun": (
         "intelligence.regime_pipeline",
         "InstitutionalRegimeRun",
+    ),
+    "IssueSeverity": (
+        "intelligence.governance",
+        "IssueSeverity",
     ),
     "LiquidityAwareCycleExecutor": (
         "intelligence.liquidity_cycle",
@@ -135,6 +159,18 @@ _EXPORTS = {
     "MissingWeightPolicy": (
         "intelligence.synthesis_weights",
         "MissingWeightPolicy",
+    ),
+    "MultiEngineGovernancePolicy": (
+        "intelligence.governance",
+        "MultiEngineGovernancePolicy",
+    ),
+    "MultiEngineGovernanceResult": (
+        "intelligence.governance",
+        "MultiEngineGovernanceResult",
+    ),
+    "MultiEngineGovernor": (
+        "intelligence.governance",
+        "MultiEngineGovernor",
     ),
     "MultiEngineNormalizationBundle": (
         "intelligence.normalization",
@@ -160,6 +196,10 @@ _EXPORTS = {
         "intelligence.normalization",
         "NormalizedEngineAssessment",
     ),
+    "PositiveConclusionCeiling": (
+        "intelligence.governance",
+        "PositiveConclusionCeiling",
+    ),
     "RegimeSeriesLoad": (
         "intelligence.regime_pipeline",
         "RegimeSeriesLoad",
@@ -183,6 +223,10 @@ _EXPORTS = {
     "SQLiteAnalyticalEngineStore": (
         "intelligence.engine_store",
         "SQLiteAnalyticalEngineStore",
+    ),
+    "SQLiteGovernanceStore": (
+        "intelligence.governance_store",
+        "SQLiteGovernanceStore",
     ),
     "SQLiteNormalizationStore": (
         "intelligence.normalization_store",
@@ -227,6 +271,10 @@ _EXPORTS = {
     "ValuationRun": (
         "intelligence.valuation",
         "ValuationRun",
+    ),
+    "VetoType": (
+        "intelligence.governance",
+        "VetoType",
     ),
     "WeightedEngineContribution": (
         "intelligence.synthesis_weights",
