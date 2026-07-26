@@ -1,4 +1,4 @@
-"""Decision-process and outcome evaluation contracts."""
+"""Point-in-time decision evaluation and validation contracts."""
 
 from evaluation.decision_quality import (
     DecisionOutcome,
@@ -6,10 +6,56 @@ from evaluation.decision_quality import (
     DecisionQualityReview,
     ProcessVerdict,
 )
+from evaluation.point_in_time import (
+    AlternativeRealizedReturn,
+    CalibrationBucket,
+    CapitalAlternativeSnapshot,
+    ConfidenceCalibrationReport,
+    ConfidenceCalibrator,
+    DecisionEvidenceSnapshot,
+    DecisionReturnAttribution,
+    EvaluationOutcome,
+    EvaluationProcessVerdict,
+    EvidenceReference,
+    PointInTimeDecisionEvaluation,
+    PointInTimeDecisionEvaluator,
+    PointInTimeEvaluationPolicy,
+    RealizedDecisionOutcome,
+)
+from evaluation.walk_forward import (
+    PaperTradeFill,
+    PointInTimeResearchRecord,
+    PointInTimeUniverseMembership,
+    WalkForwardAudit,
+    WalkForwardAuditor,
+    WalkForwardFold,
+    WalkForwardVerdict,
+)
 
 __all__ = [
+    "AlternativeRealizedReturn",
+    "CalibrationBucket",
+    "CapitalAlternativeSnapshot",
+    "ConfidenceCalibrationReport",
+    "ConfidenceCalibrator",
+    "DecisionEvidenceSnapshot",
     "DecisionOutcome",
     "DecisionQualityClassification",
     "DecisionQualityReview",
+    "DecisionReturnAttribution",
+    "EvaluationOutcome",
+    "EvaluationProcessVerdict",
+    "EvidenceReference",
+    "PaperTradeFill",
+    "PointInTimeDecisionEvaluation",
+    "PointInTimeDecisionEvaluator",
+    "PointInTimeEvaluationPolicy",
+    "PointInTimeResearchRecord",
+    "PointInTimeUniverseMembership",
     "ProcessVerdict",
+    "RealizedDecisionOutcome",
+    "WalkForwardAudit",
+    "WalkForwardAuditor",
+    "WalkForwardFold",
+    "WalkForwardVerdict",
 ]

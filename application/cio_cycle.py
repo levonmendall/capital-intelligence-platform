@@ -10,6 +10,7 @@ from cio import (
     CIODecision,
     CandidateDecisionRecord,
     ChiefInvestmentOfficer,
+    IndependentSpecialistPacket,
 )
 from cio.persistence import SQLiteCIOJournal
 from committee.specialists import (
@@ -20,6 +21,8 @@ from committee.specialists import (
     PortfolioSpecialistContext,
 )
 from company import CompanyAnalysis
+from evaluation import DecisionEvidenceSnapshot
+from evaluation.persistence import append_construction, append_evidence_snapshot
 from opportunity import (
     OpportunityEngine,
     OpportunityQueue,
@@ -256,6 +259,7 @@ class CanonicalCIOCycleResult:
     decisions: tuple[CIODecision, ...]
     construction: PortfolioConstructionResult | None
     theses: tuple[LivingThesis, ...]
+    evaluation_snapshots: tuple[DecisionEvidenceSnapshot, ...]
     briefing: DailyCIOBriefing
 
     def __post_init__(self) -> None:
@@ -282,6 +286,17 @@ class CanonicalCIOCycleResult:
             isinstance(item, LivingThesis) for item in self.theses
         ):
             raise TypeError("theses must contain LivingThesis values")
+        if not isinstance(self.evaluation_snapshots, tuple) or not all(
+            isinstance(item, DecisionEvidenceSnapshot)
+            for item in self.evaluation_snapshots
+        ):
+            raise TypeError(
+                "evaluation_snapshots must contain DecisionEvidenceSnapshot values"
+            )
+        if len(self.evaluation_snapshots) != len(self.decisions):
+            raise ValueError(
+                "each CIO decision must have one point-in-time evaluation snapshot"
+            )
         if not isinstance(self.briefing, DailyCIOBriefing):
             raise TypeError("briefing must be DailyCIOBriefing")
         if self.briefing.as_of != self.as_of:
@@ -367,6 +382,7 @@ class CanonicalCIOCycle:
         )
 
         decisions: list[CIODecision] = []
+        packets_by_candidate: dict[str, IndependentSpecialistPacket] = {}
         ranked_by_candidate = {
             item.candidate.identifier: item for item in queue.ranked
         }
@@ -394,6 +410,7 @@ class CanonicalCIOCycle:
                 candidate,
                 specialist_context,
             )
+            packets_by_candidate[candidate.identifier] = packet
             decision = self.cio.synthesize(
                 candidate,
                 ranked.qualification.universe,
@@ -420,12 +437,27 @@ class CanonicalCIOCycle:
             ranked_by_candidate=ranked_by_candidate,
             portfolio=portfolio,
         )
+        if self.journal is not None and construction is not None:
+            append_construction(
+                self.journal,
+                construction,
+                code_version=code_version or "unknown",
+            )
         theses = self._create_theses(
             decisions=tuple(decisions),
             ranked_by_candidate=ranked_by_candidate,
             construction=construction,
             portfolio=portfolio,
             code_version=code_version,
+        )
+        snapshots = self._capture_evaluation_snapshots(
+            decisions=tuple(decisions),
+            ranked_by_candidate=ranked_by_candidate,
+            packets_by_candidate=packets_by_candidate,
+            opportunity_context=opportunity_context,
+            construction=construction,
+            theses=theses,
+            code_version=code_version or "unknown",
         )
         briefing = self.briefing_builder.build(
             as_of=portfolio.as_of,
@@ -441,8 +473,47 @@ class CanonicalCIOCycle:
             decisions=tuple(decisions),
             construction=construction,
             theses=theses,
+            evaluation_snapshots=snapshots,
             briefing=briefing,
         )
+
+
+    def _capture_evaluation_snapshots(
+        self,
+        *,
+        decisions: tuple[CIODecision, ...],
+        ranked_by_candidate: dict[str, object],
+        packets_by_candidate: dict[str, IndependentSpecialistPacket],
+        opportunity_context: OpportunitySetContext,
+        construction: PortfolioConstructionResult | None,
+        theses: tuple[LivingThesis, ...],
+        code_version: str,
+    ) -> tuple[DecisionEvidenceSnapshot, ...]:
+        thesis_by_decision = {
+            item.decision_identifier: item for item in theses
+        }
+        snapshots: list[DecisionEvidenceSnapshot] = []
+        for decision in decisions:
+            ranked = ranked_by_candidate[decision.candidate_identifier]
+            packet = packets_by_candidate[decision.candidate_identifier]
+            captured_at = max(
+                item.completed_at for item in packet.analyses
+            )
+            snapshot = DecisionEvidenceSnapshot.capture(
+                candidate=ranked.candidate,
+                ranked=ranked,
+                decision=decision,
+                packet=packet,
+                opportunity_context=opportunity_context,
+                construction=construction,
+                thesis=thesis_by_decision.get(decision.identifier),
+                captured_at=captured_at,
+                code_version=code_version,
+            )
+            snapshots.append(snapshot)
+            if self.journal is not None:
+                append_evidence_snapshot(self.journal, snapshot)
+        return tuple(snapshots)
 
     def _preview_portfolio(
         self,
