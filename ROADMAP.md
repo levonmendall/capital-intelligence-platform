@@ -93,6 +93,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Reject weak, stale, redundant, illiquid, cost-disadvantaged, or infeasible candidates before committee review.
 - [x] Detect replacement opportunities and weakening active theses.
 - [x] Build reproducible Version 1 universe snapshots from security-master identity plus point-in-time liquidity and analytical-coverage metrics.
+- [x] Add resumable partitioned screening that requires a certified active catalog, complete point-in-time metrics, exact eligible-universe coverage, and atomic opportunity publication.
 - [ ] Screen the complete eligible universe continuously with production-grade provider coverage.
 - [ ] Complete institutional reports, comparisons, screens, and watchlists across that full universe.
 
@@ -177,6 +178,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Add security-master ingestion status, source-age monitoring, catalog and operation hash verification, and an activation gate.
 - [ ] Expand licensed market, fundamentals, estimates, corporate-actions, and historical-universe coverage.
 - [x] Add production SLOs for provider freshness, full-universe cycle completion, thesis reviews, and evaluation latency.
+- [x] Connect governed universe cycles to append-only screening history, terminal SLO records, and atomic CIO-journal publication.
 - [ ] Complete long-duration incident, recovery, and data-reconciliation exercises at production scale.
 - [ ] Obtain governance approval before enabling any real-money execution capability.
 

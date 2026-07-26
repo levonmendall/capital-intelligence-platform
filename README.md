@@ -135,6 +135,21 @@ python run_provider_certification.py \
 
 A catalog cannot activate unless the latest provider certification is approved, unexpired, source-matched, and integrity-valid. Conditional approval is not investment authority, and a later rejected report immediately revokes screening readiness.
 
+Run one governed complete-universe screening cycle:
+
+```bash
+python run_full_universe_screening.py \
+  --cycle-id full-universe:2026-07-27 \
+  --scheduled-for 2026-07-27T11:00:00+00:00 \
+  --as-of 2026-07-27T12:00:00+00:00 \
+  --knowledge-cutoff 2026-07-27T12:00:00+00:00 \
+  --context deploy/opportunity-context.json \
+  --metrics-provider licensed_market_adapter:build_metrics_provider \
+  --candidate-provider production_candidate_adapter:build_candidate_provider
+```
+
+The cycle requires a currently certified and activated catalog, exact point-in-time metrics for the security master, and terminal screening results for every eligible constituent. Failed or incomplete partitions are retained for audit but cannot create an opportunity queue or CIO evidence.
+
 Run the economic-regime research pipeline:
 
 ```bash
@@ -224,6 +239,7 @@ Production investment reliance still requires broader live and licensed data cov
 - [Point-in-time security master](docs/POINT_IN_TIME_SECURITY_MASTER.md)
 - [Security-master ingestion and activation](docs/SECURITY_MASTER_OPERATIONS.md)
 - [Security-master provider certification](docs/PROVIDER_CERTIFICATION.md)
+- [Complete-universe screening](docs/FULL_UNIVERSE_SCREENING.md)
 - [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
 - [Daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Production API](docs/PRODUCTION_API.md)

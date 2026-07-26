@@ -43,7 +43,7 @@ python run_slos.py
 python run_slos.py --record-assessment --require-ready
 ```
 
-The CLI can also append a terminal full-universe cycle before assessment. Completed cycles require the active catalog identifier, universe-snapshot identifier, and coverage counts. Failed cycles require an explicit error.
+The governed screening orchestrator appends terminal full-universe cycle evidence automatically. Completed cycles require the certified active catalog identifier, immutable universe-snapshot identifier, exact eligible and screened counts, and a persisted atomic publication. Failed cycles require an explicit error and produce no CIO candidate or opportunity-queue evidence. The SLO CLI can append independently verified terminal evidence for administrative recovery, but it is not the normal production screening path.
 
 ```text
 GET /operations/slo
