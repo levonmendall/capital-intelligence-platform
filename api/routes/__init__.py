@@ -12,10 +12,8 @@ from api.routes.health import router as health_router
 from api.routes.liquidity import router as liquidity_router
 from api.routes.market_breadth import router as market_breadth_router
 from api.routes.normalization import router as normalization_router
-from api.routes.objectives import router as objectives_router
 from api.routes.operations import router as operations_router
 from api.routes.personal import router as personal_router
-from api.routes.personal_cio_history import router as personal_cio_history_router
 from api.routes.portfolios import router as portfolios_router
 from api.routes.replays import router as replays_router
 from api.routes.risk import router as risk_router
@@ -37,10 +35,8 @@ __all__ = [
     "liquidity_router",
     "market_breadth_router",
     "normalization_router",
-    "objectives_router",
     "operations_router",
     "personal_router",
-    "personal_cio_history_router",
     "portfolios_router",
     "replays_router",
     "risk_router",

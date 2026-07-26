@@ -32,7 +32,6 @@ from intelligence.technical_momentum import (
 )
 from intelligence.valuation import valuation_source_readiness
 from operations import OperationalSettings
-from personal_cio import SQLiteInvestmentPolicyStore
 from security import AuthenticationService
 
 router = APIRouter(tags=["operations"])
@@ -85,25 +84,6 @@ def ready(
         required=True,
         ready=alert_ready,
         detail=alert_detail + email_detail,
-    )
-    policy_path = settings.investor_memory_database.with_name(
-        "investment_policy.db"
-    )
-    if policy_path.exists():
-        policy_ready, policy_detail = SQLiteInvestmentPolicyStore(
-            policy_path,
-            read_only=True,
-        ).readiness()
-    else:
-        policy_ready = True
-        policy_detail = (
-            "no investor objectives have been recorded; personalized guidance "
-            "will disclose incomplete context"
-        )
-    components["investment_policy"] = ReadinessComponentResponse(
-        required=False,
-        ready=policy_ready,
-        detail=policy_detail,
     )
     engine_path = settings.snapshot_database.with_name("analytical_engines.db")
     if engine_path.exists():

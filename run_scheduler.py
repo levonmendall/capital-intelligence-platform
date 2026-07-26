@@ -37,12 +37,13 @@ from intelligence.technical_momentum import (
 )
 from intelligence.valuation import build_configured_valuation_engine
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
-from personal_cio import PersonalCIOAlertPlanner
 from reporting import build_conviction_trend_from_store
 from security import SQLiteIdentityStore
 
 
 def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
+    """Build continuous analysis and material-change delivery without goal inputs."""
+
     snapshot_store = SQLiteDailySnapshotStore(settings.snapshot_database)
     daily_service = DailyCapitalIntelligenceService(
         build_fred_regime_pipeline(),
@@ -97,14 +98,6 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
         refresh_ttl=timedelta(days=settings.refresh_token_days),
         password_minimum_length=settings.password_minimum_length,
     )
-    planner = PersonalCIOAlertPlanner(
-        identity_store=identity_store,
-        snapshot_database=settings.snapshot_database,
-        portfolio_database=settings.portfolio_database,
-        policy_database=settings.investor_memory_database.with_name(
-            "investment_policy.db"
-        ),
-    )
     dispatchers = {}
     if settings.smtp_host and settings.smtp_from_address:
         dispatchers[AlertChannel.EMAIL] = SMTPEmailDispatcher(
@@ -117,7 +110,6 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
         )
     alert_service = AlertDeliveryService(
         alert_store,
-        planner=planner,
         dispatchers=dispatchers,
         maximum_attempts=settings.alert_maximum_attempts,
         base_retry_delay=timedelta(minutes=settings.alert_retry_minutes),
