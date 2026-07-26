@@ -45,6 +45,9 @@ jobs:
       - name: Verify dependency consistency
         run: python -m pip check
 
+      - name: Verify runtime lock integrity
+        run: python scripts/verify_requirements_lock.py
+
       - name: Compile Python files
         run: python -m compileall -q .
 
