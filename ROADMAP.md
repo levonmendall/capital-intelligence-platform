@@ -5,9 +5,9 @@
 Foundation 1.x now has a deployable, observable, backed-up, and operationally
 hardened application baseline, a versioned investor-objective and Personal CIO
 communication layer, seven reusable analytical engines, append-only
-normalization, and versioned fixed-weight synthesis. The next milestone is a
-governed missing-data, conflict, confidence-ceiling, and veto policy without
-changing the Capital Intelligence Score or granting portfolio authority.
+normalization, versioned fixed-weight synthesis, and evidence governance. The
+next milestone is submitting the complete governed assessment to committee
+without changing the Capital Intelligence Score or granting portfolio authority.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -108,7 +108,7 @@ Brief rather than create an independent primary dashboard.
 - [x] Produce separate aggregate opportunity, risk, confidence, and data-quality
   scores.
 - [x] Configure and version weights.
-- [ ] Apply missing-data and veto policies.
+- [x] Apply missing-data and veto policies.
 - [ ] Submit all engine assessments to committee governance.
 - [x] Define append-only thesis lifecycle and falsification triggers.
 - [x] Define structured dissent and resolution conditions.
@@ -122,11 +122,12 @@ Brief rather than create an independent primary dashboard.
 - [x] Schedule monitoring cycles and connect user-selected delivery channels.
 
 Normalization remains the source-preserving translation layer. Versioned
-synthesis weights now produce separate aggregate dimensions only when at least
-five engines and 70% weighted coverage are available. Missing weight remains
-explicitly unallocated, evidence gaps reduce confidence and data quality, and
-no veto, committee judgment, market stance, Personal CIO action, or Capital
-Intelligence Score change is applied.
+synthesis weights produce separate aggregate dimensions only above governed
+coverage thresholds. Evidence governance preserves those scores, applies the
+strictest disclosed confidence ceiling, identifies material conflict, and can
+activate confirmed credit or risk vetoes. A veto blocks high-conviction positive
+conclusions but does not create a sell instruction, market stance, Personal CIO
+action, Capital Intelligence Score change, portfolio mutation, or transaction.
 
 ## Milestone 6 — Stock intelligence
 
