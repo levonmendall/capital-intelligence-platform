@@ -35,6 +35,12 @@ class CIOJournalEventType(str, Enum):
     CIO_DECISION = "cio_decision"
     THESIS_SNAPSHOT = "thesis_snapshot"
     THESIS_REVIEW = "thesis_review"
+    PORTFOLIO_CONSTRUCTION = "portfolio_construction"
+    DECISION_EVIDENCE_SNAPSHOT = "decision_evidence_snapshot"
+    DECISION_EVALUATION = "decision_evaluation"
+    CONFIDENCE_CALIBRATION = "confidence_calibration"
+    WALK_FORWARD_AUDIT = "walk_forward_audit"
+    PAPER_TRADE_FILL = "paper_trade_fill"
 
 
 class CIOJournalIntegrityError(RuntimeError):
