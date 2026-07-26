@@ -31,6 +31,20 @@ Expose ports only through a TLS reverse proxy in shared environments. The compos
 
 A stale or failed scheduler heartbeat returns HTTP 503 without marking the API process itself dead.
 
+## Security-master readiness
+
+The security master has a separate operational authority from ordinary store readiness. Catalog ingestion, activation, and source freshness can be inspected without contacting a provider:
+
+```bash
+python run_security_master.py --status
+```
+
+Monitor `screening_ready`, both integrity flags, the active catalog identifier, active source age, and blocking reasons. A catalog can remain stored while `screening_ready` is false. This is expected for the public SEC current feed and for any stale or incomplete provider delivery.
+
+Production full-universe screening must call the activated-catalog boundary. It must not read the latest catalog row directly. Alert on catalog-chain failure, operation-chain failure, source age above policy, activation rejection, reconciliation conflict, and an absent active catalog after the licensed provider's delivery window.
+
+See [Security-master ingestion and activation](SECURITY_MASTER_OPERATIONS.md).
+
 ## Logs and correlation
 
 Every API request receives an `X-Request-ID`. A valid inbound ID is preserved; otherwise a new UUID is generated. JSON logs include timestamp, severity, service, environment, release, request ID, path, status, duration, and client address. Passwords, tokens, authorization headers, and secrets are never added as structured fields.

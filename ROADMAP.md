@@ -53,6 +53,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Freeze every decision’s complete evidence package and original alternative set.
 - [x] Add point-in-time replay and look-ahead rejection tests.
 - [x] Add a temporal identifier, listing, delisting, corporate-action, and append-only catalog substrate with cutoff-aware replay.
+- [x] Add provider-neutral delivery timestamps, deterministic source reconciliation, coverage diagnostics, and append-only ingestion history.
 - [ ] Add licensed historical identifiers, corporate actions, delisted securities, and complete cross-venue adjustment policy.
 - [ ] Expand derivative-evidence lineage and source-family de-duplication across every production provider.
 
@@ -65,6 +66,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Retain broader markets as evidence and regime inputs.
 - [x] Test eligibility and blocking behavior.
 - [x] Build validated point-in-time security-master snapshots and Version 1 membership with explicit authoritative-coverage gating.
+- [x] Add expiring activation that prevents incomplete, stale, conflicting, or integrity-invalid catalogs from powering screening.
 - [ ] Operate a complete production-quality point-in-time security master for the full eligible universe.
 
 ## Milestone 4 — Common candidate decision schema
@@ -171,6 +173,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Selective material-change alerts and delivery preferences.
 - [x] Hardened containers, dependency locks, CodeQL, dependency audit, image scan, backup, and restore controls.
 - [x] Read-only canonical CIO journal API with content hashes.
+- [x] Add security-master ingestion status, source-age monitoring, catalog and operation hash verification, and an activation gate.
 - [ ] Expand licensed market, fundamentals, estimates, corporate-actions, and historical-universe coverage.
 - [ ] Add production SLOs for provider freshness, full-universe cycle completion, thesis reviews, and evaluation latency.
 - [ ] Complete long-duration incident, recovery, and data-reconciliation exercises at production scale.

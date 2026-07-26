@@ -5,7 +5,12 @@ from datetime import datetime, timezone
 import pytest
 import requests
 
-from data import FilingProvider, FilingQuery, SecurityMasterError
+from data import (
+    FilingProvider,
+    FilingQuery,
+    SecurityMasterError,
+    SecurityMasterIngestionQuery,
+)
 from providers.sec_edgar import (
     SEC_COMPANY_FACTS_URL,
     SEC_SUBMISSIONS_URL,
@@ -181,6 +186,32 @@ def test_security_master_uses_required_identity_header() -> None:
         "User-Agent": "Capital Intelligence test@example.com",
         "Accept-Encoding": "gzip, deflate",
     }
+
+
+def test_security_master_delivery_discloses_current_only_coverage() -> None:
+    provider, _ = provider_for(
+        {
+            SEC_TICKERS_URL: {
+                "fields": ["cik", "name", "ticker", "exchange"],
+                "data": [[320193, "Apple Inc.", "AAPL", "Nasdaq"]],
+            }
+        }
+    )
+    query = SecurityMasterIngestionQuery(
+        identifier="sec-test",
+        as_of=RETRIEVED_AT,
+        knowledge_cutoff=RETRIEVED_AT,
+        requested_at=RETRIEVED_AT,
+    )
+
+    delivery = provider.fetch_security_master_delivery(query)
+
+    assert delivery.request_identifier == "sec-test"
+    assert delivery.observed_at == RETRIEVED_AT
+    assert delivery.retrieved_at == RETRIEVED_AT
+    assert delivery.catalog.coverage.source == "SEC_EDGAR"
+    assert delivery.catalog.coverage.authoritative is False
+    assert "delisted securities" in delivery.catalog.coverage.deficiencies
 
 
 def test_filings_use_acceptance_timestamp_as_boundary() -> None:

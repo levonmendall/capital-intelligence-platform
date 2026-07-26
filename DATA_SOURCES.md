@@ -146,9 +146,13 @@ XBRL normalization, and network resilience remain separate milestones.
 
 The append-only `SQLiteSecurityMasterStore` preserves complete source catalogs with canonical JSON and a SHA-256 event chain. `Version1UniverseBuilder` combines a point-in-time catalog with liquidity, freshness, Treasury-duration, and analytical-coverage metrics available by the same cutoff. It then applies the versioned `RecommendationUniversePolicy` and emits both eligible constituents and explicit exclusions. Candidate records preserve the exact security-master snapshot and record identifiers used for classification.
 
-A provider is authoritative for full-universe decisions only when its `SecurityMasterCoverage` confirms licensed use, complete universe coverage, historical identifiers, listing history, delistings, corporate actions, complete provenance, and a defined service level. The SEC ticker-exchange feed fails that gate by design: it is current-only reference data, not a historical or survivorship-safe universe.
+Operational ingestion is provider-neutral. A `SecurityMasterCatalogDelivery` preserves the source observation and retrieval timestamps separately from the effective dates of the contained identity records. `SecurityMasterIngestionService` stores every accepted catalog, evaluates coverage and SLA quality, and records ingestion and activation in a second append-only hash chain. Activation expires when source freshness breaches policy, and screening must use `active_catalog()` rather than the latest stored catalog.
 
-See [Point-in-time security master](docs/POINT_IN_TIME_SECURITY_MASTER.md).
+Independent providers are reconciled only under an explicit source-priority policy. Economically identical overlapping facts may be de-duplicated; conflicting identifier values, classifications, listings, temporal boundaries, or corporate actions raise a typed reconciliation error. Composite coverage is conservative rather than upgraded by majority vote.
+
+A provider is authoritative for full-universe decisions only when its `SecurityMasterCoverage` confirms licensed use, complete universe coverage, historical identifiers, listing history, delistings, corporate actions, complete provenance, and a defined service level. The SEC ticker-exchange feed fails that gate by design: it is current-only reference data, not a historical or survivorship-safe universe. `run_security_master.py` can store that feed and report its deficiencies, but it cannot activate it for screening.
+
+See [Point-in-time security master](docs/POINT_IN_TIME_SECURITY_MASTER.md) and [security-master ingestion and activation](docs/SECURITY_MASTER_OPERATIONS.md).
 
 ## Crypto market requirements
 
