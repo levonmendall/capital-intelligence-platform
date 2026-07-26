@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 
 from api.config import ApiSettings
 from api.dependencies import (
@@ -52,6 +52,7 @@ def health(settings: ApiSettings = Depends(get_settings)) -> HealthResponse:
     responses={503: {"model": ReadinessResponse}},
 )
 def ready(
+    request: Request,
     response: Response,
     resources: ApiResources = Depends(get_resources),
     authentication: AuthenticationService = Depends(get_authentication),
@@ -205,6 +206,20 @@ def ready(
             f"{str(operations.enforce_https).lower()}; "
             "encrypted_backups_required="
             f"{str(operations.require_encrypted_backups).lower()}"
+        ),
+    )
+    slo_snapshot = request.app.state.operational_slo_service.assess()
+    slo_states = ", ".join(
+        f"{item.name.value}={item.status.value}"
+        for item in slo_snapshot.components
+    )
+    components["operational_slos"] = ReadinessComponentResponse(
+        required=operations.require_operational_slos,
+        ready=slo_snapshot.ready,
+        detail=(
+            f"policy={slo_snapshot.policy_version}; "
+            f"evaluated_at={slo_snapshot.evaluated_at.isoformat()}; "
+            f"{slo_states}"
         ),
     )
     ready_state = all(

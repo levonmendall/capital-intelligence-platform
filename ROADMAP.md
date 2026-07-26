@@ -175,7 +175,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Read-only canonical CIO journal API with content hashes.
 - [x] Add security-master ingestion status, source-age monitoring, catalog and operation hash verification, and an activation gate.
 - [ ] Expand licensed market, fundamentals, estimates, corporate-actions, and historical-universe coverage.
-- [ ] Add production SLOs for provider freshness, full-universe cycle completion, thesis reviews, and evaluation latency.
+- [x] Add production SLOs for provider freshness, full-universe cycle completion, thesis reviews, and evaluation latency.
 - [ ] Complete long-duration incident, recovery, and data-reconciliation exercises at production scale.
 - [ ] Obtain governance approval before enabling any real-money execution capability.
 

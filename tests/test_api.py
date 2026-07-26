@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from api import ApiSettings, create_app
+from operations import OperationalSettings
 
 
 def _snapshot_payload(
@@ -271,6 +272,75 @@ def test_health_and_readiness_distinguish_process_from_dependencies(tmp_path) ->
     assert readiness.json()["ready"] is True
     assert readiness.json()["components"]["daily_snapshots"]["ready"] is True
     assert readiness.json()["components"]["institutional_journal"]["required"] is False
+    slo = readiness.json()["components"]["operational_slos"]
+    assert slo["required"] is False
+    assert slo["ready"] is False
+
+    operational = client.get("/operations/slo")
+    assert operational.status_code == 200
+    assert operational.json()["ready"] is False
+    assert {item["name"] for item in operational.json()["components"]} == {
+        "provider_freshness",
+        "full_universe_cycle_completion",
+        "thesis_review_latency",
+        "decision_evaluation_latency",
+    }
+
+    metrics = client.get("/metrics")
+    assert metrics.status_code == 200
+    assert "capital_intelligence_operational_slo_ready 0" in metrics.text
+
+
+def test_required_operational_slos_fail_readiness_and_share_metrics_auth(
+    tmp_path,
+) -> None:
+    snapshot_database = tmp_path / "daily.db"
+    portfolio_database = tmp_path / "portfolio.db"
+    _create_snapshot_database(snapshot_database)
+    _create_portfolio_database(portfolio_database)
+    backup_directory = tmp_path / "backups"
+    backup_directory.mkdir()
+    token = "m" * 32
+    settings = ApiSettings(
+        snapshot_database=snapshot_database,
+        portfolio_database=portfolio_database,
+        journal_database=tmp_path / "missing-journal.db",
+        replay_directory=None,
+    )
+    operations = OperationalSettings(
+        metrics_token=token,
+        backup_directory=backup_directory,
+        security_master_database=tmp_path / "missing-security-master.db",
+        operational_slo_database=tmp_path / "operational-slos.db",
+        require_operational_slos=True,
+    )
+    client = TestClient(
+        create_app(settings=settings, operational_settings=operations)
+    )
+
+    readiness = client.get("/ready")
+    assert readiness.status_code == 503
+    assert readiness.json()["components"]["operational_slos"] == {
+        "required": True,
+        "ready": False,
+        "detail": readiness.json()["components"]["operational_slos"]["detail"],
+    }
+
+    unauthorized = client.get("/operations/slo")
+    assert unauthorized.status_code == 401
+    authorized = client.get(
+        "/operations/slo",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert authorized.status_code == 503
+    assert authorized.json()["ready"] is False
+
+    metrics = client.get(
+        "/metrics",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert metrics.status_code == 200
+    assert "capital_intelligence_operational_slo_ready 0" in metrics.text
 
 
 def test_latest_preserves_the_existing_schema_and_honest_status(tmp_path) -> None:
