@@ -9,34 +9,75 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   codeql:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: github/codeql-action/init@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           languages: python
-      - uses: github/codeql-action/analyze@v4
+
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
 
   advisory-audits:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.11"
-      - run: python -m pip install --upgrade pip pip-audit
-      - name: Report Python dependency advisories
-        continue-on-error: true
-        run: pip-audit -r requirements.txt --progress-spinner off
-      - run: docker build -t capital-intelligence:security .
-      - uses: aquasecurity/trivy-action@v0.36.0
+          cache: pip
+
+      - name: Install dependency auditor
+        run: python -m pip install --upgrade pip "pip-audit>=2.9,<3"
+
+      - name: Block vulnerable Python dependencies
+        run: pip-audit -r requirements.lock --progress-spinner off --strict
+
+      - name: Build security image
+        run: docker build -t capital-intelligence:security .
+
+      - name: Capture high and critical container findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: capital-intelligence:security
+          format: json
+          output: trivy-results.json
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+      - name: Publish container scan evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: trivy-results
+          path: trivy-results.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Block fixable critical container findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: capital-intelligence:security
           format: table
-          severity: CRITICAL,HIGH
-          exit-code: "0"
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
