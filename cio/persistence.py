@@ -41,6 +41,7 @@ class CIOJournalEventType(str, Enum):
     CONFIDENCE_CALIBRATION = "confidence_calibration"
     WALK_FORWARD_AUDIT = "walk_forward_audit"
     PAPER_TRADE_FILL = "paper_trade_fill"
+    DAILY_CIO_BRIEFING = "daily_cio_briefing"
 
 
 class CIOJournalIntegrityError(RuntimeError):

@@ -6,7 +6,11 @@ from api.dependencies import get_resources
 from api.repositories import ApiResources
 from api.schemas import DecisionResponse, ErrorResponse
 
-router = APIRouter(prefix="/v1/decisions", tags=["decisions"])
+router = APIRouter(
+    prefix="/v1/decisions",
+    tags=["legacy snapshot decisions"],
+    deprecated=True,
+)
 
 
 @router.get(
