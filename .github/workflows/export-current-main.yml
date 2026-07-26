@@ -1,0 +1,29 @@
+name: Export current main
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/export-current-main.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+
+      - name: Create exact main archive
+        run: zip -qr current-main-source.zip . -x '.git/*' 'current-main-source.zip'
+
+      - name: Upload exact main archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-main-source
+          path: current-main-source.zip
+          if-no-files-found: error
+          retention-days: 1
