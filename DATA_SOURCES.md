@@ -150,9 +150,11 @@ Operational ingestion is provider-neutral. A `SecurityMasterCatalogDelivery` pre
 
 Independent providers are reconciled only under an explicit source-priority policy. Economically identical overlapping facts may be de-duplicated; conflicting identifier values, classifications, listings, temporal boundaries, or corporate actions raise a typed reconciliation error. Composite coverage is conservative rather than upgraded by majority vote.
 
-A provider is authoritative for full-universe decisions only when its `SecurityMasterCoverage` confirms licensed use, complete universe coverage, historical identifiers, listing history, delistings, corporate actions, complete provenance, and a defined service level. The SEC ticker-exchange feed fails that gate by design: it is current-only reference data, not a historical or survivorship-safe universe. `run_security_master.py` can store that feed and report its deficiencies, but it cannot activate it for screening.
+A provider is authoritative for full-universe decisions only when its `SecurityMasterCoverage` confirms licensed use, complete universe coverage, historical identifiers, listing history, delistings, corporate actions, complete provenance, and a defined service level. Coverage claims are necessary but not sufficient: the latest `ProviderCertificationReport` must also be approved, unexpired, provider-matched, and backed by deterministic historical acceptance scenarios. A later rejected or expired report revokes screening readiness without rewriting prior history.
 
-See [Point-in-time security master](docs/POINT_IN_TIME_SECURITY_MASTER.md) and [security-master ingestion and activation](docs/SECURITY_MASTER_OPERATIONS.md).
+The SEC ticker-exchange feed fails both gates by design: it is current-only reference data, not a historical or survivorship-safe universe, and it has no approved commercial-provider certification. `run_security_master.py` can store that feed and report its deficiencies, but it cannot activate it for screening.
+
+See [Point-in-time security master](docs/POINT_IN_TIME_SECURITY_MASTER.md), [security-master ingestion and activation](docs/SECURITY_MASTER_OPERATIONS.md), and [provider certification](docs/PROVIDER_CERTIFICATION.md).
 
 ## Crypto market requirements
 

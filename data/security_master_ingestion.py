@@ -219,6 +219,7 @@ class SecurityMasterActivationPolicy:
     minimum_stable_identifier_ratio: float = 0.90
     require_authoritative_coverage: bool = True
     require_catalog_integrity: bool = True
+    require_approved_provider_certification: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -255,6 +256,7 @@ class SecurityMasterActivationPolicy:
         for field_name in (
             "require_authoritative_coverage",
             "require_catalog_integrity",
+            "require_approved_provider_certification",
         ):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be a bool")
@@ -265,6 +267,7 @@ class SecurityMasterActivationPolicy:
         *,
         query: SecurityMasterIngestionQuery,
         integrity_verified: bool,
+        certification_report: object | None = None,
         evaluated_at: datetime | None = None,
     ) -> "SecurityMasterQualityReport":
         if not isinstance(delivery, SecurityMasterCatalogDelivery):
@@ -286,6 +289,31 @@ class SecurityMasterActivationPolicy:
             )
         if self.require_catalog_integrity and not integrity_verified:
             issues.append("catalog-store integrity was not verified")
+
+        certification_identifier: str | None = None
+        certification_decision: str | None = None
+        certification_valid_until: datetime | None = None
+        if certification_report is not None:
+            certification_identifier = getattr(certification_report, "identifier", None)
+            decision = getattr(certification_report, "decision", None)
+            certification_decision = getattr(decision, "value", None)
+            certification_valid_until = getattr(certification_report, "valid_until", None)
+        if self.require_approved_provider_certification:
+            if certification_report is None:
+                issues.append("approved provider certification is missing")
+            else:
+                report_provider = str(getattr(certification_report, "provider", ""))
+                if report_provider.upper() != catalog.coverage.source.upper():
+                    issues.append("provider certification does not match catalog source")
+                approved = bool(getattr(certification_report, "approved", False))
+                if not approved:
+                    issues.append(
+                        "latest provider certification is not approved: "
+                        + str(certification_decision or "unknown")
+                    )
+                valid_at = getattr(certification_report, "valid_at", None)
+                if not callable(valid_at) or not valid_at(evaluated):
+                    issues.append("approved provider certification has expired")
 
         try:
             snapshot = catalog.snapshot(
@@ -440,6 +468,9 @@ class SecurityMasterActivationPolicy:
             latest_record_available_at=latest_available_at,
             source_age_hours=max(0.0, source_age_hours),
             coverage_deficiencies=catalog.coverage.deficiencies,
+            certification_identifier=certification_identifier,
+            certification_decision=certification_decision,
+            certification_valid_until=certification_valid_until,
             issues=tuple(dict.fromkeys(issues)),
         )
 
@@ -468,7 +499,10 @@ class SecurityMasterQualityReport:
     latest_record_available_at: datetime
     source_age_hours: float
     coverage_deficiencies: tuple[str, ...]
-    issues: tuple[str, ...]
+    certification_identifier: str | None = None
+    certification_decision: str | None = None
+    certification_valid_until: datetime | None = None
+    issues: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("catalog_identifier", "policy_version", "source"):
@@ -519,6 +553,19 @@ class SecurityMasterQualityReport:
                 minimum=0.0,
             ),
         )
+        for field_name in ("certification_identifier", "certification_decision"):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(
+                    self,
+                    field_name,
+                    _required_text(value, field_name=field_name),
+                )
+        if self.certification_valid_until is not None:
+            _aware(
+                self.certification_valid_until,
+                field_name="certification_valid_until",
+            )
         for field_name in ("coverage_deficiencies", "issues"):
             values = getattr(self, field_name)
             if not isinstance(values, tuple) or not all(
@@ -966,6 +1013,7 @@ class SecurityMasterIngestionService:
         operational_store: SQLiteSecurityMasterOperationalStore,
         *,
         activation_policy: SecurityMasterActivationPolicy | None = None,
+        certification_store: object | None = None,
     ) -> None:
         if not isinstance(catalog_store, SQLiteSecurityMasterStore):
             raise TypeError("catalog_store must be SQLiteSecurityMasterStore")
@@ -979,6 +1027,7 @@ class SecurityMasterIngestionService:
         self.catalog_store = catalog_store
         self.operational_store = operational_store
         self.activation_policy = activation_policy or SecurityMasterActivationPolicy()
+        self.certification_store = certification_store
 
     def ingest(
         self,
@@ -1019,10 +1068,20 @@ class SecurityMasterIngestionService:
             recorded_at=query.requested_at,
         )
         integrity_verified = self.catalog_store.verify_integrity()
+        certification_report = None
+        if self.certification_store is not None:
+            latest = getattr(self.certification_store, "latest", None)
+            if not callable(latest):
+                raise TypeError("certification_store must expose latest(provider, evaluated_at=...)")
+            certification_report = latest(
+                provider_name,
+                evaluated_at=query.requested_at,
+            )
         quality = self.activation_policy.assess(
             delivery,
             query=query,
             integrity_verified=integrity_verified,
+            certification_report=certification_report,
             evaluated_at=query.requested_at,
         )
 
@@ -1092,6 +1151,32 @@ class SecurityMasterIngestionService:
                 "active security-master catalog is missing from catalog storage"
             )
         catalog.coverage.require_authoritative()
+        if self.activation_policy.require_approved_provider_certification:
+            if self.certification_store is None:
+                raise SecurityMasterError(
+                    "provider certification store is not configured"
+                )
+            require_approved = getattr(
+                self.certification_store,
+                "require_approved",
+                None,
+            )
+            if not callable(require_approved):
+                raise TypeError(
+                    "certification_store must expose require_approved(provider, evaluated_at=...)"
+                )
+            current_report = require_approved(
+                catalog.coverage.source,
+                evaluated_at=evaluated,
+            )
+            if (
+                activation.quality.certification_identifier is None
+                or activation.quality.certification_identifier
+                != current_report.identifier
+            ):
+                raise SecurityMasterError(
+                    "active catalog certification does not match the current approved report"
+                )
         source_age_hours = (
             evaluated - activation.quality.source_observed_at
         ).total_seconds() / 3600.0
@@ -1557,6 +1642,13 @@ def _quality_payload(value: SecurityMasterQualityReport) -> dict[str, Any]:
         "latest_record_available_at": value.latest_record_available_at.isoformat(),
         "source_age_hours": value.source_age_hours,
         "coverage_deficiencies": list(value.coverage_deficiencies),
+        "certification_identifier": value.certification_identifier,
+        "certification_decision": value.certification_decision,
+        "certification_valid_until": (
+            None
+            if value.certification_valid_until is None
+            else value.certification_valid_until.isoformat()
+        ),
         "issues": list(value.issues),
     }
 
@@ -1585,6 +1677,13 @@ def _quality_from_payload(payload: dict[str, Any]) -> SecurityMasterQualityRepor
         ),
         source_age_hours=float(payload["source_age_hours"]),
         coverage_deficiencies=tuple(payload["coverage_deficiencies"]),
+        certification_identifier=payload.get("certification_identifier"),
+        certification_decision=payload.get("certification_decision"),
+        certification_valid_until=(
+            None
+            if payload.get("certification_valid_until") is None
+            else datetime.fromisoformat(str(payload["certification_valid_until"]))
+        ),
         issues=tuple(payload["issues"]),
     )
 

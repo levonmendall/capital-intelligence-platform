@@ -1,0 +1,21 @@
+{
+  "provider": "VENDOR_NAME",
+  "product": "Historical Security Master",
+  "manifest_version": "manifest.v1",
+  "source_version": "vendor-security-master.v1",
+  "license_reference": "commercial-contract-reference",
+  "license_verified": false,
+  "complete_eligible_universe": false,
+  "point_in_time_delivery": false,
+  "historical_identifiers": false,
+  "listing_and_venue_history": false,
+  "delisted_securities": false,
+  "corporate_actions": false,
+  "revision_history": false,
+  "provenance_complete": false,
+  "cross_venue_adjustment_policy": "Document the effective-listing and price-adjustment policy here.",
+  "service_level_reference": "documented-sla-reference",
+  "maximum_delivery_age_hours": 24,
+  "valid_from": "2026-01-01T00:00:00+00:00",
+  "valid_until": "2026-12-31T23:59:59+00:00"
+}

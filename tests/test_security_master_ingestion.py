@@ -21,6 +21,9 @@ from data import (
     ListingRecord,
     ListingStatus,
     ReconciledSecurityMasterProvider,
+    ProviderCertificationDecision,
+    ProviderCertificationReport,
+    SQLiteProviderCertificationStore,
     SQLiteSecurityMasterOperationalStore,
     SQLiteSecurityMasterStore,
     SecurityEntityType,
@@ -211,12 +214,38 @@ def query(
     )
 
 
-def service(tmp_path, *, policy=None) -> SecurityMasterIngestionService:
+def approved_certification(provider: str) -> ProviderCertificationReport:
+    return ProviderCertificationReport(
+        identifier=f"certification:{provider.lower()}:approved",
+        provider=provider,
+        product="Test Security Master",
+        manifest_version="manifest.v1",
+        source_version="test.v1",
+        certified_at=AS_OF - timedelta(days=1),
+        valid_until=AS_OF + timedelta(days=365),
+        decision=ProviderCertificationDecision.APPROVED,
+        manifest_deficiencies=(),
+        scenario_results=(),
+        required_failures=(),
+        warnings=(),
+    )
+
+
+def service(
+    tmp_path,
+    *,
+    policy=None,
+    certified_provider: str | None = "LICENSED_A",
+) -> SecurityMasterIngestionService:
     path = tmp_path / "security-master.db"
+    certification_store = SQLiteProviderCertificationStore(path)
+    if certified_provider is not None:
+        certification_store.append(approved_certification(certified_provider))
     return SecurityMasterIngestionService(
         SQLiteSecurityMasterStore(path),
         SQLiteSecurityMasterOperationalStore(path),
         activation_policy=policy,
+        certification_store=certification_store,
     )
 
 
@@ -237,6 +266,40 @@ def test_authoritative_catalog_is_activated_and_retrievable(tmp_path) -> None:
         SecurityMasterOperationType.ACTIVATION,
     )
 
+
+
+
+def test_activation_requires_current_approved_provider_certification(tmp_path) -> None:
+    ingestion = service(tmp_path, certified_provider=None)
+
+    result = ingestion.ingest(StaticProvider(catalog()), query())
+
+    assert result.disposition is SecurityMasterIngestionDisposition.STORED_NOT_ACTIVATED
+    assert result.quality.certification_identifier is None
+    assert any("certification is missing" in item for item in result.reasons)
+
+
+def test_later_rejected_certification_revokes_active_catalog(tmp_path) -> None:
+    ingestion = service(tmp_path)
+    ingestion.ingest(StaticProvider(catalog()), query())
+    rejected = ProviderCertificationReport(
+        identifier="certification:licensed_a:revoked",
+        provider="LICENSED_A",
+        product="Test Security Master",
+        manifest_version="manifest.v2",
+        source_version="test.v2",
+        certified_at=REQUESTED + timedelta(hours=1),
+        valid_until=REQUESTED + timedelta(days=365),
+        decision=ProviderCertificationDecision.REJECTED,
+        manifest_deficiencies=("commercial license is not verified",),
+        scenario_results=(),
+        required_failures=(),
+        warnings=(),
+    )
+    ingestion.certification_store.append(rejected)
+
+    with pytest.raises(SecurityMasterError, match="not approved"):
+        ingestion.active_catalog(evaluated_at=rejected.certified_at)
 
 
 def test_active_catalog_expires_without_mutating_activation_history(tmp_path) -> None:
@@ -443,7 +506,9 @@ def test_reconciled_provider_can_be_ingested_when_all_sources_are_authoritative(
         reconciler,
     )
 
-    result = service(tmp_path).ingest(provider, query("reconciled"))
+    result = service(
+        tmp_path, certified_provider="RECONCILED_SECURITY_MASTER"
+    ).ingest(provider, query("reconciled"))
 
     assert result.disposition is SecurityMasterIngestionDisposition.ACTIVATED
     assert provider.last_report is not None

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Sequence
 
 from data import (
+    SQLiteProviderCertificationStore,
     SQLiteSecurityMasterOperationalStore,
     SQLiteSecurityMasterStore,
     SecurityMasterActivationError,
@@ -60,6 +61,7 @@ def _service(path: Path, *, maximum_age_hours: float) -> SecurityMasterIngestion
         activation_policy=SecurityMasterActivationPolicy(
             maximum_catalog_age_hours=maximum_age_hours,
         ),
+        certification_store=SQLiteProviderCertificationStore(path),
     )
 
 
@@ -85,6 +87,13 @@ def _result_payload(result) -> dict[str, object]:
             "stable_identifier_ratio": result.quality.stable_identifier_ratio,
             "coverage_deficiencies": list(
                 result.quality.coverage_deficiencies
+            ),
+            "certification_identifier": result.quality.certification_identifier,
+            "certification_decision": result.quality.certification_decision,
+            "certification_valid_until": (
+                None
+                if result.quality.certification_valid_until is None
+                else result.quality.certification_valid_until.isoformat()
             ),
             "issues": list(result.quality.issues),
         },

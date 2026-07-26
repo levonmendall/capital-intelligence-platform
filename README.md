@@ -124,6 +124,17 @@ python run_security_master.py --status
 
 The public SEC current feed is stored for discovery but cannot pass the full-universe activation gate. Licensed historical coverage remains a separate production requirement.
 
+Certify a commercial provider before activation:
+
+```bash
+python run_provider_certification.py \
+  --provider-factory vendor_adapter:create_provider \
+  --manifest provider-manifest.json \
+  --suite provider-certification-suite.json
+```
+
+A catalog cannot activate unless the latest provider certification is approved, unexpired, source-matched, and integrity-valid. Conditional approval is not investment authority, and a later rejected report immediately revokes screening readiness.
+
 Run the economic-regime research pipeline:
 
 ```bash
@@ -212,6 +223,7 @@ Production investment reliance still requires broader live and licensed data cov
 - [Point-in-time evaluation](docs/POINT_IN_TIME_EVALUATION.md)
 - [Point-in-time security master](docs/POINT_IN_TIME_SECURITY_MASTER.md)
 - [Security-master ingestion and activation](docs/SECURITY_MASTER_OPERATIONS.md)
+- [Security-master provider certification](docs/PROVIDER_CERTIFICATION.md)
 - [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
 - [Daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Production API](docs/PRODUCTION_API.md)
