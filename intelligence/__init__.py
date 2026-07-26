@@ -132,6 +132,14 @@ _EXPORTS = {
         "intelligence.regime_pipeline",
         "SeriesLoadState",
     ),
+    "TechnicalMomentumEngine": (
+        "intelligence.technical_momentum",
+        "TechnicalMomentumEngine",
+    ),
+    "TechnicalMomentumRun": (
+        "intelligence.technical_momentum",
+        "TechnicalMomentumRun",
+    ),
     "ValuationEngine": (
         "intelligence.valuation",
         "ValuationEngine",
@@ -143,6 +151,10 @@ _EXPORTS = {
     "build_configured_market_breadth_engine": (
         "intelligence.market_breadth",
         "build_configured_market_breadth_engine",
+    ),
+    "build_configured_technical_momentum_engine": (
+        "intelligence.technical_momentum",
+        "build_configured_technical_momentum_engine",
     ),
     "build_configured_valuation_engine": (
         "intelligence.valuation",
