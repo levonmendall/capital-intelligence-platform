@@ -1,198 +1,225 @@
 # Capital Intelligence Platform Roadmap
 
+> [GOVERNING_SPECIFICATION.md](GOVERNING_SPECIFICATION.md) is the binding product and engineering contract. Roadmap items may refine sequencing but may not change the governing objective, committee authority, Version 1 universe, common decision schema, or abstention rules.
+
+## Governing objective
+
+> **Maximize long-term compounded portfolio returns.**
+
+Risk, liquidity, concentration, drawdown, turnover, costs, leverage, evidence quality, data freshness, model confidence, and execution feasibility are constraints that protect compounding. Individual financial goals are not investment objectives and must not influence candidate ranking, specialist analysis, CIO decisions, or portfolio construction.
+
 ## Current release
 
-Foundation 1.x now has a deployable, observable, backed-up, and operationally
-hardened application baseline, a versioned investor-objective and Personal CIO
-communication layer, seven reusable analytical engines, append-only
-normalization, versioned fixed-weight synthesis, and evidence governance. The
-next milestone is submitting the complete governed assessment to committee
-without changing the Capital Intelligence Score or granting portfolio authority.
+Foundation 1.x provides a deployable and operationally hardened baseline with:
 
-## Milestone 1 — Consolidated foundation
+- point-in-time macro and market evidence;
+- normalized provenance-aware data contracts;
+- seven analytical engines;
+- append-only institutional history and decision-quality reviews;
+- committee and portfolio-fit foundations;
+- continuous analysis with selective material-change alerts;
+- a four-surface application and authenticated API;
+- reproducible dependency and security controls; and
+- encrypted, integrity-verified backups.
 
-- [x] Identify the authoritative GitHub repository.
-- [x] Audit external architecture, regime, and stock packages.
-- [x] Reject placeholder packages as release inputs.
-- [x] Add governing architecture, roadmap, data, and decision documents.
-- [x] Add an explainable economic-regime bounded context.
-- [x] Preserve the legacy allocation interface through a compatibility facade.
-- [x] Establish the CI baseline on the integration pull request.
+The foundation is valuable but the product is not yet a complete AI CIO. The immediate program is to realign the active product contract, then build the opportunity, specialist-analysis, CIO-synthesis, portfolio-construction, thesis-monitoring, and evaluation layers required by the governing specification.
 
-Acceptance: the full repository test suite passes; no working implementation is
-replaced by a placeholder; the pull request documents the observed baseline.
+## Milestone 1 — Governing product realignment
 
-## Architecture stabilization
+- [x] Adopt one objective: maximize long-term compounded portfolio returns.
+- [x] Make the consolidated product and engineering specification authoritative.
+- [ ] Remove investor goals, personal required return, retirement targets, preferred investment philosophy, and behavioral memory from the active decision path.
+- [ ] Preserve historical personal-goal records only as isolated migration data until safely retired.
+- [ ] Rename Personal CIO surfaces and APIs to Capital Intelligence CIO terminology.
+- [ ] Replace objective-aware Portfolio Alignment with measurable Portfolio Contribution or Portfolio Improvement.
+- [ ] Demote the Capital Intelligence Score from product identity to a supporting environment/evidence indicator.
+- [ ] Add automated architecture tests preventing personal-goal inputs from entering ranking, committee, CIO, portfolio, alert, or explanation services.
+- [ ] Add PR templates and tests enforcing the governing specification.
 
-- [x] Establish `committee` as the owner of collective governance.
-- [x] Add an ownership-correct recommendation-governance facade.
-- [x] Add a canonical recommendation-to-result workflow.
-- [x] Preserve existing intelligence imports during migration.
-- [x] Document briefing meetings versus recommendation governance.
-- [ ] Migrate remaining repository callers to canonical committee imports.
-- [ ] Move implementation files only after compatibility paths are proven.
-- [x] Add append-only regime evidence and decision-quality persistence.
-- [ ] Extend the journal to committee, mandate, and portfolio-response events.
+Acceptance: no active recommendation, ranking, committee, portfolio, alert, or user-facing decision depends on individual financial goals or personalized investment philosophies.
 
-## Milestone 2 — Economic-regime productionization
+## Milestone 2 — Decision integrity and point-in-time evidence
 
-- [x] Map normalized provider observations to regime inputs.
-- [x] Add observation dates, vintages, provider provenance, and score lineage.
-- [x] Add point-in-time fixtures for every supported regime archetype.
-- [x] Add canonical multi-series retrieval with explicit partial failures.
-- [ ] Calibrate and version thresholds without look-ahead data.
-- [ ] Add regime-transition tests and committee consumption.
-- [x] Render a governed CIO decision card as Markdown, JSON, and mobile HTML.
-- [ ] Render full analytical regime reports for specialist review.
+Completed foundation:
 
-Acceptance: at least one historically representative fixture exists for every
-supported regime, classifications are reproducible, and missing data cannot
-produce false precision.
+- [x] Strict normalized observation and provenance models.
+- [x] Publication, retrieval, vintage, and point-in-time availability fields.
+- [x] Explicit live, cached, stale, fixture, fallback, and missing states.
+- [x] Provider-neutral economic, security, filing, and market contracts.
+- [x] SEC acceptance-time handling and amended-filing preservation.
+- [x] FRED retrieval, caching, freshness, and stale-if-error disclosure.
+- [x] Append-only institutional journal with hash-chain integrity.
 
-## Milestone 3 — Data foundation
+Required completion:
 
-- [x] Define strict normalized observation and provenance models.
-- [x] Add point-in-time availability and revision identity.
-- [x] Add explicit live, cached, stale, fixture, fallback, and missing states.
-- [x] Preserve the legacy state-engine observation contract with an adapter.
-- [x] Define provider-neutral query and series contracts.
-- [x] Implement a canonical FRED adapter with point-in-time boundaries.
-- [x] Record whether availability uses provider dates or retrieval proxies.
-- [x] Add a version-controlled registry for foundation FRED series.
-- [x] Add canonical issuer, listing, filing, and company-fact contracts.
-- [x] Generalize identity across equities, funds, fixed income, FX,
-  commodities, and crypto.
-- [x] Separate issuer identity, instrument identity, and venue symbols.
-- [x] Support crypto networks, contract addresses, trading pairs,
-  perpetuals, and continuous 24/7 listings.
-- [x] Define provider-neutral quotes, trades, and OHLCV bars.
-- [x] Define explicit corporate-action, funding-rate, and open-interest records.
-- [x] Enforce market-data decision-time and venue boundaries.
-- [x] Preserve the legacy latest-quote interface during migration.
-- [x] Add current SEC security-master snapshots with ambiguity protection.
-- [x] Add offline SEC submissions and company-facts retrieval.
-- [x] Enforce SEC acceptance timestamps and preserve amended filings.
-- [x] Implement resilient FRED retrieval with caching, rate-limit handling,
-  freshness rules, stale-if-error disclosure, and local fixtures.
+- [ ] Persist complete release, revision, transformation, lineage, and provenance metadata for every recommendation input.
+- [ ] Add evidence-origin grouping and derivative-source de-duplication.
+- [ ] Add source hierarchy, reliability, freshness, relevance, independence, and completeness scoring.
+- [ ] Add deterministic conflict-resolution and data-quality policies.
 - [ ] Retrieve older SEC submission archives and dimensional XBRL metadata.
-- [ ] Add historical identifiers, corporate actions, and delisted securities
-  from a licensed reference provider.
-- [ ] Select licensed equity and crypto providers after contract evaluation.
+- [ ] Add licensed historical identifiers, corporate actions, and delisted securities.
 - [ ] Define versioned price-adjustment and cross-venue consolidation policies.
-- [ ] Persist complete observation, release, revision, transformation, and
-  provenance metadata.
-- [ ] Add deterministic fallback and data-quality policies.
+- [ ] Add complete decision replay proving exactly what was known at decision time.
 
-Acceptance: tests run without network access and live data is never confused
-with cached, fixture, or fallback data.
+Acceptance: every candidate and CIO decision can be reproduced from its point-in-time evidence package without look-ahead data or duplicate-evidence inflation.
 
-## Milestone 4 — Macro and market engines
+## Milestone 3 — Version 1 recommendation universe
 
-Implement, in order:
+Direct recommendation eligibility is limited to:
 
-1. [x] Global liquidity
-2. [x] Business cycle
-3. [x] Credit cycle
-4. [x] Market breadth
-5. [x] Valuation
-6. [x] Technical and momentum
-7. [x] Risk
+- liquid U.S.-listed equities;
+- liquid U.S.-listed ETFs; and
+- cash or short-duration Treasury equivalents.
 
-Each engine must publish a typed result with score, confidence, coverage,
-evidence, risks, and versioned rules. Every engine must feed the Personal CIO
-Brief rather than create an independent primary dashboard.
+- [ ] Add a versioned `RecommendationUniversePolicy`.
+- [ ] Require U.S. listing, supported instrument type, minimum liquidity, data freshness, and analytical coverage.
+- [ ] Distinguish intelligence-only assets from recommendation-eligible assets.
+- [ ] Block crypto, commodities, currencies, options, individual bonds, international equities, and unvalidated instruments from direct CIO actions.
+- [ ] Retain broader markets as evidence and regime inputs.
+- [ ] Add tests proving unsupported asset classes cannot enter ranking, committee approval, sizing, or portfolio implementation.
 
-## Milestone 5 — Institutional market decision
+Acceptance: architectural multi-asset support cannot be mistaken for direct recommendation authority.
 
-- [x] Normalize engine results.
-- [x] Produce separate aggregate opportunity, risk, confidence, and data-quality
-  scores.
-- [x] Configure and version weights.
-- [x] Apply missing-data and veto policies.
-- [ ] Submit all engine assessments to committee governance.
-- [x] Define append-only thesis lifecycle and falsification triggers.
-- [x] Define structured dissent and resolution conditions.
-- [x] Make no action a formal terminal committee outcome.
-- [x] Define evidence-trust dimensions and disclosed scoring.
-- [x] Define scenario shocks and versioned cross-asset transmission maps.
-- [x] Compare consecutive regime decisions under versioned materiality rules.
-- [x] Separate continuous analysis from selective portfolio alerts.
-- [x] Produce plain-language directional portfolio impact.
-- [x] Track conviction direction and component drivers across daily snapshots.
-- [x] Schedule monitoring cycles and connect user-selected delivery channels.
+## Milestone 4 — Common candidate decision schema
 
-Normalization remains the source-preserving translation layer. Versioned
-synthesis weights produce separate aggregate dimensions only above governed
-coverage thresholds. Evidence governance preserves those scores, applies the
-strictest disclosed confidence ceiling, identifies material conflict, and can
-activate confirmed credit or risk vetoes. A veto blocks high-conviction positive
-conclusions but does not create a sell instruction, market stance, Personal CIO
-action, Capital Intelligence Score change, portfolio mutation, or transaction.
+- [ ] Replace categorical expected-return/risk-only recommendation contracts with a comparable quantitative candidate record.
+- [ ] Require current price and decision horizon.
+- [ ] Require base, bull, and bear expected returns and scenario probabilities.
+- [ ] Calculate probability-weighted expected return.
+- [ ] Require fair value, upside, downside, and probability of success.
+- [ ] Require catalysts, risks, assumptions, invalidation conditions, and monitoring indicators.
+- [ ] Require supporting and contradictory evidence with quality and freshness.
+- [ ] Require liquidity, costs, slippage, opportunity cost, and portfolio contribution.
+- [ ] Preserve specialist conclusions and material dissent.
+- [ ] Require final confidence, action, recommended size, and review date.
+- [ ] Add schema versioning, serialization, point-in-time persistence, and replay tests.
 
-## Milestone 6 — Stock intelligence
+Acceptance: every candidate is comparable, auditable, testable, and capable of disciplined abstention.
 
-- [x] Establish issuer/listing identity and point-in-time SEC fact models.
+## Milestone 5 — Opportunity detection and ranking
+
 - [ ] Build normalized company and financial-statement models.
-- [ ] Add quality, strength, growth, earnings-quality, valuation, momentum,
-  regime-fit, and company-risk engines.
-- [ ] Generate an institutional stock report.
-- [ ] Add comparison, ranking, screening, and watchlists.
+- [ ] Add quality, financial strength, growth, earnings quality, valuation, momentum, regime-fit, and company-risk engines.
+- [ ] Screen the complete eligible Version 1 universe.
+- [ ] Detect improving and deteriorating candidates, dislocations, catalysts, regime beneficiaries, and weakening theses.
+- [ ] Estimate expected return, downside, probability of success, evidence quality, liquidity, and costs.
+- [ ] Compare candidates with current holdings, cash, and other qualified alternatives.
+- [ ] Rank by probability-weighted expected return, downside, evidence, liquidity, costs, opportunity cost, and portfolio contribution.
+- [ ] Reject weak, redundant, stale, illiquid, or infeasible candidates before committee review.
+- [ ] Generate institutional stock and ETF reports, comparisons, rankings, screens, and watchlists.
 
-The uploaded stock v1 archive remains a specification scaffold, not an
-implementation baseline.
+Acceptance: committee attention is reserved for qualified candidates representing plausible superior uses of capital.
 
-## Milestone 7 — Portfolio and validation
+## Milestone 6 — Independent specialist committee
 
-- [x] Define canonical point-in-time snapshots, positions, proposals, asset
-  buckets, and versioned mandate constraints.
-- [x] Gate approved proposals through direction, liquidity, concentration,
-  cash-reserve, risk-budget, and overlap controls.
-- [x] Explain opportunity cost using excess cash and explicit funding candidates.
-- [ ] Add portfolio optimization, transaction costs, rebalancing orchestration,
-  and paper trading behind the fit gate.
-- [ ] Add walk-forward backtests, point-in-time fundamentals, survivorship-bias
-  controls, transaction costs, benchmarks, and attribution.
-- [x] Separate process quality from realized investment outcome.
-- [x] Define disciplined/lucky and flawed/unlucky decision classifications.
+The committee contains five independent specialists plus the CIO:
+
+1. Macro & Economic Strategist
+2. Market Strategist
+3. Fundamental & Valuation Analyst
+4. Portfolio & Risk Manager
+5. Evidence & Governance Officer
+6. Chief Investment Officer
+
+- [ ] Replace the legacy macro/risk/credit/liquidity/valuation/technical weighted-voter default.
+- [ ] Implement typed specialist-analysis contracts against the common decision schema.
+- [ ] Enforce independent first-pass analysis before conclusions are shared.
+- [ ] Preserve majority conclusion, strongest dissent, disagreement reason, and evidence that could resolve it.
+- [ ] Give the Evidence & Governance Officer explicit veto authority for inadequate or irreproducible evidence.
+- [ ] Give the Portfolio & Risk Manager explicit implementation-rejection authority for constraint violations.
+- [ ] Prevent specialists from issuing user-facing actions.
+- [ ] Prevent weighted averaging from manufacturing a CIO decision or confidence value.
+
+Acceptance: specialist outputs are independent analyses and only the CIO has final action authority.
+
+## Milestone 7 — Chief Investment Officer synthesis
+
+- [ ] Build a deterministic and auditable CIO synthesis service.
+- [ ] Compare expected returns, downside, evidence quality, opportunity cost, and qualified alternatives.
+- [ ] Resolve disagreement without erasing dissent.
+- [ ] Apply Evidence Officer vetoes and portfolio implementation blocks.
+- [ ] Produce final confidence from disclosed evidence and decision-reliability rules.
+- [ ] Support Buy, Increase, Hold, Reduce, Exit, Watch, Insufficient evidence, No superior opportunity, and No material change.
+- [ ] Enforce abstention for inadequate evidence, stale data, unresolved disagreement, low expected return, immaterial improvement, infeasible implementation, or costs that eliminate advantage.
+- [ ] Produce the approved thesis and plain-English user explanation.
+
+Acceptance: every user-facing investment action is attributable to the CIO and can explain why it is preferable to available alternatives or why no action is superior.
+
+## Milestone 8 — Portfolio construction and implementation
+
+Completed foundation:
+
+- [x] Point-in-time portfolio snapshots, positions, proposals, asset buckets, and versioned mandate constraints.
+- [x] Direction, liquidity, concentration, cash-reserve, risk-budget, and overlap fit checks.
+- [x] Explicit non-executing opportunity-cost funding explanations.
+
+Required completion:
+
+- [ ] Maximize expected long-term compounded return subject to versioned constraints.
+- [ ] Add position sizing, allocation optimization, funding decisions, and replacement logic.
+- [ ] Add sector, factor, correlated-exposure, liquidity, turnover, leverage, and drawdown constraints.
+- [ ] Add transaction-cost and slippage estimates.
+- [ ] Add rebalancing orchestration and execution sequencing.
+- [ ] Add paper-trading implementation behind approval and fit gates.
+- [ ] Keep recommendation authority separate from sizing and execution authority.
+
+Acceptance: an approved CIO decision becomes a feasible, cost-aware portfolio change or an explicit implementation abstention.
+
+## Milestone 9 — Continuous thesis monitoring
+
+- [x] Define append-only thesis concepts and falsification triggers.
+- [ ] Implement Candidate, Under Review, Approved, Active, Strengthening, Stable, Weakening, Reduced, Exited, Invalidated, and Evaluated states.
+- [ ] Persist original rationale, assumptions, expected return, horizon, catalysts, invalidation conditions, monitoring indicators, and initial confidence.
+- [ ] Track current evidence, current confidence, performance, next review, and material-change triggers.
+- [ ] Run event-driven and scheduled monitoring.
+- [ ] Compare each active thesis with qualified replacement opportunities.
+- [ ] Generate Increase, Hold, Reduce, Exit, or Continue monitoring proposals for CIO review.
+
+Acceptance: every active position has a living, testable, point-in-time thesis and cannot remain owned without current justification.
+
+## Milestone 10 — Daily Capital Intelligence
+
+- [x] Maintain Today, Environment, Portfolio, and History as the four primary surfaces.
+- [x] Keep continuous analysis separate from selective notifications.
+- [ ] Replace score-first opening hierarchy with one coherent CIO briefing.
+- [ ] Surface only material opportunity, risk, and thesis changes.
+- [ ] Explain whether the portfolio should change, the CIO action, confidence, and what would change the conclusion.
+- [ ] Hide internal committee mechanics by default while preserving drill-down auditability.
+- [ ] Remove investor-goal onboarding and goal-derived alert wording.
+- [ ] Keep No material change and No action required as first-class daily outcomes.
+
+Acceptance: the interface communicates judgment rather than information volume or internal process theater.
+
+## Milestone 11 — Evaluation, attribution, and controlled learning
+
+- [x] Separate process quality from realized outcome.
 - [x] Persist append-only decision-quality reviews.
-- [ ] Aggregate learning metrics across reviewed decisions.
+- [ ] Add walk-forward backtests with point-in-time fundamentals and survivorship controls.
+- [ ] Model transaction costs, slippage, turnover, and implementation delay.
+- [ ] Compare with a broad market benchmark, cash, passive reference portfolio, prior system versions, and the contemporaneous opportunity set.
+- [ ] Track CAGR, compounded return, drawdown, hit rate, capture ratios, costs, and opportunity cost.
+- [ ] Attribute value creation or destruction to analysis, sizing, execution, timing, committee signals, evidence types, sources, and assumptions.
+- [ ] Calibrate confidence against observed outcomes over sufficient samples.
+- [ ] Require historical, out-of-sample, and paper-trading validation plus governance approval and rollback for model changes.
+- [ ] Prohibit autonomous process rewriting from short-term results.
 
-## Milestone 8 — Application
+Acceptance: the platform can determine not only what happened, but why the decision process created or destroyed value.
 
-- [x] Assemble one canonical daily snapshot from the regime, committee,
-  material-change, portfolio-fit, score, environment, and decision-card layers.
-- [x] Add append-only score history with prior-snapshot deltas and honest
-  current, incomplete, stale, and unavailable states.
-- [x] Make Today, Environment, Portfolio, and History the primary Streamlit
-  application surfaces.
-- [x] Provide a FastAPI boundary for daily snapshots, history, environments,
-  decisions, replay artifacts, portfolios, health, and readiness.
-- [x] Add append-only Investor Memory and conviction and memory endpoints.
-- [x] Add revocable authentication, users, roles, investor ownership, and
-  mandate-aware authorization across API and Streamlit surfaces.
-- [x] Add idempotent scheduled cycles, authenticated preferences, in-app alerts,
-  optional email delivery, deduplication, retries, and delivery history.
-- [x] Add container deployment, structured logs, request IDs, metrics, worker
-  health, encrypted backups, restore verification, operational runbooks,
-  security scanning, and production request hardening.
-- [x] Add versioned investor goals and Investment Policy Profiles.
-- [x] Add objective-aware Portfolio Alignment without presenting it as a goal
-  success probability.
-- [x] Add the four-question Personal CIO Brief with formal action and no-action
-  outcomes, evidence lineage, and review conditions.
-- [x] Add authenticated objective onboarding, objective history, and
-  cross-investor authorization.
+## Explicitly out of scope for Version 1
 
-## Milestone 9 — Personal CIO product contract
+- Individual financial-goal optimization
+- Retirement planning
+- Behavioral coaching
+- Personalized investment philosophies
+- Social investing
+- News-feed experiences
+- High-frequency trading
+- Unvalidated alternative-data recommendations
+- Direct recommendations across every asset class
+- Autonomous model self-modification
+- Excessive exposure of committee mechanics
+- Live brokerage execution before paper validation and explicit operational approval
 
-- [x] Adopt the Personal CIO North Star in the governing product vision.
-- [x] Require primary interactions to answer what changed, why it matters, how it
-  affects the portfolio, and whether action is needed.
-- [x] Keep Capital Intelligence Score, Conviction Trend, and Portfolio Alignment
-  as separate measures with distinct meanings.
-- [x] Treat missing objectives as incomplete context rather than inferred facts.
-- [x] Treat `no_action` as a formal and valuable recommendation.
-- [x] Include investor-objective history in encrypted backups and readiness.
-- [x] Feed objective relevance into scheduled alert wording and suppression.
-- [x] Link historical Personal CIO Briefs to daily snapshots, policy versions,
-  evidence lineage, and Decision Replay references.
+## Definition of product completion
+
+Capital Intelligence Version 1 is complete only when it can continuously identify qualified opportunities in the eligible universe, compare them with current uses of capital, obtain five independent specialist analyses, issue one auditable CIO decision, construct a feasible portfolio response, monitor the resulting thesis, and measure whether the decision improved long-term compounded return.

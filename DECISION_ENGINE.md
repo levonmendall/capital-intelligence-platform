@@ -1,149 +1,214 @@
 # Institutional Decision Engine
 
+> This document implements the decision rules in [GOVERNING_SPECIFICATION.md](GOVERNING_SPECIFICATION.md). The governing specification prevails over legacy recommendation, committee-consensus, Personal CIO, and investor-objective contracts.
+
 ## Objective
 
-The decision engine converts independent analytical results into an auditable
-institutional conclusion. It does not collapse uncertainty into a single opaque
-number, and a high analytical score does not bypass committee or portfolio
-constraints.
+The decision engine identifies and selects the strongest evidence-supported use of capital in order to maximize expected long-term compounded portfolio return.
 
-## Result contract
+Risk, liquidity, concentration, drawdown, turnover, transaction costs, slippage, leverage, data quality, model confidence, and execution feasibility constrain the pursuit of return. Individual financial goals do not alter the objective or the investment process.
 
-Every analytical engine returns:
+## Decision stages
 
-- classification or normalized score;
-- component scores;
-- confidence;
-- data coverage and quality;
+```text
+Point-in-time evidence
+    -> structured signals and expected-return evidence
+    -> candidate qualification and ranking
+    -> five independent specialist analyses
+    -> Evidence & Governance veto evaluation
+    -> CIO synthesis and final action
+    -> portfolio construction and implementation feasibility
+    -> active thesis monitoring
+    -> outcome evaluation and attribution
+```
+
+Each stage owns a distinct decision boundary. An analytical score cannot bypass opportunity qualification, specialist review, CIO authority, or portfolio implementation controls.
+
+## Common candidate record
+
+Every candidate must eventually provide a schema-versioned, point-in-time record containing:
+
+- asset, asset class, listing, and recommendation-eligibility policy;
+- current price and decision timestamp;
+- decision horizon;
+- base, bull, and bear expected returns;
+- scenario probabilities and probability-weighted expected return;
+- estimated fair value, expected upside, expected downside, and probability of success;
+- catalysts, risks, critical assumptions, and invalidation conditions;
+- supporting and contradictory evidence;
+- evidence reliability, freshness, relevance, independence, completeness, and point-in-time integrity;
+- data coverage and known limitations;
+- liquidity, transaction costs, slippage, and implementation feasibility;
+- opportunity cost and comparison with current holdings, cash, and qualified alternatives;
+- expected portfolio contribution and constraint impact;
+- five specialist analyses, material dissent, and veto status;
+- CIO action, final confidence, approved thesis, recommended size, monitoring indicators, and review date;
+- model, policy, schema, and code versions.
+
+Categorical labels may summarize these values for users. They may not replace quantitative expected-return, downside, cost, and opportunity comparisons.
+
+## Candidate qualification and ranking
+
+A candidate may reach specialist review only when it meets versioned minimums for:
+
+- Version 1 recommendation eligibility;
+- expected return;
+- evidence quality and independence;
+- data freshness and analytical coverage;
+- liquidity;
+- cost-adjusted advantage;
+- thesis clarity and falsifiability; and
+- implementation feasibility.
+
+Ranking must consider probability-weighted expected return, probability of success, downside severity, horizon, evidence quality and freshness, liquidity, costs, opportunity cost, portfolio contribution, thesis clarity, and invalidation clarity.
+
+Conviction or a composite score alone may not determine ranking.
+
+## Independent specialist process
+
+The committee contains five specialists plus the CIO:
+
+1. Macro & Economic Strategist
+2. Market Strategist
+3. Fundamental & Valuation Analyst
+4. Portfolio & Risk Manager
+5. Evidence & Governance Officer
+6. Chief Investment Officer
+
+The five specialists complete independent first-pass analyses before seeing one another’s conclusions.
+
+Each specialist output includes:
+
+- conclusion within the specialist mandate;
+- expected-return impact;
 - supporting evidence;
-- risks and counterarguments;
-- missing inputs;
-- natural-language explanation derived from structured results;
-- rule-set or model version.
+- contradictory evidence;
+- key assumptions;
+- risks;
+- confidence and limitations;
+- observable conditions that would change the conclusion; and
+- a structured position of supportive, neutral, opposed, abstain, or veto when authorized.
 
-## Market factor framework
+Specialists do not issue user-facing Buy, Increase, Hold, Reduce, or Exit actions.
 
-The initial configurable market framework is:
+## Specialist responsibilities
 
-| Factor | Initial weight |
-| --- | ---: |
-| Economic regime | 20% |
-| Global liquidity | 15% |
-| Credit conditions | 15% |
-| Business cycle | 10% |
-| Market breadth | 10% |
-| Valuation | 10% |
-| Trend and momentum | 10% |
-| Risk conditions | 10% |
+### Macro & Economic Strategist
 
-These are hypotheses, not validated constants. Weight changes require a
-versioned policy and out-of-sample evaluation.
+Evaluates regime, inflation, monetary and fiscal policy, rates, credit, liquidity, employment, growth, currencies, commodities, and geopolitical risk.
 
-## Separate decision dimensions
+### Market Strategist
 
-The platform reports opportunity, risk, confidence, data-quality, and final
-institutional scores separately. Risk-oriented inputs are not inverted or
-hidden without disclosure. The final score must show each raw factor, weight,
-weighted contribution, confidence adjustment, and applicable policy rule.
+Evaluates trend, momentum, relative strength, breadth, leadership, volume, volatility, positioning, short interest, flows, liquidity, and cross-asset confirmation.
 
-## Confidence and missing data
+### Fundamental & Valuation Analyst
 
-Confidence reflects evidence completeness, signal agreement, signal strength,
-and model limitations. Missing data lowers coverage and confidence; it does not
-default to neutral unless a versioned policy explicitly says so. Missing core
-inputs may block a decision.
+Evaluates business quality, financial statements, growth, cash flow, margins, return on capital, balance-sheet quality, management execution, industry structure, revisions, valuation, fair value, and expected return.
 
-## Committee process
+### Portfolio & Risk Manager
 
-1. Analytical engines publish immutable assessments.
-2. Committee members form independent opinions within their mandates.
-3. The meeting checks quorum and policy versions.
-4. Weighted votes, dissent, and conflicts are recorded.
-5. Veto rules are evaluated.
-6. A final decision is issued with rationale and invalidation conditions.
-7. Portfolio policy independently determines whether a position is permissible.
+Evaluates portfolio contribution, sizing, concentration, correlation, factor and sector exposure, drawdown, liquidity, cost, opportunity cost, funding, rebalancing, replacement candidates, and implementation feasibility.
 
-Potential outcomes during development are `Highly attractive`, `Attractive`,
-`Neutral`, `Unattractive`, `High risk`, and `Insufficient evidence`.
+This member may reject an implementation that violates portfolio constraints. An implementation block does not rewrite specialist evidence or manufacture a sell action.
 
-`No action` is a formal terminal outcome. It records why action is not
-warranted, the evidence supporting restraint, what future conditions would
-permit action, and when the committee must review the decision.
+### Evidence & Governance Officer
 
-Material dissent is preserved as a structured minority view rather than
-averaged into confidence. Each dissent identifies the conflicting position,
-supporting evidence, materiality, and observable conditions that could resolve
-the disagreement.
+Evaluates source reliability, freshness, independence, completeness, consistency, conflict, model coverage, confidence justification, point-in-time integrity, schema completeness, reproducibility, compliance, and explainability.
 
-## Thesis and falsification lifecycle
+This member may veto when evidence is inadequate, stale, materially conflicting, unsupported, incomplete, irreproducible, or paired with unjustified confidence.
 
-Theses move through proposed, active, challenged, invalidated, and closed
-states. Every active thesis has explicit falsification triggers and a review
-date. Triggers may reference price, valuation, macro, fundamental,
-market-structure, data-quality, or time conditions.
+## CIO synthesis
 
-Lifecycle transitions are append-only and require a timestamp and rationale.
-Invalidation and closure do not erase the original proposition or evidence.
+Only the Chief Investment Officer issues the final investment decision.
 
-## Evidence trust
+The CIO:
 
-Evidence trust reports source quality, freshness, completeness, point-in-time
-integrity, directness, revision stability, and known limitations. The initial
-equal-weight score is disclosed and versionable. It informs confidence but
-does not replace the underlying dimensions.
+- reviews the five independent analyses;
+- compares expected returns and downside across qualified alternatives;
+- evaluates evidence strength, opportunity cost, and portfolio contribution;
+- applies evidence vetoes and implementation blocks;
+- preserves the strongest opposing conclusion and unresolved disagreement;
+- determines whether the advantage is material after costs;
+- selects the final action or disciplined abstention;
+- approves the thesis and monitoring plan; and
+- produces the user-facing explanation.
 
-## Scenarios and transmission assumptions
+The objective is not consensus. Weighted vote aggregation and average specialist confidence may be retained only as disclosed supporting diagnostics. They may not become the final CIO action or overwrite material dissent.
 
-Scenarios explicitly name changed factors, direction, magnitude, rationale,
-and assumptions. Cross-asset transmission maps record direction, strength,
-expected lag, and rationale for relationships such as real yields to growth
-equity valuation or liquidity to Bitcoin.
+## Permitted CIO outputs
 
-These maps are hypotheses, not causal facts. They require versions and later
-out-of-sample evaluation.
+- `buy`
+- `increase`
+- `hold`
+- `reduce`
+- `exit`
+- `watch`
+- `insufficient_evidence`
+- `no_superior_opportunity`
+- `no_material_change`
 
-## Veto and escalation conditions
+## Abstention and no-action standard
 
-Initial policy should permit veto or abstention for:
+The CIO must abstain from an action recommendation when:
 
-- insufficient data coverage;
-- stale or untraceable core evidence;
-- mandate violation;
-- unacceptable liquidity or concentration;
-- unresolved model disagreement;
-- missing thesis-invalidation conditions;
-- operational or legal restriction.
+- evidence quality is below threshold;
+- data is stale, incomplete, or irreproducible;
+- expected return is below threshold;
+- specialist disagreement is unresolved and material;
+- liquidity is insufficient;
+- costs or slippage eliminate the expected advantage;
+- the candidate does not improve on a current holding or cash;
+- expected portfolio improvement is immaterial;
+- the thesis lacks testable assumptions or invalidation conditions; or
+- no valid implementation satisfies portfolio constraints.
 
-Thresholds belong in versioned configuration and require dedicated tests.
+No action is a complete, terminal, reviewable decision. It records evidence, rationale, future action triggers, and review timing.
 
-## Position sizing boundary
+## Confidence
 
-Position size is not a direct transform of the final score. It also requires
-confidence, volatility, liquidity, correlation, concentration, mandate limits,
-risk budget, drawdown tolerance, and portfolio state. Until those controls are
-implemented, outputs are research and paper-trading proposals only.
+Confidence describes evidence strength and decision reliability. It does not guarantee a return.
+
+Confidence must be derived from disclosed dimensions such as evidence reliability, independence, freshness, completeness, analytical coverage, conflict, model limitations, scenario robustness, and specialist agreement after preserving dissent.
+
+Missing data lowers coverage and confidence. It does not default to neutral unless a versioned policy explicitly permits that treatment.
+
+Confidence must later be calibrated against observed outcomes over a sufficient sample.
+
+## Portfolio-construction boundary
+
+The CIO determines what should be owned. The portfolio layer determines how much to own, what funds it, when implementation occurs, and how to minimize costs while enforcing constraints.
+
+Position size is not a direct transform of a score or CIO confidence. It also depends on expected return, downside, volatility, liquidity, correlation, concentration, factor exposure, cash, turnover, cost, drawdown policy, and portfolio state.
+
+Individual investor goals, retirement targets, preferred philosophies, and behavioral profiles are prohibited portfolio-optimization inputs.
+
+## Thesis lifecycle
+
+Approved decisions become append-only living theses with:
+
+- original rationale and assumptions;
+- expected return, downside, and horizon;
+- catalysts and invalidation conditions;
+- monitoring indicators and material-change triggers;
+- initial and current confidence;
+- current evidence and performance;
+- next scheduled review; and
+- strengthening, stable, weakening, reduced, exited, invalidated, and evaluated transitions.
+
+Every active thesis must be compared with qualified alternatives and may not remain owned without current justification.
 
 ## Explainability and AI
 
-AI may summarize evidence, compare cases, identify contradictions, and render
-structured reports. It may not invent data, alter deterministic scores, hide
-missing evidence, override committee policy, or generate unconstrained
-allocations. AI-generated prose must be traceable to structured inputs.
+AI may explain structured evidence, compare alternatives, identify contradictions, and render reports. It may not invent data, alter deterministic calculations, hide missing or conflicting evidence, create investor objectives, override a veto or implementation block, manufacture CIO authority, or generate unconstrained allocations.
 
-## Decision record
+All AI-generated prose must be traceable to structured inputs.
 
-Persist the input snapshot, all assessments, votes, dissent, policy and model
-versions, final result, invalidation conditions, portfolio response, timestamps,
-and code release identifier. Later analytics attach realized outcomes without
-rewriting what was known at decision time.
+## Decision record and evaluation
 
-Retrospective reviews separately record process verdict and realized outcome.
-The decision-quality ledger classifies disciplined-positive,
-disciplined-negative, flawed-positive, and flawed-negative cases, with
-unresolved or flat outcomes remaining inconclusive.
+Persist the complete input snapshot, evidence lineage, candidate record, specialist analyses, dissent, vetoes, CIO synthesis, final action, portfolio state, implementation result, model and policy versions, timestamps, and code release identifier.
 
-The first persisted event schemas are `regime-run.v1` and
-`decision-quality-review.v1`. They are stored in the separate institutional
-journal with database-level update/delete guards and a tamper-evident hash
-chain. Future committee, mandate, and portfolio-response events will extend the
-ledger through new schema versions rather than changing prior payloads.
+Subsequent evaluation attaches realized outcomes without rewriting what was known at decision time.
+
+Evaluation must distinguish process quality from outcome and attribute value creation or destruction to analysis, sizing, execution, timing, evidence, assumptions, and opportunity selection.
+
+Model changes require point-in-time historical testing, out-of-sample validation, paper trading, comparison with the prior version, governance approval, versioning, rollback capability, and documented acceptance criteria.

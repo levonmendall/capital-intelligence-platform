@@ -1,95 +1,108 @@
-# Canonical Daily Intelligence Experience
+# Daily Capital Intelligence Experience
 
 ## Purpose
 
-The daily experience answers one question when the user opens the product:
+The daily experience answers:
 
-> What should I know about the market and my portfolio today?
+1. What changed?
+2. Why does it matter?
+3. What opportunity or risk emerged?
+4. Should the portfolio change?
+5. How confident is the CIO decision?
 
-It is an application assembly layer. It does not rescore evidence, change a
-committee decision, select an unconstrained position size, or execute a trade.
+It is a concise CIO briefing, not a news feed, score dashboard, goal tracker, or display of internal committee mechanics.
 
 ## Canonical cycle
 
-`application.DailyCapitalIntelligenceService` runs the existing institutional
-chain once:
-
 ```text
 Point-in-time evidence
-    -> economic regime
-    -> governed committee decision
-    -> optional material-change comparison
-    -> optional portfolio-fit result
-    -> Capital Intelligence Score
-    -> Environment Brief
-    -> CIO Decision Card
+    -> signal and evidence generation
+    -> opportunity qualification and ranking
+    -> independent specialist analysis
+    -> CIO decision
+    -> portfolio construction or implementation abstention
+    -> thesis monitoring
     -> DailyCapitalIntelligenceSnapshot
 ```
 
-Every opening-screen field shares the same decision timestamp and governed
-source identifiers. The dashboard cannot combine a score from one run with an
-environment or committee conclusion from another.
+The current economic-regime, committee, material-change, portfolio-fit, environment, score, and decision-card services remain compatible foundation components while the complete opportunity and CIO layers are implemented.
 
-## Opening screen
+Every displayed field must share one decision timestamp and linked source identifiers. Presentation code may not rescore evidence, alter a specialist conclusion, manufacture a CIO action, select an unconstrained size, or execute a trade.
 
-The primary surface remains intentionally small:
+## Opening hierarchy
+
+The primary surface should prioritize:
 
 ```text
 Today's Capital Intelligence
-82  Strong
-Environment: Constructive
-Risk: Moderate
-Committee: 6-0 Favor Risk Assets
-Portfolio impact: Consider holding more diversified risk assets.
-What changed?: No meaningful portfolio-relevant change.
+
+Decision: No material change
+Why: The qualified opportunity set and active theses are unchanged.
+Portfolio: No action required.
+Confidence: 76% — evidence is current with one unresolved market-positioning disagreement.
+Would change the conclusion: material earnings revisions, a valuation dislocation, or thesis invalidation.
 ```
 
-The four primary application areas are:
+When action is warranted, the same surface identifies the asset, action, expected return, horizon, recommended size, funding implication, thesis, risks, invalidation conditions, confidence, and review date.
 
-1. **Today** — the score, environment, risk, committee, portfolio impact, and
-   the simplest explanation of what changed.
-2. **Environment** — the concise Environment Brief and supporting economic
-   evidence.
-3. **Portfolio** — mandate holdings, portfolio context, and paper activity.
-4. **History** — score history, Decision Replay entry points, and the paper
-   trade journal.
+The Capital Intelligence Score may appear as supporting environment context. It must not dominate the opening hierarchy, imply expected return, or act as a trading signal.
+
+## Four primary surfaces
+
+1. **Today** — material CIO briefing, qualified opportunity changes, active-thesis changes, action or disciplined no-action, confidence, and review conditions.
+2. **Environment** — concise global financial context and the evidence affecting expected returns.
+3. **Portfolio** — authorized holdings, constraints, expected portfolio contribution, implementation proposals, costs, and paper activity.
+4. **History** — CIO decisions, evidence lineage, thesis transitions, Decision Replay, portfolio outcomes, attribution, and supporting score context.
+
+Internal specialist analyses and dissent are available as progressive analytical detail, not default product navigation.
+
+## Valid daily outcomes
+
+- No material change
+- No action required
+- Continue monitoring
+- New opportunity
+- Thesis strengthening
+- Thesis weakening
+- Portfolio action recommended
+- Insufficient evidence
+- No superior opportunity
 
 ## Honest operating states
 
-Each snapshot discloses one state:
-
 | State | Meaning |
 | --- | --- |
-| `current` | Evidence is complete and inside the configured freshness window. |
-| `incomplete` | The cycle completed, but evidence coverage or quality is limited. |
-| `stale` | The result is older than the configured maximum age. |
-| `unavailable` | No requested canonical evidence could be loaded. |
+| `current` | Required evidence is inside freshness and coverage thresholds. |
+| `incomplete` | The cycle completed but material evidence or analytical coverage is missing. |
+| `stale` | The result exceeds the configured freshness window. |
+| `unavailable` | No valid canonical evidence package or decision could be produced. |
 
-A stale, incomplete, or unavailable cycle is never relabeled as current.
-Material-change alerts remain controlled by the existing monitoring policy.
-Score movement alone does not create an alert.
+Stale, incomplete, and unavailable states must not be relabeled as current. Missing evidence lowers confidence or causes abstention.
 
-## History
+## Selective attention
 
-`SQLiteDailySnapshotStore` keeps an append-only record of completed daily
-presentation snapshots. It supports:
+The platform analyzes continuously but interrupts the user only for material opportunity, risk, active-thesis, evidence-quality, implementation, or CIO-decision changes.
 
-- score change from the prior snapshot;
-- ordered score history for a restrained trend view;
-- material-change and alert status;
-- Decision Replay identifiers associated with the cycle; and
-- deterministic client payloads for later API delivery.
+Score movement alone does not trigger an alert. Individual goals, retirement targets, preferred risk levels, and personalized investment philosophies may not alter alert eligibility or wording.
 
-Database triggers reject update and delete operations. Re-appending the exact
-same immutable snapshot is idempotent; reusing an identifier for different
-content is rejected.
+## History and auditability
+
+Append-only daily snapshots should support:
+
+- prior-snapshot comparison;
+- opportunity-rank changes;
+- CIO action and confidence changes;
+- active-thesis strengthening, weakening, invalidation, reduction, or exit;
+- evidence freshness and coverage changes;
+- portfolio implementation and cost records;
+- Decision Replay identifiers; and
+- later outcome attribution.
+
+Historical context never rewrites what was known, believed, or decided at the original decision time.
 
 ## Boundaries
 
-- The legacy allocation path remains available for compatibility while callers
-  migrate.
-- The Streamlit app is the first client of the canonical snapshot service.
-- FastAPI, authentication, user-specific delivery channels, and deployment are
-  separate application milestones.
-- Historical score trends are context, not a trading signal or performance
-  promise.
+- The interface communicates CIO judgment rather than raw information volume.
+- Portfolio access and mandate authorization remain essential security controls, not individualized investment objectives.
+- Goal-based onboarding and Personal CIO briefing logic are deprecated and must remain outside the active decision graph during migration.
+- The application remains research and paper-only until portfolio optimization, execution controls, walk-forward validation, and governance approval are complete.

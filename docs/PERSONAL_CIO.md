@@ -1,81 +1,67 @@
-# Personal CIO Intelligence
+# Deprecated Personal CIO Compatibility Surface
 
-PR22 adds three complementary capabilities around the existing Capital
-Intelligence Score. The score remains the single daily product identity; these
-features explain its direction, remember the investor's own process, and make
-capital allocation comparative.
+The Personal CIO product contract is deprecated by [GOVERNING_SPECIFICATION.md](../GOVERNING_SPECIFICATION.md).
 
-## Investor Memory
+Capital Intelligence now applies one institutional investment objective:
 
-Investor Memory is an append-only record of facts explicitly supplied by the
-investor or a decision reviewer. It can store:
+> **Maximize long-term compounded portfolio returns.**
 
-- how a governed recommendation was handled;
-- an explicitly declared preferred risk level;
-- behavior patterns observed during a decision;
-- mistakes the investor chose to record;
-- lessons to carry into future decisions.
+Individual goals, target dates, target amounts, retirement plans, income requirements, preferred risk levels, behavioral profiles, and personalized investment philosophies must not influence:
 
-The platform does not infer personality, risk tolerance, or mistakes from
-unrelated activity. A preferred risk level appears only after a preference event
-is recorded. A recurring mistake appears only after the same behavior has been
-recorded as a mistake at least twice.
+- opportunity detection or ranking;
+- expected-return estimates;
+- specialist analysis;
+- Evidence & Governance review;
+- CIO synthesis or action;
+- position sizing or portfolio optimization;
+- material-change alerts; or
+- user-facing investment explanations.
 
-The default local store is:
+## Compatibility status
 
-```text
-database/investor_memory.db
-```
+Legacy Personal CIO, investor-goal, investment-policy-profile, objective-onboarding, and Investor Memory code may remain temporarily only to support safe data migration and backward-compatible reads.
 
-SQLite triggers reject updates and deletes. Re-appending the same identifier and
-payload is idempotent; reusing an identifier for different content is rejected.
+Compatibility surfaces must:
 
-## Conviction Trend
+1. remain isolated from the active investment decision graph;
+2. be clearly marked deprecated;
+3. avoid creating new decision dependencies;
+4. preserve historical records without rewriting them;
+5. provide an explicit removal or archival path; and
+6. be covered by tests proving they cannot alter a candidate, specialist analysis, CIO decision, portfolio response, alert, or daily briefing.
 
-Conviction is separate from the 0-100 Capital Intelligence Score. It combines:
+New development must not add features to these surfaces.
 
-- evidence confidence: 50%;
-- committee support: 30%;
-- committee agreement: 20%.
+## Retained concepts
 
-The versioned `conviction-trend.v1` policy classifies the latest move as rising,
-steady, or falling. It also reports the recent streak, score change, and the two
-largest component drivers when they move materially.
+The following concepts remain valid after removing Personal CIO behavior:
 
-The trend reads the existing append-only daily snapshot payloads. It never
-reruns the intelligence engine and never changes the underlying score.
+- authenticated users and roles;
+- portfolio and mandate access control;
+- append-only institutional decision history;
+- conviction or confidence diagnostics derived from evidence and committee analysis;
+- opportunity-cost analysis;
+- decision-review lessons tied to the institutional process; and
+- selective material-change alerts.
 
-## Opportunity Cost
+A portfolio mandate represents implementation constraints such as liquidity, concentration, leverage, prohibited exposures, turnover, drawdown, and execution feasibility. It does not represent an investor-specific competing objective.
 
-Every positive portfolio proposal needs a funding explanation. The
-`opportunity-cost.v1` assessment:
+## Replacement terminology
 
-1. uses cash above the explicit minimum reserve when permitted;
-2. uses only position reductions explicitly supplied as funding candidates;
-3. identifies overlapping positions as alternatives for review;
-4. reports any unfunded allocation gap;
-5. explains liquidity, optionality, forgone upside, diversification, and risk
-   budget trade-offs.
+- Personal CIO → Capital Intelligence CIO or Chief Investment Officer
+- Investor objective → governing return objective, when referring to the investment process
+- Portfolio Alignment → Portfolio Contribution or Portfolio Improvement
+- Personal CIO Brief → Daily Capital Intelligence Briefing
+- Investor Memory → Decision Review Journal, only when records concern the investment process rather than personal behavior
 
-The assessment is non-executing. It never selects a sale silently and cannot
-bypass the portfolio-fit gate.
+## Removal plan
 
-## Product surfaces
+The active implementation must be migrated in this order:
 
-The Streamlit experience adds:
+1. stop passing goals and investment-policy profiles into briefing, ranking, committee, alerts, and portfolio services;
+2. remove goal onboarding and goal-based API writes from primary clients;
+3. rename user-facing routes and models around the institutional CIO contract;
+4. archive or migrate historical goal records outside the active decision database graph;
+5. delete unused Personal CIO domain and route code after compatibility tests and deprecation windows are complete.
 
-- conviction direction beside the daily Capital Intelligence Score;
-- a conviction history comparison;
-- an Investor Memory summary and reflection recorder;
-- a non-executing opportunity-cost comparison on the Portfolio screen.
-
-The production API adds read-only endpoints:
-
-```http
-GET /v1/conviction/latest
-GET /v1/investor-memory/{investor_identifier}
-GET /v1/investor-memory/{investor_identifier}/events
-```
-
-Investor Memory writes remain inside the trusted application boundary until
-authentication and investor-level authorization are implemented.
+Until this work is complete, the legacy code is technical debt and must not be described as a product capability.

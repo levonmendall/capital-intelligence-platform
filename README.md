@@ -1,40 +1,100 @@
 # Capital Intelligence Platform
 
-An explainable, AI-assisted investment operating system for disciplined market
-research, governed portfolio decisions, personal investor memory, and paper
-trading.
+Capital Intelligence is an explainable, evidence-governed AI Chief Investment Officer designed to maximize long-term compounded portfolio returns.
 
-## Current release
+The platform continuously converts point-in-time global financial intelligence into qualified opportunities, independent specialist analyses, a final CIO decision, portfolio implementation, thesis monitoring, and outcome evaluation.
 
-Foundation Version 1.x now includes:
+> **Governing objective: maximize long-term compounded portfolio returns.**
+
+Risk, liquidity, concentration, transaction costs, slippage, turnover, leverage, drawdown, evidence quality, data freshness, model confidence, and execution feasibility are operating constraints. Individual financial goals are not investment objectives and do not belong in the recommendation or portfolio-construction process.
+
+The binding product contract is [GOVERNING_SPECIFICATION.md](GOVERNING_SPECIFICATION.md).
+
+## Version 1 scope
+
+Direct recommendation and allocation eligibility is limited to:
+
+- liquid U.S.-listed equities;
+- liquid U.S.-listed ETFs; and
+- cash or short-duration Treasury equivalents.
+
+Government bonds, credit, commodities, currencies, options, international indexes, global ETFs, crypto, volatility, and other markets may be analyzed as evidence. They are not direct recommendation targets until dedicated asset-specific frameworks have been validated.
+
+## Current foundation
+
+Foundation 1.x currently includes:
 
 - point-in-time economic-regime intelligence;
-- six-specialist committee governance;
-- a daily Capital Intelligence Score and conviction trend;
-- a concise Environment Brief and CIO Decision Card;
-- append-only daily history, Decision Replay, and Investor Memory;
-- mandate-aware opportunity-cost analysis;
-- revocable authentication and mandate authorization;
-- scheduled daily intelligence with selective alert delivery;
-- structured observability, worker health, and encrypted backup/restore;
-- a hardened, containerized API, scheduler, backup, and Streamlit topology;
-- an authenticated FastAPI boundary; and
-- an authenticated four-screen Streamlit experience.
+- normalized provenance-aware economic, market, security, and filing contracts;
+- seven reusable analytical engines;
+- append-only institutional history and Decision Replay foundations;
+- committee-governance and portfolio-fit foundations;
+- a daily environment and decision-card experience;
+- continuous analysis with selective material-change alerts;
+- authenticated FastAPI and four-surface Streamlit delivery;
+- encrypted backup and restore verification;
+- reproducible dependency locks and blocking security controls; and
+- research and paper-trading boundaries.
 
-The software remains research and paper-trading software. It does not execute
-live trades or bypass mandate constraints.
+The platform is not yet a complete production investment system. Opportunity ranking, the specified specialist committee, CIO synthesis, quantitative candidate schema, portfolio optimization, thesis monitoring, walk-forward validation, attribution, and confidence calibration remain active roadmap work.
+
+## Canonical decision loop
+
+```text
+Global Financial Intelligence
+        -> Data Normalization, Provenance, and Point-in-Time Storage
+        -> Signal and Evidence Generation
+        -> Opportunity Detection and Ranking
+        -> Independent Specialist Analysis
+        -> Chief Investment Officer Decision
+        -> Portfolio Construction and Implementation
+        -> Continuous Thesis Monitoring
+        -> Daily Capital Intelligence
+        -> Evaluation, Attribution, and Confidence Calibration
+```
+
+The system is a continuous decision loop rather than a reporting pipeline.
+
+## Committee contract
+
+The governing committee contains:
+
+1. Macro & Economic Strategist
+2. Market Strategist
+3. Fundamental & Valuation Analyst
+4. Portfolio & Risk Manager
+5. Evidence & Governance Officer
+6. Chief Investment Officer
+
+The first five analyze independently. The Evidence & Governance Officer may veto inadequate or irreproducible evidence. The Portfolio & Risk Manager may reject infeasible implementations. Only the CIO issues the final user-facing investment decision.
+
+Weighted specialist consensus is not the final authority. Material dissent is preserved and provided to the CIO.
+
+## Permitted CIO decisions
+
+- Buy
+- Increase
+- Hold
+- Reduce
+- Exit
+- Watch
+- Insufficient evidence
+- No superior opportunity
+- No material change
+
+No action is a valid and often preferable result.
 
 ## Canonical intelligence workflow
+
+Run the current economic-regime pipeline:
 
 ```bash
 python run_regime.py
 ```
 
-When `FRED_API_KEY` is configured, the command retrieves the required FRED
-series. Missing credentials or observations reduce disclosed coverage; the
-canonical pipeline never silently substitutes sample data.
+When `FRED_API_KEY` is configured, the command retrieves required FRED series. Missing credentials or observations reduce disclosed coverage; the pipeline never silently substitutes sample data.
 
-To journal a complete run:
+Journal a complete run:
 
 ```bash
 python run_regime.py \
@@ -42,7 +102,7 @@ python run_regime.py \
   --code-version YOUR_COMMIT_SHA
 ```
 
-To run governance and journal the regime assessment plus committee decision:
+Run governance and journal the assessment and decision:
 
 ```bash
 python run_regime.py \
@@ -51,36 +111,9 @@ python run_regime.py \
   --code-version YOUR_COMMIT_SHA
 ```
 
-The append-only institutional journal is separate from mutable paper-portfolio
-tables and verifies a hash chain across recorded events.
+The append-only institutional journal is separate from mutable paper-portfolio tables and verifies a hash chain across recorded events.
 
-## Authentication and authorization
-
-Runtime settings loaded from the environment require authentication by default.
-Before the first API, Streamlit, scheduler, or backup start, configure the initial
-administrator:
-
-```bash
-export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_EMAIL="admin@example.com"
-export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_PASSWORD="replace-with-a-long-random-password"
-export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_NAME="Platform Administrator"
-```
-
-Remove the bootstrap password from the environment after the first account is
-created.
-
-Passwords use scrypt with unique salts. Access and refresh credentials are
-opaque and stored only as hashes. Refresh rotates both credentials; logout and
-account disabling revoke sessions.
-
-Users receive explicit roles, mandate grants, and—when needed—investor-profile
-grants. Portfolio lists, holdings, trades, values, Investor Memory, alert
-preferences, and in-app alerts are filtered at the service boundary rather than
-merely hidden in the interface.
-
-See [Authentication and mandate authorization](docs/AUTHENTICATION_AND_AUTHORIZATION.md).
-
-## Daily Capital Intelligence experience
+## Daily Capital Intelligence
 
 Run the authenticated Streamlit entrypoint:
 
@@ -90,23 +123,14 @@ streamlit run secure_app.py
 
 The primary navigation remains deliberately limited to:
 
-1. **Today** — Capital Intelligence Score, conviction, environment, risk,
-   committee stance, portfolio impact, and what changed;
-2. **Environment** — the concise brief plus supporting economic evidence;
-3. **Portfolio** — authorized mandates, holdings, paper trades, value history,
-   and non-executing opportunity-cost analysis; and
-4. **History** — score and conviction trends, Decision Replay, Investor Memory,
-   and the authorized paper-trade journal.
+1. **Today** — the material CIO briefing: what changed, why it matters, portfolio implication, action or disciplined no-action, confidence, and review conditions;
+2. **Environment** — concise market and economic context with supporting evidence;
+3. **Portfolio** — authorized holdings, paper activity, constraints, and non-executing implementation analysis; and
+4. **History** — decision history, score context, Decision Replay, thesis history, and paper activity.
 
-The authenticated sidebar includes the user's in-app alert inbox and delivery
-preferences without adding a fifth primary screen.
+The Capital Intelligence Score is a supporting environment/evidence indicator. It is not the governing product identity, an expected-return estimate, or a trading signal.
 
-Daily score records are stored in the append-only
-`database/daily_intelligence_snapshots.db` history. Current, incomplete, stale,
-and unavailable evidence states remain explicit. Score movement alone does not
-trigger an alert; notification remains governed by material-change policy.
-
-See [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md).
+The default experience is not a news feed and does not expose internal committee mechanics unless the user drills into analytical or audit detail.
 
 ## Scheduled intelligence and selective alerts
 
@@ -116,37 +140,38 @@ Run the persistent worker:
 python run_scheduler.py
 ```
 
-Run one due-cycle and delivery pass:
+Run one due cycle and delivery pass:
 
 ```bash
 python run_scheduler.py --once
 ```
 
-The worker claims one idempotent cycle per configured market date, runs the
-canonical intelligence chain, records every cycle, and applies the existing
-material-change policy before delivery. Unchanged conditions remain quiet and
-produce an auditable suppression record. Users may opt into a daily summary.
+The worker records every analytical cycle and applies versioned material-change policy before delivery. Unchanged conditions remain quiet and produce an auditable suppression record. Alerts must be based on material opportunity, risk, thesis, evidence, or CIO-decision changes—not individual financial goals.
 
-In-app delivery is available by default. Email requires both explicit user
-selection and SMTP runtime configuration. Failed delivery uses bounded
-exponential retry and records append-only attempt history.
+## Authentication and authorization
 
-See [Scheduled intelligence and alerts](docs/SCHEDULING_AND_ALERTS.md).
+Authentication is required by default. Configure the initial administrator before the first API, Streamlit, scheduler, or backup start:
+
+```bash
+export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_EMAIL="admin@example.com"
+export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_PASSWORD="replace-with-a-long-random-password"
+export CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_NAME="Platform Administrator"
+```
+
+Remove the bootstrap password after the first account is created.
+
+Users receive explicit roles and portfolio or mandate grants. Authorization controls access to portfolios, holdings, paper trades, value history, alerts, and audit records. Access controls do not create personalized investment objectives.
+
+See [Authentication and mandate authorization](docs/AUTHENTICATION_AND_AUTHORIZATION.md).
 
 ## Deployment and operational hardening
-
-Copy a staging configuration, replace every placeholder secret, and start the
-four-service topology:
 
 ```bash
 cp deploy/staging.env.example deploy/staging.env
 docker compose up --build -d
 ```
 
-The same immutable image runs the API, authenticated web app, scheduler, and
-backup service. Containers run as a non-root user with a read-only root
-filesystem, dropped capabilities, explicit writable volumes, and loopback-only
-host ports by default.
+The same immutable image runs the API, web app, scheduler, and backup service. Containers run as a non-root user with a read-only root filesystem, dropped capabilities, explicit writable volumes, and loopback-only host ports by default.
 
 Operational endpoints:
 
@@ -158,22 +183,16 @@ GET /worker/health
 GET /metrics
 ```
 
-Every request receives an `X-Request-ID` and a structured JSON log. The API
-exports Prometheus-compatible request metrics, enforces trusted hosts, request
-size limits, rate limits, defensive headers, and production HTTPS policy.
-
-Create a verified backup or restore drill with:
+Create or verify backups with:
 
 ```bash
 python run_backup.py
+python run_backup.py --healthcheck
 python run_restore.py backups/<archive>.tar.gz.fernet --verify-only
 python run_restore.py backups/<archive>.tar.gz.fernet --target restored-database
 ```
 
-Production settings require HTTPS enforcement, a protected metrics endpoint,
-and encrypted backups. See [Deployment and operations](docs/OPERATIONS.md),
-[Backup and restore](docs/BACKUP_RESTORE.md), and
-[Incident response](docs/INCIDENT_RESPONSE.md).
+See [Deployment and operations](docs/OPERATIONS.md), [Backup and restore](docs/BACKUP_RESTORE.md), and [Incident response](docs/INCIDENT_RESPONSE.md).
 
 ## Production API
 
@@ -190,88 +209,39 @@ POST /v1/auth/logout
 GET  /v1/auth/me
 ```
 
-Authenticated alert endpoints:
+Authenticated intelligence endpoints include daily snapshots, history, environment, decisions, replay artifacts, conviction context, authorized portfolios, and alerts. Goal-based investment-policy endpoints are compatibility surfaces scheduled for removal from the active decision path.
 
-```text
-GET  /v1/alerts/preferences
-PUT  /v1/alerts/preferences
-GET  /v1/alerts
-POST /v1/alerts/{delivery_id}/acknowledge
-```
+Use `/docs` for interactive documentation and `/openapi.json` for the deterministic contract.
 
-Authenticated intelligence endpoints include daily snapshots, history,
-environment, decisions, replays, conviction, Investor Memory, authorized
-portfolios, and the user's alert inbox. Administrator-only routes provision
-users, assign mandate and investor grants, and disable accounts.
+## Engineering rules
 
-Use `/docs` for interactive documentation and `/openapi.json` for the
-deterministic contract. Missing, stale, incomplete, and unavailable data remain
-explicit.
+Every core change must:
 
-See [Production API](docs/PRODUCTION_API.md).
-
-## Personal CIO intelligence
-
-The product pairs the daily Capital Intelligence Score with:
-
-- a conviction trend derived from evidence confidence, committee support, and
-  committee agreement;
-- append-only Investor Memory built only from deliberately recorded preferences,
-  actions, mistakes, and lessons; and
-- explicit opportunity-cost analysis that uses excess cash and user-selected
-  funding candidates without silently choosing a sale.
-
-See [Personal CIO intelligence](docs/PERSONAL_CIO.md).
-
-## Continuous intelligence, selective alerts
-
-`monitoring.ContinuousRegimeMonitor` remains the analytical boundary separating
-continuous analysis from notification. `run_scheduler.py` adds durable cycle
-claims, authenticated preferences, deduplicated delivery, retries, and delivery
-history around that governed result.
-
-The default material-change policy stays quiet when the working view is
-unchanged or only one moderate signal moves. It surfaces portfolio review only
-when evidence crosses governed materiality thresholds, unless the user has
-explicitly enabled a daily summary.
-
-## CIO decision card
-
-```bash
-python run_regime.py \
-  --decision-card html \
-  --card-output reports/latest-decision.html
-```
-
-`--decision-card` supports Markdown, JSON, and responsive HTML. The primary view
-shows the decision, why it matters now, and the directional portfolio effect;
-evidence, risks, and review conditions remain available as progressive detail.
-
-## Portfolio-fit and opportunity-cost gates
-
-Committee approval does not flow directly into a portfolio weight. The
-`portfolio.PortfolioFitGate` evaluates a proposal against a point-in-time
-portfolio snapshot and versioned mandate.
-
-The gate checks direction, prohibited exposure, liquidity, concentration,
-minimum cash, risk budget, and overlap. Opportunity-cost analysis then explains
-whether the proposal can use excess cash, which explicitly approved reduction
-could fund it, and what trade-offs would result. Neither component executes a
-trade.
+- improve long-term capital compounding;
+- use traceable point-in-time evidence;
+- preserve source independence and contradictory evidence;
+- integrate with the common decision schema;
+- respect Version 1 recommendation eligibility;
+- preserve specialist independence and CIO-only action authority;
+- support no-action and insufficient-evidence outcomes;
+- keep sizing and execution separate from analytical conviction;
+- produce a falsifiable thesis and monitoring plan; and
+- support later attribution and confidence calibration.
 
 ## Documentation
 
-- [Architecture](ARCHITECTURE.md)
+- [Governing specification](GOVERNING_SPECIFICATION.md)
 - [Product vision](PRODUCT_VISION.md)
 - [Roadmap](ROADMAP.md)
+- [Architecture](ARCHITECTURE.md)
 - [Data sources and governance](DATA_SOURCES.md)
 - [Institutional decision engine](DECISION_ENGINE.md)
-- [Authentication and authorization](docs/AUTHENTICATION_AND_AUTHORIZATION.md)
 - [Canonical daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
-- [Scheduled intelligence and alerts](docs/SCHEDULING_AND_ALERTS.md)
-- [Deployment and operations](docs/OPERATIONS.md)
-- [Backup and restore](docs/BACKUP_RESTORE.md)
-- [Incident response](docs/INCIDENT_RESPONSE.md)
-- [Production API](docs/PRODUCTION_API.md)
-- [Personal CIO intelligence](docs/PERSONAL_CIO.md)
 - [Portfolio-fit gate](docs/PORTFOLIO_FIT.md)
+- [Dependency management](docs/DEPENDENCIES.md)
+- [Production API](docs/PRODUCTION_API.md)
+- [Operations](docs/OPERATIONS.md)
+
+## Status boundary
+
+The software remains research and paper-trading software. It does not execute live trades. Real-money reliance requires completion and validation of the remaining opportunity, portfolio, backtesting, attribution, and confidence-calibration layers.
