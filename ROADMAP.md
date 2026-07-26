@@ -4,9 +4,10 @@
 
 Foundation 1.x now has a deployable, observable, backed-up, and operationally
 hardened application baseline, a versioned investor-objective and Personal CIO
-communication layer, and six reusable analytical engines: Global Liquidity,
-Business Cycle, Credit Cycle, Market Breadth, Valuation, and Technical and
-Momentum. The next analytical milestone is Risk intelligence.
+communication layer, and seven reusable analytical engines: Global Liquidity,
+Business Cycle, Credit Cycle, Market Breadth, Valuation, Technical and Momentum,
+and Risk. The next milestone is governed institutional multi-engine decision
+normalization.
 
 ## Milestone 1 — Consolidated foundation
 
@@ -95,7 +96,7 @@ Implement, in order:
 4. [x] Market breadth
 5. [x] Valuation
 6. [x] Technical and momentum
-7. [ ] Risk
+7. [x] Risk
 
 Each engine must publish a typed result with score, confidence, coverage,
 evidence, risks, and versioned rules. Every engine must feed the Personal CIO
