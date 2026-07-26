@@ -1,0 +1,86 @@
+name: Apply point-in-time security master
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/apply-point-in-time-security-master.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out patch staging branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/export-security-master-base
+          persist-credentials: true
+
+      - name: Reconstruct and verify validated patch
+        run: |
+          cat .github/patches/security-master-{00..09}.b64 \
+            | base64 --decode \
+            > /tmp/security-master.patch.gz
+          echo 'e802adc1a5bc28c48e403bb2adf8fdcb0620a6345ad88bb4d13b1a81b125219d  /tmp/security-master.patch.gz' | sha256sum --check
+          gzip --decompress --stdout /tmp/security-master.patch.gz > /tmp/security-master.patch
+          echo '400532ea927dd14ca76997d77e4d4b97193304052d9da48983f8fd38d79d15bb  /tmp/security-master.patch' | sha256sum --check
+
+      - name: Check out product branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/point-in-time-security-master
+          persist-credentials: true
+
+      - name: Apply exact security master patch
+        run: patch -p5 --forward --batch < /tmp/security-master.patch
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+          python -m pip check
+          python scripts/verify_requirements_lock.py
+
+      - name: Validate exact updated branch
+        run: |
+          python -m compileall -q .
+          python initialize.py
+          python run_intelligence.py
+          python run_regime.py
+          pytest -q
+
+      - name: Commit validated security master
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            DATA_SOURCES.md \
+            ROADMAP.md \
+            cio/models.py \
+            cio/persistence.py \
+            company/candidate.py \
+            data/__init__.py \
+            data/security_master.py \
+            data/security_master_store.py \
+            docs/POINT_IN_TIME_SECURITY_MASTER.md \
+            providers/sec_edgar.py \
+            tests/cio_test_fixtures.py \
+            tests/test_canonical_cio.py \
+            tests/test_canonical_cio_cycle.py \
+            tests/test_company_intelligence.py \
+            tests/test_opportunity_engine.py \
+            tests/test_point_in_time_security_master.py \
+            tests/test_sec_edgar_provider.py
+          git commit -m 'Add point-in-time security master and universe snapshots'
+          git push origin HEAD:agent/point-in-time-security-master
