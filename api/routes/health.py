@@ -23,6 +23,9 @@ from api.schemas import (
 )
 from delivery import SQLiteAlertStore
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
+from intelligence.technical_momentum import (
+    technical_momentum_source_readiness,
+)
 from intelligence.valuation import valuation_source_readiness
 from operations import OperationalSettings
 from personal_cio import SQLiteInvestmentPolicyStore
@@ -142,6 +145,12 @@ def ready(
         required=False,
         ready=valuation_ready,
         detail=valuation_detail,
+    )
+    technical_ready, technical_detail = technical_momentum_source_readiness()
+    components["technical_momentum_source"] = ReadinessComponentResponse(
+        required=False,
+        ready=technical_ready,
+        detail=technical_detail,
     )
     backup_ready = operations.backup_directory.exists() and os.access(
         operations.backup_directory,
