@@ -19,8 +19,8 @@ from cio import (
     CandidateDecisionRecord,
     CandidateInstrument,
     EvidenceQuality,
-    SQLiteCIOJournal,
 )
+from cio.persistence import SQLiteCIOJournal
 from committee.specialists import (
     MacroSpecialistContext,
     MarketSpecialistContext,

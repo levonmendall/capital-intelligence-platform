@@ -10,8 +10,8 @@ from cio import (
     CIODecision,
     CandidateDecisionRecord,
     ChiefInvestmentOfficer,
-    SQLiteCIOJournal,
 )
+from cio.persistence import SQLiteCIOJournal
 from committee.specialists import (
     CandidateSpecialistContext,
     IndependentSpecialistService,

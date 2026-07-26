@@ -610,6 +610,13 @@ class IndependentSpecialistService:
     ) -> SpecialistAnalysis:
         quality = candidate.evidence_quality
         vetoes: list[str] = []
+        if (
+            candidate.instrument.asset_class is CandidateAssetClass.US_EQUITY
+            and context.company is None
+        ):
+            vetoes.append(
+                "point-in-time normalized company analysis is missing for a U.S. equity"
+            )
         if quality.score < self.policy.minimum_evidence_score:
             vetoes.append("aggregate evidence quality is below governance threshold")
         if quality.ceiling < self.policy.minimum_evidence_dimension:
@@ -653,7 +660,7 @@ class IndependentSpecialistService:
             critical_assumptions=(
                 "Evidence identifiers and model versions resolve to immutable records",
             ),
-            risks=vetoes
+            risks=tuple(vetoes)
             or (
                 "Evidence may be revised after the decision timestamp",
             ),
