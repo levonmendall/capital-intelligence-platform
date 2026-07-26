@@ -104,6 +104,14 @@ _EXPORTS = {
         "intelligence.liquidity_cycle",
         "LiquidityAwareCycleExecutor",
     ),
+    "MarketBreadthEngine": (
+        "intelligence.market_breadth",
+        "MarketBreadthEngine",
+    ),
+    "MarketBreadthRun": (
+        "intelligence.market_breadth",
+        "MarketBreadthRun",
+    ),
     "RegimeSeriesLoad": (
         "intelligence.regime_pipeline",
         "RegimeSeriesLoad",
@@ -123,6 +131,10 @@ _EXPORTS = {
     "SeriesLoadState": (
         "intelligence.regime_pipeline",
         "SeriesLoadState",
+    ),
+    "build_configured_market_breadth_engine": (
+        "intelligence.market_breadth",
+        "build_configured_market_breadth_engine",
     ),
     "build_fred_business_cycle_engine": (
         "intelligence.business_cycle",

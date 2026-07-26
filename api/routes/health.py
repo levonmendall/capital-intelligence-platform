@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Response, status
 
@@ -112,6 +113,28 @@ def ready(
         required=False,
         ready=engine_ready,
         detail=engine_detail,
+    )
+    breadth_source = os.environ.get(
+        "CAPITAL_INTELLIGENCE_MARKET_BREADTH_FILE"
+    )
+    if breadth_source and breadth_source.strip():
+        breadth_path = Path(breadth_source).expanduser()
+        breadth_ready = breadth_path.is_file() and os.access(breadth_path, os.R_OK)
+        breadth_detail = (
+            f"market breadth source is readable: {breadth_path}"
+            if breadth_ready
+            else f"configured market breadth source is unavailable: {breadth_path}"
+        )
+    else:
+        breadth_ready = True
+        breadth_detail = (
+            "market breadth source is not configured; the engine will publish "
+            "unavailable without blocking the core daily intelligence path"
+        )
+    components["market_breadth_source"] = ReadinessComponentResponse(
+        required=False,
+        ready=breadth_ready,
+        detail=breadth_detail,
     )
     backup_ready = operations.backup_directory.exists() and os.access(
         operations.backup_directory,
