@@ -117,7 +117,7 @@ def _slo(
         ready=ready,
         components=(
             OperationalSLOComponent(
-                name=OperationalSLOName.SECURITY_MASTER_FRESHNESS,
+                name=OperationalSLOName.PROVIDER_FRESHNESS,
                 status=status,
                 required=True,
                 objective="certified provider and security master are current",
