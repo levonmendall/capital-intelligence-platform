@@ -351,12 +351,11 @@ class SQLiteStageBindingApprovalStore:
         *,
         evaluated_at: datetime,
     ) -> StageBindingApproval | None:
-        values = tuple(
-            item
-            for item in self.approvals(binding_sha256)
-            if item.active_at(evaluated_at)
-        )
-        return None if not values else values[-1]
+        values = self.approvals(binding_sha256)
+        if not values:
+            return None
+        latest = values[-1]
+        return latest if latest.active_at(evaluated_at) else None
 
     def verify_integrity(self) -> bool:
         with self._connect() as connection:
