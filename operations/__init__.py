@@ -71,6 +71,21 @@ from operations.slo import (
     operational_slo_policy_from_settings,
 )
 
+_LAZY_READINESS_EXPORTS = {
+    "OperationalReadinessAssembler",
+    "OperationalReadinessAssemblyPolicy",
+    "OperationalReadinessAssemblyResult",
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_READINESS_EXPORTS:
+        from operations import readiness
+
+        return getattr(readiness, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "BackupError",
     "BackupResult",
@@ -99,6 +114,9 @@ __all__ = [
     "OperationalIncidentIntegrityError",
     "OperationalIncidentSeverity",
     "OperationalIncidentState",
+    "OperationalReadinessAssembler",
+    "OperationalReadinessAssemblyPolicy",
+    "OperationalReadinessAssemblyResult",
     "OperationalSLOComponent",
     "OperationalSLOEvaluator",
     "OperationalSLOInputs",
