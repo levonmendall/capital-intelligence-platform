@@ -189,7 +189,7 @@ class SQLiteAlertStore:
                     json.dumps([value.value for value in stored.channels]),
                     json.dumps([value.value for value in stored.topics]),
                     stored.email_address,
-                    stored.minimum_conviction_change,
+                    stored.minimum_conviction_change or 0,
                     timestamp.isoformat(),
                 ),
             )
@@ -634,7 +634,11 @@ class SQLiteAlertStore:
             channels=tuple(AlertChannel(value) for value in json.loads(row["channels_json"])),
             topics=tuple(AlertTopic(value) for value in json.loads(row["topics_json"])),
             email_address=row["email_address"],
-            minimum_conviction_change=int(row["minimum_conviction_change"]),
+            minimum_conviction_change=(
+                None
+                if int(row["minimum_conviction_change"]) <= 0
+                else int(row["minimum_conviction_change"])
+            ),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 

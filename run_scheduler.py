@@ -22,6 +22,7 @@ from delivery import (
 )
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
 from screening import SQLiteFullUniverseScreeningStore
+from security import SQLiteIdentityStore
 
 
 def _context_provider(specification: str | None):
@@ -69,6 +70,7 @@ def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
             password=settings.smtp_password,
             use_tls=settings.smtp_use_tls,
         )
+    identity_store = SQLiteIdentityStore(settings.identity_database)
     alert_service = AlertDeliveryService(
         alert_store,
         dispatchers=dispatchers,
@@ -79,6 +81,7 @@ def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
         executor,
         alert_store,
         delivery_service=alert_service,
+        identity_store=identity_store,
         schedule_timezone=settings.scheduler_timezone,
         schedule_hour=settings.scheduler_hour,
         cycle_retry_delay=timedelta(minutes=settings.scheduler_retry_minutes),

@@ -24,15 +24,24 @@ from security import AuthenticatedPrincipal
 router = APIRouter(prefix="/v1/alerts", tags=["alerts"])
 
 
+_CANONICAL_TOPICS = {
+    AlertTopic.CIO_DECISION,
+    AlertTopic.THESIS,
+    AlertTopic.OPPORTUNITY,
+    AlertTopic.IMPLEMENTATION,
+    AlertTopic.EVIDENCE,
+    AlertTopic.DAILY_BRIEFING,
+}
+
+
 def _preference_payload(preference: DeliveryPreference) -> AlertPreferenceResponse:
     return AlertPreferenceResponse(
         user_id=preference.user_id,
         timezone_name=preference.timezone_name,
         delivery_hour=preference.delivery_hour,
         channels=[value.value for value in preference.channels],
-        topics=[value.value for value in preference.topics],
+        topics=[value.value for value in preference.topics if value in _CANONICAL_TOPICS],
         email_address=preference.email_address,
-        minimum_conviction_change=preference.minimum_conviction_change,
         updated_at=(None if preference.updated_at is None else preference.updated_at.isoformat()),
     )
 
@@ -40,7 +49,7 @@ def _preference_payload(preference: DeliveryPreference) -> AlertPreferenceRespon
 def _delivery_payload(delivery) -> AlertDeliveryResponse:
     return AlertDeliveryResponse(
         delivery_id=delivery.delivery_id,
-        snapshot_identifier=delivery.snapshot_identifier,
+        event_identifier=delivery.event_identifier,
         channel=delivery.channel.value,
         topics=[value.value for value in delivery.topics],
         priority=delivery.priority.value,
@@ -85,6 +94,8 @@ def update_preferences(
     try:
         channels = tuple(AlertChannel(value) for value in payload.channels)
         topics = tuple(AlertTopic(value) for value in payload.topics)
+        if any(topic not in _CANONICAL_TOPICS for topic in topics):
+            raise ValueError("alert topics must be canonical CIO event topics")
         if AlertChannel.EMAIL in channels and not settings.smtp_host:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -97,7 +108,6 @@ def update_preferences(
             channels=channels,
             topics=topics,
             email_address=payload.email_address,
-            minimum_conviction_change=payload.minimum_conviction_change,
         )
         stored = store.save_preference(preference)
     except HTTPException:

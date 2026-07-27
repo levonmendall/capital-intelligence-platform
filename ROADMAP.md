@@ -175,7 +175,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 ## Milestone 12 — Production data and operations
 
 - [x] Authentication, role and mandate authorization, and query-only market/portfolio API access.
-- [x] Selective material-change alerts and delivery preferences.
+- [x] Canonical event-driven alerts for CIO decisions, theses, opportunities, implementation, evidence, and daily briefings; score and conviction alerts are inactive.
 - [x] Hardened containers, dependency locks, CodeQL, dependency audit, image scan, backup, and restore controls.
 - [x] Read-only canonical CIO journal API with content hashes.
 - [x] Add security-master ingestion status, source-age monitoring, catalog and operation hash verification, and an activation gate.

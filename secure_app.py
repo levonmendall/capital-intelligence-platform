@@ -165,23 +165,26 @@ def _render_alert_controls(principal) -> None:
             options=channel_values,
             default=[value.value for value in preference.channels],
         )
-        topic_values = [value.value for value in AlertTopic]
+        canonical_topics = (
+            AlertTopic.CIO_DECISION,
+            AlertTopic.THESIS,
+            AlertTopic.OPPORTUNITY,
+            AlertTopic.IMPLEMENTATION,
+            AlertTopic.EVIDENCE,
+            AlertTopic.DAILY_BRIEFING,
+        )
+        topic_values = [value.value for value in canonical_topics]
         selected_topics = st.multiselect(
             "Notify me about",
             options=topic_values,
-            default=[value.value for value in preference.topics],
+            default=[
+                value.value for value in preference.topics if value in canonical_topics
+            ],
         )
         email_address = st.text_input(
             "Email address",
             value=preference.email_address or principal.email,
             disabled=AlertChannel.EMAIL.value not in selected_channels,
-        )
-        minimum_conviction_change = st.slider(
-            "Minimum material confidence change",
-            min_value=1,
-            max_value=25,
-            value=min(preference.minimum_conviction_change, 25),
-            help="Smaller confidence changes remain silent.",
         )
         if AlertChannel.EMAIL.value in selected_channels and not settings.smtp_host:
             st.warning(
@@ -205,7 +208,6 @@ def _render_alert_controls(principal) -> None:
                         if AlertChannel.EMAIL in channels
                         else principal.email
                     ),
-                    minimum_conviction_change=minimum_conviction_change,
                 )
                 store.save_preference(updated)
             except (TypeError, ValueError) as error:

@@ -10,8 +10,10 @@ For each configured market date the worker:
 2. loads the point-in-time context from the configured factory;
 3. loads candidates only from the matching complete-universe screening publication;
 4. executes opportunity ranking, five independent specialist reviews, CIO synthesis, portfolio construction, thesis creation, evidence freezing, and the daily briefing;
-5. stores the briefing identifier on the completed claim; and
-6. drains independently queued delivery events.
+5. converts the immutable cycle result into CIO decision, thesis, opportunity, implementation, evidence, and briefing events;
+6. queues those events using account topic and channel preferences;
+7. stores the briefing identifier on the completed claim; and
+8. drains independently queued delivery attempts.
 
 Any missing configuration, incomplete screening evidence, mismatched timestamp, or integrity failure blocks the cycle and records a retryable failure. There is no legacy fallback.
 
@@ -40,6 +42,10 @@ python run_scheduler.py --once
 | `CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS` | `60` | Worker polling interval. |
 | `CAPITAL_INTELLIGENCE_SCHEDULER_RETRY_MINUTES` | `15` | Failed-cycle retry delay. |
 | `CAPITAL_INTELLIGENCE_SCHEDULER_LEASE_MINUTES` | `30` | Running-claim lease. |
+
+## Canonical alert boundary
+
+The active preference surface contains only `cio_decision`, `thesis`, `opportunity`, `implementation`, `evidence`, and `daily_briefing`. Score, score delta, conviction movement, committee voting, environment labels, and personal objectives cannot trigger an active notification. See [Canonical CIO alerts](CANONICAL_ALERTS.md).
 
 ## Safety boundaries
 

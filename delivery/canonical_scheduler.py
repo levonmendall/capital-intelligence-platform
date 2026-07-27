@@ -22,6 +22,7 @@ class ScheduledCanonicalCIOWorker:
         cycle_store: SQLiteAlertStore,
         *,
         delivery_service: Any | None = None,
+        identity_store: Any | None = None,
         schedule_timezone: str = "America/New_York",
         schedule_hour: int = 7,
         clock: Callable[[], datetime] | None = None,
@@ -37,6 +38,14 @@ class ScheduledCanonicalCIOWorker:
             getattr(delivery_service, "dispatch_pending", None)
         ):
             raise TypeError("delivery_service must expose dispatch_pending()")
+        if delivery_service is not None and not callable(
+            getattr(delivery_service, "queue_cycle_result", None)
+        ):
+            raise TypeError("delivery_service must expose queue_cycle_result()")
+        if delivery_service is not None and not callable(
+            getattr(identity_store, "list_users", None)
+        ):
+            raise TypeError("identity_store must expose list_users() when delivery is enabled")
         if not schedule_timezone.strip():
             raise ValueError("schedule_timezone cannot be empty")
         if not 0 <= schedule_hour <= 23:
@@ -48,6 +57,7 @@ class ScheduledCanonicalCIOWorker:
         self.executor = executor
         self.cycle_store = cycle_store
         self.delivery_service = delivery_service
+        self.identity_store = identity_store
         self.schedule_timezone = schedule_timezone
         self.timezone = ZoneInfo(schedule_timezone)
         self.schedule_hour = schedule_hour
@@ -97,6 +107,9 @@ class ScheduledCanonicalCIOWorker:
                 raise RuntimeError(
                     "canonical cycle result must expose briefing.identifier"
                 )
+            if self.delivery_service is not None:
+                accounts = tuple(self.identity_store.list_users())
+                self.delivery_service.queue_cycle_result(result, accounts)
             self.cycle_store.complete_cycle(
                 cycle_key,
                 snapshot_identifier=snapshot_identifier,
