@@ -64,22 +64,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add \
-            README.md \
-            ROADMAP.md \
-            api/config.py \
-            application/__init__.py \
-            application/production_cio.py \
-            delivery/__init__.py \
-            delivery/canonical_scheduler.py \
-            deploy/production.env.example \
-            deploy/staging.env.example \
-            docs/CANONICAL_PRODUCTION_SCHEDULER.md \
-            docs/OPERATIONS.md \
-            docs/SCHEDULING_AND_ALERTS.md \
-            run_scheduler.py \
-            screening/__init__.py \
-            screening/orchestration.py \
-            tests/test_production_canonical_scheduler.py
+          git add README.md ROADMAP.md api/config.py application/__init__.py application/production_cio.py delivery/__init__.py delivery/canonical_scheduler.py deploy/production.env.example deploy/staging.env.example docs/CANONICAL_PRODUCTION_SCHEDULER.md docs/OPERATIONS.md docs/SCHEDULING_AND_ALERTS.md run_scheduler.py screening/__init__.py screening/orchestration.py tests/test_production_canonical_scheduler.py
           git commit -m 'Replace scheduled pipeline with canonical CIO cycle'
           git push origin HEAD:agent/canonical-production-orchestration
