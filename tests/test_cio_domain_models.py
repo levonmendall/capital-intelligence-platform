@@ -116,17 +116,8 @@ def test_guidance_returns_highest_probability_scenario() -> None:
     assert result.probability == 0.55
 
 
-def test_all_eight_mandates_are_preserved() -> None:
-    assert {mandate.value for mandate in MandateID} == {
-        "preservation",
-        "income",
-        "balanced",
-        "growth",
-        "value",
-        "tactical",
-        "global",
-        "innovation",
-    }
+def test_only_compounding_mandate_is_active() -> None:
+    assert {mandate.value for mandate in MandateID} == {"compounding"}
 
 
 def test_timezone_aware_metadata_is_accepted() -> None:

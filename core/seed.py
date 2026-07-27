@@ -1,4 +1,4 @@
-"""Seed the database with the platform's investment mandates."""
+"""Compatibility seeding for the retired portfolio database."""
 
 import json
 from pathlib import Path
@@ -10,7 +10,7 @@ MANDATES_FILE = ROOT / "config" / "mandates.json"
 
 
 def seed_mandates() -> int:
-    """Insert the configured mandates when they do not already exist."""
+    """Insert only the legacy-compatible compounding portfolio record."""
 
     initialize_database()
 

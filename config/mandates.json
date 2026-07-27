@@ -1,50 +1,8 @@
 [
   {
-    "code": "PRES",
-    "name": "Capital Preservation",
-    "risk": "Low",
-    "capital": 25000
-  },
-  {
-    "code": "INCM",
-    "name": "Income & Stability",
-    "risk": "Low-Moderate",
-    "capital": 25000
-  },
-  {
-    "code": "BAL",
-    "name": "Balanced Allocation",
-    "risk": "Moderate",
-    "capital": 25000
-  },
-  {
-    "code": "GROW",
-    "name": "Growth Opportunities",
-    "risk": "Moderate-High",
-    "capital": 25000
-  },
-  {
-    "code": "TACT",
-    "name": "Tactical Rotation",
-    "risk": "High",
-    "capital": 25000
-  },
-  {
-    "code": "VALU",
-    "name": "Opportunistic Value",
-    "risk": "High",
-    "capital": 25000
-  },
-  {
-    "code": "GLOB",
-    "name": "Global Opportunities",
-    "risk": "Moderate-High",
-    "capital": 25000
-  },
-  {
-    "code": "INNO",
-    "name": "Innovation & Disruption",
-    "risk": "Very High",
-    "capital": 25000
+    "code": "COMPOUNDING",
+    "name": "Long-Term Compounding",
+    "risk": "Operational constraints only",
+    "capital": 200000
   }
 ]

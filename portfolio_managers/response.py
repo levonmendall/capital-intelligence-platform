@@ -9,16 +9,13 @@ from intelligence.metadata import DocumentMetadata
 
 
 class MandateID(str, Enum):
-    """The eight independent investment mandates."""
+    """The sole investment mandate: maximize long-term compounded returns.
 
-    PRESERVATION = "preservation"
-    INCOME = "income"
-    BALANCED = "balanced"
-    GROWTH = "growth"
-    VALUE = "value"
-    TACTICAL = "tactical"
-    GLOBAL = "global"
-    INNOVATION = "innovation"
+    Liquidity, concentration, leverage, turnover, and prohibited-exposure
+    controls are operational constraint profiles, not competing objectives.
+    """
+
+    COMPOUNDING = "compounding"
 
 
 class TradeAction(str, Enum):
@@ -47,17 +44,14 @@ class ProposedTrade:
             raise ValueError("quantity cannot be negative")
 
         if (
-            self.target_weight is not None
-            and not 0.0 <= self.target_weight <= 1.0
+            self.target_weight is not None and not 0.0 <= self.target_weight <= 1.0
         ):
-            raise ValueError(
-                "target_weight must be between 0.0 and 1.0"
-            )
+            raise ValueError("target_weight must be between 0.0 and 1.0")
 
 
 @dataclass
 class PortfolioManagerResponse:
-    """Formal response by one mandate to official CIO guidance."""
+    """Formal response under the compounding mandate to official CIO guidance."""
 
     mandate_id: MandateID
     guidance_id: str
@@ -72,9 +66,7 @@ class PortfolioManagerResponse:
 
     rationale: list[str] = field(default_factory=list)
     proposed_trades: list[ProposedTrade] = field(default_factory=list)
-    mandate_constraints_considered: list[str] = field(
-        default_factory=list
-    )
+    mandate_constraints_considered: list[str] = field(default_factory=list)
 
     metadata: DocumentMetadata = field(default_factory=DocumentMetadata)
 
@@ -83,11 +75,7 @@ class PortfolioManagerResponse:
             raise ValueError("guidance_id cannot be empty")
 
         if not 0.0 <= self.agreement_level <= 1.0:
-            raise ValueError(
-                "agreement_level must be between 0.0 and 1.0"
-            )
+            raise ValueError("agreement_level must be between 0.0 and 1.0")
 
         if not 0.0 <= self.conviction <= 1.0:
-            raise ValueError(
-                "conviction must be between 0.0 and 1.0"
-            )
+            raise ValueError("conviction must be between 0.0 and 1.0")
