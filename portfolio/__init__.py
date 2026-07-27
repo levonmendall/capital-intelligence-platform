@@ -1,4 +1,4 @@
-"""Canonical portfolio constraints, construction, and state authorities."""
+"""Canonical portfolio constraints, construction, execution, and state authorities."""
 
 from portfolio.fit import (
     PortfolioFitDecision,
@@ -13,6 +13,24 @@ from portfolio.models import (
     PortfolioPosition,
     PortfolioProposal,
     PortfolioSnapshot,
+)
+from portfolio.multi_asset_execution import (
+    InstrumentExecutionProfile,
+    InstrumentSession,
+    InstrumentSessionProvider,
+    InstrumentSessionStatus,
+    MultiAssetExecutionBatch,
+    MultiAssetExecutionError,
+    MultiAssetExecutionIntegrityError,
+    MultiAssetExecutionReconciliation,
+    MultiAssetExecutionStatus,
+    MultiAssetOrderResult,
+    MultiAssetOrderStatus,
+    MultiAssetPaperExecutionOrchestrator,
+    MultiAssetPaperFill,
+    MultiAssetQuote,
+    MultiAssetQuoteProvider,
+    SQLiteMultiAssetPaperExecutionStore,
 )
 from portfolio.opportunity_cost import (
     CapitalFundingSource,
@@ -43,6 +61,21 @@ __all__ = [
     "CanonicalPortfolioSnapshot",
     "FundingCandidate",
     "FundingSourceType",
+    "InstrumentExecutionProfile",
+    "InstrumentSession",
+    "InstrumentSessionProvider",
+    "InstrumentSessionStatus",
+    "MultiAssetExecutionBatch",
+    "MultiAssetExecutionError",
+    "MultiAssetExecutionIntegrityError",
+    "MultiAssetExecutionReconciliation",
+    "MultiAssetExecutionStatus",
+    "MultiAssetOrderResult",
+    "MultiAssetOrderStatus",
+    "MultiAssetPaperExecutionOrchestrator",
+    "MultiAssetPaperFill",
+    "MultiAssetQuote",
+    "MultiAssetQuoteProvider",
     "OpportunityCostAssessment",
     "OpportunityCostPolicy",
     "PortfolioFitDecision",
@@ -54,6 +87,7 @@ __all__ = [
     "PortfolioProposal",
     "PortfolioSnapshot",
     "SQLiteCanonicalPortfolioStore",
+    "SQLiteMultiAssetPaperExecutionStore",
     "assess_opportunity_cost",
     "opportunity_cost_to_dict",
 ]
