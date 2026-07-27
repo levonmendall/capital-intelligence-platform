@@ -168,16 +168,17 @@ class _Delegate:
 
 def _manifest() -> ProductionContextManifest:
     return ProductionContextManifest(
-        context_identifier="context:1",
-        screening_cycle_identifier="screening:1",
+        identifier="context-manifest:1",
         screening_publication_identifier="publication:1",
         portfolio_snapshot_identifier="portfolio:1",
+        context_evidence_identifier="context-evidence:1",
+        as_of=AS_OF,
+        knowledge_cutoff=CUTOFF,
         candidate_identifiers=("candidate:qualified",),
+        candidate_context_identifiers=("candidate-context:qualified",),
         evidence_identifiers=("evidence:base",),
         source_versions=(("source", "v1"),),
         model_versions=(("candidate", "v1"),),
-        code_version="commit:test",
-        knowledge_cutoff=CUTOFF,
     )
 
 
