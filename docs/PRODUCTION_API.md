@@ -56,7 +56,9 @@ GET  /v1/alerts?limit=50&include_suppressed=false
 POST /v1/alerts/{delivery_id}/acknowledge
 ```
 
-Portfolio responses remain filtered by mandate grants. Alerts remain scoped to the authenticated user and may reflect material evidence, opportunity, risk, thesis, implementation, confidence, or CIO-decision changes.
+Portfolio responses remain filtered by identity access grants. Those grants control which portfolio records an authenticated account may read; they do not select an investment objective. Every active portfolio operates under the sole `COMPOUNDING` investment mandate.
+
+Active alerts are limited to six canonical event topics: `cio_decision`, `thesis`, `opportunity`, `implementation`, `evidence`, and `daily_briefing`. Preferences select topics and delivery channels only. Score deltas, conviction trends, confidence thresholds, personal goals, and legacy mandate changes are not active alert controls.
 
 ## Deprecated diagnostics
 
@@ -97,7 +99,7 @@ POST /v1/users/{user_id}/investor-access
 POST /v1/users/{user_id}/disable
 ```
 
-User and mandate administration controls access only. It does not create personalized investment objectives.
+The `/mandates` path is retained as a compatibility name for portfolio-access authorization. User, grant, and access administration controls identity permissions only. It cannot create personalized investment objectives, alter opportunity ranking, or activate a retired mandate.
 
 ## HTTP behavior
 
