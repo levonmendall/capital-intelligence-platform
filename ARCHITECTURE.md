@@ -6,6 +6,12 @@
 
 The architecture is organized around authority boundaries. Analytical components may produce evidence and conclusions, but only the Chief Investment Officer may issue a user-facing investment action. Portfolio construction controls sizing and funding. Thesis monitoring may propose review. Evaluation may score process and outcome. None of those layers may silently assume another layer’s authority.
 
+## Investment mandate and constraints
+
+The platform has one active investment mandate: `COMPOUNDING`, meaning maximize long-term compounded portfolio returns after implementation costs. Liquidity, concentration, sector, factor, correlation, leverage, turnover, cash-reserve, drawdown, transaction-cost, evidence-quality, data-freshness, and restricted-instrument rules are operational constraints. They protect implementation feasibility but cannot create competing objectives, change opportunity ranking, or issue CIO decisions.
+
+Preservation, income, balanced, growth, tactical, value, global, and innovation are retired mandate labels. They may remain only in historical migration records or isolated offline research and are not active portfolio authorities.
+
 ## Canonical flow
 
 ```text
@@ -17,6 +23,7 @@ Providers and point-in-time stores
         -> five independent SpecialistAnalysis records
         -> ChiefInvestmentOfficer synthesis
         -> PortfolioConstructionEngine
+        -> canonical append-only portfolio state
         -> LivingThesis snapshots and monitoring
         -> DailyCIOBriefing
         -> DecisionEvidenceSnapshot
@@ -34,6 +41,7 @@ Providers and point-in-time stores
 | `committee.specialists` | five independent first-pass analyses | user-facing action |
 | `cio.synthesis` | final action, disclosed confidence, abstention, thesis approval | broker execution |
 | `portfolio.construction_engine` | target weights, funding, costs, liquidity, constraints | changing the CIO action or using confidence as size |
+| `portfolio.state` | append-only cash, positions, valuations, and implementation lineage | investment analysis or legacy-database mutation |
 | `thesis` | immutable ownership thesis and review proposals | automatic trades or historical rewrites |
 | `evaluation` | frozen evidence snapshots, realized comparison, attribution, calibration, walk-forward controls | hindsight inputs or autonomous governance changes |
 | `cio.persistence` | append-only hash-chained journal | mutable decision history |
@@ -67,9 +75,9 @@ The five specialists complete independent first-pass analyses against the same c
 
 The CIO alone selects Buy, Increase, Hold, Reduce, Exit, Watch, Insufficient evidence, No superior opportunity, or No material change. Weighted-voter modules remain isolated historical research and cannot be imported by active API, application, or canonical-cycle entrypoints.
 
-## Portfolio construction authority
+## Portfolio construction and state authority
 
-Construction receives approved CIO intents and the actual portfolio state. It:
+Construction receives approved CIO intents and the actual canonical portfolio state. It:
 
 - applies exits and reductions before additions;
 - allocates positive intents in opportunity-rank order;
@@ -80,6 +88,8 @@ Construction receives approved CIO intents and the actual portfolio state. It:
 - emits non-executing paper trade proposals.
 
 Confidence is evidence reliability, not risk budget. It is intentionally absent from the sizing algorithm.
+
+`SQLiteCanonicalPortfolioStore` is the only active authority for cash, holdings, valuation history, and implementation lineage. The retired mandate/trading database is a query-only migration source. Active application, API, construction, rebalancing, paper execution, backup, and reporting paths must not seed, mutate, or treat it as current portfolio state.
 
 ## Living-thesis authority
 
@@ -104,10 +114,10 @@ The active product has four screens:
 3. Portfolio — construction, holdings, constraints, and paper activity.
 4. History — briefings, evaluations, theses, and paper records.
 
-The Capital Intelligence Score, conviction trend, Personal CIO, and Investor Memory are not active decision authorities. See [Legacy authority isolation](docs/LEGACY_AUTHORITY_ISOLATION.md).
+The Capital Intelligence Score, conviction trend, Personal CIO, Investor Memory, and retired goal-oriented mandates are not active decision authorities. See [Legacy authority isolation](docs/LEGACY_AUTHORITY_ISOLATION.md).
 
 ## Security and execution boundary
 
 Authentication and authorization control data access, not investment objectives. The API opens intelligence and portfolio stores read-only or query-only and exposes no trade mutation endpoint. Containers, dependencies, source scanning, image scanning, backups, restore verification, and operational health checks are enforced in CI and deployment.
 
-The current system is research and paper-only. A future broker layer requires separate approval, idempotency, order policy, pre-trade controls, market-hours checks, realized-cost measurement, incident procedures, and governance authorization. It may not bypass the CIO, construction, thesis, or evaluation boundaries.
+The current system is research and paper-only. A future broker layer requires separate approval, idempotency, order policy, pre-trade controls, market-hours checks, realized-cost measurement, incident procedures, and governance authorization. It may not bypass the CIO, construction, canonical portfolio state, thesis, or evaluation boundaries.
