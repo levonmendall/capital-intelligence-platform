@@ -1,0 +1,100 @@
+name: Apply PR3 canonical portfolio state
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/apply-pr3-portfolio-state.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out validated payload branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/export-pr3-portfolio-state
+          persist-credentials: true
+
+      - name: Verify chunks and reconstruct patch
+        run: |
+          echo '869454cf8179aa50a73e9516c658ab2c45b0291a16cc59a6481de3b9ba65c969  .github/patches/pr3-portfolio-00.b64' | sha256sum --check
+          echo 'a71380d865ccf9c4ccc984516b2d05fbfd08ca77a96f31415eac9ab87484a63a  .github/patches/pr3-portfolio-01.b64' | sha256sum --check
+          echo '9f38f637bd78ea2ff62d5babc6ba2e1bfc7025672f9ac5a6b05c14dd2ed7a22b  .github/patches/pr3-portfolio-02.b64' | sha256sum --check
+          echo '8fee48385e6faddf7d4979c730d1deff740cfd063eca5e68efe1bbcb30544118  .github/patches/pr3-portfolio-03.b64' | sha256sum --check
+          echo '5181af86d4102921d5deec7cbee7eda4e26e7f614851ae3e2650b801bbba5246  .github/patches/pr3-portfolio-04.b64' | sha256sum --check
+          echo '5b0c52582b8fc97e6a83741a6707347e70f6a474f513fdc8631d02f00c5482d9  .github/patches/pr3-portfolio-05.b64' | sha256sum --check
+          cat .github/patches/pr3-portfolio-{00..05}.b64 | base64 --decode > /tmp/pr3.patch.gz
+          echo 'dbf3213441fac097b5ee95b305d64bc5c50606703530f1aa32c08f24c7ed5d1e  /tmp/pr3.patch.gz' | sha256sum --check
+          gzip --decompress --stdout /tmp/pr3.patch.gz > /tmp/pr3.patch
+          echo '1b01ff4c10a5c9825d29793ac592ed1c8dc807cb8860e5827607c1210ac1b30c  /tmp/pr3.patch' | sha256sum --check
+
+      - name: Check out product branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/canonical-portfolio-state
+          persist-credentials: true
+
+      - name: Apply exact portfolio-state patch
+        run: |
+          git apply --check /tmp/pr3.patch
+          git apply /tmp/pr3.patch
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+          python -m pip check
+          python scripts/verify_requirements_lock.py
+
+      - name: Validate exact updated branch
+        run: |
+          python -m compileall -q .
+          python initialize.py
+          python run_intelligence.py
+          python run_regime.py
+          pytest -q
+
+      - name: Commit validated canonical portfolio state
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            README.md \
+            ROADMAP.md \
+            api/config.py \
+            api/repositories.py \
+            app.py \
+            core/portfolio.py \
+            docs/CANONICAL_PORTFOLIO_STATE.md \
+            docs/OPERATIONS.md \
+            docs/PRODUCTION_API.md \
+            initialize.py \
+            portfolio/__init__.py \
+            portfolio/execution.py \
+            portfolio/state.py \
+            run_backup.py \
+            run_paper_execution.py \
+            run_portfolio_migration.py \
+            tests/test_api.py \
+            tests/test_authentication_authorization.py \
+            tests/test_canonical_portfolio_state.py \
+            tests/test_foundation.py \
+            tests/test_paper_execution_orchestration.py \
+            tests/test_personal_cio_alerts.py \
+            tests/test_portfolio_state_architecture.py \
+            tests/test_rebalancer.py \
+            tests/test_trading.py
+          git commit -m 'Consolidate canonical portfolio state'
+          git push origin HEAD:agent/canonical-portfolio-state
