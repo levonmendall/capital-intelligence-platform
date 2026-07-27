@@ -6,7 +6,7 @@ The Version 1 production topology contains four independently restartable servic
 
 - `api` — authenticated FastAPI boundary;
 - `web` — authenticated Streamlit experience;
-- `scheduler` — canonical daily cycle and selective-alert worker; and
+- `scheduler` — fail-closed `CanonicalCIOCycle` worker and delivery drain; and
 - `backup` — encrypted SQLite backup loop.
 
 All services run as an unprivileged user with dropped Linux capabilities, a read-only root filesystem, and explicit writable data, backup, and temporary mounts. TLS terminates at a trusted reverse proxy or managed ingress. The application rejects non-HTTPS requests in production using the forwarded protocol header.
@@ -31,6 +31,11 @@ Expose ports only through a TLS reverse proxy in shared environments. The compos
 - `GET /metrics` — Prometheus text format, protected by the metrics bearer token when configured.
 
 A stale or failed scheduler heartbeat returns HTTP 503 without marking the API process itself dead.
+
+
+## Canonical scheduler readiness
+
+The scheduler requires both `CAPITAL_INTELLIGENCE_FULL_UNIVERSE_SCREENING_DATABASE` and a no-argument `CAPITAL_INTELLIGENCE_CANONICAL_CONTEXT_PROVIDER` factory in `module:function` form. The factory supplies point-in-time specialist and portfolio context only. Candidates are reconstructed exclusively from a complete persisted full-universe screening publication. Missing configuration, partial publication, timestamp mismatch, or journal/integrity failure blocks the cycle; there is no legacy analytical-pipeline fallback.
 
 ## Security-master readiness
 

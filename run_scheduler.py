@@ -1,103 +1,64 @@
-"""Run scheduled daily Capital Intelligence cycles and selective delivery."""
+"""Run the scheduled canonical CIO cycle and drain canonical delivery."""
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import time
 from dataclasses import replace
 from datetime import timedelta
 
 from api.config import ApiSettings
-from application import DailyCapitalIntelligenceService, SQLiteDailySnapshotStore
+from application import ProductionCanonicalCIOExecutor
+from application.cio_cycle import CanonicalCIOCycle
+from cio.persistence import SQLiteCIOJournal
 from delivery import (
     AlertChannel,
     AlertDeliveryService,
-    CanonicalDailyCycleExecutor,
     SMTPEmailDispatcher,
     SQLiteAlertStore,
-    ScheduledDailyIntelligenceWorker,
+    ScheduledCanonicalCIOWorker,
 )
-from intelligence.business_cycle import build_fred_business_cycle_engine
-from intelligence.credit_cycle import build_fred_credit_cycle_engine
-from intelligence.engine_cycle import AnalyticalEngineCycleExecutor
-from intelligence.engine_store import SQLiteAnalyticalEngineStore
-from intelligence.global_liquidity import build_fred_global_liquidity_engine
-from intelligence.governance import MultiEngineGovernor
-from intelligence.governance_store import SQLiteGovernanceStore
-from intelligence.market_breadth import build_configured_market_breadth_engine
-from intelligence.normalization import MultiEngineNormalizer
-from intelligence.normalization_store import SQLiteNormalizationStore
-from intelligence.regime_pipeline import build_fred_regime_pipeline
-from intelligence.risk import build_configured_risk_engine
-from intelligence.synthesis_store import SQLiteSynthesisStore
-from intelligence.synthesis_weights import MultiEngineSynthesizer
-from intelligence.technical_momentum import (
-    build_configured_technical_momentum_engine,
-)
-from intelligence.valuation import build_configured_valuation_engine
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
-from reporting import build_conviction_trend_from_store
-from security import SQLiteIdentityStore
+from screening import SQLiteFullUniverseScreeningStore
 
 
-def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
-    """Build continuous analysis and material-change delivery without goal inputs."""
-
-    snapshot_store = SQLiteDailySnapshotStore(settings.snapshot_database)
-    daily_service = DailyCapitalIntelligenceService(
-        build_fred_regime_pipeline(),
-        store=snapshot_store,
-    )
-
-    def conviction_change() -> int | None:
-        trend = build_conviction_trend_from_store(
-            snapshot_store.path,
-            lookback=settings.conviction_default_lookback,
+def _context_provider(specification: str | None):
+    if specification is None:
+        raise RuntimeError(
+            "CAPITAL_INTELLIGENCE_CANONICAL_CONTEXT_PROVIDER is required; "
+            "there is no legacy scheduler fallback"
         )
-        return trend.change_points
+    module_name, attribute_name = specification.split(":", 1)
+    factory = getattr(importlib.import_module(module_name), attribute_name, None)
+    if not callable(factory):
+        raise ValueError(
+            f"canonical context-provider factory {specification!r} is not callable"
+        )
+    return factory()
 
-    canonical_executor = CanonicalDailyCycleExecutor(
-        daily_service,
-        conviction_change_reader=conviction_change,
+
+def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
+    """Build the only active scheduled investment-decision authority."""
+
+    journal = SQLiteCIOJournal(settings.journal_database)
+    journal.verify_integrity()
+    screening_store = SQLiteFullUniverseScreeningStore(
+        settings.full_universe_screening_database
     )
-    analytical_path = settings.snapshot_database.with_name(
-        "analytical_engines.db"
-    )
-    analytical_store = SQLiteAnalyticalEngineStore(analytical_path)
-    normalization_store = SQLiteNormalizationStore(analytical_path)
-    synthesis_store = SQLiteSynthesisStore(analytical_path)
-    governance_store = SQLiteGovernanceStore(analytical_path)
-    executor = AnalyticalEngineCycleExecutor(
-        canonical_executor,
-        (
-            build_fred_global_liquidity_engine(),
-            build_fred_business_cycle_engine(),
-            build_fred_credit_cycle_engine(),
-            build_configured_market_breadth_engine(),
-            build_configured_valuation_engine(),
-            build_configured_technical_momentum_engine(),
-            build_configured_risk_engine(),
-        ),
-        analytical_store,
-        normalizer=MultiEngineNormalizer(),
-        normalization_store=normalization_store,
-        synthesizer=MultiEngineSynthesizer(),
-        synthesis_store=synthesis_store,
-        governor=MultiEngineGovernor(),
-        governance_store=governance_store,
+    screening_store.verify_integrity()
+    provider = _context_provider(settings.canonical_cycle_context_provider)
+    executor = ProductionCanonicalCIOExecutor(
+        cycle=CanonicalCIOCycle(journal=journal),
+        screening_store=screening_store,
+        context_provider=provider,
     )
     alert_path = (
         settings.alert_database
         or settings.snapshot_database.with_name("alerts.db")
     )
     alert_store = SQLiteAlertStore(alert_path)
-    identity_store = SQLiteIdentityStore(
-        settings.identity_database,
-        access_ttl=timedelta(minutes=settings.access_token_minutes),
-        refresh_ttl=timedelta(days=settings.refresh_token_days),
-        password_minimum_length=settings.password_minimum_length,
-    )
     dispatchers = {}
     if settings.smtp_host and settings.smtp_from_address:
         dispatchers[AlertChannel.EMAIL] = SMTPEmailDispatcher(
@@ -114,10 +75,10 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
         maximum_attempts=settings.alert_maximum_attempts,
         base_retry_delay=timedelta(minutes=settings.alert_retry_minutes),
     )
-    return ScheduledDailyIntelligenceWorker(
+    return ScheduledCanonicalCIOWorker(
         executor,
-        identity_store,
-        alert_service,
+        alert_store,
+        delivery_service=alert_service,
         schedule_timezone=settings.scheduler_timezone,
         schedule_hour=settings.scheduler_hour,
         cycle_retry_delay=timedelta(minutes=settings.scheduler_retry_minutes),
@@ -125,15 +86,15 @@ def build_worker(settings: ApiSettings) -> ScheduledDailyIntelligenceWorker:
     )
 
 
-def _run_pass(worker, heartbeat: WorkerHeartbeatStore) -> int:
-    heartbeat.write("starting", detail="scheduled cycle pass started")
+def _run_pass(worker: ScheduledCanonicalCIOWorker, heartbeat: WorkerHeartbeatStore) -> int:
+    heartbeat.write("starting", detail="canonical CIO cycle pass started")
     try:
         result = worker.run_due()
-        deliveries = worker.alert_service.dispatch_pending()
+        deliveries = worker.dispatch_pending()
     except Exception as error:
         heartbeat.write("failed", detail=str(error)[:1000])
         logging.getLogger("capital_intelligence.scheduler").exception(
-            "scheduler pass failed"
+            "canonical scheduler pass failed"
         )
         return 1
     status = "degraded" if result.status == "failed" else "healthy"
@@ -143,15 +104,15 @@ def _run_pass(worker, heartbeat: WorkerHeartbeatStore) -> int:
         detail=(
             f"cycle_status={result.status}; "
             f"deliveries_processed={len(deliveries)}; "
-            f"snapshot={result.snapshot_identifier or '-'}"
+            f"briefing={result.snapshot_identifier or '-'}"
         ),
     )
     logging.getLogger("capital_intelligence.scheduler").info(
-        "scheduler pass completed",
+        "canonical scheduler pass completed",
         extra={
             "cycle_key": result.cycle_key,
             "cycle_status": result.status,
-            "snapshot_identifier": result.snapshot_identifier,
+            "briefing_identifier": result.snapshot_identifier,
             "deliveries_processed": len(deliveries),
         },
     )
@@ -160,12 +121,12 @@ def _run_pass(worker, heartbeat: WorkerHeartbeatStore) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the Capital Intelligence daily scheduler and alert worker."
+        description="Run the canonical CIO production scheduler and delivery worker."
     )
     parser.add_argument(
         "--once",
         action="store_true",
-        help="Run one due-cycle and delivery pass, then exit.",
+        help="Run one due canonical-cycle and delivery pass, then exit.",
     )
     parser.add_argument(
         "--poll-seconds",
@@ -183,7 +144,14 @@ def main() -> int:
         )
     configure_logging(operational)
     heartbeat = WorkerHeartbeatStore(operational.worker_heartbeat_path)
-    worker = build_worker(settings)
+    try:
+        worker = build_worker(settings)
+    except (ImportError, AttributeError, OSError, TypeError, ValueError, RuntimeError) as error:
+        heartbeat.write("failed", detail=str(error)[:1000])
+        logging.getLogger("capital_intelligence.scheduler").exception(
+            "canonical scheduler configuration failed"
+        )
+        return 2
     if args.once:
         return _run_pass(worker, heartbeat)
     poll_seconds = args.poll_seconds or settings.scheduler_poll_seconds

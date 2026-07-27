@@ -1227,6 +1227,12 @@ class FullUniverseScreeningOrchestrator:
         )
 
 
+def candidate_from_payload(payload: Mapping[str, Any]) -> CandidateDecisionRecord:
+    """Reconstruct a canonical candidate from persisted screening evidence."""
+
+    return _candidate_from_payload(payload)
+
+
 def _candidate_from_payload(payload: Mapping[str, Any]) -> CandidateDecisionRecord:
     instrument_payload = dict(payload["instrument"])
     scenario_payload = dict(payload["scenarios"])
