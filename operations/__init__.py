@@ -1,6 +1,13 @@
 """Deployment, observability, backup, and operational hardening."""
 
 from operations.backup import BackupError, BackupResult, SQLiteBackupManager
+from operations.backup_registry import (
+    CANONICAL_BACKUP_AUTHORITIES,
+    RETIRED_BACKUP_AUTHORITIES,
+    CanonicalBackupAuthority,
+    CanonicalBackupRegistry,
+    build_canonical_backup_registry,
+)
 from operations.config import OperationalSettings
 from operations.daily_orchestration import (
     CANONICAL_DAILY_STAGE_ORDER,
@@ -100,8 +107,11 @@ def __getattr__(name: str):
 __all__ = [
     "BackupError",
     "BackupResult",
+    "CANONICAL_BACKUP_AUTHORITIES",
     "CANONICAL_DAILY_STAGE_ORDER",
     "CallableStageRunner",
+    "CanonicalBackupAuthority",
+    "CanonicalBackupRegistry",
     "CanonicalDailyOperationRequest",
     "CanonicalDailyOperationResult",
     "CanonicalDailyOperationsOrchestrator",
@@ -144,6 +154,7 @@ __all__ = [
     "OperationalSLOSnapshot",
     "OperationalSLOStatus",
     "OperationalSettings",
+    "RETIRED_BACKUP_AUTHORITIES",
     "ReconciliationStatus",
     "ResilienceExerciseHarness",
     "ResilienceExerciseIntegrityError",
@@ -169,6 +180,7 @@ __all__ = [
     "WorkerHeartbeat",
     "WorkerHeartbeatStore",
     "assert_current_stage_fence",
+    "build_canonical_backup_registry",
     "build_operational_slo_service",
     "configure_logging",
     "current_stage_fencing_context",
