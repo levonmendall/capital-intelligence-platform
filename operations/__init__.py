@@ -26,6 +26,14 @@ from operations.daily_orchestration import (
     operation_result_to_dict,
 )
 from operations.heartbeat import WorkerHeartbeat, WorkerHeartbeatStore
+from operations.incidents import (
+    OperationalIncidentError,
+    OperationalIncidentEvent,
+    OperationalIncidentIntegrityError,
+    OperationalIncidentSeverity,
+    OperationalIncidentState,
+    SQLiteOperationalIncidentStore,
+)
 from operations.logging import JsonFormatter, configure_logging, get_request_id, set_request_id
 from operations.metrics import MetricRegistry
 from operations.middleware import SlidingWindowRateLimiter, install_operational_middleware
@@ -63,6 +71,21 @@ from operations.slo import (
     operational_slo_policy_from_settings,
 )
 
+_LAZY_READINESS_EXPORTS = {
+    "OperationalReadinessAssembler",
+    "OperationalReadinessAssemblyPolicy",
+    "OperationalReadinessAssemblyResult",
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_READINESS_EXPORTS:
+        from operations import readiness
+
+        return getattr(readiness, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "BackupError",
     "BackupResult",
@@ -86,6 +109,14 @@ __all__ = [
     "FullUniverseCycleStatus",
     "JsonFormatter",
     "MetricRegistry",
+    "OperationalIncidentError",
+    "OperationalIncidentEvent",
+    "OperationalIncidentIntegrityError",
+    "OperationalIncidentSeverity",
+    "OperationalIncidentState",
+    "OperationalReadinessAssembler",
+    "OperationalReadinessAssemblyPolicy",
+    "OperationalReadinessAssemblyResult",
     "OperationalSLOComponent",
     "OperationalSLOEvaluator",
     "OperationalSLOInputs",
@@ -107,6 +138,7 @@ __all__ = [
     "ResilienceExerciseStatus",
     "SQLiteBackupManager",
     "SQLiteCanonicalDailyOperationsStore",
+    "SQLiteOperationalIncidentStore",
     "SQLiteOperationalSLOSource",
     "SQLiteOperationalSLOStore",
     "SQLiteResilienceExerciseStore",
