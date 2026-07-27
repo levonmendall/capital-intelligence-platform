@@ -11,6 +11,10 @@ from typing import Any
 from urllib.parse import quote
 
 from api.config import ApiSettings
+from portfolio.constants import (
+    CANONICAL_PORTFOLIO_CODE,
+    INITIAL_PAPER_CAPITAL,
+)
 
 
 class RepositoryUnavailableError(RuntimeError):
@@ -238,7 +242,7 @@ class DailySnapshotRepository:
 
 
 class PortfolioRepository:
-    """Read the append-only canonical portfolio-state source."""
+    """Read the sole append-only canonical portfolio-state source."""
 
     _TABLE = "canonical_portfolio_events"
 
@@ -248,8 +252,25 @@ class PortfolioRepository:
     def check(self) -> ReadinessComponent:
         try:
             with _read_only_connection(self.path) as connection:
-                connection.execute(f"SELECT 1 FROM {self._TABLE} LIMIT 1").fetchone()
-        except (sqlite3.Error, RepositoryUnavailableError) as error:
+                rows = connection.execute(
+                    f"SELECT DISTINCT portfolio_code FROM {self._TABLE} ORDER BY portfolio_code"
+                ).fetchall()
+                latest = connection.execute(
+                    f"SELECT payload_json FROM {self._TABLE} "
+                    "WHERE portfolio_code = ? ORDER BY sequence DESC LIMIT 1",
+                    (CANONICAL_PORTFOLIO_CODE,),
+                ).fetchone()
+            codes = tuple(str(row["portfolio_code"]).upper() for row in rows)
+            if codes != (CANONICAL_PORTFOLIO_CODE,):
+                raise RepositoryUnavailableError(
+                    "canonical portfolio state must contain exactly one COMPOUNDING portfolio"
+                )
+            snapshot = self._decode(latest)
+            if abs(snapshot.starting_capital - INITIAL_PAPER_CAPITAL) > 0.00000001:
+                raise RepositoryUnavailableError(
+                    "canonical portfolio starting capital must be $250,000.00"
+                )
+        except (sqlite3.Error, RepositoryUnavailableError, TypeError, ValueError) as error:
             return ReadinessComponent(
                 name="canonical_portfolios",
                 required=True,
@@ -260,54 +281,57 @@ class PortfolioRepository:
             name="canonical_portfolios",
             required=True,
             ready=True,
-            detail="append-only canonical portfolio state is readable",
+            detail="single $250,000 COMPOUNDING portfolio state is readable",
         )
 
     @staticmethod
-    def _decode(row: sqlite3.Row):
+    def _decode(row: sqlite3.Row | None):
         from portfolio.state import snapshot_from_dict
 
-        return snapshot_from_dict(_decode_object(row["payload_json"], source="canonical-portfolio"))
+        if row is None:
+            raise RepositoryUnavailableError("canonical portfolio state is empty")
+        return snapshot_from_dict(
+            _decode_object(row["payload_json"], source="canonical-portfolio")
+        )
 
     def list(self) -> tuple[dict[str, Any], ...]:
         from portfolio.state import snapshot_summary
 
         try:
             with _read_only_connection(self.path) as connection:
-                rows = connection.execute(f"""
-                    SELECT events.payload_json
-                    FROM {self._TABLE} AS events
-                    INNER JOIN (
-                        SELECT portfolio_code, MAX(sequence) AS sequence
-                        FROM {self._TABLE}
-                        GROUP BY portfolio_code
-                    ) AS latest
-                    ON events.portfolio_code = latest.portfolio_code
-                    AND events.sequence = latest.sequence
-                    ORDER BY events.portfolio_code
-                """).fetchall()
+                row = connection.execute(
+                    f"SELECT payload_json FROM {self._TABLE} "
+                    "WHERE portfolio_code = ? ORDER BY sequence DESC LIMIT 1",
+                    (CANONICAL_PORTFOLIO_CODE,),
+                ).fetchone()
         except sqlite3.Error as error:
-            raise RepositoryUnavailableError("canonical portfolio state cannot be queried") from error
-        return tuple(snapshot_summary(self._decode(row)) for row in rows)
+            raise RepositoryUnavailableError(
+                "canonical portfolio state cannot be queried"
+            ) from error
+        return () if row is None else (snapshot_summary(self._decode(row)),)
 
     def get(self, code: str) -> dict[str, Any] | None:
         from portfolio.state import snapshot_details
 
         normalized = code.strip().upper()
+        if normalized != CANONICAL_PORTFOLIO_CODE:
+            return None
         try:
             with _read_only_connection(self.path) as connection:
                 latest = connection.execute(
                     f"SELECT payload_json FROM {self._TABLE} WHERE portfolio_code = ? ORDER BY sequence DESC LIMIT 1",
-                    (normalized,),
+                    (CANONICAL_PORTFOLIO_CODE,),
                 ).fetchone()
                 if latest is None:
                     return None
                 history = connection.execute(
                     f"SELECT payload_json FROM {self._TABLE} WHERE portfolio_code = ? ORDER BY sequence DESC LIMIT 250",
-                    (normalized,),
+                    (CANONICAL_PORTFOLIO_CODE,),
                 ).fetchall()
         except sqlite3.Error as error:
-            raise RepositoryUnavailableError("canonical portfolio details cannot be queried") from error
+            raise RepositoryUnavailableError(
+                "canonical portfolio details cannot be queried"
+            ) from error
         return snapshot_details(
             self._decode(latest),
             history=tuple(self._decode(row) for row in history),

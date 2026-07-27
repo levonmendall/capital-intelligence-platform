@@ -9,6 +9,7 @@ import streamlit as st
 
 from api.config import ApiSettings
 from core import portfolio as portfolio_services
+from portfolio.constants import CANONICAL_PORTFOLIO_CODE
 from delivery import (
     AlertChannel,
     AlertTopic,
@@ -218,55 +219,44 @@ def _render_alert_controls(principal) -> None:
 
 
 def _authorized_bindings(principal) -> dict[str, object]:
-    """Build session-local authorized portfolio adapters for app.py."""
+    """Build session-local adapters for the sole canonical portfolio."""
 
-    original_get_mandates = portfolio_services.get_mandates
     original_get_details = portfolio_services.get_mandate_details
     original_get_trades = portfolio_services.get_trade_history
+    original_get_totals = portfolio_services.get_portfolio_totals
 
-    def authorized_mandates() -> list[dict]:
-        return [
-            mandate
-            for mandate in original_get_mandates()
-            if principal.can_access_mandate(str(mandate["code"]))
-        ]
-
-    def authorized_details(mandate_code: str):
-        if not principal.can_access_mandate(mandate_code):
+    def authorized_details(mandate_code: str = CANONICAL_PORTFOLIO_CODE):
+        if mandate_code.strip().upper() != CANONICAL_PORTFOLIO_CODE:
             return None
-        return original_get_details(mandate_code)
+        if not principal.can_access_mandate(CANONICAL_PORTFOLIO_CODE):
+            return None
+        return original_get_details(CANONICAL_PORTFOLIO_CODE)
 
     def authorized_trades(
         mandate_code: str | None = None,
         limit: int = 100,
     ) -> list[dict]:
-        if mandate_code is not None:
-            if not principal.can_access_mandate(mandate_code):
-                return []
-            return original_get_trades(mandate_code, limit=limit)
-        items: list[dict] = []
-        for mandate in authorized_mandates():
-            items.extend(original_get_trades(str(mandate["code"]), limit=limit))
-        items.sort(key=lambda item: int(item.get("id", 0)), reverse=True)
-        return items[:limit]
+        if mandate_code is not None and mandate_code.strip().upper() != CANONICAL_PORTFOLIO_CODE:
+            return []
+        if not principal.can_access_mandate(CANONICAL_PORTFOLIO_CODE):
+            return []
+        return original_get_trades(CANONICAL_PORTFOLIO_CODE, limit=limit)
 
     def authorized_totals() -> dict:
-        mandates = authorized_mandates()
-        starting = sum(float(item["starting_capital"]) for item in mandates)
-        cash = sum(float(item["cash"]) for item in mandates)
-        nav = sum(float(item["nav"]) for item in mandates)
-        return {
-            "mandate_count": len(mandates),
-            "starting_capital": starting,
-            "starting": starting,
-            "cash": cash,
-            "nav": nav,
-            "total_return": ((nav / starting) - 1 if starting else 0.0),
-        }
+        if not principal.can_access_mandate(CANONICAL_PORTFOLIO_CODE):
+            return {
+                "mandate_count": 0,
+                "portfolio_count": 0,
+                "starting_capital": 0.0,
+                "starting": 0.0,
+                "cash": 0.0,
+                "nav": 0.0,
+                "total_return": 0.0,
+            }
+        return original_get_totals()
 
     return {
         "get_mandate_details": authorized_details,
-        "get_mandates": authorized_mandates,
         "get_portfolio_totals": authorized_totals,
         "get_trade_history": authorized_trades,
     }
@@ -289,7 +279,6 @@ def _authorized_source() -> str:
     source = source.replace(
         '''from core.portfolio import (
     get_mandate_details,
-    get_mandates,
     get_portfolio_totals,
     get_trade_history,
 )

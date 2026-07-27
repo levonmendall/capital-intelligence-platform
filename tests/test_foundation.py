@@ -9,27 +9,30 @@ from intelligence.regime import determine_regime
 from portfolio.state import CanonicalPortfolioSnapshot, SQLiteCanonicalPortfolioStore
 
 
-def test_platform_does_not_seed_retired_mandates(tmp_path, monkeypatch) -> None:
+def test_platform_seeds_only_the_canonical_portfolio(tmp_path, monkeypatch) -> None:
     path = tmp_path / "canonical.db"
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE", str(path))
     initialize_portfolios()
-    assert get_mandates() == []
+    mandates = get_mandates()
+    assert len(mandates) == 1
+    assert mandates[0]["code"] == "COMPOUNDING"
+    assert mandates[0]["starting_capital"] == 250000
 
 
 def test_total_virtual_capital_comes_from_canonical_state(tmp_path, monkeypatch) -> None:
     path = tmp_path / "canonical.db"
     SQLiteCanonicalPortfolioStore(path).append(
         CanonicalPortfolioSnapshot(
-            identifier="portfolio:CORE:1", portfolio_code="CORE",
+            identifier="portfolio:COMPOUNDING:1", portfolio_code="COMPOUNDING",
             display_name="Core", constraint_profile="standard",
             as_of=datetime(2026, 7, 27, tzinfo=timezone.utc),
-            starting_capital=200000, cash_amount=200000, positions=(),
+            starting_capital=250000, cash_amount=200000, positions=(),
             source_identifiers=("test",),
         )
     )
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE", str(path))
     totals = get_portfolio_totals()
-    assert totals["starting_capital"] == 200000
+    assert totals["starting_capital"] == 250000
     assert totals["cash"] == 200000
     assert totals["nav"] == 200000
 

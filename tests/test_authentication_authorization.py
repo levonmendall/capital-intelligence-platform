@@ -34,19 +34,6 @@ def _secured_client(tmp_path: Path):
     identity_database = tmp_path / "identity.db"
     _create_snapshot_database(snapshot_database)
     _create_portfolio_database(portfolio_database)
-    SQLiteCanonicalPortfolioStore(portfolio_database).append(
-        CanonicalPortfolioSnapshot(
-            identifier="portfolio:INCOME:2026-01-28",
-            portfolio_code="INCOME",
-            display_name="Income Portfolio",
-            constraint_profile="conservative",
-            as_of=datetime(2026, 1, 28, 12, tzinfo=timezone.utc),
-            starting_capital=80000,
-            cash_amount=82000,
-            positions=(),
-            source_identifiers=("test-fixture",),
-        )
-    )
     store = SQLiteIdentityStore(identity_database)
     admin = store.create_user(
         email="admin@example.com",
@@ -61,7 +48,7 @@ def _secured_client(tmp_path: Path):
         investor_identifier="investor-a",
         roles=(UserRole.INVESTOR,),
     )
-    store.assign_mandate(investor_a.user_id, "GROWTH", MandatePermission.VIEW)
+    store.assign_mandate(investor_a.user_id, "COMPOUNDING", MandatePermission.VIEW)
     investor_b = store.create_user(
         email="investor-b@example.com",
         display_name="Investor B",
@@ -69,7 +56,7 @@ def _secured_client(tmp_path: Path):
         investor_identifier="investor-b",
         roles=(UserRole.INVESTOR,),
     )
-    store.assign_mandate(investor_b.user_id, "INCOME", MandatePermission.VIEW)
+    store.assign_mandate(investor_b.user_id, "COMPOUNDING", MandatePermission.VIEW)
     settings = ApiSettings(
         snapshot_database=snapshot_database,
         portfolio_database=portfolio_database,
@@ -136,7 +123,7 @@ def test_login_and_current_user_return_only_safe_identity_fields(tmp_path) -> No
     assert payload["investor_identifier"] == "investor-a"
     assert payload["roles"] == ["investor"]
     assert payload["mandates"] == [
-        {"mandate_code": "GROWTH", "permission": "view"}
+        {"mandate_code": "COMPOUNDING", "permission": "view"}
     ]
     assert "password" not in str(payload).lower()
 
@@ -177,20 +164,20 @@ def test_logout_revokes_the_access_token(tmp_path) -> None:
     ).status_code == 401
 
 
-def test_portfolio_list_and_detail_are_mandate_scoped(tmp_path) -> None:
+def test_portfolio_list_and_detail_are_single_portfolio_scoped(tmp_path) -> None:
     client, _, _, _, _ = _secured_client(tmp_path)
     investor_a = _login(client, "investor-a@example.com", INVESTOR_PASSWORD)
     investor_b = _login(client, "investor-b@example.com", INVESTOR_PASSWORD)
 
-    growth = client.get("/v1/portfolios", headers=_headers(investor_a))
-    income = client.get("/v1/portfolios", headers=_headers(investor_b))
-    assert [item["code"] for item in growth.json()["items"]] == ["GROWTH"]
-    assert [item["code"] for item in income.json()["items"]] == ["INCOME"]
+    first = client.get("/v1/portfolios", headers=_headers(investor_a))
+    second = client.get("/v1/portfolios", headers=_headers(investor_b))
+    assert [item["code"] for item in first.json()["items"]] == ["COMPOUNDING"]
+    assert [item["code"] for item in second.json()["items"]] == ["COMPOUNDING"]
     assert client.get(
         "/v1/portfolios/INCOME", headers=_headers(investor_a)
     ).status_code == 404
     assert client.get(
-        "/v1/portfolios/GROWTH", headers=_headers(investor_a)
+        "/v1/portfolios/COMPOUNDING", headers=_headers(investor_a)
     ).status_code == 200
 
 
@@ -229,7 +216,7 @@ def test_administrator_can_create_users_and_assign_access(tmp_path) -> None:
     granted_mandate = client.post(
         f"/v1/users/{user_id}/mandates",
         headers=_headers(admin_tokens),
-        json={"mandate_code": "GROWTH", "permission": "manage"},
+        json={"mandate_code": "COMPOUNDING", "permission": "manage"},
     )
     granted_investor = client.post(
         f"/v1/users/{user_id}/investor-access",
@@ -241,7 +228,7 @@ def test_administrator_can_create_users_and_assign_access(tmp_path) -> None:
 
     advisor = _login(client, "advisor@example.com", "Advisor-Password-42!")
     assert client.get(
-        "/v1/portfolios/GROWTH", headers=_headers(advisor)
+        "/v1/portfolios/COMPOUNDING", headers=_headers(advisor)
     ).status_code == 200
     assert client.get(
         "/v1/investor-memory/investor-a", headers=_headers(advisor)

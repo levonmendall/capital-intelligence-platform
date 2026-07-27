@@ -34,7 +34,7 @@ The sole investment objective is to maximize long-term compounded portfolio retu
 
 Risk, liquidity, concentration, correlation, factor exposure, turnover, transaction costs, slippage, leverage, drawdown, evidence quality, data freshness, and implementation feasibility are constraints that protect compounding. Personal goals, retirement dates, preferred investing styles, behavioral memory, and user-selected mandates do not enter candidate ranking, specialist analysis, CIO synthesis, portfolio construction, or alerts.
 
-The only active portfolio code is `COMPOUNDING`.
+The only active portfolio code is `COMPOUNDING`. Initialization creates one USD paper portfolio with $250,000 and safely archives valid but incompatible legacy paper databases before resetting them.
 
 ## Asset-class governance
 
@@ -42,7 +42,8 @@ Market data availability does not create recommendation authority. Every asset c
 
 | Product state | Initial scope |
 | --- | --- |
-| Core product | Liquid U.S.-listed equities, liquid U.S.-listed ETFs, cash, and short-duration U.S. Treasury equivalents |
+| Required analysis | Global equities, government bonds, credit, cash equivalents, commodities, FX, crypto, real estate, options, volatility, and other liquid alternatives |
+| Direct paper allocation | Only instruments that pass point-in-time universe policy and every required asset-specific governance gate |
 | Controlled paper eligible | Crypto spot, unlevered spot FX, and approved international listed equities or funds, but only with active asset-class approval and complete provider, evidence, construction, execution, thesis, and evaluation coverage |
 | Evidence only | Forecasts, unapproved markets, research-only instruments, and cross-market observations that may inform Environment or specialist analysis but cannot produce a direct CIO action |
 | Prohibited | Live trading, leverage, margin, crypto derivatives, FX forwards or swaps, options, staking, lending, DeFi authority, synthetic notional multipliers, and any instrument without approved identity, custody, settlement, data, and execution controls |

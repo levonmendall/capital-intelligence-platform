@@ -49,7 +49,7 @@ def _goal(identifier: str = "goal:1") -> InvestorGoal:
         target_date=date(2041, 7, 25),
         target_amount=1_000_000,
         funded_amount=300_000,
-        portfolio_codes=("GROWTH",),
+        portfolio_codes=("COMPOUNDING",),
     )
 
 
@@ -124,7 +124,7 @@ def test_no_action_is_a_formal_successful_outcome() -> None:
         goals=(_goal(),),
         portfolios=(
             {
-                "code": "GROWTH",
+                "code": "COMPOUNDING",
                 "risk": "moderate",
                 "nav": 500_000,
                 "cash": 100_000,
@@ -157,7 +157,7 @@ def test_near_term_liquidity_conflict_requires_review() -> None:
         target_date=date(2028, 7, 25),
         target_amount=200_000,
         funded_amount=0,
-        portfolio_codes=("GROWTH",),
+        portfolio_codes=("COMPOUNDING",),
         liquidity_required=True,
     )
     brief = build_personal_cio_brief(
@@ -167,7 +167,7 @@ def test_near_term_liquidity_conflict_requires_review() -> None:
         goals=(liquidity_goal,),
         portfolios=(
             {
-                "code": "GROWTH",
+                "code": "COMPOUNDING",
                 "risk": "growth",
                 "nav": 500_000,
                 "cash": 10_000,

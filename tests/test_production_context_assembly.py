@@ -283,7 +283,7 @@ def _persist_portfolio(store: SQLiteCanonicalPortfolioStore) -> None:
             display_name="Long-Term Compounding",
             constraint_profile="standard",
             as_of=AS_OF,
-            starting_capital=1_000_000.0,
+            starting_capital=250_000.0,
             cash_amount=1_000_000.0,
             positions=(),
             source_identifiers=("portfolio:opening-state",),

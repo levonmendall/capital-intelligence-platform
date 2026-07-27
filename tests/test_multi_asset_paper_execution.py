@@ -168,7 +168,7 @@ def _portfolio(
         display_name="Compounding",
         constraint_profile="institutional",
         as_of=AS_OF - timedelta(minutes=1),
-        starting_capital=100_000,
+        starting_capital=250_000,
         cash_amount=cash,
         positions=positions,
         source_identifiers=("portfolio-source:test",),

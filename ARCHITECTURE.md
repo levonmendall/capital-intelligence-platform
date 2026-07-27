@@ -10,6 +10,8 @@ The architecture is organized around authority boundaries. Analytical components
 
 The platform has one active investment mandate: `COMPOUNDING`, meaning maximize long-term compounded portfolio returns after implementation costs. Liquidity, concentration, sector, factor, correlation, leverage, turnover, cash-reserve, drawdown, transaction-cost, evidence-quality, data-freshness, and restricted-instrument rules are operational constraints. They protect implementation feasibility but cannot create competing objectives, change opportunity ranking, or issue CIO decisions.
 
+The mandate owns exactly one USD paper portfolio initialized with $250,000. Global equities, rates, credit, cash, commodities, FX, crypto, real estate, options, volatility, and approved alternatives are possible evidence or exposures inside that portfolio, never separate portfolio authorities.
+
 Preservation, income, balanced, growth, tactical, value, global, and innovation are retired mandate labels. They may remain only in historical migration records or isolated offline research and are not active portfolio authorities.
 
 ## Canonical flow
@@ -37,11 +39,11 @@ Providers and point-in-time stores
 | `data`, `providers` | retrieval, normalization, provenance, point-in-time availability | investment actions |
 | `intelligence`, `company`, regime packages | analytical evidence and versioned factor results | candidate eligibility or portfolio size |
 | `cio.models` | common candidate, specialist, dissent, and CIO-decision contracts | data retrieval or execution |
-| `opportunity` | Version 1 eligibility, qualification, all-alternative comparison, ranking, rejection | final action or sizing |
+| `opportunity` | point-in-time eligibility, qualification, all-market alternative comparison, ranking, rejection | final action or sizing |
 | `committee.specialists` | five independent first-pass analyses | user-facing action |
 | `cio.synthesis` | final action, disclosed confidence, abstention, thesis approval | broker execution |
 | `portfolio.construction_engine` | target weights, funding, costs, liquidity, constraints | changing the CIO action or using confidence as size |
-| `portfolio.state` | append-only cash, positions, valuations, and implementation lineage | investment analysis or legacy-database mutation |
+| `portfolio.state` | sole `COMPOUNDING` portfolio, $250,000 starting basis, append-only cash, positions, valuations, and implementation lineage | investment analysis or multiple active portfolios |
 | `thesis` | immutable ownership thesis and review proposals | automatic trades or historical rewrites |
 | `evaluation` | frozen evidence snapshots, realized comparison, attribution, calibration, walk-forward controls | hindsight inputs or autonomous governance changes |
 | `cio.persistence` | append-only hash-chained journal | mutable decision history |

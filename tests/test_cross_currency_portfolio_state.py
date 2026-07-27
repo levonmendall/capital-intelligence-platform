@@ -27,7 +27,7 @@ def test_legacy_usd_snapshot_round_trips_without_fx_configuration() -> None:
         display_name="Compounding",
         constraint_profile="institutional",
         as_of=AS_OF,
-        starting_capital=100_000,
+        starting_capital=250_000,
         cash_amount=20_000,
         positions=(
             CanonicalPortfolioPosition(
@@ -74,7 +74,7 @@ def test_global_equity_preserves_local_and_base_currency_values() -> None:
         display_name="Compounding",
         constraint_profile="institutional",
         as_of=AS_OF,
-        starting_capital=100_000,
+        starting_capital=250_000,
         cash_amount=10_000,
         base_currency="USD",
         positions=(position,),
@@ -102,7 +102,7 @@ def test_non_base_currency_cash_is_translated_once() -> None:
         display_name="Compounding",
         constraint_profile="institutional",
         as_of=AS_OF,
-        starting_capital=100_000,
+        starting_capital=250_000,
         cash_amount=5_000,
         base_currency="USD",
         currency_balances=(
@@ -137,7 +137,7 @@ def test_non_base_position_requires_fx_lineage_and_base_acquisition_cost() -> No
             display_name="Compounding",
             constraint_profile="institutional",
             as_of=AS_OF,
-            starting_capital=100_000,
+            starting_capital=250_000,
             cash_amount=100_000,
             positions=(
                 CanonicalPortfolioPosition(
@@ -160,7 +160,7 @@ def test_non_base_position_requires_fx_lineage_and_base_acquisition_cost() -> No
             display_name="Compounding",
             constraint_profile="institutional",
             as_of=AS_OF,
-            starting_capital=100_000,
+            starting_capital=250_000,
             cash_amount=100_000,
             positions=(
                 CanonicalPortfolioPosition(
@@ -187,7 +187,7 @@ def test_future_known_fx_and_base_cash_duplication_are_rejected() -> None:
             display_name="Compounding",
             constraint_profile="institutional",
             as_of=AS_OF,
-            starting_capital=100_000,
+            starting_capital=250_000,
             cash_amount=100_000,
             positions=(
                 CanonicalPortfolioPosition(
@@ -213,7 +213,7 @@ def test_future_known_fx_and_base_cash_duplication_are_rejected() -> None:
             display_name="Compounding",
             constraint_profile="institutional",
             as_of=AS_OF,
-            starting_capital=100_000,
+            starting_capital=250_000,
             cash_amount=50_000,
             base_currency="USD",
             currency_balances=(
@@ -237,7 +237,7 @@ def test_position_identity_prevents_symbol_collision_across_venues() -> None:
             display_name="Compounding",
             constraint_profile="institutional",
             as_of=AS_OF,
-            starting_capital=100_000,
+            starting_capital=250_000,
             cash_amount=50_000,
             positions=(
                 CanonicalPortfolioPosition(
@@ -292,7 +292,7 @@ def test_cross_currency_snapshot_remains_append_only(tmp_path: Path) -> None:
         display_name="Compounding",
         constraint_profile="institutional",
         as_of=AS_OF,
-        starting_capital=100_000,
+        starting_capital=250_000,
         cash_amount=50_000,
         currency_balances=(
             CanonicalCurrencyBalance(

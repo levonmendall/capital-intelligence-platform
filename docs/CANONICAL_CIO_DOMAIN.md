@@ -12,13 +12,13 @@ The `cio` package and `committee.cio` facade implement the first enforceable dom
 
 Legacy briefing meetings, regime governance, and weighted recommendation consensus remain compatibility paths. New candidate and capital-allocation callers must use the canonical CIO domain.
 
-## Version 1 universe
+## Global analysis and governed direct-recommendation universe
 
-`RecommendationUniversePolicy` distinguishes:
+The market-scope manifest requires analysis across all configured liquid public-market families. `RecommendationUniversePolicy` then distinguishes:
 
-- `direct_recommendation` — qualified liquid U.S.-listed equities, U.S.-listed ETFs, and short-duration U.S. Treasury equivalents;
-- `intelligence_only` — broader markets that may inform evidence but cannot receive direct actions; and
-- `ineligible` — nominally in-scope instruments that fail liquidity, freshness, or analytical-coverage requirements.
+- `direct_recommendation` — instruments that satisfy active policy and every required point-in-time asset-class approval;
+- `intelligence_only` — markets that must inform comparison but cannot yet receive a direct action; and
+- `ineligible` — instruments that fail liquidity, freshness, analytical-coverage, identity, or governance requirements.
 
 The policy result is required by CIO synthesis. A specialist majority cannot override it.
 
