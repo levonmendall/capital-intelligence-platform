@@ -12,6 +12,11 @@ from email.message import EmailMessage
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
+from delivery.canonical_alerts import (
+    CanonicalAlertEvent,
+    CanonicalAlertPlanner,
+    events_from_canonical_cycle,
+)
 from delivery.models import (
     AlertChannel,
     AlertMessage,
@@ -64,7 +69,7 @@ class SelectiveAlertPlanner:
         if (
             snapshot.conviction_change_points is not None
             and abs(snapshot.conviction_change_points)
-            >= preference.minimum_conviction_change
+            >= (preference.minimum_conviction_change or 5)
         ):
             topics.append(AlertTopic.CONVICTION_CHANGE)
         if preference.daily_summary_enabled:
@@ -190,6 +195,7 @@ class AlertDeliveryService:
         store: SQLiteAlertStore,
         *,
         planner: SelectiveAlertPlanner | None = None,
+        canonical_planner: CanonicalAlertPlanner | None = None,
         dispatchers: Mapping[AlertChannel, DeliveryDispatcher] | None = None,
         maximum_attempts: int = 4,
         base_retry_delay: timedelta = timedelta(minutes=5),
@@ -197,10 +203,61 @@ class AlertDeliveryService:
     ) -> None:
         self.store = store
         self.planner = planner or SelectiveAlertPlanner()
+        self.canonical_planner = canonical_planner or CanonicalAlertPlanner()
         self.dispatchers = dict(dispatchers or {})
         self.maximum_attempts = maximum_attempts
         self.base_retry_delay = base_retry_delay
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+
+    def queue_event_for_accounts(
+        self,
+        event: CanonicalAlertEvent,
+        accounts: tuple[Any, ...],
+    ) -> tuple[Any, ...]:
+        queued: list[Any] = []
+        now = self._clock()
+        for account in accounts:
+            if not bool(getattr(account, "is_active", False)):
+                continue
+            user_id = str(getattr(account, "user_id"))
+            email = str(getattr(account, "email", "")) or None
+            preference = self.store.get_preference(user_id, fallback_email=email)
+            result = self.canonical_planner.plan(event, preference)
+            if result.message is None:
+                queued.append(
+                    self.store.record_suppression(
+                        user_id=user_id,
+                        snapshot_identifier=event.identifier,
+                        reason=result.suppression_reason or "Canonical event suppressed.",
+                        now=now,
+                    )
+                )
+                continue
+            available_at = self._available_at(
+                preference,
+                now=now,
+                priority=result.message.priority,
+            )
+            for channel in result.message.channels:
+                queued.append(
+                    self.store.enqueue(
+                        result.message,
+                        channel,
+                        now=now,
+                        available_at=available_at,
+                    )
+                )
+        return tuple(queued)
+
+    def queue_cycle_result(
+        self,
+        result: Any,
+        accounts: tuple[Any, ...],
+    ) -> tuple[Any, ...]:
+        queued: list[Any] = []
+        for event in events_from_canonical_cycle(result):
+            queued.extend(self.queue_event_for_accounts(event, accounts))
+        return tuple(queued)
 
     def queue_for_accounts(
         self,

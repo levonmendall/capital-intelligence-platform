@@ -12,7 +12,7 @@ The binding product contract is [GOVERNING_SPECIFICATION.md](GOVERNING_SPECIFICA
 
 The objective is to maximize long-term compounded portfolio returns.
 
-Risk, liquidity, concentration, correlation, factor exposure, turnover, transaction costs, slippage, leverage, drawdown, evidence quality, data freshness, and implementation feasibility are constraints that protect compounding. Individual financial goals, retirement dates, preferred investment philosophies, behavioral memory, and personal risk preferences are not investment objectives and do not enter candidate ranking, specialist analysis, CIO synthesis, portfolio construction, or alerts.
+Risk, liquidity, concentration, correlation, factor exposure, turnover, transaction costs, slippage, leverage, drawdown, evidence quality, data freshness, and implementation feasibility are constraints that protect compounding. Individual financial goals, retirement dates, preferred investment philosophies, behavioral memory, and personal risk preferences are not investment objectives and do not enter candidate ranking, specialist analysis, CIO synthesis, portfolio construction, or alerts. Active alerts are emitted only from canonical CIO decision, thesis, opportunity, implementation, evidence, and briefing events.
 
 ## Version 1 recommendation universe
 
@@ -291,6 +291,7 @@ Production investment reliance still requires broader live and licensed data cov
 - [Security-master provider certification](docs/PROVIDER_CERTIFICATION.md)
 - [Complete-universe screening](docs/FULL_UNIVERSE_SCREENING.md)
 - [Canonical production scheduler](docs/CANONICAL_PRODUCTION_SCHEDULER.md)
+- [Canonical CIO alerts](docs/CANONICAL_ALERTS.md)
 - [Production thesis monitoring](docs/THESIS_MONITORING_OPERATIONS.md)
 - [Paper execution orchestration](docs/PAPER_EXECUTION_ORCHESTRATION.md)
 - [Extended paper-operation evidence](docs/PAPER_OPERATION_EVIDENCE.md)

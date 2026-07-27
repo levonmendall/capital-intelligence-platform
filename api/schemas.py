@@ -96,17 +96,16 @@ class AlertPreferenceRequest(StrictModel):
     channels: list[str] = Field(default_factory=lambda: ["in_app"], min_length=1)
     topics: list[str] = Field(
         default_factory=lambda: [
-            "urgent_risk",
-            "environment_transition",
-            "committee_change",
-            "portfolio_review",
-            "conviction_change",
-            "data_quality",
+            "cio_decision",
+            "thesis",
+            "opportunity",
+            "implementation",
+            "evidence",
+            "daily_briefing",
         ],
         min_length=1,
     )
     email_address: str | None = None
-    minimum_conviction_change: int = Field(default=5, ge=1, le=100)
 
 
 class AlertPreferenceResponse(AlertPreferenceRequest):
@@ -116,7 +115,7 @@ class AlertPreferenceResponse(AlertPreferenceRequest):
 
 class AlertDeliveryResponse(StrictModel):
     delivery_id: str
-    snapshot_identifier: str
+    event_identifier: str
     channel: str
     topics: list[str]
     priority: str

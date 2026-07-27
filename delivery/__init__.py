@@ -1,5 +1,11 @@
 """Scheduled intelligence and selective alert delivery."""
 
+from delivery.canonical_alerts import (
+    CanonicalAlertEvent,
+    CanonicalAlertPlanner,
+    CanonicalAlertPlanningResult,
+    events_from_canonical_cycle,
+)
 from delivery.models import (
     AlertChannel,
     AlertDelivery,
@@ -27,6 +33,9 @@ from delivery.store import SQLiteAlertStore
 
 __all__ = [
     "AlertChannel",
+    "CanonicalAlertEvent",
+    "CanonicalAlertPlanner",
+    "CanonicalAlertPlanningResult",
     "AlertDelivery",
     "AlertDeliveryService",
     "AlertMessage",
@@ -46,4 +55,5 @@ __all__ = [
     "SMTPEmailDispatcher",
     "SQLiteAlertStore",
     "WorkerRunResult",
+    "events_from_canonical_cycle",
 ]

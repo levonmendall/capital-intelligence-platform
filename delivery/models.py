@@ -15,6 +15,14 @@ class AlertChannel(str, Enum):
 
 
 class AlertTopic(str, Enum):
+    CIO_DECISION = "cio_decision"
+    THESIS = "thesis"
+    OPPORTUNITY = "opportunity"
+    IMPLEMENTATION = "implementation"
+    EVIDENCE = "evidence"
+    DAILY_BRIEFING = "daily_briefing"
+
+    # Compatibility-only topics retained for archived delivery rows and tests.
     URGENT_RISK = "urgent_risk"
     ENVIRONMENT_TRANSITION = "environment_transition"
     COMMITTEE_CHANGE = "committee_change"
@@ -69,6 +77,13 @@ class DeliveryPreference:
     delivery_hour: int = 8
     channels: tuple[AlertChannel, ...] = (AlertChannel.IN_APP,)
     topics: tuple[AlertTopic, ...] = (
+        AlertTopic.CIO_DECISION,
+        AlertTopic.THESIS,
+        AlertTopic.OPPORTUNITY,
+        AlertTopic.IMPLEMENTATION,
+        AlertTopic.EVIDENCE,
+        AlertTopic.DAILY_BRIEFING,
+        # Compatibility-only defaults for archived planners; active API/UI filters these.
         AlertTopic.URGENT_RISK,
         AlertTopic.ENVIRONMENT_TRANSITION,
         AlertTopic.COMMITTEE_CHANGE,
@@ -77,7 +92,7 @@ class DeliveryPreference:
         AlertTopic.DATA_QUALITY,
     )
     email_address: str | None = None
-    minimum_conviction_change: int = 5
+    minimum_conviction_change: int | None = None
     updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -107,19 +122,23 @@ class DeliveryPreference:
             object.__setattr__(self, "email_address", email)
         if AlertChannel.EMAIL in normalized_channels and self.email_address is None:
             raise ValueError("email_address is required when email delivery is enabled")
-        if (
-            isinstance(self.minimum_conviction_change, bool)
-            or not isinstance(self.minimum_conviction_change, int)
-        ):
-            raise TypeError("minimum_conviction_change must be an int")
-        if not 1 <= self.minimum_conviction_change <= 100:
-            raise ValueError("minimum_conviction_change must be between 1 and 100")
+        if self.minimum_conviction_change is not None:
+            if (
+                isinstance(self.minimum_conviction_change, bool)
+                or not isinstance(self.minimum_conviction_change, int)
+            ):
+                raise TypeError("minimum_conviction_change must be an int or None")
+            if not 1 <= self.minimum_conviction_change <= 100:
+                raise ValueError("minimum_conviction_change must be between 1 and 100")
         if self.updated_at is not None:
             _aware(self.updated_at, "updated_at")
 
     @property
     def daily_summary_enabled(self) -> bool:
-        return AlertTopic.DAILY_SUMMARY in self.topics
+        return (
+            AlertTopic.DAILY_BRIEFING in self.topics
+            or AlertTopic.DAILY_SUMMARY in self.topics
+        )
 
     @classmethod
     def default_for(cls, user_id: str, *, email_address: str | None = None) -> "DeliveryPreference":
@@ -256,6 +275,10 @@ class AlertMessage:
                 raise ValueError("email_address must be valid")
             object.__setattr__(self, "email_address", email)
 
+    @property
+    def event_identifier(self) -> str:
+        return self.snapshot_identifier
+
 
 @dataclass(frozen=True, slots=True)
 class AlertDelivery:
@@ -299,6 +322,10 @@ class AlertDelivery:
             raise TypeError("attempts must be an int")
         if self.attempts < 0:
             raise ValueError("attempts cannot be negative")
+
+    @property
+    def event_identifier(self) -> str:
+        return self.snapshot_identifier
 
 
 @dataclass(frozen=True, slots=True)

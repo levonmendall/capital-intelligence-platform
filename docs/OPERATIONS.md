@@ -177,3 +177,8 @@ python run_resilience_exercises.py \
 ```
 
 The campaign must run in an isolated environment and prove fault injection, timely detection, controlled recovery, and exact reconciliation for provider outages, stale or conflicting data, database corruption, missed universe cycles, failed thesis reviews, delayed evaluations, partial paper execution, backup restoration, and model rollback. Production mutations, missing evidence, late recovery, or invariant mismatch fail closed. See [Incident, recovery, and reconciliation exercises](RESILIENCE_EXERCISES.md).
+
+
+## Canonical alert topics
+
+The scheduler queues only CIO decision, thesis, opportunity, implementation, evidence, and Daily Capital Intelligence briefing events. Preferences select those event topics and delivery channels. Confidence thresholds, scores, committee votes, and personal goals are not active notification inputs. See [Canonical CIO alerts](CANONICAL_ALERTS.md).

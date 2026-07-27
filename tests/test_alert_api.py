@@ -46,9 +46,8 @@ def test_investor_can_update_selective_alert_preferences(tmp_path) -> None:
             "timezone_name": "America/Los_Angeles",
             "delivery_hour": 6,
             "channels": ["in_app"],
-            "topics": ["urgent_risk", "portfolio_review", "daily_summary"],
+            "topics": ["cio_decision", "implementation", "daily_briefing"],
             "email_address": "investor-a@example.com",
-            "minimum_conviction_change": 7,
         },
     )
 
@@ -56,8 +55,8 @@ def test_investor_can_update_selective_alert_preferences(tmp_path) -> None:
     payload = updated.json()
     assert payload["timezone_name"] == "America/Los_Angeles"
     assert payload["delivery_hour"] == 6
-    assert payload["minimum_conviction_change"] == 7
-    assert "daily_summary" in payload["topics"]
+    assert "minimum_conviction_change" not in payload
+    assert "daily_briefing" in payload["topics"]
 
 
 def test_email_preferences_require_runtime_email_configuration(tmp_path) -> None:
@@ -71,9 +70,8 @@ def test_email_preferences_require_runtime_email_configuration(tmp_path) -> None
             "timezone_name": "UTC",
             "delivery_hour": 8,
             "channels": ["email"],
-            "topics": ["urgent_risk"],
+            "topics": ["cio_decision"],
             "email_address": "investor-a@example.com",
-            "minimum_conviction_change": 5,
         },
     )
 
@@ -89,9 +87,9 @@ def test_in_app_alerts_are_user_scoped_and_acknowledgeable(tmp_path) -> None:
         user_id=client.app.state.authentication.store.get_user_by_email(
             "investor-a@example.com"
         ).user_id,
-        snapshot_identifier="daily:test-alert",
+        snapshot_identifier="alert:decision:test",
         as_of=datetime(2026, 7, 25, 12, tzinfo=timezone.utc),
-        topics=(AlertTopic.PORTFOLIO_REVIEW,),
+        topics=(AlertTopic.CIO_DECISION,),
         priority=AlertPriority.STANDARD,
         subject="Capital Intelligence update",
         body="The portfolio warrants review.",
@@ -104,6 +102,8 @@ def test_in_app_alerts_are_user_scoped_and_acknowledgeable(tmp_path) -> None:
     assert listing.status_code == 200
     assert listing.json()["unread"] == 1
     assert listing.json()["items"][0]["delivery_id"] == delivery.delivery_id
+    assert listing.json()["items"][0]["event_identifier"] == "alert:decision:test"
+    assert "snapshot_identifier" not in listing.json()["items"][0]
 
     hidden = client.post(
         f"/v1/alerts/{delivery.delivery_id}/acknowledge",
