@@ -37,11 +37,6 @@ from operations.incidents import (
 from operations.logging import JsonFormatter, configure_logging, get_request_id, set_request_id
 from operations.metrics import MetricRegistry
 from operations.middleware import SlidingWindowRateLimiter, install_operational_middleware
-from operations.readiness import (
-    OperationalReadinessAssembler,
-    OperationalReadinessAssemblyPolicy,
-    OperationalReadinessAssemblyResult,
-)
 from operations.resilience import (
     ResilienceExerciseHarness,
     ResilienceExerciseIntegrityError,
@@ -104,9 +99,6 @@ __all__ = [
     "OperationalIncidentIntegrityError",
     "OperationalIncidentSeverity",
     "OperationalIncidentState",
-    "OperationalReadinessAssembler",
-    "OperationalReadinessAssemblyPolicy",
-    "OperationalReadinessAssemblyResult",
     "OperationalSLOComponent",
     "OperationalSLOEvaluator",
     "OperationalSLOInputs",
