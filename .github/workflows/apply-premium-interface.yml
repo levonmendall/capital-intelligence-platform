@@ -1,0 +1,50 @@
+name: Apply premium interface
+
+on:
+  push:
+    branches:
+      - pr-121-premium-streamlit-interface
+    paths:
+      - .github/premium-ui-app.patch.gz.b64
+      - .github/workflows/apply-premium-interface.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: pr-121-premium-streamlit-interface
+          fetch-depth: 0
+
+      - name: Decode and apply interface patch
+        shell: bash
+        run: |
+          base64 --decode .github/premium-ui-app.patch.gz.b64 | gzip --decompress > /tmp/premium-ui.patch
+          patch --batch --forward -p1 < /tmp/premium-ui.patch
+
+      - name: Validate Python and interface contracts
+        shell: bash
+        run: |
+          python -m py_compile app.py secure_app.py
+          python -m pip install --disable-pip-version-check pytest
+          pytest -q \
+            tests/test_premium_streamlit_interface.py \
+            tests/test_canonical_product_surfaces.py \
+            tests/test_portfolio_state_architecture.py \
+            tests/test_single_portfolio_global_scope.py
+
+      - name: Commit premium interface
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/premium-ui-app.patch.gz.b64 .github/workflows/apply-premium-interface.yml
+          git add app.py tests/test_premium_streamlit_interface.py
+          git commit -m "Deliver premium institutional Streamlit interface"
+          git push origin HEAD:pr-121-premium-streamlit-interface
