@@ -11,12 +11,14 @@ from typing import Sequence
 
 from governance import SQLiteReadinessEvidenceStore
 from operations import (
-    OperationalReadinessAssembler,
-    OperationalReadinessAssemblyPolicy,
     SQLiteCanonicalDailyOperationsStore,
     SQLiteOperationalIncidentStore,
     SQLiteOperationalSLOStore,
     SQLiteResilienceExerciseStore,
+)
+from operations.readiness import (
+    OperationalReadinessAssembler,
+    OperationalReadinessAssemblyPolicy,
 )
 
 
