@@ -1,10 +1,12 @@
-"""Run the complete canonical daily investment process as one durable workflow."""
+"""Run the complete canonical daily investment process as one fenced workflow."""
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
+import socket
 import time
 from datetime import date, datetime, time as clock_time, timedelta, timezone
 from pathlib import Path
@@ -14,16 +16,19 @@ from zoneinfo import ZoneInfo
 from operations import (
     CANONICAL_DAILY_STAGE_ORDER,
     CanonicalDailyOperationRequest,
-    CanonicalDailyOperationsOrchestrator,
     CanonicalDailyStage,
     CommandStageRunner,
+    DailyOperationLeaseError,
     DailyOperationStatus,
+    LeasedCanonicalDailyOperationsOrchestrator,
+    LeasedSQLiteCanonicalDailyOperationsStore,
     OperationalSettings,
     SQLiteCanonicalDailyOperationsStore,
     StageRetryPolicy,
     WorkerHeartbeatStore,
     operation_result_to_dict,
 )
+from operations.stage_bindings import validate_stage_bindings
 
 
 def _aware(value: str | None, *, default: datetime) -> datetime:
@@ -42,10 +47,21 @@ def _load_plan(path: Path) -> Mapping[str, Any]:
         raise ValueError(f"cannot load daily operations plan {path}") from error
     if not isinstance(payload, Mapping):
         raise ValueError("daily operations plan must encode an object")
-    if payload.get("schema_version") != "canonical-daily-operations.v1":
+    schema = payload.get("schema_version")
+    if schema not in {
+        "canonical-daily-operations.v1",
+        "canonical-daily-operations.v2",
+    }:
         raise ValueError(
-            "daily operations plan must use canonical-daily-operations.v1"
+            "daily operations plan must use canonical-daily-operations.v1 or v2"
         )
+    identifier = payload.get("identifier")
+    if not isinstance(identifier, str) or not identifier.strip():
+        raise ValueError("daily operations plan requires an identifier")
+    if schema == "canonical-daily-operations.v2" and payload.get(
+        "lease_required"
+    ) is not True:
+        raise ValueError("v2 daily operations plan must require leases")
     stages = payload.get("stages")
     if not isinstance(stages, Mapping):
         raise ValueError("daily operations plan requires a stages object")
@@ -55,10 +71,17 @@ def _load_plan(path: Path) -> Mapping[str, Any]:
         missing = sorted(expected - actual)
         extra = sorted(actual - expected)
         raise ValueError(
-            f"daily operations plan must configure every stage: "
+            "daily operations plan must configure every stage: "
             f"missing={missing} extra={extra}"
         )
     return payload
+
+
+def _expand_argument(value: str) -> str:
+    expanded = os.path.expandvars(value)
+    if "$" in expanded:
+        raise ValueError(f"daily operation argument has unresolved environment value: {value}")
+    return expanded
 
 
 def _stage_configuration(
@@ -79,7 +102,7 @@ def _stage_configuration(
         argv = value.get("argv")
         output_fields = value.get("output_fields")
         retryable_exit_codes = value.get("retryable_exit_codes", [])
-        if not isinstance(module, str):
+        if not isinstance(module, str) or not module.strip():
             raise ValueError(f"stage {stage.value} requires module")
         if not isinstance(argv, list) or not all(
             isinstance(item, str) for item in argv
@@ -87,9 +110,9 @@ def _stage_configuration(
             raise ValueError(f"stage {stage.value} argv must be a string list")
         if not isinstance(output_fields, list) or not all(
             isinstance(item, str) for item in output_fields
-        ):
+        ) or not output_fields:
             raise ValueError(
-                f"stage {stage.value} output_fields must be a string list"
+                f"stage {stage.value} output_fields must be a non-empty string list"
             )
         if not isinstance(retryable_exit_codes, list) or not all(
             isinstance(item, int) and not isinstance(item, bool)
@@ -101,7 +124,7 @@ def _stage_configuration(
         runners[stage] = CommandStageRunner(
             name=str(value.get("name") or f"COMMAND:{module}"),
             module=module,
-            argv=tuple(argv),
+            argv=tuple(_expand_argument(item) for item in argv),
             output_fields=tuple(output_fields),
             retryable_exit_codes=tuple(retryable_exit_codes),
         )
@@ -119,6 +142,56 @@ def _stage_configuration(
             ),
         )
     return runners, policies
+
+
+def _binding_path_from_stage(stage_value: Mapping[str, Any]) -> Path | None:
+    if stage_value.get("module") != "run_daily_stage_adapter":
+        return None
+    argv = stage_value.get("argv")
+    if not isinstance(argv, list):
+        return None
+    for index, item in enumerate(argv[:-1]):
+        if item == "--bindings":
+            return Path(_expand_argument(str(argv[index + 1]))).expanduser()
+    raise ValueError("run_daily_stage_adapter requires --bindings in every stage")
+
+
+def _validate_plan_runtime(
+    payload: Mapping[str, Any],
+) -> dict[str, object]:
+    runners, policies = _stage_configuration(payload)
+    raw_stages = payload["stages"]
+    assert isinstance(raw_stages, Mapping)
+    binding_paths: set[Path] = set()
+    for stage, runner in runners.items():
+        try:
+            main = getattr(importlib.import_module(runner.module), "main")
+        except (ImportError, AttributeError) as error:
+            raise ValueError(
+                f"stage {stage.value} cannot import command module {runner.module!r}"
+            ) from error
+        if not callable(main):
+            raise ValueError(
+                f"stage {stage.value} command module has no callable main"
+            )
+        path = _binding_path_from_stage(raw_stages[stage.value])
+        if path is not None:
+            binding_paths.add(path)
+    binding_reports = [validate_stage_bindings(path) for path in sorted(binding_paths)]
+    return {
+        "status": "valid",
+        "identifier": payload["identifier"],
+        "schema_version": payload["schema_version"],
+        "lease_required": True,
+        "stage_count": len(runners),
+        "stages": [stage.value for stage in CANONICAL_DAILY_STAGE_ORDER],
+        "maximum_attempts": {
+            stage.value: policies[stage].maximum_attempts
+            for stage in CANONICAL_DAILY_STAGE_ORDER
+        },
+        "binding_reports": binding_reports,
+        "real_money_authorized": False,
+    }
 
 
 def _operation_boundary(
@@ -241,21 +314,50 @@ def _post_operation_publisher(args: argparse.Namespace):
     )
 
 
+def _default_worker_identifier() -> str:
+    return (
+        os.getenv("CAPITAL_INTELLIGENCE_DAILY_WORKER_IDENTIFIER")
+        or f"{socket.gethostname()}:{os.getpid()}"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--plan",
-        default=os.getenv("CAPITAL_INTELLIGENCE_DAILY_OPERATION_PLAN"),
-        help=(
-            "Canonical stage plan JSON. Can also be provided by "
-            "CAPITAL_INTELLIGENCE_DAILY_OPERATION_PLAN."
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_DAILY_OPERATION_PLAN",
+            "deploy/canonical-daily-operations.json",
         ),
+        help="Complete canonical 12-stage plan JSON.",
     )
+    parser.add_argument("--validate-plan", action="store_true")
     parser.add_argument(
         "--database",
         default=os.getenv(
             "CAPITAL_INTELLIGENCE_DAILY_OPERATION_DATABASE",
             "database/canonical_daily_operations.db",
+        ),
+    )
+    parser.add_argument(
+        "--worker-identifier",
+        default=_default_worker_identifier(),
+    )
+    parser.add_argument(
+        "--lease-seconds",
+        type=float,
+        default=float(
+            os.getenv("CAPITAL_INTELLIGENCE_DAILY_LEASE_SECONDS", "120")
+        ),
+    )
+    parser.add_argument(
+        "--lease-heartbeat-seconds",
+        type=float,
+        default=float(
+            os.getenv(
+                "CAPITAL_INTELLIGENCE_DAILY_LEASE_HEARTBEAT_SECONDS",
+                "15",
+            )
         ),
     )
     parser.add_argument("--operation-id")
@@ -314,10 +416,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--require-clean-operational-readiness",
         action="store_true",
-        help=(
-            "Return failure after publication when the operational snapshot "
-            "contains blockers. The terminal investment operation is not rewritten."
-        ),
     )
     parser.add_argument(
         "--operation-timezone",
@@ -355,17 +453,45 @@ def _run_once(
     heartbeat.write(
         "starting",
         cycle_key=request.idempotency_key,
-        detail="canonical daily operation claimed",
+        detail=(
+            "canonical daily operation lease requested by "
+            f"{args.worker_identifier}"
+        ),
         observed_at=now,
     )
     runners, policies = _stage_configuration(plan)
-    orchestrator = CanonicalDailyOperationsOrchestrator(
-        store=SQLiteCanonicalDailyOperationsStore(args.database),
+    store = LeasedSQLiteCanonicalDailyOperationsStore(
+        args.database,
+        worker_identifier=args.worker_identifier,
+        lease_duration=timedelta(seconds=args.lease_seconds),
+    )
+    orchestrator = LeasedCanonicalDailyOperationsOrchestrator(
+        store=store,
         runners=runners,
         retry_policies=policies,
+        heartbeat_interval_seconds=args.lease_heartbeat_seconds,
     )
-    result = orchestrator.run(request)
+    try:
+        result = orchestrator.run(request)
+    except DailyOperationLeaseError as error:
+        payload = {
+            "identifier": request.identifier,
+            "idempotency_key": request.idempotency_key,
+            "status": "lease_not_acquired",
+            "worker_identifier": args.worker_identifier,
+            "detail": str(error),
+            "real_money_authorized": False,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        heartbeat.write(
+            "healthy",
+            cycle_key=request.idempotency_key,
+            detail="another worker owns the active daily-operation lease",
+        )
+        return 0
     payload = operation_result_to_dict(result)
+    payload["worker_identifier"] = args.worker_identifier
+    payload["lease_status"] = store.lease_status(request.identifier)
     publication = None
     if args.test_baseline_identifier:
         try:
@@ -430,14 +556,18 @@ def _run_once(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not args.plan:
-        parser.error(
-            "--plan or CAPITAL_INTELLIGENCE_DAILY_OPERATION_PLAN is required"
-        )
     if not 0 <= args.operation_hour <= 23:
         parser.error("--operation-hour must be between 0 and 23")
     if args.poll_seconds < 10:
         parser.error("--poll-seconds must be at least 10")
+    if args.lease_seconds < 5:
+        parser.error("--lease-seconds must be at least 5")
+    if args.lease_heartbeat_seconds <= 0:
+        parser.error("--lease-heartbeat-seconds must be positive")
+    if args.lease_heartbeat_seconds >= args.lease_seconds / 2:
+        parser.error(
+            "--lease-heartbeat-seconds must be less than half --lease-seconds"
+        )
     for name in (
         "maximum_daily_age_hours",
         "maximum_slo_age_hours",
@@ -455,6 +585,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     try:
         plan = _load_plan(Path(args.plan).expanduser())
+        validation = _validate_plan_runtime(plan)
+        if args.validate_plan:
+            print(json.dumps(validation, indent=2, sort_keys=True))
+            return 0
         settings = OperationalSettings.from_env()
         heartbeat = WorkerHeartbeatStore(settings.worker_heartbeat_path)
     except (OSError, TypeError, ValueError) as error:
@@ -463,7 +597,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.loop:
         return _run_once(args, plan=plan, heartbeat=heartbeat)
 
-    heartbeat.write("starting", detail="canonical daily operations loop started")
+    heartbeat.write(
+        "starting",
+        detail=f"canonical daily operations loop started: {args.worker_identifier}",
+    )
     while True:
         now = datetime.now(timezone.utc)
         _, scheduled = _operation_boundary(
@@ -479,7 +616,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             heartbeat.write(
                 "healthy",
-                detail=f"waiting for daily boundary {scheduled.isoformat()}",
+                detail=(
+                    f"worker {args.worker_identifier} waiting for daily boundary "
+                    f"{scheduled.isoformat()}"
+                ),
             )
         time.sleep(args.poll_seconds)
 
