@@ -1,11 +1,17 @@
-"""Read-only multi-engine governance routes."""
+"""Read-only analytical and all-markets data governance routes."""
 
 from typing import Any
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.config import ApiSettings
 from api.dependencies import get_settings
+from governance import (
+    AllMarketsDataReadinessEvaluator,
+    DataReadinessError,
+    load_data_readiness_manifest,
+)
 from intelligence.governance_store import SQLiteGovernanceStore
 
 
@@ -69,3 +75,22 @@ def policy_history(
         "limit": limit,
         "total": len(items),
     }
+
+@router.get("/data-readiness", response_model=dict[str, Any])
+def data_readiness() -> dict[str, Any]:
+    """Return credential-redacted readiness for the complete market scope."""
+
+    manifest_path = os.getenv(
+        "CAPITAL_INTELLIGENCE_DATA_READINESS_MANIFEST",
+        "config/all_markets_data_readiness.json",
+    )
+    try:
+        manifest = load_data_readiness_manifest(manifest_path)
+        report = AllMarketsDataReadinessEvaluator().evaluate(manifest)
+    except (DataReadinessError, KeyError, OSError, TypeError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"all-markets data readiness is unavailable: {error}",
+        ) from error
+    return report.to_dict()
+
