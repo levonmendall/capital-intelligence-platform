@@ -77,6 +77,8 @@ class CanonicalEnvironmentRepository:
         )
 
     def latest_view(self) -> dict[str, Any] | None:
+        if not self.path.exists() and not self.required:
+            return None
         try:
             with _read_only_connection(self.path) as connection:
                 if not self._has_table(connection):
@@ -98,6 +100,10 @@ class CanonicalEnvironmentRepository:
                     "AND snapshot_identifier=? ORDER BY sequence",
                     (str(row["identifier"]),),
                 ).fetchall()
+        except RepositoryUnavailableError:
+            if not self.required:
+                return None
+            raise
         except sqlite3.Error as error:
             raise RepositoryUnavailableError(
                 "canonical Environment authority cannot be queried"
