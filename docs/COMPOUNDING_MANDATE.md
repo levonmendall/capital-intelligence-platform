@@ -2,7 +2,7 @@
 
 > **Every recommendation is compared against all other available uses of capital, implemented at the portfolio level, continuously monitored against an explicit thesis, and evaluated afterward using the exact evidence available when the decision was made.**
 
-The platform has one active investment mandate: `COMPOUNDING`.
+The platform has one investment mandate. The sole active investment mandate is `COMPOUNDING`.
 
 Its objective is to maximize long-term compounded portfolio returns after implementation costs and within approved operational constraints. Every candidate, current holding, cash position, and qualified alternative is evaluated under that same objective.
 
