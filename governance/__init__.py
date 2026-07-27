@@ -13,6 +13,14 @@ from governance.asset_class_scope import (
     SQLiteAssetClassApprovalStore,
     TradingSessionModel,
 )
+from governance.test_readiness import (
+    ProductTestReadiness,
+    ProductTestReadinessEvidence,
+    ProductTestReadinessEvaluator,
+    ProductTestReadinessReport,
+    SQLiteProductTestReadinessStore,
+    TestReadinessIntegrityError,
+)
 
 __all__ = [
     "EXPANSION_ASSET_CLASSES",
@@ -24,6 +32,12 @@ __all__ = [
     "AssetClassScopeAssessment",
     "AssetClassScopeAuthority",
     "CustodySettlementModel",
+    "ProductTestReadiness",
+    "ProductTestReadinessEvidence",
+    "ProductTestReadinessEvaluator",
+    "ProductTestReadinessReport",
     "SQLiteAssetClassApprovalStore",
+    "SQLiteProductTestReadinessStore",
+    "TestReadinessIntegrityError",
     "TradingSessionModel",
 ]
