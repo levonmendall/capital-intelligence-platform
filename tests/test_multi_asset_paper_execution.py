@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+from governance.eligible_universe import (
+    CertifiedEligibleUniversePublication,
+    EligibleUniverseCertificationState,
+    SQLiteCertifiedEligibleUniverseStore,
+)
 from cio import CandidateAssetClass
 from governance import AssetClassApprovalState, TradingSessionModel
 from portfolio import (
@@ -33,6 +40,17 @@ from portfolio.construction_models import (
 
 UTC = timezone.utc
 AS_OF = datetime(2026, 7, 27, 16, 0, tzinfo=UTC)
+
+INSTRUMENT_IDENTIFIERS = {
+    "BTC-USD": "instrument:crypto:COINBASE:BTC-USD",
+    "EURUSD": "instrument:fx:EBS:EURUSD",
+    "SHEL": "instrument:international_equity:LSE:SHEL",
+}
+APPROVAL_IDENTIFIERS = {
+    "BTC-USD": "approval:crypto:paper-v1",
+    "EURUSD": "approval:fx:paper-v1",
+    "SHEL": "approval:international_equity:paper-v1",
+}
 
 
 class SessionProvider:
@@ -153,6 +171,11 @@ def _construction(*trades: TradeProposal) -> PortfolioConstructionResult:
         expected_return_improvement=0.02,
         constraints=(),
         blocks=(),
+        eligible_universe_publication_identifier="eligible-universe:multi-asset",
+        instrument_identifiers=tuple(
+            (item.symbol, INSTRUMENT_IDENTIFIERS[item.symbol])
+            for item in trades
+        ),
     )
 
 
@@ -175,11 +198,44 @@ def _portfolio(
     )
 
 
+def _universe_store(
+    tmp_path: Path,
+    *,
+    eligible_symbols: tuple[str, ...] = tuple(INSTRUMENT_IDENTIFIERS),
+) -> SQLiteCertifiedEligibleUniverseStore:
+    store = SQLiteCertifiedEligibleUniverseStore(tmp_path / "eligible-universe.db")
+    store.append(
+        CertifiedEligibleUniversePublication(
+            identifier="eligible-universe:multi-asset",
+            published_at=AS_OF - timedelta(minutes=2),
+            as_of=AS_OF - timedelta(minutes=1),
+            knowledge_cutoff=AS_OF - timedelta(minutes=3),
+            security_master_catalog_identifier="catalog:multi-asset",
+            security_master_snapshot_identifier="snapshot:multi-asset",
+            policy_version="recommendation-universe.v1",
+            certification_identifier="certification:multi-asset",
+            certification_state=EligibleUniverseCertificationState.APPROVED,
+            certification_expires_at=AS_OF + timedelta(days=1),
+            eligible_instrument_identifiers=tuple(
+                INSTRUMENT_IDENTIFIERS[symbol] for symbol in eligible_symbols
+            ),
+            source_versions=(("security-master", "v1"),),
+            model_versions=(("universe-policy", "v1"),),
+            instrument_approval_identifiers=tuple(
+                (INSTRUMENT_IDENTIFIERS[symbol], APPROVAL_IDENTIFIERS[symbol])
+                for symbol in eligible_symbols
+            ),
+        )
+    )
+    return store
+
+
 def _orchestrator(
     tmp_path: Path,
     session_provider: SessionProvider,
     quote_provider: QuoteProvider,
     portfolio: CanonicalPortfolioSnapshot | None = None,
+    universe_store: SQLiteCertifiedEligibleUniverseStore | None = None,
 ):
     state = portfolio or _portfolio()
     portfolio_store = SQLiteCanonicalPortfolioStore(tmp_path / "portfolio.db")
@@ -193,6 +249,7 @@ def _orchestrator(
             quote_provider=quote_provider,
             store=execution_store,
             portfolio_store=portfolio_store,
+            universe_store=universe_store or _universe_store(tmp_path),
         ),
         portfolio_store,
         execution_store,
@@ -505,6 +562,150 @@ def test_profile_coverage_approval_and_unlevered_spot_are_enforced(
         )
 
 
+
+def test_self_asserted_expansion_approval_is_rejected_before_market_access(
+    tmp_path: Path,
+) -> None:
+    certified = _profile(
+        "BTC-USD",
+        CandidateAssetClass.CRYPTO,
+        venue="COINBASE",
+    )
+    self_asserted = replace(
+        certified,
+        approval_identifier="approval:crypto:self-asserted",
+    )
+    sessions = SessionProvider()
+    quotes = QuoteProvider({})
+    orchestrator, _, _, portfolio = _orchestrator(
+        tmp_path,
+        sessions,
+        quotes,
+    )
+
+    with pytest.raises(
+        MultiAssetExecutionError,
+        match="does not match the certified",
+    ):
+        orchestrator.execute(
+            construction=_construction(_buy(self_asserted.symbol)),
+            decision_identifier="decision:self-asserted",
+            portfolio=portfolio,
+            profiles={self_asserted.symbol: self_asserted},
+            as_of=AS_OF,
+        )
+
+    assert sessions.calls == []
+    assert quotes.calls == []
+
+
+def test_no_longer_eligible_multi_asset_holding_can_only_exit(
+    tmp_path: Path,
+) -> None:
+    profile = _profile(
+        "SHEL",
+        CandidateAssetClass.INTERNATIONAL_EQUITY,
+        venue="LSE",
+        country_code="GB",
+        currency="GBP",
+        approval_state=AssetClassApprovalState.RESEARCH_APPROVED,
+    )
+    position = CanonicalPortfolioPosition(
+        symbol=profile.symbol,
+        instrument_identifier=profile.instrument_identifier,
+        venue=profile.venue,
+        asset_class=profile.asset_class.value,
+        quantity=400,
+        average_cost=9.0,
+        average_cost_base=11.25,
+        mark_price=10.0,
+        updated_at=AS_OF - timedelta(minutes=1),
+        price_currency="GBP",
+        settlement_currency="GBP",
+        fx_rate_to_base=1.25,
+        fx_rate_observed_at=AS_OF - timedelta(minutes=1),
+        fx_rate_source_identifier="fx:GBPUSD:prior",
+    )
+    portfolio = _portfolio(positions=(position,), cash=95_000)
+    store = _universe_store(
+        tmp_path,
+        eligible_symbols=("BTC-USD", "EURUSD"),
+    )
+    orchestrator, _, execution_store, _ = _orchestrator(
+        tmp_path,
+        SessionProvider(),
+        QuoteProvider(
+            {
+                profile.symbol: _quote(
+                    profile,
+                    bid=10,
+                    ask=10,
+                    last=10,
+                    fx=1.25,
+                )
+            }
+        ),
+        portfolio,
+        universe_store=store,
+    )
+    sell = TradeProposal(
+        symbol=profile.symbol,
+        side=TradeSide.SELL,
+        from_weight=0.05,
+        to_weight=0.0,
+        trade_weight=0.05,
+        estimated_cost_return=0.001,
+        reason="exit no-longer-eligible holding",
+    )
+    construction = PortfolioConstructionResult(
+        request_identifier="construction:legacy-global-exit:1",
+        as_of=AS_OF - timedelta(minutes=1),
+        status=ConstructionStatus.FEASIBLE,
+        policy_version="portfolio-construction.v1",
+        target_cash_weight=1.0,
+        target_weights=(),
+        trades=(sell,),
+        turnover=0.05,
+        estimated_cost_return=0.001,
+        expected_return_before=0.06,
+        expected_return_after_cost=0.059,
+        expected_return_improvement=0.01,
+        constraints=(),
+        blocks=(),
+        eligible_universe_publication_identifier=(
+            "eligible-universe:multi-asset"
+        ),
+        instrument_identifiers=(
+            (profile.symbol, profile.instrument_identifier),
+        ),
+    )
+
+    batch = orchestrator.execute(
+        construction=construction,
+        decision_identifier="decision:legacy-global-exit",
+        portfolio=portfolio,
+        profiles={profile.symbol: profile},
+        as_of=AS_OF,
+    )
+
+    assert batch.status is MultiAssetExecutionStatus.COMPLETED
+    assert batch.ending_snapshot.positions == ()
+    with sqlite3.connect(execution_store.path) as connection:
+        payload_json = connection.execute(
+            "SELECT payload_json FROM multi_asset_paper_execution_events "
+            "WHERE batch_identifier = ? AND event_type = ? "
+            "ORDER BY sequence LIMIT 1",
+            (batch.identifier, "batch_started"),
+        ).fetchone()[0]
+    evidence = json.loads(payload_json)["execution_eligibility"]
+    assert evidence["instrument_results"] == [
+        {
+            "symbol": profile.symbol,
+            "instrument_identifier": profile.instrument_identifier,
+            "eligibility_result": "legacy_exit_only",
+        }
+    ]
+
 def test_global_sell_uses_owned_identity_and_reconciles(tmp_path: Path) -> None:
     profile = _profile(
         "SHEL",
@@ -561,6 +762,8 @@ def test_global_sell_uses_owned_identity_and_reconciles(tmp_path: Path) -> None:
         expected_return_improvement=0.01,
         constraints=(),
         blocks=(),
+        eligible_universe_publication_identifier="eligible-universe:multi-asset",
+        instrument_identifiers=((profile.symbol, profile.instrument_identifier),),
     )
 
     batch = orchestrator.execute(

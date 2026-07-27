@@ -160,6 +160,10 @@ class PortfolioConstructionEngine:
         else:
             status = ConstructionStatus.NO_ACTION
 
+        instrument_identifiers = self._instrument_identifiers(
+            request=request,
+            trades=tuple(trades),
+        )
         return PortfolioConstructionResult(
             request_identifier=request.identifier,
             as_of=request.as_of,
@@ -175,6 +179,44 @@ class PortfolioConstructionEngine:
             expected_return_improvement=round(after_cost - before, 8),
             constraints=constraints,
             blocks=tuple(blocks),
+            eligible_universe_publication_identifier=(
+                request.eligible_universe_publication_identifier
+            ),
+            instrument_identifiers=instrument_identifiers,
+        )
+
+    @staticmethod
+    def _instrument_identifiers(
+        *,
+        request: PortfolioConstructionRequest,
+        trades: tuple[TradeProposal, ...],
+    ) -> tuple[tuple[str, str], ...]:
+        identities: dict[str, str] = {}
+        for item in request.positions:
+            if item.instrument_identifier is not None:
+                identities[item.symbol] = item.instrument_identifier
+        for item in request.intents:
+            if item.instrument_identifier is None:
+                continue
+            existing = identities.get(item.symbol)
+            if existing is not None and existing != item.instrument_identifier:
+                raise ValueError(
+                    f"conflicting instrument identities for {item.symbol}"
+                )
+            identities[item.symbol] = item.instrument_identifier
+        trade_symbols = {item.symbol for item in trades}
+        missing = sorted(trade_symbols - set(identities))
+        if request.eligible_universe_publication_identifier is not None and missing:
+            raise ValueError(
+                "governed construction is missing instrument identities for "
+                f"{missing}"
+            )
+        return tuple(
+            sorted(
+                (symbol, identities[symbol])
+                for symbol in trade_symbols
+                if symbol in identities
+            )
         )
 
     def _apply_reductions(

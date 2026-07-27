@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from cio import CandidateAssetClass
 from governance import AssetClassApprovalState
 from portfolio import (
@@ -87,6 +88,15 @@ def _construction(value: Mapping[str, Any]) -> PortfolioConstructionResult:
                 for item in value.get("constraints", ())
             ),
             blocks=tuple(str(item) for item in value.get("blocks", ())),
+            eligible_universe_publication_identifier=(
+                None
+                if value.get("eligible_universe_publication_identifier") is None
+                else str(value["eligible_universe_publication_identifier"])
+            ),
+            instrument_identifiers=tuple(
+                (str(item["symbol"]), str(item["instrument_identifier"]))
+                for item in value.get("instrument_identifiers", ())
+            ),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("invalid canonical construction payload") from error
@@ -132,6 +142,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--eligible-universe-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_ELIGIBLE_UNIVERSE_DATABASE",
+            str(data_dir / "eligible_universe.db"),
+        ),
+    )
+    parser.add_argument(
         "--execution-database",
         default=os.getenv(
             "CAPITAL_INTELLIGENCE_MULTI_ASSET_EXECUTION_DATABASE",
@@ -171,6 +188,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             quote_provider=_factory(args.quote_provider),
             store=SQLiteMultiAssetPaperExecutionStore(args.execution_database),
             portfolio_store=portfolio_store,
+            universe_store=SQLiteCertifiedEligibleUniverseStore(
+                args.eligible_universe_database
+            ),
             policy=MultiAssetExecutionPolicy(),
         ).execute(
             construction=_construction(construction_payload),

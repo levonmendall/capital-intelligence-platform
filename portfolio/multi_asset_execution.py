@@ -19,13 +19,18 @@ from math import floor, isfinite
 from pathlib import Path
 from typing import Any, Mapping, Protocol, runtime_checkable
 
+from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from cio import CandidateAssetClass
-from governance import AssetClassApprovalState, TradingSessionModel
+from governance import TradingSessionModel
 from portfolio.construction_models import (
     ConstructionStatus,
     PortfolioConstructionResult,
     TradeProposal,
     TradeSide,
+)
+from portfolio.execution_eligibility import (
+    CertifiedExecutionEligibilityAuthority,
+    ExecutionEligibilityError,
 )
 from portfolio.multi_asset_controls import MultiAssetInstrumentProfile
 from portfolio.state import (
@@ -707,6 +712,7 @@ class MultiAssetPaperExecutionOrchestrator:
         quote_provider: MultiAssetQuoteProvider,
         store: SQLiteMultiAssetPaperExecutionStore,
         portfolio_store: SQLiteCanonicalPortfolioStore,
+        universe_store: SQLiteCertifiedEligibleUniverseStore,
         policy: MultiAssetExecutionPolicy | None = None,
     ) -> None:
         if not isinstance(session_provider, InstrumentSessionProvider):
@@ -717,10 +723,21 @@ class MultiAssetPaperExecutionOrchestrator:
             raise TypeError("store must be SQLiteMultiAssetPaperExecutionStore")
         if not isinstance(portfolio_store, SQLiteCanonicalPortfolioStore):
             raise TypeError("portfolio_store must be SQLiteCanonicalPortfolioStore")
+        if not isinstance(
+            universe_store,
+            SQLiteCertifiedEligibleUniverseStore,
+        ):
+            raise TypeError(
+                "universe_store must be SQLiteCertifiedEligibleUniverseStore"
+            )
         self.session_provider = session_provider
         self.quote_provider = quote_provider
         self.store = store
         self.portfolio_store = portfolio_store
+        self.universe_store = universe_store
+        self.eligibility_authority = CertifiedExecutionEligibilityAuthority(
+            universe_store
+        )
         self.policy = policy or MultiAssetExecutionPolicy()
 
     def execute(
@@ -758,13 +775,43 @@ class MultiAssetPaperExecutionOrchestrator:
                 f"missing={missing} extra={extra}"
             )
         instrument_ids: list[str] = []
+        trades_by_symbol = {item.symbol: item for item in construction.trades}
         for symbol, profile in normalized_profiles.items():
-            self._require_profile(symbol, profile)
+            self._require_profile(symbol, profile, trade=trades_by_symbol[symbol])
             instrument_ids.append(profile.instrument_identifier)
         if len(instrument_ids) != len(set(instrument_ids)):
             raise MultiAssetExecutionError(
                 "execution profiles contain duplicate instrument identifiers"
             )
+        eligibility = None
+        if construction.trades:
+            try:
+                eligibility = self.eligibility_authority.authorize(
+                    construction=construction,
+                    execution_timestamp=timestamp,
+                    owned_instruments={
+                        item.symbol: item.instrument_identifier
+                        for item in portfolio.positions
+                    },
+                    execution_instruments={
+                        symbol: profile.instrument_identifier
+                        for symbol, profile in normalized_profiles.items()
+                    },
+                    approval_identifiers={
+                        symbol: profile.approval_identifier
+                        for symbol, profile in normalized_profiles.items()
+                    },
+                    approval_states={
+                        symbol: profile.approval_state
+                        for symbol, profile in normalized_profiles.items()
+                    },
+                    asset_classes={
+                        symbol: profile.asset_class
+                        for symbol, profile in normalized_profiles.items()
+                    },
+                )
+            except ExecutionEligibilityError as error:
+                raise MultiAssetExecutionError(str(error)) from error
 
         batch_identifier = f"multi-asset-execution:{construction.request_identifier}"
         previous = self.store.latest_batch(batch_identifier)
@@ -799,6 +846,9 @@ class MultiAssetPaperExecutionOrchestrator:
                     self._profile_identifier(item)
                     for item in normalized_profiles.values()
                 ],
+                "execution_eligibility": (
+                    None if eligibility is None else eligibility.to_dict()
+                ),
             },
         )
 
@@ -828,6 +878,16 @@ class MultiAssetPaperExecutionOrchestrator:
         )
         cumulative_fills = [] if previous is None else list(previous.fills)
         cumulative_sources = [] if previous is None else list(previous.source_identifiers)
+        if eligibility is not None:
+            cumulative_sources.extend(
+                (
+                    eligibility.publication_identifier,
+                    eligibility.publication_content_hash,
+                    eligibility.certification_identifier,
+                    eligibility.security_master_catalog_identifier,
+                    eligibility.security_master_snapshot_identifier,
+                )
+            )
         order_results: dict[str, MultiAssetOrderResult] = dict(previous_results)
         fill_ids = {item.identifier for item in cumulative_fills}
 
@@ -1076,19 +1136,23 @@ class MultiAssetPaperExecutionOrchestrator:
         self,
         symbol: str,
         profile: MultiAssetInstrumentProfile,
+        *,
+        trade: TradeProposal,
     ) -> None:
         if not isinstance(profile, MultiAssetInstrumentProfile):
             raise TypeError("profiles must contain MultiAssetInstrumentProfile values")
         if profile.symbol != symbol:
             raise MultiAssetExecutionError("profile key must match profile symbol")
-        if profile.approval_state is not AssetClassApprovalState.PAPER_ELIGIBLE:
-            raise MultiAssetExecutionError(
-                f"{profile.symbol} asset-class approval is not paper_eligible"
-            )
-        if profile.asset_class in {
-            CandidateAssetClass.CRYPTO,
-            CandidateAssetClass.FX,
-        } and (not profile.unlevered or not profile.spot_only):
+        if trade.symbol != symbol:
+            raise MultiAssetExecutionError("profile trade must match profile symbol")
+        if (
+            trade.side is TradeSide.BUY
+            and profile.asset_class in {
+                CandidateAssetClass.CRYPTO,
+                CandidateAssetClass.FX,
+            }
+            and (not profile.unlevered or not profile.spot_only)
+        ):
             raise MultiAssetExecutionError(
                 f"{profile.symbol} execution requires unlevered spot exposure"
             )
