@@ -30,6 +30,8 @@ from portfolio.multi_asset_execution import (
     MultiAssetPaperFill,
     MultiAssetQuote,
     MultiAssetQuoteProvider,
+)
+from portfolio.multi_asset_execution_store import (
     SQLiteMultiAssetPaperExecutionStore,
 )
 from portfolio.opportunity_cost import (
