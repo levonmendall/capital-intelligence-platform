@@ -124,3 +124,18 @@ python run_thesis_monitoring.py \
 ```
 
 Scheduled and event-driven reviews are append-only. Stable reviews satisfy the thesis-review SLO without notifying the user. Material reviews create a CIO queue item but cannot alter portfolio construction or execution. See [Production thesis monitoring](THESIS_MONITORING_OPERATIONS.md).
+
+## Paper execution cycle
+
+```bash
+python run_paper_execution.py \
+  --construction artifacts/latest_construction.json \
+  --portfolio artifacts/current_paper_portfolio.json \
+  --decision-identifier decision:example \
+  --session-provider production_calendar:create_provider \
+  --quote-provider production_paper_quotes:create_provider \
+  --as-of 2026-07-27T15:00:00+00:00 \
+  --require-complete
+```
+
+The cycle is paper-only. It sequences funding sells before dependent buys, holds orders outside configured sessions, caps fills by participation and cash or ownership, applies bid/ask and commissions, and publishes canonical paper fills only after the virtual ledger reconciles. A held or partial batch should be retried from the exact ending portfolio state or explicitly cancelled. See [Paper execution orchestration](PAPER_EXECUTION_ORCHESTRATION.md).
