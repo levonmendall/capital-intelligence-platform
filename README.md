@@ -61,7 +61,7 @@ The first five complete independent first-pass analyses. The Evidence & Governan
 
 ### Portfolio implementation
 
-An approved CIO action is translated into a separate construction request. The construction engine determines feasible target weights and funding sources under cash, position, liquidity, sector, factor, correlation, turnover, cost, and minimum-retained-weight controls. CIO confidence is not used as a sizing input. The result remains a paper proposal and does not submit broker orders.
+An approved CIO action is translated into a separate construction request. The construction engine determines feasible target weights and funding sources under cash, position, liquidity, sector, factor, correlation, turnover, cost, and minimum-retained-weight controls. CIO confidence is not used as a sizing input. The result remains a paper proposal. A separate paper execution orchestrator can simulate market-session gating, sell-before-buy funding dependencies, partial fills, spread, commission, cancellation, and reconciliation; neither layer submits broker orders.
 
 ### Living thesis
 
@@ -161,6 +161,21 @@ python run_thesis_monitoring.py \
 
 Monitoring appends point-in-time reviews and new living-thesis snapshots. Stable reviews remain silent; material invalidation, exit, reduction, evidence, replacement, or increase proposals enter a prioritized CIO review queue. The monitoring layer cannot resize positions, create orders, or issue the final CIO action.
 
+Run paper-only implementation orchestration:
+
+```bash
+python run_paper_execution.py \
+  --construction artifacts/latest_construction.json \
+  --portfolio artifacts/current_paper_portfolio.json \
+  --decision-identifier decision:example \
+  --session-provider production_calendar:create_provider \
+  --quote-provider production_paper_quotes:create_provider \
+  --as-of 2026-07-27T15:00:00+00:00 \
+  --require-complete
+```
+
+The simulator uses an isolated virtual share-and-cash ledger, holds dependent buys until funding sales complete, applies bid/ask and liquidity constraints, reconciles NAV before publishing paper fills, and has no broker or live-order authority.
+
 Run the economic-regime research pipeline:
 
 ```bash
@@ -252,6 +267,7 @@ Production investment reliance still requires broader live and licensed data cov
 - [Security-master provider certification](docs/PROVIDER_CERTIFICATION.md)
 - [Complete-universe screening](docs/FULL_UNIVERSE_SCREENING.md)
 - [Production thesis monitoring](docs/THESIS_MONITORING_OPERATIONS.md)
+- [Paper execution orchestration](docs/PAPER_EXECUTION_ORCHESTRATION.md)
 - [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
 - [Daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Production API](docs/PRODUCTION_API.md)

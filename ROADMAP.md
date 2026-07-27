@@ -129,7 +129,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Roll back orphaned funding sales when an allocation is infeasible.
 - [x] Persist and expose the complete non-executing construction result.
 - [x] Record simulated paper fills for later implementation attribution.
-- [ ] Add production rebalancing orchestration, order sequencing, and market-hours controls.
+- [x] Add paper-only rebalancing orchestration, sell-before-buy sequencing, funding dependencies, market-hours controls, simulated fills, cancellation, and reconciliation.
 - [ ] Add a separately governed broker integration only after paper validation and explicit approval.
 
 ## Milestone 9 — Continuous thesis monitoring
