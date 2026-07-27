@@ -71,5 +71,5 @@ def test_investor_boundary_still_protects_portfolios(tmp_path) -> None:
     )
     headers = _headers(tokens)
 
-    assert client.get("/v1/portfolios/GROWTH", headers=headers).status_code == 200
+    assert client.get("/v1/portfolios/COMPOUNDING", headers=headers).status_code == 200
     assert client.get("/v1/portfolios/INCOME", headers=headers).status_code == 404

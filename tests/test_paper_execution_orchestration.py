@@ -13,7 +13,7 @@ from portfolio.construction_api import (
     TradeProposal,
     TradeSide,
 )
-from portfolio.state import SQLiteCanonicalPortfolioStore
+from portfolio.state import SQLiteCanonicalPortfolioStore, ensure_canonical_portfolio_store
 from portfolio.execution import (
     MarketSession,
     MarketSessionStatus,
@@ -140,13 +140,14 @@ def orchestrator(tmp_path, *, quotes=None, session=MarketSessionStatus.OPEN, pol
         }
     )
     cio_journal = SQLiteCIOJournal(tmp_path / "cio.db") if journal else None
+    ensure_canonical_portfolio_store(tmp_path / "canonical_portfolio.db", as_of=AS_OF - timedelta(days=1))
     service = PaperExecutionOrchestrator(
         session_provider=session_provider,
         quote_provider=quote_provider,
         store=SQLitePaperExecutionStore(tmp_path / "paper.db"),
         journal=cio_journal,
         portfolio_store=SQLiteCanonicalPortfolioStore(tmp_path / "canonical_portfolio.db"),
-        portfolio_code="CORE",
+        portfolio_code="COMPOUNDING",
         policy=policy,
     )
     return service, session_provider, quote_provider, cio_journal
@@ -170,7 +171,7 @@ def test_sell_fills_before_dependent_buy_and_reconciles(tmp_path) -> None:
     assert batch.ending_portfolio.cash_amount == pytest.approx(19_400.0)
     assert batch.ending_portfolio.nav == pytest.approx(99_400.0)
     assert len(journal.events(event_type=CIOJournalEventType.PAPER_TRADE_FILL)) == 2
-    canonical = service.portfolio_store.latest("CORE")
+    canonical = service.portfolio_store.latest("COMPOUNDING")
     assert canonical is not None
     assert canonical.cash_amount == pytest.approx(19_400.0)
     assert {item.symbol for item in canonical.positions} == {"AAA", "BBB"}

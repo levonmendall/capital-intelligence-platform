@@ -22,17 +22,13 @@ The system continuously answers:
 
 The purpose is not to process or display more information. The purpose is to make better capital-allocation decisions.
 
-## Version 1 recommendation universe
+## Global analysis and governed allocation universe
 
-Capital Intelligence may directly recommend and allocate only among:
+Capital Intelligence operates one `COMPOUNDING` paper portfolio initialized with **$250,000**. The system must continuously analyze all supported liquid public-market families rather than preselecting a narrow model portfolio or static list of symbols. Required analysis coverage includes global equities, government bonds, credit, cash equivalents, commodities, foreign exchange, crypto, real estate, options, volatility, and other liquid alternatives.
 
-- liquid U.S.-listed equities;
-- liquid U.S.-listed ETFs; and
-- cash or short-duration Treasury equivalents.
+All-market analysis does not create blanket allocation authority. An instrument may receive a direct paper recommendation only when its point-in-time identity, licensed data, analytical coverage, expected-return model, valuation method, liquidity, risk, costs, execution, custody, settlement, thesis, and evaluation capabilities satisfy the active policy and any required asset-class approval. Markets that fail those gates remain intelligence inputs and must produce an explicit insufficient-evidence or ineligible result rather than being silently omitted.
 
-Government bonds, credit, commodities, currencies, options, international markets, crypto, volatility, and other markets may inform intelligence. They are not direct recommendation targets until dedicated asset-specific valuation, return, risk, liquidity, implementation, and validation frameworks are approved.
-
-The generalized multi-asset identity and evidence architecture remains valuable. Architectural support does not imply recommendation eligibility.
+The active universe is provider-driven and point-in-time. `config/investment_universe.json` defines market-family obligations and contains no static symbol list.
 
 ## Continuous decision loop
 

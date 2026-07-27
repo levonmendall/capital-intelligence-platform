@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cio.persistence import SQLiteCIOJournal
+from portfolio.constants import CANONICAL_PORTFOLIO_CODE
 from portfolio.construction_api import (
     ConstructionStatus,
     ConstraintCheck,
@@ -18,7 +19,7 @@ from portfolio.construction_api import (
     TradeProposal,
     TradeSide,
 )
-from portfolio.state import SQLiteCanonicalPortfolioStore
+from portfolio.state import SQLiteCanonicalPortfolioStore, ensure_canonical_portfolio_store
 from portfolio.execution import (
     PaperExecutionOrchestrator,
     PaperExecutionPolicy,
@@ -101,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--as-of", required=True, help="Timezone-aware execution timestamp")
     parser.add_argument("--store-db", default="database/paper_execution.db")
     parser.add_argument("--portfolio-db", default="database/canonical_portfolio.db")
-    parser.add_argument("--portfolio-code", default="CORE")
+    parser.add_argument("--portfolio-code", default=CANONICAL_PORTFOLIO_CODE)
     parser.add_argument("--journal-db", default="database/institutional_journal.db")
     parser.add_argument("--without-journal", action="store_true")
     parser.add_argument("--require-complete", action="store_true")
@@ -123,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must be timezone-aware")
         journal = None if args.without_journal else SQLiteCIOJournal(args.journal_db)
+        ensure_canonical_portfolio_store(args.portfolio_db, as_of=as_of)
         orchestrator = PaperExecutionOrchestrator(
             session_provider=_factory(args.session_provider),
             quote_provider=_factory(args.quote_provider),

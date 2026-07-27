@@ -19,6 +19,7 @@ from typing import Any, Mapping, Protocol, Sequence
 from cio.persistence import SQLiteCIOJournal
 from evaluation.persistence import append_paper_trade_fill
 from evaluation.walk_forward import PaperTradeFill
+from portfolio.constants import CANONICAL_PORTFOLIO_CODE
 from portfolio.state import (
     CanonicalImplementationEvent,
     CanonicalPortfolioPosition,
@@ -603,7 +604,7 @@ class PaperExecutionOrchestrator:
         store: SQLitePaperExecutionStore,
         journal: SQLiteCIOJournal | None = None,
         portfolio_store: SQLiteCanonicalPortfolioStore | None = None,
-        portfolio_code: str = "CORE",
+        portfolio_code: str = CANONICAL_PORTFOLIO_CODE,
         policy: PaperExecutionPolicy | None = None,
     ) -> None:
         self.session_provider = session_provider
@@ -612,6 +613,10 @@ class PaperExecutionOrchestrator:
         self.journal = journal
         self.portfolio_store = portfolio_store
         self.portfolio_code = _text(portfolio_code, field_name="portfolio_code").upper()
+        if self.portfolio_code != CANONICAL_PORTFOLIO_CODE:
+            raise ValueError(
+                f"paper execution is restricted to {CANONICAL_PORTFOLIO_CODE}"
+            )
         self.policy = policy or PaperExecutionPolicy()
 
     def execute(
@@ -977,8 +982,12 @@ class PaperExecutionOrchestrator:
     def _publish_portfolio_state(self, batch: PaperExecutionBatch) -> None:
         if self.portfolio_store is None or batch.reconciliation is None or not batch.reconciliation.reconciled:
             return
-        prior = self.portfolio_store.latest(self.portfolio_code)
-        prior_costs = {} if prior is None else {item.symbol: item.average_cost for item in prior.positions}
+        prior = self.portfolio_store.latest(CANONICAL_PORTFOLIO_CODE)
+        if prior is None:
+            raise PaperExecutionError(
+                "canonical portfolio must be initialized before paper execution"
+            )
+        prior_costs = {item.symbol: item.average_cost for item in prior.positions}
         positions = tuple(
             CanonicalPortfolioPosition(
                 symbol=item.symbol,
@@ -1007,10 +1016,10 @@ class PaperExecutionOrchestrator:
         snapshot = CanonicalPortfolioSnapshot(
             identifier=f"portfolio-state:{self.portfolio_code}:{batch.identifier}:attempt:{batch.attempt_count}",
             portfolio_code=self.portfolio_code,
-            display_name=(prior.display_name if prior is not None else "Compounding portfolio"),
-            constraint_profile=(prior.constraint_profile if prior is not None else "standard"),
+            display_name=prior.display_name,
+            constraint_profile=prior.constraint_profile,
             as_of=batch.updated_at,
-            starting_capital=(prior.starting_capital if prior is not None else batch.beginning_portfolio.nav),
+            starting_capital=prior.starting_capital,
             cash_amount=batch.ending_portfolio.cash_amount,
             positions=positions,
             implementation_events=events,

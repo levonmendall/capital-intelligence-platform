@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import json
+
 from portfolio_managers.response import MandateID
 
 
@@ -28,3 +30,20 @@ def test_constraint_document_separates_controls_from_objective() -> None:
     assert "one investment mandate" in text
     assert "operational constraint profiles" in text
     assert "do not change opportunity ranking" in text
+
+
+def test_compounding_portfolio_starts_with_250000() -> None:
+    mandates = json.loads(Path("config/mandates.json").read_text(encoding="utf-8"))
+    assert mandates == [
+        {
+            "code": "COMPOUNDING",
+            "name": "Long-Term Compounding",
+            "risk": "Operational constraints only",
+            "capital": 250000,
+        }
+    ]
+
+
+def test_retired_model_portfolios_are_isolated_from_active_config() -> None:
+    assert not Path("config/model_portfolios.json").exists()
+    assert Path("config/legacy/model_portfolios.json").exists()

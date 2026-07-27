@@ -94,7 +94,7 @@ def _planner(tmp_path):
     )
     identities.assign_mandate(
         account.user_id,
-        "GROWTH",
+        "COMPOUNDING",
         MandatePermission.VIEW,
     )
     policies = SQLiteInvestmentPolicyStore(policy)
@@ -121,7 +121,7 @@ def _planner(tmp_path):
             priority=GoalPriority.ESSENTIAL,
             effective_at=NOW,
             target_date=date(2041, 7, 25),
-            portfolio_codes=("GROWTH",),
+            portfolio_codes=("COMPOUNDING",),
         )
     )
     return (

@@ -6,6 +6,10 @@ The platform has one investment mandate. The sole active investment mandate is `
 
 Its objective is to maximize long-term compounded portfolio returns after implementation costs and within approved operational constraints. Every candidate, current holding, cash position, and qualified alternative is evaluated under that same objective.
 
+The active paper authority contains exactly one USD portfolio initialized with **$250,000**. Cash and every approved market exposure are holdings inside that one portfolio; asset classes never create additional portfolios.
+
+The system must analyze all configured market families. Direct paper allocation remains restricted to instruments that pass point-in-time policy and asset-specific governance gates. Analysis completeness and allocation authority remain separate, fail-closed controls.
+
 ## Retired mandates
 
 Preservation, income, balanced, growth, tactical, value, global, and innovation are not active mandates. They may describe historical records, evidence, exposures, or isolated research, but they cannot:
@@ -35,7 +39,9 @@ These controls govern feasibility, durability, and implementation. They do not c
 
 ## Canonical portfolio authority
 
-`SQLiteCanonicalPortfolioStore` is the sole active authority for cash, holdings, valuations, and implementation lineage. Construction, rebalancing, paper execution, the authenticated application, the production API, backups, and reporting use that append-only state.
+`SQLiteCanonicalPortfolioStore` is the sole active authority for cash, holdings, valuations, and implementation lineage. It rejects every portfolio code except `COMPOUNDING`, requires the first snapshot to use $250,000, and preserves that starting-capital basis for all later snapshots. Construction, paper execution, the authenticated application, the production API, backups, and reporting use that append-only state.
+
+Valid but incompatible paper databases are copied to a timestamped legacy audit archive before initialization creates the clean canonical portfolio. Hash-chain corruption is never reset automatically.
 
 ## Compatibility boundary
 
