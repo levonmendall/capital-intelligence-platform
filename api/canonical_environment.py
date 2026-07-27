@@ -77,7 +77,7 @@ class CanonicalEnvironmentRepository:
         )
 
     def latest_view(self) -> dict[str, Any] | None:
-        if not self.path.exists() and not self.required:
+        if not self.path.exists():
             return None
         try:
             with _read_only_connection(self.path) as connection:
