@@ -1,4 +1,4 @@
-"""Canonical portfolio constraints, construction, and state authorities."""
+"""Canonical portfolio construction, execution, constraints, and state authorities."""
 
 from portfolio.fit import (
     PortfolioFitDecision,
@@ -19,6 +19,25 @@ from portfolio.multi_asset_controls import (
     MultiAssetConstructionError,
     MultiAssetConstructionPolicy,
     MultiAssetInstrumentProfile,
+)
+from portfolio.multi_asset_execution import (
+    InstrumentSession,
+    InstrumentSessionProvider,
+    InstrumentSessionStatus,
+    MultiAssetExecutionBatch,
+    MultiAssetExecutionError,
+    MultiAssetExecutionEventType,
+    MultiAssetExecutionIntegrityError,
+    MultiAssetExecutionPolicy,
+    MultiAssetExecutionReconciliation,
+    MultiAssetExecutionStatus,
+    MultiAssetOrderResult,
+    MultiAssetOrderStatus,
+    MultiAssetPaperExecutionOrchestrator,
+    MultiAssetPaperFill,
+    MultiAssetQuote,
+    MultiAssetQuoteProvider,
+    SQLiteMultiAssetPaperExecutionStore,
 )
 from portfolio.opportunity_cost import (
     CapitalFundingSource,
@@ -50,9 +69,25 @@ __all__ = [
     "FundingCandidate",
     "FundingSourceType",
     "GovernedMultiAssetConstructionEngine",
+    "InstrumentSession",
+    "InstrumentSessionProvider",
+    "InstrumentSessionStatus",
     "MultiAssetConstructionError",
     "MultiAssetConstructionPolicy",
+    "MultiAssetExecutionBatch",
+    "MultiAssetExecutionError",
+    "MultiAssetExecutionEventType",
+    "MultiAssetExecutionIntegrityError",
+    "MultiAssetExecutionPolicy",
+    "MultiAssetExecutionReconciliation",
+    "MultiAssetExecutionStatus",
     "MultiAssetInstrumentProfile",
+    "MultiAssetOrderResult",
+    "MultiAssetOrderStatus",
+    "MultiAssetPaperExecutionOrchestrator",
+    "MultiAssetPaperFill",
+    "MultiAssetQuote",
+    "MultiAssetQuoteProvider",
     "OpportunityCostAssessment",
     "OpportunityCostPolicy",
     "PortfolioFitDecision",
@@ -64,6 +99,7 @@ __all__ = [
     "PortfolioProposal",
     "PortfolioSnapshot",
     "SQLiteCanonicalPortfolioStore",
+    "SQLiteMultiAssetPaperExecutionStore",
     "assess_opportunity_cost",
     "opportunity_cost_to_dict",
 ]
