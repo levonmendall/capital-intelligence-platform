@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
+from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from cio.persistence import SQLiteCIOJournal
 from portfolio.constants import CANONICAL_PORTFOLIO_CODE
 from portfolio.construction_api import (
@@ -19,7 +20,10 @@ from portfolio.construction_api import (
     TradeProposal,
     TradeSide,
 )
-from portfolio.state import SQLiteCanonicalPortfolioStore, ensure_canonical_portfolio_store
+from portfolio.state import (
+    SQLiteCanonicalPortfolioStore,
+    ensure_canonical_portfolio_store,
+)
 from portfolio.execution import (
     PaperExecutionOrchestrator,
     PaperExecutionPolicy,
@@ -87,6 +91,15 @@ def _construction(value: Mapping[str, Any]) -> PortfolioConstructionResult:
                 for item in value.get("constraints", ())
             ),
             blocks=tuple(value.get("blocks", ())),
+            eligible_universe_publication_identifier=(
+                None
+                if value.get("eligible_universe_publication_identifier") is None
+                else str(value["eligible_universe_publication_identifier"])
+            ),
+            instrument_identifiers=tuple(
+                (str(item["symbol"]), str(item["instrument_identifier"]))
+                for item in value.get("instrument_identifiers", ())
+            ),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("invalid portfolio construction payload") from error
@@ -102,7 +115,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--as-of", required=True, help="Timezone-aware execution timestamp")
     parser.add_argument("--store-db", default="database/paper_execution.db")
     parser.add_argument("--portfolio-db", default="database/canonical_portfolio.db")
-    parser.add_argument("--portfolio-code", default=CANONICAL_PORTFOLIO_CODE)
+    parser.add_argument(
+        "--eligible-universe-db",
+        default="database/eligible_universe.db",
+    )
+    parser.add_argument(
+        "--portfolio-code",
+        default=CANONICAL_PORTFOLIO_CODE,
+    )
     parser.add_argument("--journal-db", default="database/institutional_journal.db")
     parser.add_argument("--without-journal", action="store_true")
     parser.add_argument("--require-complete", action="store_true")
@@ -123,12 +143,17 @@ def main(argv: list[str] | None = None) -> int:
         as_of = datetime.fromisoformat(args.as_of)
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must be timezone-aware")
-        journal = None if args.without_journal else SQLiteCIOJournal(args.journal_db)
+        journal = (
+            None if args.without_journal else SQLiteCIOJournal(args.journal_db)
+        )
         ensure_canonical_portfolio_store(args.portfolio_db, as_of=as_of)
         orchestrator = PaperExecutionOrchestrator(
             session_provider=_factory(args.session_provider),
             quote_provider=_factory(args.quote_provider),
             store=SQLitePaperExecutionStore(args.store_db),
+            universe_store=SQLiteCertifiedEligibleUniverseStore(
+                args.eligible_universe_db
+            ),
             journal=journal,
             portfolio_store=SQLiteCanonicalPortfolioStore(args.portfolio_db),
             portfolio_code=args.portfolio_code,
