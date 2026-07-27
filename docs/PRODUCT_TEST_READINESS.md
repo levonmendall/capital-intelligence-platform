@@ -32,20 +32,74 @@ The baseline must prove readiness for:
 
 It must also have zero unresolved critical incidents, data-integrity failures, and reconciliation failures.
 
+## Canonical evidence authority
+
+A caller-supplied set of readiness booleans is not authoritative.
+
+`SQLiteReadinessEvidenceStore` persists:
+
+- immutable gate certifications; and
+- point-in-time operational-readiness snapshots.
+
+Every gate certification is bound to:
+
+- one test baseline identifier;
+- one investment-process version;
+- one code version;
+- effective and expiration timestamps;
+- evidence identifiers;
+- governing authority identifiers; and
+- limitations.
+
+Crypto, FX, and international-equity gates additionally require an active `paper_eligible` asset-class approval with the same process and code versions. A readiness certification cannot substitute for the asset-class governance authority.
+
+The operational snapshot records unresolved critical incidents, data-integrity failures, reconciliation failures, and their source identifiers. A missing or stale snapshot forces daily-operations, security, and resilience gates to fail closed.
+
+## Automatic assembly
+
+The default command assembles readiness from persisted authorities:
+
+```bash
+python run_test_readiness.py \
+  --baseline-identifier test-baseline:multi-asset-alpha.1 \
+  --process-version capital-intelligence-investment-process.v1 \
+  --code-version <tested-commit-sha> \
+  --require-ready
+```
+
+The assembler requires exact baseline, process, and code matches. Missing, expired, suspended, revoked, stale, or mismatched evidence becomes a blocker or open development item; it is never inferred or repaired.
+
+Record one reviewed gate certification:
+
+```bash
+python run_test_readiness_evidence.py \
+  --gate-certification artifacts/readiness-gate.json
+```
+
+Record one operational snapshot:
+
+```bash
+python run_test_readiness_evidence.py \
+  --operational-snapshot artifacts/operational-readiness.json
+```
+
+Both evidence history and resulting readiness reports are append-only and SHA-256 chained.
+
+## Manual compatibility mode
+
+Legacy caller-supplied evidence remains available only through an explicit option:
+
+```bash
+python run_test_readiness.py \
+  --manual-evidence artifacts/product-test-readiness.json
+```
+
+The output is labeled `manual_compatibility`. It is not the canonical path for declaring a test baseline ready.
+
 ## Open-development rule
 
 Readiness freezes a **test baseline**, not the repository. Mainline development may continue. Any material decision-process change creates a new candidate baseline and cannot alter results already recorded under the prior baseline.
 
-## Command
-
-```bash
-python run_test_readiness.py \
-  --evidence artifacts/product-test-readiness.json \
-  --require-ready
-```
-
-The command appends the report to a hash-chained SQLite history. Missing or false evidence is reported as a blocker rather than inferred or repaired.
-
 ## External boundary
 
-The evaluator measures supplied evidence; it cannot create licensed provider access, certify real data, complete elapsed operating cycles, or fabricate resilience results. Those authorities must exist before their gates can be marked ready.
+The assembler cannot create licensed provider access, certify real data, complete elapsed operating cycles, or fabricate resilience results. Those authorities must persist valid evidence before their gates can become ready. Development remains open and real-money execution remains unavailable in every readiness state.
