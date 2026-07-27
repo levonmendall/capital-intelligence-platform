@@ -50,35 +50,16 @@ jobs:
       - name: Verify runtime lock integrity
         run: python scripts/verify_requirements_lock.py
 
-      - name: Compile Python files
-        run: timeout --signal=TERM 5m python -m compileall -q .
+      - name: Run deterministic release validation
+        run: timeout --signal=TERM 40m python run_release_validation.py --report reports/release-validation.json
 
-      - name: Initialize platform
-        run: timeout --signal=TERM 5m python initialize.py
-
-      - name: Validate complete daily operating plan
-        run: timeout --signal=TERM 2m python run_daily_operations.py --validate-plan
-
-      - name: Run intelligence engine
-        run: timeout --signal=TERM 5m python run_intelligence.py
-
-      - name: Run deterministic automated tests
-        run: timeout --signal=TERM 25m pytest -q --maxfail=1 --junitxml=pytest-results.xml
-
-      - name: Publish automated test report
+      - name: Publish release diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: pytest-results
-          path: pytest-results.xml
+          name: release-validation-results
+          path: |
+            reports/release-validation.json
+            reports/pytest-results.xml
           if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Build Python 3.11 validation image
-        run: timeout --signal=TERM 10m docker build --target validation --tag capital-intelligence:validation .
-
-      - name: Run container workflow acceptance
-        run: timeout --signal=TERM 10m docker run --rm capital-intelligence:validation
-
-      - name: Build hardened runtime image
-        run: timeout --signal=TERM 10m docker build --target runtime --tag capital-intelligence:runtime .
+          retention-days: 14
