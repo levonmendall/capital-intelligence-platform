@@ -38,6 +38,10 @@ class ApiSettings:
     alert_database: Path | None = None
     journal_database: Path = Path("database/institutional_journal.db")
     full_universe_screening_database: Path = Path("database/full_universe_screening.db")
+    environment_database: Path = Path("database/environment_evidence.db")
+    forecast_evidence_database: Path = Path("database/forecast_evidence.db")
+    readiness_evidence_database: Path = Path("database/product_readiness_evidence.db")
+    product_test_readiness_database: Path = Path("database/product_test_readiness.db")
     canonical_cycle_context_provider: str | None = None
     replay_directory: Path | None = Path("database/decision_replays")
     authentication_required: bool = False
@@ -62,13 +66,14 @@ class ApiSettings:
     smtp_use_tls: bool = True
     require_journal: bool = False
     require_live_provider: bool = False
+    require_canonical_environment: bool = False
     allowed_origins: tuple[str, ...] = ()
     history_default_limit: int = 30
     history_max_limit: int = 100
     conviction_default_lookback: int = 7
     conviction_max_lookback: int = 30
     application_name: str = "Capital Intelligence API"
-    application_version: str = "1.3.0"
+    application_version: str = "1.4.0"
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -78,6 +83,10 @@ class ApiSettings:
             "identity_database",
             "journal_database",
             "full_universe_screening_database",
+            "environment_database",
+            "forecast_evidence_database",
+            "readiness_evidence_database",
+            "product_test_readiness_database",
         ):
             value = getattr(self, field_name)
             if not isinstance(value, Path):
@@ -154,6 +163,15 @@ class ApiSettings:
         for value in self.allowed_origins:
             if not isinstance(value, str) or not value.strip():
                 raise ValueError("allowed_origins must contain non-empty strings")
+        for field_name in (
+            "authentication_required",
+            "smtp_use_tls",
+            "require_journal",
+            "require_live_provider",
+            "require_canonical_environment",
+        ):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be a bool")
         if not self.application_name.strip():
             raise ValueError("application_name cannot be empty")
         if not self.application_version.strip():
@@ -187,6 +205,10 @@ class ApiSettings:
             ).split(",")
             if item.strip()
         )
+        production = values.get(
+            "CAPITAL_INTELLIGENCE_ENVIRONMENT",
+            "development",
+        ).strip().lower() == "production"
         return cls(
             snapshot_database=_path(
                 values.get("CAPITAL_INTELLIGENCE_SNAPSHOT_DATABASE"),
@@ -217,6 +239,26 @@ class ApiSettings:
                     "CAPITAL_INTELLIGENCE_FULL_UNIVERSE_SCREENING_DATABASE"
                 ),
                 default=data_dir / "full_universe_screening.db",
+            ),
+            environment_database=_path(
+                values.get("CAPITAL_INTELLIGENCE_ENVIRONMENT_DATABASE"),
+                default=data_dir / "environment_evidence.db",
+            ),
+            forecast_evidence_database=_path(
+                values.get("CAPITAL_INTELLIGENCE_FORECAST_EVIDENCE_DATABASE"),
+                default=data_dir / "forecast_evidence.db",
+            ),
+            readiness_evidence_database=_path(
+                values.get(
+                    "CAPITAL_INTELLIGENCE_PRODUCT_READINESS_EVIDENCE_DATABASE"
+                ),
+                default=data_dir / "product_readiness_evidence.db",
+            ),
+            product_test_readiness_database=_path(
+                values.get(
+                    "CAPITAL_INTELLIGENCE_PRODUCT_TEST_READINESS_DATABASE"
+                ),
+                default=data_dir / "product_test_readiness.db",
             ),
             canonical_cycle_context_provider=_optional(
                 values.get("CAPITAL_INTELLIGENCE_CANONICAL_CONTEXT_PROVIDER")
@@ -288,6 +330,12 @@ class ApiSettings:
             require_live_provider=_boolean(
                 values.get("CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER")
             ),
+            require_canonical_environment=_boolean(
+                values.get(
+                    "CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT"
+                ),
+                default=production,
+            ),
             allowed_origins=origins,
             history_default_limit=int(
                 values.get("CAPITAL_INTELLIGENCE_HISTORY_DEFAULT_LIMIT", "30")
@@ -307,7 +355,7 @@ class ApiSettings:
             ),
             application_version=values.get(
                 "CAPITAL_INTELLIGENCE_API_VERSION",
-                "1.3.0",
+                "1.4.0",
             ),
         )
 
