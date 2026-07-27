@@ -51,13 +51,14 @@ def _snapshot() -> CertifiedDecisionEnvironmentSnapshot:
 
 def _observation(
     *,
+    observed_at: datetime = AS_OF + timedelta(minutes=30),
     available_at: datetime = AS_OF + timedelta(hours=1),
     evidence_identifier: str = "evidence:later:1",
 ) -> SubsequentEnvironmentObservation:
     return SubsequentEnvironmentObservation(
         identifier="environment-observation:1",
         snapshot_identifier="environment:decision:1",
-        observed_at=AS_OF + timedelta(minutes=30),
+        observed_at=observed_at,
         available_at=available_at,
         category="market-development",
         summary="A later policy statement changed rate expectations.",
@@ -97,7 +98,7 @@ def test_observation_available_at_cutoff_cannot_be_reclassified_as_later(
 
     with pytest.raises(EnvironmentEvidenceError, match="belongs in the certified"):
         store.append_observation(
-            _observation(available_at=CUTOFF)
+            _observation(observed_at=CUTOFF, available_at=CUTOFF)
         )
 
 
