@@ -1,4 +1,4 @@
-name: Apply PR1 canonical production orchestration
+name: Diagnose PR1 native payload
 
 on:
   pull_request:
@@ -6,82 +6,35 @@ on:
       - .github/workflows/apply-pr1-canonical-orchestration.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  diagnose:
     runs-on: ubuntu-latest
-    env:
-      PYTHONPATH: ${{ github.workspace }}
     steps:
-      - name: Check out validated payload branch
+      - name: Check out payload branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: agent/export-pr1-base
-          persist-credentials: true
 
-      - name: Reconstruct and verify validated patch
+      - name: Capture remote bytes and hashes
         run: |
-          cat .github/patches/pr1-native-{00..04}.b64 \
-            | base64 --decode \
-            > /tmp/pr1.patch.gz
-          echo 'c7433f656d789453e9192d4146559259de68c5c7d75cf8ccf35940e6929ee204  /tmp/pr1.patch.gz' | sha256sum --check
-          gzip --decompress --stdout /tmp/pr1.patch.gz > /tmp/pr1.patch
-          echo '7563616852bc14c4d68bd8e1b39e785ed7edaa246951a959a38857d966893777  /tmp/pr1.patch' | sha256sum --check
+          mkdir -p diagnostic
+          cp .github/patches/pr1-native-*.b64 diagnostic/
+          sha256sum diagnostic/pr1-native-*.b64 | tee diagnostic/chunk-hashes.txt
+          cat diagnostic/pr1-native-{00..04}.b64 | base64 --decode > diagnostic/pr1.patch.gz
+          sha256sum diagnostic/pr1.patch.gz | tee diagnostic/compressed-hash.txt
+          if gzip --test diagnostic/pr1.patch.gz; then
+            gzip --decompress --stdout diagnostic/pr1.patch.gz > diagnostic/pr1.patch
+            sha256sum diagnostic/pr1.patch | tee diagnostic/patch-hash.txt
+          else
+            printf 'gzip-invalid\n' > diagnostic/patch-hash.txt
+          fi
 
-      - name: Check out product branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Upload diagnostic bytes
+        uses: actions/upload-artifact@v4
         with:
-          ref: agent/canonical-production-orchestration
-          persist-credentials: true
-
-      - name: Apply exact canonical scheduler patch
-        run: |
-          git apply --check /tmp/pr1.patch
-          git apply /tmp/pr1.patch
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: '3.11'
-          cache: pip
-
-      - name: Install locked dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install --require-hashes -r requirements.lock
-          pip install -r requirements-dev.txt
-          python -m pip check
-          python scripts/verify_requirements_lock.py
-
-      - name: Validate exact updated branch
-        run: |
-          python -m compileall -q .
-          python initialize.py
-          python run_intelligence.py
-          python run_regime.py
-          pytest -q
-
-      - name: Commit validated canonical scheduler
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add \
-            README.md \
-            ROADMAP.md \
-            api/config.py \
-            application/__init__.py \
-            application/production_cio.py \
-            delivery/__init__.py \
-            delivery/canonical_scheduler.py \
-            deploy/production.env.example \
-            deploy/staging.env.example \
-            docs/CANONICAL_PRODUCTION_SCHEDULER.md \
-            docs/OPERATIONS.md \
-            docs/SCHEDULING_AND_ALERTS.md \
-            run_scheduler.py \
-            screening/__init__.py \
-            screening/orchestration.py \
-            tests/test_production_canonical_scheduler.py
-          git commit -m 'Replace scheduled pipeline with canonical CIO cycle'
-          git push origin HEAD:agent/canonical-production-orchestration
+          name: pr1-native-diagnostic
+          path: diagnostic
+          if-no-files-found: error
+          retention-days: 1
