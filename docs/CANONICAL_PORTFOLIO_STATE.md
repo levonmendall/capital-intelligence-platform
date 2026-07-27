@@ -4,7 +4,9 @@
 
 `SQLiteCanonicalPortfolioStore` is the only active source for cash, positions, valuation history, and implementation events. Each complete snapshot is append-only, canonical-JSON encoded, and linked in a contiguous SHA-256 chain.
 
-The authenticated application, production API, backups, and compatibility reporting facade read this store. They do not seed or mutate the retired mandate/trading database.
+The authenticated application, production API, construction engine, rebalancing, paper execution, backups, and reporting read or append through this canonical authority. They do not seed, mutate, or treat the retired mandate/trading database as current state.
+
+All active portfolio decisions use the sole `COMPOUNDING` investment mandate. Cash, concentration, liquidity, leverage, turnover, cost, and restricted-exposure rules are implementation constraints recorded with portfolio state; they are not separate portfolio objectives.
 
 ## Migration
 
@@ -15,8 +17,12 @@ python run_portfolio_migration.py \
   --as-of 2026-07-27T00:00:00+00:00
 ```
 
-Migration opens the legacy database in query-only mode and appends one complete canonical snapshot for each historical portfolio. Exact replay is idempotent. Conflicting reuse is rejected.
+Migration opens the legacy database in query-only mode and appends one complete canonical snapshot for each historical portfolio record. Exact replay is idempotent. Conflicting reuse is rejected. Historical strategy labels remain migration evidence only and cannot create a new active mandate or portfolio authority.
 
 ## Implementation updates
 
-Canonical paper execution is the only implementation authority permitted to append a later state snapshot. Legacy `core.trading` remains offline migration/test code and is not imported by the active app, API, scheduler, or paper executor.
+Canonical paper execution is the only implementation authority permitted to append a later state snapshot. Legacy `core.trading` remains offline migration/test code and is not imported by the active app, API, scheduler, construction engine, rebalancer, paper executor, backup path, or reporting facade.
+
+## Failure boundary
+
+Missing, incomplete, or chain-invalid canonical portfolio state must fail closed. Active services may not reconstruct a substitute from the retired database, synthetic holdings, or a goal-oriented mandate configuration.
