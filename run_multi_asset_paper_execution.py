@@ -83,7 +83,7 @@ def _construction(value: Mapping[str, Any]) -> PortfolioConstructionResult:
                 )
                 for item in value.get("constraints", ())
             ),
-            blocks=tuple(value.get("blocks", ()),
+            blocks=tuple(value.get("blocks", ())),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("invalid canonical construction payload") from error
