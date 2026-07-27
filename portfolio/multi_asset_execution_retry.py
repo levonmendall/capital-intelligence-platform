@@ -1,9 +1,9 @@
 """Retry adapter that preserves the original construction notional.
 
 A partially implemented portfolio has a different NAV from the portfolio used by
-construction.  The base fill engine accepts trade weights, so a resumed attempt
+construction. The base fill engine accepts trade weights, so a resumed attempt
 must re-express each unfinished trade weight against the current NAV while keeping
-the original requested base-currency amount.  This adapter changes no canonical
+the original requested base-currency amount. This adapter changes no canonical
 target weight, decision, ranking, or construction identifier.
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
+from decimal import Decimal, ROUND_CEILING
 from typing import Mapping
 
 from portfolio.construction_models import PortfolioConstructionResult, TradeSide
@@ -21,6 +22,8 @@ from portfolio.multi_asset_execution import (
     MultiAssetPaperExecutionOrchestrator as _BaseOrchestrator,
 )
 from portfolio.state import CanonicalPortfolioSnapshot
+
+_WEIGHT_QUANTUM = Decimal("0.000000000001")
 
 
 class MultiAssetPaperExecutionOrchestrator(_BaseOrchestrator):
@@ -55,7 +58,11 @@ class MultiAssetPaperExecutionOrchestrator(_BaseOrchestrator):
                 if prior is None:
                     adjusted_trades.append(trade)
                     continue
-                weight = round(prior.requested_base_amount / portfolio.nav, 12)
+                weight_decimal = (
+                    Decimal(str(prior.requested_base_amount))
+                    / Decimal(str(portfolio.nav))
+                ).quantize(_WEIGHT_QUANTUM, rounding=ROUND_CEILING)
+                weight = float(weight_decimal)
                 if weight <= 0.0 or weight > 1.0:
                     raise MultiAssetExecutionError(
                         "original execution notional cannot be represented against "
