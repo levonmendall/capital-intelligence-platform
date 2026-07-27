@@ -23,8 +23,11 @@ from application.production_context import (
     ProductionHoldingEvidence,
     SQLiteProductionContextStore,
 )
-from application.production_context_adapter import (
+from application.production_context_runtime import (
     RepositoryProductionCanonicalCIOContextProvider,
+)
+from application.production_context_adapter import (
+    RepositoryProductionCanonicalCIOContextProvider as CanonicalProductionContextAdapter,
     build_production_context_provider,
 )
 from application.daily_intelligence import (
@@ -39,6 +42,7 @@ from application.daily_intelligence import (
 )
 
 __all__ = [
+    "CanonicalProductionContextAdapter",
     "CertifiedEligibleUniversePublication",
     "DailyCapitalIntelligenceService",
     "DailyCapitalIntelligenceSnapshot",
