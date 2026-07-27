@@ -12,6 +12,7 @@ from delivery.models import (
     DeliveryStatus,
     ScheduledCycleRecord,
 )
+from delivery.canonical_scheduler import ScheduledCanonicalCIOWorker
 from delivery.dispatch import AlertDeliveryService
 from delivery.service import (
     AlertPlanningResult,
@@ -38,6 +39,7 @@ __all__ = [
     "CycleStatus",
     "DeliveryPreference",
     "DeliveryStatus",
+    "ScheduledCanonicalCIOWorker",
     "ScheduledCycleRecord",
     "ScheduledDailyIntelligenceWorker",
     "SelectiveAlertPlanner",

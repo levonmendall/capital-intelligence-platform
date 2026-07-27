@@ -214,19 +214,20 @@ python run_slos.py --record-assessment --require-ready
 
 The SLO authority measures authoritative provider freshness, complete eligible-universe cycle completion, living-thesis review latency, and point-in-time decision-evaluation latency. It does not create recommendations or relax data and governance requirements. Production readiness fails closed when a required objective is blocked or breached.
 
-Run the persistent scheduler:
+Run the canonical production scheduler. A point-in-time context-provider factory is required and there is no legacy fallback:
 
 ```bash
+export CAPITAL_INTELLIGENCE_CANONICAL_CONTEXT_PROVIDER=production_context:create_provider
 python run_scheduler.py
 ```
 
-Run one due cycle and delivery pass:
+Run one due canonical cycle and delivery-drain pass:
 
 ```bash
 python run_scheduler.py --once
 ```
 
-Material-change delivery may reflect evidence, opportunity, risk, thesis, implementation, confidence, or CIO-decision changes. Score movement alone and individual financial goals cannot trigger investment alerts.
+The executor loads candidates only from a complete persisted full-universe screening publication, then runs opportunity ranking, independent specialist analysis, CIO synthesis, portfolio construction, thesis creation, evidence freezing, and the daily briefing. Missing screening evidence or provider configuration fails closed.
 
 Deployment:
 
@@ -289,6 +290,7 @@ Production investment reliance still requires broader live and licensed data cov
 - [Security-master ingestion and activation](docs/SECURITY_MASTER_OPERATIONS.md)
 - [Security-master provider certification](docs/PROVIDER_CERTIFICATION.md)
 - [Complete-universe screening](docs/FULL_UNIVERSE_SCREENING.md)
+- [Canonical production scheduler](docs/CANONICAL_PRODUCTION_SCHEDULER.md)
 - [Production thesis monitoring](docs/THESIS_MONITORING_OPERATIONS.md)
 - [Paper execution orchestration](docs/PAPER_EXECUTION_ORCHESTRATION.md)
 - [Extended paper-operation evidence](docs/PAPER_OPERATION_EVIDENCE.md)

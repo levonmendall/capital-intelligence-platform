@@ -37,6 +37,8 @@ class ApiSettings:
     identity_database: Path = Path("database/identity.db")
     alert_database: Path | None = None
     journal_database: Path = Path("database/institutional_journal.db")
+    full_universe_screening_database: Path = Path("database/full_universe_screening.db")
+    canonical_cycle_context_provider: str | None = None
     replay_directory: Path | None = Path("database/decision_replays")
     authentication_required: bool = False
     access_token_minutes: int = 15
@@ -75,6 +77,7 @@ class ApiSettings:
             "investor_memory_database",
             "identity_database",
             "journal_database",
+            "full_universe_screening_database",
         ):
             value = getattr(self, field_name)
             if not isinstance(value, Path):
@@ -89,6 +92,17 @@ class ApiSettings:
             Path,
         ):
             raise TypeError("replay_directory must be a pathlib.Path or None")
+        if self.canonical_cycle_context_provider is not None:
+            provider = self.canonical_cycle_context_provider.strip()
+            if not provider or ":" not in provider:
+                raise ValueError(
+                    "canonical_cycle_context_provider must use module:function form"
+                )
+            object.__setattr__(
+                self,
+                "canonical_cycle_context_provider",
+                provider,
+            )
         if not 1 <= self.access_token_minutes <= 1440:
             raise ValueError("access_token_minutes must be between 1 and 1440")
         if not 1 <= self.refresh_token_days <= 365:
@@ -197,6 +211,15 @@ class ApiSettings:
             journal_database=_path(
                 values.get("CAPITAL_INTELLIGENCE_JOURNAL_DATABASE"),
                 default=data_dir / "institutional_journal.db",
+            ),
+            full_universe_screening_database=_path(
+                values.get(
+                    "CAPITAL_INTELLIGENCE_FULL_UNIVERSE_SCREENING_DATABASE"
+                ),
+                default=data_dir / "full_universe_screening.db",
+            ),
+            canonical_cycle_context_provider=_optional(
+                values.get("CAPITAL_INTELLIGENCE_CANONICAL_CONTEXT_PROVIDER")
             ),
             replay_directory=replay_directory,
             authentication_required=_boolean(

@@ -14,6 +14,7 @@ from screening.orchestration import (
     ScreeningEvent,
     ScreeningEventType,
     UniverseMetricsProvider,
+    candidate_from_payload,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "ScreeningEvent",
     "ScreeningEventType",
     "UniverseMetricsProvider",
+    "candidate_from_payload",
 ]

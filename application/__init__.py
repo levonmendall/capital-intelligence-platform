@@ -1,5 +1,10 @@
 """Application orchestration for canonical Capital Intelligence experiences."""
 
+from application.production_cio import (
+    ProductionCanonicalCIOContext,
+    ProductionCanonicalCIOContextProvider,
+    ProductionCanonicalCIOExecutor,
+)
 from application.daily_intelligence import (
     DailyCapitalIntelligenceService,
     DailyCapitalIntelligenceSnapshot,
@@ -12,6 +17,9 @@ from application.daily_intelligence import (
 )
 
 __all__ = [
+    "ProductionCanonicalCIOContext",
+    "ProductionCanonicalCIOContextProvider",
+    "ProductionCanonicalCIOExecutor",
     "DailyCapitalIntelligenceService",
     "DailyCapitalIntelligenceSnapshot",
     "DailyIntelligenceCycle",
