@@ -141,7 +141,7 @@ def test_foreign_currency_limits_are_enforced() -> None:
     policy = MultiAssetConstructionPolicy(
         maximum_international_equity_weight=0.30,
         maximum_non_base_currency_weight=0.30,
-        maximum_single_foreign_currency_weight=0.10,
+        maximum_single_foreign_currency_weight=0.08,
     )
     engine = GovernedMultiAssetConstructionEngine(policy=policy)
     profile = _profile(
