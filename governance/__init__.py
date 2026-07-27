@@ -13,6 +13,13 @@ from governance.asset_class_scope import (
     SQLiteAssetClassApprovalStore,
     TradingSessionModel,
 )
+from governance.forecast_evidence import (
+    ForecastEvidenceError,
+    ForecastEvidenceIntegrityError,
+    ForecastScenario,
+    GovernedForecastEvidence,
+    SQLiteForecastEvidenceStore,
+)
 from governance.product_readiness import (
     ProductTestReadiness,
     ProductTestReadinessEvidence,
@@ -43,6 +50,10 @@ __all__ = [
     "AssetClassScopeAssessment",
     "AssetClassScopeAuthority",
     "CustodySettlementModel",
+    "ForecastEvidenceError",
+    "ForecastEvidenceIntegrityError",
+    "ForecastScenario",
+    "GovernedForecastEvidence",
     "OperationalReadinessSnapshot",
     "ProductTestReadiness",
     "ProductTestReadinessEvidence",
@@ -56,6 +67,7 @@ __all__ = [
     "ReadinessGateCertification",
     "ReadinessGateState",
     "SQLiteAssetClassApprovalStore",
+    "SQLiteForecastEvidenceStore",
     "SQLiteProductTestReadinessStore",
     "SQLiteReadinessEvidenceStore",
     "TestReadinessIntegrityError",
