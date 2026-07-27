@@ -13,7 +13,7 @@ from governance.asset_class_scope import (
     SQLiteAssetClassApprovalStore,
     TradingSessionModel,
 )
-from governance.test_readiness import (
+from governance.product_readiness import (
     ProductTestReadiness,
     ProductTestReadinessEvidence,
     ProductTestReadinessEvaluator,
