@@ -1,0 +1,42 @@
+name: Apply single portfolio update
+
+on:
+  push:
+    branches:
+      - pr-117-single-portfolio-250k-global-scope
+
+permissions:
+  contents: write
+
+jobs:
+  apply-update:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and validate patch
+        shell: bash
+        run: |
+          cat .github/single-portfolio-patch/chunk*.txt > /tmp/single-portfolio.patch.gz.b64
+          base64 --decode /tmp/single-portfolio.patch.gz.b64 | gzip --decompress > /tmp/single-portfolio.patch
+          git apply --check /tmp/single-portfolio.patch
+
+      - name: Apply update and remove bootstrap files
+        shell: bash
+        run: |
+          git apply /tmp/single-portfolio.patch
+          rm -rf .github/single-portfolio-patch
+          rm -f .github/workflows/apply-single-portfolio.yml
+
+      - name: Commit applied update
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Enforce one $250,000 compounding portfolio"
+          git push origin HEAD:pr-117-single-portfolio-250k-global-scope
