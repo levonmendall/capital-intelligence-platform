@@ -187,6 +187,18 @@ python run_paper_operation_review.py \
 
 The evidence authority distinguishes operationally blocked evidence from a clean but statistically insufficient sample. Even `ready_for_governance_review` leaves real-money authorization and performance claims explicitly disabled. Benchmark, cash, and passive comparisons are diagnostic rather than automatic approval rules.
 
+Run isolated incident, recovery, and reconciliation exercises:
+
+```bash
+python run_resilience_exercises.py \
+  --suite deploy/resilience-suite.json \
+  --provider production_resilience_adapter:create_provider \
+  --record \
+  --require-passed
+```
+
+Every required scenario must detect, recover, and reconcile within policy in an isolated environment with zero production mutations. A passing campaign is an operational release gate only; it cannot authorize live capital.
+
 Run the economic-regime research pipeline:
 
 ```bash
@@ -280,6 +292,7 @@ Production investment reliance still requires broader live and licensed data cov
 - [Production thesis monitoring](docs/THESIS_MONITORING_OPERATIONS.md)
 - [Paper execution orchestration](docs/PAPER_EXECUTION_ORCHESTRATION.md)
 - [Extended paper-operation evidence](docs/PAPER_OPERATION_EVIDENCE.md)
+- [Incident, recovery, and reconciliation exercises](docs/RESILIENCE_EXERCISES.md)
 - [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
 - [Daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Production API](docs/PRODUCTION_API.md)

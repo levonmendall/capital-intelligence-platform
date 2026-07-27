@@ -182,6 +182,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [ ] Expand licensed market, fundamentals, estimates, corporate-actions, and historical-universe coverage.
 - [x] Add production SLOs for provider freshness, full-universe cycle completion, thesis reviews, and evaluation latency.
 - [x] Connect governed universe cycles to append-only screening history, terminal SLO records, and atomic CIO-journal publication.
+- [x] Add a versioned, isolated, append-only incident, recovery, and reconciliation exercise authority with detection, recovery, invariant, and zero-production-mutation gates.
 - [ ] Complete long-duration incident, recovery, and data-reconciliation exercises at production scale.
 - [ ] Obtain governance approval before enabling any real-money execution capability.
 

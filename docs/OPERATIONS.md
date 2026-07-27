@@ -160,3 +160,15 @@ python run_paper_operation_review.py \
 ```
 
 A blocked assessment indicates an operating or evidence-quality failure. An insufficient assessment indicates that the process may be functioning but lacks adequate duration, regime diversity, decisions, calibration samples, implementations, or alert feedback. Ready-for-review never authorizes real-money trading or performance claims. See [Extended paper-operation evidence](PAPER_OPERATION_EVIDENCE.md).
+
+## Resilience exercise campaign
+
+```bash
+python run_resilience_exercises.py \
+  --suite deploy/resilience-suite.json \
+  --provider production_resilience_adapter:create_provider \
+  --record \
+  --require-passed
+```
+
+The campaign must run in an isolated environment and prove fault injection, timely detection, controlled recovery, and exact reconciliation for provider outages, stale or conflicting data, database corruption, missed universe cycles, failed thesis reviews, delayed evaluations, partial paper execution, backup restoration, and model rollback. Production mutations, missing evidence, late recovery, or invariant mismatch fail closed. See [Incident, recovery, and reconciliation exercises](RESILIENCE_EXERCISES.md).
