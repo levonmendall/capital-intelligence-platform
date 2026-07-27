@@ -26,9 +26,22 @@ from operations.daily_orchestration import (
     operation_result_to_dict,
 )
 from operations.heartbeat import WorkerHeartbeat, WorkerHeartbeatStore
+from operations.incidents import (
+    OperationalIncidentError,
+    OperationalIncidentEvent,
+    OperationalIncidentIntegrityError,
+    OperationalIncidentSeverity,
+    OperationalIncidentState,
+    SQLiteOperationalIncidentStore,
+)
 from operations.logging import JsonFormatter, configure_logging, get_request_id, set_request_id
 from operations.metrics import MetricRegistry
 from operations.middleware import SlidingWindowRateLimiter, install_operational_middleware
+from operations.readiness import (
+    OperationalReadinessAssembler,
+    OperationalReadinessAssemblyPolicy,
+    OperationalReadinessAssemblyResult,
+)
 from operations.resilience import (
     ResilienceExerciseHarness,
     ResilienceExerciseIntegrityError,
@@ -86,6 +99,14 @@ __all__ = [
     "FullUniverseCycleStatus",
     "JsonFormatter",
     "MetricRegistry",
+    "OperationalIncidentError",
+    "OperationalIncidentEvent",
+    "OperationalIncidentIntegrityError",
+    "OperationalIncidentSeverity",
+    "OperationalIncidentState",
+    "OperationalReadinessAssembler",
+    "OperationalReadinessAssemblyPolicy",
+    "OperationalReadinessAssemblyResult",
     "OperationalSLOComponent",
     "OperationalSLOEvaluator",
     "OperationalSLOInputs",
@@ -107,6 +128,7 @@ __all__ = [
     "ResilienceExerciseStatus",
     "SQLiteBackupManager",
     "SQLiteCanonicalDailyOperationsStore",
+    "SQLiteOperationalIncidentStore",
     "SQLiteOperationalSLOSource",
     "SQLiteOperationalSLOStore",
     "SQLiteResilienceExerciseStore",
