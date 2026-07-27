@@ -123,7 +123,9 @@ def _quote(
         fx_observed_at=observed_at,
         quote_source_identifier=f"quote:{profile.venue}:{profile.symbol}",
         fx_source_identifier=(
-            f"fx:{profile.price_currency}USD" if profile.price_currency != "USD" else "fx:USDUSD"
+            f"fx:{profile.price_currency}USD"
+            if profile.price_currency != "USD"
+            else "fx:USDUSD"
         ),
         quote_certification_identifier=f"cert:quote:{profile.venue}:v1",
         halted=halted,
@@ -134,7 +136,7 @@ def _construction(*trades: TradeProposal) -> PortfolioConstructionResult:
     return PortfolioConstructionResult(
         request_identifier="construction:multi-asset:1",
         as_of=AS_OF - timedelta(minutes=1),
-        status=ConstructionStatus.APPROVED,
+        status=ConstructionStatus.FEASIBLE,
         policy_version="portfolio-construction.v1",
         target_cash_weight=0.8,
         target_weights=tuple((item.symbol, item.to_weight) for item in trades),
@@ -344,7 +346,7 @@ def test_mixed_global_sessions_create_a_reconciled_partial_batch(
         MultiAssetOrderStatus.FILLED,
         MultiAssetOrderStatus.HELD,
     }
-    assert quote_provider.calls == ((crypto.symbol,),)
+    assert quote_provider.calls == [(crypto.symbol,)]
     assert batch.reconciliation.reconciled is True
 
 
