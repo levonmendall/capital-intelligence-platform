@@ -18,21 +18,29 @@ jobs:
           ref: agent/export-pr1-base
 
       - name: Reconstruct and inspect payload
+        id: inspect
+        continue-on-error: true
         run: |
           cat .github/patches/pr1-canonical-orchestration-{00..01}.b64 \
             | base64 --decode \
             > pr1.patch.gz
-          sha256sum pr1.patch.gz
-          gzip --test pr1.patch.gz
-          gzip --decompress --stdout pr1.patch.gz > pr1.patch
-          sha256sum pr1.patch
+          sha256sum pr1.patch.gz | tee pr1.patch.gz.sha256
+          if gzip --test pr1.patch.gz; then
+            gzip --decompress --stdout pr1.patch.gz > pr1.patch
+            sha256sum pr1.patch | tee pr1.patch.sha256
+          else
+            printf 'gzip-invalid\n' > pr1.patch.sha256
+          fi
 
       - name: Upload reconstructed payload
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pr1-reconstructed-payload
           path: |
             pr1.patch.gz
+            pr1.patch.gz.sha256
             pr1.patch
-          if-no-files-found: error
+            pr1.patch.sha256
+          if-no-files-found: warn
           retention-days: 1
