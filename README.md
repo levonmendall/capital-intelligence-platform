@@ -10,7 +10,7 @@ The binding product contract is [GOVERNING_SPECIFICATION.md](GOVERNING_SPECIFICA
 
 ## Current readiness
 
-The product has a strong canonical architecture and a governed CIO decision process, but it is **not yet approved for controlled paper testing**. Development remains open.
+The product has a strong canonical architecture and a governed CIO decision process, but it is **not yet approved for controlled paper testing**. Development remains open. The software does not execute live trades.
 
 Readiness is deliberately split into four different statuses:
 
