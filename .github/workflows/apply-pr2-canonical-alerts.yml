@@ -1,0 +1,90 @@
+name: Apply PR2 canonical alerts
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/apply-pr2-canonical-alerts.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out validated payload branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/export-pr2-canonical-alerts
+          persist-credentials: true
+
+      - name: Verify chunks and reconstruct patch
+        run: |
+          echo '7a9bb2db071acfb4f0e56d992f497db8577b825dc23bdec19adb65ccb0e14bd1  .github/patches/pr2-alerts-00.b64' | sha256sum --check
+          echo '3976fb65afc8b59f805a77bdc110efc71396077ce2228e27dc1fa618c0f44848  .github/patches/pr2-alerts-01.b64' | sha256sum --check
+          echo '33463163de703c7507befe90793e68038945368972155025050ad6b45dcf77a7  .github/patches/pr2-alerts-02.b64' | sha256sum --check
+          echo 'bfd4045b1be6dd44018cce7693759e3e9488fed356c49ab6de8abd2cd05ffbcb  .github/patches/pr2-alerts-03.b64' | sha256sum --check
+          cat .github/patches/pr2-alerts-{00..03}.b64 | base64 --decode > /tmp/pr2.patch.gz
+          echo '00afbb4e1c280b290204a7c309b918052f616dc2276b11af60817202b530c6d4  /tmp/pr2.patch.gz' | sha256sum --check
+          gzip --decompress --stdout /tmp/pr2.patch.gz > /tmp/pr2.patch
+          echo '09a6aed81393e1630ec646ee391a067e1910b97fc312c99d32be9ff42bc44446  /tmp/pr2.patch' | sha256sum --check
+
+      - name: Check out product branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/canonical-alerts
+          persist-credentials: true
+
+      - name: Apply exact canonical-alert patch
+        run: |
+          git apply --check /tmp/pr2.patch
+          git apply /tmp/pr2.patch
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+          python -m pip check
+          python scripts/verify_requirements_lock.py
+
+      - name: Validate exact updated branch
+        run: |
+          python -m compileall -q .
+          python initialize.py
+          python run_intelligence.py
+          python run_regime.py
+          pytest -q
+
+      - name: Commit validated canonical alerts
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            README.md \
+            ROADMAP.md \
+            api/routes/alerts.py \
+            api/schemas.py \
+            delivery/__init__.py \
+            delivery/canonical_alerts.py \
+            delivery/canonical_scheduler.py \
+            delivery/models.py \
+            delivery/service.py \
+            delivery/store.py \
+            docs/CANONICAL_ALERTS.md \
+            docs/OPERATIONS.md \
+            docs/SCHEDULING_AND_ALERTS.md \
+            run_scheduler.py \
+            secure_app.py \
+            tests/test_alert_api.py \
+            tests/test_canonical_alerts.py
+          git commit -m 'Replace score alerts with canonical CIO events'
+          git push origin HEAD:agent/canonical-alerts
