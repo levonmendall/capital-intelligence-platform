@@ -52,15 +52,21 @@ class MultiAssetPaperExecutionOrchestrator(_BaseOrchestrator):
             prior_by_symbol = {
                 item.symbol: item for item in previous.order_results
             }
+            representation_guard = Decimal(
+                str(self.policy.reconciliation_tolerance)
+            ) / Decimal("2")
             adjusted_trades = []
             for trade in construction.trades:
                 prior = prior_by_symbol.get(trade.symbol)
                 if prior is None:
                     adjusted_trades.append(trade)
                     continue
-                weight_decimal = (
+                guarded_notional = (
                     Decimal(str(prior.requested_base_amount))
-                    / Decimal(str(portfolio.nav))
+                    + representation_guard
+                )
+                weight_decimal = (
+                    guarded_notional / Decimal(str(portfolio.nav))
                 ).quantize(_WEIGHT_QUANTUM, rounding=ROUND_CEILING)
                 weight = float(weight_decimal)
                 if weight <= 0.0 or weight > 1.0:
