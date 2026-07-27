@@ -1,12 +1,14 @@
-"""Process health and deployment readiness routes."""
+"""System health and distinct readiness-status routes."""
 
 from __future__ import annotations
 
 import os
+import sqlite3
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Response, status
 
+from api.canonical_environment import CanonicalEnvironmentRepository
 from api.config import ApiSettings
 from api.dependencies import (
     get_alert_store,
@@ -15,26 +17,159 @@ from api.dependencies import (
     get_resources,
     get_settings,
 )
-from api.repositories import ApiResources
+from api.readiness_status import ReadinessStatusRepository
+from api.repositories import (
+    ApiResources,
+    ReadinessComponent,
+    RepositoryUnavailableError,
+    _read_only_connection,
+)
 from api.schemas import (
     HealthResponse,
     ReadinessComponentResponse,
     ReadinessResponse,
 )
 from delivery import SQLiteAlertStore
-from intelligence.engine_store import SQLiteAnalyticalEngineStore
-from intelligence.governance_store import SQLiteGovernanceStore
-from intelligence.normalization_store import SQLiteNormalizationStore
-from intelligence.risk import risk_source_readiness
-from intelligence.synthesis_store import SQLiteSynthesisStore
-from intelligence.technical_momentum import (
-    technical_momentum_source_readiness,
-)
-from intelligence.valuation import valuation_source_readiness
 from operations import OperationalSettings
 from security import AuthenticationService
 
 router = APIRouter(tags=["operations"])
+
+
+def _database_component(
+    *,
+    name: str,
+    path: Path,
+    required: bool,
+    detail: str,
+) -> ReadinessComponent:
+    if not path.exists() and not required:
+        return ReadinessComponent(
+            name=name,
+            required=False,
+            ready=True,
+            detail=f"{detail} is optional and has not been created",
+        )
+    try:
+        with _read_only_connection(path) as connection:
+            row = connection.execute("PRAGMA quick_check").fetchone()
+    except (sqlite3.Error, RepositoryUnavailableError) as error:
+        return ReadinessComponent(
+            name=name,
+            required=required,
+            ready=False,
+            detail=str(error),
+        )
+    ready = row is not None and str(row[0]).lower() == "ok"
+    return ReadinessComponent(
+        name=name,
+        required=required,
+        ready=ready,
+        detail=(
+            f"{detail} is readable and passed SQLite quick_check"
+            if ready
+            else f"{detail} failed SQLite quick_check"
+        ),
+    )
+
+
+def _dependency_components(
+    *,
+    resources: ApiResources,
+    authentication: AuthenticationService,
+    alert_store: SQLiteAlertStore,
+    settings: ApiSettings,
+    operations: OperationalSettings,
+) -> dict[str, ReadinessComponentResponse]:
+    active_checks = [
+        resources.portfolios.check(),
+        resources.journal.check(),
+        ReadinessComponent(
+            name="live_provider",
+            required=resources.require_live_provider,
+            ready=(
+                resources.live_provider_configured
+                or not resources.require_live_provider
+            ),
+            detail=(
+                "live provider credentials are configured"
+                if resources.live_provider_configured
+                else "live provider credentials are not required"
+                if not resources.require_live_provider
+                else "required live provider credentials are missing"
+            ),
+        ),
+        _database_component(
+            name="full_universe_screening",
+            path=settings.full_universe_screening_database,
+            required=True,
+            detail="complete-universe screening authority",
+        ),
+        CanonicalEnvironmentRepository(
+            settings.environment_database,
+            required=settings.require_canonical_environment,
+        ).check(),
+    ]
+    identity = authentication.readiness()
+    active_checks.append(
+        ReadinessComponent(
+            name=identity.name,
+            required=identity.required,
+            ready=identity.ready,
+            detail=identity.detail,
+        )
+    )
+    alert_ready, alert_detail = alert_store.readiness()
+    email_detail = (
+        " SMTP email delivery is configured."
+        if settings.smtp_host and settings.smtp_from_address
+        else " Email delivery is disabled; in-app delivery remains available."
+    )
+    active_checks.append(
+        ReadinessComponent(
+            name="scheduled_alerts",
+            required=True,
+            ready=alert_ready,
+            detail=alert_detail + email_detail,
+        )
+    )
+    backup_ready = operations.backup_directory.exists() and os.access(
+        operations.backup_directory,
+        os.W_OK,
+    )
+    active_checks.append(
+        ReadinessComponent(
+            name="backup_target",
+            required=True,
+            ready=backup_ready,
+            detail=(
+                f"backup target is writable: {operations.backup_directory}"
+                if backup_ready
+                else f"backup target is unavailable: {operations.backup_directory}"
+            ),
+        )
+    )
+    active_checks.append(
+        ReadinessComponent(
+            name="operational_policy",
+            required=True,
+            ready=True,
+            detail=(
+                f"environment={operations.environment}; https_enforced="
+                f"{str(operations.enforce_https).lower()}; "
+                "encrypted_backups_required="
+                f"{str(operations.require_encrypted_backups).lower()}"
+            ),
+        )
+    )
+    return {
+        item.name: ReadinessComponentResponse(
+            required=item.required,
+            ready=item.ready,
+            detail=item.detail,
+        )
+        for item in active_checks
+    }
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -52,7 +187,6 @@ def health(settings: ApiSettings = Depends(get_settings)) -> HealthResponse:
     responses={503: {"model": ReadinessResponse}},
 )
 def ready(
-    request: Request,
     response: Response,
     resources: ApiResources = Depends(get_resources),
     authentication: AuthenticationService = Depends(get_authentication),
@@ -60,167 +194,12 @@ def ready(
     settings: ApiSettings = Depends(get_settings),
     operations: OperationalSettings = Depends(get_operational_settings),
 ) -> ReadinessResponse:
-    checks = list(resources.readiness())
-    identity = authentication.readiness()
-    components = {
-        item.name: ReadinessComponentResponse(
-            required=item.required,
-            ready=item.ready,
-            detail=item.detail,
-        )
-        for item in checks
-    }
-    components[identity.name] = ReadinessComponentResponse(
-        required=identity.required,
-        ready=identity.ready,
-        detail=identity.detail,
-    )
-    alert_ready, alert_detail = alert_store.readiness()
-    email_detail = (
-        " SMTP email delivery is configured."
-        if settings.smtp_host and settings.smtp_from_address
-        else " Email delivery is disabled; in-app delivery remains available."
-    )
-    components["scheduled_alerts"] = ReadinessComponentResponse(
-        required=True,
-        ready=alert_ready,
-        detail=alert_detail + email_detail,
-    )
-    engine_path = settings.snapshot_database.with_name("analytical_engines.db")
-    if engine_path.exists():
-        engine_ready, engine_detail = SQLiteAnalyticalEngineStore(
-            engine_path,
-            read_only=True,
-        ).readiness()
-        normalization_ready, normalization_detail = SQLiteNormalizationStore(
-            engine_path,
-            read_only=True,
-        ).readiness()
-        synthesis_ready, synthesis_detail = SQLiteSynthesisStore(
-            engine_path,
-            read_only=True,
-        ).readiness()
-        governance_ready, governance_detail = SQLiteGovernanceStore(
-            engine_path,
-            read_only=True,
-        ).readiness()
-    else:
-        engine_ready = True
-        engine_detail = (
-            "analytical engine history has not been created; the core daily "
-            "intelligence path remains available"
-        )
-        normalization_ready = True
-        normalization_detail = (
-            "normalization history has not been created; raw analytical engine "
-            "results remain available"
-        )
-        synthesis_ready = True
-        synthesis_detail = (
-            "weighted synthesis history has not been created; normalization "
-            "remains available"
-        )
-        governance_ready = True
-        governance_detail = (
-            "governance history has not been created; weighted synthesis remains "
-            "available"
-        )
-    components["analytical_engines"] = ReadinessComponentResponse(
-        required=False,
-        ready=engine_ready,
-        detail=engine_detail,
-    )
-    components["multi_engine_normalization"] = ReadinessComponentResponse(
-        required=False,
-        ready=normalization_ready,
-        detail=normalization_detail,
-    )
-    components["multi_engine_synthesis"] = ReadinessComponentResponse(
-        required=False,
-        ready=synthesis_ready,
-        detail=synthesis_detail,
-    )
-    components["multi_engine_governance"] = ReadinessComponentResponse(
-        required=False,
-        ready=governance_ready,
-        detail=governance_detail,
-    )
-    breadth_source = os.environ.get(
-        "CAPITAL_INTELLIGENCE_MARKET_BREADTH_FILE"
-    )
-    if breadth_source and breadth_source.strip():
-        breadth_path = Path(breadth_source).expanduser()
-        breadth_ready = breadth_path.is_file() and os.access(breadth_path, os.R_OK)
-        breadth_detail = (
-            f"market breadth source is readable: {breadth_path}"
-            if breadth_ready
-            else f"configured market breadth source is unavailable: {breadth_path}"
-        )
-    else:
-        breadth_ready = True
-        breadth_detail = (
-            "market breadth source is not configured; the engine will publish "
-            "unavailable without blocking the core daily intelligence path"
-        )
-    components["market_breadth_source"] = ReadinessComponentResponse(
-        required=False,
-        ready=breadth_ready,
-        detail=breadth_detail,
-    )
-    valuation_ready, valuation_detail = valuation_source_readiness()
-    components["valuation_source"] = ReadinessComponentResponse(
-        required=False,
-        ready=valuation_ready,
-        detail=valuation_detail,
-    )
-    technical_ready, technical_detail = technical_momentum_source_readiness()
-    components["technical_momentum_source"] = ReadinessComponentResponse(
-        required=False,
-        ready=technical_ready,
-        detail=technical_detail,
-    )
-    risk_ready, risk_detail = risk_source_readiness()
-    components["risk_source"] = ReadinessComponentResponse(
-        required=False,
-        ready=risk_ready,
-        detail=risk_detail,
-    )
-    backup_ready = operations.backup_directory.exists() and os.access(
-        operations.backup_directory,
-        os.W_OK,
-    )
-    components["backup_target"] = ReadinessComponentResponse(
-        required=True,
-        ready=backup_ready,
-        detail=(
-            f"backup target is writable: {operations.backup_directory}"
-            if backup_ready
-            else f"backup target is unavailable: {operations.backup_directory}"
-        ),
-    )
-    components["operational_policy"] = ReadinessComponentResponse(
-        required=True,
-        ready=True,
-        detail=(
-            f"environment={operations.environment}; https_enforced="
-            f"{str(operations.enforce_https).lower()}; "
-            "encrypted_backups_required="
-            f"{str(operations.require_encrypted_backups).lower()}"
-        ),
-    )
-    slo_snapshot = request.app.state.operational_slo_service.assess()
-    slo_states = ", ".join(
-        f"{item.name.value}={item.status.value}"
-        for item in slo_snapshot.components
-    )
-    components["operational_slos"] = ReadinessComponentResponse(
-        required=operations.require_operational_slos,
-        ready=slo_snapshot.ready,
-        detail=(
-            f"policy={slo_snapshot.policy_version}; "
-            f"evaluated_at={slo_snapshot.evaluated_at.isoformat()}; "
-            f"{slo_states}"
-        ),
+    components = _dependency_components(
+        resources=resources,
+        authentication=authentication,
+        alert_store=alert_store,
+        settings=settings,
+        operations=operations,
     )
     ready_state = all(
         item.ready for item in components.values() if item.required
@@ -228,3 +207,59 @@ def ready(
     if not ready_state:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadinessResponse(ready=ready_state, components=components)
+
+
+@router.get("/v1/readiness/status")
+def readiness_status(
+    resources: ApiResources = Depends(get_resources),
+    authentication: AuthenticationService = Depends(get_authentication),
+    alert_store: SQLiteAlertStore = Depends(get_alert_store),
+    settings: ApiSettings = Depends(get_settings),
+    operations: OperationalSettings = Depends(get_operational_settings),
+) -> dict[str, object]:
+    components = _dependency_components(
+        resources=resources,
+        authentication=authentication,
+        alert_store=alert_store,
+        settings=settings,
+        operations=operations,
+    )
+    dependency_ready = all(
+        item.ready for item in components.values() if item.required
+    )
+    persisted = ReadinessStatusRepository(
+        readiness_evidence_path=settings.readiness_evidence_database,
+        product_test_readiness_path=settings.product_test_readiness_database,
+    )
+    operational = persisted.latest_operational()
+    paper_test = persisted.latest_paper_test()
+    return {
+        "system_health": {
+            "state": "healthy",
+            "ready": True,
+            "detail": "API process is alive and serving requests",
+        },
+        "dependency_readiness": {
+            "state": "ready" if dependency_ready else "blocked",
+            "ready": dependency_ready,
+            "detail": (
+                "all required active API dependencies are ready"
+                if dependency_ready
+                else "one or more required active API dependencies are unavailable"
+            ),
+            "components": {
+                name: component.model_dump()
+                for name, component in components.items()
+            },
+        },
+        "operational_readiness": operational,
+        "paper_test_readiness": paper_test,
+        "statuses_are_independent": True,
+        "api_health_implies_paper_test_readiness": False,
+        "real_money_authorized": False,
+        "performance_claims_permitted": False,
+        "schema_version": "capital-intelligence-readiness-status.v1",
+    }
+
+
+__all__ = ["router"]
