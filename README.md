@@ -176,6 +176,17 @@ python run_paper_execution.py \
 
 The simulator uses an isolated virtual share-and-cash ledger, holds dependent buys until funding sales complete, applies bid/ask and liquidity constraints, reconciles NAV before publishing paper fills, and has no broker or live-order authority.
 
+Assess accumulated paper-operation evidence:
+
+```bash
+python run_paper_operation_review.py \
+  --observation artifacts/paper-operation-observation.json \
+  --record-report \
+  --require-governance-ready
+```
+
+The evidence authority distinguishes operationally blocked evidence from a clean but statistically insufficient sample. Even `ready_for_governance_review` leaves real-money authorization and performance claims explicitly disabled. Benchmark, cash, and passive comparisons are diagnostic rather than automatic approval rules.
+
 Run the economic-regime research pipeline:
 
 ```bash
@@ -254,7 +265,7 @@ Architecture tests prevent active application and API entrypoints from importing
 
 The canonical institutional decision architecture is implemented. The software remains research and paper-trading software and does not execute live trades.
 
-Production investment reliance still requires broader live and licensed data coverage, comprehensive point-in-time Version 1 universe screening, extended walk-forward evidence across regimes, operational monitoring at production scale, paper-trading performance sufficient for governance approval, and a separately controlled execution system. The repository does not claim proven alpha or production brokerage readiness.
+Production investment reliance still requires broader live and licensed data coverage, real elapsed paper operation across multiple regimes, incident and recovery exercises at production scale, a formal human governance decision, and a separately controlled execution system. The evidence authority may determine that a sample is ready for review, but the repository does not claim proven alpha, authorize real money, or permit production-performance claims.
 
 ## Documentation
 
@@ -268,6 +279,7 @@ Production investment reliance still requires broader live and licensed data cov
 - [Complete-universe screening](docs/FULL_UNIVERSE_SCREENING.md)
 - [Production thesis monitoring](docs/THESIS_MONITORING_OPERATIONS.md)
 - [Paper execution orchestration](docs/PAPER_EXECUTION_ORCHESTRATION.md)
+- [Extended paper-operation evidence](docs/PAPER_OPERATION_EVIDENCE.md)
 - [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
 - [Daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Production API](docs/PRODUCTION_API.md)

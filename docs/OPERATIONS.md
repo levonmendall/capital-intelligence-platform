@@ -139,3 +139,24 @@ python run_paper_execution.py \
 ```
 
 The cycle is paper-only. It sequences funding sells before dependent buys, holds orders outside configured sessions, caps fills by participation and cash or ownership, applies bid/ask and commissions, and publishes canonical paper fills only after the virtual ledger reconciles. A held or partial batch should be retried from the exact ending portfolio state or explicitly cancelled. See [Paper execution orchestration](PAPER_EXECUTION_ORCHESTRATION.md).
+
+## Extended paper-operation evidence
+
+Append one or more immutable evidence observations and assess the current release sample:
+
+```bash
+python run_paper_operation_review.py \
+  --observation artifacts/paper-operation-observation.json \
+  --record-report
+```
+
+Scheduled release checks should use a reviewed policy file and fail unless the sample is ready for human governance review:
+
+```bash
+python run_paper_operation_review.py \
+  --policy deploy/paper-operation-policy.json \
+  --record-report \
+  --require-governance-ready
+```
+
+A blocked assessment indicates an operating or evidence-quality failure. An insufficient assessment indicates that the process may be functioning but lacks adequate duration, regime diversity, decisions, calibration samples, implementations, or alert feedback. Ready-for-review never authorizes real-money trading or performance claims. See [Extended paper-operation evidence](PAPER_OPERATION_EVIDENCE.md).

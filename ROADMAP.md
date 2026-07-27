@@ -143,6 +143,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Add production scheduled and event-driven thesis-review orchestration with immutable retries, materiality, deduplication, CIO escalation, and selective notification.
 - [ ] Operate continuous thesis monitoring across the full eligible universe using certified point-in-time evidence.
 - [ ] Validate alert usefulness and false-positive rates across extended live paper operation.
+- [x] Add an append-only paper-operation evidence authority covering cycle continuity, abstentions, evaluations, calibration, implementation, thesis reviews, alerts, benchmarks, incidents, and release-sample sufficiency.
 
 ## Milestone 10 — Daily Capital Intelligence and product surfaces
 
@@ -167,6 +168,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Reject look-ahead inputs and survivorship-invalid securities.
 - [x] Journal evaluations, calibration, walk-forward audits, and paper fills.
 - [x] Prohibit automatic model-weight or governance changes from retrospective evaluation.
+- [x] Define versioned minimum duration, regime, decision, calibration, implementation, alert-feedback, integrity, and operational-quality gates for formal governance review.
 - [ ] Accumulate sufficient out-of-sample decisions across market regimes to support statistically credible product claims.
 - [ ] Complete formal paper-trading governance review and release approval.
 
