@@ -172,7 +172,7 @@ def _manifest() -> ProductionContextManifest:
         screening_publication_identifier="publication:1",
         portfolio_snapshot_identifier="portfolio:1",
         context_evidence_identifier="context-evidence:1",
-        as_of=AS_OF,
+        as_of=CUTOFF,
         knowledge_cutoff=CUTOFF,
         candidate_identifiers=("candidate:qualified",),
         candidate_context_identifiers=("candidate-context:qualified",),
