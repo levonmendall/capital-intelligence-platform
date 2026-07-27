@@ -243,7 +243,7 @@ class OpportunityEngine:
             > self.policy.opportunity_cost_tolerance
         ):
             reasons.append(
-                "recorded candidate opportunity cost does not match the point-in-time baseline alternatives"
+                "recorded candidate opportunity cost does not match the point-in-time opportunity set baseline alternatives"
             )
         if candidate.net_expected_return < self.policy.minimum_net_expected_return:
             reasons.append("cost-adjusted expected return is below threshold")
