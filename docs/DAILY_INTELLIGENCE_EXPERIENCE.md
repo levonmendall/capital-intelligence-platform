@@ -37,11 +37,11 @@ The displayed briefing is persisted in the same hash-chained journal as the cand
 ## Four primary screens
 
 1. **Today** — canonical CIO status, confidence, implementation, what changed, why it matters, opportunity or risk, portfolio decision, material developments, change conditions, and audit hash.
-2. **Environment** — economic and market evidence only; it cannot issue or override a recommendation.
+2. **Environment** — a concise diagnostic view of current economic and market evidence; it explains the backdrop but cannot issue or override a recommendation.
 3. **Portfolio** — canonical construction, proposed paper trades, constraints, authorized holdings, and paper history.
 4. **History** — CIO briefings, point-in-time evaluations, living theses, and paper-trade records.
 
-No active screen leads with the Capital Intelligence Score, conviction trend, Personal CIO, or Investor Memory. When no canonical briefing exists, Today states that no portfolio action is permitted and that cash or current holdings remain valid alternatives.
+No active screen leads with the Capital Intelligence Score, conviction trend, Personal CIO, Investor Memory, or a goal-oriented mandate. When no canonical briefing exists, Today states that no portfolio action is permitted and that cash or current holdings remain valid alternatives.
 
 ## Valid outcomes
 
@@ -61,7 +61,7 @@ No action is a first-class and often preferable decision.
 
 ## Selective attention
 
-The platform may analyze continuously but interrupts the user only for material evidence, opportunity, risk, thesis, construction, evaluation, or CIO-decision changes. Score movement alone and personal goals cannot determine alert eligibility or wording.
+The platform may analyze continuously, but the notification system interrupts the user only through six canonical event topics: `cio_decision`, `thesis`, `opportunity`, `implementation`, `evidence`, and `daily_briefing`. Material risks, confidence, and evaluation results may be explained inside the corresponding governed event or briefing, but they are not independent alert authorities. Score movement, conviction trends, confidence thresholds, personal goals, and retired mandates cannot determine alert eligibility or wording.
 
 ## History and auditability
 
