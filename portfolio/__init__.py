@@ -33,11 +33,13 @@ from portfolio.multi_asset_execution import (
     MultiAssetExecutionStatus,
     MultiAssetOrderResult,
     MultiAssetOrderStatus,
-    MultiAssetPaperExecutionOrchestrator,
     MultiAssetPaperFill,
     MultiAssetQuote,
     MultiAssetQuoteProvider,
     SQLiteMultiAssetPaperExecutionStore,
+)
+from portfolio.multi_asset_execution_retry import (
+    MultiAssetPaperExecutionOrchestrator,
 )
 from portfolio.opportunity_cost import (
     CapitalFundingSource,
