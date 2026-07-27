@@ -64,7 +64,7 @@ class RepositoryProductionCanonicalCIOContextProvider:
         screening_store: SQLiteFullUniverseScreeningStore,
         portfolio_store: SQLiteCanonicalPortfolioStore,
         context_store: SQLiteProductionContextStore,
-        asset_evidence_store: SQLiteAssetSpecificEvidenceStore,
+        asset_evidence_store: SQLiteAssetSpecificEvidenceStore | None = None,
         portfolio_code: str = "COMPOUNDING",
         process_version: str = "capital-intelligence-investment-process.v1",
         code_version: str | None = None,
@@ -91,7 +91,7 @@ class RepositoryProductionCanonicalCIOContextProvider:
             raise TypeError(
                 "context_store must be SQLiteProductionContextStore"
             )
-        if not isinstance(
+        if asset_evidence_store is not None and not isinstance(
             asset_evidence_store,
             SQLiteAssetSpecificEvidenceStore,
         ):
@@ -102,7 +102,11 @@ class RepositoryProductionCanonicalCIOContextProvider:
         self.screening_store = screening_store
         self.portfolio_store = portfolio_store
         self.context_store = context_store
-        self.asset_evidence_store = asset_evidence_store
+        self.asset_evidence_store = (
+            asset_evidence_store
+            if asset_evidence_store is not None
+            else SQLiteAssetSpecificEvidenceStore(context_store.path)
+        )
         self.portfolio_code = _text(
             portfolio_code,
             field_name="portfolio_code",
