@@ -6,6 +6,13 @@ from application.eligible_universe import (
     EligibleUniverseError,
     SQLiteCertifiedEligibleUniverseStore,
 )
+from application.multi_asset_evidence import (
+    AssetSpecificEvidencePacket,
+    MultiAssetEvidenceError,
+    MultiAssetEvidenceIntegrityError,
+    OriginatingFactObservation,
+    SQLiteAssetSpecificEvidenceStore,
+)
 from application.production_cio import (
     ProductionCanonicalCIOContextProvider,
     ProductionContextManifest,
@@ -42,6 +49,7 @@ from application.daily_intelligence import (
 )
 
 __all__ = [
+    "AssetSpecificEvidencePacket",
     "CanonicalProductionContextAdapter",
     "CertifiedEligibleUniversePublication",
     "DailyCapitalIntelligenceService",
@@ -53,6 +61,9 @@ __all__ = [
     "EligibleUniverseError",
     "EvidenceCertificationState",
     "GovernedEvidenceLineage",
+    "MultiAssetEvidenceError",
+    "MultiAssetEvidenceIntegrityError",
+    "OriginatingFactObservation",
     "ProductionCandidateEvidence",
     "ProductionCanonicalCIOContext",
     "ProductionCanonicalCIOContextProvider",
@@ -62,6 +73,7 @@ __all__ = [
     "ProductionContextManifest",
     "ProductionHoldingEvidence",
     "RepositoryProductionCanonicalCIOContextProvider",
+    "SQLiteAssetSpecificEvidenceStore",
     "SQLiteCertifiedEligibleUniverseStore",
     "SQLiteDailySnapshotStore",
     "SQLiteProductionContextStore",
