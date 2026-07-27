@@ -6,6 +6,19 @@ from operations.heartbeat import WorkerHeartbeat, WorkerHeartbeatStore
 from operations.logging import JsonFormatter, configure_logging, get_request_id, set_request_id
 from operations.metrics import MetricRegistry
 from operations.middleware import SlidingWindowRateLimiter, install_operational_middleware
+from operations.resilience import (
+    ResilienceExerciseHarness,
+    ResilienceExerciseIntegrityError,
+    ResilienceExerciseKind,
+    ResilienceExerciseOutcome,
+    ResilienceExercisePolicy,
+    ResilienceExerciseReport,
+    ResilienceExerciseScenario,
+    ResilienceExerciseStatus,
+    SQLiteResilienceExerciseStore,
+    policy_from_payload,
+    scenario_from_payload,
+)
 from operations.slo import (
     DecisionEvaluationSLOObservation,
     FullUniverseCycleRecord,
@@ -45,6 +58,17 @@ __all__ = [
     "OperationalSLOSnapshot",
     "OperationalSLOStatus",
     "OperationalSettings",
+    "ResilienceExerciseHarness",
+    "ResilienceExerciseIntegrityError",
+    "ResilienceExerciseKind",
+    "ResilienceExerciseOutcome",
+    "ResilienceExercisePolicy",
+    "ResilienceExerciseReport",
+    "ResilienceExerciseScenario",
+    "ResilienceExerciseStatus",
+    "SQLiteResilienceExerciseStore",
+    "policy_from_payload",
+    "scenario_from_payload",
     "SQLiteBackupManager",
     "SQLiteOperationalSLOSource",
     "SQLiteOperationalSLOStore",
