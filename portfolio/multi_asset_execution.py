@@ -1,11 +1,10 @@
-"""Paper-only execution for crypto, FX, and global listed markets.
+"""Governed paper-only execution for crypto, FX, and global listed markets.
 
-This authority consumes a canonical construction result and a canonical
-cross-currency portfolio snapshot. It applies one exact execution profile per
-trade, routes each instrument through its approved session model, requires
-certified point-in-time quotes and FX lineage, prohibits leverage, updates the
-canonical paper portfolio, and reconciles all local activity in the portfolio's
-base currency. It has no broker or live-order authority.
+The authority consumes the same ``MultiAssetInstrumentProfile`` used by governed
+portfolio construction.  It never creates a competing instrument, approval,
+custody, leverage, or execution-model contract.  It routes paper activity through
+asset-aware sessions, certified point-in-time quotes, and canonical cross-currency
+portfolio state.  No broker or live-order capability exists here.
 """
 
 from __future__ import annotations
@@ -18,16 +17,17 @@ from datetime import datetime, timedelta
 from enum import Enum
 from math import floor, isfinite
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 from cio import CandidateAssetClass
-from governance import EXPANSION_ASSET_CLASSES, TradingSessionModel
-from portfolio.construction_api import (
+from governance import AssetClassApprovalState, TradingSessionModel
+from portfolio.construction_models import (
     ConstructionStatus,
     PortfolioConstructionResult,
     TradeProposal,
     TradeSide,
 )
+from portfolio.multi_asset_controls import MultiAssetInstrumentProfile
 from portfolio.state import (
     CanonicalImplementationEvent,
     CanonicalPortfolioPosition,
@@ -37,12 +37,11 @@ from portfolio.state import (
     snapshot_to_dict,
 )
 
-
 _EPSILON = 1e-9
 
 
 class MultiAssetExecutionError(RuntimeError):
-    """Raised when multi-asset paper activity cannot be processed safely."""
+    """Raised when governed paper implementation cannot proceed safely."""
 
 
 class MultiAssetExecutionIntegrityError(MultiAssetExecutionError):
@@ -136,85 +135,20 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class InstrumentExecutionProfile:
-    """Approved paper-routing and implementation contract for one symbol."""
+class MultiAssetExecutionPolicy:
+    """Versioned paper-fill assumptions; never an instrument authority."""
 
-    symbol: str
-    instrument_identifier: str
-    asset_class: CandidateAssetClass
-    venue: str
-    session_model: TradingSessionModel
-    price_currency: str
-    settlement_currency: str
-    execution_certification_identifier: str
-    asset_class_approval_identifier: str | None = None
+    version: str = "multi-asset-paper-execution.v1"
     maximum_quote_age_minutes: int = 5
     maximum_volume_participation: float = 0.10
-    commission_bps: float = 0.0
+    crypto_commission_bps: float = 10.0
+    fx_commission_bps: float = 1.0
+    international_equity_commission_bps: float = 5.0
     minimum_trade_base_amount: float = 1.0
-    maximum_position_weight: float = 0.20
-    allow_fractional_quantity: bool = True
-    notional_multiplier: float = 1.0
-    profile_version: str = "multi-asset-execution-profile.v1"
+    reconciliation_tolerance: float = 0.01
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "symbol",
-            _text(self.symbol, field_name="symbol").upper(),
-        )
-        object.__setattr__(
-            self,
-            "instrument_identifier",
-            _text(
-                self.instrument_identifier,
-                field_name="instrument_identifier",
-            ),
-        )
-        if not isinstance(self.asset_class, CandidateAssetClass):
-            raise TypeError("asset_class must be CandidateAssetClass")
-        object.__setattr__(
-            self,
-            "venue",
-            _text(self.venue, field_name="venue").upper(),
-        )
-        if not isinstance(self.session_model, TradingSessionModel):
-            raise TypeError("session_model must be TradingSessionModel")
-        object.__setattr__(
-            self,
-            "price_currency",
-            _currency(self.price_currency, field_name="price_currency"),
-        )
-        object.__setattr__(
-            self,
-            "settlement_currency",
-            _currency(
-                self.settlement_currency,
-                field_name="settlement_currency",
-            ),
-        )
-        object.__setattr__(
-            self,
-            "execution_certification_identifier",
-            _text(
-                self.execution_certification_identifier,
-                field_name="execution_certification_identifier",
-            ),
-        )
-        object.__setattr__(
-            self,
-            "asset_class_approval_identifier",
-            _optional_text(
-                self.asset_class_approval_identifier,
-                field_name="asset_class_approval_identifier",
-            ),
-        )
-        if self.asset_class in EXPANSION_ASSET_CLASSES and (
-            self.asset_class_approval_identifier is None
-        ):
-            raise ValueError(
-                "expanded-market execution requires an asset-class approval identifier"
-            )
+        object.__setattr__(self, "version", _text(self.version, field_name="version"))
         if isinstance(self.maximum_quote_age_minutes, bool) or not isinstance(
             self.maximum_quote_age_minutes,
             int,
@@ -222,68 +156,58 @@ class InstrumentExecutionProfile:
             raise TypeError("maximum_quote_age_minutes must be an integer")
         if self.maximum_quote_age_minutes < 1:
             raise ValueError("maximum_quote_age_minutes must be positive")
-        for field_name in (
-            "maximum_volume_participation",
-            "maximum_position_weight",
-        ):
-            object.__setattr__(
-                self,
-                field_name,
-                _number(
-                    getattr(self, field_name),
-                    field_name=field_name,
-                    minimum=0.0,
-                    maximum=1.0,
-                ),
-            )
-        if self.maximum_volume_participation <= 0.0:
-            raise ValueError("maximum_volume_participation must be positive")
-        if self.maximum_position_weight <= 0.0:
-            raise ValueError("maximum_position_weight must be positive")
-        for field_name in ("commission_bps", "minimum_trade_base_amount"):
-            object.__setattr__(
-                self,
-                field_name,
-                _number(
-                    getattr(self, field_name),
-                    field_name=field_name,
-                    minimum=0.0,
-                ),
-            )
         object.__setattr__(
             self,
-            "notional_multiplier",
+            "maximum_volume_participation",
             _number(
-                self.notional_multiplier,
-                field_name="notional_multiplier",
+                self.maximum_volume_participation,
+                field_name="maximum_volume_participation",
                 minimum=0.000000000001,
+                maximum=1.0,
             ),
         )
-        if abs(self.notional_multiplier - 1.0) > _EPSILON:
-            raise ValueError(
-                "multi-asset paper execution prohibits leveraged or synthetic notional multipliers"
+        for field_name in (
+            "crypto_commission_bps",
+            "fx_commission_bps",
+            "international_equity_commission_bps",
+            "minimum_trade_base_amount",
+            "reconciliation_tolerance",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _number(getattr(self, field_name), field_name=field_name, minimum=0.0),
             )
-        if not isinstance(self.allow_fractional_quantity, bool):
-            raise TypeError("allow_fractional_quantity must be a bool")
-        object.__setattr__(
-            self,
-            "profile_version",
-            _text(self.profile_version, field_name="profile_version"),
-        )
-        if self.asset_class is CandidateAssetClass.CRYPTO and (
-            self.session_model is not TradingSessionModel.CONTINUOUS_24_7
-        ):
-            raise ValueError("crypto execution requires a continuous 24/7 session")
-        if self.asset_class is CandidateAssetClass.FX and (
-            self.session_model is not TradingSessionModel.CONTINUOUS_24_5
-        ):
-            raise ValueError("FX execution requires a continuous 24/5 session")
-        if self.asset_class is CandidateAssetClass.INTERNATIONAL_EQUITY and (
-            self.session_model is not TradingSessionModel.EXCHANGE_LOCAL
-        ):
-            raise ValueError(
-                "international-equity execution requires a local exchange session"
-            )
+
+    def session_model(self, asset_class: CandidateAssetClass) -> TradingSessionModel:
+        try:
+            return {
+                CandidateAssetClass.CRYPTO: TradingSessionModel.CONTINUOUS_24_7,
+                CandidateAssetClass.FX: TradingSessionModel.CONTINUOUS_24_5,
+                CandidateAssetClass.INTERNATIONAL_EQUITY: (
+                    TradingSessionModel.EXCHANGE_LOCAL
+                ),
+            }[asset_class]
+        except KeyError as error:
+            raise MultiAssetExecutionError(
+                f"{asset_class.value} is outside governed multi-asset execution"
+            ) from error
+
+    def commission_bps(self, asset_class: CandidateAssetClass) -> float:
+        return {
+            CandidateAssetClass.CRYPTO: self.crypto_commission_bps,
+            CandidateAssetClass.FX: self.fx_commission_bps,
+            CandidateAssetClass.INTERNATIONAL_EQUITY: (
+                self.international_equity_commission_bps
+            ),
+        }[asset_class]
+
+    @staticmethod
+    def fractional_quantity(asset_class: CandidateAssetClass) -> bool:
+        return asset_class in {
+            CandidateAssetClass.CRYPTO,
+            CandidateAssetClass.FX,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,16 +223,9 @@ class InstrumentSession:
         object.__setattr__(
             self,
             "instrument_identifier",
-            _text(
-                self.instrument_identifier,
-                field_name="instrument_identifier",
-            ),
+            _text(self.instrument_identifier, field_name="instrument_identifier"),
         )
-        object.__setattr__(
-            self,
-            "venue",
-            _text(self.venue, field_name="venue").upper(),
-        )
+        object.__setattr__(self, "venue", _text(self.venue, field_name="venue").upper())
         if not isinstance(self.session_model, TradingSessionModel):
             raise TypeError("session_model must be TradingSessionModel")
         _aware(self.as_of, field_name="as_of")
@@ -340,24 +257,13 @@ class MultiAssetQuote:
     halted: bool = False
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "symbol",
-            _text(self.symbol, field_name="symbol").upper(),
-        )
+        object.__setattr__(self, "symbol", _text(self.symbol, field_name="symbol").upper())
         object.__setattr__(
             self,
             "instrument_identifier",
-            _text(
-                self.instrument_identifier,
-                field_name="instrument_identifier",
-            ),
+            _text(self.instrument_identifier, field_name="instrument_identifier"),
         )
-        object.__setattr__(
-            self,
-            "venue",
-            _text(self.venue, field_name="venue").upper(),
-        )
+        object.__setattr__(self, "venue", _text(self.venue, field_name="venue").upper())
         _aware(self.observed_at, field_name="observed_at")
         for field_name in ("bid", "ask", "last"):
             object.__setattr__(
@@ -413,8 +319,9 @@ class MultiAssetQuote:
 class InstrumentSessionProvider(Protocol):
     def session(
         self,
-        profile: InstrumentExecutionProfile,
+        profile: MultiAssetInstrumentProfile,
         *,
+        session_model: TradingSessionModel,
         as_of: datetime,
     ) -> InstrumentSession: ...
 
@@ -423,7 +330,7 @@ class InstrumentSessionProvider(Protocol):
 class MultiAssetQuoteProvider(Protocol):
     def quotes(
         self,
-        profiles: tuple[InstrumentExecutionProfile, ...],
+        profiles: tuple[MultiAssetInstrumentProfile, ...],
         *,
         as_of: datetime,
     ) -> Mapping[str, MultiAssetQuote]: ...
@@ -441,6 +348,7 @@ class MultiAssetPaperFill:
     fill_price_local: float
     mark_price_local: float
     price_currency: str
+    settlement_currency: str
     fx_rate_to_base: float
     gross_amount_local: float
     gross_amount_base: float
@@ -449,7 +357,10 @@ class MultiAssetPaperFill:
     adverse_spread_base: float
     quote_source_identifier: str
     fx_source_identifier: str
-    execution_certification_identifier: str
+    quote_certification_identifier: str
+    approval_identifier: str
+    custody_settlement_identifier: str
+    execution_model_version: str
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -457,23 +368,18 @@ class MultiAssetPaperFill:
             "instrument_identifier",
             "quote_source_identifier",
             "fx_source_identifier",
-            "execution_certification_identifier",
+            "quote_certification_identifier",
+            "approval_identifier",
+            "custody_settlement_identifier",
+            "execution_model_version",
         ):
             object.__setattr__(
                 self,
                 field_name,
                 _text(getattr(self, field_name), field_name=field_name),
             )
-        object.__setattr__(
-            self,
-            "symbol",
-            _text(self.symbol, field_name="symbol").upper(),
-        )
-        object.__setattr__(
-            self,
-            "venue",
-            _text(self.venue, field_name="venue").upper(),
-        )
+        object.__setattr__(self, "symbol", _text(self.symbol, field_name="symbol").upper())
+        object.__setattr__(self, "venue", _text(self.venue, field_name="venue").upper())
         if not isinstance(self.asset_class, CandidateAssetClass):
             raise TypeError("asset_class must be CandidateAssetClass")
         if not isinstance(self.side, TradeSide):
@@ -492,19 +398,20 @@ class MultiAssetPaperFill:
             object.__setattr__(
                 self,
                 field_name,
-                _number(
-                    getattr(self, field_name),
-                    field_name=field_name,
-                    minimum=0.0,
-                ),
+                _number(getattr(self, field_name), field_name=field_name, minimum=0.0),
             )
+        if self.quantity <= 0.0:
+            raise ValueError("fill quantity must be positive")
         object.__setattr__(
             self,
             "price_currency",
             _currency(self.price_currency, field_name="price_currency"),
         )
-        if self.quantity <= 0.0:
-            raise ValueError("fill quantity must be positive")
+        object.__setattr__(
+            self,
+            "settlement_currency",
+            _currency(self.settlement_currency, field_name="settlement_currency"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -516,21 +423,14 @@ class MultiAssetOrderResult:
     requested_base_amount: float
     filled_base_amount: float
     reason: str
-    fill_identifier: str | None = None
+    fill_identifiers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "symbol",
-            _text(self.symbol, field_name="symbol").upper(),
-        )
+        object.__setattr__(self, "symbol", _text(self.symbol, field_name="symbol").upper())
         object.__setattr__(
             self,
             "instrument_identifier",
-            _text(
-                self.instrument_identifier,
-                field_name="instrument_identifier",
-            ),
+            _text(self.instrument_identifier, field_name="instrument_identifier"),
         )
         if not isinstance(self.side, TradeSide):
             raise TypeError("side must be TradeSide")
@@ -540,21 +440,15 @@ class MultiAssetOrderResult:
             object.__setattr__(
                 self,
                 field_name,
-                _number(
-                    getattr(self, field_name),
-                    field_name=field_name,
-                    minimum=0.0,
-                ),
+                _number(getattr(self, field_name), field_name=field_name, minimum=0.0),
             )
         object.__setattr__(self, "reason", _text(self.reason, field_name="reason"))
-        object.__setattr__(
-            self,
-            "fill_identifier",
-            _optional_text(
-                self.fill_identifier,
-                field_name="fill_identifier",
-            ),
+        identifiers = tuple(
+            _text(item, field_name="fill_identifiers") for item in self.fill_identifiers
         )
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("fill_identifiers cannot contain duplicates")
+        object.__setattr__(self, "fill_identifiers", identifiers)
 
 
 @dataclass(frozen=True, slots=True)
@@ -582,6 +476,7 @@ class MultiAssetExecutionBatch:
     order_results: tuple[MultiAssetOrderResult, ...]
     fills: tuple[MultiAssetPaperFill, ...]
     reconciliation: MultiAssetExecutionReconciliation
+    policy_version: str
     profile_identifiers: tuple[str, ...]
     source_identifiers: tuple[str, ...]
     attempt: int
@@ -593,6 +488,7 @@ class MultiAssetExecutionBatch:
             "decision_identifier",
             "construction_identifier",
             "beginning_snapshot_identifier",
+            "policy_version",
             "schema_version",
         ):
             object.__setattr__(
@@ -608,26 +504,20 @@ class MultiAssetExecutionBatch:
         if not isinstance(self.order_results, tuple) or not all(
             isinstance(item, MultiAssetOrderResult) for item in self.order_results
         ):
-            raise TypeError("order_results must contain MultiAssetOrderResult")
+            raise TypeError("order_results must contain MultiAssetOrderResult values")
         if not isinstance(self.fills, tuple) or not all(
             isinstance(item, MultiAssetPaperFill) for item in self.fills
         ):
-            raise TypeError("fills must contain MultiAssetPaperFill")
-        if not isinstance(
-            self.reconciliation,
-            MultiAssetExecutionReconciliation,
-        ):
-            raise TypeError(
-                "reconciliation must be MultiAssetExecutionReconciliation"
-            )
+            raise TypeError("fills must contain MultiAssetPaperFill values")
+        if not isinstance(self.reconciliation, MultiAssetExecutionReconciliation):
+            raise TypeError("reconciliation must be MultiAssetExecutionReconciliation")
         for field_name in ("profile_identifiers", "source_identifiers"):
-            value = getattr(self, field_name)
-            if not isinstance(value, tuple) or not all(
-                isinstance(item, str) and item.strip() for item in value
-            ):
-                raise TypeError(f"{field_name} must contain non-empty strings")
-            if len(value) != len(set(value)):
+            values = tuple(
+                _text(item, field_name=field_name) for item in getattr(self, field_name)
+            )
+            if len(values) != len(set(values)):
                 raise ValueError(f"{field_name} cannot contain duplicates")
+            object.__setattr__(self, field_name, values)
         if isinstance(self.attempt, bool) or not isinstance(self.attempt, int):
             raise TypeError("attempt must be an integer")
         if self.attempt < 1:
@@ -635,7 +525,7 @@ class MultiAssetExecutionBatch:
 
 
 class SQLiteMultiAssetPaperExecutionStore:
-    """Append-only execution attempts and completed batch authority."""
+    """Append-only, SHA-256-chained execution-attempt authority."""
 
     _TABLE = "multi_asset_paper_execution_events"
     _GENESIS_HASH = "0" * 64
@@ -734,11 +624,7 @@ class SQLiteMultiAssetPaperExecutionStore:
                 "ORDER BY sequence DESC LIMIT 1"
             ).fetchone()
             sequence = 1 if tail is None else int(tail["sequence"]) + 1
-            previous_hash = (
-                self._GENESIS_HASH
-                if tail is None
-                else str(tail["content_hash"])
-            )
+            previous_hash = self._GENESIS_HASH if tail is None else str(tail["content_hash"])
             content_hash = self._hash(
                 sequence=sequence,
                 event_identifier=identifier,
@@ -777,9 +663,7 @@ class SQLiteMultiAssetPaperExecutionStore:
                 "ORDER BY sequence DESC LIMIT 1",
                 (resolved, MultiAssetExecutionEventType.ATTEMPT_RECORDED.value),
             ).fetchone()
-        if row is None:
-            return None
-        return batch_from_dict(json.loads(str(row["payload_json"])))
+        return None if row is None else batch_from_dict(json.loads(str(row["payload_json"])))
 
     def verify_integrity(self) -> bool:
         with self._connect() as connection:
@@ -814,7 +698,7 @@ class SQLiteMultiAssetPaperExecutionStore:
 
 
 class MultiAssetPaperExecutionOrchestrator:
-    """Simulate asset-aware paper implementation and reconcile in base currency."""
+    """Apply governed paper fills and publish only reconciled canonical state."""
 
     def __init__(
         self,
@@ -823,12 +707,10 @@ class MultiAssetPaperExecutionOrchestrator:
         quote_provider: MultiAssetQuoteProvider,
         store: SQLiteMultiAssetPaperExecutionStore,
         portfolio_store: SQLiteCanonicalPortfolioStore,
-        reconciliation_tolerance: float = 0.01,
+        policy: MultiAssetExecutionPolicy | None = None,
     ) -> None:
         if not isinstance(session_provider, InstrumentSessionProvider):
-            raise TypeError(
-                "session_provider must implement InstrumentSessionProvider"
-            )
+            raise TypeError("session_provider must implement InstrumentSessionProvider")
         if not isinstance(quote_provider, MultiAssetQuoteProvider):
             raise TypeError("quote_provider must implement MultiAssetQuoteProvider")
         if not isinstance(store, SQLiteMultiAssetPaperExecutionStore):
@@ -839,11 +721,7 @@ class MultiAssetPaperExecutionOrchestrator:
         self.quote_provider = quote_provider
         self.store = store
         self.portfolio_store = portfolio_store
-        self.reconciliation_tolerance = _number(
-            reconciliation_tolerance,
-            field_name="reconciliation_tolerance",
-            minimum=0.0,
-        )
+        self.policy = policy or MultiAssetExecutionPolicy()
 
     def execute(
         self,
@@ -851,7 +729,7 @@ class MultiAssetPaperExecutionOrchestrator:
         construction: PortfolioConstructionResult,
         decision_identifier: str,
         portfolio: CanonicalPortfolioSnapshot,
-        profiles: tuple[InstrumentExecutionProfile, ...],
+        profiles: Mapping[str, MultiAssetInstrumentProfile],
         as_of: datetime,
     ) -> MultiAssetExecutionBatch:
         if not isinstance(construction, PortfolioConstructionResult):
@@ -860,59 +738,55 @@ class MultiAssetPaperExecutionOrchestrator:
         if not isinstance(portfolio, CanonicalPortfolioSnapshot):
             raise TypeError("portfolio must be CanonicalPortfolioSnapshot")
         timestamp = _aware(as_of, field_name="as_of")
-        if construction.as_of > timestamp:
+        if construction.as_of > timestamp or portfolio.as_of > timestamp:
             raise MultiAssetExecutionError(
-                "construction timestamp cannot follow execution time"
-            )
-        if portfolio.as_of > timestamp:
-            raise MultiAssetExecutionError(
-                "portfolio snapshot cannot follow execution time"
+                "construction and portfolio timestamps cannot follow execution time"
             )
         if construction.status is ConstructionStatus.BLOCKED:
+            raise MultiAssetExecutionError("blocked construction cannot enter execution")
+
+        normalized_profiles = {
+            _text(key, field_name="profile symbol").upper(): value
+            for key, value in profiles.items()
+        }
+        trade_symbols = tuple(item.symbol for item in construction.trades)
+        if set(normalized_profiles) != set(trade_symbols):
+            missing = sorted(set(trade_symbols) - set(normalized_profiles))
+            extra = sorted(set(normalized_profiles) - set(trade_symbols))
             raise MultiAssetExecutionError(
-                "blocked construction cannot enter multi-asset execution"
+                "execution profiles must exactly match construction trades: "
+                f"missing={missing} extra={extra}"
             )
-        if not isinstance(profiles, tuple) or not all(
-            isinstance(item, InstrumentExecutionProfile) for item in profiles
-        ):
-            raise TypeError("profiles must contain InstrumentExecutionProfile")
-        profile_by_symbol = {item.symbol: item for item in profiles}
-        if len(profile_by_symbol) != len(profiles):
-            raise MultiAssetExecutionError(
-                "execution profiles contain duplicate symbols"
-            )
-        profile_instruments = tuple(item.instrument_identifier for item in profiles)
-        if len(profile_instruments) != len(set(profile_instruments)):
+        instrument_ids: list[str] = []
+        for symbol, profile in normalized_profiles.items():
+            self._require_profile(symbol, profile)
+            instrument_ids.append(profile.instrument_identifier)
+        if len(instrument_ids) != len(set(instrument_ids)):
             raise MultiAssetExecutionError(
                 "execution profiles contain duplicate instrument identifiers"
-            )
-        trade_symbols = tuple(item.symbol for item in construction.trades)
-        if set(profile_by_symbol) != set(trade_symbols):
-            missing = sorted(set(trade_symbols) - set(profile_by_symbol))
-            extra = sorted(set(profile_by_symbol) - set(trade_symbols))
-            raise MultiAssetExecutionError(
-                "execution profile coverage must exactly match construction trades: "
-                f"missing={missing} extra={extra}"
             )
 
         batch_identifier = f"multi-asset-execution:{construction.request_identifier}"
         previous = self.store.latest_batch(batch_identifier)
-        if previous is not None and previous.status in {
-            MultiAssetExecutionStatus.COMPLETED,
-            MultiAssetExecutionStatus.NO_ACTION,
-        }:
-            return previous
-        if previous is not None and (
-            portfolio.identifier != previous.ending_snapshot.identifier
-        ):
-            raise MultiAssetExecutionError(
-                "retry must resume from the exact prior ending portfolio snapshot"
-            )
+        if previous is not None:
+            if previous.decision_identifier != decision:
+                raise MultiAssetExecutionError(
+                    "execution retry decision identifier does not match prior attempt"
+                )
+            if previous.status in {
+                MultiAssetExecutionStatus.COMPLETED,
+                MultiAssetExecutionStatus.NO_ACTION,
+            }:
+                return previous
+            if portfolio.identifier != previous.ending_snapshot.identifier:
+                raise MultiAssetExecutionError(
+                    "retry must resume from the exact prior ending portfolio snapshot"
+                )
         attempt = 1 if previous is None else previous.attempt + 1
         self.store.verify_integrity()
         self.portfolio_store.verify_integrity()
         self.store.append(
-            event_identifier=f"event:{batch_identifier}:started",
+            event_identifier=f"event:{batch_identifier}:attempt:{attempt}:started",
             batch_identifier=batch_identifier,
             event_type=MultiAssetExecutionEventType.BATCH_STARTED,
             occurred_at=timestamp,
@@ -920,25 +794,16 @@ class MultiAssetPaperExecutionOrchestrator:
                 "decision_identifier": decision,
                 "construction_identifier": construction.request_identifier,
                 "beginning_snapshot_identifier": portfolio.identifier,
+                "policy_version": self.policy.version,
                 "profile_identifiers": [
-                    f"{item.profile_version}:{item.instrument_identifier}"
-                    for item in profiles
+                    self._profile_identifier(item)
+                    for item in normalized_profiles.values()
                 ],
             },
         )
 
         if not construction.trades:
-            reconciliation = MultiAssetExecutionReconciliation(
-                beginning_nav=portfolio.nav,
-                revalued_beginning_nav=portfolio.nav,
-                mark_change_base=0.0,
-                commission_base=0.0,
-                adverse_spread_base=0.0,
-                expected_ending_nav=portfolio.nav,
-                ending_nav=portfolio.nav,
-                difference=0.0,
-                reconciled=True,
-            )
+            reconciliation = self._unchanged_reconciliation(portfolio)
             batch = MultiAssetExecutionBatch(
                 identifier=batch_identifier,
                 decision_identifier=decision,
@@ -950,6 +815,7 @@ class MultiAssetPaperExecutionOrchestrator:
                 order_results=(),
                 fills=(),
                 reconciliation=reconciliation,
+                policy_version=self.policy.version,
                 profile_identifiers=(),
                 source_identifiers=(),
                 attempt=attempt,
@@ -957,58 +823,52 @@ class MultiAssetPaperExecutionOrchestrator:
             self._record(batch)
             return batch
 
-        sessions: dict[str, InstrumentSession] = {}
-        open_profiles: list[InstrumentExecutionProfile] = []
-        for profile in profiles:
-            session = self.session_provider.session(profile, as_of=timestamp)
-            if session.instrument_identifier != profile.instrument_identifier:
-                raise MultiAssetExecutionError(
-                    "session result does not match the execution profile instrument"
-                )
-            if session.venue != profile.venue:
-                raise MultiAssetExecutionError(
-                    "session result venue does not match the execution profile"
-                )
-            if session.session_model is not profile.session_model:
-                raise MultiAssetExecutionError(
-                    "session result model does not match the execution profile"
-                )
-            if session.as_of != timestamp:
-                raise MultiAssetExecutionError(
-                    "session result timestamp does not match execution time"
-                )
-            sessions[profile.symbol] = session
-            if session.status is InstrumentSessionStatus.OPEN:
-                open_profiles.append(profile)
+        previous_results = (
+            {} if previous is None else {item.symbol: item for item in previous.order_results}
+        )
+        cumulative_fills = [] if previous is None else list(previous.fills)
+        cumulative_sources = [] if previous is None else list(previous.source_identifiers)
+        order_results: dict[str, MultiAssetOrderResult] = dict(previous_results)
+        fill_ids = {item.identifier for item in cumulative_fills}
 
-        quotes: Mapping[str, MultiAssetQuote]
-        if open_profiles:
-            quotes = self.quote_provider.quotes(
-                tuple(open_profiles),
+        pending_profiles: list[MultiAssetInstrumentProfile] = []
+        sessions: dict[str, InstrumentSession] = {}
+        for trade in construction.trades:
+            prior = previous_results.get(trade.symbol)
+            if prior is not None and prior.status is MultiAssetOrderStatus.FILLED:
+                continue
+            profile = normalized_profiles[trade.symbol]
+            model = self.policy.session_model(profile.asset_class)
+            session = self.session_provider.session(
+                profile,
+                session_model=model,
                 as_of=timestamp,
             )
+            self._validate_session(session, profile=profile, model=model, as_of=timestamp)
+            sessions[trade.symbol] = session
+            cumulative_sources.append(session.source_identifier)
+            if session.status is InstrumentSessionStatus.OPEN:
+                pending_profiles.append(profile)
+
+        quotes: Mapping[str, MultiAssetQuote]
+        if pending_profiles:
+            quotes = self.quote_provider.quotes(tuple(pending_profiles), as_of=timestamp)
             if not isinstance(quotes, Mapping):
-                raise MultiAssetExecutionError(
-                    "quote provider must return a symbol mapping"
-                )
-            if set(quotes) != {item.symbol for item in open_profiles}:
-                missing = sorted(
-                    {item.symbol for item in open_profiles} - set(quotes)
-                )
-                extra = sorted(set(quotes) - {item.symbol for item in open_profiles})
+                raise MultiAssetExecutionError("quote provider must return a symbol mapping")
+            expected = {item.symbol for item in pending_profiles}
+            if set(quotes) != expected:
                 raise MultiAssetExecutionError(
                     "quote coverage must exactly match open execution profiles: "
-                    f"missing={missing} extra={extra}"
+                    f"missing={sorted(expected-set(quotes))} "
+                    f"extra={sorted(set(quotes)-expected)}"
                 )
         else:
             quotes = {}
 
         position_by_symbol = {item.symbol: item for item in portfolio.positions}
-        cash = portfolio.cash_amount
-        order_results: list[MultiAssetOrderResult] = []
-        fills: list[MultiAssetPaperFill] = []
-        source_identifiers: list[str] = []
         updated_positions = dict(position_by_symbol)
+        cash = portfolio.cash_amount
+        new_fills: list[MultiAssetPaperFill] = []
 
         ordered_trades = tuple(
             sorted(
@@ -1017,25 +877,37 @@ class MultiAssetPaperExecutionOrchestrator:
             )
         )
         for trade in ordered_trades:
-            profile = profile_by_symbol[trade.symbol]
-            session = sessions[trade.symbol]
-            requested_base = round(trade.trade_weight * portfolio.nav, 8)
-            if session.status is not InstrumentSessionStatus.OPEN:
-                order_results.append(
-                    MultiAssetOrderResult(
-                        symbol=trade.symbol,
-                        instrument_identifier=profile.instrument_identifier,
-                        side=trade.side,
-                        status=MultiAssetOrderStatus.HELD,
-                        requested_base_amount=requested_base,
-                        filled_base_amount=0.0,
-                        reason=(
-                            f"{profile.session_model.value} session is "
-                            f"{session.status.value}"
-                        ),
-                    )
+            prior = previous_results.get(trade.symbol)
+            if prior is not None and prior.status is MultiAssetOrderStatus.FILLED:
+                continue
+            profile = normalized_profiles[trade.symbol]
+            requested_total = round(trade.trade_weight * portfolio.nav, 8)
+            already_filled = 0.0 if prior is None else prior.filled_base_amount
+            requested_remaining = round(max(0.0, requested_total - already_filled), 8)
+            if requested_remaining <= self.policy.reconciliation_tolerance:
+                order_results[trade.symbol] = MultiAssetOrderResult(
+                    symbol=trade.symbol,
+                    instrument_identifier=profile.instrument_identifier,
+                    side=trade.side,
+                    status=MultiAssetOrderStatus.FILLED,
+                    requested_base_amount=requested_total,
+                    filled_base_amount=already_filled,
+                    reason="cumulative paper fill satisfies requested construction",
+                    fill_identifiers=() if prior is None else prior.fill_identifiers,
                 )
-                source_identifiers.append(session.source_identifier)
+                continue
+            session = sessions[trade.symbol]
+            if session.status is not InstrumentSessionStatus.OPEN:
+                order_results[trade.symbol] = MultiAssetOrderResult(
+                    symbol=trade.symbol,
+                    instrument_identifier=profile.instrument_identifier,
+                    side=trade.side,
+                    status=MultiAssetOrderStatus.HELD,
+                    requested_base_amount=requested_total,
+                    filled_base_amount=already_filled,
+                    reason=f"{session.session_model.value} session is {session.status.value}",
+                    fill_identifiers=() if prior is None else prior.fill_identifiers,
+                )
                 continue
 
             quote = quotes[trade.symbol]
@@ -1045,26 +917,26 @@ class MultiAssetPaperExecutionOrchestrator:
                 as_of=timestamp,
                 base_currency=portfolio.base_currency,
             )
-            source_identifiers.extend(
+            cumulative_sources.extend(
                 (
-                    session.source_identifier,
                     quote.quote_source_identifier,
                     quote.fx_source_identifier,
                     quote.quote_certification_identifier,
-                    profile.execution_certification_identifier,
+                    profile.approval_identifier,
+                    profile.custody_settlement_identifier,
+                    profile.execution_model_version,
                 )
             )
             if quote.halted:
-                order_results.append(
-                    MultiAssetOrderResult(
-                        symbol=trade.symbol,
-                        instrument_identifier=profile.instrument_identifier,
-                        side=trade.side,
-                        status=MultiAssetOrderStatus.REJECTED,
-                        requested_base_amount=requested_base,
-                        filled_base_amount=0.0,
-                        reason="instrument is halted",
-                    )
+                order_results[trade.symbol] = MultiAssetOrderResult(
+                    symbol=trade.symbol,
+                    instrument_identifier=profile.instrument_identifier,
+                    side=trade.side,
+                    status=MultiAssetOrderStatus.REJECTED,
+                    requested_base_amount=requested_total,
+                    filled_base_amount=already_filled,
+                    reason="instrument is halted",
+                    fill_identifiers=() if prior is None else prior.fill_identifiers,
                 )
                 continue
 
@@ -1077,10 +949,19 @@ class MultiAssetPaperExecutionOrchestrator:
                 available_cash=cash,
                 attempted_at=timestamp,
                 batch_identifier=batch_identifier,
+                attempt=attempt,
+                requested_total=requested_total,
+                requested_remaining=requested_remaining,
+                already_filled=already_filled,
+                prior_fill_identifiers=() if prior is None else prior.fill_identifiers,
             )
-            order_results.append(result)
+            order_results[trade.symbol] = result
             if fill is not None:
-                fills.append(fill)
+                if fill.identifier in fill_ids:
+                    raise MultiAssetExecutionError("execution generated a duplicate fill identifier")
+                fill_ids.add(fill.identifier)
+                new_fills.append(fill)
+                cumulative_fills.append(fill)
                 if next_position is None:
                     updated_positions.pop(trade.symbol, None)
                 else:
@@ -1090,70 +971,46 @@ class MultiAssetPaperExecutionOrchestrator:
             portfolio=portfolio,
             quotes=quotes,
         )
-        commission_base = round(sum(item.commission_base for item in fills), 8)
+        commission_base = round(sum(item.commission_base for item in new_fills), 8)
         adverse_spread_base = round(
-            sum(item.adverse_spread_base for item in fills),
+            sum(item.adverse_spread_base for item in new_fills),
             8,
         )
         mark_change = round(revalued_beginning_nav - portfolio.nav, 8)
-        implementation_events = tuple(
-            list(portfolio.implementation_events)
-            + [
-                CanonicalImplementationEvent(
-                    identifier=item.identifier,
-                    occurred_at=timestamp,
-                    action=item.side.value,
-                    symbol=item.symbol,
-                    instrument_identifier=item.instrument_identifier,
-                    venue=item.venue,
-                    asset_class=item.asset_class.value,
-                    quantity=item.quantity,
-                    price=item.fill_price_local,
-                    gross_amount=item.gross_amount_local,
-                    cost_amount=item.commission_local,
-                    rationale=(
-                        "Governed multi-asset paper fill; no broker order submitted."
-                    ),
-                    source_identifier=item.quote_source_identifier,
-                    price_currency=item.price_currency,
-                    settlement_currency=(
-                        profile_by_symbol[item.symbol].settlement_currency
-                    ),
-                    fx_rate_to_base=item.fx_rate_to_base,
-                    fx_rate_source_identifier=item.fx_source_identifier,
-                )
-                for item in fills
-            ]
-        )
-        ending_snapshot = CanonicalPortfolioSnapshot(
-            identifier=f"{portfolio.identifier}:multi-asset-attempt:{attempt}",
-            portfolio_code=portfolio.portfolio_code,
-            display_name=portfolio.display_name,
-            constraint_profile=portfolio.constraint_profile,
-            as_of=timestamp,
-            starting_capital=portfolio.starting_capital,
-            cash_amount=round(cash, 8),
-            base_currency=portfolio.base_currency,
-            currency_balances=portfolio.currency_balances,
-            positions=tuple(
-                sorted(updated_positions.values(), key=lambda item: item.symbol)
-            ),
-            implementation_events=implementation_events,
-            source_identifiers=tuple(
-                dict.fromkeys(
-                    portfolio.source_identifiers + tuple(source_identifiers)
-                )
-            ),
-        )
+        if new_fills:
+            implementation_events = tuple(
+                list(portfolio.implementation_events)
+                + [self._implementation_event(item, occurred_at=timestamp) for item in new_fills]
+            )
+            ending_snapshot = CanonicalPortfolioSnapshot(
+                identifier=f"{portfolio.identifier}:multi-asset-attempt:{attempt}",
+                portfolio_code=portfolio.portfolio_code,
+                display_name=portfolio.display_name,
+                constraint_profile=portfolio.constraint_profile,
+                as_of=timestamp,
+                starting_capital=portfolio.starting_capital,
+                cash_amount=round(cash, 8),
+                base_currency=portfolio.base_currency,
+                currency_balances=portfolio.currency_balances,
+                positions=tuple(
+                    sorted(updated_positions.values(), key=lambda item: item.symbol)
+                ),
+                implementation_events=implementation_events,
+                source_identifiers=tuple(
+                    dict.fromkeys(
+                        portfolio.source_identifiers + tuple(cumulative_sources)
+                    )
+                ),
+            )
+        else:
+            ending_snapshot = portfolio
+
         expected_ending_nav = round(
-            portfolio.nav
-            + mark_change
-            - commission_base
-            - adverse_spread_base,
+            portfolio.nav + mark_change - commission_base - adverse_spread_base,
             8,
         )
         difference = round(ending_snapshot.nav - expected_ending_nav, 8)
-        reconciled = abs(difference) <= self.reconciliation_tolerance
+        reconciled = abs(difference) <= self.policy.reconciliation_tolerance
         reconciliation = MultiAssetExecutionReconciliation(
             beginning_nav=portfolio.nav,
             revalued_beginning_nav=revalued_beginning_nav,
@@ -1178,21 +1035,19 @@ class MultiAssetPaperExecutionOrchestrator:
                     "ending_nav": ending_snapshot.nav,
                 },
             )
-            raise MultiAssetExecutionError(
-                "multi-asset paper ledger did not reconcile"
-            )
+            raise MultiAssetExecutionError("multi-asset paper ledger did not reconcile")
 
-        statuses = {item.status for item in order_results}
-        if not order_results:
-            status = MultiAssetExecutionStatus.NO_ACTION
-        elif statuses <= {MultiAssetOrderStatus.FILLED}:
+        ordered_results = tuple(order_results[item.symbol] for item in construction.trades)
+        statuses = {item.status for item in ordered_results}
+        if statuses <= {MultiAssetOrderStatus.FILLED}:
             status = MultiAssetExecutionStatus.COMPLETED
-        elif fills:
+        elif new_fills or any(item.filled_base_amount > 0 for item in ordered_results):
             status = MultiAssetExecutionStatus.PARTIAL
         elif statuses <= {MultiAssetOrderStatus.HELD}:
             status = MultiAssetExecutionStatus.HELD
         else:
             status = MultiAssetExecutionStatus.FAILED
+
         batch = MultiAssetExecutionBatch(
             identifier=batch_identifier,
             decision_identifier=decision,
@@ -1201,95 +1056,124 @@ class MultiAssetPaperExecutionOrchestrator:
             status=status,
             beginning_snapshot_identifier=portfolio.identifier,
             ending_snapshot=ending_snapshot,
-            order_results=tuple(order_results),
-            fills=tuple(fills),
+            order_results=ordered_results,
+            fills=tuple(cumulative_fills),
             reconciliation=reconciliation,
+            policy_version=self.policy.version,
             profile_identifiers=tuple(
-                f"{item.profile_version}:{item.instrument_identifier}"
-                for item in profiles
+                self._profile_identifier(normalized_profiles[symbol])
+                for symbol in trade_symbols
             ),
-            source_identifiers=tuple(dict.fromkeys(source_identifiers)),
+            source_identifiers=tuple(dict.fromkeys(cumulative_sources)),
             attempt=attempt,
         )
-        if fills:
+        if new_fills:
             self.portfolio_store.append(ending_snapshot)
         self._record(batch)
         return batch
 
-    def _record(self, batch: MultiAssetExecutionBatch) -> None:
-        self.store.append(
-            event_identifier=(
-                f"event:{batch.identifier}:attempt:{batch.attempt}:recorded"
-            ),
-            batch_identifier=batch.identifier,
-            event_type=MultiAssetExecutionEventType.ATTEMPT_RECORDED,
-            occurred_at=batch.attempted_at,
-            payload=batch_to_dict(batch),
-        )
-        self.store.verify_integrity()
+    def _require_profile(
+        self,
+        symbol: str,
+        profile: MultiAssetInstrumentProfile,
+    ) -> None:
+        if not isinstance(profile, MultiAssetInstrumentProfile):
+            raise TypeError("profiles must contain MultiAssetInstrumentProfile values")
+        if profile.symbol != symbol:
+            raise MultiAssetExecutionError("profile key must match profile symbol")
+        if profile.approval_state is not AssetClassApprovalState.PAPER_ELIGIBLE:
+            raise MultiAssetExecutionError(
+                f"{profile.symbol} asset-class approval is not paper_eligible"
+            )
+        if profile.asset_class in {
+            CandidateAssetClass.CRYPTO,
+            CandidateAssetClass.FX,
+        } and (not profile.unlevered or not profile.spot_only):
+            raise MultiAssetExecutionError(
+                f"{profile.symbol} execution requires unlevered spot exposure"
+            )
 
     @staticmethod
+    def _profile_identifier(profile: MultiAssetInstrumentProfile) -> str:
+        return ":".join(
+            (
+                profile.instrument_identifier,
+                profile.approval_identifier,
+                profile.custody_settlement_identifier,
+                profile.execution_model_version,
+            )
+        )
+
+    @staticmethod
+    def _validate_session(
+        session: InstrumentSession,
+        *,
+        profile: MultiAssetInstrumentProfile,
+        model: TradingSessionModel,
+        as_of: datetime,
+    ) -> None:
+        if session.instrument_identifier != profile.instrument_identifier:
+            raise MultiAssetExecutionError("session instrument does not match profile")
+        if session.venue != profile.venue:
+            raise MultiAssetExecutionError("session venue does not match profile")
+        if session.session_model is not model:
+            raise MultiAssetExecutionError("session model does not match asset class")
+        if session.as_of != as_of:
+            raise MultiAssetExecutionError("session timestamp does not match execution")
+
     def _validate_quote(
+        self,
         *,
         quote: MultiAssetQuote,
-        profile: InstrumentExecutionProfile,
+        profile: MultiAssetInstrumentProfile,
         as_of: datetime,
         base_currency: str,
     ) -> None:
         if quote.symbol != profile.symbol:
             raise MultiAssetExecutionError("quote symbol does not match profile")
         if quote.instrument_identifier != profile.instrument_identifier:
-            raise MultiAssetExecutionError(
-                "quote instrument does not match execution profile"
-            )
+            raise MultiAssetExecutionError("quote instrument does not match profile")
         if quote.venue != profile.venue:
-            raise MultiAssetExecutionError(
-                "quote venue does not match execution profile"
-            )
+            raise MultiAssetExecutionError("quote venue does not match profile")
         if quote.price_currency != profile.price_currency:
-            raise MultiAssetExecutionError(
-                "quote currency does not match execution profile"
-            )
+            raise MultiAssetExecutionError("quote currency does not match profile")
         if quote.observed_at > as_of or quote.fx_observed_at > as_of:
             raise MultiAssetExecutionError(
                 "quote or FX evidence is future-known at execution time"
             )
-        maximum_age = timedelta(minutes=profile.maximum_quote_age_minutes)
+        maximum_age = timedelta(minutes=self.policy.maximum_quote_age_minutes)
         if as_of - quote.observed_at > maximum_age:
             raise MultiAssetExecutionError("quote is stale")
         if as_of - quote.fx_observed_at > maximum_age:
             raise MultiAssetExecutionError("FX conversion evidence is stale")
-        if quote.price_currency == base_currency:
-            if abs(quote.fx_rate_to_base - 1.0) > _EPSILON:
-                raise MultiAssetExecutionError(
-                    "base-currency quote must use FX rate 1.0"
-                )
-
-    @staticmethod
-    def _quantity(value: float, *, fractional: bool) -> float:
-        if fractional:
-            return round(max(0.0, value), 12)
-        return float(max(0, floor(value)))
+        if profile.price_currency == base_currency and abs(quote.fx_rate_to_base - 1.0) > _EPSILON:
+            raise MultiAssetExecutionError(
+                "base-currency quote must use an FX rate of 1.0"
+            )
 
     def _fill_trade(
         self,
         *,
         trade: TradeProposal,
-        profile: InstrumentExecutionProfile,
+        profile: MultiAssetInstrumentProfile,
         quote: MultiAssetQuote,
         portfolio: CanonicalPortfolioSnapshot,
         current_position: CanonicalPortfolioPosition | None,
         available_cash: float,
         attempted_at: datetime,
         batch_identifier: str,
+        attempt: int,
+        requested_total: float,
+        requested_remaining: float,
+        already_filled: float,
+        prior_fill_identifiers: tuple[str, ...],
     ) -> tuple[
         MultiAssetPaperFill | None,
         MultiAssetOrderResult,
         float,
         CanonicalPortfolioPosition | None,
     ]:
-        requested_base = round(trade.trade_weight * portfolio.nav, 8)
-        if requested_base < profile.minimum_trade_base_amount:
+        if requested_remaining < self.policy.minimum_trade_base_amount:
             return (
                 None,
                 MultiAssetOrderResult(
@@ -1297,9 +1181,10 @@ class MultiAssetPaperExecutionOrchestrator:
                     instrument_identifier=profile.instrument_identifier,
                     side=trade.side,
                     status=MultiAssetOrderStatus.REJECTED,
-                    requested_base_amount=requested_base,
-                    filled_base_amount=0.0,
-                    reason="requested trade is below the minimum base amount",
+                    requested_base_amount=requested_total,
+                    filled_base_amount=already_filled,
+                    reason="remaining trade is below the minimum base amount",
+                    fill_identifiers=prior_fill_identifiers,
                 ),
                 available_cash,
                 current_position,
@@ -1307,10 +1192,10 @@ class MultiAssetPaperExecutionOrchestrator:
         fill_price = quote.bid if trade.side is TradeSide.SELL else quote.ask
         mark_price = quote.last
         per_unit_base = fill_price * quote.fx_rate_to_base
-        volume_cap_base = (
-            quote.available_base_notional * profile.maximum_volume_participation
+        base_cap = min(
+            requested_remaining,
+            quote.available_base_notional * self.policy.maximum_volume_participation,
         )
-        base_cap = min(requested_base, volume_cap_base)
         if trade.side is TradeSide.SELL:
             if current_position is None:
                 return (
@@ -1320,42 +1205,31 @@ class MultiAssetPaperExecutionOrchestrator:
                         instrument_identifier=profile.instrument_identifier,
                         side=trade.side,
                         status=MultiAssetOrderStatus.REJECTED,
-                        requested_base_amount=requested_base,
-                        filled_base_amount=0.0,
+                        requested_base_amount=requested_total,
+                        filled_base_amount=already_filled,
                         reason="sell has no canonical owned position",
+                        fill_identifiers=prior_fill_identifiers,
                     ),
                     available_cash,
                     current_position,
                 )
-            if (
-                current_position.instrument_identifier is not None
-                and current_position.instrument_identifier
-                != profile.instrument_identifier
-            ):
+            if current_position.instrument_identifier not in {
+                None,
+                profile.instrument_identifier,
+            }:
                 raise MultiAssetExecutionError(
                     "owned position identity does not match execution profile"
                 )
             quantity_cap = current_position.quantity
         else:
-            commission_rate = profile.commission_bps / 10_000
-            base_cap = min(
-                base_cap,
-                available_cash / max(1.0 + commission_rate, _EPSILON),
-            )
-            current_weight = (
-                0.0
-                if current_position is None
-                else current_position.market_value / portfolio.nav
-            )
-            remaining_weight = max(
-                0.0,
-                profile.maximum_position_weight - current_weight,
-            )
-            base_cap = min(base_cap, remaining_weight * portfolio.nav)
+            commission_rate = self.policy.commission_bps(profile.asset_class) / 10_000
+            base_cap = min(base_cap, available_cash / (1.0 + commission_rate))
             quantity_cap = float("inf")
-        quantity = self._quantity(
-            min(base_cap / per_unit_base, quantity_cap),
-            fractional=profile.allow_fractional_quantity,
+        raw_quantity = min(base_cap / per_unit_base, quantity_cap)
+        quantity = (
+            round(max(0.0, raw_quantity), 12)
+            if self.policy.fractional_quantity(profile.asset_class)
+            else float(max(0, floor(raw_quantity)))
         )
         if quantity <= _EPSILON:
             return (
@@ -1365,32 +1239,29 @@ class MultiAssetPaperExecutionOrchestrator:
                     instrument_identifier=profile.instrument_identifier,
                     side=trade.side,
                     status=MultiAssetOrderStatus.REJECTED,
-                    requested_base_amount=requested_base,
-                    filled_base_amount=0.0,
-                    reason="cash, ownership, liquidity, or position limit permits no fill",
+                    requested_base_amount=requested_total,
+                    filled_base_amount=already_filled,
+                    reason="cash, ownership, or liquidity permits no paper fill",
+                    fill_identifiers=prior_fill_identifiers,
                 ),
                 available_cash,
                 current_position,
             )
+
         gross_local = round(quantity * fill_price, 12)
         gross_base = round(gross_local * quote.fx_rate_to_base, 8)
         commission_local = round(
-            gross_local * profile.commission_bps / 10_000,
+            gross_local * self.policy.commission_bps(profile.asset_class) / 10_000,
             12,
         )
-        commission_base = round(
-            commission_local * quote.fx_rate_to_base,
-            8,
-        )
+        commission_base = round(commission_local * quote.fx_rate_to_base, 8)
         adverse_spread_base = round(
-            quantity
-            * abs(fill_price - mark_price)
-            * quote.fx_rate_to_base,
+            quantity * abs(fill_price - mark_price) * quote.fx_rate_to_base,
             8,
         )
         if trade.side is TradeSide.BUY:
             total_cash_use = gross_base + commission_base
-            if total_cash_use > available_cash + self.reconciliation_tolerance:
+            if total_cash_use > available_cash + self.policy.reconciliation_tolerance:
                 raise MultiAssetExecutionError(
                     "unlevered buy would make base-currency cash negative"
                 )
@@ -1407,20 +1278,14 @@ class MultiAssetPaperExecutionOrchestrator:
                 attempted_at=attempted_at,
             )
         else:
-            next_cash = round(
-                available_cash + gross_base - commission_base,
-                8,
-            )
+            next_cash = round(available_cash + gross_base - commission_base, 8)
             remaining = round(current_position.quantity - quantity, 12)
             next_position = (
                 None
                 if remaining <= _EPSILON
                 else CanonicalPortfolioPosition(
                     symbol=current_position.symbol,
-                    instrument_identifier=(
-                        current_position.instrument_identifier
-                        or profile.instrument_identifier
-                    ),
+                    instrument_identifier=profile.instrument_identifier,
                     venue=profile.venue,
                     asset_class=profile.asset_class.value,
                     quantity=remaining,
@@ -1435,9 +1300,9 @@ class MultiAssetPaperExecutionOrchestrator:
                     fx_rate_source_identifier=quote.fx_source_identifier,
                 )
             )
+
         fill_identifier = (
-            f"fill:{batch_identifier}:{attempted_at.isoformat()}:{trade.symbol}:"
-            f"{trade.side.value}"
+            f"fill:{batch_identifier}:attempt:{attempt}:{trade.symbol}:{trade.side.value}"
         )
         fill = MultiAssetPaperFill(
             identifier=fill_identifier,
@@ -1450,6 +1315,7 @@ class MultiAssetPaperExecutionOrchestrator:
             fill_price_local=fill_price,
             mark_price_local=mark_price,
             price_currency=profile.price_currency,
+            settlement_currency=profile.settlement_currency,
             fx_rate_to_base=quote.fx_rate_to_base,
             gross_amount_local=gross_local,
             gross_amount_base=gross_base,
@@ -1458,28 +1324,30 @@ class MultiAssetPaperExecutionOrchestrator:
             adverse_spread_base=adverse_spread_base,
             quote_source_identifier=quote.quote_source_identifier,
             fx_source_identifier=quote.fx_source_identifier,
-            execution_certification_identifier=(
-                profile.execution_certification_identifier
-            ),
+            quote_certification_identifier=quote.quote_certification_identifier,
+            approval_identifier=profile.approval_identifier,
+            custody_settlement_identifier=profile.custody_settlement_identifier,
+            execution_model_version=profile.execution_model_version,
         )
-        fill_status = (
+        cumulative_amount = round(already_filled + gross_base, 8)
+        status = (
             MultiAssetOrderStatus.FILLED
-            if gross_base + self.reconciliation_tolerance >= requested_base
+            if cumulative_amount + self.policy.reconciliation_tolerance >= requested_total
             else MultiAssetOrderStatus.PARTIALLY_FILLED
         )
         result = MultiAssetOrderResult(
             symbol=trade.symbol,
             instrument_identifier=profile.instrument_identifier,
             side=trade.side,
-            status=fill_status,
-            requested_base_amount=requested_base,
-            filled_base_amount=gross_base,
+            status=status,
+            requested_base_amount=requested_total,
+            filled_base_amount=cumulative_amount,
             reason=(
                 "paper fill completed"
-                if fill_status is MultiAssetOrderStatus.FILLED
-                else "paper fill was limited by cash, liquidity, ownership, or position policy"
+                if status is MultiAssetOrderStatus.FILLED
+                else "paper fill was limited by cash, ownership, or liquidity"
             ),
-            fill_identifier=fill.identifier,
+            fill_identifiers=prior_fill_identifiers + (fill.identifier,),
         )
         return fill, result, next_cash, next_position
 
@@ -1487,7 +1355,7 @@ class MultiAssetPaperExecutionOrchestrator:
     def _buy_position(
         *,
         current: CanonicalPortfolioPosition | None,
-        profile: InstrumentExecutionProfile,
+        profile: MultiAssetInstrumentProfile,
         quote: MultiAssetQuote,
         quantity: float,
         gross_local: float,
@@ -1515,7 +1383,9 @@ class MultiAssetPaperExecutionOrchestrator:
             asset_class=profile.asset_class.value,
             quantity=total_quantity,
             average_cost=average_local,
-            average_cost_base=average_base,
+            average_cost_base=(
+                None if profile.price_currency == "USD" else average_base
+            ),
             mark_price=quote.last,
             updated_at=attempted_at,
             price_currency=profile.price_currency,
@@ -1523,6 +1393,32 @@ class MultiAssetPaperExecutionOrchestrator:
             fx_rate_to_base=quote.fx_rate_to_base,
             fx_rate_observed_at=quote.fx_observed_at,
             fx_rate_source_identifier=quote.fx_source_identifier,
+        )
+
+    @staticmethod
+    def _implementation_event(
+        fill: MultiAssetPaperFill,
+        *,
+        occurred_at: datetime,
+    ) -> CanonicalImplementationEvent:
+        return CanonicalImplementationEvent(
+            identifier=fill.identifier,
+            occurred_at=occurred_at,
+            action=fill.side.value,
+            symbol=fill.symbol,
+            instrument_identifier=fill.instrument_identifier,
+            venue=fill.venue,
+            asset_class=fill.asset_class.value,
+            quantity=fill.quantity,
+            price=fill.fill_price_local,
+            gross_amount=fill.gross_amount_local,
+            cost_amount=fill.commission_local,
+            rationale="Governed multi-asset paper fill; no broker order submitted.",
+            source_identifier=fill.quote_source_identifier,
+            price_currency=fill.price_currency,
+            settlement_currency=fill.settlement_currency,
+            fx_rate_to_base=fill.fx_rate_to_base,
+            fx_rate_source_identifier=fill.fx_source_identifier,
         )
 
     @staticmethod
@@ -1541,71 +1437,31 @@ class MultiAssetPaperExecutionOrchestrator:
             )
         return round(value, 8)
 
+    @staticmethod
+    def _unchanged_reconciliation(
+        portfolio: CanonicalPortfolioSnapshot,
+    ) -> MultiAssetExecutionReconciliation:
+        return MultiAssetExecutionReconciliation(
+            beginning_nav=portfolio.nav,
+            revalued_beginning_nav=portfolio.nav,
+            mark_change_base=0.0,
+            commission_base=0.0,
+            adverse_spread_base=0.0,
+            expected_ending_nav=portfolio.nav,
+            ending_nav=portfolio.nav,
+            difference=0.0,
+            reconciled=True,
+        )
 
-def profile_to_dict(value: InstrumentExecutionProfile) -> dict[str, Any]:
-    return {
-        "symbol": value.symbol,
-        "instrument_identifier": value.instrument_identifier,
-        "asset_class": value.asset_class.value,
-        "venue": value.venue,
-        "session_model": value.session_model.value,
-        "price_currency": value.price_currency,
-        "settlement_currency": value.settlement_currency,
-        "execution_certification_identifier": (
-            value.execution_certification_identifier
-        ),
-        "asset_class_approval_identifier": (
-            value.asset_class_approval_identifier
-        ),
-        "maximum_quote_age_minutes": value.maximum_quote_age_minutes,
-        "maximum_volume_participation": value.maximum_volume_participation,
-        "commission_bps": value.commission_bps,
-        "minimum_trade_base_amount": value.minimum_trade_base_amount,
-        "maximum_position_weight": value.maximum_position_weight,
-        "allow_fractional_quantity": value.allow_fractional_quantity,
-        "notional_multiplier": value.notional_multiplier,
-        "profile_version": value.profile_version,
-    }
-
-
-def profile_from_dict(value: Mapping[str, Any]) -> InstrumentExecutionProfile:
-    return InstrumentExecutionProfile(
-        symbol=str(value["symbol"]),
-        instrument_identifier=str(value["instrument_identifier"]),
-        asset_class=CandidateAssetClass(str(value["asset_class"])),
-        venue=str(value["venue"]),
-        session_model=TradingSessionModel(str(value["session_model"])),
-        price_currency=str(value["price_currency"]),
-        settlement_currency=str(value["settlement_currency"]),
-        execution_certification_identifier=str(
-            value["execution_certification_identifier"]
-        ),
-        asset_class_approval_identifier=(
-            None
-            if value.get("asset_class_approval_identifier") is None
-            else str(value["asset_class_approval_identifier"])
-        ),
-        maximum_quote_age_minutes=int(
-            value.get("maximum_quote_age_minutes", 5)
-        ),
-        maximum_volume_participation=float(
-            value.get("maximum_volume_participation", 0.10)
-        ),
-        commission_bps=float(value.get("commission_bps", 0.0)),
-        minimum_trade_base_amount=float(
-            value.get("minimum_trade_base_amount", 1.0)
-        ),
-        maximum_position_weight=float(
-            value.get("maximum_position_weight", 0.20)
-        ),
-        allow_fractional_quantity=bool(
-            value.get("allow_fractional_quantity", True)
-        ),
-        notional_multiplier=float(value.get("notional_multiplier", 1.0)),
-        profile_version=str(
-            value.get("profile_version", "multi-asset-execution-profile.v1")
-        ),
-    )
+    def _record(self, batch: MultiAssetExecutionBatch) -> None:
+        self.store.append(
+            event_identifier=f"event:{batch.identifier}:attempt:{batch.attempt}:recorded",
+            batch_identifier=batch.identifier,
+            event_type=MultiAssetExecutionEventType.ATTEMPT_RECORDED,
+            occurred_at=batch.attempted_at,
+            payload=batch_to_dict(batch),
+        )
+        self.store.verify_integrity()
 
 
 def fill_to_dict(value: MultiAssetPaperFill) -> dict[str, Any]:
@@ -1620,6 +1476,7 @@ def fill_to_dict(value: MultiAssetPaperFill) -> dict[str, Any]:
         "fill_price_local": value.fill_price_local,
         "mark_price_local": value.mark_price_local,
         "price_currency": value.price_currency,
+        "settlement_currency": value.settlement_currency,
         "fx_rate_to_base": value.fx_rate_to_base,
         "gross_amount_local": value.gross_amount_local,
         "gross_amount_base": value.gross_amount_base,
@@ -1628,9 +1485,10 @@ def fill_to_dict(value: MultiAssetPaperFill) -> dict[str, Any]:
         "adverse_spread_base": value.adverse_spread_base,
         "quote_source_identifier": value.quote_source_identifier,
         "fx_source_identifier": value.fx_source_identifier,
-        "execution_certification_identifier": (
-            value.execution_certification_identifier
-        ),
+        "quote_certification_identifier": value.quote_certification_identifier,
+        "approval_identifier": value.approval_identifier,
+        "custody_settlement_identifier": value.custody_settlement_identifier,
+        "execution_model_version": value.execution_model_version,
     }
 
 
@@ -1652,16 +1510,14 @@ def batch_to_dict(value: MultiAssetExecutionBatch) -> dict[str, Any]:
                 "requested_base_amount": item.requested_base_amount,
                 "filled_base_amount": item.filled_base_amount,
                 "reason": item.reason,
-                "fill_identifier": item.fill_identifier,
+                "fill_identifiers": list(item.fill_identifiers),
             }
             for item in value.order_results
         ],
         "fills": [fill_to_dict(item) for item in value.fills],
         "reconciliation": {
             "beginning_nav": value.reconciliation.beginning_nav,
-            "revalued_beginning_nav": (
-                value.reconciliation.revalued_beginning_nav
-            ),
+            "revalued_beginning_nav": value.reconciliation.revalued_beginning_nav,
             "mark_change_base": value.reconciliation.mark_change_base,
             "commission_base": value.reconciliation.commission_base,
             "adverse_spread_base": value.reconciliation.adverse_spread_base,
@@ -1670,6 +1526,7 @@ def batch_to_dict(value: MultiAssetExecutionBatch) -> dict[str, Any]:
             "difference": value.reconciliation.difference,
             "reconciled": value.reconciliation.reconciled,
         },
+        "policy_version": value.policy_version,
         "profile_identifiers": list(value.profile_identifiers),
         "source_identifiers": list(value.source_identifiers),
         "attempt": value.attempt,
@@ -1681,16 +1538,17 @@ def batch_from_dict(value: Mapping[str, Any]) -> MultiAssetExecutionBatch:
     reconciliation = value["reconciliation"]
     if not isinstance(reconciliation, Mapping):
         raise TypeError("reconciliation must encode an object")
+    ending_snapshot = value["ending_snapshot"]
+    if not isinstance(ending_snapshot, Mapping):
+        raise TypeError("ending_snapshot must encode an object")
     return MultiAssetExecutionBatch(
         identifier=str(value["identifier"]),
         decision_identifier=str(value["decision_identifier"]),
         construction_identifier=str(value["construction_identifier"]),
         attempted_at=datetime.fromisoformat(str(value["attempted_at"])),
         status=MultiAssetExecutionStatus(str(value["status"])),
-        beginning_snapshot_identifier=str(
-            value["beginning_snapshot_identifier"]
-        ),
-        ending_snapshot=snapshot_from_dict(value["ending_snapshot"]),
+        beginning_snapshot_identifier=str(value["beginning_snapshot_identifier"]),
+        ending_snapshot=snapshot_from_dict(ending_snapshot),
         order_results=tuple(
             MultiAssetOrderResult(
                 symbol=str(item["symbol"]),
@@ -1700,10 +1558,8 @@ def batch_from_dict(value: Mapping[str, Any]) -> MultiAssetExecutionBatch:
                 requested_base_amount=float(item["requested_base_amount"]),
                 filled_base_amount=float(item["filled_base_amount"]),
                 reason=str(item["reason"]),
-                fill_identifier=(
-                    None
-                    if item.get("fill_identifier") is None
-                    else str(item["fill_identifier"])
+                fill_identifiers=tuple(
+                    str(identifier) for identifier in item.get("fill_identifiers", ())
                 ),
             )
             for item in value.get("order_results", ())
@@ -1720,6 +1576,7 @@ def batch_from_dict(value: Mapping[str, Any]) -> MultiAssetExecutionBatch:
                 fill_price_local=float(item["fill_price_local"]),
                 mark_price_local=float(item["mark_price_local"]),
                 price_currency=str(item["price_currency"]),
+                settlement_currency=str(item["settlement_currency"]),
                 fx_rate_to_base=float(item["fx_rate_to_base"]),
                 gross_amount_local=float(item["gross_amount_local"]),
                 gross_amount_base=float(item["gross_amount_base"]),
@@ -1728,29 +1585,29 @@ def batch_from_dict(value: Mapping[str, Any]) -> MultiAssetExecutionBatch:
                 adverse_spread_base=float(item["adverse_spread_base"]),
                 quote_source_identifier=str(item["quote_source_identifier"]),
                 fx_source_identifier=str(item["fx_source_identifier"]),
-                execution_certification_identifier=str(
-                    item["execution_certification_identifier"]
+                quote_certification_identifier=str(
+                    item["quote_certification_identifier"]
                 ),
+                approval_identifier=str(item["approval_identifier"]),
+                custody_settlement_identifier=str(
+                    item["custody_settlement_identifier"]
+                ),
+                execution_model_version=str(item["execution_model_version"]),
             )
             for item in value.get("fills", ())
         ),
         reconciliation=MultiAssetExecutionReconciliation(
             beginning_nav=float(reconciliation["beginning_nav"]),
-            revalued_beginning_nav=float(
-                reconciliation["revalued_beginning_nav"]
-            ),
+            revalued_beginning_nav=float(reconciliation["revalued_beginning_nav"]),
             mark_change_base=float(reconciliation["mark_change_base"]),
             commission_base=float(reconciliation["commission_base"]),
-            adverse_spread_base=float(
-                reconciliation["adverse_spread_base"]
-            ),
-            expected_ending_nav=float(
-                reconciliation["expected_ending_nav"]
-            ),
+            adverse_spread_base=float(reconciliation["adverse_spread_base"]),
+            expected_ending_nav=float(reconciliation["expected_ending_nav"]),
             ending_nav=float(reconciliation["ending_nav"]),
             difference=float(reconciliation["difference"]),
             reconciled=bool(reconciliation["reconciled"]),
         ),
+        policy_version=str(value["policy_version"]),
         profile_identifiers=tuple(
             str(item) for item in value.get("profile_identifiers", ())
         ),
@@ -1759,22 +1616,20 @@ def batch_from_dict(value: Mapping[str, Any]) -> MultiAssetExecutionBatch:
         ),
         attempt=int(value["attempt"]),
         schema_version=str(
-            value.get(
-                "schema_version",
-                "multi-asset-paper-execution-batch.v1",
-            )
+            value.get("schema_version", "multi-asset-paper-execution-batch.v1")
         ),
     )
 
 
 __all__ = [
-    "InstrumentExecutionProfile",
     "InstrumentSession",
     "InstrumentSessionProvider",
     "InstrumentSessionStatus",
     "MultiAssetExecutionBatch",
     "MultiAssetExecutionError",
+    "MultiAssetExecutionEventType",
     "MultiAssetExecutionIntegrityError",
+    "MultiAssetExecutionPolicy",
     "MultiAssetExecutionReconciliation",
     "MultiAssetExecutionStatus",
     "MultiAssetOrderResult",
@@ -1786,6 +1641,5 @@ __all__ = [
     "SQLiteMultiAssetPaperExecutionStore",
     "batch_from_dict",
     "batch_to_dict",
-    "profile_from_dict",
-    "profile_to_dict",
+    "fill_to_dict",
 ]
