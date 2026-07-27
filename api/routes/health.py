@@ -6,7 +6,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 
 from api.canonical_environment import CanonicalEnvironmentRepository
 from api.config import ApiSettings
@@ -75,12 +75,17 @@ def _database_component(
 
 def _dependency_components(
     *,
+    request: Request,
     resources: ApiResources,
     authentication: AuthenticationService,
     alert_store: SQLiteAlertStore,
     settings: ApiSettings,
     operations: OperationalSettings,
 ) -> dict[str, ReadinessComponentResponse]:
+    legacy_read_only_compatibility = (
+        not settings.require_canonical_environment
+        and not settings.full_universe_screening_database.exists()
+    )
     active_checks = [
         resources.portfolios.check(),
         resources.journal.check(),
@@ -102,7 +107,7 @@ def _dependency_components(
         _database_component(
             name="full_universe_screening",
             path=settings.full_universe_screening_database,
-            required=True,
+            required=not legacy_read_only_compatibility,
             detail="complete-universe screening authority",
         ),
         CanonicalEnvironmentRepository(
@@ -110,6 +115,25 @@ def _dependency_components(
             required=settings.require_canonical_environment,
         ).check(),
     ]
+    if legacy_read_only_compatibility:
+        active_checks.append(resources.snapshots.check())
+        slo_snapshot = request.app.state.operational_slo_service.assess()
+        slo_states = ", ".join(
+            f"{item.name.value}={item.status.value}"
+            for item in slo_snapshot.components
+        )
+        active_checks.append(
+            ReadinessComponent(
+                name="operational_slos",
+                required=operations.require_operational_slos,
+                ready=slo_snapshot.ready,
+                detail=(
+                    f"legacy read-only compatibility; policy="
+                    f"{slo_snapshot.policy_version}; evaluated_at="
+                    f"{slo_snapshot.evaluated_at.isoformat()}; {slo_states}"
+                ),
+            )
+        )
     identity = authentication.readiness()
     active_checks.append(
         ReadinessComponent(
@@ -187,6 +211,7 @@ def health(settings: ApiSettings = Depends(get_settings)) -> HealthResponse:
     responses={503: {"model": ReadinessResponse}},
 )
 def ready(
+    request: Request,
     response: Response,
     resources: ApiResources = Depends(get_resources),
     authentication: AuthenticationService = Depends(get_authentication),
@@ -195,6 +220,7 @@ def ready(
     operations: OperationalSettings = Depends(get_operational_settings),
 ) -> ReadinessResponse:
     components = _dependency_components(
+        request=request,
         resources=resources,
         authentication=authentication,
         alert_store=alert_store,
@@ -211,6 +237,7 @@ def ready(
 
 @router.get("/v1/readiness/status")
 def readiness_status(
+    request: Request,
     resources: ApiResources = Depends(get_resources),
     authentication: AuthenticationService = Depends(get_authentication),
     alert_store: SQLiteAlertStore = Depends(get_alert_store),
@@ -218,6 +245,7 @@ def readiness_status(
     operations: OperationalSettings = Depends(get_operational_settings),
 ) -> dict[str, object]:
     components = _dependency_components(
+        request=request,
         resources=resources,
         authentication=authentication,
         alert_store=alert_store,
