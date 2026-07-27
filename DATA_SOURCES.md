@@ -213,3 +213,19 @@ unavailable, the backtest must report the resulting bias.
 API keys stay in environment variables or GitHub secrets. Source licensing,
 redistribution rights, retention limits, and derived-data permissions must be
 reviewed before a provider is enabled outside development.
+
+## All-markets data-readiness gate
+
+`governance.data_readiness` and `config/all_markets_data_readiness.json` now
+provide the fail-closed coverage matrix for the complete controlled-test scope.
+The manifest distinguishes paper-eligible, decision-relevant, evidence-only, and
+prohibited markets and maps every required data domain to specific provider
+slots. A provider counts only when it is enabled, configured, authoritative for
+the domain, approved for the intended use, point-in-time capable, historically
+usable, provenance-complete, covered by a service-level policy, permitted for
+storage and derived analytics, and certified when required.
+
+Run `python run_data_readiness.py` before the canonical daily operation. The
+command never prints secret values and remains nonzero until every
+non-prohibited market has complete data coverage. See
+[All-Markets Data Readiness](docs/ALL_MARKETS_DATA_READINESS.md).
