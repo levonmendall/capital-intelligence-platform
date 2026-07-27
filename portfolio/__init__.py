@@ -1,4 +1,4 @@
-"""Canonical portfolio constraints, construction, execution, and state authorities."""
+"""Canonical portfolio construction, execution, constraints, and state authorities."""
 
 from portfolio.fit import (
     PortfolioFitDecision,
@@ -13,6 +13,12 @@ from portfolio.models import (
     PortfolioPosition,
     PortfolioProposal,
     PortfolioSnapshot,
+)
+from portfolio.multi_asset_controls import (
+    GovernedMultiAssetConstructionEngine,
+    MultiAssetConstructionError,
+    MultiAssetConstructionPolicy,
+    MultiAssetInstrumentProfile,
 )
 from portfolio.multi_asset_execution import (
     InstrumentExecutionProfile,
@@ -63,15 +69,19 @@ __all__ = [
     "CanonicalPortfolioSnapshot",
     "FundingCandidate",
     "FundingSourceType",
+    "GovernedMultiAssetConstructionEngine",
     "InstrumentExecutionProfile",
     "InstrumentSession",
     "InstrumentSessionProvider",
     "InstrumentSessionStatus",
+    "MultiAssetConstructionError",
+    "MultiAssetConstructionPolicy",
     "MultiAssetExecutionBatch",
     "MultiAssetExecutionError",
     "MultiAssetExecutionIntegrityError",
     "MultiAssetExecutionReconciliation",
     "MultiAssetExecutionStatus",
+    "MultiAssetInstrumentProfile",
     "MultiAssetOrderResult",
     "MultiAssetOrderStatus",
     "MultiAssetPaperExecutionOrchestrator",
