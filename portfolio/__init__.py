@@ -1,4 +1,4 @@
-"""Mandate-aware portfolio constraints and fit decisions."""
+"""Canonical portfolio constraints, construction, and state authorities."""
 
 from portfolio.fit import (
     PortfolioFitDecision,
@@ -23,16 +23,24 @@ from portfolio.opportunity_cost import (
     assess_opportunity_cost,
     opportunity_cost_to_dict,
 )
+from portfolio.state import (
+    CanonicalCurrencyBalance,
+    CanonicalImplementationEvent,
+    CanonicalPortfolioIntegrityError,
+    CanonicalPortfolioPosition,
+    CanonicalPortfolioSnapshot,
+    SQLiteCanonicalPortfolioStore,
+)
 
 __all__ = [
     "AssetBucket",
     "AssetBucketLimit",
     "CapitalFundingSource",
-    "SQLiteCanonicalPortfolioStore",
-    "CanonicalPortfolioSnapshot",
-    "CanonicalPortfolioPosition",
-    "CanonicalPortfolioIntegrityError",
+    "CanonicalCurrencyBalance",
     "CanonicalImplementationEvent",
+    "CanonicalPortfolioIntegrityError",
+    "CanonicalPortfolioPosition",
+    "CanonicalPortfolioSnapshot",
     "FundingCandidate",
     "FundingSourceType",
     "OpportunityCostAssessment",
@@ -45,14 +53,7 @@ __all__ = [
     "PortfolioPosition",
     "PortfolioProposal",
     "PortfolioSnapshot",
+    "SQLiteCanonicalPortfolioStore",
     "assess_opportunity_cost",
     "opportunity_cost_to_dict",
 ]
-
-from portfolio.state import (
-    CanonicalImplementationEvent,
-    CanonicalPortfolioIntegrityError,
-    CanonicalPortfolioPosition,
-    CanonicalPortfolioSnapshot,
-    SQLiteCanonicalPortfolioStore,
-)
