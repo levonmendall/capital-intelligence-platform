@@ -8,7 +8,7 @@ Its objective is to maximize long-term compounded portfolio returns after implem
 
 The active paper authority contains exactly one USD portfolio initialized with **$250,000**. Cash and every approved market exposure are holdings inside that one portfolio; asset classes never create additional portfolios.
 
-The system must analyze all configured market families. Direct paper allocation remains restricted to instruments that pass point-in-time policy and asset-specific governance gates.
+The system must analyze all configured market families. Direct paper allocation remains restricted to instruments that pass point-in-time policy and asset-specific governance gates. Analysis completeness and allocation authority remain separate, fail-closed controls.
 
 ## Retired mandates
 
