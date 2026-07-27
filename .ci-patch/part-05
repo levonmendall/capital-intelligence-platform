@@ -1,0 +1,134 @@
++        as_of=AS_OF - timedelta(minutes=1),
++        cash_amount=90_000.0,
++        positions=(
++            PaperPosition(
++                symbol="LEGACY",
++                instrument_identifier="instrument:LEGACY",
++                quantity=1_000.0,
++                mark_price=10.0,
++            ),
++        ),
++    )
++    exit_construction = PortfolioConstructionResult(
++        request_identifier="construction:legacy-exit",
++        as_of=AS_OF - timedelta(minutes=2),
++        status=ConstructionStatus.FEASIBLE,
++        policy_version="construction.v1",
++        target_cash_weight=1.0,
++        target_weights=(),
++        trades=(
++            TradeProposal(
++                symbol="LEGACY",
++                side=TradeSide.SELL,
++                from_weight=0.10,
++                to_weight=0.0,
++                trade_weight=0.10,
++                estimated_cost_return=0.001,
++                reason="exit no-longer-eligible holding",
++            ),
++        ),
++        turnover=0.10,
++        estimated_cost_return=0.001,
++        expected_return_before=0.04,
++        expected_return_after_cost=0.04,
++        expected_return_improvement=0.0,
++        constraints=(),
++        blocks=(),
++        eligible_universe_publication_identifier="eligible-universe:test",
++        instrument_identifiers=(("LEGACY", "instrument:LEGACY"),),
++    )
++
++    batch = service.execute(
++        construction=exit_construction,
++        decision_identifier="decision:legacy-exit",
++        portfolio=legacy_portfolio,
++        as_of=AS_OF,
++    )
++
++    assert batch.status is PaperExecutionStatus.COMPLETED
++    assert batch.ending_portfolio.positions == ()
++    assert provider.calls == 1
++    started = service.store.events(batch_identifier=batch.identifier)[0].payload
++    eligibility = started["execution_eligibility"]
++    assert eligibility["publication_identifier"] == "eligible-universe:test"
++    assert eligibility["instrument_results"][0]["eligibility_result"] == "legacy_exit_only"
++
++
+ def test_execution_module_has_no_broker_or_network_authority() -> None:
+     source = open("portfolio/execution.py", encoding="utf-8").read()
+     for prohibited in ("requests.", "httpx.", "alpaca", "interactive_brokers", "submit_order", "broker_api"):
+diff --git a/tests/test_run_paper_execution.py b/tests/test_run_paper_execution.py
+index 9d5a2b9e1258a0ca1683b8ae8136d90f6ddbc5b8..23afcd6520bfb10280eb8d12d442d14974b86d9b 100644
+--- a/tests/test_run_paper_execution.py
++++ b/tests/test_run_paper_execution.py
+@@ -6,7 +6,12 @@ from datetime import datetime, timedelta, timezone
+ from evaluation.persistence import serialize_construction
+ from portfolio.execution import portfolio_to_dict
+ from run_paper_execution import main
+-from tests.test_paper_execution_orchestration import AS_OF, construction, portfolio
++from tests.test_paper_execution_orchestration import (
++    AS_OF,
++    _universe_store,
++    construction,
++    portfolio,
++)
+ 
+ 
+ def _files(tmp_path):
+@@ -14,11 +19,12 @@ def _files(tmp_path):
+     portfolio_path = tmp_path / "portfolio.json"
+     construction_path.write_text(json.dumps(serialize_construction(construction(), code_version="test")), encoding="utf-8")
+     portfolio_path.write_text(json.dumps(portfolio_to_dict(portfolio())), encoding="utf-8")
+-    return construction_path, portfolio_path
++    universe_store = _universe_store(tmp_path)
++    return construction_path, portfolio_path, universe_store.path
+ 
+ 
+ def test_cli_executes_complete_paper_batch(tmp_path, capsys) -> None:
+-    construction_path, portfolio_path = _files(tmp_path)
++    construction_path, portfolio_path, universe_path = _files(tmp_path)
+     result = main([
+         "--construction", str(construction_path),
+         "--portfolio", str(portfolio_path),
+@@ -27,6 +33,7 @@ def test_cli_executes_complete_paper_batch(tmp_path, capsys) -> None:
+         "--quote-provider", "tests.paper_execution_factories:quote_provider",
+         "--as-of", AS_OF.isoformat(),
+         "--store-db", str(tmp_path / "paper.db"),
++        "--eligible-universe-db", str(universe_path),
+         "--journal-db", str(tmp_path / "journal.db"),
+         "--require-complete",
+     ])
+@@ -37,7 +44,7 @@ def test_cli_executes_complete_paper_batch(tmp_path, capsys) -> None:
+ 
+ 
+ def test_cli_require_complete_fails_for_closed_market(tmp_path, capsys) -> None:
+-    construction_path, portfolio_path = _files(tmp_path)
++    construction_path, portfolio_path, universe_path = _files(tmp_path)
+     result = main([
+         "--construction", str(construction_path),
+         "--portfolio", str(portfolio_path),
+@@ -46,6 +53,7 @@ def test_cli_require_complete_fails_for_closed_market(tmp_path, capsys) -> None:
+         "--quote-provider", "tests.paper_execution_factories:quote_provider",
+         "--as-of", AS_OF.isoformat(),
+         "--store-db", str(tmp_path / "paper.db"),
++        "--eligible-universe-db", str(universe_path),
+         "--without-journal",
+         "--require-complete",
+     ])
+@@ -54,7 +62,7 @@ def test_cli_require_complete_fails_for_closed_market(tmp_path, capsys) -> None:
+ 
+ 
+ def test_cli_rejects_naive_execution_timestamp(tmp_path, capsys) -> None:
+-    construction_path, portfolio_path = _files(tmp_path)
++    construction_path, portfolio_path, universe_path = _files(tmp_path)
+     result = main([
+         "--construction", str(construction_path),
+         "--portfolio", str(portfolio_path),
+@@ -63,6 +71,7 @@ def test_cli_rejects_naive_execution_timestamp(tmp_path, capsys) -> None:
+         "--quote-provider", "tests.paper_execution_factories:quote_provider",
+         "--as-of", "2026-07-27T15:00:00",
+         "--store-db", str(tmp_path / "paper.db"),
++        "--eligible-universe-db", str(universe_path),
+         "--without-journal",
+     ])
+     assert result == 4
