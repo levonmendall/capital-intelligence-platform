@@ -1,21 +1,27 @@
 name: Apply single portfolio update
 
 on:
-  push:
+  pull_request:
     branches:
-      - pr-117-single-portfolio-250k-global-scope
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   apply-update:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out branch
+      - name: Check out pull request branch
         uses: actions/checkout@v4
         with:
+          ref: pr-117-single-portfolio-250k-global-scope
           fetch-depth: 0
 
       - name: Reconstruct and validate patch
