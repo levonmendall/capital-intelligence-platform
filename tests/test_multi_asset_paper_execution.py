@@ -138,7 +138,10 @@ def _construction(*trades: TradeProposal) -> PortfolioConstructionResult:
         as_of=AS_OF - timedelta(minutes=1),
         status=ConstructionStatus.FEASIBLE,
         policy_version="portfolio-construction.v1",
-        target_cash_weight=0.8,
+        target_cash_weight=round(
+            1.0 - sum(item.to_weight for item in trades),
+            8,
+        ),
         target_weights=tuple((item.symbol, item.to_weight) for item in trades),
         trades=tuple(trades),
         turnover=sum(item.trade_weight for item in trades),
