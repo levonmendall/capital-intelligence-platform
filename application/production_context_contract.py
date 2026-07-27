@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from application.production_cio import (
@@ -229,12 +229,20 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                     "publication"
                 )
 
+        portfolio = context.portfolio
+        if governed_context:
+            portfolio = replace(
+                portfolio,
+                eligible_universe_publication_identifier=(
+                    context.eligible_universe_publication_identifier
+                ),
+            )
         return self.cycle.run(
             identifier=context.identifier,
             candidates=candidates,
             opportunity_context=context.opportunity_context,
             specialist_contexts=context.specialist_contexts,
-            portfolio=context.portfolio,
+            portfolio=portfolio,
             code_version=context.code_version,
         )
 
