@@ -39,7 +39,7 @@ class ProductionCanonicalCIOContext(_BaseProductionCanonicalCIOContext):
     eligible_universe_publication_identifier: str = "unknown"
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        super(ProductionCanonicalCIOContext, self).__post_init__()
         cutoff = self.knowledge_cutoff or self.as_of
         object.__setattr__(
             self,
