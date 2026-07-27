@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from cio import CandidateDecisionRecord, RecommendationUniversePolicy
 from opportunity.models import (
+    AlternativeKind,
     CandidateQualification,
     OpportunityQueue,
     OpportunitySetContext,
@@ -127,7 +128,12 @@ class OpportunityEngine:
             )
 
         qualified: list[
-            tuple[CandidateDecisionRecord, CandidateQualification, tuple[ScoreComponent, ...], float]
+            tuple[
+                CandidateDecisionRecord,
+                CandidateQualification,
+                tuple[ScoreComponent, ...],
+                float,
+            ]
         ] = []
         rejected: list[CandidateQualification] = []
         for candidate in candidates:
@@ -184,7 +190,43 @@ class OpportunityEngine:
             )
 
         universe = self.universe_policy.evaluate(candidate.instrument)
-        best_alternative = context.best_alternative()
+        baseline_alternatives = tuple(
+            item
+            for item in context.alternatives
+            if item.kind is not AlternativeKind.QUALIFIED_CANDIDATE
+        )
+        if not baseline_alternatives:
+            raise ValueError(
+                "opportunity context must contain cash or a current holding"
+            )
+        comparable_alternatives = tuple(
+            item
+            for item in context.alternatives
+            if not (
+                item.kind is AlternativeKind.QUALIFIED_CANDIDATE
+                and item.identifier == candidate.identifier
+            )
+        )
+        if not comparable_alternatives:
+            raise ValueError("candidate has no other available capital alternative")
+        baseline_alternative = max(
+            baseline_alternatives,
+            key=lambda item: (
+                item.net_expected_return,
+                item.evidence_quality,
+                item.liquidity_score,
+                item.identifier,
+            ),
+        )
+        best_alternative = max(
+            comparable_alternatives,
+            key=lambda item: (
+                item.net_expected_return,
+                item.evidence_quality,
+                item.liquidity_score,
+                item.identifier,
+            ),
+        )
         effective_opportunity_cost = best_alternative.net_expected_return
         opportunity_edge = round(
             candidate.net_expected_return - effective_opportunity_cost,
@@ -196,12 +238,12 @@ class OpportunityEngine:
         if (
             abs(
                 candidate.opportunity_cost_return
-                - effective_opportunity_cost
+                - baseline_alternative.net_expected_return
             )
             > self.policy.opportunity_cost_tolerance
         ):
             reasons.append(
-                "recorded candidate opportunity cost does not match the point-in-time opportunity set"
+                "recorded candidate opportunity cost does not match the point-in-time baseline alternatives"
             )
         if candidate.net_expected_return < self.policy.minimum_net_expected_return:
             reasons.append("cost-adjusted expected return is below threshold")
