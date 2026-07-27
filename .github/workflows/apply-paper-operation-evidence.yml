@@ -22,7 +22,14 @@ jobs:
 
       - name: Reconstruct and verify validated patch
         run: |
-          base64 --decode .github/patches/paper-operation-evidence-00.b64 \
+          cat \
+            .github/patches/paper-operation-evidence-00.part \
+            .github/patches/paper-operation-evidence-01.part \
+            .github/patches/paper-operation-evidence-02.part \
+            .github/patches/paper-operation-evidence-03a.part \
+            .github/patches/paper-operation-evidence-03b.part \
+            .github/patches/paper-operation-evidence-04.part \
+            | base64 --decode \
             > /tmp/paper-operation-evidence.patch.gz
           echo '690b1eb02e216b0c582f452bec95d9314f7946c72741b6b5f8d73b36969f307e  /tmp/paper-operation-evidence.patch.gz' | sha256sum --check
           gzip --decompress --stdout /tmp/paper-operation-evidence.patch.gz > /tmp/paper-operation-evidence.patch
