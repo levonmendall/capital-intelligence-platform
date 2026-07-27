@@ -1,6 +1,8 @@
 services:
   api:
-    build: .
+    build:
+      context: .
+      target: runtime
     image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
     command: ["sh", "-c", "python initialize.py && exec uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
@@ -26,12 +28,15 @@ services:
 
   scheduler:
     image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
-    build: .
-    command: ["python", "run_daily_operations.py", "--loop"]
+    build:
+      context: .
+      target: runtime
+    command: ["sh", "-c", "python run_daily_operations.py --validate-plan && exec python run_daily_operations.py --loop"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
     volumes:
       - capital_data:/app/database
       - capital_backups:/app/backups
+      - ${CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS_FILE:?Set CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS_FILE to the reviewed binding JSON}:/run/secrets/canonical-daily-stage-bindings.json:ro
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -40,6 +45,7 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+    stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "python", "-c", "from operations import OperationalSettings, WorkerHeartbeatStore; s=OperationalSettings.from_env(); ok,_,_=WorkerHeartbeatStore(s.worker_heartbeat_path).health(maximum_age_seconds=s.worker_max_age_seconds); raise SystemExit(0 if ok else 1)"]
       interval: 60s
@@ -52,7 +58,9 @@ services:
 
   web:
     image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
-    build: .
+    build:
+      context: .
+      target: runtime
     command: ["streamlit", "run", "secure_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
     ports:
@@ -81,7 +89,9 @@ services:
 
   backup:
     image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
-    build: .
+    build:
+      context: .
+      target: runtime
     command: ["python", "run_backup.py", "--loop"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
     volumes:
