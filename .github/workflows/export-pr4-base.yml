@@ -1,0 +1,28 @@
+name: Export PR4 base source
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/export-pr4-base.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+      - name: Create exact source archive
+        run: |
+          git archive --format=zip --output=pr4-base.zip HEAD
+      - name: Upload exact source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr4-base
+          path: pr4-base.zip
+          if-no-files-found: error
+          retention-days: 1
