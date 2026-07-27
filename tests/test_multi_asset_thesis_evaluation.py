@@ -228,7 +228,10 @@ def test_multi_asset_performance_feeds_existing_living_thesis_monitor(tmp_path) 
     assert assessment.currency_material is True
     assert assessment.net_base_return == observation.implementation_net_base_return
     assert update.thesis_identifier == thesis.identifier
-    assert update.performance_since_approval == observation.implementation_net_base_return
+    assert update.performance_since_approval == round(
+        observation.implementation_net_base_return,
+        8,
+    )
     assert "replacement-screen:1" in update.evidence_identifiers
     assert assessment.observation_identifier == observation.identifier
 
