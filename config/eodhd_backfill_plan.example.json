@@ -1,0 +1,28 @@
+{
+  "schema_version": "provider-backfill-plan.v1",
+  "identifier": "eodhd-initial-backfill.v1",
+  "as_of": "2026-07-27T23:59:59+00:00",
+  "tasks": [
+    {
+      "identifier": "global-eod-prices",
+      "provider_factory": "providers.eodhd:build_eodhd_provider",
+      "dataset_type": "market_history",
+      "provider_symbols": ["AAPL.US", "SPY.US", "EUR.FOREX", "BTC-USD.CC"],
+      "start_at": "2016-01-01T00:00:00+00:00",
+      "end_at": "2026-07-27T00:00:00+00:00",
+      "window_days": 365,
+      "limit": 1000000,
+      "required": true
+    },
+    {
+      "identifier": "corporate-actions",
+      "provider_factory": "providers.eodhd:build_eodhd_provider",
+      "dataset_type": "corporate_actions",
+      "provider_symbols": ["AAPL.US", "SPY.US"],
+      "start_at": "2016-01-01T00:00:00+00:00",
+      "end_at": "2026-07-27T00:00:00+00:00",
+      "window_days": 730,
+      "required": true
+    }
+  ]
+}
