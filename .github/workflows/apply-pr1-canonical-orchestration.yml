@@ -36,9 +36,7 @@ jobs:
           persist-credentials: true
 
       - name: Apply exact canonical scheduler patch
-        run: |
-          git apply --check /tmp/pr1.patch
-          git apply /tmp/pr1.patch
+        run: patch -p1 --forward --batch < /tmp/pr1.patch
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
