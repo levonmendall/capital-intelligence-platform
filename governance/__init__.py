@@ -30,6 +30,13 @@ from governance.data_readiness import (
     load_data_readiness_manifest,
     manifest_from_payload as data_readiness_manifest_from_payload,
 )
+from governance.forecast_evidence import (
+    ForecastEvidenceError,
+    ForecastEvidenceIntegrityError,
+    ForecastScenario,
+    GovernedForecastEvidence,
+    SQLiteForecastEvidenceStore,
+)
 from governance.product_readiness import (
     ProductTestReadiness,
     ProductTestReadinessEvidence,
@@ -75,6 +82,10 @@ __all__ = [
     "AssetClassScopeAssessment",
     "AssetClassScopeAuthority",
     "CustodySettlementModel",
+    "ForecastEvidenceError",
+    "ForecastEvidenceIntegrityError",
+    "ForecastScenario",
+    "GovernedForecastEvidence",
     "OperationalReadinessSnapshot",
     "ProductTestReadiness",
     "ProductTestReadinessEvidence",
@@ -88,6 +99,7 @@ __all__ = [
     "ReadinessGateCertification",
     "ReadinessGateState",
     "SQLiteAssetClassApprovalStore",
+    "SQLiteForecastEvidenceStore",
     "SQLiteProductTestReadinessStore",
     "SQLiteReadinessEvidenceStore",
     "TestReadinessIntegrityError",
