@@ -24,6 +24,7 @@ from data.market import (
     PriceBar,
     TradeSide,
 )
+from data.multi_asset_universe import MultiAssetUniverseBuilder
 from data.observation import (
     AvailabilityBasis,
     DataFrequency,
@@ -52,7 +53,6 @@ from data.security import (
     VenueListing,
     normalize_cik,
 )
-
 from data.security_master import (
     IdentifierAssignment,
     InstrumentRecord,
@@ -118,6 +118,7 @@ from data.security_master_store import (
     deserialize_security_master_catalog,
     serialize_security_master_catalog,
 )
+
 __all__ = [
     "AssetClass",
     "AvailabilityBasis",
@@ -145,6 +146,7 @@ __all__ = [
     "MarketDataType",
     "MarketQuote",
     "MarketTrade",
+    "MultiAssetUniverseBuilder",
     "NormalizedObservation",
     "ObservationProvenance",
     "ObservationProvider",
