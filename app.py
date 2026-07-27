@@ -17,9 +17,12 @@ from api.repositories import (
 )
 from core.portfolio import (
     get_mandate_details,
-    get_mandates,
     get_portfolio_totals,
     get_trade_history,
+)
+from portfolio.constants import (
+    CANONICAL_PORTFOLIO_CODE,
+    PORTFOLIO_OBJECTIVE,
 )
 from providers.economic_snapshot import load_dashboard_data
 
@@ -151,12 +154,13 @@ def _render_today() -> None:
     st.divider()
     totals = get_portfolio_totals()
     overview1, overview2, overview3, overview4 = st.columns(4)
-    overview1.metric("Virtual AUM", format_currency(totals["nav"]))
+    overview1.metric("Portfolio value", format_currency(totals["nav"]))
     overview2.metric("Available cash", format_currency(totals["cash"]))
     overview3.metric("Paper return", format_percent(totals["total_return"]))
-    overview4.metric("Authorized portfolios", totals["mandate_count"])
+    overview4.metric("Mandate", "Compounding")
     st.caption(
-        "Portfolio figures are paper records. CIO decisions remain non-executing "
+        "One paper portfolio pursues the strongest evidence-supported use of "
+        "capital across all governed markets. CIO decisions remain non-executing "
         "until a separately approved implementation layer is validated."
     )
 
@@ -242,15 +246,11 @@ def _render_portfolio() -> None:
             "the CIO action and does not submit broker orders."
         )
 
-    mandates = get_mandates()
-    if not mandates:
-        st.info("No authorized paper mandates are available.")
-        return
-    labels = {str(item["code"]): f"{item['name']} ({item['code']})" for item in mandates}
-    selected = st.selectbox("Authorized mandate", options=list(labels), format_func=labels.get)
-    mandate = get_mandate_details(selected)
+    st.markdown("### Capital Intelligence Portfolio")
+    st.caption(PORTFOLIO_OBJECTIVE)
+    mandate = get_mandate_details(CANONICAL_PORTFOLIO_CODE)
     if mandate is None:
-        st.warning("The selected mandate is unavailable.")
+        st.warning("The canonical paper portfolio is unavailable.")
         return
 
     summary1, summary2, summary3, summary4 = st.columns(4)
@@ -337,7 +337,7 @@ def _render_history() -> None:
 
 st.title("Capital Intelligence Platform")
 st.caption(
-    "Compare every use of capital · Implement at portfolio level · Monitor the thesis · Evaluate point in time"
+    "One portfolio · All-market analysis · Evidence-supported allocation · Point-in-time evaluation"
 )
 
 page = st.sidebar.radio("Navigation", ["Today", "Environment", "Portfolio", "History"])

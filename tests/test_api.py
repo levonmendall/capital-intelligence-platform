@@ -179,13 +179,13 @@ def _create_portfolio_database(path: Path) -> None:
     as_of = datetime(2026, 1, 28, 12, tzinfo=timezone.utc)
     store.append(
         CanonicalPortfolioSnapshot(
-            identifier="portfolio:GROWTH:2026-01-28",
-            portfolio_code="GROWTH",
-            display_name="Growth Portfolio",
-            constraint_profile="moderate",
+            identifier="portfolio:COMPOUNDING:2026-01-28",
+            portfolio_code="COMPOUNDING",
+            display_name="Capital Intelligence Portfolio",
+            constraint_profile="operational",
             as_of=as_of,
-            starting_capital=100000,
-            cash_amount=54000,
+            starting_capital=250000,
+            cash_amount=199000,
             positions=(
                 CanonicalPortfolioPosition(
                     symbol="SPY", quantity=100, average_cost=500,
@@ -378,15 +378,15 @@ def test_portfolio_routes_are_read_only(tmp_path) -> None:
 
     listing = client.get("/v1/portfolios")
     assert listing.status_code == 200
-    assert listing.json()["items"][0]["code"] == "GROWTH"
+    assert listing.json()["items"][0]["code"] == "COMPOUNDING"
 
-    portfolio = client.get("/v1/portfolios/growth")
+    portfolio = client.get("/v1/portfolios/compounding")
     assert portfolio.status_code == 200
-    assert portfolio.json()["total_return"] == 0.05
+    assert portfolio.json()["total_return"] == 0.0
     assert portfolio.json()["holdings"][0]["symbol"] == "SPY"
 
     assert client.post("/v1/portfolios", json={}).status_code == 405
-    assert client.delete("/v1/portfolios/GROWTH").status_code == 405
+    assert client.delete("/v1/portfolios/COMPOUNDING").status_code == 405
 
 
 def test_missing_required_store_returns_503_without_affecting_health(tmp_path) -> None:

@@ -14,6 +14,8 @@ from enum import Enum
 from pathlib import Path
 from uuid import uuid4
 
+from portfolio.constants import CANONICAL_PORTFOLIO_CODE
+
 
 class AuthenticationError(RuntimeError):
     """Base authentication failure."""
@@ -94,6 +96,8 @@ class AuthenticatedPrincipal:
 
     def can_access_mandate(self, mandate_code: str, *, write: bool = False) -> bool:
         normalized = _mandate_code(mandate_code)
+        if normalized != CANONICAL_PORTFOLIO_CODE:
+            return False
         if self.is_administrator:
             return True
         if self.is_auditor:
@@ -482,6 +486,10 @@ class SQLiteIdentityStore:
     ) -> UserAccount:
         resolved_user_id = self.get_user(user_id).user_id
         normalized_code = _mandate_code(mandate_code)
+        if normalized_code != CANONICAL_PORTFOLIO_CODE:
+            raise ValueError(
+                f"only {CANONICAL_PORTFOLIO_CODE} portfolio access may be granted"
+            )
         resolved_permission = MandatePermission(permission)
         with self._connect() as connection:
             connection.execute(

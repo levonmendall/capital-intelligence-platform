@@ -1,9 +1,9 @@
 """Canonical append-only, cross-currency portfolio-state authority.
 
 The store owns base-currency cash, non-base cash balances, positions, valuation
-snapshots, FX lineage, and implementation history for every active paper
-portfolio. Legacy mandate/trading databases may be read once by migration code,
-but are never an active state source.
+snapshots, FX lineage, and implementation history for the sole active paper
+portfolio. Legacy mandate/trading databases may be archived or read once by
+migration code, but are never an active state source.
 """
 
 from __future__ import annotations
@@ -16,6 +16,14 @@ from datetime import datetime, timezone
 from math import isfinite
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+
+from portfolio.constants import (
+    CANONICAL_BASE_CURRENCY,
+    CANONICAL_CONSTRAINT_PROFILE,
+    CANONICAL_PORTFOLIO_CODE,
+    CANONICAL_PORTFOLIO_NAME,
+    INITIAL_PAPER_CAPITAL,
+)
 
 
 def _text(value: object, *, field_name: str) -> str:
@@ -379,7 +387,7 @@ class CanonicalPortfolioSnapshot:
     implementation_events: tuple[CanonicalImplementationEvent, ...] = ()
     source_identifiers: tuple[str, ...] = ()
     schema_version: str = "canonical-portfolio-state.v2"
-    base_currency: str = "USD"
+    base_currency: str = CANONICAL_BASE_CURRENCY
     currency_balances: tuple[CanonicalCurrencyBalance, ...] = ()
 
     def __post_init__(self) -> None:
@@ -394,10 +402,19 @@ class CanonicalPortfolioSnapshot:
                 field_name,
                 _text(getattr(self, field_name), field_name=field_name),
             )
+        normalized_portfolio_code = _text(
+            self.portfolio_code,
+            field_name="portfolio_code",
+        ).upper()
+        if normalized_portfolio_code != CANONICAL_PORTFOLIO_CODE:
+            raise ValueError(
+                "portfolio_code must be the sole canonical portfolio "
+                f"{CANONICAL_PORTFOLIO_CODE!r}"
+            )
         object.__setattr__(
             self,
             "portfolio_code",
-            _text(self.portfolio_code, field_name="portfolio_code").upper(),
+            normalized_portfolio_code,
         )
         _aware(self.as_of, field_name="as_of")
         object.__setattr__(
@@ -518,6 +535,21 @@ class CanonicalPortfolioIntegrityError(RuntimeError):
     """Raised when the append-only portfolio event chain is invalid."""
 
 
+class CanonicalPortfolioCompatibilityError(CanonicalPortfolioIntegrityError):
+    """Raised when valid history conflicts with the sole-portfolio contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalPortfolioInitialization:
+    """Result of bootstrapping or repairing the paper portfolio authority."""
+
+    path: Path
+    created: bool
+    reset: bool
+    archive_path: Path | None
+    reason: str
+
+
 class SQLiteCanonicalPortfolioStore:
     """Persist complete portfolio snapshots in one tamper-evident event chain."""
 
@@ -540,7 +572,8 @@ class SQLiteCanonicalPortfolioStore:
                 CREATE TABLE IF NOT EXISTS {self._TABLE} (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     event_identifier TEXT NOT NULL UNIQUE,
-                    portfolio_code TEXT NOT NULL,
+                    portfolio_code TEXT NOT NULL
+                        CHECK (portfolio_code = 'COMPOUNDING'),
                     occurred_at TEXT NOT NULL,
                     payload_json TEXT NOT NULL,
                     previous_hash TEXT NOT NULL,
@@ -548,6 +581,10 @@ class SQLiteCanonicalPortfolioStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_canonical_portfolio_code
                     ON {self._TABLE}(portfolio_code, sequence);
+                CREATE TRIGGER IF NOT EXISTS canonical_portfolio_code_guard
+                BEFORE INSERT ON {self._TABLE}
+                WHEN NEW.portfolio_code <> 'COMPOUNDING'
+                BEGIN SELECT RAISE(ABORT, 'only the COMPOUNDING portfolio is permitted'); END;
                 CREATE TRIGGER IF NOT EXISTS canonical_portfolio_no_update
                 BEFORE UPDATE ON {self._TABLE}
                 BEGIN SELECT RAISE(ABORT, 'canonical portfolio events are append-only'); END;
@@ -580,8 +617,31 @@ class SQLiteCanonicalPortfolioStore:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     def append(self, snapshot: CanonicalPortfolioSnapshot) -> int:
+        if not isinstance(snapshot, CanonicalPortfolioSnapshot):
+            raise TypeError("snapshot must be a CanonicalPortfolioSnapshot")
+        if snapshot.portfolio_code != CANONICAL_PORTFOLIO_CODE:
+            raise ValueError(
+                f"only {CANONICAL_PORTFOLIO_CODE} portfolio snapshots may be appended"
+            )
         payload_json = _canonical_json(snapshot_to_dict(snapshot))
         with self._connect() as connection:
+            latest = connection.execute(
+                f"SELECT payload_json FROM {self._TABLE} "
+                "WHERE portfolio_code = ? ORDER BY sequence DESC LIMIT 1",
+                (CANONICAL_PORTFOLIO_CODE,),
+            ).fetchone()
+            if latest is None:
+                if abs(snapshot.starting_capital - INITIAL_PAPER_CAPITAL) > 0.00000001:
+                    raise ValueError(
+                        "the first canonical portfolio snapshot must use initial "
+                        f"paper capital of {INITIAL_PAPER_CAPITAL:.2f}"
+                    )
+            else:
+                latest_snapshot = snapshot_from_dict(json.loads(latest["payload_json"]))
+                if abs(snapshot.starting_capital - latest_snapshot.starting_capital) > 0.00000001:
+                    raise ValueError(
+                        "starting_capital is immutable after canonical portfolio initialization"
+                    )
             prior = connection.execute(
                 f"SELECT sequence, payload_json FROM {self._TABLE} "
                 "WHERE event_identifier = ?",
@@ -638,6 +698,10 @@ class SQLiteCanonicalPortfolioStore:
                 raise CanonicalPortfolioIntegrityError(
                     "portfolio event sequence is not contiguous"
                 )
+            if str(row["portfolio_code"]).upper() != CANONICAL_PORTFOLIO_CODE:
+                raise CanonicalPortfolioCompatibilityError(
+                    "portfolio history contains a retired or unauthorized portfolio code"
+                )
             if str(row["previous_hash"]) != expected_previous:
                 raise CanonicalPortfolioIntegrityError(
                     "portfolio event previous-hash link is invalid"
@@ -656,8 +720,10 @@ class SQLiteCanonicalPortfolioStore:
                 )
             expected_previous = expected_hash
 
-    def latest(self, portfolio_code: str) -> CanonicalPortfolioSnapshot | None:
+    def latest(self, portfolio_code: str = CANONICAL_PORTFOLIO_CODE) -> CanonicalPortfolioSnapshot | None:
         normalized = _text(portfolio_code, field_name="portfolio_code").upper()
+        if normalized != CANONICAL_PORTFOLIO_CODE:
+            return None
         with self._connect() as connection:
             row = connection.execute(
                 f"SELECT payload_json FROM {self._TABLE} "
@@ -671,24 +737,8 @@ class SQLiteCanonicalPortfolioStore:
         )
 
     def list_latest(self) -> tuple[CanonicalPortfolioSnapshot, ...]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT events.payload_json
-                FROM {self._TABLE} AS events
-                INNER JOIN (
-                    SELECT portfolio_code, MAX(sequence) AS sequence
-                    FROM {self._TABLE}
-                    GROUP BY portfolio_code
-                ) AS latest
-                ON events.portfolio_code = latest.portfolio_code
-                AND events.sequence = latest.sequence
-                ORDER BY events.portfolio_code
-                """
-            ).fetchall()
-        return tuple(
-            snapshot_from_dict(json.loads(row["payload_json"])) for row in rows
-        )
+        latest = self.latest(CANONICAL_PORTFOLIO_CODE)
+        return () if latest is None else (latest,)
 
     def history(
         self,
@@ -697,6 +747,8 @@ class SQLiteCanonicalPortfolioStore:
         limit: int = 250,
     ) -> tuple[CanonicalPortfolioSnapshot, ...]:
         normalized = _text(portfolio_code, field_name="portfolio_code").upper()
+        if normalized != CANONICAL_PORTFOLIO_CODE:
+            return ()
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError("limit must be a positive integer")
         with self._connect() as connection:
@@ -1012,14 +1064,160 @@ def snapshot_details(
     return payload
 
 
+def canonical_initial_snapshot(
+    *,
+    as_of: datetime | None = None,
+) -> CanonicalPortfolioSnapshot:
+    """Build the deterministic economic starting state for the paper portfolio."""
+
+    effective_as_of = (as_of or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return CanonicalPortfolioSnapshot(
+        identifier="portfolio-bootstrap:COMPOUNDING:v1",
+        portfolio_code=CANONICAL_PORTFOLIO_CODE,
+        display_name=CANONICAL_PORTFOLIO_NAME,
+        constraint_profile=CANONICAL_CONSTRAINT_PROFILE,
+        as_of=effective_as_of,
+        starting_capital=INITIAL_PAPER_CAPITAL,
+        cash_amount=INITIAL_PAPER_CAPITAL,
+        positions=(),
+        source_identifiers=("canonical-single-portfolio-bootstrap.v1",),
+        base_currency=CANONICAL_BASE_CURRENCY,
+    )
+
+
+def _archive_portfolio_database(
+    path: Path,
+    *,
+    archive_directory: Path | None,
+    archived_at: datetime,
+    reason: str,
+) -> Path:
+    directory = archive_directory or path.parent / "legacy_portfolio_archives"
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = archived_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archive_path = directory / f"{path.stem}.pre-single-portfolio.{stamp}{path.suffix or '.db'}"
+    counter = 1
+    while archive_path.exists():
+        archive_path = directory / (
+            f"{path.stem}.pre-single-portfolio.{stamp}.{counter}{path.suffix or '.db'}"
+        )
+        counter += 1
+
+    with sqlite3.connect(path) as source, sqlite3.connect(archive_path) as target:
+        source.backup(target)
+
+    manifest = {
+        "schema_version": "canonical-portfolio-archive.v1",
+        "source_path": str(path),
+        "archive_path": str(archive_path),
+        "archived_at": archived_at.astimezone(timezone.utc).isoformat(),
+        "reason": reason,
+        "replacement_portfolio_code": CANONICAL_PORTFOLIO_CODE,
+        "replacement_initial_capital": INITIAL_PAPER_CAPITAL,
+    }
+    archive_path.with_suffix(archive_path.suffix + ".json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    path.unlink(missing_ok=True)
+    for suffix in ("-wal", "-shm", "-journal"):
+        Path(f"{path}{suffix}").unlink(missing_ok=True)
+    return archive_path
+
+
+def ensure_canonical_portfolio_store(
+    path: str | Path,
+    *,
+    as_of: datetime | None = None,
+    archive_directory: str | Path | None = None,
+) -> CanonicalPortfolioInitialization:
+    """Ensure exactly one USD COMPOUNDING portfolio initialized with $250,000.
+
+    Valid append-only history is preserved when it already satisfies the contract.
+    Valid but incompatible paper history is copied to a legacy audit archive before
+    a clean canonical database is created. Hash-chain corruption is never reset
+    automatically and remains a hard failure.
+    """
+
+    effective_as_of = (as_of or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    resolved_path = Path(path)
+    resolved_archive = None if archive_directory is None else Path(archive_directory)
+    store = SQLiteCanonicalPortfolioStore(resolved_path)
+    archive_path: Path | None = None
+    reset = False
+    reason = "existing canonical portfolio retained"
+
+    try:
+        store.verify_integrity()
+    except CanonicalPortfolioCompatibilityError as error:
+        reason = str(error)
+        archive_path = _archive_portfolio_database(
+            resolved_path,
+            archive_directory=resolved_archive,
+            archived_at=effective_as_of,
+            reason=reason,
+        )
+        reset = True
+        store = SQLiteCanonicalPortfolioStore(resolved_path)
+
+    latest = store.latest(CANONICAL_PORTFOLIO_CODE)
+    if latest is not None:
+        incompatibilities: list[str] = []
+        if abs(latest.starting_capital - INITIAL_PAPER_CAPITAL) > 0.00000001:
+            incompatibilities.append(
+                "canonical starting capital is not $250,000.00"
+            )
+        if latest.base_currency != CANONICAL_BASE_CURRENCY:
+            incompatibilities.append("canonical base currency is not USD")
+        if incompatibilities:
+            reason = "; ".join(incompatibilities)
+            archive_path = _archive_portfolio_database(
+                resolved_path,
+                archive_directory=resolved_archive,
+                archived_at=effective_as_of,
+                reason=reason,
+            )
+            reset = True
+            store = SQLiteCanonicalPortfolioStore(resolved_path)
+            latest = None
+
+    created = latest is None
+    if created:
+        store.append(canonical_initial_snapshot(as_of=effective_as_of))
+        reason = (
+            "incompatible paper history archived and canonical portfolio reset"
+            if reset
+            else "canonical portfolio created"
+        )
+
+    store.verify_integrity()
+    final = store.list_latest()
+    if len(final) != 1:
+        raise CanonicalPortfolioCompatibilityError(
+            "canonical portfolio initialization did not produce exactly one portfolio"
+        )
+    return CanonicalPortfolioInitialization(
+        path=resolved_path,
+        created=created,
+        reset=reset,
+        archive_path=archive_path,
+        reason=reason,
+    )
+
+
 __all__ = [
     "CanonicalCurrencyBalance",
     "CanonicalImplementationEvent",
+    "CanonicalPortfolioCompatibilityError",
+    "CanonicalPortfolioInitialization",
     "CanonicalPortfolioIntegrityError",
     "CanonicalPortfolioPosition",
     "CanonicalPortfolioSnapshot",
     "SQLiteCanonicalPortfolioStore",
+    "canonical_initial_snapshot",
     "currency_balance_to_dict",
+    "ensure_canonical_portfolio_store",
     "event_to_dict",
     "position_to_dict",
     "snapshot_details",

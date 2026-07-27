@@ -114,46 +114,36 @@ Supporting metrics may include:
 
 # 4. Scope and Investment Universe
 
-## Version 1 Recommendation Universe
+## One Portfolio and All-Market Analysis
 
-For Version 1, the platform should directly recommend and allocate capital among:
+The platform operates one active paper portfolio:
 
-* Liquid U.S.-listed equities
-* Liquid U.S.-listed ETFs
-* Cash or short-duration Treasury equivalents
+* Portfolio code: `COMPOUNDING`
+* Initial paper capital: **$250,000**
+* Base currency: USD
+* Objective: maximize long-term compounded returns after implementation costs and within approved constraints
 
-This creates a focused investable universe with sufficient liquidity, data quality, and analytical consistency.
+The platform must continuously analyze all supported liquid public-market families, including:
 
-## Broader Markets as Evidence
+* Global equities and listed funds
+* Government bonds and credit
+* Cash equivalents
+* Commodities and precious metals
+* Foreign exchange
+* Crypto
+* Real-estate securities
+* Options and volatility markets
+* Other liquid alternatives
 
-The platform should still analyze the following markets as intelligence inputs:
+The analysis universe must be built from a provider-driven, point-in-time security master. A static shortlist cannot define the active opportunity set.
 
-* Government bonds
-* Credit markets
-* Commodities
-* Currencies
-* Options
-* International equity indexes
-* Global ETFs
-* Economic derivatives
-* Volatility markets
+## Governed Direct Allocation
 
-These markets help the system understand economic conditions, capital flows, risk, expectations, and cross-asset relationships.
+All-market analysis is mandatory; direct allocation is conditional. An instrument may become a direct paper recommendation target only when the complete point-in-time capability stack is approved: identity, licensed data, valuation, expected return, liquidity, risk, transaction costs, execution, custody, settlement, thesis monitoring, outcome evaluation, and governance lineage.
 
-They should not become direct recommendation targets until dedicated asset-specific valuation, return, risk, liquidity, and implementation models have been validated.
+An unavailable or unapproved capability keeps the market evidence-only, research-only, or ineligible. It must never be treated as absent evidence for the purpose of claiming that the remaining market is the best use of capital.
 
-## Future Expansion
-
-The architecture should remain extensible to:
-
-* Individual fixed-income instruments
-* International equities
-* Commodities
-* Currencies
-* Options
-* Alternative assets
-
-Each new asset class must receive its own analytical and implementation framework before joining the investable universe.
+Each newly eligible asset class remains under the same `COMPOUNDING` objective. It cannot create a separate crypto, global, income, defensive, growth, or tactical portfolio.
 
 ---
 
