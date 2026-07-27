@@ -1,9 +1,7 @@
 name: Apply PR4 compounding mandate
 
 on:
-  push:
-    branches:
-      - agent/remove-goal-oriented-mandates
+  pull_request:
     paths:
       - .github/workflows/one-shot-pr4-compounding.yml
 
