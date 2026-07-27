@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capital-intelligence.example/schemas/crypto-venue-bindings.v1.json",
+  "title": "Independent crypto venue bindings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bindings"],
+  "properties": {
+    "schema_version": {"const": "crypto-venue-bindings.v1"},
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instrument_id",
+          "quote_currency",
+          "coinbase_product_id",
+          "kraken_symbol"
+        ],
+        "properties": {
+          "instrument_id": {"type": "string", "minLength": 1},
+          "quote_currency": {"type": "string", "minLength": 2},
+          "coinbase_product_id": {"type": "string", "minLength": 3},
+          "kraken_symbol": {"type": "string", "minLength": 3}
+        }
+      }
+    }
+  }
+}

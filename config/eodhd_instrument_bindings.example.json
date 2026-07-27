@@ -1,0 +1,23 @@
+{
+  "schema_version": "eodhd-instrument-bindings.v1",
+  "bindings": [
+    {
+      "instrument_id": "instrument:us-equity:aapl",
+      "provider_symbol": "AAPL.US",
+      "venue": "XNAS",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:fx:eurusd",
+      "provider_symbol": "EURUSD.FOREX",
+      "venue": "EODHD_FOREX",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:crypto:btcusd",
+      "provider_symbol": "BTC-USD.CC",
+      "venue": "EODHD_CRYPTO",
+      "currency": "USD"
+    }
+  ]
+}
