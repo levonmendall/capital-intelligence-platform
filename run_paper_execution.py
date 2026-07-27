@@ -18,6 +18,7 @@ from portfolio.construction_api import (
     TradeProposal,
     TradeSide,
 )
+from portfolio.state import SQLiteCanonicalPortfolioStore
 from portfolio.execution import (
     PaperExecutionOrchestrator,
     PaperExecutionPolicy,
@@ -99,6 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--quote-provider", required=True, help="module:factory returning a PaperQuoteProvider")
     parser.add_argument("--as-of", required=True, help="Timezone-aware execution timestamp")
     parser.add_argument("--store-db", default="database/paper_execution.db")
+    parser.add_argument("--portfolio-db", default="database/canonical_portfolio.db")
+    parser.add_argument("--portfolio-code", default="CORE")
     parser.add_argument("--journal-db", default="database/institutional_journal.db")
     parser.add_argument("--without-journal", action="store_true")
     parser.add_argument("--require-complete", action="store_true")
@@ -125,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
             quote_provider=_factory(args.quote_provider),
             store=SQLitePaperExecutionStore(args.store_db),
             journal=journal,
+            portfolio_store=SQLiteCanonicalPortfolioStore(args.portfolio_db),
+            portfolio_code=args.portfolio_code,
             policy=PaperExecutionPolicy(
                 maximum_quote_age_minutes=args.maximum_quote_age_minutes,
                 maximum_daily_volume_participation=args.maximum_volume_participation,

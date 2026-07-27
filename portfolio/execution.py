@@ -19,6 +19,12 @@ from typing import Any, Mapping, Protocol, Sequence
 from cio.persistence import SQLiteCIOJournal
 from evaluation.persistence import append_paper_trade_fill
 from evaluation.walk_forward import PaperTradeFill
+from portfolio.state import (
+    CanonicalImplementationEvent,
+    CanonicalPortfolioPosition,
+    CanonicalPortfolioSnapshot,
+    SQLiteCanonicalPortfolioStore,
+)
 from portfolio.construction_api import (
     ConstructionStatus,
     PortfolioConstructionResult,
@@ -596,12 +602,16 @@ class PaperExecutionOrchestrator:
         quote_provider: PaperQuoteProvider,
         store: SQLitePaperExecutionStore,
         journal: SQLiteCIOJournal | None = None,
+        portfolio_store: SQLiteCanonicalPortfolioStore | None = None,
+        portfolio_code: str = "CORE",
         policy: PaperExecutionPolicy | None = None,
     ) -> None:
         self.session_provider = session_provider
         self.quote_provider = quote_provider
         self.store = store
         self.journal = journal
+        self.portfolio_store = portfolio_store
+        self.portfolio_code = _text(portfolio_code, field_name="portfolio_code").upper()
         self.policy = policy or PaperExecutionPolicy()
 
     def execute(
@@ -631,6 +641,7 @@ class PaperExecutionOrchestrator:
             PaperExecutionStatus.CANCELLED,
         }:
             self._publish_journal_fills(prior)
+            self._publish_portfolio_state(prior)
             return prior
 
         if prior is None:
@@ -664,6 +675,7 @@ class PaperExecutionOrchestrator:
                 now, PaperExecutionStatus.NO_ACTION, self.policy.version, beginning, current, tuple(orders), tuple(fills), reconciliation, attempt,
             )
             self._persist_attempt(batch)
+            self._publish_portfolio_state(batch)
             return batch
 
         session = self.session_provider.session(as_of=now, calendar_name=self.policy.calendar_name)
@@ -817,6 +829,7 @@ class PaperExecutionOrchestrator:
         )
         self._persist_attempt(batch)
         self._publish_journal_fills(batch)
+        self._publish_portfolio_state(batch)
         return batch
 
     def cancel_open_orders(self, *, batch_identifier: str, cancelled_at: datetime, reason: str) -> PaperExecutionBatch:
@@ -960,6 +973,55 @@ class PaperExecutionOrchestrator:
                     source_identifier=fill.source_identifier,
                 ),
             )
+
+    def _publish_portfolio_state(self, batch: PaperExecutionBatch) -> None:
+        if self.portfolio_store is None or batch.reconciliation is None or not batch.reconciliation.reconciled:
+            return
+        prior = self.portfolio_store.latest(self.portfolio_code)
+        prior_costs = {} if prior is None else {item.symbol: item.average_cost for item in prior.positions}
+        positions = tuple(
+            CanonicalPortfolioPosition(
+                symbol=item.symbol,
+                quantity=item.quantity,
+                average_cost=prior_costs.get(item.symbol, item.mark_price),
+                mark_price=item.mark_price,
+                updated_at=batch.updated_at,
+            )
+            for item in batch.ending_portfolio.positions
+        )
+        events = tuple(
+            CanonicalImplementationEvent(
+                identifier=fill.identifier,
+                occurred_at=fill.filled_at,
+                action=fill.side.value,
+                symbol=fill.symbol,
+                quantity=fill.quantity,
+                price=fill.fill_price,
+                gross_amount=fill.gross_amount,
+                cost_amount=fill.commission_amount,
+                rationale=f"paper implementation for {batch.decision_identifier}",
+                source_identifier=fill.source_identifier,
+            )
+            for fill in batch.fills
+        )
+        snapshot = CanonicalPortfolioSnapshot(
+            identifier=f"portfolio-state:{self.portfolio_code}:{batch.identifier}:attempt:{batch.attempt_count}",
+            portfolio_code=self.portfolio_code,
+            display_name=(prior.display_name if prior is not None else "Compounding portfolio"),
+            constraint_profile=(prior.constraint_profile if prior is not None else "standard"),
+            as_of=batch.updated_at,
+            starting_capital=(prior.starting_capital if prior is not None else batch.beginning_portfolio.nav),
+            cash_amount=batch.ending_portfolio.cash_amount,
+            positions=positions,
+            implementation_events=events,
+            source_identifiers=(
+                batch.decision_identifier,
+                batch.construction_request_identifier,
+                batch.identifier,
+            ),
+        )
+        self.portfolio_store.append(snapshot)
+        self.portfolio_store.verify_integrity()
 
     @staticmethod
     def _replace_order(

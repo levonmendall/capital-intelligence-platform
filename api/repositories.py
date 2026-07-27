@@ -238,7 +238,9 @@ class DailySnapshotRepository:
 
 
 class PortfolioRepository:
-    """Read legacy virtual mandates without seeding or mutating them."""
+    """Read the append-only canonical portfolio-state source."""
+
+    _TABLE = "canonical_portfolio_events"
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -246,104 +248,70 @@ class PortfolioRepository:
     def check(self) -> ReadinessComponent:
         try:
             with _read_only_connection(self.path) as connection:
-                connection.execute("SELECT 1 FROM mandates LIMIT 1").fetchone()
+                connection.execute(f"SELECT 1 FROM {self._TABLE} LIMIT 1").fetchone()
         except (sqlite3.Error, RepositoryUnavailableError) as error:
             return ReadinessComponent(
-                name="portfolios",
+                name="canonical_portfolios",
                 required=True,
                 ready=False,
                 detail=str(error),
             )
         return ReadinessComponent(
-            name="portfolios",
+            name="canonical_portfolios",
             required=True,
             ready=True,
-            detail="portfolio store is readable",
+            detail="append-only canonical portfolio state is readable",
         )
 
+    @staticmethod
+    def _decode(row: sqlite3.Row):
+        from portfolio.state import snapshot_from_dict
+
+        return snapshot_from_dict(_decode_object(row["payload_json"], source="canonical-portfolio"))
+
     def list(self) -> tuple[dict[str, Any], ...]:
+        from portfolio.state import snapshot_summary
+
         try:
             with _read_only_connection(self.path) as connection:
-                rows = connection.execute(
-                    """
-                    SELECT code, name, risk, starting_capital, cash, nav
-                    FROM mandates
-                    ORDER BY id
-                    """
-                ).fetchall()
+                rows = connection.execute(f"""
+                    SELECT events.payload_json
+                    FROM {self._TABLE} AS events
+                    INNER JOIN (
+                        SELECT portfolio_code, MAX(sequence) AS sequence
+                        FROM {self._TABLE}
+                        GROUP BY portfolio_code
+                    ) AS latest
+                    ON events.portfolio_code = latest.portfolio_code
+                    AND events.sequence = latest.sequence
+                    ORDER BY events.portfolio_code
+                """).fetchall()
         except sqlite3.Error as error:
-            raise RepositoryUnavailableError(
-                "portfolio store cannot be queried"
-            ) from error
-        return tuple(dict(row) for row in rows)
+            raise RepositoryUnavailableError("canonical portfolio state cannot be queried") from error
+        return tuple(snapshot_summary(self._decode(row)) for row in rows)
 
     def get(self, code: str) -> dict[str, Any] | None:
+        from portfolio.state import snapshot_details
+
         normalized = code.strip().upper()
         try:
             with _read_only_connection(self.path) as connection:
-                mandate = connection.execute(
-                    """
-                    SELECT code, name, risk, starting_capital, cash, nav
-                    FROM mandates
-                    WHERE code = ?
-                    """,
+                latest = connection.execute(
+                    f"SELECT payload_json FROM {self._TABLE} WHERE portfolio_code = ? ORDER BY sequence DESC LIMIT 1",
                     (normalized,),
                 ).fetchone()
-                if mandate is None:
+                if latest is None:
                     return None
-                holdings = connection.execute(
-                    """
-                    SELECT
-                        symbol,
-                        quantity,
-                        average_cost,
-                        current_price,
-                        quantity * average_cost AS cost_basis,
-                        quantity * current_price AS market_value,
-                        quantity * (current_price - average_cost) AS unrealized_gain,
-                        updated_at
-                    FROM holdings
-                    WHERE mandate_code = ?
-                    ORDER BY symbol
-                    """,
-                    (normalized,),
-                ).fetchall()
-                trades = connection.execute(
-                    """
-                    SELECT
-                        id, created_at, side, symbol, quantity, price,
-                        gross_amount, rationale
-                    FROM trades
-                    WHERE mandate_code = ?
-                    ORDER BY id DESC
-                    LIMIT 25
-                    """,
-                    (normalized,),
-                ).fetchall()
-                snapshots = connection.execute(
-                    """
-                    SELECT id, created_at, cash, holdings_value, nav
-                    FROM portfolio_snapshots
-                    WHERE mandate_code = ?
-                    ORDER BY id DESC
-                    LIMIT 250
-                    """,
+                history = connection.execute(
+                    f"SELECT payload_json FROM {self._TABLE} WHERE portfolio_code = ? ORDER BY sequence DESC LIMIT 250",
                     (normalized,),
                 ).fetchall()
         except sqlite3.Error as error:
-            raise RepositoryUnavailableError(
-                "portfolio details cannot be queried"
-            ) from error
-        payload = dict(mandate)
-        starting = float(payload["starting_capital"])
-        nav = float(payload["nav"])
-        payload["total_return"] = (
-            round((nav / starting) - 1, 10) if starting else 0.0
+            raise RepositoryUnavailableError("canonical portfolio details cannot be queried") from error
+        return snapshot_details(
+            self._decode(latest),
+            history=tuple(self._decode(row) for row in history),
         )
-        payload["holdings"] = [dict(row) for row in holdings]
-        payload["trades"] = [dict(row) for row in trades]
-        payload["snapshots"] = [dict(row) for row in snapshots]
-        return payload
 
 
 class ReplayRepository:
