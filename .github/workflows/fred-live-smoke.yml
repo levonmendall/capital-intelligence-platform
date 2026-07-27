@@ -1,0 +1,71 @@
+name: Verify Live FRED Provider
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 13 * * 1"
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fred-live-smoke.yml
+      - providers/fred.py
+      - providers/fred_cache.py
+      - providers/fred_series.py
+      - run_fred_live_smoke.py
+      - requirements.lock
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fred-live-provider-smoke
+  cancel-in-progress: false
+
+jobs:
+  fred-live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: live-provider-smoke
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Require protected FRED credential
+        shell: bash
+        run: |
+          if [[ -z "${FRED_API_KEY:-}" ]]; then
+            echo "::error::FRED_API_KEY is unavailable to the live-provider environment."
+            exit 1
+          fi
+
+      - name: Verify live FRED access
+        run: >-
+          python run_fred_live_smoke.py
+          --series DGS10
+          --report reports/fred-live-smoke.json
+
+      - name: Publish credential-safe smoke evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fred-live-smoke-results
+          path: reports/fred-live-smoke.json
+          if-no-files-found: warn
+          retention-days: 14
