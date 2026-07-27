@@ -141,7 +141,7 @@ class RecommendationUniversePolicy:
                     disposition=UniverseDisposition.INTELLIGENCE_ONLY,
                     policy_version=self.version,
                     reasons=(
-                        "expanded asset class has no configured governance authority",
+                        "expanded asset class is intelligence-only because no configured governance authority exists",
                     ),
                 )
             if as_of is None:
@@ -150,7 +150,7 @@ class RecommendationUniversePolicy:
                     disposition=UniverseDisposition.INTELLIGENCE_ONLY,
                     policy_version=self.version,
                     reasons=(
-                        "expanded asset-class eligibility requires a point-in-time evaluation timestamp",
+                        "expanded asset class is intelligence-only because eligibility requires a point-in-time evaluation timestamp",
                     ),
                     asset_class_policy_version=(
                         self.asset_class_authority.policy_version
@@ -168,7 +168,9 @@ class RecommendationUniversePolicy:
                     instrument_id=instrument.instrument_id,
                     disposition=UniverseDisposition.INTELLIGENCE_ONLY,
                     policy_version=self.version,
-                    reasons=scope.reasons,
+                    reasons=tuple(
+                        f"intelligence-only: {reason}" for reason in scope.reasons
+                    ),
                     asset_class_approval_identifier=approval_identifier,
                     asset_class_approval_state=approval_state,
                     asset_class_policy_version=asset_class_policy_version,
