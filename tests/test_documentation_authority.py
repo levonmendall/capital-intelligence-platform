@@ -24,7 +24,7 @@ def test_active_documentation_has_one_compounding_mandate() -> None:
 
     assert "one active investment mandate" in architecture
     assert "`compounding` is the sole active investment mandate" in roadmap
-    assert "one active investment mandate: `compounding`" in mandate
+    assert "sole active investment mandate is `compounding`" in mandate
     assert "sole `compounding` investment mandate" in portfolio
 
 
