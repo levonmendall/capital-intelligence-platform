@@ -31,7 +31,7 @@ Constraint profiles may specify:
 - evidence-quality and data-freshness thresholds; and
 - restricted instruments or exposures.
 
-These controls govern feasibility, durability, and implementation. They do not create competing portfolio objectives, change opportunity ranking, manufacture a CIO action, or use confidence as a risk budget.
+These controls govern feasibility, durability, and implementation. They do not change opportunity ranking or manufacture a CIO action. They do not create competing portfolio objectives or use confidence as a risk budget.
 
 ## Canonical portfolio authority
 
