@@ -6,28 +6,25 @@
 
 ## Purpose
 
-The multi-asset execution authority measures whether an approved canonical construction can be implemented across crypto, spot FX, and global listed markets under their actual market-session, currency, liquidity, cost, and identity boundaries.
+The multi-asset execution authority measures whether a governed canonical construction can be implemented across crypto, unlevered spot FX, and international listed markets under their actual session, currency, liquidity, cost, custody, and identity boundaries.
 
 It is paper-only. It cannot connect to a broker, submit or cancel a live order, borrow, create margin, use leverage, trade derivatives, change the CIO action, or alter construction targets.
 
-## Exact execution profiles
+## One instrument authority
 
-Every construction trade requires exactly one `InstrumentExecutionProfile`. Profiles preserve:
+Execution consumes the same `MultiAssetInstrumentProfile` used by governed portfolio construction. It does not create a second execution profile with competing identity or approval fields.
 
-- stable instrument identity and display symbol;
-- asset class and venue;
-- approved session model;
+The shared profile preserves:
+
+- stable instrument identity and symbol;
+- asset class, venue, and jurisdiction;
 - price and settlement currencies;
-- asset-class governance approval;
-- execution certification;
-- quote freshness;
-- volume participation;
-- commissions;
-- minimum trade value;
-- maximum position weight; and
-- fractional-quantity policy.
+- paper-eligibility approval;
+- unlevered and spot-only boundaries;
+- custody or settlement authority; and
+- execution-model version.
 
-Expanded-market profiles require an asset-class approval. Any notional multiplier other than `1.0` is rejected.
+`MultiAssetExecutionPolicy` owns only paper-fill assumptions such as quote freshness, volume participation, commissions, fractional quantity behavior, minimum trade value, and reconciliation tolerance. It cannot change instrument eligibility or construction targets.
 
 ## Session routing
 
@@ -35,11 +32,11 @@ Expanded-market profiles require an asset-class approval. Any notional multiplie
 - Spot FX uses a continuous 24/5 session model.
 - International equities use their local exchange session.
 
-A closed, holiday, or maintenance session holds the affected paper order. It does not manufacture a quote or route the order through the U.S. equity calendar. Other open-market orders may execute in the same batch, producing a reconciled partial batch that can be retried later.
+A closed, holiday, or maintenance session holds the affected paper order. It does not manufacture a quote or route the order through the U.S. equity calendar. Other open-market orders may execute in the same batch, producing a reconciled partial batch that can later resume from the exact canonical ending state.
 
 ## Quote and FX evidence
 
-Every open profile requires one exact quote with:
+Every open instrument requires one exact quote with:
 
 - matching symbol, instrument, and venue;
 - bid, ask, and last price;
@@ -51,7 +48,7 @@ Every open profile requires one exact quote with:
 - quote certification; and
 - halt state.
 
-Missing, extra, mismatched, stale, future-known, halted, or uncertified evidence blocks or rejects the affected activity. Base-currency quotes must use an FX rate of `1.0`.
+Missing, extra, mismatched, stale, future-known, or identity-inconsistent evidence blocks execution. A halted instrument is rejected without creating a fill. Base-currency quotes must use an FX rate of `1.0`.
 
 ## Unlevered fills
 
@@ -60,14 +57,14 @@ Requested notional is the construction trade weight multiplied by canonical base
 - approved volume participation;
 - available base-currency cash for buys;
 - owned quantity for sells;
-- maximum position weight; and
-- fractional-quantity policy.
+- the construction result already approved by the multi-asset construction authority; and
+- the execution policy's fractional-quantity rule.
 
-Cash cannot become negative. Spot FX is represented as an unlevered owned spot instrument; no synthetic or margin notional is permitted.
+Cash cannot become negative. Spot FX remains an unlevered owned paper instrument; no synthetic or margin notional is permitted.
 
-## Cross-currency state
+## Cross-currency state and lineage
 
-Fills preserve local price, local gross value, base-currency gross value, commission, spread cost, FX rate, quote source, FX source, venue, instrument identity, and execution certification.
+Fills preserve local price, local gross value, base-currency gross value, commission, spread cost, FX rate, quote source, FX source, quote certification, venue, instrument identity, approval, custody or settlement identity, and execution-model version.
 
 The ending state is appended to `SQLiteCanonicalPortfolioStore`, which remains the sole active portfolio authority.
 
@@ -87,14 +84,16 @@ An unreconciled batch publishes no canonical portfolio state.
 
 ## Durable retries
 
-`SQLiteMultiAssetPaperExecutionStore` keeps an append-only SHA-256 event chain. Every resumed attempt receives a distinct immutable start record. A held batch may retry from the same state. A batch with fills must resume from the exact prior ending snapshot. Completed and no-action batches replay idempotently.
+`SQLiteMultiAssetPaperExecutionStore` keeps an append-only SHA-256 event chain. Every attempt has a distinct immutable start and completion record.
+
+A held batch may retry from the same portfolio state. A partially filled batch must resume from its exact prior ending snapshot. Fully filled trades are not repeated, remaining notional is calculated from the original request, and completed or no-action batches replay idempotently.
 
 ## Command
 
 ```bash
 python run_multi_asset_paper_execution.py \
   --construction artifacts/construction.json \
-  --profiles artifacts/execution-profiles.json \
+  --profiles artifacts/multi-asset-instrument-profiles.json \
   --decision-identifier decision:example \
   --session-provider production_multi_asset_sessions:create_provider \
   --quote-provider production_multi_asset_quotes:create_provider \
@@ -102,4 +101,4 @@ python run_multi_asset_paper_execution.py \
   --require-complete
 ```
 
-Providers and credentials remain deployment boundaries. The repository does not contain a broker adapter or claim that any real expanded market has been activated.
+Providers and credentials remain deployment boundaries. The repository does not contain a broker adapter or claim that any real expanded market has been activated. Development remains open, real-money execution remains unavailable, and test readiness must be evaluated against an immutable baseline rather than inferred from this implementation alone.
