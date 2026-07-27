@@ -66,6 +66,16 @@ def serialize_construction(
             for item in result.constraints
         ],
         "blocks": list(result.blocks),
+        "eligible_universe_publication_identifier": (
+            result.eligible_universe_publication_identifier
+        ),
+        "instrument_identifiers": [
+            {
+                "symbol": symbol,
+                "instrument_identifier": instrument_identifier,
+            }
+            for symbol, instrument_identifier in result.instrument_identifiers
+        ],
     }
 
 
@@ -80,7 +90,7 @@ def append_construction(
         aggregate_identifier=result.request_identifier,
         occurred_at=result.as_of,
         payload=serialize_construction(result, code_version=code_version),
-        schema_version="portfolio-construction-result.v1",
+        schema_version="portfolio-construction-result.v2",
         event_identifier=f"event:{result.request_identifier}",
     )
 

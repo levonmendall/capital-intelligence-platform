@@ -1036,6 +1036,7 @@ class RepositoryProductionCanonicalCIOContextProvider:
             )
         return PortfolioAsset(
             symbol=position.symbol,
+            instrument_identifier=position.instrument_identifier,
             current_weight=weight,
             expected_return=evidence.expected_return,
             sector=evidence.sector,

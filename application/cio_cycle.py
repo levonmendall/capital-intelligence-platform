@@ -123,6 +123,7 @@ class CyclePortfolioState:
     cash_expected_return: float
     positions: tuple[PortfolioAsset, ...]
     exposure_profiles: tuple[CandidateExposureProfile, ...]
+    eligible_universe_publication_identifier: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -166,6 +167,15 @@ class CyclePortfolioState:
             - 1.0
         ) > 0.000001:
             raise ValueError("portfolio positions and cash must sum to 1.0")
+        if self.eligible_universe_publication_identifier is not None:
+            object.__setattr__(
+                self,
+                "eligible_universe_publication_identifier",
+                _required_text(
+                    self.eligible_universe_publication_identifier,
+                    field_name="eligible_universe_publication_identifier",
+                ),
+            )
 
     def profile(self, candidate_identifier: str) -> CandidateExposureProfile:
         resolved = _required_text(
@@ -206,6 +216,9 @@ class CyclePortfolioState:
             cash_expected_return=self.cash_expected_return,
             positions=self.positions,
             intents=intents,
+            eligible_universe_publication_identifier=(
+                self.eligible_universe_publication_identifier
+            ),
         )
 
 
@@ -563,6 +576,7 @@ class CanonicalCIOCycle:
             transaction_cost_bps=candidate.transaction_cost_bps,
             slippage_bps=candidate.slippage_bps,
             priority_rank=rank,
+            instrument_identifier=candidate.instrument.instrument_id,
         )
         preview = self.construction_engine.construct(
             portfolio.request(

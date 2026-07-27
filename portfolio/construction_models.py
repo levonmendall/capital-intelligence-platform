@@ -31,6 +31,12 @@ def _required_text(value: object, *, field_name: str) -> str:
     return normalized
 
 
+def _optional_text(value: object, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _required_text(value, field_name=field_name)
+
+
 def _aware(value: object, *, field_name: str) -> datetime:
     if not isinstance(value, datetime):
         raise TypeError(f"{field_name} must be a datetime")
@@ -225,6 +231,7 @@ class PortfolioAsset:
     slippage_bps: float
     minimum_weight: float = 0.0
     funding_eligible: bool = False
+    instrument_identifier: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("symbol", "sector", "correlation_bucket"):
@@ -281,6 +288,14 @@ class PortfolioAsset:
             )
         if not isinstance(self.funding_eligible, bool):
             raise TypeError("funding_eligible must be a bool")
+        object.__setattr__(
+            self,
+            "instrument_identifier",
+            _optional_text(
+                self.instrument_identifier,
+                field_name="instrument_identifier",
+            ),
+        )
 
     @property
     def total_cost_bps(self) -> float:
@@ -303,6 +318,7 @@ class ConstructionIntent:
     transaction_cost_bps: float
     slippage_bps: float
     priority_rank: int
+    instrument_identifier: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -384,6 +400,14 @@ class ConstructionIntent:
             raise TypeError("priority_rank must be an integer")
         if self.priority_rank < 1:
             raise ValueError("priority_rank must be positive")
+        object.__setattr__(
+            self,
+            "instrument_identifier",
+            _optional_text(
+                self.instrument_identifier,
+                field_name="instrument_identifier",
+            ),
+        )
         sized_actions = {
             CIOAction.BUY,
             CIOAction.INCREASE,
@@ -436,6 +460,7 @@ class ConstructionIntent:
             transaction_cost_bps=candidate.transaction_cost_bps,
             slippage_bps=candidate.slippage_bps,
             priority_rank=priority_rank,
+            instrument_identifier=candidate.instrument.instrument_id,
         )
 
 
@@ -448,6 +473,7 @@ class PortfolioConstructionRequest:
     cash_expected_return: float
     positions: tuple[PortfolioAsset, ...]
     intents: tuple[ConstructionIntent, ...]
+    eligible_universe_publication_identifier: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -507,6 +533,14 @@ class PortfolioConstructionRequest:
             - 1.0
         ) > 0.000001:
             raise ValueError("portfolio weights and cash must sum to 1.0")
+        object.__setattr__(
+            self,
+            "eligible_universe_publication_identifier",
+            _optional_text(
+                self.eligible_universe_publication_identifier,
+                field_name="eligible_universe_publication_identifier",
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -613,6 +647,8 @@ class PortfolioConstructionResult:
     expected_return_improvement: float
     constraints: tuple[ConstraintCheck, ...]
     blocks: tuple[str, ...]
+    eligible_universe_publication_identifier: str | None = None
+    instrument_identifiers: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("request_identifier", "policy_version"):
@@ -685,6 +721,57 @@ class PortfolioConstructionResult:
             raise TypeError("blocks must contain non-empty strings")
         if self.status is ConstructionStatus.FEASIBLE and self.blocks:
             raise ValueError("feasible result cannot contain blocks")
+        object.__setattr__(
+            self,
+            "eligible_universe_publication_identifier",
+            _optional_text(
+                self.eligible_universe_publication_identifier,
+                field_name="eligible_universe_publication_identifier",
+            ),
+        )
+        if not isinstance(self.instrument_identifiers, tuple):
+            raise TypeError("instrument_identifiers must be a tuple")
+        normalized_identifiers = tuple(
+            (
+                _required_text(symbol, field_name="instrument symbol").upper(),
+                _required_text(
+                    instrument_identifier,
+                    field_name="instrument_identifier",
+                ),
+            )
+            for symbol, instrument_identifier in self.instrument_identifiers
+        )
+        symbols = tuple(symbol for symbol, _ in normalized_identifiers)
+        identifiers = tuple(identifier for _, identifier in normalized_identifiers)
+        if len(symbols) != len(set(symbols)):
+            raise ValueError("instrument identifier symbols must be unique")
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("instrument identifiers must be unique")
+        object.__setattr__(
+            self,
+            "instrument_identifiers",
+            normalized_identifiers,
+        )
+        if self.eligible_universe_publication_identifier is not None:
+            trade_symbols = {item.symbol for item in self.trades}
+            if set(symbols) != trade_symbols:
+                missing = sorted(trade_symbols - set(symbols))
+                extra = sorted(set(symbols) - trade_symbols)
+                raise ValueError(
+                    "governed construction instrument identities must exactly "
+                    f"match trades: missing={missing} extra={extra}"
+                )
+
+    def instrument_identifier(self, symbol: str) -> str | None:
+        resolved = _required_text(symbol, field_name="symbol").upper()
+        return next(
+            (
+                instrument_identifier
+                for mapped_symbol, instrument_identifier in self.instrument_identifiers
+                if mapped_symbol == resolved
+            ),
+            None,
+        )
 
 
 __all__ = [

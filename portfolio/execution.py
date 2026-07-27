@@ -16,10 +16,15 @@ from math import isfinite
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
+from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from cio.persistence import SQLiteCIOJournal
 from evaluation.persistence import append_paper_trade_fill
 from evaluation.walk_forward import PaperTradeFill
 from portfolio.constants import CANONICAL_PORTFOLIO_CODE
+from portfolio.execution_eligibility import (
+    CertifiedExecutionEligibilityAuthority,
+    ExecutionEligibilityError,
+)
 from portfolio.state import (
     CanonicalImplementationEvent,
     CanonicalPortfolioPosition,
@@ -221,6 +226,7 @@ class PaperPosition:
     symbol: str
     quantity: float
     mark_price: float
+    instrument_identifier: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, field_name="symbol").upper())
@@ -228,6 +234,15 @@ class PaperPosition:
         object.__setattr__(self, "mark_price", _number(self.mark_price, field_name="mark_price", minimum=0.0))
         if self.quantity <= 0.0 or self.mark_price <= 0.0:
             raise ValueError("paper positions require positive quantity and mark_price")
+        if self.instrument_identifier is not None:
+            object.__setattr__(
+                self,
+                "instrument_identifier",
+                _text(
+                    self.instrument_identifier,
+                    field_name="instrument_identifier",
+                ),
+            )
 
     @property
     def market_value(self) -> float:
@@ -602,6 +617,7 @@ class PaperExecutionOrchestrator:
         session_provider: MarketSessionProvider,
         quote_provider: PaperQuoteProvider,
         store: SQLitePaperExecutionStore,
+        universe_store: SQLiteCertifiedEligibleUniverseStore,
         journal: SQLiteCIOJournal | None = None,
         portfolio_store: SQLiteCanonicalPortfolioStore | None = None,
         portfolio_code: str = CANONICAL_PORTFOLIO_CODE,
@@ -610,9 +626,23 @@ class PaperExecutionOrchestrator:
         self.session_provider = session_provider
         self.quote_provider = quote_provider
         self.store = store
+        if not isinstance(
+            universe_store,
+            SQLiteCertifiedEligibleUniverseStore,
+        ):
+            raise TypeError(
+                "universe_store must be SQLiteCertifiedEligibleUniverseStore"
+            )
+        self.universe_store = universe_store
+        self.eligibility_authority = CertifiedExecutionEligibilityAuthority(
+            universe_store
+        )
         self.journal = journal
         self.portfolio_store = portfolio_store
-        self.portfolio_code = _text(portfolio_code, field_name="portfolio_code").upper()
+        self.portfolio_code = _text(
+            portfolio_code,
+            field_name="portfolio_code",
+        ).upper()
         if self.portfolio_code != CANONICAL_PORTFOLIO_CODE:
             raise ValueError(
                 f"paper execution is restricted to {CANONICAL_PORTFOLIO_CODE}"
@@ -637,6 +667,19 @@ class PaperExecutionOrchestrator:
             raise PaperExecutionError("blocked construction cannot enter paper execution")
         if portfolio.as_of > now:
             raise PaperExecutionError("portfolio state cannot be from the future")
+        eligibility = None
+        if construction.trades:
+            try:
+                eligibility = self.eligibility_authority.authorize(
+                    construction=construction,
+                    execution_timestamp=now,
+                    owned_instruments={
+                        item.symbol: item.instrument_identifier
+                        for item in portfolio.positions
+                    },
+                )
+            except ExecutionEligibilityError as error:
+                raise PaperExecutionError(str(error)) from error
         self.store.verify_integrity()
         batch_id = f"paper-execution:{construction.request_identifier}"
         prior = self.store.latest_batch(batch_id)
@@ -655,7 +698,13 @@ class PaperExecutionOrchestrator:
                 batch_identifier=batch_id,
                 event_type=PaperExecutionEventType.BATCH_STARTED,
                 occurred_at=now,
-                payload={"construction_request_identifier": construction.request_identifier, "decision_identifier": decision_id},
+                payload={
+                    "construction_request_identifier": construction.request_identifier,
+                    "decision_identifier": decision_id,
+                    "execution_eligibility": (
+                        None if eligibility is None else eligibility.to_dict()
+                    ),
+                },
             )
             beginning = portfolio
             current = portfolio
@@ -704,7 +753,14 @@ class PaperExecutionOrchestrator:
         symbols = tuple(sorted({item.symbol for item in open_orders}))
         raw_quotes = self.quote_provider.quotes(symbols=symbols, as_of=now)
         quotes = {str(symbol).upper(): quote for symbol, quote in raw_quotes.items()}
-        working_positions = {item.symbol: [item.quantity, item.mark_price] for item in current.positions}
+        working_positions = {
+            item.symbol: [
+                item.quantity,
+                item.mark_price,
+                item.instrument_identifier,
+            ]
+            for item in current.positions
+        }
         cash = current.cash_amount
         updated_orders: dict[str, PaperOrder] = {item.identifier: item for item in orders}
         new_fills: list[PaperFill] = []
@@ -732,7 +788,7 @@ class PaperExecutionOrchestrator:
             quantity_cap = quote.available_dollar_volume * self.policy.maximum_daily_volume_participation / (quote.ask if order.side is TradeSide.BUY else quote.bid)
             desired = min(order.remaining_notional / quote.last, quantity_cap)
             if order.side is TradeSide.SELL:
-                desired = min(desired, working_positions.get(order.symbol, [0.0, quote.last])[0])
+                desired = min(desired, working_positions.get(order.symbol, [0.0, quote.last, None])[0])
             else:
                 unit_cost = quote.ask * (1.0 + self.policy.commission_bps / 10000.0)
                 desired = min(desired, cash / unit_cost if unit_cost > 0.0 else 0.0)
@@ -753,16 +809,33 @@ class PaperExecutionOrchestrator:
                 continue
             if order.side is TradeSide.BUY:
                 cash -= gross + commission
-                quantity, _ = working_positions.get(order.symbol, [0.0, quote.last])
-                working_positions[order.symbol] = [quantity + desired, quote.last]
+                quantity, _, existing_identifier = working_positions.get(
+                    order.symbol,
+                    [0.0, quote.last, None],
+                )
+                instrument_identifier = construction.instrument_identifier(
+                    order.symbol
+                )
+                working_positions[order.symbol] = [
+                    quantity + desired,
+                    quote.last,
+                    instrument_identifier or existing_identifier,
+                ]
             else:
-                quantity, _ = working_positions.get(order.symbol, [0.0, quote.last])
+                quantity, _, instrument_identifier = working_positions.get(
+                    order.symbol,
+                    [0.0, quote.last, None],
+                )
                 remaining = max(0.0, quantity - desired)
                 cash += gross - commission
                 if remaining <= _EPSILON:
                     working_positions.pop(order.symbol, None)
                 else:
-                    working_positions[order.symbol] = [remaining, quote.last]
+                    working_positions[order.symbol] = [
+                        remaining,
+                        quote.last,
+                        instrument_identifier,
+                    ]
             fill_number = 1 + sum(item.order_identifier == order.identifier for item in fills + new_fills)
             fill = PaperFill(
                 identifier=f"{batch_id}:fill:{order.symbol}:{fill_number}",
@@ -793,7 +866,12 @@ class PaperExecutionOrchestrator:
             as_of=now,
             cash_amount=max(0.0, cash),
             positions=tuple(
-                PaperPosition(symbol=symbol, quantity=values[0], mark_price=values[1])
+                PaperPosition(
+                    symbol=symbol,
+                    quantity=values[0],
+                    mark_price=values[1],
+                    instrument_identifier=values[2],
+                )
                 for symbol, values in sorted(working_positions.items())
                 if values[0] > _EPSILON
             ),
@@ -987,10 +1065,13 @@ class PaperExecutionOrchestrator:
             raise PaperExecutionError(
                 "canonical portfolio must be initialized before paper execution"
             )
-        prior_costs = {item.symbol: item.average_cost for item in prior.positions}
+        prior_costs = {
+            item.symbol: item.average_cost for item in prior.positions
+        }
         positions = tuple(
             CanonicalPortfolioPosition(
                 symbol=item.symbol,
+                instrument_identifier=item.instrument_identifier,
                 quantity=item.quantity,
                 average_cost=prior_costs.get(item.symbol, item.mark_price),
                 mark_price=item.mark_price,
@@ -1056,7 +1137,12 @@ class PaperExecutionOrchestrator:
 
 
 def position_to_dict(value: PaperPosition) -> dict[str, Any]:
-    return {"symbol": value.symbol, "quantity": value.quantity, "mark_price": value.mark_price}
+    return {
+        "symbol": value.symbol,
+        "instrument_identifier": value.instrument_identifier,
+        "quantity": value.quantity,
+        "mark_price": value.mark_price,
+    }
 
 
 def portfolio_to_dict(value: PaperPortfolioState) -> dict[str, Any]:
@@ -1113,7 +1199,19 @@ def portfolio_from_dict(value: Mapping[str, Any]) -> PaperPortfolioState:
     return PaperPortfolioState(
         identifier=str(value["identifier"]), as_of=datetime.fromisoformat(str(value["as_of"])),
         cash_amount=float(value["cash_amount"]),
-        positions=tuple(PaperPosition(symbol=str(item["symbol"]), quantity=float(item["quantity"]), mark_price=float(item["mark_price"])) for item in value["positions"]),
+        positions=tuple(
+            PaperPosition(
+                symbol=str(item["symbol"]),
+                instrument_identifier=(
+                    None
+                    if item.get("instrument_identifier") is None
+                    else str(item["instrument_identifier"])
+                ),
+                quantity=float(item["quantity"]),
+                mark_price=float(item["mark_price"]),
+            )
+            for item in value["positions"]
+        ),
     )
 
 
