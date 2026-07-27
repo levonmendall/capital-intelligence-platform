@@ -10,30 +10,33 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from cio import CandidateAssetClass
+from governance import AssetClassApprovalState
 from portfolio import (
+    MultiAssetExecutionPolicy,
     MultiAssetExecutionStatus,
+    MultiAssetInstrumentProfile,
     MultiAssetPaperExecutionOrchestrator,
     SQLiteCanonicalPortfolioStore,
     SQLiteMultiAssetPaperExecutionStore,
 )
-from portfolio.construction_api import (
+from portfolio.construction_models import (
     ConstructionStatus,
     ConstraintCheck,
     PortfolioConstructionResult,
     TradeProposal,
     TradeSide,
 )
-from portfolio.multi_asset_execution import batch_to_dict, profile_from_dict
+from portfolio.multi_asset_execution import batch_to_dict
 
 
 def _factory(specification: str):
     try:
         module_name, attribute_name = specification.split(":", 1)
         factory = getattr(importlib.import_module(module_name), attribute_name)
-        value = factory()
+        return factory()
     except (ValueError, ImportError, AttributeError, TypeError) as error:
         raise ValueError(f"invalid provider factory {specification!r}") from error
-    return value
 
 
 def _load(path: str) -> object:
@@ -83,10 +86,33 @@ def _construction(value: Mapping[str, Any]) -> PortfolioConstructionResult:
                 )
                 for item in value.get("constraints", ())
             ),
-            blocks=tuple(value.get("blocks", ())),
+            blocks=tuple(str(item) for item in value.get("blocks", ())),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("invalid canonical construction payload") from error
+
+
+def _profile(value: Mapping[str, Any]) -> MultiAssetInstrumentProfile:
+    try:
+        return MultiAssetInstrumentProfile(
+            symbol=str(value["symbol"]),
+            instrument_identifier=str(value["instrument_identifier"]),
+            asset_class=CandidateAssetClass(str(value["asset_class"])),
+            venue=str(value["venue"]),
+            country_code=str(value["country_code"]),
+            price_currency=str(value["price_currency"]),
+            settlement_currency=str(value["settlement_currency"]),
+            approval_identifier=str(value["approval_identifier"]),
+            approval_state=AssetClassApprovalState(str(value["approval_state"])),
+            unlevered=bool(value["unlevered"]),
+            spot_only=bool(value["spot_only"]),
+            custody_settlement_identifier=str(
+                value["custody_settlement_identifier"]
+            ),
+            execution_model_version=str(value["execution_model_version"]),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("invalid multi-asset instrument profile") from error
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -113,7 +139,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--portfolio-code", default="COMPOUNDING")
-    parser.add_argument("--reconciliation-tolerance", type=float, default=0.01)
     parser.add_argument("--require-complete", action="store_true")
     return parser
 
@@ -128,7 +153,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         profiles_payload = _load(args.profiles)
         if not isinstance(profiles_payload, list):
             raise ValueError("profiles JSON must encode a list")
-        profiles = tuple(profile_from_dict(item) for item in profiles_payload)
+        profiles = tuple(_profile(item) for item in profiles_payload)
+        profile_map = {item.symbol: item for item in profiles}
+        if len(profile_map) != len(profiles):
+            raise ValueError("profiles cannot contain duplicate symbols")
         as_of = datetime.fromisoformat(args.as_of.replace("Z", "+00:00"))
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must be timezone-aware")
@@ -138,20 +166,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError(
                 f"canonical portfolio {args.portfolio_code!r} is unavailable"
             )
-        orchestrator = MultiAssetPaperExecutionOrchestrator(
+        batch = MultiAssetPaperExecutionOrchestrator(
             session_provider=_factory(args.session_provider),
             quote_provider=_factory(args.quote_provider),
-            store=SQLiteMultiAssetPaperExecutionStore(
-                args.execution_database
-            ),
+            store=SQLiteMultiAssetPaperExecutionStore(args.execution_database),
             portfolio_store=portfolio_store,
-            reconciliation_tolerance=args.reconciliation_tolerance,
-        )
-        batch = orchestrator.execute(
+            policy=MultiAssetExecutionPolicy(),
+        ).execute(
             construction=_construction(construction_payload),
             decision_identifier=args.decision_identifier,
             portfolio=portfolio,
-            profiles=profiles,
+            profiles=profile_map,
             as_of=as_of,
         )
     except (OSError, TypeError, ValueError, RuntimeError) as error:
