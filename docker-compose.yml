@@ -27,7 +27,7 @@ services:
   scheduler:
     image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
     build: .
-    command: ["python", "run_scheduler.py"]
+    command: ["python", "run_daily_operations.py", "--loop"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
     volumes:
       - capital_data:/app/database
