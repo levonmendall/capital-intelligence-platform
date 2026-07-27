@@ -7,6 +7,7 @@ on:
     paths:
       - .github/premium-ui-app.patch.gz.b64
       - .github/workflows/apply-premium-interface.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
