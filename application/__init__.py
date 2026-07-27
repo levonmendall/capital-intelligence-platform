@@ -6,6 +6,13 @@ from application.eligible_universe import (
     EligibleUniverseError,
     SQLiteCertifiedEligibleUniverseStore,
 )
+from application.environment_evidence import (
+    CertifiedDecisionEnvironmentSnapshot,
+    EnvironmentEvidenceError,
+    EnvironmentEvidenceIntegrityError,
+    SQLiteEnvironmentEvidenceStore,
+    SubsequentEnvironmentObservation,
+)
 from application.multi_asset_evidence import (
     AssetSpecificEvidencePacket,
     MultiAssetEvidenceError,
@@ -35,6 +42,13 @@ from application.production_context_runtime import (
 )
 from application.production_context_adapter import (
     RepositoryProductionCanonicalCIOContextProvider as CanonicalProductionContextAdapter,
+)
+from application.forecast_support import (
+    CandidateForecastSupport,
+    ForecastSupportError,
+    ForecastSupportIntegrityError,
+    ForecastSupportingProductionContextProvider,
+    SQLiteCandidateForecastSupportStore,
     build_production_context_provider,
 )
 from application.daily_intelligence import (
@@ -50,7 +64,9 @@ from application.daily_intelligence import (
 
 __all__ = [
     "AssetSpecificEvidencePacket",
+    "CandidateForecastSupport",
     "CanonicalProductionContextAdapter",
+    "CertifiedDecisionEnvironmentSnapshot",
     "CertifiedEligibleUniversePublication",
     "DailyCapitalIntelligenceService",
     "DailyCapitalIntelligenceSnapshot",
@@ -59,7 +75,12 @@ __all__ = [
     "DailySnapshotRecord",
     "EligibleUniverseCertificationState",
     "EligibleUniverseError",
+    "EnvironmentEvidenceError",
+    "EnvironmentEvidenceIntegrityError",
     "EvidenceCertificationState",
+    "ForecastSupportError",
+    "ForecastSupportIntegrityError",
+    "ForecastSupportingProductionContextProvider",
     "GovernedEvidenceLineage",
     "MultiAssetEvidenceError",
     "MultiAssetEvidenceIntegrityError",
@@ -74,9 +95,12 @@ __all__ = [
     "ProductionHoldingEvidence",
     "RepositoryProductionCanonicalCIOContextProvider",
     "SQLiteAssetSpecificEvidenceStore",
+    "SQLiteCandidateForecastSupportStore",
     "SQLiteCertifiedEligibleUniverseStore",
     "SQLiteDailySnapshotStore",
+    "SQLiteEnvironmentEvidenceStore",
     "SQLiteProductionContextStore",
+    "SubsequentEnvironmentObservation",
     "build_daily_capital_intelligence_snapshot",
     "build_production_context_provider",
     "daily_snapshot_to_dict",

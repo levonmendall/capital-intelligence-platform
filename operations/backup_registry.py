@@ -117,6 +117,24 @@ CANONICAL_BACKUP_AUTHORITIES: tuple[CanonicalBackupAuthority, ...] = (
         "evidence",
     ),
     CanonicalBackupAuthority(
+        "forecast_evidence",
+        "CAPITAL_INTELLIGENCE_FORECAST_EVIDENCE_DATABASE",
+        "forecast_evidence.db",
+        "evidence",
+    ),
+    CanonicalBackupAuthority(
+        "forecast_support",
+        "CAPITAL_INTELLIGENCE_FORECAST_SUPPORT_DATABASE",
+        "forecast_support.db",
+        "evidence",
+    ),
+    CanonicalBackupAuthority(
+        "environment_evidence",
+        "CAPITAL_INTELLIGENCE_ENVIRONMENT_DATABASE",
+        "environment_evidence.db",
+        "evidence",
+    ),
+    CanonicalBackupAuthority(
         "institutional_journal",
         "CAPITAL_INTELLIGENCE_JOURNAL_DATABASE",
         "institutional_journal.db",
