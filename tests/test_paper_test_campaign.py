@@ -50,6 +50,7 @@ def _day(
     day: date,
     *,
     identifier: str | None = None,
+    recorded_at: datetime | None = None,
     completed: bool = True,
     reconciled: bool = True,
     no_action: bool = False,
@@ -57,17 +58,16 @@ def _day(
     incidents: int = 0,
     integrity_failures: int = 0,
 ) -> BurnInDayRecord:
+    resolved_recorded_at = recorded_at or (
+        datetime.combine(day, datetime.min.time(), tzinfo=UTC)
+        + timedelta(hours=23)
+    )
     return BurnInDayRecord(
         identifier=identifier or f"burn-in-day:{baseline.identifier}:{day.isoformat()}",
         baseline_identifier=baseline.identifier,
         baseline_fingerprint=baseline.fingerprint,
         operation_date=day,
-        recorded_at=datetime.combine(
-            day,
-            datetime.min.time(),
-            tzinfo=UTC,
-        )
-        + timedelta(hours=23),
+        recorded_at=resolved_recorded_at,
         operation_identifier=f"daily-operation:{day.isoformat()}",
         operation_status="completed" if completed else "failed",
         completed_stage_count=12 if completed else 7,
@@ -169,7 +169,11 @@ def test_elapsed_days_cannot_be_synthesized_or_duplicated(tmp_path: Path) -> Non
         )
 
     with pytest.raises(ValueError, match="future or synthetic"):
-        _day(baseline, date(2026, 8, 10))
+        _day(
+            baseline,
+            date(2026, 8, 10),
+            recorded_at=datetime(2026, 8, 9, 23, 0, tzinfo=UTC),
+        )
 
 
 def test_baseline_drift_resets_campaign_evidence(tmp_path: Path) -> None:
