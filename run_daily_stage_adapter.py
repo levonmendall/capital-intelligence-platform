@@ -8,7 +8,10 @@ import os
 from datetime import datetime, timezone
 from typing import Sequence
 
-from governance.stage_binding_approval import require_approved_stage_bindings
+from governance.stage_binding_approval import (
+    StageBindingApprovalError,
+    require_approved_stage_bindings,
+)
 from operations import CanonicalDailyStage
 from operations.stage_bindings import (
     StageBindingError,
@@ -154,7 +157,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 75
-    except (OSError, TypeError, ValueError, StageBindingError) as error:
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        StageBindingError,
+        StageBindingApprovalError,
+    ) as error:
         print(
             json.dumps(
                 {
