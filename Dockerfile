@@ -1,4 +1,4 @@
-FROM python:3.11-slim-trixie AS runtime
+FROM python:3.11-slim-trixie AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -17,6 +17,14 @@ RUN mkdir -p /app/database /app/backups /app/reports && \
     chown -R capital:capital /app
 
 USER 10001:10001
+
+FROM base AS validation
+USER root
+RUN python -m pip install --requirement requirements-dev.txt
+USER 10001:10001
+CMD ["python", "run_container_acceptance.py"]
+
+FROM base AS runtime
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
