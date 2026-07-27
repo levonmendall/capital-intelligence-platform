@@ -32,7 +32,7 @@ class ApiSettings:
     """Versioned runtime settings with secure production defaults."""
 
     snapshot_database: Path = Path("database/daily_intelligence_snapshots.db")
-    portfolio_database: Path = Path("database/capital_intelligence.db")
+    portfolio_database: Path = Path("database/canonical_portfolio.db")
     investor_memory_database: Path = Path("database/investor_memory.db")
     identity_database: Path = Path("database/identity.db")
     alert_database: Path | None = None
@@ -193,8 +193,8 @@ class ApiSettings:
                 default=data_dir / "daily_intelligence_snapshots.db",
             ),
             portfolio_database=_path(
-                values.get("CAPITAL_INTELLIGENCE_PORTFOLIO_DATABASE"),
-                default=data_dir / "capital_intelligence.db",
+                values.get("CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE"),
+                default=data_dir / "canonical_portfolio.db",
             ),
             investor_memory_database=_path(
                 values.get("CAPITAL_INTELLIGENCE_INVESTOR_MEMORY_DATABASE"),

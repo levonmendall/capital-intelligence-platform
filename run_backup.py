@@ -20,7 +20,7 @@ def build_manager() -> SQLiteBackupManager:
         {
             "daily_intelligence": api.snapshot_database,
             "analytical_engines": analytical_path,
-            "portfolio": api.portfolio_database,
+            "canonical_portfolio": api.portfolio_database,
             "investor_memory": api.investor_memory_database,
             "investment_policy": policy_path,
             "identity": api.identity_database,

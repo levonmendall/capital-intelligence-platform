@@ -5,6 +5,13 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from datetime import datetime, timezone
+
+from portfolio.state import (
+    CanonicalPortfolioPosition,
+    CanonicalPortfolioSnapshot,
+    SQLiteCanonicalPortfolioStore,
+)
 
 from fastapi.testclient import TestClient
 
@@ -168,63 +175,26 @@ def _create_snapshot_database(path: Path) -> None:
 
 
 def _create_portfolio_database(path: Path) -> None:
-    with sqlite3.connect(path) as connection:
-        connection.executescript(
-            """
-            CREATE TABLE mandates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                risk TEXT NOT NULL,
-                starting_capital REAL NOT NULL,
-                cash REAL NOT NULL,
-                nav REAL NOT NULL
-            );
-            CREATE TABLE holdings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mandate_code TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                quantity REAL NOT NULL,
-                average_cost REAL NOT NULL,
-                current_price REAL NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE trades (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                created_at TEXT NOT NULL,
-                mandate_code TEXT NOT NULL,
-                side TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                quantity REAL NOT NULL,
-                price REAL NOT NULL,
-                gross_amount REAL NOT NULL,
-                rationale TEXT NOT NULL
-            );
-            CREATE TABLE portfolio_snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                created_at TEXT NOT NULL,
-                mandate_code TEXT NOT NULL,
-                cash REAL NOT NULL,
-                holdings_value REAL NOT NULL,
-                nav REAL NOT NULL
-            );
-            """
+    store = SQLiteCanonicalPortfolioStore(path)
+    as_of = datetime(2026, 1, 28, 12, tzinfo=timezone.utc)
+    store.append(
+        CanonicalPortfolioSnapshot(
+            identifier="portfolio:GROWTH:2026-01-28",
+            portfolio_code="GROWTH",
+            display_name="Growth Portfolio",
+            constraint_profile="moderate",
+            as_of=as_of,
+            starting_capital=100000,
+            cash_amount=54000,
+            positions=(
+                CanonicalPortfolioPosition(
+                    symbol="SPY", quantity=100, average_cost=500,
+                    mark_price=510, updated_at=as_of,
+                ),
+            ),
+            source_identifiers=("test-fixture",),
         )
-        connection.execute(
-            """
-            INSERT INTO mandates (
-                code, name, risk, starting_capital, cash, nav
-            ) VALUES ('GROWTH', 'Growth Mandate', 'moderate', 100000, 20000, 105000)
-            """
-        )
-        connection.execute(
-            """
-            INSERT INTO holdings (
-                mandate_code, symbol, quantity, average_cost,
-                current_price, updated_at
-            ) VALUES ('GROWTH', 'SPY', 100, 500, 510, '2026-01-28T12:00:00Z')
-            """
-        )
+    )
 
 
 def _client(tmp_path: Path) -> TestClient:

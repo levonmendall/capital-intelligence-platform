@@ -84,11 +84,6 @@ def _planner(tmp_path):
     policy = tmp_path / "investment_policy.db"
     _daily_database(daily)
     _create_portfolio_database(portfolio)
-    with sqlite3.connect(portfolio) as connection:
-        connection.execute(
-            "UPDATE mandates SET risk = 'moderate', cash = 100000, nav = 500000 "
-            "WHERE code = 'GROWTH'"
-        )
     identities = SQLiteIdentityStore(identity)
     account = identities.create_user(
         email="investor@example.com",

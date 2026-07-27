@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from datetime import datetime, timezone
+
+from portfolio.state import CanonicalPortfolioSnapshot, SQLiteCanonicalPortfolioStore
 
 from api import ApiSettings, create_app
 from security import (
@@ -31,14 +34,19 @@ def _secured_client(tmp_path: Path):
     identity_database = tmp_path / "identity.db"
     _create_snapshot_database(snapshot_database)
     _create_portfolio_database(portfolio_database)
-    with sqlite3.connect(portfolio_database) as connection:
-        connection.execute(
-            """
-            INSERT INTO mandates (
-                code, name, risk, starting_capital, cash, nav
-            ) VALUES ('INCOME', 'Income Mandate', 'conservative', 80000, 15000, 82000)
-            """
+    SQLiteCanonicalPortfolioStore(portfolio_database).append(
+        CanonicalPortfolioSnapshot(
+            identifier="portfolio:INCOME:2026-01-28",
+            portfolio_code="INCOME",
+            display_name="Income Portfolio",
+            constraint_profile="conservative",
+            as_of=datetime(2026, 1, 28, 12, tzinfo=timezone.utc),
+            starting_capital=80000,
+            cash_amount=82000,
+            positions=(),
+            source_identifiers=("test-fixture",),
         )
+    )
     store = SQLiteIdentityStore(identity_database)
     admin = store.create_user(
         email="admin@example.com",

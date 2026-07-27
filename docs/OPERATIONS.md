@@ -182,3 +182,8 @@ The campaign must run in an isolated environment and prove fault injection, time
 ## Canonical alert topics
 
 The scheduler queues only CIO decision, thesis, opportunity, implementation, evidence, and Daily Capital Intelligence briefing events. Preferences select those event topics and delivery channels. Confidence thresholds, scores, committee votes, and personal goals are not active notification inputs. See [Canonical CIO alerts](CANONICAL_ALERTS.md).
+
+
+## Canonical portfolio migration
+
+Use `run_portfolio_migration.py` once to import the retired mandate/trading database. Active services must set `CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE`; the old portfolio database environment variable is not read.

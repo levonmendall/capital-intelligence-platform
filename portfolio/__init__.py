@@ -28,6 +28,11 @@ __all__ = [
     "AssetBucket",
     "AssetBucketLimit",
     "CapitalFundingSource",
+    "SQLiteCanonicalPortfolioStore",
+    "CanonicalPortfolioSnapshot",
+    "CanonicalPortfolioPosition",
+    "CanonicalPortfolioIntegrityError",
+    "CanonicalImplementationEvent",
     "FundingCandidate",
     "FundingSourceType",
     "OpportunityCostAssessment",
@@ -43,3 +48,11 @@ __all__ = [
     "assess_opportunity_cost",
     "opportunity_cost_to_dict",
 ]
+
+from portfolio.state import (
+    CanonicalImplementationEvent,
+    CanonicalPortfolioIntegrityError,
+    CanonicalPortfolioPosition,
+    CanonicalPortfolioSnapshot,
+    SQLiteCanonicalPortfolioStore,
+)

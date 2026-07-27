@@ -1,18 +1,15 @@
-"""Initialize the Capital Intelligence Platform."""
+"""Initialize active Capital Intelligence data stores."""
 
-from core.database import initialize_database
-from core.seed import seed_mandates
+from api.config import ApiSettings
+from portfolio.state import SQLiteCanonicalPortfolioStore
 
 
 def main() -> None:
-    """Initialize the database and configured mandates."""
-
     print("Initializing Capital Intelligence Platform...")
-
-    initialize_database()
-    mandate_count = seed_mandates()
-
-    print(f"Platform initialized with {mandate_count} mandates.")
+    settings = ApiSettings.from_env()
+    store = SQLiteCanonicalPortfolioStore(settings.portfolio_database)
+    store.verify_integrity()
+    print(f"Canonical portfolio state initialized at {settings.portfolio_database}.")
 
 
 if __name__ == "__main__":

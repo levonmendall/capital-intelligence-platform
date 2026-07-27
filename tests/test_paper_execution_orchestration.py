@@ -13,6 +13,7 @@ from portfolio.construction_api import (
     TradeProposal,
     TradeSide,
 )
+from portfolio.state import SQLiteCanonicalPortfolioStore
 from portfolio.execution import (
     MarketSession,
     MarketSessionStatus,
@@ -144,6 +145,8 @@ def orchestrator(tmp_path, *, quotes=None, session=MarketSessionStatus.OPEN, pol
         quote_provider=quote_provider,
         store=SQLitePaperExecutionStore(tmp_path / "paper.db"),
         journal=cio_journal,
+        portfolio_store=SQLiteCanonicalPortfolioStore(tmp_path / "canonical_portfolio.db"),
+        portfolio_code="CORE",
         policy=policy,
     )
     return service, session_provider, quote_provider, cio_journal
@@ -167,6 +170,11 @@ def test_sell_fills_before_dependent_buy_and_reconciles(tmp_path) -> None:
     assert batch.ending_portfolio.cash_amount == pytest.approx(19_400.0)
     assert batch.ending_portfolio.nav == pytest.approx(99_400.0)
     assert len(journal.events(event_type=CIOJournalEventType.PAPER_TRADE_FILL)) == 2
+    canonical = service.portfolio_store.latest("CORE")
+    assert canonical is not None
+    assert canonical.cash_amount == pytest.approx(19_400.0)
+    assert {item.symbol for item in canonical.positions} == {"AAA", "BBB"}
+    assert {item.identifier for item in canonical.implementation_events} == {item.identifier for item in batch.fills}
 
 
 def test_closed_market_holds_orders_without_quotes_or_fills(tmp_path) -> None:

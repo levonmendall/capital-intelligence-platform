@@ -15,14 +15,12 @@ from api.repositories import (
     JournalRepository,
     RepositoryUnavailableError,
 )
-from core.database import initialize_database
 from core.portfolio import (
     get_mandate_details,
     get_mandates,
     get_portfolio_totals,
     get_trade_history,
 )
-from core.seed import seed_mandates
 from providers.economic_snapshot import load_dashboard_data
 
 
@@ -156,7 +154,7 @@ def _render_today() -> None:
     overview1.metric("Virtual AUM", format_currency(totals["nav"]))
     overview2.metric("Available cash", format_currency(totals["cash"]))
     overview3.metric("Paper return", format_percent(totals["total_return"]))
-    overview4.metric("Authorized mandates", totals["mandate_count"])
+    overview4.metric("Authorized portfolios", totals["mandate_count"])
     st.caption(
         "Portfolio figures are paper records. CIO decisions remain non-executing "
         "until a separately approved implementation layer is validated."
@@ -336,9 +334,6 @@ def _render_history() -> None:
     else:
         st.info("No paper trades have been recorded.")
 
-
-initialize_database()
-seed_mandates()
 
 st.title("Capital Intelligence Platform")
 st.caption(

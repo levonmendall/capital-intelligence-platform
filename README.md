@@ -297,6 +297,7 @@ Production investment reliance still requires broader live and licensed data cov
 - [Extended paper-operation evidence](docs/PAPER_OPERATION_EVIDENCE.md)
 - [Incident, recovery, and reconciliation exercises](docs/RESILIENCE_EXERCISES.md)
 - [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
+- [Canonical portfolio state](docs/CANONICAL_PORTFOLIO_STATE.md)
 - [Daily experience](docs/DAILY_INTELLIGENCE_EXPERIENCE.md)
 - [Production API](docs/PRODUCTION_API.md)
 - [Legacy authority isolation](docs/LEGACY_AUTHORITY_ISOLATION.md)

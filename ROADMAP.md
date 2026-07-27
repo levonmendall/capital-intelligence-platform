@@ -122,6 +122,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 ## Milestone 8 — Portfolio construction and implementation
 
 - [x] Maintain point-in-time portfolio states and versioned constraints.
+- [x] Consolidate active cash, positions, valuation history, and implementation events into one append-only canonical portfolio-state source.
 - [x] Determine position size, allocation, funding, and replacement separately from analytical confidence.
 - [x] Enforce cash, position, sector, factor, correlation, liquidity, turnover, and cost controls.
 - [x] Estimate transaction cost and slippage.

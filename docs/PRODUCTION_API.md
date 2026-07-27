@@ -129,7 +129,7 @@ User and mandate administration controls access only. It does not create persona
 | `CAPITAL_INTELLIGENCE_DATA_DIR` | `database` | Base storage directory. |
 | `CAPITAL_INTELLIGENCE_JOURNAL_DATABASE` | `database/institutional_journal.db` | Canonical append-only CIO journal. |
 | `CAPITAL_INTELLIGENCE_SNAPSHOT_DATABASE` | `database/daily_intelligence_snapshots.db` | Deprecated diagnostic snapshots. |
-| `CAPITAL_INTELLIGENCE_PORTFOLIO_DATABASE` | `database/capital_intelligence.db` | Authorized paper portfolios. |
+| `CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE` | `database/canonical_portfolio.db` | Append-only canonical cash, positions, valuation, and implementation state. |
 | `CAPITAL_INTELLIGENCE_IDENTITY_DATABASE` | `database/identity.db` | Users, grants, and sessions. |
 | `CAPITAL_INTELLIGENCE_ALERT_DATABASE` | `database/alerts.db` | Preferences and delivery history. |
 | `CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL` | `false` | Require journal readiness. |
