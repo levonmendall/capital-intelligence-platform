@@ -23,17 +23,18 @@ NOW = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
 
 
 def _operational_store(path: Path) -> None:
-    SQLiteReadinessEvidenceStore(path).append_operational_snapshot(
+    SQLiteReadinessEvidenceStore(path).append_operational(
         OperationalReadinessSnapshot(
             identifier="operational:1",
             baseline_identifier="baseline:1",
             observed_at=NOW,
+            knowledge_cutoff=NOW,
             process_version="process:1",
             code_version="commit:1",
             unresolved_critical_incidents=0,
             data_integrity_failures=0,
             reconciliation_failures=0,
-            evidence_identifiers=("daily-operation:1", "slo:1", "resilience:1"),
+            source_identifiers=("daily-operation:1", "slo:1", "resilience:1"),
         )
     )
 
