@@ -10,7 +10,10 @@ from dataclasses import replace
 from datetime import timedelta
 
 from api.config import ApiSettings
-from application import ProductionCanonicalCIOExecutor
+from application import (
+    ProductionCanonicalCIOExecutor,
+    build_production_context_provider,
+)
 from application.cio_cycle import CanonicalCIOCycle
 from cio.persistence import SQLiteCIOJournal
 from delivery import (
@@ -25,11 +28,17 @@ from screening import SQLiteFullUniverseScreeningStore
 from security import SQLiteIdentityStore
 
 
-def _context_provider(specification: str | None):
+def _context_provider(
+    specification: str | None,
+    *,
+    settings: ApiSettings,
+):
+    """Build the repository provider by default or an explicit override."""
+
     if specification is None:
-        raise RuntimeError(
-            "CAPITAL_INTELLIGENCE_CANONICAL_CONTEXT_PROVIDER is required; "
-            "there is no legacy scheduler fallback"
+        return build_production_context_provider(
+            screening_database=settings.full_universe_screening_database,
+            portfolio_database=settings.portfolio_database,
         )
     module_name, attribute_name = specification.split(":", 1)
     factory = getattr(importlib.import_module(module_name), attribute_name, None)
@@ -49,7 +58,10 @@ def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
         settings.full_universe_screening_database
     )
     screening_store.verify_integrity()
-    provider = _context_provider(settings.canonical_cycle_context_provider)
+    provider = _context_provider(
+        settings.canonical_cycle_context_provider,
+        settings=settings,
+    )
     executor = ProductionCanonicalCIOExecutor(
         cycle=CanonicalCIOCycle(journal=journal),
         screening_store=screening_store,

@@ -1,8 +1,8 @@
 """Production executor for the canonical CIO decision cycle.
 
 The executor binds the scheduled decision process to one complete-universe
-screening publication.  External adapters may provide specialist and portfolio
-context, but they cannot replace the candidate set or bypass the immutable
+screening publication. External adapters may provide specialist and portfolio
+context, but they cannot replace the candidate set or bypass immutable
 screening evidence.
 """
 
@@ -42,6 +42,129 @@ def _aware(value: object, *, field_name: str) -> datetime:
     return value
 
 
+def _texts(
+    value: object,
+    *,
+    field_name: str,
+    minimum: int = 0,
+) -> tuple[str, ...]:
+    if not isinstance(value, tuple):
+        raise TypeError(f"{field_name} must be a tuple")
+    normalized = tuple(
+        _required_text(item, field_name=field_name) for item in value
+    )
+    if len(normalized) < minimum:
+        raise ValueError(
+            f"{field_name} must contain at least {minimum} item(s)"
+        )
+    if len(normalized) != len(set(normalized)):
+        raise ValueError(f"{field_name} cannot contain duplicates")
+    return normalized
+
+
+def _versions(
+    value: object,
+    *,
+    field_name: str,
+) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, tuple):
+        raise TypeError(f"{field_name} must be a tuple")
+    normalized = tuple(
+        (
+            _required_text(name, field_name=f"{field_name} name"),
+            _required_text(version, field_name=f"{field_name} version"),
+        )
+        for name, version in value
+    )
+    names = tuple(name for name, _ in normalized)
+    if len(names) != len(set(names)):
+        raise ValueError(f"{field_name} names must be unique")
+    return normalized
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionContextManifest:
+    """Immutable lineage proving how one production context was assembled."""
+
+    identifier: str
+    screening_publication_identifier: str
+    portfolio_snapshot_identifier: str
+    context_evidence_identifier: str
+    as_of: datetime
+    knowledge_cutoff: datetime
+    candidate_identifiers: tuple[str, ...]
+    candidate_context_identifiers: tuple[str, ...]
+    evidence_identifiers: tuple[str, ...]
+    source_versions: tuple[tuple[str, str], ...]
+    model_versions: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "identifier",
+            "screening_publication_identifier",
+            "portfolio_snapshot_identifier",
+            "context_evidence_identifier",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _required_text(getattr(self, field_name), field_name=field_name),
+            )
+        _aware(self.as_of, field_name="as_of")
+        _aware(self.knowledge_cutoff, field_name="knowledge_cutoff")
+        if self.knowledge_cutoff < self.as_of:
+            raise ValueError("knowledge_cutoff cannot predate as_of")
+        for field_name, minimum in (
+            ("candidate_identifiers", 0),
+            ("candidate_context_identifiers", 0),
+            ("evidence_identifiers", 1),
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _texts(
+                    getattr(self, field_name),
+                    field_name=field_name,
+                    minimum=minimum,
+                ),
+            )
+        object.__setattr__(
+            self,
+            "source_versions",
+            _versions(self.source_versions, field_name="source_versions"),
+        )
+        object.__setattr__(
+            self,
+            "model_versions",
+            _versions(self.model_versions, field_name="model_versions"),
+        )
+        if len(self.candidate_context_identifiers) != len(
+            self.candidate_identifiers
+        ):
+            raise ValueError(
+                "each qualified candidate must have one context identifier"
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "identifier": self.identifier,
+            "screening_publication_identifier": (
+                self.screening_publication_identifier
+            ),
+            "portfolio_snapshot_identifier": self.portfolio_snapshot_identifier,
+            "context_evidence_identifier": self.context_evidence_identifier,
+            "as_of": self.as_of.isoformat(),
+            "knowledge_cutoff": self.knowledge_cutoff.isoformat(),
+            "candidate_identifiers": list(self.candidate_identifiers),
+            "candidate_context_identifiers": list(
+                self.candidate_context_identifiers
+            ),
+            "evidence_identifiers": list(self.evidence_identifiers),
+            "source_versions": [list(item) for item in self.source_versions],
+            "model_versions": [list(item) for item in self.model_versions],
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class ProductionCanonicalCIOContext:
     """Non-candidate inputs required to execute one canonical CIO cycle."""
@@ -52,6 +175,7 @@ class ProductionCanonicalCIOContext:
     specialist_contexts: tuple[CandidateCycleContext, ...]
     portfolio: CyclePortfolioState
     code_version: str = "unknown"
+    manifest: ProductionContextManifest | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -79,6 +203,15 @@ class ProductionCanonicalCIOContext:
             raise ValueError(
                 "opportunity context and portfolio must share the decision timestamp"
             )
+        if self.manifest is not None:
+            if not isinstance(self.manifest, ProductionContextManifest):
+                raise TypeError(
+                    "manifest must be ProductionContextManifest or None"
+                )
+            if self.manifest.as_of != self.portfolio.as_of:
+                raise ValueError(
+                    "production context manifest must share the decision timestamp"
+                )
 
     @property
     def as_of(self) -> datetime:
@@ -167,6 +300,47 @@ class ProductionCanonicalCIOExecutor:
             raise RuntimeError(
                 "screening publication candidate count does not reconcile"
             )
+        ranked = tuple(
+            dict(item)
+            for item in publication.opportunity_queue_payload.get("ranked", ())
+        )
+        qualified_identifiers = tuple(
+            _required_text(
+                item.get("candidate_identifier"),
+                field_name="qualified candidate identifier",
+            )
+            for item in ranked
+        )
+        context_identifiers = tuple(
+            item.candidate_identifier for item in context.specialist_contexts
+        )
+        if set(context_identifiers) != set(qualified_identifiers):
+            missing = sorted(
+                set(qualified_identifiers) - set(context_identifiers)
+            )
+            extra = sorted(
+                set(context_identifiers) - set(qualified_identifiers)
+            )
+            raise ValueError(
+                "specialist context coverage must exactly match the persisted "
+                f"qualified candidate set: missing={missing} extra={extra}"
+            )
+        if context.manifest is not None:
+            if (
+                context.manifest.screening_publication_identifier
+                != publication.identifier
+            ):
+                raise ValueError(
+                    "production context manifest does not match publication"
+                )
+            if (
+                context.manifest.candidate_identifiers
+                != qualified_identifiers
+            ):
+                raise ValueError(
+                    "production context manifest candidate order does not match "
+                    "the persisted opportunity queue"
+                )
         return self.cycle.run(
             identifier=context.identifier,
             candidates=candidates,
@@ -181,4 +355,5 @@ __all__ = [
     "ProductionCanonicalCIOContext",
     "ProductionCanonicalCIOContextProvider",
     "ProductionCanonicalCIOExecutor",
+    "ProductionContextManifest",
 ]

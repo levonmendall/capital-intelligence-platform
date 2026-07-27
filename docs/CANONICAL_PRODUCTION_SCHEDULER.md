@@ -6,31 +6,55 @@ The production scheduler has one investment-decision authority: `CanonicalCIOCyc
 
 ## Evidence boundary
 
-Each scheduled cycle requires a complete persisted publication from the full-universe screening ledger. Candidates are reconstructed from that immutable publication. An external context provider supplies only:
+Each scheduled cycle requires three persisted, integrity-valid authorities at the exact decision timestamp:
 
-- the matching opportunity-set context;
-- independent specialist contexts;
-- the current canonical portfolio state; and
-- the deployed code version.
+1. a complete full-universe screening publication;
+2. an append-only canonical portfolio snapshot; and
+3. a certified production-context evidence snapshot.
 
-The provider cannot add, remove, replace, or mutate candidates. The executor rejects missing publications, incomplete coverage, candidate-count mismatches, mismatched opportunity-context identifiers, timestamp disagreements, and invalid screening or CIO-journal chains.
+`RepositoryProductionCanonicalCIOContextProvider` assembles the context from those records. It reconstructs the immutable screened candidates, loads current cash and holdings, creates cash and holding alternatives, adds the persisted qualified candidates as peer alternatives, builds one specialist context and one exposure profile for every qualified candidate, and preserves the complete evidence, source-version, and model-version lineage in a `ProductionContextManifest`.
 
-## Configuration
+The provider fails closed when timestamps or knowledge cutoffs disagree; candidate or holding coverage is missing or duplicated; evidence is stale, uncertified, rejected, conditional, or expired; exposure profiles are missing; an equity candidate lacks governed fundamental and valuation analysis; the portfolio snapshot is absent; or any append-only chain is invalid.
+
+The provider cannot add, remove, replace, mutate, or silently re-screen candidates. The executor independently reconstructs the candidate set from the screening publication and verifies the provider manifest against the persisted qualified queue before starting `CanonicalCIOCycle`.
+
+## Repository-default configuration
+
+The repository-owned provider is the scheduler default. No context-provider environment variable is required.
 
 ```bash
 export CAPITAL_INTELLIGENCE_FULL_UNIVERSE_SCREENING_DATABASE=database/full_universe_screening.db
-export CAPITAL_INTELLIGENCE_CANONICAL_CONTEXT_PROVIDER=production_context:create_provider
+export CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE=database/canonical_portfolio.db
+export CAPITAL_INTELLIGENCE_PRODUCTION_CONTEXT_DATABASE=database/production_context.db
+export CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_CODE=COMPOUNDING
 python run_scheduler.py
 ```
 
-The context-provider factory must take no arguments and return an object exposing:
+An explicit `CAPITAL_INTELLIGENCE_CANONICAL_CONTEXT_PROVIDER=module:function` may still be supplied for controlled deployments. The factory must take no arguments and return an object exposing:
 
 ```python
 name: str
 load_context(*, as_of: datetime) -> ProductionCanonicalCIOContext
 ```
 
-There is no default provider and no fallback to the retired daily snapshot, regime, weighted-engine synthesis, score, or conviction pipeline.
+An override remains subject to the executor's persisted-publication, timestamp, candidate-count, opportunity-context, and manifest checks. There is no fallback to the retired daily snapshot, regime, weighted-engine synthesis, score, conviction, goal, or mandate pipeline.
+
+## Persisting production context evidence
+
+Upstream governed operations append one `ProductionContextEvidenceSnapshot` per portfolio and decision timestamp to `SQLiteProductionContextStore`. The snapshot contains:
+
+- the screening-cycle identifier and knowledge cutoff;
+- certified cash evidence;
+- governed macro and market evidence;
+- fundamental and valuation evidence where required;
+- candidate exposure profiles;
+- governed current-holding expected returns, costs, liquidity, and exposures;
+- certification identifiers and expiry;
+- evidence freshness boundaries;
+- source versions; and
+- model versions.
+
+The context store is append-only, hash-chained, idempotent by snapshot identifier, and rejects update or delete operations.
 
 ## Durable execution
 
