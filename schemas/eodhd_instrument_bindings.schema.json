@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capital-intelligence.example/schemas/eodhd-instrument-bindings.v1.json",
+  "title": "EODHD instrument bindings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bindings"],
+  "properties": {
+    "schema_version": {
+      "const": "eodhd-instrument-bindings.v1"
+    },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instrument_id",
+          "provider_symbol",
+          "venue",
+          "currency"
+        ],
+        "properties": {
+          "instrument_id": {"type": "string", "minLength": 1},
+          "provider_symbol": {"type": "string", "minLength": 1},
+          "venue": {"type": "string", "minLength": 1},
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{2,16}$"
+          }
+        }
+      }
+    }
+  }
+}
