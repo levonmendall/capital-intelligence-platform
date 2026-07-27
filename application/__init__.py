@@ -13,8 +13,10 @@ from application.production_context import (
     ProductionContextError,
     ProductionContextEvidenceSnapshot,
     ProductionHoldingEvidence,
-    RepositoryProductionCanonicalCIOContextProvider,
     SQLiteProductionContextStore,
+)
+from application.production_context_runtime import (
+    RepositoryProductionCanonicalCIOContextProvider,
     build_production_context_provider,
 )
 from application.daily_intelligence import (
