@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 import time
-from datetime import date, datetime, time as clock_time, timezone
+from datetime import date, datetime, time as clock_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
@@ -172,12 +172,18 @@ def _request(
         f"canonical-daily:{portfolio_code}:{operation_date.isoformat()}:"
         f"{process_version}"
     )
-    input_identifiers = tuple(args.input_identifier or ())
-    if not input_identifiers:
+    supplied_identifiers = list(args.input_identifier or ())
+    if not supplied_identifiers:
         plan_identifier = str(
             plan.get("identifier") or "canonical-daily-operations-plan"
         )
-        input_identifiers = (f"plan:{plan_identifier}",)
+        supplied_identifiers.append(f"plan:{plan_identifier}")
+    if args.test_baseline_identifier:
+        baseline = args.test_baseline_identifier.strip()
+        if not baseline:
+            raise ValueError("test baseline identifier cannot be empty")
+        supplied_identifiers.append(baseline)
+    input_identifiers = tuple(dict.fromkeys(supplied_identifiers))
     return CanonicalDailyOperationRequest(
         identifier=identifier,
         idempotency_key=idempotency_key,
@@ -190,6 +196,48 @@ def _request(
         process_version=process_version,
         code_version=code_version,
         input_identifiers=input_identifiers,
+    )
+
+
+def _post_operation_publisher(args: argparse.Namespace):
+    from governance import SQLiteReadinessEvidenceStore
+    from operations import (
+        SQLiteOperationalIncidentStore,
+        SQLiteOperationalSLOStore,
+        SQLiteResilienceExerciseStore,
+    )
+    from operations.post_operation import PostOperationReadinessPublisher
+    from operations.readiness import (
+        OperationalReadinessAssembler,
+        OperationalReadinessAssemblyPolicy,
+    )
+
+    return PostOperationReadinessPublisher(
+        assembler=OperationalReadinessAssembler(
+            daily_store=SQLiteCanonicalDailyOperationsStore(args.database),
+            slo_store=SQLiteOperationalSLOStore(args.slo_database),
+            resilience_store=SQLiteResilienceExerciseStore(
+                args.resilience_database
+            ),
+            incident_store=SQLiteOperationalIncidentStore(
+                args.incident_database
+            ),
+            readiness_store=SQLiteReadinessEvidenceStore(
+                args.readiness_evidence_database
+            ),
+            policy=OperationalReadinessAssemblyPolicy(
+                maximum_daily_operation_age=timedelta(
+                    hours=args.maximum_daily_age_hours
+                ),
+                maximum_slo_age=timedelta(
+                    hours=args.maximum_slo_age_hours
+                ),
+                maximum_resilience_report_age=timedelta(
+                    days=args.maximum_resilience_age_days
+                ),
+            ),
+        ),
+        baseline_identifier=args.test_baseline_identifier,
     )
 
 
@@ -223,6 +271,53 @@ def build_parser() -> argparse.ArgumentParser:
         "--input-identifier",
         action="append",
         help="Initial canonical input identifier. May be repeated.",
+    )
+    parser.add_argument(
+        "--test-baseline-identifier",
+        default=os.getenv("CAPITAL_INTELLIGENCE_TEST_BASELINE_IDENTIFIER"),
+        help=(
+            "Immutable test baseline to bind into the operation and use for "
+            "post-terminal operational-readiness publication."
+        ),
+    )
+    parser.add_argument(
+        "--slo-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_OPERATIONAL_SLO_DATABASE",
+            "database/operational_slos.db",
+        ),
+    )
+    parser.add_argument(
+        "--resilience-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_RESILIENCE_DATABASE",
+            "database/resilience_exercises.db",
+        ),
+    )
+    parser.add_argument(
+        "--incident-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_OPERATIONAL_INCIDENT_DATABASE",
+            "database/operational_incidents.db",
+        ),
+    )
+    parser.add_argument(
+        "--readiness-evidence-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_PRODUCT_READINESS_EVIDENCE_DATABASE",
+            "database/product_readiness_evidence.db",
+        ),
+    )
+    parser.add_argument("--maximum-daily-age-hours", type=float, default=24.0)
+    parser.add_argument("--maximum-slo-age-hours", type=float, default=24.0)
+    parser.add_argument("--maximum-resilience-age-days", type=float, default=30.0)
+    parser.add_argument(
+        "--require-clean-operational-readiness",
+        action="store_true",
+        help=(
+            "Return failure after publication when the operational snapshot "
+            "contains blockers. The terminal investment operation is not rewritten."
+        ),
     )
     parser.add_argument(
         "--operation-timezone",
@@ -270,24 +365,66 @@ def _run_once(
         retry_policies=policies,
     )
     result = orchestrator.run(request)
-    print(json.dumps(operation_result_to_dict(result), indent=2, sort_keys=True))
-    if result.status is DailyOperationStatus.COMPLETED:
+    payload = operation_result_to_dict(result)
+    publication = None
+    if args.test_baseline_identifier:
+        try:
+            publication = _post_operation_publisher(args).publish(
+                request,
+                result,
+                published_at=datetime.now(timezone.utc),
+            )
+            payload["operational_readiness"] = publication.to_dict()
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            payload["operational_readiness"] = {
+                "status": "publication_failed",
+                "error": str(error),
+                "real_money_authorized": False,
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            heartbeat.write(
+                "failed",
+                cycle_key=request.idempotency_key,
+                detail="post-operation readiness publication failed",
+            )
+            return 4
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+    if result.status is not DailyOperationStatus.COMPLETED:
         heartbeat.write(
-            "healthy",
+            "failed",
             cycle_key=request.idempotency_key,
-            detail="canonical daily operation completed",
+            detail=(
+                "canonical daily operation failed"
+                if result.failed_stage is None
+                else f"canonical daily operation failed at {result.failed_stage.value}"
+            ),
         )
-        return 0
+        return 3
+    if (
+        args.require_clean_operational_readiness
+        and publication is not None
+        and not publication.clean
+    ):
+        heartbeat.write(
+            "failed",
+            cycle_key=request.idempotency_key,
+            detail=(
+                "canonical daily operation completed but operational readiness "
+                "contains blockers"
+            ),
+        )
+        return 3
     heartbeat.write(
-        "failed",
+        "healthy",
         cycle_key=request.idempotency_key,
         detail=(
-            "canonical daily operation failed"
-            if result.failed_stage is None
-            else f"canonical daily operation failed at {result.failed_stage.value}"
+            "canonical daily operation and operational readiness completed"
+            if publication is not None and publication.clean
+            else "canonical daily operation completed"
         ),
     )
-    return 3
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -301,6 +438,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--operation-hour must be between 0 and 23")
     if args.poll_seconds < 10:
         parser.error("--poll-seconds must be at least 10")
+    for name in (
+        "maximum_daily_age_hours",
+        "maximum_slo_age_hours",
+        "maximum_resilience_age_days",
+    ):
+        if getattr(args, name) <= 0:
+            parser.error(f"--{name.replace('_', '-')} must be positive")
+    if (
+        args.require_clean_operational_readiness
+        and not args.test_baseline_identifier
+    ):
+        parser.error(
+            "--require-clean-operational-readiness requires "
+            "--test-baseline-identifier"
+        )
     try:
         plan = _load_plan(Path(args.plan).expanduser())
         settings = OperationalSettings.from_env()
