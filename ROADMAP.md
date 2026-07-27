@@ -10,7 +10,7 @@
 
 > **Maximize long-term compounded portfolio returns.**
 
-Risk, liquidity, concentration, correlation, factor exposure, turnover, costs, leverage, drawdown, evidence quality, data freshness, and implementation feasibility are protective constraints. Individual financial goals and personalized investment philosophies are excluded from the active investment process.
+`COMPOUNDING` is the sole active investment mandate. Risk, liquidity, concentration, correlation, factor exposure, turnover, costs, leverage, drawdown, evidence quality, data freshness, and implementation feasibility are protective operational constraints. Individual financial goals, retired strategy mandates, and personalized investment philosophies are excluded from the active investment process.
 
 ## Current release state
 
@@ -23,17 +23,21 @@ The canonical institutional CIO architecture is implemented:
 - qualification and opportunity ranking;
 - five independent specialists plus CIO authority;
 - portfolio-level construction and funding;
+- one append-only canonical source for cash, holdings, valuations, and implementation lineage;
 - append-only decision, construction, thesis, and evaluation history;
 - continuous living-thesis review;
 - point-in-time outcome evaluation, attribution, and confidence calibration;
-- score-free Daily Capital Intelligence and a canonical read-only API; and
+- score-free Daily Capital Intelligence and a canonical read-only API;
+- canonical CIO event alerts with no score, conviction, confidence-threshold, goal, or retired-mandate controls;
+- a fail-closed `CanonicalCIOCycle` production scheduler backed by complete-universe publications; and
 - authentication, authorization, security, deployment, and backup controls.
 
-The remaining roadmap is primarily data breadth, empirical validation, monitoring orchestration, paper-trading governance, and production operations—not creation of a second decision architecture.
+The remaining roadmap is primarily licensed data breadth, empirical validation, monitoring operation, paper-trading governance, and production scale—not creation of a second decision architecture or a competing mandate.
 
 ## Milestone 1 — Governing product realignment
 
 - [x] Adopt one objective: maximize long-term compounded portfolio returns.
+- [x] Establish `COMPOUNDING` as the sole active investment mandate.
 - [x] Make the consolidated specification authoritative.
 - [x] Remove goals, required returns, retirement targets, preferences, and behavioral memory from the active decision path.
 - [x] Preserve historical personal records only as isolated migration data.
@@ -41,6 +45,7 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 - [x] Replace objective-aware alignment with measurable portfolio contribution and improvement.
 - [x] Demote the Capital Intelligence Score to deprecated diagnostic context.
 - [x] Add architecture tests protecting the active decision graph.
+- [x] Align active architecture, API, experience, alert, portfolio, and legacy-boundary documentation.
 - [ ] Add repository PR-template automation that explicitly cites every governing invariant.
 
 ## Milestone 2 — Decision integrity and point-in-time evidence
@@ -175,8 +180,8 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 
 ## Milestone 12 — Production data and operations
 
-- [x] Authentication, role and mandate authorization, and query-only market/portfolio API access.
-- [x] Canonical event-driven alerts for CIO decisions, theses, opportunities, implementation, evidence, and daily briefings; score and conviction alerts are inactive.
+- [x] Authentication, role, and portfolio-access authorization with query-only market and portfolio API access.
+- [x] Canonical event-driven alerts for CIO decisions, theses, opportunities, implementation, evidence, and daily briefings; score, conviction, confidence-threshold, personal-goal, and retired-mandate alerts are inactive.
 - [x] Hardened containers, dependency locks, CodeQL, dependency audit, image scan, backup, and restore controls.
 - [x] Read-only canonical CIO journal API with content hashes.
 - [x] Add security-master ingestion status, source-age monitoring, catalog and operation hash verification, and an activation gate.
@@ -190,6 +195,6 @@ The remaining roadmap is primarily data breadth, empirical validation, monitorin
 
 ## Completion boundary
 
-The core AI CIO decision architecture is complete when judged as software architecture: every recommendation follows the governing rule, uses point-in-time evidence, preserves authority boundaries, and supports abstention, audit, monitoring, and evaluation.
+The core AI CIO decision architecture is complete when judged as software architecture: every recommendation follows the governing rule, uses point-in-time evidence, preserves authority boundaries, supports abstention, audit, monitoring, and evaluation, and operates under the sole `COMPOUNDING` mandate.
 
-The product is not yet proven as a production investment manager. That separate boundary requires comprehensive live data, extended out-of-sample evidence, paper-trading validation across regimes, operational scale, governance review, and independently controlled execution.
+The product is not yet proven as a production investment manager. That separate boundary requires comprehensive licensed live data, extended out-of-sample evidence, paper-trading validation across multiple regimes, production-scale incident and recovery evidence, formal governance review, and independently controlled execution. Until those conditions exist, the platform must report blocked or insufficient evidence rather than imply production investment readiness.
