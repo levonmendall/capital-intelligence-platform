@@ -14,6 +14,12 @@ from portfolio.models import (
     PortfolioProposal,
     PortfolioSnapshot,
 )
+from portfolio.multi_asset_controls import (
+    GovernedMultiAssetConstructionEngine,
+    MultiAssetConstructionError,
+    MultiAssetConstructionPolicy,
+    MultiAssetInstrumentProfile,
+)
 from portfolio.opportunity_cost import (
     CapitalFundingSource,
     FundingCandidate,
@@ -43,6 +49,10 @@ __all__ = [
     "CanonicalPortfolioSnapshot",
     "FundingCandidate",
     "FundingSourceType",
+    "GovernedMultiAssetConstructionEngine",
+    "MultiAssetConstructionError",
+    "MultiAssetConstructionPolicy",
+    "MultiAssetInstrumentProfile",
     "OpportunityCostAssessment",
     "OpportunityCostPolicy",
     "PortfolioFitDecision",
