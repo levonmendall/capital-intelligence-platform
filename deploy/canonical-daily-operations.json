@@ -1,0 +1,103 @@
+{
+  "schema_version": "canonical-daily-operations.v2",
+  "identifier": "canonical-daily-operations.production.v2",
+  "lease_required": true,
+  "stages": {
+    "provider_certification": {
+      "name": "FENCED:provider-certification",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "provider_certification", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 3, "initial_backoff_seconds": 5, "multiplier": 2, "maximum_backoff_seconds": 60}
+    },
+    "security_master_activation": {
+      "name": "FENCED:security-master-activation",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "security_master_activation", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 3, "initial_backoff_seconds": 5, "multiplier": 2, "maximum_backoff_seconds": 60}
+    },
+    "eligible_universe_publication": {
+      "name": "FENCED:eligible-universe-publication",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "eligible_universe_publication", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 2, "initial_backoff_seconds": 5, "multiplier": 2, "maximum_backoff_seconds": 30}
+    },
+    "complete_universe_screening": {
+      "name": "FENCED:complete-universe-screening",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "complete_universe_screening", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 2, "initial_backoff_seconds": 10, "multiplier": 2, "maximum_backoff_seconds": 60}
+    },
+    "production_context_assembly": {
+      "name": "FENCED:production-context-assembly",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "production_context_assembly", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 2, "initial_backoff_seconds": 5, "multiplier": 2, "maximum_backoff_seconds": 30}
+    },
+    "canonical_cio_cycle": {
+      "name": "FENCED:canonical-cio-cycle",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "canonical_cio_cycle", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 1, "initial_backoff_seconds": 0, "multiplier": 1, "maximum_backoff_seconds": 0}
+    },
+    "paper_construction_execution": {
+      "name": "FENCED:paper-construction-execution",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "paper_construction_execution", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 3, "initial_backoff_seconds": 15, "multiplier": 2, "maximum_backoff_seconds": 120}
+    },
+    "thesis_monitoring": {
+      "name": "FENCED:thesis-monitoring",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "thesis_monitoring", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 2, "initial_backoff_seconds": 5, "multiplier": 2, "maximum_backoff_seconds": 30}
+    },
+    "outcome_evaluation": {
+      "name": "FENCED:outcome-evaluation",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "outcome_evaluation", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 2, "initial_backoff_seconds": 5, "multiplier": 2, "maximum_backoff_seconds": 30}
+    },
+    "operational_evidence_review": {
+      "name": "FENCED:operational-evidence-review",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "operational_evidence_review", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 2, "initial_backoff_seconds": 5, "multiplier": 2, "maximum_backoff_seconds": 30}
+    },
+    "canonical_alert_delivery": {
+      "name": "FENCED:canonical-alert-delivery",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "canonical_alert_delivery", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 3, "initial_backoff_seconds": 5, "multiplier": 2, "maximum_backoff_seconds": 60}
+    },
+    "slo_assessment": {
+      "name": "FENCED:slo-assessment",
+      "module": "run_daily_stage_adapter",
+      "argv": ["--stage", "slo_assessment", "--bindings", "$CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS", "--operation-identifier", "{operation_identifier}", "--operation-idempotency-key", "{operation_idempotency_key}", "--stage-idempotency-key", "{stage_idempotency_key}", "--attempt", "{attempt}", "--scheduled-for", "{scheduled_for}", "--decision-timestamp", "{decision_timestamp}", "--knowledge-cutoff", "{knowledge_cutoff}", "--portfolio-code", "{portfolio_code}", "--process-version", "{process_version}", "--code-version", "{code_version}", "--input-identifiers-json", "{input_identifiers_json}"],
+      "output_fields": ["publication_identifier"],
+      "retryable_exit_codes": [75],
+      "retry": {"maximum_attempts": 2, "initial_backoff_seconds": 5, "multiplier": 2, "maximum_backoff_seconds": 30}
+    }
+  }
+}
