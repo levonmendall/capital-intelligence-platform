@@ -17,9 +17,11 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     env:
       PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
 
     steps:
       - name: Check out repository
@@ -49,19 +51,19 @@ jobs:
         run: python scripts/verify_requirements_lock.py
 
       - name: Compile Python files
-        run: python -m compileall -q .
+        run: timeout --signal=TERM 5m python -m compileall -q .
 
       - name: Initialize platform
-        run: python initialize.py
+        run: timeout --signal=TERM 5m python initialize.py
+
+      - name: Validate complete daily operating plan
+        run: timeout --signal=TERM 2m python run_daily_operations.py --validate-plan
 
       - name: Run intelligence engine
-        run: python run_intelligence.py
+        run: timeout --signal=TERM 5m python run_intelligence.py
 
-      - name: Run canonical regime pipeline
-        run: python run_regime.py
-
-      - name: Run automated tests
-        run: pytest -q --junitxml=pytest-results.xml
+      - name: Run deterministic automated tests
+        run: timeout --signal=TERM 25m pytest -q --maxfail=1 --junitxml=pytest-results.xml
 
       - name: Publish automated test report
         if: always()
@@ -72,5 +74,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Build Python 3.11 validation image
+        run: timeout --signal=TERM 10m docker build --target validation --tag capital-intelligence:validation .
+
+      - name: Run container workflow acceptance
+        run: timeout --signal=TERM 10m docker run --rm capital-intelligence:validation
+
       - name: Build hardened runtime image
-        run: docker build --tag capital-intelligence:validation .
+        run: timeout --signal=TERM 10m docker build --target runtime --tag capital-intelligence:runtime .
