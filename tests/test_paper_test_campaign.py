@@ -323,7 +323,7 @@ def test_no_action_day_is_valid_but_cannot_contain_implementation() -> None:
 
 def test_failed_scenario_cannot_masquerade_as_passed() -> None:
     baseline = _baseline()
-    with pytest.raises(ValueError, match="isolated"):
+    with pytest.raises(ValueError, match="isolation"):
         FailureScenarioRecord(
             identifier="scenario:not-isolated",
             baseline_identifier=baseline.identifier,
