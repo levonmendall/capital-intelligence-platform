@@ -4,9 +4,15 @@
 
 Every classified liquid public-market family has a governed analytical,
 construction, execution, portfolio-accounting, and readiness path. The release
-suite runs a deterministic mechanical rehearsal across international equities,
-fixed income, commodities, FX, crypto, real estate, futures, options,
-volatility, and liquid alternatives.
+suite runs a deterministic mechanical rehearsal across all 13 classified asset
+classes: U.S. equities, U.S. ETFs, cash equivalents, international equities,
+fixed income, commodities, FX, crypto, real estate, futures, options, volatility,
+and liquid alternatives.
+
+The exact internal simulation scope is versioned in
+`config/universal_paper_asset_classes.json` and documented in
+[Universal Paper Asset-Class Availability](UNIVERSAL_PAPER_ASSET_CLASSES.md).
+`other`, private, and unclassified instruments remain fail closed.
 
 That rehearsal uses fixtures. It proves implementation mechanics and certified
 execution lineage; it does not certify an external provider or claim that live
@@ -139,10 +145,12 @@ python run_asset_specific_evidence.py \
 
 ## Asset-family activation
 
-Every non-core family also requires at least one active, structure-specific
-`paper_eligible` approval in `database/asset-class-governance.db`. Direct tokens,
-listed funds, cash instruments, futures, and options require separate profiles
-when their custody, session, lifecycle, or settlement models differ.
+Core U.S. equities, U.S. ETFs, and cash equivalents use the canonical core
+policy plus instrument-level eligible-universe lineage. Every other family also
+requires at least one active, structure-specific `paper_eligible` approval in
+`database/asset-class-governance.db`. Direct tokens, listed funds, cash
+instruments, bonds, futures, and options require separate profiles when their
+custody, session, lifecycle, or settlement models differ.
 
 ```bash
 python run_asset_class_governance.py \
@@ -151,7 +159,15 @@ python run_asset_class_governance.py \
 
 ## Readiness commands
 
-Prove repository-internal coverage and list external blockers:
+Prove exact internal capability and successful simulated fills for all 13 asset
+classes:
+
+```bash
+python run_universal_paper_availability.py --require-available
+```
+
+Prove repository-internal provider and market coverage and list external
+blockers:
 
 ```bash
 python run_all_markets_paper_readiness.py --require-internal-ready
@@ -184,7 +200,7 @@ python run_data_readiness.py \
 
 ## External inputs that code cannot create
 
-The product cannot honestly declare all markets paper ready until operators
+The product cannot honestly declare all markets provider-backed paper ready until operators
 supply and approve:
 
 1. licensed global reference and historical security-master data;
@@ -202,8 +218,9 @@ supply and approve:
 10. active provider certifications, asset-class approvals, operational evidence,
     and final readiness-gate certifications.
 
-Missing external evidence blocks the affected instrument or market. It does not
-remove that market from analysis, and it never creates live-trading authority.
+Missing external evidence blocks the affected instrument from provider-backed
+operation. It does not remove that class from internal mechanical paper
+availability or market analysis, and it never creates live-trading authority.
 
 ## Provider bundle and derivative certification
 
