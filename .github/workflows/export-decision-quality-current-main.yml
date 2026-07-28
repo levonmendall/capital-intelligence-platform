@@ -23,12 +23,15 @@ jobs:
           ref: main
       - name: Package current main
         run: |
+          git rev-parse HEAD > /tmp/current-main-sha.txt
           zip -qr /tmp/capital-intelligence-current-main.zip . -x '.git/*'
       - name: Upload current main
         uses: actions/upload-artifact@v4
         with:
           name: decision-quality-current-main
-          path: /tmp/capital-intelligence-current-main.zip
+          path: |
+            /tmp/capital-intelligence-current-main.zip
+            /tmp/current-main-sha.txt
           retention-days: 1
       - name: Check out PR 143 original base
         uses: actions/checkout@v4
