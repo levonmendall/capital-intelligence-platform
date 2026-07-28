@@ -17,6 +17,9 @@ from providers.public_live_information import (
     PublicLiveSourceResult,
     load_public_live_source_catalog,
 )
+from providers.public_live_information_runtime import (
+    GovernedPublicLiveInformationProvider,
+)
 from providers.sec_edgar import (
     SECEdgarProvider,
     SECEdgarProviderError,
@@ -26,6 +29,7 @@ __all__ = [
     "FREDCache",
     "FREDCacheRecord",
     "FREDRetrievalPolicy",
+    "GovernedPublicLiveInformationProvider",
     "JsonFREDCache",
     "MemoryFREDCache",
     "PublicLiveCoverageReport",
