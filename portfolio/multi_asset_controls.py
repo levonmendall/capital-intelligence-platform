@@ -2,7 +2,7 @@
 
 The canonical construction engine remains the sizing authority. This module adds
 mandatory instrument, leverage, contract, currency, and capability checks for all
-classified non-core liquid public markets. It cannot change CIO ranking or create
+classified liquid public markets. It cannot change CIO ranking or create
 intents.
 """
 
@@ -98,8 +98,8 @@ class MultiAssetInstrumentProfile:
             object.__setattr__(self, field_name, value)
         if not isinstance(self.asset_class, CandidateAssetClass):
             raise TypeError("asset_class must be CandidateAssetClass")
-        if self.asset_class not in EXPANSION_ASSET_CLASSES:
-            raise ValueError("profile is only valid for classified governed non-core markets")
+        if self.asset_class is CandidateAssetClass.OTHER:
+            raise ValueError("unclassified instruments cannot receive an execution profile")
         if not isinstance(self.approval_state, AssetClassApprovalState):
             raise TypeError("approval_state must be AssetClassApprovalState")
         if not isinstance(self.unlevered, bool) or not isinstance(self.spot_only, bool):

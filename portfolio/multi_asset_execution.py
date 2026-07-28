@@ -144,8 +144,11 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
 class MultiAssetExecutionPolicy:
     """Versioned paper-fill assumptions; never an instrument authority."""
 
-    version: str = "multi-asset-paper-execution.v1"
+    version: str = "multi-asset-paper-execution.v2"
     maximum_quote_age_minutes: int = 5
+    us_equity_commission_bps: float = 0.0
+    us_etf_commission_bps: float = 0.0
+    cash_equivalent_commission_bps: float = 0.0
     maximum_volume_participation: float = 0.10
     crypto_commission_bps: float = 10.0
     fx_commission_bps: float = 1.0
@@ -180,6 +183,9 @@ class MultiAssetExecutionPolicy:
             ),
         )
         for field_name in (
+            "us_equity_commission_bps",
+            "us_etf_commission_bps",
+            "cash_equivalent_commission_bps",
             "crypto_commission_bps",
             "fx_commission_bps",
             "international_equity_commission_bps",
@@ -202,6 +208,9 @@ class MultiAssetExecutionPolicy:
     def session_model(self, asset_class: CandidateAssetClass) -> TradingSessionModel:
         try:
             return {
+                CandidateAssetClass.US_EQUITY: TradingSessionModel.EXCHANGE_LOCAL,
+                CandidateAssetClass.US_ETF: TradingSessionModel.EXCHANGE_LOCAL,
+                CandidateAssetClass.CASH_EQUIVALENT: TradingSessionModel.EXCHANGE_LOCAL,
                 CandidateAssetClass.CRYPTO: TradingSessionModel.CONTINUOUS_24_7,
                 CandidateAssetClass.FX: TradingSessionModel.CONTINUOUS_24_5,
                 CandidateAssetClass.FIXED_INCOME: TradingSessionModel.DEALER_24_5,
@@ -220,6 +229,9 @@ class MultiAssetExecutionPolicy:
 
     def commission_bps(self, asset_class: CandidateAssetClass) -> float:
         return {
+            CandidateAssetClass.US_EQUITY: self.us_equity_commission_bps,
+            CandidateAssetClass.US_ETF: self.us_etf_commission_bps,
+            CandidateAssetClass.CASH_EQUIVALENT: self.cash_equivalent_commission_bps,
             CandidateAssetClass.CRYPTO: self.crypto_commission_bps,
             CandidateAssetClass.FX: self.fx_commission_bps,
             CandidateAssetClass.INTERNATIONAL_EQUITY: self.international_equity_commission_bps,
@@ -238,8 +250,11 @@ class MultiAssetExecutionPolicy:
         instrument_type: str | None = None,
     ) -> bool:
         if instrument_type is not None:
-            return instrument_type in {"spot", "token", "stablecoin", "bond"}
+            return instrument_type in {"spot", "token", "stablecoin", "bond", "common_stock", "preferred_stock", "fund"}
         return asset_class in {
+            CandidateAssetClass.US_EQUITY,
+            CandidateAssetClass.US_ETF,
+            CandidateAssetClass.CASH_EQUIVALENT,
             CandidateAssetClass.CRYPTO,
             CandidateAssetClass.FX,
             CandidateAssetClass.FIXED_INCOME,
