@@ -516,7 +516,7 @@ def allocation_bar(*, cash: float, nav: float) -> None:
         <div class="capital-orbit">
             <div class="capital-ring" style="--deployed:{deployed * 100:.2f}%"><div class="capital-ring-value">{deployed:.0%}<span>deployed</span></div></div>
             <div class="capital-copy">
-                <h4>Capital Deployment Map</h4>
+                <h4>Capital Deployment Orbit</h4>
                 <p>The portfolio only leaves cash when a governed opportunity clears the complete decision and implementation process.</p>
                 <div class="capital-ledger">
                     <div><small>Invested</small><strong>{format_currency(invested)}</strong></div>
