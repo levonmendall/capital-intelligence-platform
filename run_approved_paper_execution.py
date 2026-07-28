@@ -11,12 +11,21 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from delivery import (
+    AlertChannel,
+    AlertMessage,
+    AlertPriority,
+    AlertTopic,
+    SQLiteAlertStore,
+)
 from governance.paper_decision_approval import (
     PaperDecisionApprovalError,
+    PaperDecisionApprovalEvent,
     PaperDecisionApprovalState,
     SQLitePaperDecisionApprovalStore,
     canonical_construction_sha256,
@@ -49,6 +58,13 @@ def build_parser() -> argparse.ArgumentParser:
             str(data_dir / "paper_test_governance.db"),
         ),
     )
+    parser.add_argument(
+        "--alert-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_ALERT_DATABASE",
+            str(data_dir / "alerts.db"),
+        ),
+    )
     return parser
 
 
@@ -65,6 +81,81 @@ def _forwarded_arguments(args: argparse.Namespace, remaining: Sequence[str]) -> 
         *remaining,
         "--require-complete",
     ]
+
+
+def _queue_completion_notification(
+    *,
+    alert_database: str,
+    approval: PaperDecisionApprovalEvent,
+    execution_identifier: str,
+    as_of: datetime,
+) -> tuple[str, ...]:
+    """Publish completion to the approver's configured implementation channels."""
+
+    alert_store = SQLiteAlertStore(alert_database)
+    preference = alert_store.get_preference(approval.actor_user_id)
+    notification_identifier = f"paper-execution-completed:{execution_identifier}"
+    if AlertTopic.IMPLEMENTATION not in preference.topics:
+        alert_store.record_suppression(
+            user_id=approval.actor_user_id,
+            snapshot_identifier=notification_identifier,
+            reason=(
+                "Paper execution completed, but implementation notifications are "
+                "disabled in this user's alert preferences."
+            ),
+            now=as_of,
+        )
+        return ()
+
+    channels = tuple(
+        channel
+        for channel in preference.channels
+        if channel is not AlertChannel.EMAIL or preference.email_address is not None
+    )
+    if not channels:
+        alert_store.record_suppression(
+            user_id=approval.actor_user_id,
+            snapshot_identifier=notification_identifier,
+            reason="Paper execution completed, but no usable notification channel is configured.",
+            now=as_of,
+        )
+        return ()
+
+    message = AlertMessage(
+        user_id=approval.actor_user_id,
+        snapshot_identifier=notification_identifier,
+        as_of=as_of,
+        topics=(AlertTopic.IMPLEMENTATION,),
+        priority=AlertPriority.STANDARD,
+        subject="Paper transaction completed",
+        body=(
+            "The approved paper implementation completed successfully.\n"
+            f"Execution: {execution_identifier}\n"
+            f"Decision: {approval.decision_identifier}\n"
+            f"Construction: {approval.construction_identifier}\n"
+            "Portfolio: COMPOUNDING\n"
+            "This was a simulated paper transaction. Real money was not authorized."
+        ),
+        channels=channels,
+        email_address=preference.email_address,
+    )
+    delivery_identifiers: list[str] = []
+    for channel in channels:
+        delivery = alert_store.enqueue(
+            message,
+            channel,
+            now=as_of,
+            available_at=as_of,
+        )
+        if channel is AlertChannel.IN_APP:
+            delivery = alert_store.record_attempt(
+                delivery.delivery_id,
+                success=True,
+                detail="Paper-execution completion is available in the authenticated inbox.",
+                now=as_of,
+            )
+        delivery_identifiers.append(delivery.delivery_id)
+    return tuple(delivery_identifiers)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -135,6 +226,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 5
+
+    try:
+        notification_identifiers = _queue_completion_notification(
+            alert_database=args.alert_database,
+            approval=approval,
+            execution_identifier=execution_identifier,
+            as_of=as_of,
+        )
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as error:
+        print(
+            json.dumps(
+                {
+                    "status": "completed_with_notification_error",
+                    "error": str(error),
+                    "execution_identifier": execution_identifier,
+                    "real_money_authorized": False,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    print(
+        json.dumps(
+            {
+                "status": "completed",
+                "execution_identifier": execution_identifier,
+                "completion_notification_delivery_ids": list(notification_identifiers),
+                "real_money_authorized": False,
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 
