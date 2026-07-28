@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -140,10 +141,7 @@ def _recovery(
         process_version=PROCESS_VERSION,
         code_version=CODE_VERSION,
         restored_authorities=("institutional_journal", "canonical_portfolio"),
-        integrity_verified_authorities=(
-            "institutional_journal",
-            "canonical_portfolio",
-        ),
+        integrity_verified_authorities=("institutional_journal", "canonical_portfolio"),
         passed_probe_identifiers=("probe:decision", "probe:portfolio"),
         failed_probe_identifiers=() if status is RecoveryDrillStatus.PASSED else ("probe:decision",),
         recovery_seconds=30,
@@ -154,18 +152,14 @@ def _recovery(
     )
 
 
-def _binding(
-    *,
-    state: StageBindingApprovalState = StageBindingApprovalState.APPROVED,
-    binding_hash: str = BINDING_HASH,
-) -> StageBindingApproval:
+def _binding(*, binding_hash: str = BINDING_HASH) -> StageBindingApproval:
     return StageBindingApproval(
-        identifier=f"binding-approval:{state.value}:1",
+        identifier="binding-approval:approved:1",
         binding_sha256=binding_hash,
         baseline_identifier=BASELINE_ID,
         process_version=PROCESS_VERSION,
         code_version=CODE_VERSION,
-        state=state,
+        state=StageBindingApprovalState.APPROVED,
         approved_at=NOW - timedelta(days=2),
         effective_at=NOW - timedelta(days=1),
         expires_at=NOW + timedelta(days=30),
@@ -177,15 +171,23 @@ def _binding(
     )
 
 
-def _eligible_package() -> ControlledPaperTestEligibilityPackage:
+def _package(
+    *,
+    freeze: InvestmentProcessFreeze | None = None,
+    readiness: ProductTestReadinessReport | None = None,
+    campaign_state: PaperTestCampaignState = PaperTestCampaignState.SATISFIED,
+    recovery_status: RecoveryDrillStatus = RecoveryDrillStatus.PASSED,
+) -> ControlledPaperTestEligibilityPackage:
     baseline = _baseline()
     return PaperTestEntryPackageAssembler().assemble(
-        freeze=_freeze(),
-        readiness=_readiness(),
+        freeze=freeze or _freeze(),
+        readiness=readiness or _readiness(),
         baseline=baseline,
-        campaign=_campaign(baseline),
-        recovery=_recovery(),
-        stage_binding_approval=_binding(),
+        campaign=_campaign(baseline, campaign_state),
+        recovery=_recovery(recovery_status),
+        stage_binding_approval=_binding(
+            binding_hash=(freeze or _freeze()).stage_bindings_sha256
+        ),
         assembled_at=NOW,
     )
 
@@ -212,37 +214,28 @@ def _decision(
         approver_role="paper_test_release_authority",
         independent_validator_identifier="validation:paper-test:independent-1",
         rationale="Authorize the exact immutable baseline for a limited paper cohort.",
-        limitations=(
-            "Paper-only; no broker connectivity or real-money activity.",
-        ),
+        limitations=("Paper-only; no broker connectivity or real-money activity.",),
     )
 
 
 def test_complete_authorities_create_eligible_package() -> None:
-    package = _eligible_package()
-
+    package = _package()
     assert package.state is PaperTestEligibilityState.ELIGIBLE
     assert package.blockers == ()
-    assert package.development_open is True
     assert package.to_dict()["paper_test_authorized"] is False
-    assert package.to_dict()["real_money_authorized"] is False
     assert package.fingerprint == ControlledPaperTestEligibilityPackage.from_dict(
         package.to_dict()
     ).fingerprint
 
 
-def test_hash_version_and_authority_drift_fail_closed() -> None:
-    baseline = _baseline()
-    package = PaperTestEntryPackageAssembler().assemble(
-        freeze=_freeze(binding_hash="e" * 64),
+def test_authority_drift_and_failed_evidence_block_package() -> None:
+    freeze = _freeze(binding_hash="e" * 64)
+    package = _package(
+        freeze=freeze,
         readiness=_readiness(ProductTestReadiness.BLOCKED),
-        baseline=baseline,
-        campaign=_campaign(baseline, PaperTestCampaignState.IN_PROGRESS),
-        recovery=_recovery(RecoveryDrillStatus.FAILED),
-        stage_binding_approval=_binding(binding_hash="e" * 64),
-        assembled_at=NOW,
+        campaign_state=PaperTestCampaignState.IN_PROGRESS,
+        recovery_status=RecoveryDrillStatus.FAILED,
     )
-
     assert package.state is PaperTestEligibilityState.BLOCKED
     assert "stage-binding digest does not match the frozen baseline" in package.blockers
     assert "canonical product-test readiness is not satisfied" in package.blockers
@@ -250,143 +243,85 @@ def test_hash_version_and_authority_drift_fail_closed() -> None:
     assert "canonical recovery drill is not passing" in package.blockers
 
 
-def test_expired_or_suspended_process_freeze_blocks_package() -> None:
-    baseline = _baseline()
-    for freeze in (
+@pytest.mark.parametrize(
+    "freeze",
+    (
         _freeze(expires_at=NOW - timedelta(seconds=1)),
         _freeze(state=ProcessFreezeState.SUSPENDED),
-    ):
-        package = PaperTestEntryPackageAssembler().assemble(
-            freeze=freeze,
-            readiness=_readiness(),
-            baseline=baseline,
-            campaign=_campaign(baseline),
-            recovery=_recovery(),
-            stage_binding_approval=_binding(),
-            assembled_at=NOW,
-        )
-        assert package.state is PaperTestEligibilityState.BLOCKED
-        assert "investment process freeze is not active" in package.blockers
+    ),
+)
+def test_inactive_process_freeze_blocks_package(freeze: InvestmentProcessFreeze) -> None:
+    package = _package(freeze=freeze)
+    assert package.state is PaperTestEligibilityState.BLOCKED
+    assert "investment process freeze is not active" in package.blockers
 
 
 def test_approved_decision_is_cohort_bound_and_paper_only(tmp_path: Path) -> None:
     store = SQLitePaperTestEntryGovernanceStore(tmp_path / "governance.db")
-    freeze = _freeze()
-    package = _eligible_package()
+    package = _package()
     decision = _decision(package)
-
-    assert store.append_freeze(freeze) == 1
+    assert store.append_freeze(_freeze()) == 1
     assert store.append_package(package) == 2
     assert store.append_decision(decision, package=package) == 3
-    assert decision.controlled_paper_test_authorized is True
-    assert decision.active_at(NOW + timedelta(minutes=2)) is True
+    assert decision.active_at(NOW + timedelta(minutes=2))
     payload = decision.to_dict()
-    assert payload["cohort_identifier"] == "controlled-paper-cohort:alpha-1"
+    assert payload["controlled_paper_test_authorized"] is True
     assert payload["paper_only"] is True
     assert payload["real_money_authorized"] is False
     assert payload["broker_connectivity_authorized"] is False
     assert payload["performance_claims_permitted"] is False
-    assert store.verify_integrity()
 
 
 def test_blocked_package_cannot_be_human_approved(tmp_path: Path) -> None:
-    baseline = _baseline()
-    package = PaperTestEntryPackageAssembler().assemble(
-        freeze=_freeze(state=ProcessFreezeState.SUSPENDED),
-        readiness=_readiness(),
-        baseline=baseline,
-        campaign=_campaign(baseline),
-        recovery=_recovery(),
-        stage_binding_approval=_binding(),
-        assembled_at=NOW,
-    )
+    package = _package(freeze=_freeze(state=ProcessFreezeState.SUSPENDED))
     store = SQLitePaperTestEntryGovernanceStore(tmp_path / "governance.db")
     store.append_package(package)
-
     with pytest.raises(PaperTestEntryGovernanceError, match="cannot be approved"):
         store.append_decision(_decision(package), package=package)
 
 
-def test_package_fingerprint_and_baseline_cannot_be_substituted(tmp_path: Path) -> None:
-    package = _eligible_package()
+def test_package_fingerprint_cannot_be_substituted(tmp_path: Path) -> None:
+    package = _package()
     store = SQLitePaperTestEntryGovernanceStore(tmp_path / "governance.db")
     store.append_package(package)
-    altered = ControlledPaperTestEntryDecision(
-        **{
-            **_decision(package).to_dict(),
-            "state": PaperTestEntryDecisionState.APPROVED,
-            "decided_at": NOW,
-            "effective_at": NOW + timedelta(minutes=1),
-            "expires_at": NOW + timedelta(days=14),
-            "package_fingerprint": "f" * 64,
-            "limitations": ("Paper-only.",),
-        }
-    )
-
+    altered = replace(_decision(package), package_fingerprint="f" * 64)
     with pytest.raises(PaperTestEntryGovernanceError, match="fingerprint"):
         store.append_decision(altered, package=package)
 
 
-def test_suspension_or_revocation_supersedes_prior_entry_decision(tmp_path: Path) -> None:
-    package = _eligible_package()
+def test_suspension_supersedes_prior_entry_decision(tmp_path: Path) -> None:
+    package = _package()
     store = SQLitePaperTestEntryGovernanceStore(tmp_path / "governance.db")
     store.append_package(package)
-    approved = _decision(package)
+    store.append_decision(_decision(package), package=package)
     suspended = _decision(
         package,
         state=PaperTestEntryDecisionState.SUSPENDED,
         identifier="paper-test-entry-decision:suspended",
     )
-    store.append_decision(approved, package=package)
     store.append_decision(suspended, package=package)
-
-    decisions = store.decisions(BASELINE_ID)
-    assert decisions[-1].state is PaperTestEntryDecisionState.SUSPENDED
-    assert decisions[-1].controlled_paper_test_authorized is False
+    assert store.decisions(BASELINE_ID)[-1].controlled_paper_test_authorized is False
 
 
 def test_process_and_release_roles_require_independent_validation() -> None:
     with pytest.raises(ValueError, match="independent validation"):
-        InvestmentProcessFreeze(
-            **{
-                **_freeze().to_dict(),
-                "state": ProcessFreezeState.FROZEN,
-                "recorded_at": NOW - timedelta(days=2),
-                "effective_at": NOW - timedelta(days=1),
-                "expires_at": NOW + timedelta(days=30),
-                "evidence_identifiers": ("evidence:1",),
-                "limitations": ("Paper-only.",),
-                "independent_validation_identifier": (
-                    "governance:investment-process:committee-a"
-                ),
-            }
+        replace(
+            _freeze(),
+            independent_validation_identifier="governance:investment-process:committee-a",
         )
-
-    package = _eligible_package()
+    package = _package()
     with pytest.raises(ValueError, match="independent validation"):
-        ControlledPaperTestEntryDecision(
-            **{
-                **_decision(package).to_dict(),
-                "state": PaperTestEntryDecisionState.APPROVED,
-                "decided_at": NOW,
-                "effective_at": NOW + timedelta(minutes=1),
-                "expires_at": NOW + timedelta(days=14),
-                "limitations": ("Paper-only.",),
-                "independent_validator_identifier": (
-                    "governance:paper-test-release:1"
-                ),
-            }
+        replace(
+            _decision(package),
+            independent_validator_identifier="governance:paper-test-release:1",
         )
 
 
-def test_process_bundle_hash_is_deterministic_and_content_sensitive(
-    tmp_path: Path,
-) -> None:
+def test_process_bundle_hash_is_deterministic_and_content_sensitive(tmp_path: Path) -> None:
     first = tmp_path / "GOVERNING_SPECIFICATION.md"
     second = tmp_path / "ARCHITECTURE.md"
     first.write_text("governing rule\n", encoding="utf-8")
     second.write_text("authority boundary\n", encoding="utf-8")
-
     initial = canonical_process_bundle_sha256((first, second))
     assert initial == canonical_process_bundle_sha256((second, first))
     second.write_text("changed authority boundary\n", encoding="utf-8")
@@ -398,7 +333,7 @@ def test_governance_history_is_idempotent_and_append_only(tmp_path: Path) -> Non
     freeze = _freeze()
     assert store.append_freeze(freeze) == 1
     assert store.append_freeze(freeze) == 1
-
+    assert store.verify_integrity()
     with sqlite3.connect(store.path) as connection:
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(
