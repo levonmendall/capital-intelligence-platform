@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capital-intelligence.local/schemas/free_provider_connections.schema.json",
+  "title": "Free provider connections",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "providers"],
+  "properties": {
+    "schema_version": {"const": "free-provider-connections.v1"},
+    "providers": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "identifier",
+          "enabled",
+          "required_environment_variables",
+          "health_probe",
+          "readiness_authority",
+          "limitations"
+        ],
+        "properties": {
+          "identifier": {
+            "enum": [
+              "fred",
+              "sec_edgar",
+              "coinbase_exchange",
+              "kraken_spot",
+              "openfigi",
+              "gleif"
+            ]
+          },
+          "enabled": {"type": "boolean"},
+          "required_environment_variables": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "optional_environment_variables": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "health_probe": {"type": "object", "minProperties": 1},
+          "readiness_authority": {"const": false},
+          "limitations": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    }
+  }
+}
