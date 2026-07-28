@@ -1,4 +1,4 @@
-"""Activate, halt, or inspect the global controlled paper-trading switch."""
+"""Activate, halt, or inspect the controlled paper-execution risk switch."""
 
 from __future__ import annotations
 
@@ -12,9 +12,11 @@ from typing import Sequence
 from governance import (
     PaperTradingControlEvent,
     PaperTradingControlState,
+    SQLitePaperTestEntryGovernanceStore,
     SQLitePaperTradingControlStore,
     SQLitePaperTradingLaunchStore,
 )
+from governance.paper_execution_authority import require_human_paper_test_entry
 
 
 def _timestamp(value: str | None) -> datetime:
@@ -38,6 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reason")
     parser.add_argument("--authority-identifier", action="append", default=[])
     parser.add_argument(
+        "--entry-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_PAPER_TEST_GOVERNANCE_DATABASE",
+            str(data_dir / "paper_test_governance.db"),
+        ),
+    )
+    parser.add_argument(
         "--launch-database",
         default=os.getenv(
             "CAPITAL_INTELLIGENCE_PAPER_LAUNCH_DATABASE",
@@ -57,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    human = None
     try:
         effective_at = _timestamp(args.effective_at)
         control_store = SQLitePaperTradingControlStore(args.control_database)
@@ -86,6 +96,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             launch_report_identifier = None
             state = PaperTradingControlState.HALTED
             if args.action == "activate":
+                human = require_human_paper_test_entry(
+                    entry_store=SQLitePaperTestEntryGovernanceStore(
+                        args.entry_database
+                    ),
+                    baseline_identifier=args.baseline_identifier,
+                    process_version=args.process_version,
+                    code_version=args.code_version,
+                    as_of=effective_at,
+                )
                 launch = SQLitePaperTradingLaunchStore(
                     args.launch_database
                 ).latest_ready(
@@ -96,7 +115,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 if launch is None:
                     raise ValueError(
-                        "cannot activate paper trading without a current launch authorization"
+                        "cannot activate runtime paper execution without a current "
+                        "sustained launch certification"
                     )
                 state = PaperTradingControlState.ACTIVE
                 launch_report_identifier = launch.identifier
@@ -115,6 +135,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             control_store.verify_integrity()
             payload = event.to_dict()
             payload["registry_sequence"] = sequence
+            payload["human_entry_decision_identifier"] = (
+                None if human is None else human.decision.identifier
+            )
+            payload["eligibility_package_identifier"] = (
+                None if human is None else human.package.identifier
+            )
+            payload["eligibility_package_fingerprint"] = (
+                None if human is None else human.package.fingerprint
+            )
     except (OSError, TypeError, ValueError, RuntimeError) as error:
         print(
             json.dumps(
