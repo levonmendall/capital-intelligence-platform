@@ -38,6 +38,8 @@ The approval is bound to:
 
 Approval events are append-only and tamper-evident. They are stored as additional tables in the canonical `paper_test_governance.db`, so the existing governance backup and recovery authority covers them.
 
+While an approved implementation is pending, the Portfolio approval panel refreshes every five seconds. After successful execution, it changes to the completed state and displays a one-time Streamlit completion toast without requiring a manual page refresh.
+
 ## Execute the approved implementation
 
 Use the consent-gated entrypoint instead of calling the lower-level executor directly:
@@ -59,6 +61,10 @@ python run_approved_paper_execution.py \
 The entrypoint first requires current user approval for the exact construction hash. It then delegates to `run_multi_asset_paper_execution.py`, which independently requires the active entry, launch, and runtime authorities and applies the existing paper-only execution controls.
 
 A successful execution appends an `executed` event to the approval history. That prevents the same consent from being reused for a second implementation. A failed or held execution leaves the approval pending until it expires or is revoked, permitting a governed retry without changing the approved construction.
+
+After the executed event is recorded, the worker creates a `Paper transaction completed` alert for the authenticated approver under the existing `IMPLEMENTATION` topic. The in-app alert is immediately available in the authenticated Notifications inbox. Email is queued when the user has enabled the email channel and configured an address. User alert preferences remain authoritative.
+
+The completion alert is deduplicated by user, execution identifier, and channel. A notification-store failure cannot cause the already completed paper transaction to run again; the worker reports `completed_with_notification_error` while retaining a successful execution result.
 
 ## Fail-closed behavior
 
