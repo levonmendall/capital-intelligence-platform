@@ -17,7 +17,7 @@ def test_authenticated_app_passes_principal_to_consent_controls() -> None:
     assert "paper decision approval insertion point is unavailable" in app
 
 
-def test_consent_surface_is_exact_and_paper_only() -> None:
+def test_consent_surface_is_exact_paper_only_and_auto_refreshing() -> None:
     ui = (ROOT / "paper_trading_ui.py").read_text(encoding="utf-8")
     worker = (ROOT / "run_approved_paper_execution.py").read_text(encoding="utf-8")
 
@@ -26,6 +26,12 @@ def test_consent_surface_is_exact_and_paper_only() -> None:
     assert "Revoke paper approval" in ui
     assert "canonical_construction_sha256" in ui
     assert "write=True" in ui
+    assert '@st.fragment(run_every="5s")' in ui
+    assert 'st.toast("Paper transaction completed."' in ui
+    assert "Status refreshes automatically" in ui
     assert "require_user_approved_paper_decision" in worker
     assert "run_multi_asset_paper_execution" in worker
+    assert "Paper transaction completed" in worker
+    assert "AlertTopic.IMPLEMENTATION" in worker
+    assert "completion_notification_delivery_ids" in worker
     assert '"real_money_authorized": False' in worker
