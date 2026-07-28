@@ -12,7 +12,7 @@ jobs:
   apply:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -29,6 +29,13 @@ jobs:
           rm -f .github/workflows/export-performance-audit.yml
           rm -f .github/workflows/apply-performance-accounting.yml
 
+      - name: Install project dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+
       - name: Verify syntax and focused accounting tests
         shell: bash
         run: |
@@ -42,7 +49,6 @@ jobs:
             run_portfolio_mark_to_market.py \
             run_portfolio_position_adjustment.py \
             app_impl.py
-          python -m pip install 'pytest>=9.1.1,<10'
           pytest -q \
             tests/test_canonical_portfolio_state.py \
             tests/test_cross_currency_portfolio_state.py \
