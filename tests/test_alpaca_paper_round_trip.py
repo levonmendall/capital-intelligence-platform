@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,7 @@ class _Response:
 
 class _FeeAwarePaperApi:
     def __init__(self) -> None:
-        self.opening_available = 0.000300000
+        self.opening_available = Decimal("0.000300000")
         self.available = self.opening_available
         self.orders: dict[str, dict[str, Any]] = {}
         self.activities: list[dict[str, Any]] = []
@@ -69,15 +70,13 @@ class _FeeAwarePaperApi:
             order_id = f"fee-order-{order_number}"
             side = str(request["side"])
             if side == "buy":
-                gross_quantity = 0.000153301
-                net_available = 0.000152917
+                gross_quantity = Decimal("0.000153301")
+                net_available = Decimal("0.000152917")
                 self.available += net_available
                 fill_quantity = gross_quantity
             else:
-                fill_quantity = float(request["qty"])
+                fill_quantity = Decimal(str(request["qty"]))
                 self.available -= fill_quantity
-            if abs(self.available) < 1e-12:
-                self.available = 0.0
             order = {
                 "id": order_id,
                 "client_order_id": request["client_order_id"],
@@ -127,7 +126,7 @@ def test_round_trip_sells_net_available_crypto_and_preserves_opening_position(
     tmp_path: Path,
 ) -> None:
     api = _FeeAwarePaperApi()
-    opening_available = api.opening_available
+    opening_available = float(api.opening_available)
     client = AlpacaPaperBrokerClient(
         AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),
         http_request=api,
