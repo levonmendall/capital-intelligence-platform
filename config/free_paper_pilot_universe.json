@@ -226,6 +226,7 @@
   "limitations": [
     "This pilot provides broad economic exposure through U.S.-listed wrappers; it does not certify direct trading in every underlying instrument class.",
     "Alpaca Basic uses the free IEX market-data feed and is not consolidated full-market execution evidence.",
+    "Closed-market zero top-of-book quotes may confirm provider availability, but execution remains held until a positive non-crossed market-open quote is available.",
     "All fills remain internal simulations. No broker order-submission endpoint is implemented or authorized.",
     "The institutional all-market readiness gate remains unchanged and fail-closed."
   ]
