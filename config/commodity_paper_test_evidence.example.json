@@ -1,0 +1,52 @@
+{
+  "schema_version": "commodity-paper-test-evidence.v1",
+  "identifier": "commodity-evidence:replace-with-certified-baseline",
+  "as_of": "2026-07-27T23:59:59+00:00",
+  "knowledge_cutoff": "2026-07-27T23:59:59+00:00",
+  "expires_at": "2026-07-28T23:59:59+00:00",
+  "baseline_identifier": "test-baseline:replace-me",
+  "process_version": "capital-intelligence-investment-process.v1",
+  "code_version": "replace-with-commit-sha",
+  "eligible_universe_publication_identifier": "eligible-universe:replace-me",
+  "direct_derivatives_authorized": false,
+  "benchmarks": [
+    {
+      "identifier": "gold",
+      "observed_at": "2026-07-27T20:00:00+00:00",
+      "available_at": "2026-07-27T20:00:00+00:00",
+      "retrieved_at": "2026-07-27T20:01:00+00:00",
+      "history_years": 0,
+      "licensed_use_approved": false,
+      "point_in_time_supported": false,
+      "market_price_ready": false,
+      "forward_curve_ready": false,
+      "history_ready": false,
+      "source_identifier": "replace-me",
+      "market_data_certification_identifier": "replace-me",
+      "curve_certification_identifier": "replace-me"
+    }
+  ],
+  "proxies": [
+    {
+      "category": "gold",
+      "instrument_identifier": "instrument:us-etf:replace-me",
+      "symbol": "REPLACE",
+      "asset_class": "us_etf",
+      "country_code": "US",
+      "venue": "NYSEARCA",
+      "currency": "USD",
+      "eligible_universe_publication_identifier": "eligible-universe:replace-me",
+      "in_eligible_universe": false,
+      "paper_eligible": false,
+      "unlevered": true,
+      "inverse": false,
+      "direct_derivative": false,
+      "liquidity_ready": false,
+      "execution_inputs_ready": false,
+      "cost_model_ready": false,
+      "market_data_certification_identifier": "replace-me",
+      "execution_certification_identifier": "replace-me",
+      "source_identifiers": ["replace-me"]
+    }
+  ]
+}
