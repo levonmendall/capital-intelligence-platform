@@ -57,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="config/paper_readiness_provider_requirements.json",
     )
     parser.add_argument(
+        "--provider-activation-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_PROVIDER_ACTIVATION_DATABASE",
+            str(data_dir / "provider_activations.db"),
+        ),
+    )
+    parser.add_argument(
         "--stage-bindings",
         default=os.getenv("CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS"),
     )
@@ -133,6 +140,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             code_version=args.code_version,
             inputs=PaperReadinessStatusInputs(
                 provider_requirements=args.provider_requirements,
+                provider_activation_database=args.provider_activation_database,
                 stage_bindings=args.stage_bindings,
                 stage_binding_database=args.stage_binding_database,
                 reconciliation_reports=tuple(args.reconciliation_report),

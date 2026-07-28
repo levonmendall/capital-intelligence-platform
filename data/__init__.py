@@ -40,6 +40,13 @@ from data.provider import (
     ProviderError,
     SeriesSpecification,
 )
+from data.provider_dataset import (
+    ProviderDatasetError,
+    ProviderDatasetProvider,
+    ProviderDatasetQuery,
+    ProviderDatasetSnapshot,
+    ProviderDatasetType,
+)
 from data.security import (
     AssetClass,
     IdentifierScheme,
@@ -155,6 +162,11 @@ __all__ = [
     "OpenInterest",
     "PriceBar",
     "ProviderError",
+    "ProviderDatasetError",
+    "ProviderDatasetProvider",
+    "ProviderDatasetQuery",
+    "ProviderDatasetSnapshot",
+    "ProviderDatasetType",
     "ProviderCapabilityManifest",
     "ProviderCertificationDecision",
     "ProviderCertificationEvent",

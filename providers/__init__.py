@@ -1,5 +1,27 @@
 """External data providers for the Capital Intelligence Platform."""
 
+from providers.configured_dataset import (
+    ConfiguredDatasetBinding,
+    ConfiguredDatasetProvider,
+    ConfiguredDatasetProviderError,
+    ConfiguredDatasetProviderSettings,
+    TransportResponse,
+    build_from_environment as build_configured_dataset_provider,
+)
+from providers.configured_information import (
+    ConfiguredDecisionInformationError,
+    ConfiguredDecisionInformationProvider,
+    build_configured_decision_information_provider,
+)
+from providers.configured_pipeline import (
+    ConfiguredCandidateScreeningProvider,
+    ConfiguredPipelineAdapterError,
+    ConfiguredSecurityMasterProvider,
+    ConfiguredUniverseMetricsProvider,
+    build_configured_candidate_screening_provider,
+    build_configured_security_master_provider,
+    build_configured_universe_metrics_provider,
+)
 from providers.crypto_venues import (
     CoinbaseExchangeProvider,
     CryptoVenueBinding,
@@ -64,6 +86,16 @@ from providers.sec_edgar import (
 
 __all__ = [
     "CoinbaseExchangeProvider",
+    "ConfiguredCandidateScreeningProvider",
+    "ConfiguredDatasetBinding",
+    "ConfiguredDatasetProvider",
+    "ConfiguredDatasetProviderError",
+    "ConfiguredDatasetProviderSettings",
+    "ConfiguredDecisionInformationError",
+    "ConfiguredDecisionInformationProvider",
+    "ConfiguredPipelineAdapterError",
+    "ConfiguredSecurityMasterProvider",
+    "ConfiguredUniverseMetricsProvider",
     "CryptoVenueBinding",
     "CryptoVenueBindingRegistry",
     "CryptoVenueProviderError",
@@ -100,7 +132,13 @@ __all__ = [
     "SECEdgarProvider",
     "SECEdgarProviderError",
     "SQLiteFreeProviderConnectionStore",
+    "TransportResponse",
     "build_coinbase_exchange_provider",
+    "build_configured_candidate_screening_provider",
+    "build_configured_dataset_provider",
+    "build_configured_decision_information_provider",
+    "build_configured_security_master_provider",
+    "build_configured_universe_metrics_provider",
     "build_kraken_spot_provider",
     "fred_cache_key",
     "load_crypto_venue_bindings",

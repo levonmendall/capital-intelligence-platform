@@ -21,6 +21,10 @@ from data import (
 )
 from operations import OperationalSettings, SQLiteOperationalSLOStore
 from opportunity import AlternativeKind, AlternativeUse, OpportunitySetContext
+from providers import (
+    build_configured_candidate_screening_provider,
+    build_configured_universe_metrics_provider,
+)
 from screening import (
     FullUniverseScreeningError,
     FullUniverseScreeningOrchestrator,
@@ -48,6 +52,29 @@ def _factory(value: str):
         raise ValueError(f"provider factory {value!r} is not callable")
     return factory()
 
+
+
+
+def _metrics_provider(reference: str | None):
+    if reference:
+        return _factory(reference)
+    if os.getenv("CAPITAL_INTELLIGENCE_UNIVERSE_METRICS_DATASET_BINDING"):
+        return build_configured_universe_metrics_provider()
+    raise ValueError(
+        "configure --metrics-provider or "
+        "CAPITAL_INTELLIGENCE_UNIVERSE_METRICS_DATASET_BINDING"
+    )
+
+
+def _candidate_provider(reference: str | None):
+    if reference:
+        return _factory(reference)
+    if os.getenv("CAPITAL_INTELLIGENCE_CANDIDATE_SCREENING_DATASET_BINDING"):
+        return build_configured_candidate_screening_provider()
+    raise ValueError(
+        "configure --candidate-provider or "
+        "CAPITAL_INTELLIGENCE_CANDIDATE_SCREENING_DATASET_BINDING"
+    )
 
 def _context(payload: Mapping[str, Any]) -> OpportunitySetContext:
     alternatives = tuple(
@@ -90,13 +117,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--context", required=True, help="Opportunity-context JSON file.")
     parser.add_argument(
         "--metrics-provider",
-        required=True,
-        help="No-argument metrics-provider factory in module:function form.",
+        help=(
+            "Optional no-argument metrics-provider factory in module:function form. "
+            "When omitted, the configured dataset binding is used."
+        ),
     )
     parser.add_argument(
         "--candidate-provider",
-        required=True,
-        help="No-argument candidate-provider factory in module:function form.",
+        help=(
+            "Optional no-argument candidate-provider factory in module:function "
+            "form. When omitted, the configured dataset binding is used."
+        ),
     )
     parser.add_argument("--partition-size", type=int, default=250)
     parser.add_argument("--maximum-partition-attempts", type=int, default=3)
@@ -116,8 +147,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not isinstance(context_payload, dict):
             raise ValueError("opportunity context must encode an object")
         context = _context(context_payload)
-        metrics_provider = _factory(args.metrics_provider)
-        candidate_provider = _factory(args.candidate_provider)
+        metrics_provider = _metrics_provider(args.metrics_provider)
+        candidate_provider = _candidate_provider(args.candidate_provider)
     except (
         ImportError,
         AttributeError,

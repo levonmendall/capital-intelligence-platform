@@ -119,8 +119,8 @@ Endpoint access is only the first step. The controlled test must retain the foll
 6. reconcile record counts, identifiers, currencies, calendars, actions, prices, and timestamps;
 7. run deterministic provider-certification scenarios;
 8. record an approved, expiring certification identifier;
-9. update the all-markets manifest with reviewed capability facts; and
-10. rerun `python run_data_readiness.py`.
+9. append an expiring provider activation record with the reviewed capability facts; and
+10. rerun `python run_data_readiness.py` with the activation registry.
 
 No adapter may set its own licensing or certification flags to true.
 
@@ -138,3 +138,18 @@ This first stack does not by itself provide:
 - vendor approval for redistribution or user-facing display.
 
 Those gaps remain visible in the readiness report and must fail closed.
+
+## Provider-neutral expansion
+
+Providers not covered by a dedicated adapter can use `providers.configured_dataset.ConfiguredDatasetProvider`. The checked-in example covers all 25 governed market, canonical-screening, and decision-information dataset categories and keeps endpoint schemas, response paths, and credential references outside investment logic. Approved runtime facts are recorded through `run_provider_activation.py`, not by changing source-controlled policy. See [All-Markets Paper Activation](ALL_MARKETS_PAPER_ACTIVATION.md).
+
+
+## Canonical configured pipeline
+
+The generic landing-zone connector is adapted to investment authorities through:
+
+- `ConfiguredSecurityMasterProvider`;
+- `ConfiguredUniverseMetricsProvider`; and
+- `ConfiguredCandidateScreeningProvider`.
+
+These adapters require canonical payload schemas and preserve point-in-time identity and availability. They never infer vendor field meanings or convert end-of-day prices into execution quotes. Configure them with the three `CAPITAL_INTELLIGENCE_*_DATASET_BINDING` variables documented in `deploy/external-data.env.example`.

@@ -1,0 +1,541 @@
+{
+  "schema_version": "configured-dataset-provider.v1",
+  "provider_identifier": "commercial-global-market-data",
+  "source_version": "replace-with-provider-api-version",
+  "base_url": "https://provider.example.com/api/",
+  "credential_environment_variables": [
+    "CAPITAL_INTELLIGENCE_GLOBAL_MARKET_DATA_API_KEY"
+  ],
+  "default_headers": {
+    "Authorization": "Bearer ${CAPITAL_INTELLIGENCE_GLOBAL_MARKET_DATA_API_KEY}",
+    "Accept": "application/json"
+  },
+  "allow_insecure_local": false,
+  "bindings": [
+    {
+      "dataset_type": "account_entitlement",
+      "path": "v1/account_entitlement/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "exchange_directory",
+      "path": "v1/exchange_directory/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "symbol_directory",
+      "path": "v1/symbol_directory/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "security_master",
+      "path": "v1/security_master/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "market_prices",
+      "path": "v1/market_prices/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "market_history",
+      "path": "v1/market_history/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "quotes_liquidity",
+      "path": "v1/quotes_liquidity/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "corporate_actions",
+      "path": "v1/corporate_actions/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "fundamentals",
+      "path": "v1/fundamentals/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "filings",
+      "path": "v1/filings/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "macro",
+      "path": "v1/macro/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "fx_rates",
+      "path": "v1/fx_rates/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "fixed_income",
+      "path": "v1/fixed_income/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "fixed_income_terms",
+      "path": "v1/fixed_income_terms/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "commodity",
+      "path": "v1/commodity/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "commodity_curves",
+      "path": "v1/commodity_curves/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "crypto_market_structure",
+      "path": "v1/crypto_market_structure/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "derivative_contracts",
+      "path": "v1/derivative_contracts/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "margin_collateral",
+      "path": "v1/margin_collateral/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "volatility_surfaces",
+      "path": "v1/volatility_surfaces/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "market_calendars",
+      "path": "v1/market_calendars/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "benchmarks",
+      "path": "v1/benchmarks/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "execution_inputs",
+      "path": "v1/execution_inputs/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "candidate_screening",
+      "path": "v1/candidate_screening/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    },
+    {
+      "dataset_type": "decision_information",
+      "path": "v1/decision_information/{symbol}",
+      "method": "GET",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "start_at": "{start_at}",
+        "end_at": "{end_at}",
+        "limit": "{limit}"
+      },
+      "payload_path": "data",
+      "observed_at_path": "meta.observed_at",
+      "available_at_path": "meta.available_at",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "availability_basis": "provider_timestamp",
+      "limitations": [
+        "Example binding only; replace endpoint and response paths with licensed provider semantics."
+      ],
+      "timeout_seconds": 30
+    }
+  ]
+}

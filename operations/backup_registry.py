@@ -172,6 +172,18 @@ CANONICAL_BACKUP_AUTHORITIES: tuple[CanonicalBackupAuthority, ...] = (
         "governance",
     ),
     CanonicalBackupAuthority(
+        "provider_activations",
+        "CAPITAL_INTELLIGENCE_PROVIDER_ACTIVATION_DATABASE",
+        "provider_activations.db",
+        "governance",
+    ),
+    CanonicalBackupAuthority(
+        "decision_information_activations",
+        "CAPITAL_INTELLIGENCE_DECISION_INFORMATION_ACTIVATION_DATABASE",
+        "decision_information_activations.db",
+        "governance",
+    ),
+    CanonicalBackupAuthority(
         "multi_asset_evaluation",
         "CAPITAL_INTELLIGENCE_MULTI_ASSET_EVALUATION_DATABASE",
         "multi_asset_evaluation.db",
