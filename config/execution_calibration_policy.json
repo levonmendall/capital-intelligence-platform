@@ -1,0 +1,9 @@
+{
+  "version": "paper-execution-calibration-policy.v1",
+  "minimum_samples": 12,
+  "minimum_asset_classes": 3,
+  "maximum_mean_absolute_error_bps": 15.0,
+  "maximum_p95_absolute_error_bps": 25.0,
+  "maximum_single_sample_error_bps": 50.0,
+  "maximum_quote_age_seconds": 60
+}
