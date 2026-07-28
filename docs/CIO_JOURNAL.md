@@ -10,7 +10,7 @@ The ledger supports:
 
 1. `candidate_decision` — the quantitative point-in-time candidate package;
 2. `opportunity_queue` — qualified rankings and explicit rejections;
-3. `specialist_packet` — all five independent analyses, vetoes, implementation blocks, and strongest dissent;
+3. `specialist_packet` — all six independent analyses, vetoes, implementation blocks, and strongest dissent;
 4. `cio_decision` — the final CIO action or disciplined abstention;
 5. `thesis_snapshot` — an immutable state of the living thesis; and
 6. `thesis_review` — a monitoring conclusion and CIO-review proposal.
@@ -62,7 +62,7 @@ The opportunity event preserves both ranked and rejected candidates. Each rankin
 
 ## Committee and CIO replay
 
-The specialist packet preserves the five independent first-pass analyses, role-specific authority, evidence vetoes, implementation blocks, proposed size and funding, support diagnostics, and strongest dissent.
+The specialist packet preserves the six independent first-pass analyses, role-specific authority, evidence vetoes, implementation blocks, proposed size and funding, support diagnostics, and strongest dissent.
 
 The CIO event preserves the final action, confidence, expected return, position proposal, funding source, thesis, evidence, assumptions, risks, invalidation conditions, portfolio impact, opportunity-cost explanation, dissent, vetoes, blocks, monitoring indicators, review date, explanation, policy version, and code version.
 

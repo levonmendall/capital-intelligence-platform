@@ -146,8 +146,11 @@ def test_specialist_holds_share_mismatch() -> None:
     assert any("quantity does not reconcile" in item for item in review.blocks)
 
 
-def test_specialist_is_not_a_sixth_investment_vote() -> None:
+def test_integrity_specialist_is_not_a_committee_investment_vote() -> None:
     from cio.models import SpecialistRole
 
-    assert len(tuple(SpecialistRole)) == 5
+    assert len(tuple(SpecialistRole)) == 6
+    assert SpecialistRole.CROSS_ASSET_FORECAST.value == (
+        "cross_asset_forecast_scenario_specialist"
+    )
     assert all("integrity" not in role.value for role in SpecialistRole)

@@ -379,7 +379,7 @@ class DecisionEvidenceSnapshot:
         for field_name, minimum in (
             ("model_versions", 1),
             ("policy_versions", 1),
-            ("specialist_roles", 5),
+            ("specialist_roles", 6),
             ("evidence_vetoes", 0),
             ("implementation_blocks", 0),
             ("thesis_assumptions", 0),
@@ -395,8 +395,8 @@ class DecisionEvidenceSnapshot:
                     minimum=minimum,
                 ),
             )
-        if len(self.specialist_roles) != 5:
-            raise ValueError("exactly five specialist roles are required")
+        if len(self.specialist_roles) != 6:
+            raise ValueError("exactly six specialist roles are required")
         if self.thesis_identifier is not None:
             object.__setattr__(
                 self,

@@ -180,6 +180,7 @@ def _packet(
         analyses=(
             _analysis(candidate, SpecialistRole.MACRO_ECONOMIC, impact=0.06, origin=shared),
             _analysis(candidate, SpecialistRole.MARKET, impact=0.06, origin=shared),
+            _analysis(candidate, SpecialistRole.CROSS_ASSET_FORECAST, impact=0.0),
             _analysis(candidate, SpecialistRole.FUNDAMENTAL_VALUATION, impact=0.06, origin=shared),
             _analysis(candidate, SpecialistRole.PORTFOLIO_RISK),
             _analysis(candidate, SpecialistRole.EVIDENCE_GOVERNANCE),
@@ -415,3 +416,32 @@ def test_learning_reports_keep_asset_horizon_and_regime_segments_separate() -> N
     assert by_key[("asset_class", "fixed_income")].state is DecisionLearningState.INSUFFICIENT_EVIDENCE
     assert ("horizon_bucket", "1-30_days") in by_key
     assert ("horizon_bucket", "91-365_days") in by_key
+
+
+def test_forecast_specialist_adjustment_is_conservatively_capped() -> None:
+    candidate = _candidate("FORECASTCAP")
+    packet = IndependentSpecialistPacket(
+        candidate_identifier=candidate.identifier,
+        analyses=tuple(
+            _analysis(
+                candidate,
+                role,
+                impact=(0.50 if role is SpecialistRole.CROSS_ASSET_FORECAST else 0.0),
+            )
+            for role in SpecialistRole
+        ),
+    )
+
+    result = SpecialistReturnReconciler().reconcile(
+        candidate,
+        packet,
+        alternative_return=0.04,
+    )
+    adjustment = next(
+        item
+        for item in result.adjustments
+        if item.role is SpecialistRole.CROSS_ASSET_FORECAST
+    )
+
+    assert adjustment.applied_impact == pytest.approx(0.04)
+    assert adjustment.applied_impact < adjustment.raw_impact

@@ -47,10 +47,11 @@ class CIOAction(str, Enum):
 
 
 class SpecialistRole(str, Enum):
-    """The five independent analytical roles preceding CIO synthesis."""
+    """The six independent analytical roles preceding CIO synthesis."""
 
     MACRO_ECONOMIC = "macro_economic_strategist"
     MARKET = "market_strategist"
+    CROSS_ASSET_FORECAST = "cross_asset_forecast_scenario_specialist"
     FUNDAMENTAL_VALUATION = "fundamental_valuation_analyst"
     PORTFOLIO_RISK = "portfolio_risk_manager"
     EVIDENCE_GOVERNANCE = "evidence_governance_officer"

@@ -2,7 +2,7 @@
 
 The `company` package translates accepted SEC company facts, point-in-time market data, and regime context into structured company evidence and the canonical CIO candidate schema.
 
-It does not issue an investment action. Its output must still pass Version 1 universe policy, opportunity qualification and ranking, five independent specialist analyses, CIO synthesis, portfolio construction, and thesis monitoring.
+It does not issue an investment action. Its output must still pass Version 1 universe policy, opportunity qualification and ranking, six independent specialist analyses, CIO synthesis, portfolio construction, and thesis monitoring.
 
 ## Point-in-time financial normalization
 

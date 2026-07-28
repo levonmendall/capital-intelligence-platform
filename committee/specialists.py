@@ -198,6 +198,161 @@ class MarketSpecialistContext:
 
 
 @dataclass(frozen=True, slots=True)
+class ForecastScenarioAssessment:
+    """Candidate-specific effect of one governed cross-asset forecast scenario."""
+
+    label: str
+    probability: float
+    candidate_return_impact: float
+    expected_path_drawdown: float
+    rationale: str
+    evidence_identifiers: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "label",
+            _required_text(self.label, field_name="label"),
+        )
+        object.__setattr__(
+            self,
+            "probability",
+            _ratio(self.probability, field_name="probability"),
+        )
+        object.__setattr__(
+            self,
+            "candidate_return_impact",
+            _bounded(
+                self.candidate_return_impact,
+                field_name="candidate_return_impact",
+            ),
+        )
+        drawdown = _bounded(
+            self.expected_path_drawdown,
+            field_name="expected_path_drawdown",
+        )
+        if drawdown > 0.0:
+            raise ValueError("expected_path_drawdown must be zero or negative")
+        object.__setattr__(self, "expected_path_drawdown", drawdown)
+        object.__setattr__(
+            self,
+            "rationale",
+            _required_text(self.rationale, field_name="rationale"),
+        )
+        object.__setattr__(
+            self,
+            "evidence_identifiers",
+            _text_tuple(
+                self.evidence_identifiers,
+                field_name="evidence_identifiers",
+                minimum=1,
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CrossAssetForecastSpecialistContext:
+    """Forward distribution evidence kept separate from market technicals."""
+
+    as_of: datetime
+    forecast_horizon_days: int
+    scenarios: tuple[ForecastScenarioAssessment, ...]
+    aggregate_confidence: float
+    calibration_score: float
+    model_agreement: float
+    forecast_stability: float
+    path_drawdown_probability: float
+    cross_asset_signals: tuple[str, ...]
+    contradictory_evidence: tuple[str, ...]
+    limitations: tuple[str, ...]
+    change_conditions: tuple[str, ...]
+    model_versions: tuple[str, ...]
+    evidence_identifiers: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _aware(self.as_of, field_name="as_of")
+        if isinstance(self.forecast_horizon_days, bool) or not isinstance(
+            self.forecast_horizon_days, int
+        ):
+            raise TypeError("forecast_horizon_days must be an integer")
+        if self.forecast_horizon_days < 1:
+            raise ValueError("forecast_horizon_days must be positive")
+        if not isinstance(self.scenarios, tuple) or not all(
+            isinstance(item, ForecastScenarioAssessment) for item in self.scenarios
+        ):
+            raise TypeError(
+                "scenarios must contain ForecastScenarioAssessment values"
+            )
+        if len(self.scenarios) < 2:
+            raise ValueError("forecast specialist requires at least two scenarios")
+        labels = tuple(item.label for item in self.scenarios)
+        if len(labels) != len(set(labels)):
+            raise ValueError("forecast scenario labels must be unique")
+        if abs(sum(item.probability for item in self.scenarios) - 1.0) > 0.000001:
+            raise ValueError("forecast scenario probabilities must sum to 1.0")
+        for field_name in (
+            "aggregate_confidence",
+            "calibration_score",
+            "model_agreement",
+            "forecast_stability",
+            "path_drawdown_probability",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _ratio(getattr(self, field_name), field_name=field_name),
+            )
+        for field_name, minimum in (
+            ("cross_asset_signals", 1),
+            ("contradictory_evidence", 0),
+            ("limitations", 1),
+            ("change_conditions", 1),
+            ("model_versions", 1),
+            ("evidence_identifiers", 1),
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _text_tuple(
+                    getattr(self, field_name),
+                    field_name=field_name,
+                    minimum=minimum,
+                ),
+            )
+
+    @property
+    def expected_return_impact(self) -> float:
+        return round(
+            sum(
+                item.probability * item.candidate_return_impact
+                for item in self.scenarios
+            ),
+            8,
+        )
+
+    @property
+    def expected_path_drawdown(self) -> float:
+        return round(
+            sum(
+                item.probability * item.expected_path_drawdown
+                for item in self.scenarios
+            ),
+            8,
+        )
+
+    def horizon_alignment(self, decision_horizon_days: int) -> float:
+        if isinstance(decision_horizon_days, bool) or not isinstance(
+            decision_horizon_days, int
+        ):
+            raise TypeError("decision_horizon_days must be an integer")
+        if decision_horizon_days < 1:
+            raise ValueError("decision_horizon_days must be positive")
+        shorter = min(decision_horizon_days, self.forecast_horizon_days)
+        longer = max(decision_horizon_days, self.forecast_horizon_days)
+        return round(shorter / longer, 8)
+
+
+@dataclass(frozen=True, slots=True)
 class AssetValuationSpecialistContext:
     """Independent asset-specific valuation evidence for non-company instruments."""
 
@@ -312,6 +467,7 @@ class CandidateSpecialistContext:
     macro: MacroSpecialistContext
     market: MarketSpecialistContext
     portfolio: PortfolioSpecialistContext
+    forecast: CrossAssetForecastSpecialistContext | None = None
     company: CompanyAnalysis | None = None
     asset_valuation: AssetValuationSpecialistContext | None = None
 
@@ -334,6 +490,13 @@ class CandidateSpecialistContext:
             raise TypeError("market must be MarketSpecialistContext")
         if not isinstance(self.portfolio, PortfolioSpecialistContext):
             raise TypeError("portfolio must be PortfolioSpecialistContext")
+        if self.forecast is not None and not isinstance(
+            self.forecast,
+            CrossAssetForecastSpecialistContext,
+        ):
+            raise TypeError(
+                "forecast must be CrossAssetForecastSpecialistContext or None"
+            )
         if self.company is not None and not isinstance(
             self.company,
             CompanyAnalysis,
@@ -346,9 +509,12 @@ class CandidateSpecialistContext:
             raise TypeError(
                 "asset_valuation must be AssetValuationSpecialistContext or None"
             )
+        dated_contexts = [self.macro, self.market, self.portfolio]
+        if self.forecast is not None:
+            dated_contexts.append(self.forecast)
         if any(
             item.as_of > self.analysis_completed_at
-            for item in (self.macro, self.market, self.portfolio)
+            for item in dated_contexts
         ):
             raise ValueError(
                 "specialist contexts cannot be newer than completion time"
@@ -368,10 +534,15 @@ class CandidateSpecialistContext:
 
 @dataclass(frozen=True, slots=True)
 class SpecialistGovernancePolicy:
-    version: str = "specialist-governance.v1"
+    version: str = "specialist-governance.v2"
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     maximum_market_data_age_hours: float = 24.0
+    minimum_forecast_calibration_score: float = 0.55
+    minimum_forecast_model_agreement: float = 0.50
+    minimum_forecast_stability: float = 0.50
+    minimum_forecast_horizon_alignment: float = 0.50
+    forecast_materiality_threshold: float = 0.01
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -382,6 +553,10 @@ class SpecialistGovernancePolicy:
         for field_name in (
             "minimum_evidence_score",
             "minimum_evidence_dimension",
+            "minimum_forecast_calibration_score",
+            "minimum_forecast_model_agreement",
+            "minimum_forecast_stability",
+            "minimum_forecast_horizon_alignment",
         ):
             object.__setattr__(
                 self,
@@ -392,10 +567,14 @@ class SpecialistGovernancePolicy:
             raise ValueError(
                 "maximum_market_data_age_hours must be positive"
             )
+        if not 0.0 < self.forecast_materiality_threshold <= 1.0:
+            raise ValueError(
+                "forecast_materiality_threshold must be between 0 and 1"
+            )
 
 
 class IndependentSpecialistService:
-    """Create five first-pass analyses without cross-specialist input."""
+    """Create six first-pass analyses without cross-specialist input."""
 
     def __init__(
         self,
@@ -421,6 +600,7 @@ class IndependentSpecialistService:
         analyses = (
             self._macro(candidate, context),
             self._market(candidate, context),
+            self._forecast(candidate, context),
             self._fundamental(candidate, context),
             self._portfolio(candidate, context),
             self._evidence(candidate, context),
@@ -512,6 +692,143 @@ class IndependentSpecialistService:
             ),
         )
 
+    def _forecast(
+        self,
+        candidate: CandidateDecisionRecord,
+        context: CandidateSpecialistContext,
+    ) -> SpecialistAnalysis:
+        forecast = context.forecast
+        if forecast is None:
+            return SpecialistAnalysis(
+                candidate_identifier=candidate.identifier,
+                role=SpecialistRole.CROSS_ASSET_FORECAST,
+                completed_at=self._completed(context, 3),
+                independent_first_pass=True,
+                position=SpecialistPosition.ABSTAIN,
+                conclusion=(
+                    "No governed candidate-specific cross-asset forecast translation "
+                    "was supplied."
+                ),
+                expected_return_impact=0.0,
+                confidence=0.0,
+                supporting_evidence=(
+                    "Forecast evidence remains optional and cannot create a candidate",
+                ),
+                contradictory_evidence=(),
+                critical_assumptions=(
+                    "A complete scenario-to-candidate translation is required before "
+                    "forecast evidence can influence CIO synthesis",
+                ),
+                risks=(
+                    "The forward distribution was not independently validated by the "
+                    "forecast specialist",
+                ),
+                limitations=(
+                    "No specialist forecast packet was available",
+                ),
+                change_conditions=(
+                    "Attach calibrated governed forecasts with complete candidate-specific "
+                    "scenario mappings",
+                ),
+                evidence_origin_identifiers=candidate.evidence_identifiers,
+            )
+
+        quality_failures: list[str] = []
+        if (
+            forecast.calibration_score
+            < self.policy.minimum_forecast_calibration_score
+        ):
+            quality_failures.append("forecast calibration is below threshold")
+        if forecast.model_agreement < self.policy.minimum_forecast_model_agreement:
+            quality_failures.append("forecast model agreement is below threshold")
+        if forecast.forecast_stability < self.policy.minimum_forecast_stability:
+            quality_failures.append("forecast stability is below threshold")
+        horizon_alignment = forecast.horizon_alignment(
+            candidate.decision_horizon_days
+        )
+        if (
+            horizon_alignment
+            < self.policy.minimum_forecast_horizon_alignment
+        ):
+            quality_failures.append(
+                "forecast and candidate decision horizons are not sufficiently aligned"
+            )
+
+        confidence = min(
+            forecast.aggregate_confidence,
+            forecast.calibration_score,
+            forecast.model_agreement,
+            forecast.forecast_stability,
+            horizon_alignment,
+        )
+        raw_impact = forecast.expected_return_impact
+        applied_impact = 0.0 if quality_failures else raw_impact
+        position = (
+            SpecialistPosition.ABSTAIN
+            if quality_failures
+            else _position(
+                applied_impact,
+                threshold=self.policy.forecast_materiality_threshold,
+            )
+        )
+        scenario_evidence = tuple(
+            (
+                f"{item.label}: probability={item.probability:.2%}, "
+                f"candidate impact={item.candidate_return_impact:+.2%}, "
+                f"path drawdown={item.expected_path_drawdown:.2%}"
+            )
+            for item in forecast.scenarios
+        )
+        adverse_scenarios = tuple(
+            item.rationale
+            for item in forecast.scenarios
+            if item.candidate_return_impact < 0.0
+        )
+        conclusion = (
+            "The governed cross-asset forecast distribution implies a "
+            f"{raw_impact:+.2%} candidate return delta over "
+            f"{forecast.forecast_horizon_days} days, with an expected path "
+            f"drawdown of {forecast.expected_path_drawdown:.2%}."
+        )
+        if quality_failures:
+            conclusion += " The specialist abstains because forecast quality gates failed."
+        return SpecialistAnalysis(
+            candidate_identifier=candidate.identifier,
+            role=SpecialistRole.CROSS_ASSET_FORECAST,
+            completed_at=self._completed(context, 3),
+            independent_first_pass=True,
+            position=position,
+            conclusion=conclusion,
+            expected_return_impact=applied_impact,
+            confidence=confidence,
+            supporting_evidence=tuple(
+                dict.fromkeys(scenario_evidence + forecast.cross_asset_signals)
+            ),
+            contradictory_evidence=tuple(
+                dict.fromkeys(
+                    forecast.contradictory_evidence
+                    + adverse_scenarios
+                    + tuple(quality_failures)
+                )
+            ),
+            critical_assumptions=(
+                "Scenario-to-candidate return mappings remain valid through the "
+                "decision horizon",
+                "Forecast model dependencies and overlapping evidence remain disclosed",
+            ),
+            risks=(
+                f"Probability of a material path drawdown is "
+                f"{forecast.path_drawdown_probability:.2%}",
+                *forecast.limitations,
+            ),
+            limitations=(
+                "Forecasts estimate distributions and cannot guarantee the realized path",
+                *forecast.limitations,
+            ),
+            change_conditions=forecast.change_conditions,
+            evidence_origin_identifiers=forecast.evidence_identifiers,
+        )
+
     def _fundamental(
         self,
         candidate: CandidateDecisionRecord,
@@ -529,7 +846,7 @@ class IndependentSpecialistService:
             return SpecialistAnalysis(
                 candidate_identifier=candidate.identifier,
                 role=SpecialistRole.FUNDAMENTAL_VALUATION,
-                completed_at=self._completed(context, 3),
+                completed_at=self._completed(context, 4),
                 independent_first_pass=True,
                 position=_position(asset_valuation.expected_return_impact),
                 conclusion=(
@@ -554,7 +871,7 @@ class IndependentSpecialistService:
             return SpecialistAnalysis(
                 candidate_identifier=candidate.identifier,
                 role=SpecialistRole.FUNDAMENTAL_VALUATION,
-                completed_at=self._completed(context, 3),
+                completed_at=self._completed(context, 4),
                 independent_first_pass=True,
                 position=SpecialistPosition.ABSTAIN,
                 conclusion=f"Required {requirement} is unavailable.",
@@ -598,7 +915,7 @@ class IndependentSpecialistService:
         return SpecialistAnalysis(
             candidate_identifier=candidate.identifier,
             role=SpecialistRole.FUNDAMENTAL_VALUATION,
-            completed_at=self._completed(context, 3),
+            completed_at=self._completed(context, 4),
             independent_first_pass=True,
             position=_position(impact),
             conclusion=(
@@ -659,7 +976,7 @@ class IndependentSpecialistService:
         return SpecialistAnalysis(
             candidate_identifier=candidate.identifier,
             role=SpecialistRole.PORTFOLIO_RISK,
-            completed_at=self._completed(context, 4),
+            completed_at=self._completed(context, 5),
             independent_first_pass=True,
             position=position,
             conclusion=(
@@ -733,7 +1050,7 @@ class IndependentSpecialistService:
         return SpecialistAnalysis(
             candidate_identifier=candidate.identifier,
             role=SpecialistRole.EVIDENCE_GOVERNANCE,
-            completed_at=self._completed(context, 5),
+            completed_at=self._completed(context, 6),
             independent_first_pass=True,
             position=position,
             conclusion=(
@@ -768,6 +1085,8 @@ class IndependentSpecialistService:
 __all__ = [
     "AssetValuationSpecialistContext",
     "CandidateSpecialistContext",
+    "CrossAssetForecastSpecialistContext",
+    "ForecastScenarioAssessment",
     "IndependentSpecialistService",
     "MacroSpecialistContext",
     "MarketSpecialistContext",

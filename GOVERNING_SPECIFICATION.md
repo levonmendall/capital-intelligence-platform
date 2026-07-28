@@ -621,7 +621,7 @@ Every pull request must answer the following:
 2. Universe: are direct recommendation targets eligible for Version 1?
 3. Evidence: is the decision point-in-time, traceable, independent, and reproducible?
 4. Opportunity: was the candidate compared with current holdings, cash, and qualified alternatives?
-5. Committee: did the five specialists analyze independently before CIO synthesis?
+5. Committee: did the six specialists analyze independently before CIO synthesis?
 6. Authority: was the final action issued only by the CIO?
 7. Abstention: can the system return no action, no superior opportunity, or insufficient evidence?
 8. Implementation: do size and funding satisfy constraints and costs?

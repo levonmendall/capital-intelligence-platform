@@ -21,7 +21,7 @@ The governing loop is:
 - opportunity rank, effective opportunity cost, and opportunity edge;
 - all evidence identifiers with availability timestamps;
 - model, policy, and code versions;
-- the five specialist roles, vetoes, and implementation blocks;
+- the six specialist roles, vetoes, and implementation blocks;
 - recommended and implemented portfolio weights;
 - construction status and estimated implementation cost; and
 - the explicit thesis, assumptions, invalidation conditions, and monitoring indicators.

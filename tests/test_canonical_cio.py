@@ -283,10 +283,10 @@ def test_universe_blocks_stale_illiquid_or_undercovered_direct_candidates() -> N
     assert len(assessment.reasons) == 3
 
 
-def test_specialist_packet_requires_exactly_five_independent_roles() -> None:
+def test_specialist_packet_requires_exactly_six_independent_roles() -> None:
     analyses = tuple(_analysis(role) for role in list(SpecialistRole)[:-1])
 
-    with pytest.raises(ValueError, match="exactly the five"):
+    with pytest.raises(ValueError, match="exactly the six"):
         IndependentSpecialistPacket(
             candidate_identifier="candidate:acme:2026-07-26",
             analyses=analyses,

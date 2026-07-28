@@ -48,6 +48,7 @@ from application.production_context_adapter import (
     RepositoryProductionCanonicalCIOContextProvider as CanonicalProductionContextAdapter,
 )
 from application.forecast_support import (
+    CandidateForecastScenarioImpact,
     CandidateForecastSupport,
     ForecastSupportError,
     ForecastSupportIntegrityError,
@@ -69,6 +70,7 @@ from application.daily_intelligence import (
 __all__ = [
     "AssetMetricDefinition",
     "AssetSpecificEvidencePacket",
+    "CandidateForecastScenarioImpact",
     "CandidateForecastSupport",
     "CanonicalProductionContextAdapter",
     "CertifiedDecisionEnvironmentSnapshot",
