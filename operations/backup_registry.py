@@ -213,6 +213,12 @@ CANONICAL_BACKUP_AUTHORITIES: tuple[CanonicalBackupAuthority, ...] = (
         "readiness",
     ),
     CanonicalBackupAuthority(
+        "paper_test_governance",
+        "CAPITAL_INTELLIGENCE_PAPER_TEST_GOVERNANCE_DATABASE",
+        "paper_test_governance.db",
+        "governance",
+    ),
+    CanonicalBackupAuthority(
         "product_readiness_evidence",
         "CAPITAL_INTELLIGENCE_PRODUCT_READINESS_EVIDENCE_DATABASE",
         "product_readiness_evidence.db",
