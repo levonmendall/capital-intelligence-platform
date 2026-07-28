@@ -1,9 +1,7 @@
 name: Apply performance accounting
 
 on:
-  push:
-    branches:
-      - pr-172-performance-accounting
+  pull_request:
     paths:
       - ".github/workflows/apply-performance-accounting.yml"
 
@@ -20,6 +18,7 @@ jobs:
         with:
           ref: pr-172-performance-accounting
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Apply audited accounting source
         shell: bash
