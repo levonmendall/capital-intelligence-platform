@@ -21,6 +21,7 @@ from providers.alpaca_paper_broker import create_alpaca_paper_broker_client
 
 
 DEFAULT_ACTIVATION = Path("config/alpaca_paper_broker_activation.json")
+MINIMUM_SMOKE_NOTIONAL = 10.0
 
 
 def _write(path: str, payload: dict[str, object]) -> None:
@@ -53,7 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--symbol", default="BTC/USD")
-    parser.add_argument("--notional", type=float, default=1.0)
+    parser.add_argument(
+        "--notional",
+        type=float,
+        default=MINIMUM_SMOKE_NOTIONAL,
+        help="Neutral paper buy notional; Alpaca currently requires at least $10.",
+    )
     parser.add_argument("--output")
     parser.add_argument("--require-reconciled", action="store_true")
     return parser
@@ -62,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.notional < MINIMUM_SMOKE_NOTIONAL:
+            raise ValueError(
+                f"--notional must be at least ${MINIMUM_SMOKE_NOTIONAL:,.2f} "
+                "for the Alpaca paper smoke order"
+            )
         payload = json.loads(
             Path(args.activation).expanduser().read_text(encoding="utf-8")
         )
