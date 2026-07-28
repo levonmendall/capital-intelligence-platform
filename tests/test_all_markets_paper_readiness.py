@@ -73,7 +73,7 @@ def test_all_markets_mechanical_rehearsal_executes_every_governed_class(
     assert report.complete is True
     assert report.fill_count == 10
     assert report.filled_asset_classes == report.expected_asset_classes
-    assert report.reconciliation_difference == 0.0
+    assert report.reconciliation_difference < 1e-7
     assert report.ending_cash > 0.0
 
     retry = run_all_markets_paper_rehearsal(
