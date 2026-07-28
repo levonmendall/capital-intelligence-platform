@@ -1,0 +1,49 @@
+name: Repair PR166 pilot limits
+
+on:
+  push:
+    branches:
+      - pr-166-free-paper-pilot
+    paths:
+      - ".github/workflows/repair-pr166-pilot-limits.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: pr-166-free-paper-pilot
+          fetch-depth: 0
+
+      - name: Align government-bond wrapper with pilot limit
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("config/free_paper_pilot_universe.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          matches = [item for item in payload["instruments"] if item.get("symbol") == "GOVT"]
+          if len(matches) != 1:
+              raise SystemExit("expected exactly one GOVT pilot instrument")
+          matches[0]["maximum_weight"] = payload["maximum_single_instrument_weight"]
+          path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          Path(".github/workflows/repair-pr166-pilot-limits.yml").unlink()
+          PY
+
+      - name: Commit aligned pilot limits
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add config/free_paper_pilot_universe.json .github/workflows/repair-pr166-pilot-limits.yml
+          git commit -m "Align government bond pilot weight limit"
+          git push origin HEAD:pr-166-free-paper-pilot
