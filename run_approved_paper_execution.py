@@ -45,8 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--approval-database",
         default=os.getenv(
-            "CAPITAL_INTELLIGENCE_PAPER_DECISION_APPROVAL_DATABASE",
-            str(data_dir / "paper_decision_approvals.db"),
+            "CAPITAL_INTELLIGENCE_PAPER_TEST_GOVERNANCE_DATABASE",
+            str(data_dir / "paper_test_governance.db"),
         ),
     )
     return parser
