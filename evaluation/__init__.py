@@ -1,5 +1,12 @@
 """Point-in-time decision evaluation and validation contracts."""
 
+from evaluation.decision_learning import (
+    DecisionLearningEvaluator,
+    DecisionLearningObservation,
+    DecisionLearningPolicy,
+    DecisionLearningReport,
+    DecisionLearningState,
+)
 from evaluation.decision_quality import (
     DecisionOutcome,
     DecisionQualityClassification,
@@ -60,6 +67,11 @@ __all__ = [
     "ConfidenceCalibrationReport",
     "ConfidenceCalibrator",
     "DecisionEvidenceSnapshot",
+    "DecisionLearningEvaluator",
+    "DecisionLearningObservation",
+    "DecisionLearningPolicy",
+    "DecisionLearningReport",
+    "DecisionLearningState",
     "DecisionOutcome",
     "DecisionQualityClassification",
     "DecisionQualityReview",
