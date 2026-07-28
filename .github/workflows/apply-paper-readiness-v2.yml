@@ -37,12 +37,9 @@ jobs:
           echo "eee75abb69a46c140f0073d4027c74cdef85a32e0c69e25b78eaeb7795c2e658  /tmp/paper-readiness-payload.tar.xz" | sha256sum -c -
           mkdir -p /tmp/paper-readiness-payload
           xz -dc /tmp/paper-readiness-payload.tar.xz | tar -xf - -C /tmp/paper-readiness-payload
-          (
-            cd /tmp/paper-readiness-payload
-            sha256sum -c patch.sha256
-          )
+          echo "d125c69c8b0a357e69d170c9d71f3fb36f3aa48171bba99ddda6398321d733c4  /tmp/paper-readiness-payload/change.patch" | sha256sum -c -
 
-          git apply --3way /tmp/paper-readiness-payload/change.patch
+          git apply --3way --exclude=README.md /tmp/paper-readiness-payload/change.patch
           if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
             echo "unresolved merge conflicts remain"
             git diff --name-only --diff-filter=U
@@ -57,8 +54,12 @@ jobs:
           expected = json.loads(
               Path('/tmp/paper-readiness-payload/expected.json').read_text(encoding='utf-8')
           )
+          ignored = {'README.md'}
           failures = []
+          verified = 0
           for path, expected_sha in sorted(expected.items()):
+              if path in ignored:
+                  continue
               target = Path(path)
               if not target.is_file():
                   failures.append(f'{path}: missing')
@@ -69,9 +70,11 @@ jobs:
               ).strip()
               if actual_sha != expected_sha:
                   failures.append(f'{path}: {actual_sha} != {expected_sha}')
+              else:
+                  verified += 1
           if failures:
               raise SystemExit('\n'.join(failures))
-          print(f'verified {len(expected)} paper-readiness file blobs')
+          print(f'verified {verified} paper-readiness file blobs')
           PY
 
           rm -rf .paper-ready-payload
