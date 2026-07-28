@@ -37,103 +37,36 @@ def format_datetime(value: object) -> str:
 def apply_global_style(*, dark_mode: bool = False) -> None:
     palette = (
         """
-        :root{
-            --app-bg:#070b14;
-            --app-glow:rgba(37,99,235,.18);
-            --surface:#111827;
-            --surface-soft:#0f172a;
-            --surface-raised:#151e2f;
-            --surface-gradient:linear-gradient(135deg,rgba(20,29,46,.98),rgba(11,18,32,.98));
-            --ink:#f8fafc;
-            --ink-soft:#e2e8f0;
-            --muted:#94a3b8;
-            --blue:#60a5fa;
-            --blue-strong:#3b82f6;
-            --line:rgba(148,163,184,.16);
-            --shadow:rgba(0,0,0,.34);
-            --track:#263246;
-            --nav:#0b1220;
-            --alert-bg:rgba(30,41,59,.78);
-        }
+        :root{--app-bg:#070b14;--app-glow:rgba(37,99,235,.18);--surface:#111827;--surface-soft:#0f172a;--surface-raised:#151e2f;--surface-gradient:linear-gradient(135deg,rgba(20,29,46,.98),rgba(11,18,32,.98));--ink:#f8fafc;--ink-soft:#e2e8f0;--muted:#94a3b8;--blue:#60a5fa;--blue-strong:#3b82f6;--line:rgba(148,163,184,.16);--shadow:rgba(0,0,0,.34);--track:#263246;--alert-bg:rgba(30,41,59,.78)}
         """
         if dark_mode
         else
         """
-        :root{
-            --app-bg:#f6f8fb;
-            --app-glow:rgba(37,99,235,.07);
-            --surface:#ffffff;
-            --surface-soft:#f8fafc;
-            --surface-raised:#ffffff;
-            --surface-gradient:linear-gradient(135deg,rgba(255,255,255,.98),rgba(248,251,255,.96));
-            --ink:#0f172a;
-            --ink-soft:#334155;
-            --muted:#64748b;
-            --blue:#2563eb;
-            --blue-strong:#1d4ed8;
-            --line:rgba(15,23,42,.08);
-            --shadow:rgba(15,23,42,.07);
-            --track:#e8edf5;
-            --nav:#ffffff;
-            --alert-bg:rgba(255,255,255,.92);
-        }
+        :root{--app-bg:#f6f8fb;--app-glow:rgba(37,99,235,.07);--surface:#fff;--surface-soft:#f8fafc;--surface-raised:#fff;--surface-gradient:linear-gradient(135deg,rgba(255,255,255,.98),rgba(248,251,255,.96));--ink:#0f172a;--ink-soft:#334155;--muted:#64748b;--blue:#2563eb;--blue-strong:#1d4ed8;--line:rgba(15,23,42,.08);--shadow:rgba(15,23,42,.07);--track:#e8edf5;--alert-bg:rgba(255,255,255,.92)}
         """
     )
     common = """
-        <style>
         #MainMenu,footer,[data-testid="stToolbar"]{visibility:hidden}
         [data-testid="stHeader"]{background:transparent}
         html,body,[class*="css"]{color:var(--ink)}
-        .stApp{
-            color:var(--ink);
-            background:
-                radial-gradient(circle at 85% 0%,var(--app-glow),transparent 28rem),
-                linear-gradient(180deg,var(--app-bg) 0%,var(--app-bg) 100%);
-        }
+        .stApp{color:var(--ink);background:radial-gradient(circle at 85% 0%,var(--app-glow),transparent 28rem),linear-gradient(180deg,var(--app-bg),var(--app-bg))}
         .block-container{max-width:1280px;padding-top:1.15rem;padding-bottom:2.5rem}
-        [data-testid="stSidebar"]{background:linear-gradient(180deg,#0b1220 0%,#111827 100%);border-right:1px solid rgba(255,255,255,.06)}
+        [data-testid="stSidebar"]{background:linear-gradient(180deg,#0b1220,#111827);border-right:1px solid rgba(255,255,255,.06)}
         [data-testid="stSidebar"] *{color:#e5e7eb}
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:#cbd5e1}
-        .sidebar-brand{padding:1.05rem 1rem 1rem;border:1px solid rgba(255,255,255,.09);border-radius:20px;background:linear-gradient(145deg,rgba(255,255,255,.07),rgba(255,255,255,.025));box-shadow:inset 0 1px 0 rgba(255,255,255,.04);margin-bottom:1rem}
+        .sidebar-brand{padding:1.05rem 1rem 1rem;border:1px solid rgba(255,255,255,.09);border-radius:20px;background:linear-gradient(145deg,rgba(255,255,255,.07),rgba(255,255,255,.025));margin-bottom:1rem}
         .sidebar-mark{width:2.35rem;height:2.35rem;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:white;font-size:.76rem;font-weight:800;letter-spacing:.08em;margin-bottom:.8rem;box-shadow:0 10px 24px rgba(37,99,235,.28)}
         .sidebar-brand-title{font-size:1rem;font-weight:700;color:#fff;margin-bottom:.2rem}
         .sidebar-brand-copy{font-size:.88rem;line-height:1.4;color:#cbd5e1}
         .nav-caption{font-size:.72rem;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:.15rem 0 .45rem}
         [data-testid="stRadio"]{margin-bottom:.2rem}
-        [data-testid="stRadio"] div[role="radiogroup"]{
-            display:flex;
-            gap:.35rem;
-            flex-wrap:wrap;
-            padding:.38rem;
-            border-radius:18px;
-            background:var(--surface);
-            border:1px solid var(--line);
-            box-shadow:0 10px 28px var(--shadow);
-        }
-        [data-testid="stRadio"] div[role="radiogroup"] label{
-            min-height:2.55rem;
-            flex:1 1 8.25rem;
-            justify-content:center;
-            border-radius:14px;
-            padding:.45rem .8rem;
-            color:var(--muted);
-            transition:background 150ms ease,color 150ms ease,transform 150ms ease;
-        }
+        [data-testid="stRadio"] div[role="radiogroup"]{display:flex;gap:.35rem;flex-wrap:wrap;padding:.38rem;border-radius:18px;background:var(--surface);border:1px solid var(--line);box-shadow:0 10px 28px var(--shadow)}
+        [data-testid="stRadio"] div[role="radiogroup"] label{min-height:2.55rem;flex:1 1 8.25rem;justify-content:center;border-radius:14px;padding:.45rem .8rem;color:var(--muted);transition:background 150ms ease,color 150ms ease}
         [data-testid="stRadio"] div[role="radiogroup"] label:hover{background:var(--surface-soft);color:var(--ink)}
-        [data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked){background:linear-gradient(135deg,var(--blue-strong),var(--blue));color:white;box-shadow:0 8px 20px rgba(37,99,235,.24)}
-        [data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) p{color:white!important;font-weight:700}
-        [data-testid="stRadio"] div[role="radiogroup"] label > div:first-child{display:none}
-        [data-testid="stToggle"]{
-            min-height:3.25rem;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            border-radius:18px;
-            padding:.35rem .65rem;
-            background:var(--surface);
-            border:1px solid var(--line);
-            box-shadow:0 10px 28px var(--shadow);
-        }
+        [data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked){background:linear-gradient(135deg,var(--blue-strong),var(--blue));color:#fff;box-shadow:0 8px 20px rgba(37,99,235,.24)}
+        [data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) p{color:#fff!important;font-weight:700}
+        [data-testid="stRadio"] div[role="radiogroup"] label>div:first-child{display:none}
+        [data-testid="stToggle"]{min-height:3.25rem;display:flex;align-items:center;justify-content:center;border-radius:18px;padding:.35rem .65rem;background:var(--surface);border:1px solid var(--line);box-shadow:0 10px 28px var(--shadow)}
         [data-testid="stToggle"] p{color:var(--ink)!important;font-weight:650;font-size:.88rem}
         .hero-card{position:relative;overflow:hidden;background:var(--surface-gradient);border:1px solid var(--line);border-radius:28px;padding:1.55rem 1.6rem 1.35rem;box-shadow:0 18px 45px var(--shadow);margin-bottom:1.1rem}
         .hero-card:after{content:"";position:absolute;width:18rem;height:18rem;right:-8rem;top:-11rem;border-radius:999px;background:radial-gradient(circle,var(--app-glow),rgba(37,99,235,0));pointer-events:none}
@@ -155,9 +88,8 @@ def apply_global_style(*, dark_mode: bool = False) -> None:
         .section-header{margin:.4rem 0 .8rem}
         .section-header h3{font-size:1.1rem;margin-bottom:.15rem;color:var(--ink)}
         .section-header p{color:var(--muted);margin:0;font-size:.92rem}
-        [data-testid="stMetric"]{position:relative;overflow:hidden;background:var(--surface-raised);border:1px solid var(--line);border-radius:20px;padding:1rem 1.05rem;box-shadow:0 12px 28px var(--shadow);transition:transform 160ms ease,box-shadow 160ms ease}
+        [data-testid="stMetric"]{position:relative;overflow:hidden;background:var(--surface-raised);border:1px solid var(--line);border-radius:20px;padding:1rem 1.05rem;box-shadow:0 12px 28px var(--shadow)}
         [data-testid="stMetric"]:before{content:"";position:absolute;left:0;top:0;width:100%;height:3px;background:linear-gradient(90deg,var(--blue-strong),var(--blue));opacity:.85}
-        [data-testid="stMetric"]:hover{transform:translateY(-1px)}
         [data-testid="stMetricLabel"]{color:var(--muted);font-weight:600}
         [data-testid="stMetricValue"]{color:var(--ink);font-weight:800}
         [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 10px 24px var(--shadow);background:var(--surface)}
@@ -175,21 +107,9 @@ def apply_global_style(*, dark_mode: bool = False) -> None:
         .allocation-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--blue-strong),var(--blue))}
         [data-testid="stMarkdownContainer"] p,[data-testid="stCaptionContainer"]{color:var(--muted)}
         hr{border-color:var(--line)}
-        @media(max-width:760px){
-            .block-container{padding:.7rem .8rem 2rem}
-            .hero-card{padding:1.15rem 1rem;border-radius:22px}
-            .hero-grid{grid-template-columns:1fr}
-            .hero-monogram{display:none}
-            .hero-title{font-size:1.55rem}
-            [data-testid="stRadio"] div[role="radiogroup"]{display:grid;grid-template-columns:1fr 1fr}
-            [data-testid="stRadio"] div[role="radiogroup"] label{min-width:0;flex:none}
-            [data-testid="stToggle"]{min-height:3rem;margin-top:.15rem}
-            .allocation-row{display:block}
-            .allocation-row span{display:block;margin-bottom:.25rem}
-        }
-        </style>
+        @media(max-width:760px){.block-container{padding:.7rem .8rem 2rem}.hero-card{padding:1.15rem 1rem;border-radius:22px}.hero-grid{grid-template-columns:1fr}.hero-monogram{display:none}.hero-title{font-size:1.55rem}[data-testid="stRadio"] div[role="radiogroup"]{display:grid;grid-template-columns:1fr 1fr}[data-testid="stRadio"] div[role="radiogroup"] label{min-width:0;flex:none}[data-testid="stToggle"]{min-height:3rem;margin-top:.15rem}.allocation-row{display:block}.allocation-row span{display:block;margin-bottom:.25rem}}
     """
-    st.markdown(palette + common, unsafe_allow_html=True)
+    st.markdown(f"<style>{palette}{common}</style>", unsafe_allow_html=True)
 
 
 def render_sidebar() -> None:
