@@ -47,9 +47,16 @@ def test_release_plan_is_one_ordered_bounded_command_surface() -> None:
         "run_intelligence",
         "validate_provider_bundle_implementation",
         "validate_all_markets_internal_readiness",
+        "validate_universal_paper_asset_classes",
         "rehearse_all_markets_paper_execution",
         "full_test_suite",
     )
+    universal = next(
+        item for item in host
+        if item.name == "validate_universal_paper_asset_classes"
+    )
+    assert "run_universal_paper_availability.py" in universal.command
+    assert "--require-available" in universal.command
     assert tuple(item.name for item in complete[-3:]) == (
         "build_validation_image",
         "run_container_acceptance",
