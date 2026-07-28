@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .agent/cross_asset_valid_patch.part-* > /tmp/cross_asset_patch.b64
+          cat .agent/cross_asset_valid_patch.part-* | tr -d '\r\n' > /tmp/cross_asset_patch.b64
           echo "a178b1f173a79240b32fbc1cc00fb1c73a0d818d770ae790044b34d3d496f50e  /tmp/cross_asset_patch.b64" | sha256sum --check --strict
           base64 --decode /tmp/cross_asset_patch.b64 | gzip --decompress > /tmp/cross_asset.patch
           git apply --check /tmp/cross_asset.patch
