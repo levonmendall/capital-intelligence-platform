@@ -125,7 +125,7 @@ Run the neutral paper verification:
 python run_alpaca_paper_broker_smoke.py \
   --activation config/alpaca_paper_broker_activation.json \
   --symbol BTC/USD \
-  --notional 1 \
+  --notional 10 \
   --output reports/alpaca-paper-broker-smoke.json \
   --require-reconciled
 ```
@@ -134,7 +134,7 @@ The verifier:
 
 1. authenticates the configured paper credentials;
 2. requires the active append-only Alpaca provider activation;
-3. submits an idempotently identified $1 paper buy;
+3. submits an idempotently identified $10 paper buy, matching Alpaca's minimum order value;
 4. records Alpaca request IDs and order-status snapshots;
 5. matches the final order to Alpaca `FILL` account activities;
 6. detects missing, duplicate, mismatched, or unreconciled fills;
