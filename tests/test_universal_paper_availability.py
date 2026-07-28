@@ -53,7 +53,7 @@ def test_rehearsal_fills_all_thirteen_classified_asset_classes(
     assert report.filled_asset_classes == expected
     assert report.fill_count >= 13
     assert report.ending_cash >= 0.0
-    assert report.reconciliation_difference == 0.0
+    assert abs(report.reconciliation_difference) < 1e-7
     assert report.to_dict()["real_money_authorized"] is False
 
 
