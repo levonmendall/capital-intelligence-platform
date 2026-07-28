@@ -30,6 +30,12 @@ _LAZY_EXPORTS = {
         "cio.universe",
         "RecommendationUniversePolicy",
     ),
+    "RobustCandidateAssessment": (
+        "cio.robustness",
+        "RobustCandidateAssessment",
+    ),
+    "RobustCandidateAssessor": ("cio.robustness", "RobustCandidateAssessor"),
+    "RobustDecisionPolicy": ("cio.robustness", "RobustDecisionPolicy"),
     "UniverseAssessment": ("cio.universe", "UniverseAssessment"),
     "UniverseDisposition": ("cio.universe", "UniverseDisposition"),
 }
@@ -59,6 +65,9 @@ __all__ = [
     "IndependentSpecialistPacket",
     "MaterialDissent",
     "RecommendationUniversePolicy",
+    "RobustCandidateAssessment",
+    "RobustCandidateAssessor",
+    "RobustDecisionPolicy",
     "SpecialistAnalysis",
     "SpecialistPosition",
     "SpecialistRole",

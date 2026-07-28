@@ -11,6 +11,11 @@ from cio.models import (
     CandidateDecisionRecord,
     SpecialistPosition,
 )
+from cio.robustness import (
+    RobustCandidateAssessment,
+    RobustCandidateAssessor,
+    RobustDecisionPolicy,
+)
 from cio.universe import UniverseAssessment
 
 
@@ -18,7 +23,7 @@ from cio.universe import UniverseAssessment
 class CIOSynthesisPolicy:
     """Versioned materiality, evidence, and abstention rules."""
 
-    version: str = "cio-synthesis.v1"
+    version: str = "cio-synthesis.v2"
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     minimum_net_expected_return: float = 0.05
@@ -47,17 +52,20 @@ class CIOSynthesisPolicy:
 class ChiefInvestmentOfficer:
     """Synthesize specialists and issue the sole user-facing investment action.
 
-    This service deliberately does not expose a vote-to-action mapping. Vote and
-    confidence statistics inform reliability, while the action follows the
-    disclosed evidence, opportunity, dissent, veto, cost, and implementation
-    rules below.
+    The service does not expose a vote-to-action mapping.  Positive capital
+    actions must clear evidence, opportunity, implementation, geometric-return,
+    uncertainty, and adverse-probability stress controls.  Negative ownership
+    actions remain available when a current holding has deteriorated.
     """
 
     def __init__(
         self,
         policy: CIOSynthesisPolicy | None = None,
+        *,
+        robustness_policy: RobustDecisionPolicy | None = None,
     ) -> None:
         self.policy = policy or CIOSynthesisPolicy()
+        self.robust_assessor = RobustCandidateAssessor(robustness_policy)
 
     def synthesize(
         self,
@@ -68,7 +76,7 @@ class ChiefInvestmentOfficer:
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be a CandidateDecisionRecord")
         if not isinstance(universe, UniverseAssessment):
-            raise TypeError("universe must be a UniverseAssessment")
+            raise TypeError("universe must be an UniverseAssessment")
         if not isinstance(specialists, IndependentSpecialistPacket):
             raise TypeError(
                 "specialists must be an IndependentSpecialistPacket"
@@ -77,6 +85,10 @@ class ChiefInvestmentOfficer:
             raise ValueError("universe assessment does not match the candidate")
         specialists.validate_against(candidate)
 
+        robustness = self.robust_assessor.assess(
+            candidate,
+            alternative_return=candidate.opportunity_cost_return,
+        )
         dissent = specialists.strongest_dissent()
         evidence_vetoes = specialists.evidence_vetoes
         implementation_blocks = specialists.implementation_blocks
@@ -85,6 +97,7 @@ class ChiefInvestmentOfficer:
             candidate,
             universe=universe,
             specialists=specialists,
+            robustness=robustness,
         )
         final_confidence = self._confidence(
             candidate,
@@ -107,11 +120,15 @@ class ChiefInvestmentOfficer:
             position_weight=position_weight,
         )
         opportunity_cost = (
-            f"Net expected return is {candidate.net_expected_return:.2%}; "
+            f"Arithmetic net expected return is {candidate.net_expected_return:.2%}; "
             f"the best recorded alternative is "
             f"{candidate.opportunity_cost_return:.2%}; "
-            f"the cost-adjusted opportunity edge is "
-            f"{candidate.opportunity_edge:.2%}."
+            f"the arithmetic opportunity edge is "
+            f"{candidate.opportunity_edge:.2%}. "
+            f"After geometric compounding, evidence shrinkage, uncertainty, and "
+            f"adverse-probability stress, the robust edge is "
+            f"{robustness.robust_edge:.2%} and the stressed edge is "
+            f"{robustness.stressed_edge:.2%}."
         )
         explanation = self._explanation(
             candidate,
@@ -119,6 +136,7 @@ class ChiefInvestmentOfficer:
             reason=reason,
             confidence=final_confidence,
             has_dissent=dissent is not None,
+            robustness=robustness,
         )
         return CIODecision(
             identifier=(
@@ -158,12 +176,13 @@ class ChiefInvestmentOfficer:
         *,
         universe: UniverseAssessment,
         specialists: IndependentSpecialistPacket,
+        robustness: RobustCandidateAssessment,
     ) -> tuple[CIOAction, float | None, str]:
         if not universe.direct_recommendation_allowed:
             return (
                 CIOAction.INSUFFICIENT_EVIDENCE,
                 None,
-                "The instrument is not eligible for a Version 1 direct recommendation: "
+                "The instrument is not eligible for a direct recommendation: "
                 + "; ".join(universe.reasons),
             )
         if specialists.evidence_vetoes:
@@ -249,6 +268,14 @@ class ChiefInvestmentOfficer:
                 None,
                 "The candidate does not offer a material cost-adjusted advantage over the recorded alternative.",
             )
+        if not robustness.passed:
+            reason = (
+                "Positive allocation is blocked by robust decision controls: "
+                + "; ".join(robustness.reasons)
+            )
+            if current_weight > 0.0:
+                return CIOAction.HOLD, None, reason
+            return CIOAction.NO_SUPERIOR_OPPORTUNITY, None, reason
         if portfolio.recommended_position_weight is None:
             return (
                 CIOAction.WATCH,
@@ -269,14 +296,14 @@ class ChiefInvestmentOfficer:
             return (
                 CIOAction.BUY,
                 target,
-                "The candidate clears evidence, return, cost, opportunity, and implementation thresholds.",
+                "The candidate clears evidence, arithmetic return, geometric compounding, uncertainty, adverse-probability stress, opportunity, and implementation thresholds.",
             )
         difference = target - current_weight
         if difference >= self.policy.material_weight_change:
             return (
                 CIOAction.INCREASE,
                 target,
-                "The candidate remains a superior use of capital and the feasible target is materially above the current weight.",
+                "The candidate remains a robust superior use of capital and the feasible target is materially above the current weight.",
             )
         if difference <= -self.policy.material_weight_change:
             return (
@@ -297,8 +324,6 @@ class ChiefInvestmentOfficer:
         specialists: IndependentSpecialistPacket,
         has_dissent: bool,
     ) -> float:
-        # Confidence is a disclosed reliability diagnostic. It does not decide the
-        # action and is capped by the weakest evidence dimension.
         calculated = (
             candidate.evidence_quality.score * 0.55
             + specialists.median_confidence * 0.25
@@ -347,6 +372,7 @@ class ChiefInvestmentOfficer:
         reason: str,
         confidence: float,
         has_dissent: bool,
+        robustness: RobustCandidateAssessment,
     ) -> str:
         dissent_text = (
             " Material specialist dissent is preserved in the decision record."
@@ -355,9 +381,11 @@ class ChiefInvestmentOfficer:
         )
         return (
             f"What changed: {candidate.primary_catalysts[0]} "
-            f"Why it matters: cost-adjusted expected return is "
-            f"{candidate.net_expected_return:.2%}, with expected downside of "
-            f"{candidate.expected_downside:.2%}. "
+            f"Why it matters: arithmetic cost-adjusted expected return is "
+            f"{candidate.net_expected_return:.2%}, expected downside is "
+            f"{candidate.expected_downside:.2%}, robust edge is "
+            f"{robustness.robust_edge:.2%}, and stressed edge is "
+            f"{robustness.stressed_edge:.2%}. "
             f"CIO decision: {action.value.replace('_', ' ')}. {reason} "
             f"Decision confidence is {confidence:.0%}; this describes evidence "
             f"and process reliability, not a guarantee of return.{dissent_text}"
