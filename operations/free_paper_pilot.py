@@ -354,6 +354,7 @@ def assess_free_paper_pilot_readiness(
         raise TypeError("universe must be FreePaperPilotUniverse")
     if not isinstance(client, AlpacaPaperClient):
         raise TypeError("client must be AlpacaPaperClient")
+    dynamic_evaluation_time = evaluated_at is None
     now = evaluated_at or datetime.now(timezone.utc)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("evaluated_at must be timezone-aware")
@@ -403,6 +404,10 @@ def assess_free_paper_pilot_readiness(
     if len(validated) == len(universe.instruments):
         try:
             quotes = client.latest_quotes(validated)
+            if dynamic_evaluation_time:
+                # Live readiness is evaluated after the provider response arrives.
+                # Explicit point-in-time evaluations remain strict and immutable.
+                now = datetime.now(timezone.utc)
             maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)
             for symbol in validated:
                 quote = quotes[symbol]

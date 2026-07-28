@@ -268,3 +268,38 @@ def test_authenticated_pair_selection_uses_matching_credentials(monkeypatch) -> 
     assert attempts[-1] == ("matching-key", "matching-secret")
     assert len(attempts) == 4
 
+def test_live_readiness_uses_post_response_time_for_quote_cutoff() -> None:
+    def current_quote_http_get(url: str, **kwargs: Any) -> _Response:
+        if url.endswith("/v2/stocks/quotes/latest"):
+            symbols = str(kwargs["params"]["symbols"]).split(",")
+            observed = datetime.now(timezone.utc).isoformat()
+            return _Response(
+                {
+                    "quotes": {
+                        symbol: {
+                            "bp": 99.9,
+                            "ap": 100.1,
+                            "bs": 500,
+                            "as": 400,
+                            "t": observed,
+                        }
+                        for symbol in symbols
+                    }
+                }
+            )
+        return _http_get(url, **kwargs)
+
+    universe = load_free_paper_pilot_universe(
+        ROOT / "config" / "free_paper_pilot_universe.json"
+    )
+    client = AlpacaPaperClient(
+        AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),
+        http_get=current_quote_http_get,
+    )
+
+    report = assess_free_paper_pilot_readiness(universe=universe, client=client)
+
+    assert report.configuration_ready
+    assert len(report.quote_timestamps) == 15
+    assert not any("future-known" in blocker for blocker in report.blockers)
+
