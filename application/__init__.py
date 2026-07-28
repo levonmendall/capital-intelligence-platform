@@ -14,11 +14,15 @@ from application.environment_evidence import (
     SubsequentEnvironmentObservation,
 )
 from application.multi_asset_evidence import (
+    AssetMetricDefinition,
     AssetSpecificEvidencePacket,
+    MetricDirection,
     MultiAssetEvidenceError,
     MultiAssetEvidenceIntegrityError,
     OriginatingFactObservation,
     SQLiteAssetSpecificEvidenceStore,
+    TypedAssetMetric,
+    metric_definition,
 )
 from application.production_cio import (
     ProductionCanonicalCIOContextProvider,
@@ -63,6 +67,7 @@ from application.daily_intelligence import (
 )
 
 __all__ = [
+    "AssetMetricDefinition",
     "AssetSpecificEvidencePacket",
     "CandidateForecastSupport",
     "CanonicalProductionContextAdapter",
@@ -82,6 +87,7 @@ __all__ = [
     "ForecastSupportIntegrityError",
     "ForecastSupportingProductionContextProvider",
     "GovernedEvidenceLineage",
+    "MetricDirection",
     "MultiAssetEvidenceError",
     "MultiAssetEvidenceIntegrityError",
     "OriginatingFactObservation",
@@ -95,6 +101,7 @@ __all__ = [
     "ProductionHoldingEvidence",
     "RepositoryProductionCanonicalCIOContextProvider",
     "SQLiteAssetSpecificEvidenceStore",
+    "TypedAssetMetric",
     "SQLiteCandidateForecastSupportStore",
     "SQLiteCertifiedEligibleUniverseStore",
     "SQLiteDailySnapshotStore",
@@ -104,4 +111,5 @@ __all__ = [
     "build_daily_capital_intelligence_snapshot",
     "build_production_context_provider",
     "daily_snapshot_to_dict",
+    "metric_definition",
 ]

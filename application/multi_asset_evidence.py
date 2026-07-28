@@ -13,6 +13,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from math import isfinite
 from pathlib import Path
 from typing import Any, Mapping
@@ -152,6 +153,85 @@ class OriginatingFactObservation:
             observed_at=datetime.fromisoformat(str(value["observed_at"])),
             available_at=datetime.fromisoformat(str(value["available_at"])),
         )
+
+
+class MetricDirection(str, Enum):
+    HIGHER_IS_BETTER = "higher_is_better"
+    LOWER_IS_BETTER = "lower_is_better"
+    CONTEXTUAL = "contextual"
+
+
+@dataclass(frozen=True, slots=True)
+class AssetMetricDefinition:
+    name: str
+    unit: str
+    direction: MetricDirection
+    applicable_horizon: str
+
+    def __post_init__(self) -> None:
+        for field_name in ("name", "unit", "applicable_horizon"):
+            object.__setattr__(
+                self,
+                field_name,
+                _text(getattr(self, field_name), field_name=field_name),
+            )
+        if not isinstance(self.direction, MetricDirection):
+            raise TypeError("direction must be MetricDirection")
+
+
+@dataclass(frozen=True, slots=True)
+class TypedAssetMetric:
+    definition: AssetMetricDefinition
+    value: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.definition, AssetMetricDefinition):
+            raise TypeError("definition must be AssetMetricDefinition")
+        object.__setattr__(
+            self,
+            "value",
+            _number(self.value, field_name=self.definition.name),
+        )
+
+
+_METRIC_DEFINITIONS: dict[str, AssetMetricDefinition] = {
+    "valuation_signal": AssetMetricDefinition("valuation_signal", "standardized_score", MetricDirection.HIGHER_IS_BETTER, "decision_horizon"),
+    "supply_demand_signal": AssetMetricDefinition("supply_demand_signal", "standardized_score", MetricDirection.HIGHER_IS_BETTER, "decision_horizon"),
+    "liquidity_score": AssetMetricDefinition("liquidity_score", "ratio", MetricDirection.HIGHER_IS_BETTER, "current"),
+    "implementation_cost_return": AssetMetricDefinition("implementation_cost_return", "return_fraction", MetricDirection.LOWER_IS_BETTER, "implementation"),
+    "rate_differential": AssetMetricDefinition("rate_differential", "annual_return_fraction", MetricDirection.CONTEXTUAL, "annual"),
+    "fundamental_quality": AssetMetricDefinition("fundamental_quality", "standardized_score", MetricDirection.HIGHER_IS_BETTER, "decision_horizon"),
+    "currency_exposure": AssetMetricDefinition("currency_exposure", "base_currency_fraction", MetricDirection.CONTEXTUAL, "decision_horizon"),
+    "yield_to_worst": AssetMetricDefinition("yield_to_worst", "annual_return_fraction", MetricDirection.HIGHER_IS_BETTER, "annual"),
+    "duration": AssetMetricDefinition("duration", "years", MetricDirection.CONTEXTUAL, "current"),
+    "credit_spread": AssetMetricDefinition("credit_spread", "basis_points", MetricDirection.CONTEXTUAL, "current"),
+    "curve_carry": AssetMetricDefinition("curve_carry", "annual_return_fraction", MetricDirection.HIGHER_IS_BETTER, "annual"),
+    "rate_sensitivity": AssetMetricDefinition("rate_sensitivity", "standardized_beta", MetricDirection.CONTEXTUAL, "decision_horizon"),
+    "underlying_return_signal": AssetMetricDefinition("underlying_return_signal", "standardized_score", MetricDirection.HIGHER_IS_BETTER, "decision_horizon"),
+    "margin_requirement": AssetMetricDefinition("margin_requirement", "portfolio_fraction", MetricDirection.LOWER_IS_BETTER, "implementation"),
+    "implied_volatility": AssetMetricDefinition("implied_volatility", "annualized_volatility", MetricDirection.CONTEXTUAL, "contract_horizon"),
+    "delta": AssetMetricDefinition("delta", "option_delta", MetricDirection.CONTEXTUAL, "current"),
+    "gamma": AssetMetricDefinition("gamma", "option_gamma", MetricDirection.CONTEXTUAL, "current"),
+    "theta": AssetMetricDefinition("theta", "return_per_day", MetricDirection.CONTEXTUAL, "daily"),
+    "maximum_loss": AssetMetricDefinition("maximum_loss", "portfolio_fraction", MetricDirection.LOWER_IS_BETTER, "contract_horizon"),
+    "implied_realized_spread": AssetMetricDefinition("implied_realized_spread", "annualized_volatility", MetricDirection.CONTEXTUAL, "contract_horizon"),
+    "term_structure": AssetMetricDefinition("term_structure", "standardized_slope", MetricDirection.CONTEXTUAL, "contract_horizon"),
+    "strategy_exposure": AssetMetricDefinition("strategy_exposure", "standardized_score", MetricDirection.CONTEXTUAL, "decision_horizon"),
+    "expected_return_impact": AssetMetricDefinition("expected_return_impact", "return_fraction", MetricDirection.HIGHER_IS_BETTER, "decision_horizon"),
+}
+
+
+def metric_definition(name: str) -> AssetMetricDefinition:
+    resolved = _text(name, field_name="metric name")
+    return _METRIC_DEFINITIONS.get(
+        resolved,
+        AssetMetricDefinition(
+            resolved,
+            "provider_native_unit",
+            MetricDirection.CONTEXTUAL,
+            "decision_horizon",
+        ),
+    )
 
 
 _REQUIRED_METRICS: dict[CandidateAssetClass, frozenset[str]] = {
@@ -308,6 +388,13 @@ class AssetSpecificEvidencePacket:
         )
         if not self.model_versions:
             raise ValueError("asset-specific evidence requires model versions")
+
+    @property
+    def typed_metrics(self) -> tuple[TypedAssetMetric, ...]:
+        return tuple(
+            TypedAssetMetric(metric_definition(name), value)
+            for name, value in self.metrics
+        )
 
     @property
     def originating_fact_identifiers(self) -> tuple[str, ...]:
@@ -625,9 +712,13 @@ class SQLiteAssetSpecificEvidenceStore:
 
 
 __all__ = [
+    "AssetMetricDefinition",
     "AssetSpecificEvidencePacket",
+    "MetricDirection",
     "MultiAssetEvidenceError",
     "MultiAssetEvidenceIntegrityError",
     "OriginatingFactObservation",
     "SQLiteAssetSpecificEvidenceStore",
+    "TypedAssetMetric",
+    "metric_definition",
 ]

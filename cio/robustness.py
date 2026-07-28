@@ -25,7 +25,7 @@ def _finite(value: object, *, field_name: str) -> float:
 
 @dataclass(frozen=True, slots=True)
 class RobustDecisionPolicy:
-    version: str = "robust-decision.v1"
+    version: str = "robust-decision.v2"
     reference_position_weight: float = 0.05
     minimum_reference_weight: float = 0.01
     evidence_shrinkage_floor: float = 0.10
@@ -74,6 +74,8 @@ class RobustCandidateAssessment:
     evidence_adjusted_return: float
     stressed_evidence_adjusted_return: float
     alternative_return: float
+    horizon_alternative_return: float
+    effective_probability_of_success: float
     robust_edge: float
     stressed_edge: float
     scenario_dispersion: float
@@ -110,18 +112,14 @@ class RobustCandidateAssessor:
             max(candidate.maximum_position_weight, self.policy.minimum_reference_weight),
             self.policy.reference_position_weight,
         )
-        returns = (
-            candidate.base_case_return,
-            candidate.bull_case_return,
-            candidate.bear_case_return,
-        )
-        probabilities = (
-            candidate.base_case_probability,
-            candidate.bull_case_probability,
-            candidate.bear_case_probability,
-        )
+        distribution = candidate.scenario_distribution
+        returns = tuple(item.total_return for item in distribution)
+        probabilities = tuple(item.probability for item in distribution)
+        labels = {item.label.lower(): item.total_return for item in distribution}
         reasons: list[str] = []
-        if not candidate.bear_case_return <= candidate.base_case_return <= candidate.bull_case_return:
+        if {"base", "bull", "bear"}.issubset(labels) and not (
+            labels["bear"] <= labels["base"] <= labels["bull"]
+        ):
             reasons.append(
                 "scenario ordering must satisfy bear case <= base case <= bull case"
             )
@@ -160,7 +158,7 @@ class RobustCandidateAssessor:
         )
         stressed_geometric = self._geometric(
             annualized,
-            self._stress(probabilities),
+            self._stress(probabilities, returns=returns),
             weight,
         )
         stressed_adjusted = (
@@ -175,10 +173,14 @@ class RobustCandidateAssessor:
             for value, probability in zip(returns, probabilities, strict=True)
             if value - candidate.implementation_cost_return < 0.0
         )
+        horizon_alternative = self._horizon_return(
+            alternative,
+            horizon_days=candidate.decision_horizon_days,
+        )
         implied_success = sum(
             probability
             for value, probability in zip(returns, probabilities, strict=True)
-            if value - candidate.implementation_cost_return > 0.0
+            if value - candidate.implementation_cost_return > horizon_alternative
         )
         probability_gap = round(
             abs(candidate.probability_of_success - implied_success),
@@ -220,6 +222,8 @@ class RobustCandidateAssessor:
             evidence_adjusted_return=round(adjusted, 10),
             stressed_evidence_adjusted_return=round(stressed_adjusted, 10),
             alternative_return=round(alternative, 10),
+            horizon_alternative_return=round(horizon_alternative, 10),
+            effective_probability_of_success=round(implied_success, 10),
             robust_edge=round(robust_edge, 10),
             stressed_edge=round(stressed_edge, 10),
             scenario_dispersion=round(dispersion, 10),
@@ -231,11 +235,21 @@ class RobustCandidateAssessor:
             reasons=unique_reasons,
         )
 
+
+    @staticmethod
+    def _horizon_return(annual_return: float, *, horizon_days: int) -> float:
+        """Convert an annual capital alternative into the candidate horizon."""
+
+        years = horizon_days / 365.25
+        if annual_return <= -1.0:
+            return -1.0
+        return exp(log1p(annual_return) * years) - 1.0
+
     @staticmethod
     def _annualized_scenarios(
         candidate: CandidateDecisionRecord,
         *,
-        returns: tuple[float, float, float],
+        returns: tuple[float, ...],
         weight: float,
     ) -> tuple[tuple[float, ...], tuple[float, ...], bool]:
         years = candidate.decision_horizon_days / 365.25
@@ -258,7 +272,7 @@ class RobustCandidateAssessor:
     @staticmethod
     def _geometric(
         returns: tuple[float, ...],
-        probabilities: tuple[float, float, float],
+        probabilities: tuple[float, ...],
         weight: float,
     ) -> float:
         expected_log = 0.0
@@ -271,18 +285,30 @@ class RobustCandidateAssessor:
 
     def _stress(
         self,
-        probabilities: tuple[float, float, float],
-    ) -> tuple[float, float, float]:
-        base, bull, bear = probabilities
+        probabilities: tuple[float, ...],
+        *,
+        returns: tuple[float, ...],
+    ) -> tuple[float, ...]:
+        """Shift probability from the strongest outcomes to the worst outcome."""
+
+        if len(probabilities) != len(returns) or not probabilities:
+            raise ValueError("stress inputs must be non-empty and aligned")
+        stressed = list(probabilities)
+        worst_index = min(range(len(returns)), key=returns.__getitem__)
         remaining = self.policy.bear_probability_shift
-        reduction = min(bull, remaining)
-        bull -= reduction
-        bear += reduction
-        remaining -= reduction
-        reduction = min(base, remaining)
-        base -= reduction
-        bear += reduction
-        return base, bull, bear
+        donor_indices = sorted(
+            (index for index in range(len(returns)) if index != worst_index),
+            key=lambda index: returns[index],
+            reverse=True,
+        )
+        for index in donor_indices:
+            if remaining <= 0.0:
+                break
+            reduction = min(stressed[index], remaining)
+            stressed[index] -= reduction
+            stressed[worst_index] += reduction
+            remaining -= reduction
+        return tuple(stressed)
 
 
 __all__ = [

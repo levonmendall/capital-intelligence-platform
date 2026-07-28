@@ -341,6 +341,28 @@ class CandidateInstrument:
 
 
 @dataclass(frozen=True, slots=True)
+class PayoffDistributionPoint:
+    """One point in a governed return distribution."""
+
+    label: str
+    total_return: float
+    probability: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "label", _required_text(self.label, field_name="label"))
+        object.__setattr__(
+            self,
+            "total_return",
+            _finite(self.total_return, field_name="total_return", minimum=-1.0),
+        )
+        object.__setattr__(
+            self,
+            "probability",
+            _ratio(self.probability, field_name="probability"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateDecisionRecord:
     """Comparable quantitative evidence package submitted for specialist review."""
 
@@ -378,6 +400,7 @@ class CandidateDecisionRecord:
     review_at: datetime
     evidence_identifiers: tuple[str, ...]
     model_versions: tuple[str, ...]
+    payoff_distribution: tuple[PayoffDistributionPoint, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("identifier", "schema_version"):
@@ -466,6 +489,29 @@ class CandidateDecisionRecord:
             )
         if not isinstance(self.evidence_quality, EvidenceQuality):
             raise TypeError("evidence_quality must be EvidenceQuality")
+        if not isinstance(self.payoff_distribution, tuple) or not all(
+            isinstance(item, PayoffDistributionPoint)
+            for item in self.payoff_distribution
+        ):
+            raise TypeError(
+                "payoff_distribution must contain PayoffDistributionPoint values"
+            )
+        if self.payoff_distribution:
+            labels = tuple(item.label for item in self.payoff_distribution)
+            if len(labels) != len(set(labels)):
+                raise ValueError("payoff distribution labels must be unique")
+            if abs(sum(item.probability for item in self.payoff_distribution) - 1.0) > 0.000001:
+                raise ValueError("payoff distribution probabilities must sum to 1.0")
+            if len(self.payoff_distribution) < 3:
+                raise ValueError("payoff distribution must contain at least three outcomes")
+        if self.instrument.asset_class in {
+            CandidateAssetClass.OPTION,
+            CandidateAssetClass.VOLATILITY,
+        } and not self.payoff_distribution:
+            raise ValueError(
+                "options and volatility candidates require a simulated payoff distribution"
+            )
+
         for field_name, minimum in (
             ("primary_catalysts", 1),
             ("key_risks", 1),
@@ -486,6 +532,28 @@ class CandidateDecisionRecord:
                     minimum=minimum,
                 ),
             )
+
+    @property
+    def scenario_distribution(self) -> tuple[PayoffDistributionPoint, ...]:
+        if self.payoff_distribution:
+            return self.payoff_distribution
+        return (
+            PayoffDistributionPoint(
+                label="base",
+                total_return=self.base_case_return,
+                probability=self.base_case_probability,
+            ),
+            PayoffDistributionPoint(
+                label="bull",
+                total_return=self.bull_case_return,
+                probability=self.bull_case_probability,
+            ),
+            PayoffDistributionPoint(
+                label="bear",
+                total_return=self.bear_case_return,
+                probability=self.bear_case_probability,
+            ),
+        )
 
     @property
     def probability_weighted_expected_return(self) -> float:
@@ -543,6 +611,139 @@ class MaterialDissent:
 
 
 @dataclass(frozen=True, slots=True)
+class SpecialistReturnAdjustment:
+    """One dependency-discounted specialist adjustment."""
+
+    role: SpecialistRole
+    raw_impact: float
+    confidence: float
+    overlap_discount: float
+    applied_impact: float
+    evidence_origin_identifiers: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.role, SpecialistRole):
+            raise TypeError("role must be a SpecialistRole")
+        for field_name in ("raw_impact", "applied_impact"):
+            object.__setattr__(
+                self,
+                field_name,
+                _finite(getattr(self, field_name), field_name=field_name),
+            )
+        for field_name in ("confidence", "overlap_discount"):
+            object.__setattr__(
+                self,
+                field_name,
+                _ratio(getattr(self, field_name), field_name=field_name),
+            )
+        object.__setattr__(
+            self,
+            "evidence_origin_identifiers",
+            _text_tuple(
+                self.evidence_origin_identifiers,
+                field_name="evidence_origin_identifiers",
+                minimum=1,
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReturnReconciliation:
+    """CIO reconciliation of the original and specialist-adjusted distribution."""
+
+    policy_version: str
+    original_expected_return: float
+    original_probability_of_success: float
+    alternative_return: float
+    horizon_alternative_return: float
+    implementation_cost_return: float
+    outcomes: tuple[PayoffDistributionPoint, ...]
+    expected_return: float
+    expected_downside: float
+    probability_of_success: float
+    evidence_origin_count: int
+    adjustments: tuple[SpecialistReturnAdjustment, ...]
+    bounds_correction_applied: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "policy_version",
+            _required_text(self.policy_version, field_name="policy_version"),
+        )
+        for field_name in (
+            "original_expected_return",
+            "alternative_return",
+            "horizon_alternative_return",
+            "expected_return",
+            "expected_downside",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _finite(getattr(self, field_name), field_name=field_name),
+            )
+        object.__setattr__(
+            self,
+            "original_probability_of_success",
+            _ratio(
+                self.original_probability_of_success,
+                field_name="original_probability_of_success",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "probability_of_success",
+            _ratio(self.probability_of_success, field_name="probability_of_success"),
+        )
+        object.__setattr__(
+            self,
+            "implementation_cost_return",
+            _finite(
+                self.implementation_cost_return,
+                field_name="implementation_cost_return",
+                minimum=0.0,
+            ),
+        )
+        if not isinstance(self.outcomes, tuple) or not self.outcomes or not all(
+            isinstance(item, PayoffDistributionPoint) for item in self.outcomes
+        ):
+            raise TypeError("outcomes must contain PayoffDistributionPoint values")
+        if abs(sum(item.probability for item in self.outcomes) - 1.0) > 0.000001:
+            raise ValueError("reconciled outcome probabilities must sum to 1.0")
+        calculated_return = sum(
+            item.total_return * item.probability for item in self.outcomes
+        ) - self.implementation_cost_return
+        if abs(calculated_return - self.expected_return) > 0.000001:
+            raise ValueError("reconciled expected return must match the outcome distribution")
+        calculated_downside = min(
+            item.total_return for item in self.outcomes
+        ) - self.implementation_cost_return
+        if abs(calculated_downside - self.expected_downside) > 0.000001:
+            raise ValueError("reconciled downside must match the outcome distribution")
+        calculated_success = sum(
+            item.probability
+            for item in self.outcomes
+            if item.total_return - self.implementation_cost_return
+            > self.horizon_alternative_return
+        )
+        if abs(calculated_success - self.probability_of_success) > 0.000001:
+            raise ValueError("reconciled probability must match the outcome distribution")
+        if isinstance(self.evidence_origin_count, bool) or not isinstance(
+            self.evidence_origin_count, int
+        ):
+            raise TypeError("evidence_origin_count must be an integer")
+        if self.evidence_origin_count < 1:
+            raise ValueError("evidence_origin_count must be positive")
+        if not isinstance(self.adjustments, tuple) or not all(
+            isinstance(item, SpecialistReturnAdjustment) for item in self.adjustments
+        ):
+            raise TypeError("adjustments must contain SpecialistReturnAdjustment values")
+        if not isinstance(self.bounds_correction_applied, bool):
+            raise TypeError("bounds_correction_applied must be a bool")
+
+
+@dataclass(frozen=True, slots=True)
 class CIODecision:
     """Final action issued only by the Chief Investment Officer service."""
 
@@ -573,6 +774,7 @@ class CIODecision:
     review_at: datetime
     explanation: str
     policy_version: str
+    return_reconciliation: ReturnReconciliation | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -632,6 +834,17 @@ class CIODecision:
             self.dissent, MaterialDissent
         ):
             raise TypeError("dissent must be MaterialDissent or None")
+        if self.return_reconciliation is not None:
+            if not isinstance(self.return_reconciliation, ReturnReconciliation):
+                raise TypeError(
+                    "return_reconciliation must be ReturnReconciliation or None"
+                )
+            if abs(
+                self.expected_return - self.return_reconciliation.expected_return
+            ) > 0.000001:
+                raise ValueError(
+                    "decision expected_return must match return reconciliation"
+                )
         for field_name, minimum in (
             ("supporting_evidence", 1),
             ("contradictory_evidence", 0),

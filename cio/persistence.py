@@ -238,6 +238,14 @@ def serialize_candidate_decision(
         "review_at": candidate.review_at.isoformat(),
         "evidence_identifiers": list(candidate.evidence_identifiers),
         "model_versions": list(candidate.model_versions),
+        "payoff_distribution": [
+            {
+                "label": item.label,
+                "total_return": item.total_return,
+                "probability": item.probability,
+            }
+            for item in candidate.payoff_distribution
+        ],
     }
 
 
@@ -263,6 +271,7 @@ def serialize_opportunity_queue(
                 "instrument_id": item.candidate.instrument.instrument_id,
                 "symbol": item.candidate.instrument.symbol,
                 "score": item.score,
+                "analysis_lane": item.qualification.analysis_lane.value,
                 "effective_opportunity_cost": (
                     item.qualification.effective_opportunity_cost
                 ),
@@ -285,6 +294,7 @@ def serialize_opportunity_queue(
             {
                 "candidate_identifier": item.candidate_identifier,
                 "outcome": item.outcome.value,
+                "analysis_lane": item.analysis_lane.value,
                 "universe_disposition": item.universe.disposition.value,
                 "universe_policy_version": item.universe.policy_version,
                 "effective_opportunity_cost": item.effective_opportunity_cost,
@@ -342,6 +352,9 @@ def serialize_specialist_packet(
                     item.recommended_position_weight
                 ),
                 "funding_source": item.funding_source,
+                "evidence_origin_identifiers": list(
+                    item.evidence_origin_identifiers
+                ),
             }
             for item in packet.analyses
         ],
@@ -399,6 +412,58 @@ def serialize_cio_decision(
         "review_at": decision.review_at.isoformat(),
         "explanation": decision.explanation,
         "policy_version": decision.policy_version,
+        "return_reconciliation": (
+            None
+            if decision.return_reconciliation is None
+            else {
+                "policy_version": decision.return_reconciliation.policy_version,
+                "original_expected_return": (
+                    decision.return_reconciliation.original_expected_return
+                ),
+                "original_probability_of_success": (
+                    decision.return_reconciliation.original_probability_of_success
+                ),
+                "alternative_return": decision.return_reconciliation.alternative_return,
+                "horizon_alternative_return": (
+                    decision.return_reconciliation.horizon_alternative_return
+                ),
+                "implementation_cost_return": (
+                    decision.return_reconciliation.implementation_cost_return
+                ),
+                "expected_return": decision.return_reconciliation.expected_return,
+                "expected_downside": decision.return_reconciliation.expected_downside,
+                "probability_of_success": (
+                    decision.return_reconciliation.probability_of_success
+                ),
+                "evidence_origin_count": (
+                    decision.return_reconciliation.evidence_origin_count
+                ),
+                "bounds_correction_applied": (
+                    decision.return_reconciliation.bounds_correction_applied
+                ),
+                "outcomes": [
+                    {
+                        "label": item.label,
+                        "total_return": item.total_return,
+                        "probability": item.probability,
+                    }
+                    for item in decision.return_reconciliation.outcomes
+                ],
+                "adjustments": [
+                    {
+                        "role": item.role.value,
+                        "raw_impact": item.raw_impact,
+                        "confidence": item.confidence,
+                        "overlap_discount": item.overlap_discount,
+                        "applied_impact": item.applied_impact,
+                        "evidence_origin_identifiers": list(
+                            item.evidence_origin_identifiers
+                        ),
+                    }
+                    for item in decision.return_reconciliation.adjustments
+                ],
+            }
+        ),
     }
 
 

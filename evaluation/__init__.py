@@ -5,6 +5,7 @@ from evaluation.decision_learning import (
     DecisionLearningObservation,
     DecisionLearningPolicy,
     DecisionLearningReport,
+    DecisionLearningSegmentReport,
     DecisionLearningState,
 )
 from evaluation.decision_quality import (
@@ -71,6 +72,7 @@ __all__ = [
     "DecisionLearningObservation",
     "DecisionLearningPolicy",
     "DecisionLearningReport",
+    "DecisionLearningSegmentReport",
     "DecisionLearningState",
     "DecisionOutcome",
     "DecisionQualityClassification",

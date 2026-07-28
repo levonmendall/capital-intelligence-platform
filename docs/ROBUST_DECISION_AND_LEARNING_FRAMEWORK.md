@@ -4,10 +4,13 @@
 
 The canonical framework already enforces point-in-time evidence, complete capital-alternative comparison, independent specialist review, CIO-only action authority, portfolio construction, paper implementation, living theses, and hindsight-free evaluation.
 
-This layer closes two remaining weaknesses:
+This layer closes the remaining analytical inconsistencies:
 
-1. a high arithmetic expected return could look attractive even when compounding, scenario dispersion, evidence uncertainty, or a modest adverse probability shift makes the opportunity fragile; and
-2. completed outcomes could be measured without a single version-specific process for deciding whether a model should be retained, watched, suspended, or submitted for human governance review.
+1. a high arithmetic expected return could look attractive even when compounding, horizon, scenario dispersion, evidence uncertainty, or a modest adverse probability shift makes the opportunity fragile;
+2. a deteriorating current holding could be filtered out by acquisition rules before the CIO reached Reduce or Exit;
+3. specialist conclusions could affect confidence without producing a reconciled expected-return distribution;
+4. repeated evidence origins, preliminary portfolio-contribution estimates, and caller-supplied success probabilities could appear more authoritative than warranted; and
+5. completed outcomes could be pooled across incompatible assets, horizons, and regimes.
 
 The framework improves robustness and expected net decision quality. It does not guarantee profit, authorize live trading, or permit performance claims.
 
@@ -23,11 +26,39 @@ It:
 - shrinks the estimated advantage toward that alternative when evidence quality is weak;
 - penalizes scenario dispersion;
 - shifts probability from favorable scenarios toward the bear case and repeats the calculation;
-- reconciles the stated probability of success with the probabilities implied by positive and negative scenarios;
+- derives effective probability of success from the same outcome distribution, measured against the horizon-matched best alternative, while retaining any stated value only as a consistency diagnostic;
 - measures the probability of loss, worst-case portfolio loss, robust edge, stressed edge, and edge relative to uncertainty; and
 - fails closed when any required robustness gate is not met.
 
-The opportunity engine uses these diagnostics in qualification, ranking, and tie-breaking. The CIO independently applies the same gate before issuing a positive allocation action. A current holding can still be reduced or exited when its expected return has deteriorated.
+The opportunity engine uses these diagnostics for the acquisition lane. Preliminary portfolio-contribution estimates are neutral at this stage and cannot determine qualification or rank.
+
+Every current holding enters a separate mandatory review lane even when it fails acquisition thresholds. The CIO therefore always has authority to issue Hold, Reduce, Exit, or replacement decisions for deteriorating or no-longer-supported ownership.
+
+## Specialist return reconciliation
+
+The five specialists remain independent first-pass reviewers. Macro, market, and asset-specific valuation impacts are then reconciled conservatively into the candidate's full outcome distribution.
+
+The reconciler:
+
+- excludes abstentions and never treats narrative repetition as new information;
+- groups evidence by originating-fact identifiers;
+- discounts overlapping origins;
+- applies confidence-weighted per-role and total adjustment caps;
+- preserves every original outcome label and probability;
+- adjusts the full distribution rather than only a point estimate; and
+- derives final expected return, downside, and probability of beating the horizon-matched alternative from that same distribution.
+
+For fixed income, FX, commodities, crypto, real estate, futures, options, volatility, and alternatives, the Fundamental & Valuation role requires a genuine asset-specific evidence context. Without one it abstains instead of restating the candidate model.
+
+## Nonlinear instruments and typed metrics
+
+Options and volatility candidates require a simulated payoff distribution with at least three governed outcomes. The distribution preserves nonlinear and bounded-loss behavior through CIO synthesis and evaluation.
+
+Asset-specific metrics retain a semantic definition containing unit, directionality, and applicable horizon. Their source observations, model versions, limitations, and originating facts remain attached to the evidence packet.
+
+## Portfolio-aware ordering
+
+Analytical qualification determines which acquisition candidates deserve review; it does not pretend final portfolio contribution is already known. After specialist preview, final construction orders exits and reductions first, then additions by feasible marginal portfolio contribution, analytical rank, funding, constraints, correlation, currency, and implementation cost.
 
 ## Why geometric return is separate from arithmetic return
 
@@ -55,6 +86,8 @@ Each observation preserves:
 - realized drawdown;
 - number of candidates considered; and
 - evidence lineage.
+
+The report evaluates the exact model and policy version both in aggregate and in separate asset-class, market-regime, and horizon buckets. Segments below their own minimum sample remain explicitly insufficient rather than borrowing confidence from unrelated observations.
 
 The report evaluates:
 

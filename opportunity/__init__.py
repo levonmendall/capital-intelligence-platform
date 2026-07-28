@@ -2,6 +2,7 @@
 
 from opportunity.engine import OpportunityEngine, OpportunityQualificationPolicy
 from opportunity.models import (
+    AnalysisLane,
     AlternativeKind,
     AlternativeUse,
     CandidateQualification,
@@ -13,6 +14,7 @@ from opportunity.models import (
 )
 
 __all__ = [
+    "AnalysisLane",
     "AlternativeKind",
     "AlternativeUse",
     "CandidateQualification",
