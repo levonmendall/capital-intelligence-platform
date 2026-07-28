@@ -22,21 +22,28 @@ The report is credential-safe. The normalized record set contains metadata, offi
 
 ## Live sources
 
-The initial public live stack includes:
+The public live stack includes:
 
-1. **GDELT DOC 2.0** for global news discovery metadata and links. GDELT is a discovery and corroboration aid, not a substitute for an original source or licensed journalism archive.
-2. **Federal Reserve Board RSS** for U.S. monetary-policy, regulatory, liquidity, and central-bank communications.
-3. **European Central Bank RSS** for euro-area policy, speeches, releases, and central-bank communications.
-4. **SEC press-release RSS** for U.S. securities regulation, enforcement, legal events, and corporate-disclosure developments.
+1. **GDELT DOC 2.0** for global news-discovery metadata and links. It is a discovery and corroboration aid, not a substitute for an original source or licensed journalism archive.
+2. **Federal Reserve Board** and **European Central Bank** feeds for monetary-policy, liquidity, regulatory, and central-bank communications.
+3. **SEC press releases** and the **Federal Register API** for securities enforcement, formal U.S. rules, notices, executive actions, and regulatory changes.
+4. **OFAC Sanctions List Service** for the SDN list and consolidated non-SDN restrictions. Matches require governed entity resolution and program-specific legal interpretation.
 5. **CFTC public reporting** for weekly futures and commodity positioning.
-6. **National Weather Service alerts** for active U.S. weather hazards.
-7. **USGS earthquake GeoJSON** for near-real-time earthquake events.
+6. **National Weather Service**, **OpenFEMA**, and **USGS** for active hazards, official disaster declarations, and earthquakes.
+7. **NASA FIRMS** for global near-real-time active-fire detections when a free `NASA_FIRMS_MAP_KEY` is configured.
 8. **CISA Known Exploited Vulnerabilities** for authoritative cyber-risk developments.
-9. **U.S. Treasury Fiscal Data** for current federal fiscal and debt observations.
-10. **World Bank Indicators API** for broad global macro context.
-11. **EIA Open Data** for energy prices and physical-market evidence when a free `EIA_API_KEY` is configured.
+9. **openFDA food, drug, and medical-device enforcement data** for recalls and supply-chain, health, legal, and issuer-risk evidence.
+10. **World Health Organization Disease Outbreak News** for confirmed or potentially material international public-health events.
+11. **U.S. Treasury Fiscal Data**, **World Bank Indicators**, and **IMF DataMapper** for fiscal and global macroeconomic context.
+12. **EIA Open Data** for energy prices and physical-market evidence when a free `EIA_API_KEY` is configured.
 
-The public stack complements the existing live FRED, SEC EDGAR, Coinbase, and Kraken adapters and the optional EODHD commercial adapter.
+The public stack complements the existing FRED, SEC EDGAR, Coinbase, Kraken, and optional EODHD adapters.
+
+## Required versus optional sources
+
+The required baseline contains stable, high-impact official sources that need no new credential, plus SEC access using the existing descriptive user agent. A required-source outage fails the public-baseline workflow.
+
+Optional sources are still attempted every hour but do not stop the required baseline. They include free-key services and endpoints that need operating burn-in, including NASA FIRMS, EIA, WHO, IMF, openFDA, and the OFAC consolidated non-SDN export. Their failures remain visible in the report.
 
 ## Point-in-time behavior
 
@@ -56,7 +63,7 @@ Every normalized live record preserves:
 - reliability, relevance, and materiality scores;
 - declared limitations.
 
-Retrieval time is used as a conservative availability boundary when a source does not provide a precise first-availability timestamp.
+Retrieval time is used as a conservative availability boundary when a source does not provide a precise first-availability timestamp. Future scheduled events are retained as tagged metadata without making them appear to have already occurred.
 
 ## Reliability policy
 
@@ -68,8 +75,11 @@ Public-source breadth does not create investment authority. The platform must:
 - distinguish an event from reporting about that event;
 - deduplicate normalized records by deterministic content hash;
 - retain source limitations;
+- perform entity, geography, product, issuer, and portfolio-exposure mapping;
 - require market confirmation and CIO review before a material event can change a portfolio decision;
 - keep paid newswire and independent-journalism requirements visible in the maximum-information readiness gate.
+
+Sanctions, recalls, disaster declarations, vulnerabilities, and fire detections are evidence of a condition or official action. They are not, by themselves, proof of portfolio loss, issuer exposure, expected return, or a trade requirement.
 
 Repeated syndicated copies do not count as independent evidence.
 
@@ -78,9 +88,9 @@ Repeated syndicated copies do not count as independent evidence.
 `.github/workflows/public-live-information.yml` runs hourly and on demand. It performs two passes:
 
 1. a required public baseline that must succeed; and
-2. a full pass that also attempts optional free-key sources such as EIA.
+2. a full pass that also attempts optional and free-key sources.
 
-The workflow uploads credential-safe reports and normalized records as a 14-day artifact. Production deployment should run the same CLI from its persistent scheduler and write the report paths to durable storage.
+The workflow uploads credential-safe reports and normalized records as a 14-day artifact. Production deployment should run the same CLI from a persistent scheduler and write the report paths to durable storage.
 
 The latest persisted report is available through:
 
@@ -94,7 +104,7 @@ The combined governance route also exposes public source and record counts:
 GET /v1/governance/data-readiness
 ```
 
-## Required configuration
+## Configuration
 
 ```text
 CAPITAL_INTELLIGENCE_PUBLIC_LIVE_SOURCE_CATALOG=config/public_live_information_sources.json
@@ -102,13 +112,14 @@ CAPITAL_INTELLIGENCE_PUBLIC_LIVE_REPORT=database/public-live-information-report.
 SEC_USER_AGENT=Capital Intelligence Platform <monitored-contact>
 ```
 
-Optional:
+Optional free keys:
 
 ```text
 EIA_API_KEY=<free EIA key>
+NASA_FIRMS_MAP_KEY=<free NASA FIRMS map key>
 ```
 
-The source catalog contains no secret values.
+The source catalog contains no secret values. Credential placeholders in URL paths and parameters are substituted only at runtime, and failures are redacted before reports are written.
 
 ## Remaining paid coverage
 
@@ -122,7 +133,7 @@ Maximum public live coverage still cannot provide:
 - authoritative historical global security-master and corporate-action data;
 - proprietary fund flows, securities lending, short interest, and ownership datasets;
 - comprehensive shipping, satellite, card-spending, app, web, and employment alternative data;
-- full global weather, crop, power-grid, and physical commodity coverage;
+- full global crop, power-grid, physical commodity, and weather-model coverage;
 - consolidated on-chain labels and crypto derivatives data.
 
 Those sources remain explicit provider-onboarding requirements. The platform does not mark maximum decision-information readiness complete merely because the public layer is operating.
