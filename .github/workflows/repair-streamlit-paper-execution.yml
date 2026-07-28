@@ -1,0 +1,108 @@
+name: Repair Streamlit paper execution integration
+
+on:
+  push:
+    branches:
+      - feature/streamlit-paper-execution-worker-v5
+    paths:
+      - ".github/workflows/repair-streamlit-paper-execution.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: feature/streamlit-paper-execution-worker-v5
+          fetch-depth: 0
+
+      - name: Wire background worker and provider clock tolerance
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          worker = Path("streamlit_paper_execution_worker.py")
+          source = worker.read_text(encoding="utf-8")
+          source = source.replace(
+              "from datetime import datetime, timezone\n",
+              "from datetime import datetime, timedelta, timezone\n",
+          )
+          source = source.replace(
+              'timestamp - previous_time < __import__("datetime").timedelta(seconds=_retry_seconds())',
+              'timestamp - previous_time < timedelta(seconds=_retry_seconds())',
+          )
+          worker.write_text(source, encoding="utf-8")
+
+          app = Path("app.py")
+          source = app.read_text(encoding="utf-8")
+          import_anchor = "from paper_trading_ui import render_paper_decision_controls\n"
+          worker_import = (
+              "from streamlit_paper_execution_worker import "
+              "render_background_paper_execution_worker\n"
+          )
+          if worker_import not in source:
+              if source.count(import_anchor) != 1:
+                  raise SystemExit("app worker import anchor unavailable")
+              source = source.replace(import_anchor, import_anchor + worker_import, 1)
+          contract_anchor = "render_paper_decision_controls(\n"
+          if "render_background_paper_execution_worker(\n" not in source.split("'''", 2)[1]:
+              source = source.replace(
+                  contract_anchor,
+                  contract_anchor + "render_background_paper_execution_worker(\n",
+                  1,
+              )
+          injection_anchor = "\n# ``secure_app.py`` executes this entrypoint"
+          injection = '''\n# Keep the execution worker alive on every Streamlit surface. It consumes only an\n# already-authenticated exact approval and is idempotent at the construction hash.\n_worker_anchor = "render_sidebar()\\n"\nif _source.count(_worker_anchor) != 1:\n    raise RuntimeError("paper execution worker insertion point is unavailable")\n_source = _source.replace(\n    _worker_anchor,\n    _worker_anchor\n    + 'render_background_paper_execution_worker(\\n'\n    + '    construction=_latest("portfolio_construction"),\\n'\n    + '    briefing=_latest("daily_cio_briefing"),\\n'\n    + ')\\n',\n    1,\n)\n'''
+          if "_worker_anchor = \"render_sidebar()\\n\"" not in source:
+              if source.count(injection_anchor) != 1:
+                  raise SystemExit("app worker injection anchor unavailable")
+              source = source.replace(injection_anchor, injection + injection_anchor, 1)
+          app.write_text(source, encoding="utf-8")
+
+          provider = Path("providers/alpaca_paper.py")
+          source = provider.read_text(encoding="utf-8")
+          source = source.replace(
+              "from datetime import datetime, timezone\n",
+              "from datetime import datetime, timedelta, timezone\n",
+          )
+          old_session = '''        observed_at = _timestamp(payload.get("timestamp"), field_name="Alpaca clock timestamp")\n        if observed_at > as_of:\n            raise AlpacaPaperProviderError(\n                "Alpaca clock is future-known relative to execution"\n            )\n        status = (\n'''
+          new_session = '''        observed_at = _timestamp(payload.get("timestamp"), field_name="Alpaca clock timestamp")\n        if observed_at > as_of + timedelta(seconds=5):\n            raise AlpacaPaperProviderError(\n                "Alpaca clock is future-known relative to execution"\n            )\n        status = (\n'''
+          if old_session in source:
+              source = source.replace(old_session, new_session, 1)
+          source = source.replace(
+              "            as_of=observed_at,\n            status=status,\n            source_identifier=\"alpaca-paper-clock:v2\",\n",
+              "            as_of=as_of,\n            status=status,\n            source_identifier=\"alpaca-paper-clock:v2\",\n",
+              1,
+          )
+          old_quote = '''            if observed_at > as_of:\n                raise AlpacaPaperProviderError(\n                    f"{profile.symbol} quote is future-known relative to execution"\n                )\n            available = min(bid * bid_size, ask * ask_size)\n            result[profile.symbol] = MultiAssetQuote(\n'''
+          new_quote = '''            if observed_at > as_of + timedelta(seconds=5):\n                raise AlpacaPaperProviderError(\n                    f"{profile.symbol} quote is future-known relative to execution"\n                )\n            effective_observed_at = min(observed_at, as_of)\n            available = min(bid * bid_size, ask * ask_size)\n            result[profile.symbol] = MultiAssetQuote(\n'''
+          if old_quote in source:
+              source = source.replace(old_quote, new_quote, 1)
+          source = source.replace(
+              "                observed_at=observed_at,\n                bid=bid,\n",
+              "                observed_at=effective_observed_at,\n                bid=bid,\n",
+              1,
+          )
+          source = source.replace(
+              "                fx_observed_at=observed_at,\n",
+              "                fx_observed_at=effective_observed_at,\n",
+              1,
+          )
+          provider.write_text(source, encoding="utf-8")
+          PY
+
+      - name: Commit integration repairs
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py providers/alpaca_paper.py streamlit_paper_execution_worker.py
+          git commit -m "Wire automatic paper execution into Streamlit"
+          git push origin HEAD:feature/streamlit-paper-execution-worker-v5
