@@ -1,0 +1,316 @@
+         conclusion=f"{role.value} conclusion",
+-        expected_return_impact=0.02,
++        expected_return_impact=return_impact,
+         confidence=confidence,
+         supporting_evidence=(f"{role.value} supporting evidence",),
+         contradictory_evidence=(),
+@@ -151,6 +152,7 @@ def _packet(
+     opposed_role: SpecialistRole | None = None,
+     opposed_confidence: float = 0.80,
+     weight: float | None = 0.06,
++    return_impact: float = 0.02,
+ ) -> IndependentSpecialistPacket:
+     analyses = []
+     for role in SpecialistRole:
+@@ -180,6 +182,7 @@ def _packet(
+                     if role is SpecialistRole.PORTFOLIO_RISK and weight is not None
+                     else None
+                 ),
++                return_impact=return_impact,
+             )
+         )
+     return IndependentSpecialistPacket(
+@@ -364,6 +367,58 @@ def test_evidence_veto_forces_insufficient_evidence() -> None:
+     assert decision.final_confidence <= 0.25
+ 
+ 
++def test_evidence_veto_reduces_an_existing_holding_instead_of_preserving_risk() -> None:
++    candidate = _candidate(current_weight=0.08)
++    universe = RecommendationUniversePolicy().evaluate(candidate.instrument)
++
++    decision = ChiefInvestmentOfficer().synthesize(
++        candidate,
++        universe,
++        _packet(
++            evidence_vetoes=("filing timestamp cannot be reproduced",),
++            weight=0.08,
++        ),
++    )
++
++    assert decision.action is CIOAction.REDUCE
++    assert decision.recommended_position_weight == pytest.approx(0.04)
++
++
++def test_positive_holding_is_reduced_when_a_superior_alternative_exists() -> None:
++    candidate = _candidate(
++        current_weight=0.08,
++        base_return=0.08,
++        bull_return=0.14,
++        bear_return=0.01,
++        opportunity_cost=0.12,
++    )
++    universe = RecommendationUniversePolicy().evaluate(candidate.instrument)
++
++    decision = ChiefInvestmentOfficer().synthesize(
++        candidate,
++        universe,
++        _packet(weight=0.08),
++    )
++
++    assert candidate.net_expected_return > 0.0
++    assert decision.action in {CIOAction.REDUCE, CIOAction.EXIT}
++
++
++def test_adverse_specialist_reconciliation_can_block_preliminary_maximum_size() -> None:
++    candidate = _candidate()
++    universe = RecommendationUniversePolicy().evaluate(candidate.instrument)
++
++    decision = ChiefInvestmentOfficer().synthesize(
++        candidate,
++        universe,
++        _packet(weight=0.10, return_impact=-0.06),
++    )
++
++    assert decision.return_reconciliation.expected_return < candidate.net_expected_return
++    assert decision.action is not CIOAction.BUY
++    assert decision.recommended_position_weight is None
++
++
+ def test_portfolio_block_produces_watch_without_position_size() -> None:
+     candidate = _candidate()
+     universe = RecommendationUniversePolicy().evaluate(candidate.instrument)
+diff --git a/tests/test_cio_persistence.py b/tests/test_cio_persistence.py
+index 850215c..05f5ae2 100644
+--- a/tests/test_cio_persistence.py
++++ b/tests/test_cio_persistence.py
+@@ -209,7 +209,7 @@ def test_specialist_and_decision_serializers_preserve_authority_and_dissent() ->
+     assert decision_payload["recommended_position_weight"] == pytest.approx(
+         0.06
+     )
+-    assert decision_payload["policy_version"] == "cio-synthesis.v3"
++    assert decision_payload["policy_version"] == "cio-synthesis.v4"
+ 
+ 
+ def test_event_payload_is_canonical_json(tmp_path) -> None:
+diff --git a/tests/test_decision_quality_reconciliation.py b/tests/test_decision_quality_reconciliation.py
+index 68f7bc8..d6f76e3 100644
+--- a/tests/test_decision_quality_reconciliation.py
++++ b/tests/test_decision_quality_reconciliation.py
+@@ -164,8 +164,17 @@ def _analysis(
+     )
+ 
+ 
+-def _packet(candidate: CandidateDecisionRecord, *, duplicate_origins: bool) -> IndependentSpecialistPacket:
+-    shared = "origin:shared" if duplicate_origins else None
++def _packet(
++    candidate: CandidateDecisionRecord,
++    *,
++    duplicate_origins: bool,
++    baseline_origin: bool = False,
++) -> IndependentSpecialistPacket:
++    shared = (
++        "origin:candidate"
++        if baseline_origin
++        else ("origin:shared" if duplicate_origins else None)
++    )
+     return IndependentSpecialistPacket(
+         candidate_identifier=candidate.identifier,
+         analyses=(
+@@ -265,6 +274,29 @@ def test_duplicate_evidence_origins_reduce_specialist_adjustments() -> None:
+     assert duplicated.evidence_origin_count < independent.evidence_origin_count
+ 
+ 
++def test_specialist_evidence_already_used_by_baseline_is_discounted() -> None:
++    candidate = _candidate("BASELINE")
++
++    novel = SpecialistReturnReconciler().reconcile(
++        candidate,
++        _packet(candidate, duplicate_origins=False),
++        alternative_return=0.04,
++    )
++    repeated = SpecialistReturnReconciler().reconcile(
++        candidate,
++        _packet(
++            candidate,
++            duplicate_origins=False,
++            baseline_origin=True,
++        ),
++        alternative_return=0.04,
++    )
++
++    assert sum(item.applied_impact for item in repeated.adjustments) < sum(
++        item.applied_impact for item in novel.adjustments
++    )
++
++
+ def test_options_require_and_preserve_nonlinear_payoff_distribution() -> None:
+     with pytest.raises(ValueError, match="simulated payoff distribution"):
+         _candidate("OPT", asset_class=CandidateAssetClass.OPTION)
+diff --git a/tests/test_opportunity_engine.py b/tests/test_opportunity_engine.py
+index d546852..2ab5910 100644
+--- a/tests/test_opportunity_engine.py
++++ b/tests/test_opportunity_engine.py
+@@ -17,6 +17,7 @@ from opportunity import (
+     AlternativeKind,
+     AlternativeUse,
+     OpportunityEngine,
++    OpportunityQualificationPolicy,
+     OpportunitySetContext,
+     QualificationOutcome,
+ )
+@@ -219,6 +220,35 @@ def test_context_recalculates_opportunity_cost_against_current_holding() -> None
+     assert qualification.qualified
+ 
+ 
++@pytest.mark.parametrize(
++    ("policy", "reason_fragment"),
++    (
++        (
++            OpportunityQualificationPolicy(minimum_net_expected_return=0.50),
++            "absolute return threshold",
++        ),
++        (
++            OpportunityQualificationPolicy(minimum_opportunity_edge=0.20),
++            "opportunity edge",
++        ),
++        (
++            OpportunityQualificationPolicy(maximum_expected_downside=-0.10),
++            "downside",
++        ),
++    ),
++)
++def test_each_declared_qualification_hurdle_has_screening_authority(
++    policy: OpportunityQualificationPolicy,
++    reason_fragment: str,
++) -> None:
++    qualification = OpportunityEngine(
++        qualification_policy=policy
++    ).qualify(_candidate("ACME"), _context())
++
++    assert not qualification.qualified
++    assert any(reason_fragment in reason for reason in qualification.reasons)
++
++
+ def test_stale_recorded_opportunity_cost_is_rejected() -> None:
+     context = _context(holding_return=0.08)
+     candidate = _candidate("ACME", opportunity_cost=0.04)
+diff --git a/tests/test_portfolio_construction_engine.py b/tests/test_portfolio_construction_engine.py
+index 86b66ce..c31a956 100644
+--- a/tests/test_portfolio_construction_engine.py
++++ b/tests/test_portfolio_construction_engine.py
+@@ -412,6 +412,64 @@ def test_expected_return_improvement_is_net_of_costs() -> None:
+     assert result.expected_return_improvement > 0.0
+ 
+ 
++def test_positive_allocation_is_removed_when_portfolio_improvement_is_immaterial() -> None:
++    marginal = _intent(
++        "TINY",
++        target=0.005,
++        maximum_position_weight=0.005,
++        expected_return=0.0511,
++        opportunity_edge=0.0111,
++    )
++
++    result = PortfolioConstructionEngine(_policy()).construct(
++        _request(intents=(marginal,))
++    )
++
++    assert result.status is ConstructionStatus.BLOCKED
++    assert "TINY" not in _weights(result)
++    assert result.trades == ()
++    assert any("did not improve expected return" in block for block in result.blocks)
++
++
++def test_return_gate_preserves_risk_reductions_when_a_purchase_is_removed() -> None:
++    positions = (
++        _asset("LEGACY", 0.10, expected_return=-0.08),
++        _asset("CORE", 0.70, expected_return=0.07),
++    )
++    exit_intent = _intent(
++        "LEGACY",
++        action=CIOAction.EXIT,
++        target=0.0,
++        expected_return=-0.08,
++        maximum_position_weight=0.10,
++        sector="Legacy",
++        bucket="legacy",
++    )
++    marginal = _intent(
++        "TINY",
++        target=0.005,
++        maximum_position_weight=0.005,
++        expected_return=0.0511,
++        opportunity_edge=0.0111,
++        rank=2,
++    )
++
++    result = PortfolioConstructionEngine(_policy()).construct(
++        _request(
++            cash=0.20,
++            positions=positions,
++            intents=(exit_intent, marginal),
++        )
++    )
++
++    assert result.status is ConstructionStatus.PARTIAL
++    assert "LEGACY" not in _weights(result)
++    assert "TINY" not in _weights(result)
++    assert len(result.trades) == 1
++    assert result.trades[0].symbol == "LEGACY"
++    assert result.trades[0].side is TradeSide.SELL
++
++
+ def test_engine_source_does_not_use_cio_confidence_for_position_size() -> None:
+     source = Path("portfolio/construction_engine.py").read_text(encoding="utf-8")
+ 
+diff --git a/tests/test_robust_decision_framework.py b/tests/test_robust_decision_framework.py
+index 939e10f..09149d2 100644
+--- a/tests/test_robust_decision_framework.py
++++ b/tests/test_robust_decision_framework.py
+@@ -174,6 +174,46 @@ def test_short_horizon_returns_are_compared_on_an_annualized_geometric_basis() -
+     assert assessment.annualized_geometric_return > candidate.net_expected_return
+ 
+ 
++def test_robustness_is_enforced_at_the_actual_target_weight() -> None:
++    candidate = _candidate(
++        "TAIL",
++        base=0.20,
++        bull=0.45,
++        bear=-0.60,
++        base_probability=0.60,
++        bull_probability=0.30,
++        bear_probability=0.10,
++        stated_success=0.90,
++    )
++    assessor = RobustCandidateAssessor()
++
++    five_percent = assessor.assess(
++        candidate,
++        alternative_return=0.04,
++        position_weight=0.05,
++    )
++    ten_percent = assessor.assess(
++        candidate,
++        alternative_return=0.04,
++        position_weight=0.10,
++    )
++    supported = assessor.maximum_supported_weight(
++        candidate,
++        alternative_return=0.04,
++        maximum_weight=0.10,
++    )
++
++    assert five_percent.passed
++    assert not ten_percent.passed
++    assert any("worst-case portfolio loss" in reason for reason in ten_percent.reasons)
++    assert 0.05 <= supported < 0.10
++    assert assessor.assess(
++        candidate,
++        alternative_return=0.04,
++        position_weight=supported,
++    ).passed
++
++
+ def _observation(index: int, *, negative: bool = False) -> DecisionLearningObservation:
+     decision_at = AS_OF + timedelta(days=index * 10)
+     success = index % 5 != 0
