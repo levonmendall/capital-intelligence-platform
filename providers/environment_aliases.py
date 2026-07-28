@@ -8,7 +8,7 @@ values always win; an alias fills only an otherwise empty canonical variable.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 
 
 PROVIDER_ENVIRONMENT_ALIASES: dict[str, tuple[str, ...]] = {
@@ -54,6 +54,29 @@ def normalize_provider_environment(
     return result
 
 
+def install_provider_environment_aliases(
+    environment: MutableMapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Populate missing canonical variables in one process-local environment.
+
+    This never replaces a non-empty canonical value. The returned tuple contains
+    only canonical variable names that were populated, never credential values.
+    """
+
+    target = os.environ if environment is None else environment
+    normalized = normalize_provider_environment(target)
+    installed: list[str] = []
+    for canonical in PROVIDER_ENVIRONMENT_ALIASES:
+        current = target.get(canonical)
+        if isinstance(current, str) and current.strip():
+            continue
+        value = normalized.get(canonical)
+        if isinstance(value, str) and value.strip():
+            target[canonical] = value
+            installed.append(canonical)
+    return tuple(installed)
+
+
 def provider_environment_value(
     canonical: str,
     *aliases: str,
@@ -71,6 +94,7 @@ def provider_environment_value(
 
 __all__ = [
     "PROVIDER_ENVIRONMENT_ALIASES",
+    "install_provider_environment_aliases",
     "normalize_provider_environment",
     "provider_environment_value",
 ]
