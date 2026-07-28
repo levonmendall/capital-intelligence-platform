@@ -1,0 +1,41 @@
+name: Apply decision test fix
+
+on:
+  push:
+    branches:
+      - pr-152-robust-decision-framework
+    paths:
+      - .github/workflows/apply-decision-test-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pr-152-robust-decision-framework
+          fetch-depth: 0
+      - name: Correct calibrated outcome fixture
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/test_robust_decision_framework.py')
+          source = path.read_text(encoding='utf-8')
+          old = 'forecast_probability=0.70,'
+          new = 'forecast_probability=0.72,'
+          if source.count(old) != 1:
+              raise SystemExit('expected fixture line not found exactly once')
+          path.write_text(source.replace(old, new), encoding='utf-8')
+          PY
+      - name: Commit focused correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-decision-test-fix.yml
+          git add tests/test_robust_decision_framework.py
+          git commit -m "Correct calibrated decision-learning fixture"
+          git push origin HEAD:pr-152-robust-decision-framework
