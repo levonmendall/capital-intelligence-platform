@@ -159,6 +159,12 @@ CANONICAL_BACKUP_AUTHORITIES: tuple[CanonicalBackupAuthority, ...] = (
         "governance",
     ),
     CanonicalBackupAuthority(
+        "stage_binding_approvals",
+        "CAPITAL_INTELLIGENCE_STAGE_BINDING_APPROVAL_DATABASE",
+        "stage_binding_approvals.db",
+        "governance",
+    ),
+    CanonicalBackupAuthority(
         "multi_asset_evaluation",
         "CAPITAL_INTELLIGENCE_MULTI_ASSET_EVALUATION_DATABASE",
         "multi_asset_evaluation.db",
@@ -198,6 +204,12 @@ CANONICAL_BACKUP_AUTHORITIES: tuple[CanonicalBackupAuthority, ...] = (
         "paper_test_campaign",
         "CAPITAL_INTELLIGENCE_PAPER_TEST_CAMPAIGN_DATABASE",
         "paper_test_campaign.db",
+        "readiness",
+    ),
+    CanonicalBackupAuthority(
+        "recovery_drills",
+        "CAPITAL_INTELLIGENCE_RECOVERY_DRILL_DATABASE",
+        "recovery_drills.db",
         "readiness",
     ),
     CanonicalBackupAuthority(
