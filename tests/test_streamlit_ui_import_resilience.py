@@ -23,12 +23,32 @@ def test_streamlit_entrypoint_preserves_secure_portfolio_bindings() -> None:
     assert 'exec(compile(_source, str(_source_path), "exec"), globals())' in entrypoint
 
 
+def test_premium_html_helpers_are_rebound_to_non_indented_renderers() -> None:
+    entrypoint = (ROOT / "app.py").read_text(encoding="utf-8")
+
+    assert "def _safe_render_app_header(active_page: str)" in entrypoint
+    assert "def _safe_render_sidebar()" in entrypoint
+    assert "def _safe_allocation_bar(*, cash: float, nav: float)" in entrypoint
+    assert "_premium_ui.render_app_header = _safe_render_app_header" in entrypoint
+    assert "_premium_ui.render_sidebar = _safe_render_sidebar" in entrypoint
+    assert "_premium_ui.allocation_bar = _safe_allocation_bar" in entrypoint
+
+
+def test_surface_hero_markup_starts_with_html_not_markdown_indentation() -> None:
+    entrypoint = (ROOT / "app.py").read_text(encoding="utf-8")
+
+    assert "markup = (\n        f'<style>:root" in entrypoint
+    assert "_premium_ui.st.markdown(markup, unsafe_allow_html=True)" in entrypoint
+    assert 'f"""\n        <style>' not in entrypoint
+    assert 'f"""\n        <div class="capital-orbit">' not in entrypoint
+
+
 def test_interface_implementation_retains_four_distinct_surfaces() -> None:
     implementation = (ROOT / "app_impl.py").read_text(encoding="utf-8")
 
     assert 'PRIMARY_SURFACES = ["Today", "Environment", "Portfolio", "History"]' in implementation
-    assert 'surface_story(' in implementation
-    assert 'activity_rail(' in implementation
+    assert "surface_story(" in implementation
+    assert "activity_rail(" in implementation
     assert 'variant="environment"' in implementation
     assert 'variant="portfolio"' in implementation
     assert 'variant="history"' in implementation
