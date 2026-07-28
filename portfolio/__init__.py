@@ -6,6 +6,14 @@ from portfolio.fit import (
     PortfolioFitOutcome,
     PortfolioFitPolicy,
 )
+from portfolio.integrity_specialist import (
+    PORTFOLIO_INTEGRITY_SPECIALIST_NAME,
+    PORTFOLIO_INTEGRITY_SPECIALIST_ROLE,
+    PortfolioIntegrityCertification,
+    PortfolioIntegrityDisposition,
+    PortfolioValuationExecutionIntegritySpecialist,
+    SQLitePortfolioIntegrityCertificationStore,
+)
 from portfolio.models import (
     AssetBucket,
     AssetBucketLimit,
@@ -122,16 +130,22 @@ __all__ = [
     "MultiAssetQuoteProvider",
     "OpportunityCostAssessment",
     "OpportunityCostPolicy",
+    "PORTFOLIO_INTEGRITY_SPECIALIST_NAME",
+    "PORTFOLIO_INTEGRITY_SPECIALIST_ROLE",
     "PortfolioFitDecision",
     "PortfolioFitGate",
     "PortfolioFitOutcome",
     "PortfolioFitPolicy",
+    "PortfolioIntegrityCertification",
+    "PortfolioIntegrityDisposition",
     "PortfolioMandate",
     "PortfolioPosition",
     "PortfolioProposal",
     "PortfolioSnapshot",
+    "PortfolioValuationExecutionIntegritySpecialist",
     "SQLiteCanonicalPortfolioStore",
     "SQLiteMultiAssetPaperExecutionStore",
+    "SQLitePortfolioIntegrityCertificationStore",
     "assess_opportunity_cost",
     "opportunity_cost_to_dict",
 ]
