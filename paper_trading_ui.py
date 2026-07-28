@@ -15,6 +15,7 @@ from governance.paper_decision_approval import (
     canonical_construction_sha256,
 )
 from portfolio.constants import CANONICAL_PORTFOLIO_CODE
+from streamlit_paper_execution_worker import attempt_approved_paper_execution
 
 
 def _approval_database() -> Path:
@@ -34,11 +35,12 @@ def render_paper_decision_controls(
     briefing: Mapping[str, Any] | None,
     principal: object | None,
 ) -> None:
-    """Render consent and poll the exact implementation until it resolves.
+    """Render consent and execute the exact implementation when controls permit.
 
-    Approval records intent only. The paper execution worker must separately pass
-    provider, launch, runtime-control, portfolio-integrity, quote, and
-    reconciliation gates before any simulated fill is recorded.
+    Approval applies only to the displayed construction. The co-located worker still
+    requires the exact approval, free-pilot scope, portfolio and universe integrity,
+    live Alpaca paper session/quote evidence, liquidity, cost, and reconciliation
+    controls before recording any internal simulated fill.
     """
 
     if not isinstance(construction, Mapping):
@@ -72,7 +74,7 @@ def render_paper_decision_controls(
     st.markdown("### Paper implementation approval")
     st.caption(
         "Approval applies only to the exact proposed transactions shown above. "
-        "It does not authorize real money or bypass launch and risk controls."
+        "It does not authorize real money or a live brokerage order."
     )
 
     if principal is None:
@@ -101,10 +103,29 @@ def render_paper_decision_controls(
             )
             return
         if latest.active_at(now):
-            st.success(
-                "Approved and queued for paper execution. Status refreshes automatically "
-                "while this Portfolio screen remains open."
+            attempt = attempt_approved_paper_execution(
+                construction=construction,
+                briefing=briefing,
+                now=now,
             )
+            if attempt.completed:
+                st.rerun()
+            if attempt.state == "disabled":
+                st.warning(attempt.detail)
+            elif attempt.state == "blocked":
+                st.warning(f"Approved, but execution is blocked: {attempt.detail}")
+            elif attempt.state == "held":
+                st.info(f"Approved; execution is currently held: {attempt.detail}")
+            else:
+                st.success(
+                    "Approved and queued for paper execution. The worker checks the "
+                    "implementation automatically while the application is running."
+                )
+            if attempt.attempted_at is not None:
+                st.caption(
+                    "Last execution check: "
+                    f"{attempt.attempted_at.astimezone(timezone.utc).isoformat()}"
+                )
             st.caption(f"Approval expires {latest.expires_at.isoformat()}.")
             if st.button(
                 "Revoke paper approval",
@@ -155,6 +176,11 @@ def render_paper_decision_controls(
             actor_session_id=str(principal.session_id),
             occurred_at=now,
             rationale=rationale,
+        )
+        attempt_approved_paper_execution(
+            construction=construction,
+            briefing=briefing,
+            now=now,
         )
         st.rerun()
     if decline:
