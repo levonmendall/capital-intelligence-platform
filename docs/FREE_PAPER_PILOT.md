@@ -15,8 +15,8 @@ The pilot:
 - represents the major economic asset classes through liquid listed wrappers;
 - requires the exact CIO decision, exact construction, and exact authenticated user approval;
 - uses the existing certified-universe, quote-age, session, portfolio-integrity, fill, reconciliation, and notification controls;
-- records internal simulated fills only; and
-- remains unavailable in staging and production.
+- keeps canonical portfolio implementation on the internal append-only paper executor; and
+- separately verifies Alpaca paper order submission and broker fill reconciliation through a governed neutral round trip.
 
 ## Economic exposure covered
 
@@ -40,7 +40,7 @@ The allowlist covers:
 
 These are economic exposures, not direct authority for every underlying instrument. For example, the managed-futures sleeve uses a listed fund rather than an exchange futures contract, and the option-strategy sleeve uses a listed fund rather than direct option orders.
 
-Direct futures, options, individual bonds, spot FX, direct crypto tokens, non-U.S. listings, leveraged funds, inverse funds, and private assets remain prohibited in the pilot.
+Direct futures, options, individual bonds, spot FX, direct crypto tokens, non-U.S. listings, leveraged funds, inverse funds, and private assets remain prohibited in the listed-wrapper portfolio pilot.
 
 ## Required external setup
 
@@ -55,9 +55,9 @@ APCA_DATA_FEED=iex
 CAPITAL_INTELLIGENCE_ENVIRONMENT=development
 ```
 
-Never commit the key or secret. The adapter rejects the live Alpaca brokerage endpoint.
+Never commit the key or secret. Both the quote adapter and broker-order adapter reject Alpaca's live brokerage endpoint.
 
-## Start the pilot
+## Start the listed-wrapper pilot
 
 ### 1. Validate the live free-provider configuration
 
@@ -105,15 +105,44 @@ python run_free_paper_pilot.py \
 
 The runner:
 
-1. requires `CAPITAL_INTELLIGENCE_ENVIRONMENT=development`;
+1. requires an approved paper environment;
 2. verifies the live Alpaca paper account and IEX quotes;
 3. rejects any symbol outside the allowlist;
 4. enforces at least 20% cash;
 5. limits one batch to 10% turnover;
 6. enforces per-instrument, crypto-proxy, and volatility-proxy limits;
-7. requires exact user approval;
+7. requires exact authenticated user approval;
 8. delegates to the canonical internal paper executor; and
 9. queues the normal completion notification.
+
+## Verify Alpaca broker order and fill integration
+
+Alpaca is registered in the append-only provider activation system as `alpaca-paper-broker`. The activation authorizes only the paper endpoint, internal paper-order transport, and broker evidence. It does not authorize live trading.
+
+Run the neutral paper verification:
+
+```bash
+python run_alpaca_paper_broker_smoke.py \
+  --activation config/alpaca_paper_broker_activation.json \
+  --symbol BTC/USD \
+  --notional 1 \
+  --output reports/alpaca-paper-broker-smoke.json \
+  --require-reconciled
+```
+
+The verifier:
+
+1. authenticates the configured paper credentials;
+2. requires the active append-only Alpaca provider activation;
+3. submits an idempotently identified $1 paper buy;
+4. records Alpaca request IDs and order-status snapshots;
+5. matches the final order to Alpaca `FILL` account activities;
+6. detects missing, duplicate, mismatched, or unreconciled fills;
+7. submits a paper sell for the exact filled quantity;
+8. verifies the broker position returns to its opening quantity; and
+9. persists every event in the hash-chained `alpaca_paper_broker.db` ledger.
+
+This round trip validates transport and reconciliation. It is not a portfolio recommendation and does not add the smoke symbol to the `COMPOUNDING` eligible universe.
 
 ## Safety limits
 
@@ -127,11 +156,12 @@ The runner:
 | Maximum quote age while market is open | 5 minutes |
 | Gross leverage | 1.0x |
 | Margin | Prohibited |
-| Broker order submission | Not implemented |
+| Broker order submission | Paper endpoint only; governed verification path |
+| Broker fill evidence | Append-only and reconciled to Alpaca `FILL` activities |
 | Real money | Never authorized |
 
 ## What this changes—and what it does not
 
-This change makes controlled free-provider paper testing operationally possible. It does not mark the institutional all-market readiness report as passed. It does not certify direct derivatives, individual global bonds, direct international listings, or institutional execution quality.
+This makes controlled free-provider paper testing and Alpaca broker transport verification operationally possible. It does not mark the institutional all-market readiness report as passed. It does not certify direct derivatives, individual global bonds, direct international listings, or institutional execution quality.
 
-Outcomes from this pilot may be used as paper-operation evidence only when their exact data source, decision timestamp, universe publication, model version, construction, approval, quote, fill, and reconciliation lineage are preserved.
+The canonical portfolio remains the product's sole state authority. Broker verification evidence may support readiness only when the exact provider activation, account environment, request IDs, order snapshots, fill activities, event hashes, and reconciliation conclusion are preserved.
