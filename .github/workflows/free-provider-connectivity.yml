@@ -51,7 +51,7 @@ jobs:
       CAPITAL_INTELLIGENCE_FREE_PROVIDER_CATALOG: config/free_provider_connections.json
       CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS: config/crypto_venue_bindings.free.json
       FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-      SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+      SEC_USER_AGENT: Capital Intelligence Platform levonmendall2369@gmail.com
       OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
 
     steps:
