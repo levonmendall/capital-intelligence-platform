@@ -8,9 +8,9 @@ import os
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from providers.public_live_information import (
-    PublicLiveInformationProvider,
-    load_public_live_source_catalog,
+from providers.public_live_information import load_public_live_source_catalog
+from providers.public_live_information_runtime import (
+    GovernedPublicLiveInformationProvider,
 )
 
 
@@ -57,7 +57,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         catalog = load_public_live_source_catalog(args.catalog)
-        report = PublicLiveInformationProvider(catalog).collect(
+        report = GovernedPublicLiveInformationProvider(catalog).collect(
             include_optional=not args.required_only
         )
         payload = report.to_dict(include_records=False)
@@ -97,12 +97,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    failed_required = [
-        item
-        for item in report.sources
-        if "required" in item.limitations and not item.succeeded
-    ]
-    if failed_required:
+    if not report.required_sources_ready:
         return 3
     if any(not item.succeeded for item in report.sources):
         return 2
