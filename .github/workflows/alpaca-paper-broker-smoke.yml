@@ -1,0 +1,132 @@
+name: Verify Alpaca Paper Orders and Fills
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/alpaca-paper-broker-smoke.yml"
+      - "providers/alpaca_paper_broker.py"
+      - "operations/alpaca_paper_broker.py"
+      - "config/alpaca_paper_broker_activation.json"
+      - "run_alpaca_paper_broker_smoke.py"
+      - "tests/test_alpaca_paper_broker.py"
+      - "tests/test_alpaca_paper_broker_backup.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/alpaca-paper-broker-smoke.yml"
+      - "providers/alpaca_paper_broker.py"
+      - "operations/alpaca_paper_broker.py"
+      - "operations/backup_registry.py"
+      - "config/alpaca_paper_broker_activation.json"
+      - "run_alpaca_paper_broker_smoke.py"
+      - "tests/test_alpaca_paper_broker.py"
+      - "tests/test_alpaca_paper_broker_backup.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alpaca-paper-broker-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_ENVIRONMENT: development
+      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID || secrets.ALPACA_API_KEY_ID || secrets.ALPACA_API_KEY }}
+      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY || secrets.ALPACA_API_SECRET_KEY || secrets.ALPACA_SECRET_KEY || secrets.ALPACA_API_SECRET }}
+      APCA_API_BASE_URL: https://paper-api.alpaca.markets
+      APCA_DATA_BASE_URL: https://data.alpaca.markets
+      APCA_DATA_FEED: iex
+      CAPITAL_INTELLIGENCE_PROVIDER_ACTIVATION_DATABASE: reports/provider_activations.db
+      CAPITAL_INTELLIGENCE_ALPACA_PAPER_BROKER_DATABASE: reports/alpaca_paper_broker.db
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run deterministic broker integration tests
+        run: python -m pytest -q tests/test_alpaca_paper_broker.py tests/test_alpaca_paper_broker_backup.py
+
+      - name: Require Alpaca paper credentials
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          if [ -z "${APCA_API_KEY_ID}" ]; then
+            echo "Missing Alpaca paper key ID."
+            exit 2
+          fi
+          if [ -z "${APCA_API_SECRET_KEY}" ]; then
+            echo "Missing Alpaca paper secret key."
+            exit 2
+          fi
+
+      - name: Submit and reconcile neutral paper round trip
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          mkdir -p reports
+          python run_alpaca_paper_broker_smoke.py \
+            --activation config/alpaca_paper_broker_activation.json \
+            --symbol BTC/USD \
+            --notional 1 \
+            --output reports/alpaca-paper-broker-smoke.json \
+            --require-reconciled
+
+      - name: Publish credential-safe summary
+        if: always() && github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          source = Path("reports/alpaca-paper-broker-smoke.json")
+          if source.exists():
+              payload = json.loads(source.read_text(encoding="utf-8"))
+              lines = [
+                  f"reconciled={payload.get('reconciled')}",
+                  f"symbol={payload.get('symbol')}",
+                  f"net_quantity_change={payload.get('net_quantity_change')}",
+                  f"provider_activation_identifier={payload.get('provider_activation_identifier')}",
+                  f"broker_event_integrity_verified={payload.get('broker_event_integrity_verified')}",
+                  f"real_money_authorized={payload.get('real_money_authorized')}",
+                  f"blockers={'; '.join(payload.get('blockers', [])) or 'none'}",
+              ]
+          else:
+              lines = ["Alpaca paper broker smoke did not produce a report."]
+          summary = "\n".join(lines) + "\n"
+          Path("reports").mkdir(exist_ok=True)
+          Path("reports/alpaca-paper-broker-summary.txt").write_text(summary, encoding="utf-8")
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as handle:
+              handle.write("## Alpaca paper broker verification\n\n```text\n" + summary + "```\n")
+          PY
+
+      - name: Upload broker and governance evidence
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: alpaca-paper-broker-evidence
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 30

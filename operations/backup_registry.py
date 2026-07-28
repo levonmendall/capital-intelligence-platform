@@ -160,6 +160,12 @@ CANONICAL_BACKUP_AUTHORITIES: tuple[CanonicalBackupAuthority, ...] = (
         "execution",
     ),
     CanonicalBackupAuthority(
+        "alpaca_paper_broker",
+        "CAPITAL_INTELLIGENCE_ALPACA_PAPER_BROKER_DATABASE",
+        "alpaca_paper_broker.db",
+        "execution",
+    ),
+    CanonicalBackupAuthority(
         "asset_class_governance",
         "CAPITAL_INTELLIGENCE_ASSET_CLASS_GOVERNANCE_DATABASE",
         "asset_class_governance.db",
