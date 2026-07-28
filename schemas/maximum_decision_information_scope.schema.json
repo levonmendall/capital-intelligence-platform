@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capital-intelligence.local/schemas/maximum_decision_information_scope.schema.json",
+  "title": "Maximum Decision Information Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["identifier", "schema_version", "objective", "require_complete_scope", "sources", "requirements"],
+  "properties": {
+    "identifier": {"type": "string", "minLength": 1},
+    "schema_version": {"const": "maximum-decision-information-manifest.v1"},
+    "objective": {"type": "string", "minLength": 1},
+    "require_complete_scope": {"const": true},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 28,
+      "items": {"$ref": "#/$defs/requirement"}
+    }
+  },
+  "$defs": {
+    "domain": {
+      "type": "string",
+      "enum": [
+        "current_events_news",
+        "geopolitical_security",
+        "government_policy_regulation",
+        "central_bank_communications",
+        "elections_political_risk",
+        "legal_litigation_sanctions",
+        "public_health",
+        "cybersecurity_incidents",
+        "filings_corporate_disclosures",
+        "earnings_call_transcripts",
+        "management_guidance",
+        "analyst_estimates_revisions",
+        "credit_ratings_defaults",
+        "options_implied_expectations",
+        "futures_positioning",
+        "fund_flows_positioning",
+        "short_interest_securities_lending",
+        "insider_institutional_ownership",
+        "commodity_physical_balances",
+        "supply_chain_shipping_inventories",
+        "weather_climate_disasters",
+        "energy_grid_power",
+        "consumer_activity",
+        "labor_web_activity",
+        "real_estate_activity",
+        "onchain_crypto_network",
+        "social_search_sentiment",
+        "patents_technology_innovation"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identifier", "source_name", "role", "independence_group", "enabled",
+        "domains", "authoritative_domains", "credential_environment_variables",
+        "usage_rights_approved", "storage_and_backup_approved", "derived_analytics_approved",
+        "internal_display_approved", "paper_simulation_approved", "event_time_supported",
+        "publication_time_supported", "availability_time_supported", "correction_history_supported",
+        "historical_coverage_supported", "provenance_complete", "entity_mapping_supported",
+        "geographic_mapping_supported", "reliability_policy_defined", "manipulation_controls_defined",
+        "deduplication_supported", "service_level_defined", "certification_required",
+        "certification_identifier", "limitations"
+      ],
+      "properties": {
+        "identifier": {"type": "string", "minLength": 1},
+        "source_name": {"type": "string", "minLength": 1},
+        "role": {"enum": ["official", "primary", "secondary", "validation", "alternative"]},
+        "independence_group": {"type": "string", "minLength": 1},
+        "enabled": {"type": "boolean"},
+        "domains": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/domain"}},
+        "authoritative_domains": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/domain"}},
+        "credential_environment_variables": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}},
+        "usage_rights_approved": {"type": "boolean"},
+        "storage_and_backup_approved": {"type": "boolean"},
+        "derived_analytics_approved": {"type": "boolean"},
+        "internal_display_approved": {"type": "boolean"},
+        "paper_simulation_approved": {"type": "boolean"},
+        "event_time_supported": {"type": "boolean"},
+        "publication_time_supported": {"type": "boolean"},
+        "availability_time_supported": {"type": "boolean"},
+        "correction_history_supported": {"type": "boolean"},
+        "historical_coverage_supported": {"type": "boolean"},
+        "provenance_complete": {"type": "boolean"},
+        "entity_mapping_supported": {"type": "boolean"},
+        "geographic_mapping_supported": {"type": "boolean"},
+        "reliability_policy_defined": {"type": "boolean"},
+        "manipulation_controls_defined": {"type": "boolean"},
+        "deduplication_supported": {"type": "boolean"},
+        "service_level_defined": {"type": "boolean"},
+        "certification_required": {"type": "boolean"},
+        "certification_identifier": {"type": ["string", "null"]},
+        "limitations": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "source_identifiers", "minimum_ready_sources", "minimum_independence_groups", "authoritative_required", "rationale"],
+      "properties": {
+        "domain": {"$ref": "#/$defs/domain"},
+        "source_identifiers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "minimum_ready_sources": {"type": "integer", "minimum": 1},
+        "minimum_independence_groups": {"type": "integer", "minimum": 1},
+        "authoritative_required": {"type": "boolean"},
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}
