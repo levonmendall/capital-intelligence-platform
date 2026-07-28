@@ -1,4 +1,4 @@
-"""Evaluate the complete all-markets data supply chain without exposing secrets."""
+"""Evaluate market data and maximum decision-information coverage safely."""
 
 from __future__ import annotations
 
@@ -15,12 +15,25 @@ from governance import (
     DataReadinessError,
     load_data_readiness_manifest,
 )
+from governance.decision_information_readiness import (
+    DecisionInformationReadinessError,
+    DecisionInformationReadinessState,
+    MaximumDecisionInformationReadinessEvaluator,
+    load_maximum_decision_information_manifest,
+)
 
 
 def _default_manifest() -> str:
     return os.getenv(
         "CAPITAL_INTELLIGENCE_DATA_READINESS_MANIFEST",
         "config/all_markets_data_readiness.json",
+    )
+
+
+def _default_information_manifest() -> str:
+    return os.getenv(
+        "CAPITAL_INTELLIGENCE_DECISION_INFORMATION_MANIFEST",
+        "config/maximum_decision_information_scope.json",
     )
 
 
@@ -40,23 +53,16 @@ def _environment_file(path: str | None) -> dict[str, str]:
         if line.startswith("export "):
             line = line[7:].strip()
         if "=" not in line:
-            raise ValueError(
-                f"invalid environment assignment on line {line_number}"
-            )
+            raise ValueError(f"invalid environment assignment on line {line_number}")
         name, value = line.split("=", 1)
         name = name.strip()
         if not name:
-            raise ValueError(
-                f"environment variable name is empty on line {line_number}"
-            )
+            raise ValueError(f"environment variable name is empty on line {line_number}")
         normalized = value.strip()
-        if len(normalized) >= 2 and normalized[0] == normalized[-1] and (
-            normalized[0] in {"'", '"'}
-        ):
+        if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {"'", '"'}:
             normalized = normalized[1:-1]
         values[name] = normalized
     return values
-
 
 
 def _timestamp(value: str, *, field_name: str) -> datetime:
@@ -71,7 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--manifest",
         default=_default_manifest(),
-        help="Version-controlled all-markets data manifest JSON.",
+        help="Version-controlled all-markets operating-data manifest JSON.",
+    )
+    parser.add_argument(
+        "--information-manifest",
+        default=_default_information_manifest(),
+        help="Maximum decision-relevant information manifest JSON.",
     )
     parser.add_argument(
         "--env-file",
@@ -80,18 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--show-required-environment",
         action="store_true",
-        help="Print only credential/configuration variable names; never values.",
+        help="Print credential/configuration variable names only; never values.",
     )
-    parser.add_argument(
-        "--output",
-        help="Optional path for the complete JSON readiness report.",
-    )
+    parser.add_argument("--output", help="Optional path for the combined JSON report.")
     parser.add_argument(
         "--gate-certification-output",
-        help=(
-            "Write a certified-data ReadinessGateCertification JSON only when "
-            "the all-markets report is ready."
-        ),
+        help="Write certified-data gate JSON only when both scopes are ready.",
     )
     parser.add_argument("--gate-identifier")
     parser.add_argument("--baseline-identifier")
@@ -101,11 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--certified-at")
     parser.add_argument("--effective-at")
     parser.add_argument("--expires-at")
-    parser.add_argument(
-        "--compact",
-        action="store_true",
-        help="Emit compact JSON for scheduled-operation integration.",
-    )
+    parser.add_argument("--compact", action="store_true")
     return parser
 
 
@@ -113,26 +114,73 @@ def _write(path: str, payload: Mapping[str, object]) -> None:
     destination = Path(path).expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temporary.replace(destination)
+
+
+def _combined_payload(market_report, information_report) -> dict[str, object]:
+    payload = market_report.to_dict()
+    combined_ready = (
+        market_report.global_test_data_ready and information_report.all_domains_ready
+    )
+    if combined_ready:
+        state = "ready"
+    elif (
+        market_report.state is AllMarketsDataReadinessState.PARTIAL
+        or information_report.state is DecisionInformationReadinessState.PARTIAL
+        or market_report.state is AllMarketsDataReadinessState.READY
+        or information_report.state is DecisionInformationReadinessState.READY
+    ):
+        state = "partial"
+    else:
+        state = "blocked"
+    payload.update(
+        {
+            "schema_version": "combined-market-and-decision-information-readiness-report.v1",
+            "state": state,
+            "market_data_ready": market_report.global_test_data_ready,
+            "maximum_decision_information_ready": information_report.all_domains_ready,
+            "current_events_and_news_ready": information_report.current_events_and_news_ready,
+            "global_test_data_ready": combined_ready,
+            "missing_environment_variables": sorted(
+                set(market_report.missing_environment_variables)
+                | set(information_report.missing_environment_variables)
+            ),
+            "blockers": [
+                *(f"market-data: {item}" for item in market_report.blockers),
+                *(f"decision-information: {item}" for item in information_report.blockers),
+            ],
+            "decision_information": information_report.to_dict(),
+            "evidence_identifier": (
+                "combined-data-readiness:"
+                f"{market_report.manifest_identifier}:"
+                f"{information_report.manifest_identifier}:{state}"
+            ),
+            "real_money_authorized": False,
+        }
+    )
+    return payload
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        manifest = load_data_readiness_manifest(args.manifest)
+        market_manifest = load_data_readiness_manifest(args.manifest)
+        information_manifest = load_maximum_decision_information_manifest(
+            args.information_manifest
+        )
         if args.show_required_environment:
+            required = sorted(
+                set(market_manifest.required_environment_variables)
+                | set(information_manifest.required_environment_variables)
+            )
             print(
                 json.dumps(
                     {
-                        "manifest_identifier": manifest.identifier,
-                        "required_environment_variables": list(
-                            manifest.required_environment_variables
-                        ),
+                        "market_manifest_identifier": market_manifest.identifier,
+                        "information_manifest_identifier": information_manifest.identifier,
+                        "required_environment_variables": required,
                         "secret_values_disclosed": False,
                     },
                     indent=None if args.compact else 2,
@@ -141,16 +189,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         environment = _environment_file(args.env_file)
-        report = AllMarketsDataReadinessEvaluator().evaluate(
-            manifest,
+        market_report = AllMarketsDataReadinessEvaluator().evaluate(
+            market_manifest,
             environment=environment,
         )
-        payload = report.to_dict()
+        information_report = MaximumDecisionInformationReadinessEvaluator().evaluate(
+            information_manifest,
+            environment=environment,
+        )
+        payload = _combined_payload(market_report, information_report)
         if args.output:
             _write(args.output, payload)
         if args.gate_certification_output:
+            if not payload["global_test_data_ready"]:
+                raise DataReadinessError(
+                    "cannot certify the product data gate until both market data and maximum decision-information coverage are ready"
+                )
             required = {
-                "--gate-identificatior": args.gate_identifier,
+                "--gate-identifier": args.gate_identifier,
                 "--baseline-identifier": args.baseline_identifier,
                 "--process-version": args.process_version,
                 "--code-version": args.code_version,
@@ -165,46 +221,44 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError(
                     "gate certification output requires: " + ", ".join(missing)
                 )
-            certification = report.to_readiness_gate_certification(
+            certification = market_report.to_readiness_gate_certification(
                 identifier=args.gate_identifier,
-                certified_at=_timestamp(
-                    args.certified_at, field_name="--certified-at"
-                ),
-                effective_at=_timestamp(
-                    args.effective_at, field_name="--effective-at"
-                ),
-                expires_at=_timestamp(
-                    args.expires_at, field_name="--expires-at"
-                ),
+                certified_at=_timestamp(args.certified_at, field_name="--certified-at"),
+                effective_at=_timestamp(args.effective_at, field_name="--effective-at"),
+                expires_at=_timestamp(args.expires_at, field_name="--expires-at"),
                 baseline_identifier=args.baseline_identifier,
                 process_version=args.process_version,
                 code_version=args.code_version,
                 authority_identifiers=tuple(args.authority_identifier),
+                additional_evidence_identifiers=(
+                    information_report.evidence_identifier,
+                    information_report.manifest_identifier,
+                ),
+                limitations=(
+                    "maximum decision-relevant information scope is required for this baseline",
+                ),
             )
             _write(args.gate_certification_output, certification.to_dict())
-    except (DataReadinessError, KeyError, OSError, TypeError, ValueError) as error:
+    except (
+        DataReadinessError,
+        DecisionInformationReadinessError,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+    ) as error:
         print(
             json.dumps(
-                {
-                    "state": "blocked",
-                    "error": str(error),
-                    "real_money_authorized": False,
-                },
+                {"state": "blocked", "error": str(error), "real_money_authorized": False},
                 sort_keys=True,
             )
         )
         return 4
 
-    print(
-        json.dumps(
-            payload,
-            indent=None if args.compact else 2,
-            sort_keys=True,
-        )
-    )
-    if report.state is AllMarketsDataReadinessState.READY:
+    print(json.dumps(payload, indent=None if args.compact else 2, sort_keys=True))
+    if payload["state"] == "ready":
         return 0
-    if report.state is AllMarketsDataReadinessState.PARTIAL:
+    if payload["state"] == "partial":
         return 2
     return 3
 

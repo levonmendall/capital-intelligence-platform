@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -25,9 +24,12 @@ from premium_ui import (
     format_currency,
     format_datetime,
     format_percent,
+    metric_grid,
     page_header,
     render_app_header,
+    render_navigation,
     render_sidebar,
+    signal_panel,
     text_card,
 )
 from providers.economic_snapshot import load_dashboard_data
@@ -91,39 +93,55 @@ def _render_today() -> None:
     briefing = _latest("daily_cio_briefing")
     theses = _latest_theses()
     page_header(
-        "Today’s Capital Intelligence",
-        "What changed, why it matters, and whether the portfolio should respond.",
+        "Decision signal",
+        "The system stays quiet until evidence earns a portfolio-level conclusion.",
+        "01",
     )
 
     if briefing is None:
-        st.warning(
-            "No governed CIO briefing is available. No portfolio action is permitted until opportunity comparison, independent review, CIO synthesis, and portfolio construction complete successfully."
+        signal_panel(
+            "CIO core // standby",
+            "No capital change authorized",
+            "No governed CIO briefing is available. The portfolio remains unchanged until opportunity comparison, independent review, CIO synthesis, and construction complete successfully.",
         )
-        st.info(
-            "The system remains comfortable holding cash or current positions when no superior evidence-supported use of capital is available."
+        metric_grid(
+            [
+                ("Decision state", "Standby", "Fail-closed"),
+                ("Implementation", "No change", "No order authority"),
+                ("Active theses", len(theses), "Living ownership cases"),
+                ("Market watch", "Continuous", "All governed markets"),
+            ]
         )
     else:
         status = str(briefing.get("status", "unavailable")).replace("_", " ").title()
         confidence = briefing.get("confidence")
         construction = briefing.get("construction_status")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("CIO status", status)
-        c2.metric("Confidence", "—" if confidence is None else f"{float(confidence):.0%}")
-        c3.metric("Implementation", "No change" if construction is None else str(construction).replace("_", " ").title())
-        c4.metric("Active theses", len(theses))
+        signal_panel(
+            f"CIO core // {status}",
+            briefing.get("portfolio_decision") or "Maintain current posture",
+            briefing.get("why_it_matters") or "No additional portfolio-level conclusion is available.",
+        )
+        metric_grid(
+            [
+                ("CIO state", status, "Governed conclusion"),
+                ("Confidence", "—" if confidence is None else f"{float(confidence):.0%}", "Evidence-weighted"),
+                ("Implementation", "No change" if construction is None else str(construction).replace("_", " ").title(), "Paper layer"),
+                ("Active theses", len(theses), "Monitored continuously"),
+            ]
+        )
 
-        left, right = st.columns((1.15, 0.85), gap="large")
+        left, right = st.columns((1.12, 0.88), gap="large")
         with left:
-            text_card("What changed?", briefing.get("what_changed"))
-            st.markdown("<div style='height:.8rem'></div>", unsafe_allow_html=True)
-            text_card("Why does it matter?", briefing.get("why_it_matters"))
+            text_card("Signal change", briefing.get("what_changed"))
+            st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
+            text_card("Portfolio relevance", briefing.get("why_it_matters"))
         with right:
-            text_card("Opportunity or risk", briefing.get("opportunity_or_risk"))
-            st.markdown("<div style='height:.8rem'></div>", unsafe_allow_html=True)
+            text_card("Opportunity / risk vector", briefing.get("opportunity_or_risk"))
+            st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
             callout_card(
-                "Should the portfolio change?",
+                "Capital action",
                 briefing.get("portfolio_decision"),
-                "The CIO conclusion remains non-executing until implementation is validated.",
+                "The conclusion remains non-executing until implementation is separately validated.",
             )
 
         developments = briefing.get("material_developments", [])
@@ -140,89 +158,130 @@ def _render_today() -> None:
             st.write(f"Journal sequence: {journal.get('sequence')}")
             st.code(str(journal.get("content_hash", "unavailable")))
 
-    st.divider()
-    page_header("Portfolio snapshot", "The sole active portfolio at the current decision point.")
-    totals = get_portfolio_totals()
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Portfolio value", format_currency(totals["nav"]))
-    c2.metric("Available cash", format_currency(totals["cash"]))
-    c3.metric("Paper return", format_percent(totals["total_return"]))
-    c4.metric("Mandate", "Compounding")
-    st.caption(
-        "One paper portfolio pursues the strongest evidence-supported use of capital across all governed markets."
+    page_header(
+        "Capital position",
+        "The sole active portfolio at the current decision point.",
+        "02",
     )
+    totals = get_portfolio_totals()
+    metric_grid(
+        [
+            ("Portfolio value", format_currency(totals["nav"]), "Canonical NAV"),
+            ("Available cash", format_currency(totals["cash"]), "Optionality reserve"),
+            ("Paper return", format_percent(totals["total_return"]), "Since inception"),
+            ("Mandate", "Compounding", "One portfolio"),
+        ]
+    )
+    allocation_bar(cash=totals["cash"], nav=totals["nav"])
 
 
 def _render_environment() -> None:
     page_header(
-        "Market environment",
-        "Certified evidence that informs opportunity analysis without issuing a recommendation by itself.",
+        "Environment signal field",
+        "Certified evidence that shapes opportunity analysis without becoming a recommendation by itself.",
+        "01",
     )
     payload = _diagnostic_environment()
     environment = None if payload is None else payload.get("environment")
     if isinstance(environment, dict):
-        callout_card(
-            str(environment.get("headline", "Current environment")),
+        signal_panel(
+            "Macro core // active",
+            environment.get("headline", "Current environment"),
             environment.get("summary", "No environment summary is available."),
         )
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Regime", environment.get("regime", "Unavailable"))
         confidence = environment.get("confidence")
-        c2.metric("Evidence confidence", "—" if confidence is None else f"{float(confidence):.0%}")
-        c3.metric("Data status", environment.get("data_status", "Unavailable"))
+        metric_grid(
+            [
+                ("Regime", environment.get("regime", "Unavailable"), "Current classification"),
+                ("Evidence confidence", "—" if confidence is None else f"{float(confidence):.0%}", "Certified inputs"),
+                ("Data status", environment.get("data_status", "Unavailable"), "Freshness and coverage"),
+                ("Portfolio effect", "Observed", "Not independently actionable"),
+            ]
+        )
         if environment.get("portfolio_impact"):
-            callout_card("Portfolio relevance", environment["portfolio_impact"])
+            callout_card("Portfolio transmission", environment["portfolio_impact"])
         if environment.get("review_conditions"):
             with st.expander("Environment review conditions"):
                 st.markdown(bullet_lines(environment["review_conditions"]))
     else:
-        st.info("No canonical environment brief is stored. Diagnostic readings are shown below without a portfolio conclusion.")
+        signal_panel(
+            "Macro core // limited",
+            "Canonical environment brief unavailable",
+            "Diagnostic readings remain visible, but no portfolio conclusion is inferred from incomplete environment evidence.",
+        )
 
-    st.divider()
-    page_header("Economic evidence", "Live macro readings used as inputs to the broader opportunity engine.")
+    page_header(
+        "Economic telemetry",
+        "Live macro readings feeding the broader opportunity engine.",
+        "02",
+    )
     dashboard_data = load_dashboard_data()
     readings = dashboard_data.readings
     if readings is None:
         st.warning("Live economic readings are unavailable.")
         st.caption(str(dashboard_data.status))
         return
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Unemployment rate", f"{readings.unemployment_rate:.1f}%")
-    c2.metric("Estimated inflation", f"{readings.inflation_rate:.2f}%")
-    c3.metric("Federal funds rate", f"{readings.federal_funds_rate:.2f}%")
-    st.caption("These readings are evidence inputs only; every candidate must still be compared with cash, holdings, and qualified alternatives.")
+    metric_grid(
+        [
+            ("Unemployment", f"{readings.unemployment_rate:.1f}%", "Labor market"),
+            ("Estimated inflation", f"{readings.inflation_rate:.2f}%", "Price pressure"),
+            ("Federal funds", f"{readings.federal_funds_rate:.2f}%", "Policy rate"),
+            ("Use", "Evidence only", "Compared across candidates"),
+        ]
+    )
 
 
 def _render_portfolio() -> None:
-    page_header("Portfolio", "Holdings, construction, and paper activity for the single canonical portfolio.")
+    page_header(
+        "Construction engine",
+        "Feasible sizing, funding, and implementation for the single canonical portfolio.",
+        "01",
+    )
     construction = _latest("portfolio_construction")
     if construction is None:
-        st.info("No canonical portfolio-construction result is available.")
+        signal_panel(
+            "Construction // idle",
+            "No implementation change queued",
+            "No canonical construction result is available. Existing capital remains in its current state.",
+        )
     else:
         status = str(construction.get("status", "unavailable")).replace("_", " ").title()
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Construction status", status)
-        c2.metric("Turnover", format_percent(construction.get("turnover", 0.0)))
-        c3.metric("Estimated cost", format_percent(construction.get("estimated_cost_return", 0.0)))
-        c4.metric("Expected improvement", format_percent(construction.get("expected_return_improvement", 0.0)))
+        signal_panel(
+            f"Construction // {status}",
+            "Implementation geometry resolved",
+            "Sizing and funding are visible for review, but construction cannot alter the CIO decision or submit broker orders.",
+        )
+        metric_grid(
+            [
+                ("Construction state", status, "Paper implementation"),
+                ("Turnover", format_percent(construction.get("turnover", 0.0)), "Portfolio movement"),
+                ("Estimated cost", format_percent(construction.get("estimated_cost_return", 0.0)), "Return drag"),
+                ("Expected improvement", format_percent(construction.get("expected_return_improvement", 0.0)), "Net opportunity"),
+            ]
+        )
         if construction.get("trades"):
             with st.expander("Proposed paper implementation"):
                 display_frame(pd.DataFrame(construction["trades"]))
         for block in construction.get("blocks", []):
             st.warning(block)
-        st.caption("Construction determines feasible sizing and funding. It cannot alter the CIO action or submit broker orders.")
 
-    st.markdown("### Capital Intelligence Portfolio")
-    st.caption(PORTFOLIO_OBJECTIVE)
+    page_header(
+        "Canonical portfolio",
+        PORTFOLIO_OBJECTIVE,
+        "02",
+    )
     mandate = get_mandate_details(CANONICAL_PORTFOLIO_CODE)
     if mandate is None:
         st.warning("The canonical paper portfolio is unavailable.")
         return
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("NAV", format_currency(mandate["nav"]))
-    c2.metric("Cash", format_currency(mandate["cash"]))
-    c3.metric("Paper return", format_percent(mandate["total_return"]))
-    c4.metric("Holdings", len(mandate["holdings"]))
+    metric_grid(
+        [
+            ("NAV", format_currency(mandate["nav"]), "Canonical value"),
+            ("Cash", format_currency(mandate["cash"]), "Available capital"),
+            ("Paper return", format_percent(mandate["total_return"]), "Since inception"),
+            ("Holdings", len(mandate["holdings"]), "Active positions"),
+        ]
+    )
     allocation_bar(cash=mandate["cash"], nav=mandate["nav"])
 
     holdings_tab, trades_tab, history_tab = st.tabs(["Holdings", "Paper trades", "Value history"])
@@ -266,11 +325,23 @@ def _render_portfolio() -> None:
 
 
 def _render_history() -> None:
-    page_header("Decision history", "CIO briefings, evaluations, theses, and paper-trade records.")
+    page_header(
+        "Decision memory",
+        "Every conclusion, evaluation, thesis, and paper action remains visible as governed institutional memory.",
+        "01",
+    )
     briefings = _history("daily_cio_briefing")
     evaluations = _history("decision_evaluation")
     theses = _latest_theses()
     trades = get_trade_history(limit=250)
+    metric_grid(
+        [
+            ("CIO briefings", len(briefings), "Recorded decisions"),
+            ("Evaluations", len(evaluations), "Outcome reviews"),
+            ("Living theses", len(theses), "Current ownership cases"),
+            ("Paper trades", len(trades), "Execution journal"),
+        ]
+    )
     brief_tab, eval_tab, thesis_tab, trade_tab = st.tabs(["CIO briefings", "Evaluations", "Living theses", "Paper-trade journal"])
     with brief_tab:
         if not briefings:
@@ -299,8 +370,10 @@ def _render_history() -> None:
             display_frame(frame)
 
 
-apply_global_style()
-page = render_sidebar(PRIMARY_SURFACES)
+st.session_state.setdefault("dark_mode", True)
+apply_global_style(dark_mode=bool(st.session_state["dark_mode"]))
+render_sidebar()
+page, _ = render_navigation(PRIMARY_SURFACES)
 render_app_header(page)
 if page == "Today":
     _render_today()
