@@ -36,7 +36,7 @@ Every current holding enters a separate mandatory review lane even when it fails
 
 ## Specialist return reconciliation
 
-The five specialists remain independent first-pass reviewers. Macro, market, and asset-specific valuation impacts are then reconciled conservatively into the candidate's full outcome distribution.
+The six specialists remain independent first-pass reviewers. Macro, market, and asset-specific valuation impacts are then reconciled conservatively into the candidate's full outcome distribution.
 
 The reconciler:
 

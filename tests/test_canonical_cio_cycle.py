@@ -354,9 +354,9 @@ def test_specialist_analyses_are_independent_and_complete(tmp_path) -> None:
         if item.event_type.value == "specialist_packet"
     )
     analyses = packet_event.payload["analyses"]
-    assert len(analyses) == 5
+    assert len(analyses) == 6
     assert all(item["independent_first_pass"] for item in analyses)
-    assert len({item["role"] for item in analyses}) == 5
+    assert len({item["role"] for item in analyses}) == 6
     assert all(
         datetime.fromisoformat(item["completed_at"]) >= candidate.as_of
         for item in analyses

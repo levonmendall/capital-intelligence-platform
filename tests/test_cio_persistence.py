@@ -192,7 +192,7 @@ def test_specialist_and_decision_serializers_preserve_authority_and_dissent() ->
         code_version="commit-1",
     )
 
-    assert len(packet_payload["analyses"]) == 5
+    assert len(packet_payload["analyses"]) == 6
     assert all(
         item["independent_first_pass"]
         for item in packet_payload["analyses"]

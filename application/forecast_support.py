@@ -8,6 +8,7 @@ import os
 import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime
+from math import isfinite
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -16,6 +17,10 @@ from application.production_context_adapter import (
     build_production_context_provider as _build_base_provider,
 )
 from application.production_context_contract import ProductionCanonicalCIOContext
+from committee.specialists import (
+    CrossAssetForecastSpecialistContext,
+    ForecastScenarioAssessment,
+)
 from governance.forecast_evidence import (
     ForecastEvidenceError,
     GovernedForecastEvidence,
@@ -31,15 +36,43 @@ class ForecastSupportIntegrityError(ForecastSupportError):
     """Raised when the append-only forecast-reference chain is invalid."""
 
 
-def _texts(value: object, *, field_name: str) -> tuple[str, ...]:
+def _texts(
+    value: object,
+    *,
+    field_name: str,
+    minimum: int = 1,
+) -> tuple[str, ...]:
     if not isinstance(value, tuple):
         raise TypeError(f"{field_name} must be a tuple")
     normalized = tuple(_text(item, field_name=field_name) for item in value)
-    if not normalized:
-        raise ValueError(f"{field_name} cannot be empty")
+    if len(normalized) < minimum:
+        raise ValueError(f"{field_name} requires at least {minimum} item(s)")
     if len(normalized) != len(set(normalized)):
         raise ValueError(f"{field_name} cannot contain duplicates")
     return normalized
+
+
+def _number(
+    value: object,
+    *,
+    field_name: str,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{field_name} must be numeric")
+    normalized = float(value)
+    if not isfinite(normalized):
+        raise ValueError(f"{field_name} must be finite")
+    if minimum is not None and normalized < minimum:
+        raise ValueError(f"{field_name} must be at least {minimum}")
+    if maximum is not None and normalized > maximum:
+        raise ValueError(f"{field_name} must be at most {maximum}")
+    return round(normalized, 12)
+
+
+def _ratio(value: object, *, field_name: str) -> float:
+    return _number(value, field_name=field_name, minimum=0.0, maximum=1.0)
 
 
 def _canonical_json(value: Mapping[str, Any]) -> str:
@@ -70,8 +103,66 @@ def _merge_versions(
 
 
 @dataclass(frozen=True, slots=True)
+class CandidateForecastScenarioImpact:
+    """Reviewed translation of one forecast scenario into candidate path effects."""
+
+    forecast_identifier: str
+    scenario_name: str
+    candidate_return_impact: float
+    expected_path_drawdown: float
+    rationale: str
+
+    def __post_init__(self) -> None:
+        for field_name in ("forecast_identifier", "scenario_name", "rationale"):
+            object.__setattr__(
+                self,
+                field_name,
+                _text(getattr(self, field_name), field_name=field_name),
+            )
+        object.__setattr__(
+            self,
+            "candidate_return_impact",
+            _number(
+                self.candidate_return_impact,
+                field_name="candidate_return_impact",
+                minimum=-1.0,
+                maximum=1.0,
+            ),
+        )
+        drawdown = _number(
+            self.expected_path_drawdown,
+            field_name="expected_path_drawdown",
+            minimum=-1.0,
+            maximum=0.0,
+        )
+        object.__setattr__(self, "expected_path_drawdown", drawdown)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "forecast_identifier": self.forecast_identifier,
+            "scenario_name": self.scenario_name,
+            "candidate_return_impact": self.candidate_return_impact,
+            "expected_path_drawdown": self.expected_path_drawdown,
+            "rationale": self.rationale,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "CandidateForecastScenarioImpact":
+        return cls(
+            forecast_identifier=str(value["forecast_identifier"]),
+            scenario_name=str(value["scenario_name"]),
+            candidate_return_impact=float(value["candidate_return_impact"]),
+            expected_path_drawdown=float(value["expected_path_drawdown"]),
+            rationale=str(value["rationale"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateForecastSupport:
-    """Immutable supporting-evidence references for one screened candidate."""
+    """Immutable forecast references and reviewed candidate translation evidence."""
 
     identifier: str
     screening_cycle_identifier: str
@@ -81,8 +172,17 @@ class CandidateForecastSupport:
     forecast_identifiers: tuple[str, ...]
     rationale: str
     limitations: tuple[str, ...]
+    scenario_impacts: tuple[CandidateForecastScenarioImpact, ...] = ()
+    model_agreement: float | None = None
+    forecast_stability: float | None = None
+    path_drawdown_probability: float | None = None
+    cross_asset_signals: tuple[str, ...] = ()
+    contradictory_evidence: tuple[str, ...] = ()
+    review_conditions: tuple[str, ...] = ()
+    translation_method: str | None = None
+    translation_model_version: str | None = None
     supporting_only: bool = True
-    schema_version: str = "candidate-forecast-support.v1"
+    schema_version: str = "candidate-forecast-support.v2"
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -104,20 +204,110 @@ class CandidateForecastSupport:
         object.__setattr__(
             self,
             "forecast_identifiers",
-            _texts(
-                self.forecast_identifiers,
-                field_name="forecast_identifiers",
-            ),
+            _texts(self.forecast_identifiers, field_name="forecast_identifiers"),
         )
         object.__setattr__(
             self,
             "limitations",
             _texts(self.limitations, field_name="limitations"),
         )
+        if not isinstance(self.scenario_impacts, tuple) or not all(
+            isinstance(item, CandidateForecastScenarioImpact)
+            for item in self.scenario_impacts
+        ):
+            raise TypeError(
+                "scenario_impacts must contain CandidateForecastScenarioImpact values"
+            )
+        keys = tuple(
+            (item.forecast_identifier, item.scenario_name)
+            for item in self.scenario_impacts
+        )
+        if len(keys) != len(set(keys)):
+            raise ValueError("candidate forecast scenario impacts cannot duplicate scenarios")
+        unknown_forecasts = sorted(
+            {item.forecast_identifier for item in self.scenario_impacts}
+            - set(self.forecast_identifiers)
+        )
+        if unknown_forecasts:
+            raise ValueError(
+                "scenario impacts reference undeclared forecasts: "
+                f"{unknown_forecasts}"
+            )
+        for field_name in (
+            "cross_asset_signals",
+            "contradictory_evidence",
+            "review_conditions",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _texts(
+                    getattr(self, field_name),
+                    field_name=field_name,
+                    minimum=0,
+                ),
+            )
         if self.supporting_only is not True:
             raise ValueError("candidate forecast references must be supporting-only")
-        if self.schema_version != "candidate-forecast-support.v1":
+        if self.schema_version not in {
+            "candidate-forecast-support.v1",
+            "candidate-forecast-support.v2",
+        }:
             raise ValueError("unsupported candidate forecast-support schema")
+        translated = bool(self.scenario_impacts)
+        if self.schema_version == "candidate-forecast-support.v1" and translated:
+            raise ValueError("v1 forecast support cannot contain specialist translation")
+        if translated:
+            if self.schema_version != "candidate-forecast-support.v2":
+                raise ValueError("forecast specialist translation requires schema v2")
+            for field_name in (
+                "model_agreement",
+                "forecast_stability",
+                "path_drawdown_probability",
+            ):
+                value = getattr(self, field_name)
+                if value is None:
+                    raise ValueError(f"{field_name} is required for specialist translation")
+                object.__setattr__(
+                    self,
+                    field_name,
+                    _ratio(value, field_name=field_name),
+                )
+            for field_name in ("translation_method", "translation_model_version"):
+                value = getattr(self, field_name)
+                if value is None:
+                    raise ValueError(f"{field_name} is required for specialist translation")
+                object.__setattr__(
+                    self,
+                    field_name,
+                    _text(value, field_name=field_name),
+                )
+            if not self.cross_asset_signals:
+                raise ValueError(
+                    "cross_asset_signals cannot be empty for specialist translation"
+                )
+            if not self.review_conditions:
+                raise ValueError(
+                    "review_conditions cannot be empty for specialist translation"
+                )
+        else:
+            optional_metrics = (
+                self.model_agreement,
+                self.forecast_stability,
+                self.path_drawdown_probability,
+            )
+            if any(item is not None for item in optional_metrics):
+                raise ValueError(
+                    "forecast quality metrics require candidate scenario impacts"
+                )
+            if self.translation_method is not None or self.translation_model_version is not None:
+                raise ValueError(
+                    "forecast translation metadata requires candidate scenario impacts"
+                )
+
+    @property
+    def specialist_translation_available(self) -> bool:
+        return bool(self.scenario_impacts)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -129,11 +319,21 @@ class CandidateForecastSupport:
             "forecast_identifiers": list(self.forecast_identifiers),
             "rationale": self.rationale,
             "limitations": list(self.limitations),
+            "scenario_impacts": [item.to_dict() for item in self.scenario_impacts],
+            "model_agreement": self.model_agreement,
+            "forecast_stability": self.forecast_stability,
+            "path_drawdown_probability": self.path_drawdown_probability,
+            "cross_asset_signals": list(self.cross_asset_signals),
+            "contradictory_evidence": list(self.contradictory_evidence),
+            "review_conditions": list(self.review_conditions),
+            "translation_method": self.translation_method,
+            "translation_model_version": self.translation_model_version,
             "supporting_only": True,
             "candidate_creation_authority": False,
             "ranking_authority": False,
             "sizing_authority": False,
             "decision_authority": False,
+            "specialist_translation_available": self.specialist_translation_available,
             "schema_version": self.schema_version,
         }
 
@@ -144,14 +344,50 @@ class CandidateForecastSupport:
             screening_cycle_identifier=str(value["screening_cycle_identifier"]),
             candidate_identifier=str(value["candidate_identifier"]),
             as_of=datetime.fromisoformat(str(value["as_of"])),
-            knowledge_cutoff=datetime.fromisoformat(
-                str(value["knowledge_cutoff"])
-            ),
+            knowledge_cutoff=datetime.fromisoformat(str(value["knowledge_cutoff"])),
             forecast_identifiers=tuple(
                 str(item) for item in value["forecast_identifiers"]
             ),
             rationale=str(value["rationale"]),
             limitations=tuple(str(item) for item in value["limitations"]),
+            scenario_impacts=tuple(
+                CandidateForecastScenarioImpact.from_dict(dict(item))
+                for item in value.get("scenario_impacts", ())
+            ),
+            model_agreement=(
+                None
+                if value.get("model_agreement") is None
+                else float(value["model_agreement"])
+            ),
+            forecast_stability=(
+                None
+                if value.get("forecast_stability") is None
+                else float(value["forecast_stability"])
+            ),
+            path_drawdown_probability=(
+                None
+                if value.get("path_drawdown_probability") is None
+                else float(value["path_drawdown_probability"])
+            ),
+            cross_asset_signals=tuple(
+                str(item) for item in value.get("cross_asset_signals", ())
+            ),
+            contradictory_evidence=tuple(
+                str(item) for item in value.get("contradictory_evidence", ())
+            ),
+            review_conditions=tuple(
+                str(item) for item in value.get("review_conditions", ())
+            ),
+            translation_method=(
+                None
+                if value.get("translation_method") is None
+                else str(value["translation_method"])
+            ),
+            translation_model_version=(
+                None
+                if value.get("translation_model_version") is None
+                else str(value["translation_model_version"])
+            ),
             supporting_only=bool(value.get("supporting_only", True)),
             schema_version=str(
                 value.get("schema_version", "candidate-forecast-support.v1")
@@ -345,7 +581,7 @@ class SQLiteCandidateForecastSupportStore:
 
 
 class ForecastSupportingProductionContextProvider:
-    """Enrich a completed canonical context with usable forecast lineage only."""
+    """Attach governed forecast lineage and a separated specialist context."""
 
     name = "FORECAST_SUPPORTING_PRODUCTION_CONTEXT_PROVIDER"
 
@@ -374,6 +610,176 @@ class ForecastSupportingProductionContextProvider:
     @property
     def code_version(self) -> str:
         return self.delegate.code_version
+
+    @staticmethod
+    def _specialist_context(
+        reference: CandidateForecastSupport,
+        forecasts: tuple[GovernedForecastEvidence, ...],
+    ) -> CrossAssetForecastSpecialistContext:
+        impacts = {
+            (item.forecast_identifier, item.scenario_name): item
+            for item in reference.scenario_impacts
+        }
+        expected = {
+            (forecast.identifier, scenario.name)
+            for forecast in forecasts
+            for scenario in forecast.scenarios
+        }
+        actual = set(impacts)
+        if actual != expected:
+            missing = sorted(expected - actual)
+            extra = sorted(actual - expected)
+            raise ProductionContextError(
+                "forecast specialist translation must cover every referenced "
+                f"scenario exactly once: missing={missing} extra={extra}"
+            )
+
+        raw_weights = tuple(
+            forecast.confidence
+            * forecast.historical_accuracy
+            * min(1.0, forecast.calibration_sample_size / 50.0)
+            for forecast in forecasts
+        )
+        total_weight = sum(raw_weights)
+        if total_weight <= 0.0:
+            raise ProductionContextError(
+                "forecast specialist model weights are not positive"
+            )
+        weights = tuple(item / total_weight for item in raw_weights)
+        scenario_inputs: list[tuple[str, float, CandidateForecastScenarioImpact, str, tuple[str, ...]]] = []
+        for forecast, model_weight in zip(forecasts, weights, strict=True):
+            for scenario in forecast.scenarios:
+                mapping = impacts[(forecast.identifier, scenario.name)]
+                scenario_inputs.append(
+                    (
+                        f"{forecast.target}:{forecast.identifier}:{scenario.name}",
+                        model_weight * scenario.probability,
+                        mapping,
+                        f"{scenario.description} Candidate translation: {mapping.rationale}",
+                        tuple(
+                            dict.fromkeys(
+                                (
+                                    reference.identifier,
+                                    forecast.identifier,
+                                    *forecast.evidence_identifiers,
+                                    *forecast.originating_fact_identifiers,
+                                )
+                            )
+                        ),
+                    )
+                )
+        probability_total = sum(item[1] for item in scenario_inputs)
+        if probability_total <= 0.0:
+            raise ProductionContextError(
+                "forecast specialist scenario probability is not positive"
+            )
+        scenarios: list[ForecastScenarioAssessment] = []
+        running = 0.0
+        for index, (label, probability, mapping, rationale, evidence) in enumerate(
+            scenario_inputs
+        ):
+            normalized = probability / probability_total
+            if index == len(scenario_inputs) - 1:
+                normalized = 1.0 - running
+            else:
+                running += normalized
+            scenarios.append(
+                ForecastScenarioAssessment(
+                    label=label,
+                    probability=normalized,
+                    candidate_return_impact=mapping.candidate_return_impact,
+                    expected_path_drawdown=mapping.expected_path_drawdown,
+                    rationale=rationale,
+                    evidence_identifiers=evidence,
+                )
+            )
+
+        aggregate_confidence = sum(
+            weight * forecast.confidence
+            for forecast, weight in zip(forecasts, weights, strict=True)
+        )
+        calibration_score = sum(
+            weight
+            * forecast.historical_accuracy
+            * min(1.0, forecast.calibration_sample_size / 50.0)
+            for forecast, weight in zip(forecasts, weights, strict=True)
+        )
+        forecast_horizon_days = max(
+            1,
+            round(
+                sum(
+                    weight * (forecast.horizon_seconds / 86_400.0)
+                    for forecast, weight in zip(forecasts, weights, strict=True)
+                )
+            ),
+        )
+        evidence_identifiers = tuple(
+            dict.fromkeys(
+                (
+                    reference.identifier,
+                    *(
+                        identifier
+                        for forecast in forecasts
+                        for identifier in (
+                            forecast.identifier,
+                            *forecast.evidence_identifiers,
+                            *forecast.originating_fact_identifiers,
+                        )
+                    ),
+                )
+            )
+        )
+        model_versions = tuple(
+            dict.fromkeys(
+                (
+                    *(
+                        f"{name}:{version}"
+                        for forecast in forecasts
+                        for name, version in forecast.model_versions
+                    ),
+                    f"forecast-translation:{reference.translation_model_version}",
+                )
+            )
+        )
+        limitations = tuple(
+            dict.fromkeys(
+                reference.limitations
+                + tuple(
+                    item
+                    for forecast in forecasts
+                    for item in forecast.limitations
+                )
+                + (
+                    f"Candidate translation method: {reference.translation_method}",
+                )
+            )
+        )
+        change_conditions = tuple(
+            dict.fromkeys(
+                reference.review_conditions
+                + tuple(
+                    item
+                    for forecast in forecasts
+                    for item in forecast.invalidation_conditions
+                )
+            )
+        )
+        return CrossAssetForecastSpecialistContext(
+            as_of=reference.as_of,
+            forecast_horizon_days=forecast_horizon_days,
+            scenarios=tuple(scenarios),
+            aggregate_confidence=aggregate_confidence,
+            calibration_score=calibration_score,
+            model_agreement=float(reference.model_agreement),
+            forecast_stability=float(reference.forecast_stability),
+            path_drawdown_probability=float(reference.path_drawdown_probability),
+            cross_asset_signals=reference.cross_asset_signals,
+            contradictory_evidence=reference.contradictory_evidence,
+            limitations=limitations,
+            change_conditions=change_conditions,
+            model_versions=model_versions,
+            evidence_identifiers=evidence_identifiers,
+        )
 
     def load_context(
         self,
@@ -409,12 +815,14 @@ class ForecastSupportingProductionContextProvider:
         evidence_identifiers: list[str] = []
         source_versions: list[tuple[str, str]] = []
         model_versions: list[tuple[str, str]] = []
+        specialist_contexts: dict[str, CrossAssetForecastSpecialistContext] = {}
         for reference in references:
             if reference.knowledge_cutoff != context.knowledge_cutoff:
                 raise ProductionContextError(
                     "forecast-support cutoff does not match production context"
                 )
             evidence_identifiers.append(reference.identifier)
+            loaded: list[GovernedForecastEvidence] = []
             for forecast_identifier in reference.forecast_identifiers:
                 forecast = self.forecast_store.get(forecast_identifier)
                 if forecast is None:
@@ -429,6 +837,7 @@ class ForecastSupportingProductionContextProvider:
                     )
                 except ForecastEvidenceError as error:
                     raise ProductionContextError(str(error)) from error
+                loaded.append(forecast)
                 evidence_identifiers.extend(
                     (
                         forecast.identifier,
@@ -438,6 +847,16 @@ class ForecastSupportingProductionContextProvider:
                 )
                 source_versions.extend(forecast.data_versions)
                 model_versions.extend(forecast.model_versions)
+            if reference.specialist_translation_available:
+                specialist_contexts[reference.candidate_identifier] = (
+                    self._specialist_context(reference, tuple(loaded))
+                )
+                model_versions.append(
+                    (
+                        "forecast_candidate_translation",
+                        str(reference.translation_model_version),
+                    )
+                )
         manifest = replace(
             context.manifest,
             evidence_identifiers=tuple(
@@ -457,7 +876,41 @@ class ForecastSupportingProductionContextProvider:
                 field_name="model_versions",
             ),
         )
-        return replace(context, manifest=manifest)
+        if not specialist_contexts:
+            return replace(context, manifest=manifest)
+        if not hasattr(context, "specialist_contexts"):
+            raise ProductionContextError(
+                "forecast specialist translation requires candidate specialist contexts"
+            )
+        updated_contexts = []
+        for candidate_context in context.specialist_contexts:
+            forecast_context = specialist_contexts.get(
+                candidate_context.candidate_identifier
+            )
+            if forecast_context is None:
+                updated_contexts.append(candidate_context)
+                continue
+            if candidate_context.forecast is not None:
+                raise ProductionContextError(
+                    "candidate already contains a forecast specialist context"
+                )
+            updated_contexts.append(
+                replace(candidate_context, forecast=forecast_context)
+            )
+        missing_contexts = sorted(
+            set(specialist_contexts)
+            - {item.candidate_identifier for item in updated_contexts}
+        )
+        if missing_contexts:
+            raise ProductionContextError(
+                "forecast specialist translation lacks candidate context coverage: "
+                f"{missing_contexts}"
+            )
+        return replace(
+            context,
+            manifest=manifest,
+            specialist_contexts=tuple(updated_contexts),
+        )
 
 
 def build_production_context_provider(
@@ -485,6 +938,7 @@ def build_production_context_provider(
 
 
 __all__ = [
+    "CandidateForecastScenarioImpact",
     "CandidateForecastSupport",
     "ForecastSupportError",
     "ForecastSupportIntegrityError",

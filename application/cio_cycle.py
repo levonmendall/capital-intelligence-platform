@@ -16,6 +16,7 @@ from cio.persistence import CIOJournalEventType, SQLiteCIOJournal
 from committee.specialists import (
     AssetValuationSpecialistContext,
     CandidateSpecialistContext,
+    CrossAssetForecastSpecialistContext,
     IndependentSpecialistService,
     MacroSpecialistContext,
     MarketSpecialistContext,
@@ -237,6 +238,7 @@ class CandidateCycleContext:
     analysis_completed_at: datetime
     macro: MacroSpecialistContext
     market: MarketSpecialistContext
+    forecast: CrossAssetForecastSpecialistContext | None = None
     company: CompanyAnalysis | None = None
     asset_valuation: AssetValuationSpecialistContext | None = None
 
@@ -257,6 +259,13 @@ class CandidateCycleContext:
             raise TypeError("macro must be MacroSpecialistContext")
         if not isinstance(self.market, MarketSpecialistContext):
             raise TypeError("market must be MarketSpecialistContext")
+        if self.forecast is not None and not isinstance(
+            self.forecast,
+            CrossAssetForecastSpecialistContext,
+        ):
+            raise TypeError(
+                "forecast must be CrossAssetForecastSpecialistContext or None"
+            )
         if self.company is not None and not isinstance(
             self.company,
             CompanyAnalysis,
@@ -426,6 +435,7 @@ class CanonicalCIOCycle:
                 macro=base_context.macro,
                 market=base_context.market,
                 portfolio=portfolio_context,
+                forecast=base_context.forecast,
                 company=base_context.company,
                 asset_valuation=base_context.asset_valuation,
             )

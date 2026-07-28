@@ -14,7 +14,7 @@ Risk, liquidity, concentration, drawdown, turnover, transaction costs, slippage,
 Point-in-time evidence
     -> structured signals and expected-return evidence
     -> candidate qualification and ranking
-    -> five independent specialist analyses
+    -> six independent specialist analyses
     -> Evidence & Governance veto evaluation
     -> CIO synthesis and final action
     -> portfolio construction and implementation feasibility
@@ -41,7 +41,7 @@ Every candidate must eventually provide a schema-versioned, point-in-time record
 - liquidity, transaction costs, slippage, and implementation feasibility;
 - opportunity cost and comparison with current holdings, cash, and qualified alternatives;
 - expected portfolio contribution and constraint impact;
-- five specialist analyses, material dissent, and veto status;
+- six specialist analyses, material dissent, and veto status;
 - CIO action, final confidence, approved thesis, recommended size, monitoring indicators, and review date;
 - model, policy, schema, and code versions.
 
@@ -68,16 +68,17 @@ Qualification comparisons use horizon-normalized, evidence-adjusted geometric re
 
 ## Independent specialist process
 
-The committee contains five specialists plus the CIO:
+The committee contains six specialists plus the CIO:
 
 1. Macro & Economic Strategist
 2. Market Strategist
-3. Fundamental & Valuation Analyst
-4. Portfolio & Risk Manager
-5. Evidence & Governance Officer
-6. Chief Investment Officer
+3. Cross-Asset Forecast & Scenario Specialist
+4. Fundamental & Valuation Analyst
+5. Portfolio & Risk Manager
+6. Evidence & Governance Officer
+7. Chief Investment Officer
 
-The five specialists complete independent first-pass analyses before seeing one another’s conclusions.
+The six specialists complete independent first-pass analyses before seeing one another’s conclusions.
 
 Each specialist output includes:
 
@@ -103,6 +104,10 @@ Evaluates regime, inflation, monetary and fiscal policy, rates, credit, liquidit
 
 Evaluates trend, momentum, relative strength, breadth, leadership, volume, volatility, positioning, short interest, flows, liquidity, and cross-asset confirmation.
 
+### Cross-Asset Forecast & Scenario Specialist
+
+Evaluates calibrated forward distributions across rates, credit, currencies, commodities, equities, volatility, and crypto; model agreement and stability; regime-transition risk; candidate-specific scenario effects; expected path drawdown; horizon alignment; and the evidence that would change the forecast. This specialist does not duplicate market technicals, create candidates, determine final size, or issue portfolio actions.
+
 ### Fundamental & Valuation Analyst
 
 Evaluates business quality, financial statements, growth, cash flow, margins, return on capital, balance-sheet quality, management execution, industry structure, revisions, valuation, fair value, and expected return.
@@ -125,7 +130,7 @@ Only the Chief Investment Officer issues the final investment decision.
 
 The CIO:
 
-- reviews the five independent analyses;
+- reviews the six independent analyses;
 - compares expected returns and downside across qualified alternatives;
 - evaluates evidence strength, opportunity cost, and portfolio contribution;
 - applies evidence vetoes and implementation blocks;

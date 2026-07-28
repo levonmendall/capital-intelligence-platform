@@ -215,7 +215,7 @@ The core institutional CIO architecture is implemented as software. The reposito
 - provider and security-master certification controls;
 - complete-universe publication and screening requirements;
 - candidate qualification and capital-alternative comparison;
-- five independent specialists and CIO-only action authority;
+- six independent specialists and CIO-only action authority;
 - portfolio-level construction and funding;
 - one append-only canonical portfolio-state source;
 - append-only CIO, thesis, construction, execution, and evaluation history;

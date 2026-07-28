@@ -772,7 +772,7 @@ class SQLiteCIOJournal:
                 packet,
                 code_version=code_version,
             ),
-            schema_version="specialist-packet.v1",
+            schema_version="specialist-packet.v2",
             event_identifier=(
                 f"event:specialists:{packet.candidate_identifier}:"
                 f"{occurred.isoformat()}"

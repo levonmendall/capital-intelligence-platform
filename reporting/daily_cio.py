@@ -279,7 +279,7 @@ class DailyCIOBriefingBuilder:
                 portfolio_decision="No portfolio action is permitted.",
                 confidence=None,
                 evidence_that_changes_conclusion=(
-                    "Complete all five specialist analyses and CIO synthesis",
+                    "Complete all six specialist analyses and CIO synthesis",
                 ),
                 material_developments=(
                     "Qualified opportunities are awaiting CIO synthesis",

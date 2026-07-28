@@ -169,7 +169,7 @@ class SpecialistAnalysis:
 
 @dataclass(frozen=True, slots=True)
 class IndependentSpecialistPacket:
-    """Exactly five independent specialist analyses for one candidate."""
+    """Exactly six independent specialist analyses for one candidate."""
 
     candidate_identifier: str
     analyses: tuple[SpecialistAnalysis, ...]
@@ -198,7 +198,7 @@ class IndependentSpecialistPacket:
             missing_text = ", ".join(sorted(item.value for item in missing))
             extra_text = ", ".join(sorted(item.value for item in extra))
             raise ValueError(
-                "specialist packet must contain exactly the five governing roles; "
+                "specialist packet must contain exactly the six governing roles; "
                 f"missing={missing_text or '-'}; extra={extra_text or '-'}"
             )
         if any(

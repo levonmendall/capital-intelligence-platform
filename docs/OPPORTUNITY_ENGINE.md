@@ -57,7 +57,7 @@ The score is a committee-attention ordering mechanism. It is not a CIO action, c
 
 - Evidence engines create `CandidateDecisionRecord` values.
 - The Opportunity Engine qualifies and ranks them.
-- The five independent specialists analyze only qualified candidates.
+- The six independent specialists analyze only qualified candidates.
 - The CIO compares the candidate, specialist packet, opportunity cost, and portfolio implementation before issuing an action.
 
 A fully supportive committee cannot restore a candidate rejected for universe scope, evidence quality, stale opportunity cost, inadequate return, excessive downside, poor liquidity, or implementation cost.

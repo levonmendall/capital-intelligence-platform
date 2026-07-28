@@ -21,20 +21,24 @@ from cio.models import (
 class SpecialistReconciliationPolicy:
     """Conservative rules for incorporating independent specialist evidence."""
 
-    version: str = "specialist-return-reconciliation.v2"
+    version: str = "specialist-return-reconciliation.v3"
     specialist_adjustment_share: float = 0.35
+    forecast_adjustment_share: float = 0.20
     maximum_total_adjustment: float = 0.15
     minimum_overlap_discount: float = 0.25
     maximum_role_adjustment: float = 0.06
+    maximum_forecast_role_adjustment: float = 0.04
 
     def __post_init__(self) -> None:
         if not isinstance(self.version, str) or not self.version.strip():
             raise ValueError("version cannot be empty")
         for field_name in (
             "specialist_adjustment_share",
+            "forecast_adjustment_share",
             "maximum_total_adjustment",
             "minimum_overlap_discount",
             "maximum_role_adjustment",
+            "maximum_forecast_role_adjustment",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -52,6 +56,7 @@ class SpecialistReturnReconciler:
         {
             SpecialistRole.MACRO_ECONOMIC,
             SpecialistRole.MARKET,
+            SpecialistRole.CROSS_ASSET_FORECAST,
             SpecialistRole.FUNDAMENTAL_VALUATION,
         }
     )
@@ -112,16 +117,23 @@ class SpecialistReturnReconciler:
                 self.policy.minimum_overlap_discount,
                 specialist_independence * baseline_novelty,
             )
+            adjustment_share = (
+                self.policy.forecast_adjustment_share
+                if analysis.role is SpecialistRole.CROSS_ASSET_FORECAST
+                else self.policy.specialist_adjustment_share
+            )
+            role_cap = (
+                self.policy.maximum_forecast_role_adjustment
+                if analysis.role is SpecialistRole.CROSS_ASSET_FORECAST
+                else self.policy.maximum_role_adjustment
+            )
             applied = (
                 analysis.expected_return_impact
                 * analysis.confidence
-                * self.policy.specialist_adjustment_share
+                * adjustment_share
                 * overlap_discount
             )
-            applied = max(
-                -self.policy.maximum_role_adjustment,
-                min(self.policy.maximum_role_adjustment, applied),
-            )
+            applied = max(-role_cap, min(role_cap, applied))
             provisional.append((analysis, origins, overlap_discount, applied))
 
         total = sum(item[3] for item in provisional)

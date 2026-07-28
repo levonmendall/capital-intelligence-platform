@@ -21,7 +21,7 @@ The canonical institutional CIO architecture is implemented:
 - quantitative candidate records;
 - comparison with cash, holdings, and other capital alternatives;
 - qualification and opportunity ranking;
-- five independent specialists plus CIO authority;
+- six independent specialists plus CIO authority;
 - portfolio-level construction and funding;
 - one append-only canonical source for cash, holdings, valuations, and implementation lineage;
 - append-only decision, construction, thesis, and evaluation history;
@@ -104,7 +104,7 @@ The remaining roadmap is primarily licensed data breadth, empirical validation, 
 
 ## Milestone 6 — Independent specialist committee
 
-- [x] Replace weighted-voter authority with five independent specialists and the CIO.
+- [x] Replace weighted-voter authority with six independent specialists and the CIO.
 - [x] Implement typed specialist contracts against the common candidate schema.
 - [x] Enforce independent first-pass analysis.
 - [x] Preserve the strongest dissent, disagreement reason, and resolving evidence.

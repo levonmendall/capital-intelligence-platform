@@ -22,7 +22,7 @@ Providers and point-in-time stores
         -> analytical engines and company factors
         -> quantitative CandidateDecisionRecord
         -> OpportunityEngine compares every capital alternative
-        -> five independent SpecialistAnalysis records
+        -> six independent SpecialistAnalysis records
         -> ChiefInvestmentOfficer synthesis
         -> PortfolioConstructionEngine
         -> canonical append-only portfolio state
@@ -40,7 +40,7 @@ Providers and point-in-time stores
 | `intelligence`, `company`, regime packages | analytical evidence and versioned factor results | candidate eligibility or portfolio size |
 | `cio.models` | common candidate, specialist, dissent, and CIO-decision contracts | data retrieval or execution |
 | `opportunity` | point-in-time eligibility, qualification, all-market alternative comparison, ranking, rejection | final action or sizing |
-| `committee.specialists` | five independent first-pass analyses | user-facing action |
+| `committee.specialists` | six independent first-pass analyses | user-facing action |
 | `cio.synthesis` | final action, disclosed confidence, abstention, thesis approval | broker execution |
 | `portfolio.construction_engine` | target weights, funding, costs, liquidity, constraints | changing the CIO action or using confidence as size |
 | `portfolio.state` | sole `COMPOUNDING` portfolio, $250,000 starting basis, append-only cash, positions, valuations, and implementation lineage | investment analysis or multiple active portfolios |
@@ -73,7 +73,7 @@ An empty qualified queue is not an error. It becomes a governed “No superior o
 
 ## Specialist and CIO authority
 
-The five specialists complete independent first-pass analyses against the same candidate boundary. They cannot see or average one another’s conclusions before submission. The Evidence & Governance Officer may veto inadequate or irreproducible evidence. The Portfolio & Risk Manager may block infeasible implementation. Dissent remains visible to the CIO.
+The six specialists complete independent first-pass analyses against the same candidate boundary. They cannot see or average one another’s conclusions before submission. The Evidence & Governance Officer may veto inadequate or irreproducible evidence. The Portfolio & Risk Manager may block infeasible implementation. Dissent remains visible to the CIO.
 
 The CIO alone selects Buy, Increase, Hold, Reduce, Exit, Watch, Insufficient evidence, No superior opportunity, or No material change. Weighted-voter modules remain isolated historical research and cannot be imported by active API, application, or canonical-cycle entrypoints.
 

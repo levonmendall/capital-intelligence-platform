@@ -48,16 +48,17 @@ Global Financial Intelligence
 
 ## Committee authority
 
-The committee has six participants:
+The committee has seven participants:
 
 1. Macro & Economic Strategist
 2. Market Strategist
-3. Fundamental & Valuation Analyst
-4. Portfolio & Risk Manager
-5. Evidence & Governance Officer
-6. Chief Investment Officer
+3. Cross-Asset Forecast & Scenario Specialist
+4. Fundamental & Valuation Analyst
+5. Portfolio & Risk Manager
+6. Evidence & Governance Officer
+7. Chief Investment Officer
 
-The first five independently analyze the same candidate before seeing one another’s conclusions. Specialists issue analyses, not user-facing actions. The Evidence & Governance Officer can veto inadequate or irreproducible evidence. The Portfolio & Risk Manager can reject implementations that violate constraints. Only the CIO issues the final investment decision.
+The first six independently analyze the same candidate before seeing one another’s conclusions. Specialists issue analyses, not user-facing actions. The Evidence & Governance Officer can veto inadequate or irreproducible evidence. The Portfolio & Risk Manager can reject implementations that violate constraints. Only the CIO issues the final investment decision.
 
 The objective is not weighted consensus. It is the strongest defensible capital-allocation decision. Material dissent must be preserved rather than averaged away.
 
