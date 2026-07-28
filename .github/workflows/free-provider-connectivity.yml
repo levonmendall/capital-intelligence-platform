@@ -1,0 +1,109 @@
+name: Verify Free Provider Connectivity
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "43 11 * * *"
+
+  push:
+    branches:
+      - main
+    paths:
+      - "providers/fred.py"
+      - "providers/sec_edgar.py"
+      - "providers/crypto_venues.py"
+      - "providers/openfigi.py"
+      - "providers/gleif.py"
+      - "providers/free_connections.py"
+      - "config/free_provider_connections.json"
+      - "config/crypto_venue_bindings.free.json"
+      - "run_free_provider_connections.py"
+      - ".github/workflows/free-provider-connectivity.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: free-provider-connectivity
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_FREE_PROVIDER_CATALOG: config/free_provider_connections.json
+      CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS: config/crypto_venue_bindings.free.json
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+      OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Verify configured free services
+        shell: bash
+        run: |
+          mkdir -p reports
+          python run_free_provider_connections.py \
+            --no-persist \
+            > reports/free-provider-connections.json
+
+      - name: Require keyless service connectivity
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("reports/free-provider-connections.json").read_text(encoding="utf-8")
+          )
+          report = payload["report"]
+          if not report["keyless_services_connected"]:
+              failed = [
+                  item["provider_identifier"]
+                  for item in report["results"]
+                  if not item["credential_names"] and item["state"] != "connected"
+              ]
+              raise SystemExit(
+                  "keyless free providers are not connected: " + ", ".join(failed)
+              )
+          PY
+
+      - name: Require credentialed free services when configured
+        shell: bash
+        run: |
+          if [ -n "${FRED_API_KEY}" ] && [ -n "${SEC_USER_AGENT}" ]; then
+            python run_free_provider_connections.py \
+              --no-persist \
+              --require-all-connected \
+              > reports/free-provider-connections-strict.json
+          else
+            echo "FRED_API_KEY and/or SEC_USER_AGENT are not configured; the report remains credential_required." \
+              > reports/free-provider-credential-actions.txt
+          fi
+
+      - name: Upload credential-safe connection evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: free-provider-connectivity
+          path: reports/
+          if-no-files-found: error
+          retention-days: 14
