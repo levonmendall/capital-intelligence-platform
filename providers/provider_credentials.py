@@ -240,9 +240,67 @@ class DatabentoCredentialProbe:
         }
 
 
+class EODHDCredentialProbe:
+    """Validate an EODHD token through its dedicated user entitlement API."""
+
+    environment_names = (
+        "EODHD_API_KEY",
+        "EODHD_API_TOKEN",
+        "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN",
+    )
+    endpoint = "https://eodhd.com/api/user"
+
+    def __init__(
+        self,
+        api_token: str,
+        *,
+        timeout: int = 20,
+        http_get: Callable[..., Any] | None = None,
+    ) -> None:
+        self.api_token = _text(api_token, field_name="api_token")
+        self.timeout = timeout
+        self._http_get = http_get or requests.get
+
+    def probe(self) -> dict[str, Any]:
+        try:
+            response = self._http_get(
+                self.endpoint,
+                params={"api_token": self.api_token, "fmt": "json"},
+                timeout=self.timeout,
+            )
+        except requests.RequestException as error:
+            raise ProviderCredentialProbeError("EODHD request failed") from error
+        payload = _json_response(response, provider="EODHD")
+        if not isinstance(payload, dict):
+            raise ProviderCredentialProbeError("EODHD user response must be an object")
+        recognized = {
+            "name",
+            "email",
+            "subscriptionType",
+            "apiRequests",
+            "apiRequestsDate",
+            "dailyRateLimit",
+            "extraLimit",
+        }
+        if not recognized.intersection(payload):
+            raise ProviderCredentialProbeError(
+                "EODHD did not return recognized entitlement metadata"
+            )
+        return {
+            "probe": "user-entitlement",
+            "usage_metadata_available": any(
+                field in payload
+                for field in ("apiRequests", "apiRequestsDate", "dailyRateLimit")
+            ),
+            "subscription_metadata_available": "subscriptionType" in payload,
+            "execution_authority": False,
+        }
+
+
 __all__ = [
     "AlphaVantageCredentialProbe",
     "DatabentoCredentialProbe",
+    "EODHDCredentialProbe",
     "EnvironmentCredential",
     "ProviderCredentialProbeError",
     "TwelveDataCredentialProbe",
