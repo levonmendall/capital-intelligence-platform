@@ -1,0 +1,45 @@
+{
+  "approved_at": "2026-07-28T00:00:00+00:00",
+  "approved_by": "replace-with-human-data-governance-authority",
+  "approved_domains": [
+    "security_master",
+    "market_prices",
+    "corporate_actions",
+    "fundamentals",
+    "fx_rates",
+    "fixed_income_terms",
+    "commodity_curves",
+    "benchmarks"
+  ],
+  "authoritative_domains": [
+    "security_master",
+    "market_prices",
+    "corporate_actions",
+    "fundamentals",
+    "fx_rates",
+    "fixed_income_terms",
+    "commodity_curves",
+    "benchmarks"
+  ],
+  "certification_identifier": "replace-with-certification:eodhd-primary",
+  "derived_analytics_approved": false,
+  "effective_at": "2026-07-28T00:00:00+00:00",
+  "enabled": false,
+  "expires_at": "2026-08-27T00:00:00+00:00",
+  "historical_coverage_supported": false,
+  "identifier": "activation:eodhd-primary:replace-with-approved-version",
+  "paper_simulation_approved": false,
+  "point_in_time_supported": false,
+  "provenance_complete": false,
+  "provider_identifier": "eodhd-primary",
+  "provider_name": "EODHD broad historical multi-asset data",
+  "rationale": "Complete only after contract, license, binding, history, point-in-time, service-level, reconciliation, and paper-simulation review.",
+  "schema_version": "provider-activation.v1",
+  "service_level_defined": false,
+  "source_identifiers": [
+    "replace-with-contract:eodhd-primary",
+    "replace-with-certification:eodhd-primary"
+  ],
+  "storage_and_backup_approved": false,
+  "usage_rights_approved": false
+}

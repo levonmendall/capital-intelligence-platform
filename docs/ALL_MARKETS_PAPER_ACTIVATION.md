@@ -204,3 +204,7 @@ supply and approve:
 
 Missing external evidence blocks the affected instrument or market. It does not
 remove that market from analysis, and it never creates live-trading authority.
+
+## Provider bundle and derivative certification
+
+Paper readiness now requires the concrete provider bundle in `config/all_market_provider_bundle.json` and a current `derivative-data-certification-report.v1`. See [All-Market Institutional Provider Stack](ALL_MARKET_PROVIDER_STACK.md).

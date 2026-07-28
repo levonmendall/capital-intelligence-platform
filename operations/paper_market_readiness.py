@@ -27,6 +27,10 @@ from governance.decision_information_readiness import (
     MaximumDecisionInformationManifest,
     MaximumDecisionInformationReadinessEvaluator,
 )
+from governance.market_data_bundle import (
+    AllMarketProviderBundle,
+    assess_all_market_provider_bundle,
+)
 from governance.provider_activation import (
     ProviderActivationAuthority,
     SQLiteProviderActivationStore,
@@ -35,6 +39,7 @@ from portfolio.multi_asset_controls import MultiAssetConstructionPolicy
 from portfolio.multi_asset_execution import MultiAssetExecutionPolicy
 from providers.configured_dataset import ConfiguredDatasetProviderSettings
 from data.provider_dataset import ProviderDatasetType
+from data.derivative_market import DerivativeDataCertificationReport
 
 
 DATA_DOMAIN_DATASET_TYPE: Mapping[DataDomain, ProviderDatasetType] = {
@@ -81,6 +86,10 @@ class UniversalPaperMarketReadinessReport:
     activated_provider_identifiers: tuple[str, ...]
     activated_decision_information_identifiers: tuple[str, ...]
     configured_provider_identifiers: tuple[str, ...]
+    provider_bundle_identifier: str | None
+    provider_bundle_ready: bool
+    derivative_data_certified: bool
+    derivative_data_certification_identifier: str | None
     internal_blockers: tuple[str, ...]
     external_blockers: tuple[str, ...]
 
@@ -102,6 +111,12 @@ class UniversalPaperMarketReadinessReport:
             ),
             "configured_provider_identifiers": list(
                 self.configured_provider_identifiers
+            ),
+            "provider_bundle_identifier": self.provider_bundle_identifier,
+            "provider_bundle_ready": self.provider_bundle_ready,
+            "derivative_data_certified": self.derivative_data_certified,
+            "derivative_data_certification_identifier": (
+                self.derivative_data_certification_identifier
             ),
             "internal_blockers": list(self.internal_blockers),
             "external_blockers": list(self.external_blockers),
@@ -129,6 +144,8 @@ def assess_universal_paper_market_readiness(
     decision_information_activation_store: SQLiteDecisionInformationActivationStore,
     asset_class_approval_store: SQLiteAssetClassApprovalStore,
     provider_binding_paths: Sequence[str | Path] = (),
+    provider_bundle: AllMarketProviderBundle | None = None,
+    derivative_data_certification: DerivativeDataCertificationReport | None = None,
 ) -> UniversalPaperMarketReadinessReport:
     if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
         raise ValueError("evaluated_at must be timezone-aware")
@@ -285,6 +302,55 @@ def assess_universal_paper_market_readiness(
             for item in information_report.blockers
         )
 
+    provider_bundle_ready = provider_bundle is None
+    provider_bundle_identifier = None
+    if provider_bundle is not None:
+        provider_bundle_identifier = provider_bundle.identifier
+        bundle_report = assess_all_market_provider_bundle(
+            provider_bundle,
+            evaluated_at=evaluated_at,
+            environment=environment,
+            provider_activation_store=provider_activation_store,
+        )
+        provider_bundle_ready = bundle_report.active
+        if not bundle_report.active:
+            external_blockers.extend(
+                f"provider-bundle: {item}"
+                for item in bundle_report.blockers
+            )
+            for member in bundle_report.member_assessments:
+                if member.ready:
+                    continue
+                external_blockers.extend(
+                    f"provider-bundle {member.provider_identifier}: {item}"
+                    for item in member.blockers
+                )
+
+    derivative_data_certified = (
+        derivative_data_certification is not None
+        and derivative_data_certification.certified
+        and derivative_data_certification.evaluated_at <= evaluated_at
+    )
+    derivative_identifier = None
+    if derivative_data_certification is None:
+        external_blockers.append(
+            "derivative-data: certified contract, margin, and volatility-surface report is unavailable"
+        )
+    else:
+        derivative_identifier = (
+            "derivative-data-certification:"
+            + derivative_data_certification.evaluated_at.isoformat()
+        )
+        if derivative_data_certification.evaluated_at > evaluated_at:
+            external_blockers.append(
+                "derivative-data: certification is future-known at evaluation time"
+            )
+        if not derivative_data_certification.certified:
+            external_blockers.extend(
+                f"derivative-data: {item}"
+                for item in derivative_data_certification.blockers
+            )
+
     internal_ready = not internal_blockers
     paper_ready = internal_ready and not external_blockers
     return UniversalPaperMarketReadinessReport(
@@ -304,6 +370,10 @@ def assess_universal_paper_market_readiness(
             sorted(information_overlay.activation_identifiers)
         ),
         configured_provider_identifiers=configured_provider_ids,
+        provider_bundle_identifier=provider_bundle_identifier,
+        provider_bundle_ready=provider_bundle_ready,
+        derivative_data_certified=derivative_data_certified,
+        derivative_data_certification_identifier=derivative_identifier,
         internal_blockers=tuple(internal_blockers),
         external_blockers=tuple(dict.fromkeys(external_blockers)),
     )

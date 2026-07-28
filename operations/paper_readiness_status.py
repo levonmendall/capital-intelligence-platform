@@ -301,6 +301,17 @@ class PaperReadinessStatusAssembler:
                     credential_blockers.append(
                         f"{name}: binding file for {variable_name} is unavailable"
                     )
+            for field_name, label in (
+                ("contract_reference_environments", "contract reference"),
+                ("license_approval_environments", "license approval"),
+                ("certification_environments", "certification identifier"),
+            ):
+                for variable in item.get(field_name, ()):
+                    variable_name = _text(variable, field_name=field_name)
+                    if not self.environ.get(variable_name):
+                        credential_blockers.append(
+                            f"{name}: {label} {variable_name} is unavailable"
+                        )
         return (
             self._objective(
                 "licensed_and_certified_market_data_providers",

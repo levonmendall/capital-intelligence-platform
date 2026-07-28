@@ -1,0 +1,142 @@
+{
+  "allow_insecure_local": false,
+  "base_url": "https://replace-with-reviewed-normalization-gateway.example.com/databento-execution-data/",
+  "bindings": [
+    {
+      "availability_basis": "provider_timestamp",
+      "available_at_path": "meta.available_at",
+      "dataset_type": "market_prices",
+      "limitations": [
+        "Deployment template only. Replace the gateway URL and response paths with reviewed, licensed provider semantics before activation."
+      ],
+      "method": "GET",
+      "observed_at_path": "meta.observed_at",
+      "path": "v1/market_prices/{symbol}",
+      "payload_path": "data",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "end_at": "{end_at}",
+        "limit": "{limit}",
+        "start_at": "{start_at}"
+      },
+      "timeout_seconds": 30
+    },
+    {
+      "availability_basis": "provider_timestamp",
+      "available_at_path": "meta.available_at",
+      "dataset_type": "quotes_liquidity",
+      "limitations": [
+        "Deployment template only. Replace the gateway URL and response paths with reviewed, licensed provider semantics before activation."
+      ],
+      "method": "GET",
+      "observed_at_path": "meta.observed_at",
+      "path": "v1/quotes_liquidity/{symbol}",
+      "payload_path": "data",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "end_at": "{end_at}",
+        "limit": "{limit}",
+        "start_at": "{start_at}"
+      },
+      "timeout_seconds": 30
+    },
+    {
+      "availability_basis": "provider_timestamp",
+      "available_at_path": "meta.available_at",
+      "dataset_type": "derivative_contracts",
+      "limitations": [
+        "Deployment template only. Replace the gateway URL and response paths with reviewed, licensed provider semantics before activation."
+      ],
+      "method": "GET",
+      "observed_at_path": "meta.observed_at",
+      "path": "v1/derivative_contracts/{symbol}",
+      "payload_path": "data",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "end_at": "{end_at}",
+        "limit": "{limit}",
+        "start_at": "{start_at}"
+      },
+      "timeout_seconds": 30
+    },
+    {
+      "availability_basis": "provider_timestamp",
+      "available_at_path": "meta.available_at",
+      "dataset_type": "market_calendars",
+      "limitations": [
+        "Deployment template only. Replace the gateway URL and response paths with reviewed, licensed provider semantics before activation."
+      ],
+      "method": "GET",
+      "observed_at_path": "meta.observed_at",
+      "path": "v1/market_calendars/{symbol}",
+      "payload_path": "data",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "end_at": "{end_at}",
+        "limit": "{limit}",
+        "start_at": "{start_at}"
+      },
+      "timeout_seconds": 30
+    },
+    {
+      "availability_basis": "provider_timestamp",
+      "available_at_path": "meta.available_at",
+      "dataset_type": "benchmarks",
+      "limitations": [
+        "Deployment template only. Replace the gateway URL and response paths with reviewed, licensed provider semantics before activation."
+      ],
+      "method": "GET",
+      "observed_at_path": "meta.observed_at",
+      "path": "v1/benchmarks/{symbol}",
+      "payload_path": "data",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "end_at": "{end_at}",
+        "limit": "{limit}",
+        "start_at": "{start_at}"
+      },
+      "timeout_seconds": 30
+    },
+    {
+      "availability_basis": "provider_timestamp",
+      "available_at_path": "meta.available_at",
+      "dataset_type": "execution_inputs",
+      "limitations": [
+        "Deployment template only. Replace the gateway URL and response paths with reviewed, licensed provider semantics before activation."
+      ],
+      "method": "GET",
+      "observed_at_path": "meta.observed_at",
+      "path": "v1/execution_inputs/{symbol}",
+      "payload_path": "data",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "end_at": "{end_at}",
+        "limit": "{limit}",
+        "start_at": "{start_at}"
+      },
+      "timeout_seconds": 30
+    }
+  ],
+  "credential_environment_variables": [
+    "CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"
+  ],
+  "default_headers": {
+    "Accept": "application/json",
+    "Authorization": "Bearer ${CAPITAL_INTELLIGENCE_DATABENTO_API_KEY}"
+  },
+  "provider_identifier": "databento-execution-data",
+  "schema_version": "configured-dataset-provider.v1",
+  "source_version": "replace-with-certified-provider-version"
+}

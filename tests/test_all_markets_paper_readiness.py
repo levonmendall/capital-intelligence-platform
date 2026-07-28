@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from data.derivative_market import DerivativeDataCertificationReport
+
 from governance import (
     SQLiteAssetClassApprovalStore,
     SQLiteDecisionInformationActivationStore,
@@ -336,6 +338,15 @@ def test_complete_external_activation_can_reach_paper_ready(tmp_path: Path) -> N
         decision_information_activation_store=information_store,
         asset_class_approval_store=asset_store,
         provider_binding_paths=binding_paths,
+        derivative_data_certification=DerivativeDataCertificationReport(
+            evaluated_at=AS_OF,
+            certified=True,
+            contract_count=3,
+            margin_count=3,
+            volatility_surface_count=1,
+            covered_venues=("CME", "ICE", "OCC"),
+            blockers=(),
+        ),
     )
 
     assert report.internal_ready is True

@@ -393,6 +393,292 @@
         "venue-specific spot market data only",
         "public endpoint access does not approve storage or derived use"
       ]
+    },
+    {
+      "identifier": "lseg-global-market-data",
+      "provider_name": "LSEG Data Platform global market data",
+      "role": "primary",
+      "enabled": false,
+      "domains": [
+        "market_prices",
+        "quotes_liquidity",
+        "fx_rates",
+        "commodity_curves",
+        "benchmarks",
+        "market_calendars",
+        "execution_inputs"
+      ],
+      "authoritative_domains": [
+        "market_prices",
+        "quotes_liquidity",
+        "fx_rates",
+        "commodity_curves",
+        "benchmarks",
+        "market_calendars",
+        "execution_inputs"
+      ],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_API_KEY"
+      ],
+      "usage_rights_approved": false,
+      "point_in_time_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "service_level_defined": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "paper_simulation_approved": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "limitations": [
+        "Requires licensed entitlements and reviewed normalization bindings; source-control presence is not activation."
+      ]
+    },
+    {
+      "identifier": "lseg-global-reference-data",
+      "provider_name": "LSEG DataScope global reference and corporate actions",
+      "role": "primary",
+      "enabled": false,
+      "domains": [
+        "security_master",
+        "corporate_actions",
+        "market_calendars",
+        "benchmarks"
+      ],
+      "authoritative_domains": [
+        "security_master",
+        "corporate_actions",
+        "market_calendars",
+        "benchmarks"
+      ],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_REFERENCE_API_KEY"
+      ],
+      "usage_rights_approved": false,
+      "point_in_time_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "service_level_defined": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "paper_simulation_approved": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "limitations": [
+        "Must preserve historical identifiers, listings, delistings, and corporate-action availability timestamps."
+      ]
+    },
+    {
+      "identifier": "lseg-global-fundamentals",
+      "provider_name": "LSEG global fundamentals and filings",
+      "role": "primary",
+      "enabled": false,
+      "domains": [
+        "fundamentals",
+        "filings"
+      ],
+      "authoritative_domains": [
+        "fundamentals",
+        "filings"
+      ],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_API_KEY"
+      ],
+      "usage_rights_approved": false,
+      "point_in_time_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "service_level_defined": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "paper_simulation_approved": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "limitations": [
+        "Accounting normalization must retain original filing and revision lineage."
+      ]
+    },
+    {
+      "identifier": "ice-evaluated-fixed-income",
+      "provider_name": "ICE Data Services evaluated fixed-income pricing",
+      "role": "primary",
+      "enabled": false,
+      "domains": [
+        "security_master",
+        "market_prices",
+        "quotes_liquidity",
+        "fixed_income_terms",
+        "market_calendars",
+        "benchmarks",
+        "execution_inputs"
+      ],
+      "authoritative_domains": [
+        "security_master",
+        "market_prices",
+        "quotes_liquidity",
+        "fixed_income_terms",
+        "market_calendars",
+        "benchmarks",
+        "execution_inputs"
+      ],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_API_KEY"
+      ],
+      "usage_rights_approved": false,
+      "point_in_time_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "service_level_defined": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "paper_simulation_approved": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "limitations": [
+        "Evaluated prices require methodology, contributor, timestamp, liquidity, and staleness certification."
+      ]
+    },
+    {
+      "identifier": "databento-execution-data",
+      "provider_name": "Databento direct equities, futures, and options data",
+      "role": "primary",
+      "enabled": false,
+      "domains": [
+        "market_prices",
+        "quotes_liquidity",
+        "derivative_contracts",
+        "market_calendars",
+        "benchmarks",
+        "execution_inputs"
+      ],
+      "authoritative_domains": [
+        "market_prices",
+        "quotes_liquidity",
+        "derivative_contracts",
+        "market_calendars",
+        "benchmarks",
+        "execution_inputs"
+      ],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"
+      ],
+      "usage_rights_approved": false,
+      "point_in_time_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "service_level_defined": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "paper_simulation_approved": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "limitations": [
+        "Entitlements must cover the selected venues, schemas, history, and live paper-simulation use."
+      ]
+    },
+    {
+      "identifier": "cme-margin-data",
+      "provider_name": "CME clearing margin schedules",
+      "role": "official",
+      "enabled": false,
+      "domains": [
+        "margin_collateral"
+      ],
+      "authoritative_domains": [
+        "margin_collateral"
+      ],
+      "credential_environment_variables": [],
+      "usage_rights_approved": false,
+      "point_in_time_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "service_level_defined": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "paper_simulation_approved": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "limitations": [
+        "Published schedules must be normalized point-in-time and mapped to exact contracts."
+      ]
+    },
+    {
+      "identifier": "occ-margin-data",
+      "provider_name": "OCC option margin and risk schedules",
+      "role": "official",
+      "enabled": false,
+      "domains": [
+        "margin_collateral"
+      ],
+      "authoritative_domains": [
+        "margin_collateral"
+      ],
+      "credential_environment_variables": [],
+      "usage_rights_approved": false,
+      "point_in_time_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "service_level_defined": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "paper_simulation_approved": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "limitations": [
+        "OCC schedules must be normalized without treating broad methodology files as instrument-level coverage."
+      ]
+    },
+    {
+      "identifier": "ice-margin-data",
+      "provider_name": "ICE clearing margin schedules",
+      "role": "official",
+      "enabled": false,
+      "domains": [
+        "margin_collateral"
+      ],
+      "authoritative_domains": [
+        "margin_collateral"
+      ],
+      "credential_environment_variables": [],
+      "usage_rights_approved": false,
+      "point_in_time_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "service_level_defined": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "paper_simulation_approved": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "limitations": [
+        "ICE schedules require exact product and effective-date mapping."
+      ]
+    },
+    {
+      "identifier": "derived-volatility-surfaces",
+      "provider_name": "Governed derived volatility surface compiler",
+      "role": "validation",
+      "enabled": false,
+      "domains": [
+        "volatility_surfaces"
+      ],
+      "authoritative_domains": [
+        "volatility_surfaces"
+      ],
+      "credential_environment_variables": [],
+      "usage_rights_approved": false,
+      "point_in_time_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "service_level_defined": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "paper_simulation_approved": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "limitations": [
+        "Derived surfaces require certified option quotes, contract definitions, rate/dividend inputs, breadth, freshness, and model-version lineage."
+      ]
     }
   ],
   "markets": [
@@ -404,7 +690,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -413,7 +701,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -421,7 +712,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -430,7 +724,8 @@
           "domain": "corporate_actions",
           "provider_identifiers": [
             "commercial-global-reference-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-reference-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -440,7 +735,8 @@
           "provider_identifiers": [
             "official-sec-edgar",
             "commercial-global-fundamentals",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-fundamentals"
           ],
           "minimum_ready_providers": 2,
           "authoritative_required": true
@@ -448,7 +744,8 @@
         {
           "domain": "filings",
           "provider_identifiers": [
-            "official-sec-edgar"
+            "official-sec-edgar",
+            "lseg-global-fundamentals"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -464,7 +761,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -473,7 +773,11 @@
           "domain": "benchmarks",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -481,7 +785,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -496,7 +803,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -505,7 +814,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -513,7 +825,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -522,7 +837,8 @@
           "domain": "corporate_actions",
           "provider_identifiers": [
             "commercial-global-reference-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-reference-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -530,7 +846,8 @@
         {
           "domain": "fundamentals",
           "provider_identifiers": [
-            "commercial-global-fundamentals"
+            "commercial-global-fundamentals",
+            "lseg-global-fundamentals"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -546,7 +863,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -555,7 +875,11 @@
           "domain": "benchmarks",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -563,7 +887,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -579,7 +906,9 @@
           "domain": "security_master",
           "provider_identifiers": [
             "commercial-fixed-income-data",
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -589,7 +918,10 @@
           "provider_identifiers": [
             "commercial-fixed-income-data",
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -598,7 +930,10 @@
           "domain": "quotes_liquidity",
           "provider_identifiers": [
             "commercial-fixed-income-data",
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -606,7 +941,8 @@
         {
           "domain": "fixed_income_terms",
           "provider_identifiers": [
-            "commercial-fixed-income-data"
+            "commercial-fixed-income-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -623,7 +959,10 @@
           "domain": "market_calendars",
           "provider_identifiers": [
             "commercial-fixed-income-data",
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -632,7 +971,11 @@
           "domain": "benchmarks",
           "provider_identifiers": [
             "commercial-fixed-income-data",
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -641,7 +984,10 @@
           "domain": "execution_inputs",
           "provider_identifiers": [
             "commercial-fixed-income-data",
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -657,7 +1003,9 @@
           "domain": "security_master",
           "provider_identifiers": [
             "commercial-fixed-income-data",
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -666,7 +1014,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-fixed-income-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -674,7 +1025,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-fixed-income-data"
+            "commercial-fixed-income-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -683,7 +1037,8 @@
           "domain": "fixed_income_terms",
           "provider_identifiers": [
             "commercial-fixed-income-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -701,7 +1056,8 @@
           "domain": "fx_rates",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "official-global-macro"
+            "official-global-macro",
+            "lseg-global-market-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -710,7 +1066,10 @@
           "domain": "market_calendars",
           "provider_identifiers": [
             "commercial-fixed-income-data",
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -720,7 +1079,11 @@
           "provider_identifiers": [
             "commercial-fixed-income-data",
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -728,7 +1091,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -743,7 +1109,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -752,7 +1120,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -760,7 +1131,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -769,7 +1143,8 @@
           "domain": "corporate_actions",
           "provider_identifiers": [
             "commercial-global-reference-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-reference-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -778,7 +1153,8 @@
           "domain": "fundamentals",
           "provider_identifiers": [
             "commercial-global-fundamentals",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-fundamentals"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -786,7 +1162,8 @@
         {
           "domain": "filings",
           "provider_identifiers": [
-            "commercial-global-fundamentals"
+            "commercial-global-fundamentals",
+            "lseg-global-fundamentals"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -804,7 +1181,8 @@
           "provider_identifiers": [
             "commercial-global-market-data",
             "official-global-macro",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -812,7 +1190,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -821,7 +1202,11 @@
           "domain": "benchmarks",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -829,7 +1214,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -845,7 +1233,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -853,7 +1244,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -862,7 +1256,8 @@
           "domain": "commodity_curves",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -879,7 +1274,8 @@
           "domain": "fx_rates",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "official-global-macro"
+            "official-global-macro",
+            "lseg-global-market-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -887,7 +1283,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -895,7 +1294,11 @@
         {
           "domain": "benchmarks",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -903,7 +1306,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -911,7 +1316,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -926,7 +1334,10 @@
         {
           "domain": "market_prices",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -934,7 +1345,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -944,7 +1358,8 @@
           "provider_identifiers": [
             "commercial-global-market-data",
             "official-global-macro",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -961,7 +1376,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -970,7 +1388,11 @@
           "domain": "benchmarks",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "official-global-macro"
+            "official-global-macro",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -978,7 +1400,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -986,7 +1410,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1001,7 +1428,11 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-crypto-validation-data"
+            "commercial-crypto-validation-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income",
+            "coinbase-crypto-validation",
+            "kraken-crypto-validation"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1013,7 +1444,10 @@
             "commercial-crypto-validation-data",
             "coinbase-crypto-validation",
             "kraken-crypto-validation",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 2,
           "authoritative_required": true
@@ -1024,7 +1458,10 @@
             "commercial-global-market-data",
             "commercial-crypto-validation-data",
             "coinbase-crypto-validation",
-            "kraken-crypto-validation"
+            "kraken-crypto-validation",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 2,
           "authoritative_required": true
@@ -1043,7 +1480,8 @@
         {
           "domain": "fx_rates",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1051,7 +1489,11 @@
         {
           "domain": "benchmarks",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1059,7 +1501,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1067,7 +1512,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1082,7 +1530,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1091,7 +1541,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1099,7 +1552,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1107,7 +1563,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1115,7 +1574,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1124,7 +1586,8 @@
           "domain": "fundamentals",
           "provider_identifiers": [
             "commercial-global-fundamentals",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-fundamentals"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1133,7 +1596,8 @@
           "domain": "corporate_actions",
           "provider_identifiers": [
             "commercial-global-reference-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-reference-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1148,7 +1612,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1157,7 +1623,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1165,7 +1634,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1173,7 +1645,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1181,7 +1656,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1189,7 +1667,11 @@
         {
           "domain": "benchmarks",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1198,7 +1680,8 @@
           "domain": "commodity_curves",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1206,7 +1689,8 @@
         {
           "domain": "derivative_contracts",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "databento-execution-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1214,7 +1698,10 @@
         {
           "domain": "margin_collateral",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "cme-margin-data",
+            "occ-margin-data",
+            "ice-margin-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1229,7 +1716,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1238,7 +1727,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1246,7 +1738,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1254,7 +1749,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1262,7 +1760,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1270,7 +1771,8 @@
         {
           "domain": "derivative_contracts",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "databento-execution-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1278,7 +1780,10 @@
         {
           "domain": "margin_collateral",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "cme-margin-data",
+            "occ-margin-data",
+            "ice-margin-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1286,7 +1791,8 @@
         {
           "domain": "volatility_surfaces",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "derived-volatility-surfaces"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1301,7 +1807,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1310,7 +1818,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1318,7 +1829,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1326,7 +1840,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1334,7 +1851,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1342,7 +1862,11 @@
         {
           "domain": "benchmarks",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1350,7 +1874,8 @@
         {
           "domain": "derivative_contracts",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "databento-execution-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1358,7 +1883,10 @@
         {
           "domain": "margin_collateral",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "cme-margin-data",
+            "occ-margin-data",
+            "ice-margin-data"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1366,7 +1894,8 @@
         {
           "domain": "volatility_surfaces",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "derived-volatility-surfaces"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1381,7 +1910,9 @@
         {
           "domain": "security_master",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1390,7 +1921,10 @@
           "domain": "market_prices",
           "provider_identifiers": [
             "commercial-global-market-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1408,7 +1942,11 @@
           "provider_identifiers": [
             "commercial-global-market-data",
             "commercial-global-reference-data",
-            "eodhd-primary"
+            "eodhd-primary",
+            "lseg-global-market-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1416,7 +1954,10 @@
         {
           "domain": "quotes_liquidity",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1424,7 +1965,10 @@
         {
           "domain": "market_calendars",
           "provider_identifiers": [
-            "commercial-global-reference-data"
+            "commercial-global-reference-data",
+            "lseg-global-reference-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
@@ -1432,7 +1976,10 @@
         {
           "domain": "execution_inputs",
           "provider_identifiers": [
-            "commercial-global-market-data"
+            "commercial-global-market-data",
+            "lseg-global-market-data",
+            "databento-execution-data",
+            "ice-evaluated-fixed-income"
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true

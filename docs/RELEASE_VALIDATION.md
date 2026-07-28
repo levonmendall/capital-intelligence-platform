@@ -108,3 +108,7 @@ A green functional report cannot hide a security failure, and a green security w
 ## Release boundary
 
 This command proves that the repository code, shipped plan, universal market capability map, deterministic all-market execution mechanics, synthetic container workflow, and canonical CIO integration pass on the tested commit. It does not prove licensed provider availability, production dataset or stage-binding approval, historical backfill completion, backup restoration, multi-day burn-in, operational SLO history, market certification, custody or clearing access, or human governance approval. Those remain separate readiness evidence for the same immutable baseline.
+
+## All-market provider implementation validation
+
+Release validation executes `run_all_market_provider_bundle.py --require-implementation-ready`. This validates the selected provider roles, binding schemas, derivative certification code, and source-controlled activation path without treating missing commercial credentials as a release-code defect.

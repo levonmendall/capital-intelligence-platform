@@ -82,6 +82,12 @@ class CryptoVenueBindingRegistry:
             mapping[binding.instrument_id] = binding
         self._bindings = mapping
 
+    @property
+    def bindings(self) -> tuple[CryptoVenueBinding, ...]:
+        return tuple(
+            self._bindings[key] for key in sorted(self._bindings)
+        )
+
     def resolve(self, instrument_id: str) -> CryptoVenueBinding:
         try:
             return self._bindings[instrument_id]

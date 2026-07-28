@@ -229,3 +229,7 @@ Run `python run_data_readiness.py` before the canonical daily operation. The
 command never prints secret values and remains nonzero until every
 non-prohibited market has complete data coverage. See
 [All-Markets Data Readiness](docs/ALL_MARKETS_DATA_READINESS.md).
+
+## Selected all-market institutional stack
+
+The concrete controlled-paper stack is governed by `config/all_market_provider_bundle.json` and documented in `docs/ALL_MARKET_PROVIDER_STACK.md`. It uses LSEG and Databento for broad and direct market data, LSEG DataScope for historical reference and corporate actions, ICE Data Services for evaluated fixed income, EODHD for broad historical research coverage, Coinbase and Kraken for independent crypto validation, CME/OCC/ICE clearing schedules for margin, and the governed derived volatility-surface compiler. Every source remains fail closed until reviewed credentials, contracts, licenses, bindings, certifications and append-only activations are present.

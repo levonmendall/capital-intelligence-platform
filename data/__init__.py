@@ -1,5 +1,19 @@
 """Canonical point-in-time data contracts."""
 
+from data.derivative_market import (
+    DerivativeContractRecord,
+    DerivativeContractType,
+    DerivativeDataCertificationReport,
+    DerivativeDataError,
+    ExerciseStyle,
+    MarginRequirementRecord,
+    OptionQuoteRecord,
+    OptionRight,
+    VolatilitySurfacePoint,
+    VolatilitySurfaceSnapshot,
+    build_volatility_surface,
+    certify_derivative_data,
+)
 from data.filing import (
     CompanyFact,
     FilingProvider,
@@ -136,6 +150,18 @@ __all__ = [
     "CorporateActionType",
     "DataFrequency",
     "DataQualityState",
+    "DerivativeContractRecord",
+    "DerivativeContractType",
+    "DerivativeDataCertificationReport",
+    "DerivativeDataError",
+    "ExerciseStyle",
+    "MarginRequirementRecord",
+    "OptionQuoteRecord",
+    "OptionRight",
+    "VolatilitySurfacePoint",
+    "VolatilitySurfaceSnapshot",
+    "build_volatility_surface",
+    "certify_derivative_data",
     "FilingProvider",
     "FilingProviderError",
     "FilingQuery",
