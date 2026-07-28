@@ -1,0 +1,64 @@
+name: Repair Alpaca provider clock skew
+
+on:
+  push:
+    branches:
+      - fix-alpaca-authenticated-pairing
+    paths:
+      - ".github/workflows/repair-alpaca-clock-skew.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: fix-alpaca-authenticated-pairing
+          fetch-depth: 0
+
+      - name: Add bounded live-provider clock tolerance
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("operations/free_paper_pilot.py")
+          source = path.read_text(encoding="utf-8")
+          old_age = "            maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)\n"
+          new_age = (
+              "            maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)\n"
+              "            maximum_future_skew = (\n"
+              "                timedelta(seconds=5) if dynamic_evaluation_time else timedelta(0)\n"
+              "            )\n"
+          )
+          if source.count(old_age) != 1:
+              raise SystemExit("maximum quote age line not found exactly once")
+          source = source.replace(old_age, new_age, 1)
+
+          old_future = '''                if observed > now:\n                    raise ValueError(f"{symbol} quote is future-known")\n                quote_times.append((symbol, observed.isoformat()))\n'''
+          new_future = '''                if observed > now + maximum_future_skew:\n                    raise ValueError(f"{symbol} quote is future-known")\n                if observed > now:\n                    warnings.append(\n                        f"{symbol}: quote timestamp is within the 5-second provider clock tolerance"\n                    )\n                quote_times.append((symbol, observed.isoformat()))\n'''
+          if source.count(old_future) != 1:
+              raise SystemExit("future quote validation block not found exactly once")
+          path.write_text(source.replace(old_future, new_future, 1), encoding="utf-8")
+
+          tests = Path("tests/test_free_paper_pilot.py")
+          test_source = tests.read_text(encoding="utf-8")
+          addition = '''\n\ndef test_live_readiness_allows_only_bounded_provider_clock_skew() -> None:\n    def skewed_quote_http_get(url: str, **kwargs: Any) -> _Response:\n        if url.endswith("/v2/stocks/quotes/latest"):\n            symbols = str(kwargs["params"]["symbols"]).split(",")\n            observed = (datetime.now(timezone.utc) + timedelta(seconds=2)).isoformat()\n            return _Response(\n                {\n                    "quotes": {\n                        symbol: {\n                            "bp": 99.9,\n                            "ap": 100.1,\n                            "bs": 500,\n                            "as": 400,\n                            "t": observed,\n                        }\n                        for symbol in symbols\n                    }\n                }\n            )\n        return _http_get(url, **kwargs)\n\n    universe = load_free_paper_pilot_universe(\n        ROOT / "config" / "free_paper_pilot_universe.json"\n    )\n    client = AlpacaPaperClient(\n        AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),\n        http_get=skewed_quote_http_get,\n    )\n\n    report = assess_free_paper_pilot_readiness(universe=universe, client=client)\n\n    assert report.configuration_ready\n    assert any("5-second provider clock tolerance" in warning for warning in report.warnings)\n'''
+          if "test_live_readiness_allows_only_bounded_provider_clock_skew" not in test_source:
+              tests.write_text(test_source.rstrip() + addition + "\n", encoding="utf-8")
+          PY
+
+      - name: Commit provider clock tolerance
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add operations/free_paper_pilot.py tests/test_free_paper_pilot.py
+          git commit -m "Allow bounded Alpaca provider clock skew"
+          git push origin HEAD:fix-alpaca-authenticated-pairing
