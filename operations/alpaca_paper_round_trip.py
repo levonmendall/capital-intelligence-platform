@@ -56,6 +56,14 @@ def _decimal(value: object, *, field_name: str, default: Decimal | None = None) 
     return result
 
 
+def _usable_position_value(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str) and not value.strip():
+        return False
+    return True
+
+
 def _available_quantity(position: object) -> Decimal:
     if position is None:
         return Decimal("0")
@@ -66,8 +74,11 @@ def _available_quantity(position: object) -> Decimal:
             raise TypeError("position must be a mapping") from error
     else:
         source = position
+    candidate = source.get("qty_available")
+    if not _usable_position_value(candidate):
+        candidate = source.get("qty")
     return _decimal(
-        source.get("qty_available", source.get("qty")),
+        candidate,
         field_name="available position quantity",
         default=Decimal("0"),
     )
@@ -158,6 +169,11 @@ class FeeAwareAlpacaPaperBrokerExecutor(AlpacaPaperBrokerExecutor):
             greater_than=opening_available,
         )
         acquired_available = after_buy_available - opening_available
+        if acquired_available <= 0:
+            raise AlpacaPaperBrokerError(
+                "net available crypto quantity is not positive after waiting for "
+                "the broker position to update"
+            )
         sell_quantity = _round_down_crypto_quantity(acquired_available)
 
         sell = self.submit_and_reconcile(
