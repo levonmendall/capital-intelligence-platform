@@ -1,0 +1,69 @@
+name: Repair Alpaca quote cutoff
+
+on:
+  push:
+    branches:
+      - fix-alpaca-authenticated-pairing
+    paths:
+      - ".github/workflows/repair-alpaca-quote-cutoff.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: fix-alpaca-authenticated-pairing
+          fetch-depth: 0
+
+      - name: Repair dynamic readiness timestamp
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("operations/free_paper_pilot.py")
+          source = path.read_text(encoding="utf-8")
+          old_now = "    now = evaluated_at or datetime.now(timezone.utc)\n"
+          new_now = (
+              "    dynamic_evaluation_time = evaluated_at is None\n"
+              "    now = evaluated_at or datetime.now(timezone.utc)\n"
+          )
+          if source.count(old_now) != 1:
+              raise SystemExit("readiness evaluation timestamp assignment not found exactly once")
+          source = source.replace(old_now, new_now, 1)
+
+          old_quotes = "            quotes = client.latest_quotes(validated)\n            maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)\n"
+          new_quotes = (
+              "            quotes = client.latest_quotes(validated)\n"
+              "            if dynamic_evaluation_time:\n"
+              "                # Live readiness is evaluated after the provider response arrives.\n"
+              "                # Explicit point-in-time evaluations remain strict and immutable.\n"
+              "                now = datetime.now(timezone.utc)\n"
+              "            maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)\n"
+          )
+          if source.count(old_quotes) != 1:
+              raise SystemExit("quote validation insertion point not found exactly once")
+          path.write_text(source.replace(old_quotes, new_quotes, 1), encoding="utf-8")
+
+          tests = Path("tests/test_free_paper_pilot.py")
+          test_source = tests.read_text(encoding="utf-8")
+          addition = '''\n\ndef test_live_readiness_uses_post_response_time_for_quote_cutoff() -> None:\n    def current_quote_http_get(url: str, **kwargs: Any) -> _Response:\n        if url.endswith("/v2/stocks/quotes/latest"):\n            symbols = str(kwargs["params"]["symbols"]).split(",")\n            observed = datetime.now(timezone.utc).isoformat()\n            return _Response(\n                {\n                    "quotes": {\n                        symbol: {\n                            "bp": 99.9,\n                            "ap": 100.1,\n                            "bs": 500,\n                            "as": 400,\n                            "t": observed,\n                        }\n                        for symbol in symbols\n                    }\n                }\n            )\n        return _http_get(url, **kwargs)\n\n    universe = load_free_paper_pilot_universe(\n        ROOT / "config" / "free_paper_pilot_universe.json"\n    )\n    client = AlpacaPaperClient(\n        AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),\n        http_get=current_quote_http_get,\n    )\n\n    report = assess_free_paper_pilot_readiness(universe=universe, client=client)\n\n    assert report.configuration_ready\n    assert len(report.quote_timestamps) == 15\n    assert not any("future-known" in blocker for blocker in report.blockers)\n'''
+          if "test_live_readiness_uses_post_response_time_for_quote_cutoff" not in test_source:
+              tests.write_text(test_source.rstrip() + addition + "\n", encoding="utf-8")
+          PY
+
+      - name: Commit quote cutoff repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add operations/free_paper_pilot.py tests/test_free_paper_pilot.py
+          git commit -m "Evaluate live quotes after provider response"
+          git push origin HEAD:fix-alpaca-authenticated-pairing
