@@ -1,0 +1,144 @@
+name: Apply Streamlit UI import hotfix
+
+on:
+  push:
+    branches:
+      - hotfix-157-streamlit-ui-import-cache
+    paths:
+      - .github/workflows/apply-streamlit-import-hotfix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix-157-streamlit-ui-import-cache
+          fetch-depth: 0
+      - name: Make presentation imports deployment-safe
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('app.py')
+          source = path.read_text(encoding='utf-8')
+          pattern = re.compile(r"from premium_ui import \(\n(?:    [A-Za-z_]+,\n)+\)\n")
+          replacement = '''import importlib
+
+import premium_ui as _premium_ui
+
+# Streamlit Community Cloud may retain an imported presentation module while
+# replacing repository files during a hot deployment. Reload the module and
+# keep backward-compatible adapters so a transient mixed-version process never
+# takes the application offline.
+_premium_ui = importlib.reload(_premium_ui)
+
+activity_rail = getattr(_premium_ui, "activity_rail", lambda _items: None)
+allocation_bar = _premium_ui.allocation_bar
+apply_global_style = _premium_ui.apply_global_style
+bullet_lines = _premium_ui.bullet_lines
+callout_card = _premium_ui.callout_card
+display_frame = _premium_ui.display_frame
+format_currency = _premium_ui.format_currency
+format_datetime = _premium_ui.format_datetime
+format_percent = _premium_ui.format_percent
+page_header = _premium_ui.page_header
+render_app_header = _premium_ui.render_app_header
+render_navigation = _premium_ui.render_navigation
+render_sidebar = _premium_ui.render_sidebar
+surface_story = getattr(
+    _premium_ui,
+    "surface_story",
+    lambda _active_page, _steps: None,
+)
+text_card = _premium_ui.text_card
+
+
+def metric_grid(metrics, *, variant: str = "today") -> None:
+    """Render page-aware metrics while tolerating a stale pre-variant module."""
+
+    try:
+        _premium_ui.metric_grid(metrics, variant=variant)
+    except TypeError as error:
+        if "unexpected keyword argument 'variant'" not in str(error):
+            raise
+        _premium_ui.metric_grid(metrics)
+
+
+def signal_panel(
+    state: str,
+    title: object,
+    body: object,
+    *,
+    variant: str = "today",
+) -> None:
+    """Render a page-aware signal while tolerating a stale presentation module."""
+
+    try:
+        _premium_ui.signal_panel(state, title, body, variant=variant)
+    except TypeError as error:
+        if "unexpected keyword argument 'variant'" not in str(error):
+            raise
+        _premium_ui.signal_panel(state, title, body)
+'''
+          updated, count = pattern.subn(replacement, source, count=1)
+          if count != 1:
+              raise SystemExit('premium_ui import block was not found exactly once')
+          path.write_text(updated, encoding='utf-8')
+          PY
+      - name: Add startup regression contract
+        run: |
+          cat > tests/test_streamlit_ui_import_resilience.py <<'PY'
+          """Regression contracts for mixed-version Streamlit hot deployments."""
+
+          from pathlib import Path
+
+
+          ROOT = Path(__file__).resolve().parents[1]
+
+
+          def test_app_reloads_presentation_module_before_binding_helpers() -> None:
+              app = (ROOT / "app.py").read_text(encoding="utf-8")
+
+              assert "import premium_ui as _premium_ui" in app
+              assert "_premium_ui = importlib.reload(_premium_ui)" in app
+              assert 'getattr(_premium_ui, "activity_rail"' in app
+              assert '"surface_story",' in app
+
+
+          def test_page_aware_helpers_have_legacy_signature_fallbacks() -> None:
+              app = (ROOT / "app.py").read_text(encoding="utf-8")
+
+              assert "def metric_grid(metrics, *, variant: str = \"today\")" in app
+              assert "def signal_panel(" in app
+              assert app.count("unexpected keyword argument 'variant'") == 2
+
+
+          def test_current_presentation_module_exports_every_required_helper() -> None:
+              ui = (ROOT / "premium_ui.py").read_text(encoding="utf-8")
+
+              for helper in (
+                  "activity_rail",
+                  "allocation_bar",
+                  "surface_story",
+                  "metric_grid",
+                  "signal_panel",
+                  "render_app_header",
+              ):
+                  assert f"def {helper}(" in ui
+          PY
+      - name: Verify syntax
+        run: python -m py_compile app.py premium_ui.py
+      - name: Commit hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-streamlit-import-hotfix.yml
+          git add app.py tests/test_streamlit_ui_import_resilience.py
+          git commit -m "Prevent Streamlit UI import cache crashes"
+          git push origin HEAD:hotfix-157-streamlit-ui-import-cache
