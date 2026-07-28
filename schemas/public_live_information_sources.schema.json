@@ -52,7 +52,14 @@
             "cisa_kev",
             "treasury_fiscal",
             "world_bank",
-            "eia_v2"
+            "eia_v2",
+            "federal_register",
+            "ofac_csv",
+            "fema_open",
+            "openfda_enforcement",
+            "who_disease_outbreaks",
+            "firms_csv",
+            "imf_datamapper"
           ]
         },
         "endpoint": {"type": "string", "pattern": "^https://"},

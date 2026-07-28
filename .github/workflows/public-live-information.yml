@@ -11,6 +11,8 @@ on:
       - main
     paths:
       - "providers/public_live_information.py"
+      - "providers/public_live_information_runtime.py"
+      - "providers/public_live_information_extended.py"
       - "config/public_live_information_sources.json"
       - "schemas/public_live_information_sources.schema.json"
       - "run_public_live_information.py"
@@ -32,6 +34,7 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
       SEC_USER_AGENT: Capital Intelligence Platform https://github.com/levonmendall/capital-intelligence-platform-
       EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+      NASA_FIRMS_MAP_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
 
     steps:
       - name: Check out repository
