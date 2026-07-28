@@ -56,7 +56,12 @@ def _texts(value: object, *, field_name: str, minimum: int = 0) -> tuple[str, ..
 
 
 def _json(value: Mapping[str, Any]) -> str:
-    return json.dumps(dict(value), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        dict(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,39 +98,79 @@ class ProductTestReadinessEvidence:
     data_integrity_failures: int
     reconciliation_failures: int
     evidence_identifiers: tuple[str, ...]
+    paper_launch_ready: bool = False
     open_development_items: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("identifier", "code_version"):
-            object.__setattr__(self, field_name, _text(getattr(self, field_name), field_name=field_name))
+            object.__setattr__(
+                self,
+                field_name,
+                _text(getattr(self, field_name), field_name=field_name),
+            )
         _aware(self.assessed_at, field_name="assessed_at")
         for field_name in ("test_baseline_identifier", "process_version"):
             value = getattr(self, field_name)
             if value is not None:
-                object.__setattr__(self, field_name, _text(value, field_name=field_name))
+                object.__setattr__(
+                    self,
+                    field_name,
+                    _text(value, field_name=field_name),
+                )
         boolean_fields = (
-            "development_remains_open", "core_us_market_ready", "crypto_market_ready",
-            "spot_fx_market_ready", "international_equity_market_ready",
-            "fixed_income_market_ready", "commodity_market_ready",
-            "real_estate_market_ready", "futures_market_ready",
-            "options_market_ready", "volatility_market_ready",
-            "alternative_market_ready", "certified_data_ready",
-            "complete_screening_ready", "production_context_ready", "portfolio_construction_ready",
-            "paper_execution_ready", "thesis_and_evaluation_ready", "daily_operations_ready",
-            "four_screen_product_ready", "security_suite_ready", "resilience_campaign_ready",
+            "development_remains_open",
+            "core_us_market_ready",
+            "crypto_market_ready",
+            "spot_fx_market_ready",
+            "international_equity_market_ready",
+            "fixed_income_market_ready",
+            "commodity_market_ready",
+            "real_estate_market_ready",
+            "futures_market_ready",
+            "options_market_ready",
+            "volatility_market_ready",
+            "alternative_market_ready",
+            "certified_data_ready",
+            "complete_screening_ready",
+            "production_context_ready",
+            "portfolio_construction_ready",
+            "paper_execution_ready",
+            "thesis_and_evaluation_ready",
+            "daily_operations_ready",
+            "four_screen_product_ready",
+            "security_suite_ready",
+            "resilience_campaign_ready",
             "paper_only_disclosures_ready",
+            "paper_launch_ready",
         )
         for field_name in boolean_fields:
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be a bool")
         for field_name in (
-            "unresolved_critical_incidents", "data_integrity_failures", "reconciliation_failures"
+            "unresolved_critical_incidents",
+            "data_integrity_failures",
+            "reconciliation_failures",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{field_name} must be a nonnegative integer")
-        object.__setattr__(self, "evidence_identifiers", _texts(self.evidence_identifiers, field_name="evidence_identifiers", minimum=1))
-        object.__setattr__(self, "open_development_items", _texts(self.open_development_items, field_name="open_development_items"))
+        object.__setattr__(
+            self,
+            "evidence_identifiers",
+            _texts(
+                self.evidence_identifiers,
+                field_name="evidence_identifiers",
+                minimum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "open_development_items",
+            _texts(
+                self.open_development_items,
+                field_name="open_development_items",
+            ),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,6 +202,7 @@ class ProductTestReadinessEvidence:
             "security_suite_ready": self.security_suite_ready,
             "resilience_campaign_ready": self.resilience_campaign_ready,
             "paper_only_disclosures_ready": self.paper_only_disclosures_ready,
+            "paper_launch_ready": self.paper_launch_ready,
             "unresolved_critical_incidents": self.unresolved_critical_incidents,
             "data_integrity_failures": self.data_integrity_failures,
             "reconciliation_failures": self.reconciliation_failures,
@@ -167,8 +213,7 @@ class ProductTestReadinessEvidence:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "ProductTestReadinessEvidence":
         normalized = dict(payload)
-        # Older persisted evidence predated universal-market readiness gates.
-        # Missing fields fail closed rather than being inferred as ready.
+        # Missing later-version gates fail closed rather than being inferred ready.
         for field_name in (
             "fixed_income_market_ready",
             "commodity_market_ready",
@@ -177,6 +222,7 @@ class ProductTestReadinessEvidence:
             "options_market_ready",
             "volatility_market_ready",
             "alternative_market_ready",
+            "paper_launch_ready",
         ):
             normalized.setdefault(field_name, False)
         return cls(
@@ -184,7 +230,9 @@ class ProductTestReadinessEvidence:
                 **normalized,
                 "assessed_at": datetime.fromisoformat(str(payload["assessed_at"])),
                 "evidence_identifiers": tuple(payload["evidence_identifiers"]),
-                "open_development_items": tuple(payload.get("open_development_items", ())),
+                "open_development_items": tuple(
+                    payload.get("open_development_items", ())
+                ),
             }
         )
 
@@ -204,7 +252,9 @@ class ProductTestReadinessReport:
 
     def __post_init__(self) -> None:
         if self.real_money_authorized or self.performance_claims_permitted:
-            raise ValueError("test readiness cannot authorize real money or performance claims")
+            raise ValueError(
+                "test readiness cannot authorize real money or performance claims"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -225,21 +275,42 @@ class ProductTestReadinessEvaluator:
     """Evaluate a versioned baseline without requiring main development to stop."""
 
     _REQUIRED_FLAGS = (
-        "core_us_market_ready", "crypto_market_ready", "spot_fx_market_ready",
-        "international_equity_market_ready", "fixed_income_market_ready",
-        "commodity_market_ready", "real_estate_market_ready",
-        "futures_market_ready", "options_market_ready",
-        "volatility_market_ready", "alternative_market_ready",
-        "certified_data_ready", "complete_screening_ready",
-        "production_context_ready", "portfolio_construction_ready", "paper_execution_ready",
-        "thesis_and_evaluation_ready", "daily_operations_ready", "four_screen_product_ready",
-        "security_suite_ready", "resilience_campaign_ready", "paper_only_disclosures_ready",
+        "core_us_market_ready",
+        "crypto_market_ready",
+        "spot_fx_market_ready",
+        "international_equity_market_ready",
+        "fixed_income_market_ready",
+        "commodity_market_ready",
+        "real_estate_market_ready",
+        "futures_market_ready",
+        "options_market_ready",
+        "volatility_market_ready",
+        "alternative_market_ready",
+        "certified_data_ready",
+        "complete_screening_ready",
+        "production_context_ready",
+        "portfolio_construction_ready",
+        "paper_execution_ready",
+        "thesis_and_evaluation_ready",
+        "daily_operations_ready",
+        "four_screen_product_ready",
+        "security_suite_ready",
+        "resilience_campaign_ready",
+        "paper_only_disclosures_ready",
+        "paper_launch_ready",
     )
 
-    def evaluate(self, evidence: ProductTestReadinessEvidence) -> ProductTestReadinessReport:
+    def evaluate(
+        self,
+        evidence: ProductTestReadinessEvidence,
+    ) -> ProductTestReadinessReport:
         if not isinstance(evidence, ProductTestReadinessEvidence):
             raise TypeError("evidence must be ProductTestReadinessEvidence")
-        blockers = [name.removesuffix("_ready") for name in self._REQUIRED_FLAGS if not getattr(evidence, name)]
+        blockers = [
+            name.removesuffix("_ready")
+            for name in self._REQUIRED_FLAGS
+            if not getattr(evidence, name)
+        ]
         if evidence.test_baseline_identifier is None:
             blockers.append("immutable_test_baseline")
         if evidence.process_version is None:
@@ -251,7 +322,11 @@ class ProductTestReadinessEvaluator:
         if evidence.reconciliation_failures:
             blockers.append("reconciliation_failures")
         if blockers:
-            state = ProductTestReadiness.DEVELOPMENT_IN_PROGRESS if evidence.development_remains_open else ProductTestReadiness.BLOCKED
+            state = (
+                ProductTestReadiness.DEVELOPMENT_IN_PROGRESS
+                if evidence.development_remains_open
+                else ProductTestReadiness.BLOCKED
+            )
         else:
             state = ProductTestReadiness.READY_FOR_CONTROLLED_PAPER_TEST
         return ProductTestReadinessReport(
@@ -274,7 +349,8 @@ class SQLiteProductTestReadinessStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as connection:
-            connection.executescript(f"""
+            connection.executescript(
+                f"""
                 CREATE TABLE IF NOT EXISTS {self._TABLE} (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     identifier TEXT NOT NULL UNIQUE,
@@ -283,15 +359,26 @@ class SQLiteProductTestReadinessStore:
                     previous_hash TEXT NOT NULL,
                     content_hash TEXT NOT NULL UNIQUE
                 );
-                CREATE TRIGGER IF NOT EXISTS {self._TABLE}_no_update BEFORE UPDATE ON {self._TABLE}
+                CREATE TRIGGER IF NOT EXISTS {self._TABLE}_no_update
+                BEFORE UPDATE ON {self._TABLE}
                 BEGIN SELECT RAISE(ABORT, 'test readiness history is append-only'); END;
-                CREATE TRIGGER IF NOT EXISTS {self._TABLE}_no_delete BEFORE DELETE ON {self._TABLE}
+                CREATE TRIGGER IF NOT EXISTS {self._TABLE}_no_delete
+                BEFORE DELETE ON {self._TABLE}
                 BEGIN SELECT RAISE(ABORT, 'test readiness history is append-only'); END;
-            """)
+                """
+            )
 
     @staticmethod
-    def _hash(sequence: int, identifier: str, assessed_at: str, payload: str, previous: str) -> str:
-        return hashlib.sha256(f"{sequence}|{identifier}|{assessed_at}|{payload}|{previous}".encode()).hexdigest()
+    def _hash(
+        sequence: int,
+        identifier: str,
+        assessed_at: str,
+        payload: str,
+        previous: str,
+    ) -> str:
+        return hashlib.sha256(
+            f"{sequence}|{identifier}|{assessed_at}|{payload}|{previous}".encode()
+        ).hexdigest()
 
     def append(self, report: ProductTestReadinessReport) -> int:
         if not isinstance(report, ProductTestReadinessReport):
@@ -299,33 +386,67 @@ class SQLiteProductTestReadinessStore:
         self.verify_integrity()
         payload = _json(report.to_dict())
         with sqlite3.connect(self.path) as connection:
-            existing = connection.execute(f"SELECT sequence,payload_json FROM {self._TABLE} WHERE identifier=?", (report.identifier,)).fetchone()
+            existing = connection.execute(
+                f"SELECT sequence, payload_json FROM {self._TABLE} WHERE identifier = ?",
+                (report.identifier,),
+            ).fetchone()
             if existing is not None:
                 if existing[1] != payload:
-                    raise ValueError("report identifier already exists with different content")
+                    raise ValueError(
+                        "report identifier already exists with different content"
+                    )
                 return int(existing[0])
-            tail = connection.execute(f"SELECT sequence,content_hash FROM {self._TABLE} ORDER BY sequence DESC LIMIT 1").fetchone()
+            tail = connection.execute(
+                f"SELECT sequence, content_hash FROM {self._TABLE} "
+                "ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
             sequence = 1 if tail is None else int(tail[0]) + 1
             previous = self._GENESIS if tail is None else str(tail[1])
-            content_hash = self._hash(sequence, report.identifier, report.assessed_at.isoformat(), payload, previous)
-            connection.execute(f"INSERT INTO {self._TABLE} VALUES (?,?,?,?,?,?)", (sequence, report.identifier, report.assessed_at.isoformat(), payload, previous, content_hash))
+            content_hash = self._hash(
+                sequence,
+                report.identifier,
+                report.assessed_at.isoformat(),
+                payload,
+                previous,
+            )
+            connection.execute(
+                f"INSERT INTO {self._TABLE} VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    sequence,
+                    report.identifier,
+                    report.assessed_at.isoformat(),
+                    payload,
+                    previous,
+                    content_hash,
+                ),
+            )
         return sequence
 
     def verify_integrity(self) -> bool:
         previous = self._GENESIS
         with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(f"SELECT * FROM {self._TABLE} ORDER BY sequence").fetchall()
+            rows = connection.execute(
+                f"SELECT * FROM {self._TABLE} ORDER BY sequence"
+            ).fetchall()
         for expected, row in enumerate(rows, 1):
             if row[0] != expected or row[4] != previous:
-                raise TestReadinessIntegrityError("test readiness chain is not contiguous")
+                raise TestReadinessIntegrityError(
+                    "test readiness chain is not contiguous"
+                )
             actual = self._hash(row[0], row[1], row[2], row[3], row[4])
             if row[5] != actual:
-                raise TestReadinessIntegrityError("test readiness content hash is invalid")
+                raise TestReadinessIntegrityError(
+                    "test readiness content hash is invalid"
+                )
             previous = actual
         return True
 
 
 __all__ = [
-    "ProductTestReadiness", "ProductTestReadinessEvidence", "ProductTestReadinessEvaluator",
-    "ProductTestReadinessReport", "SQLiteProductTestReadinessStore", "TestReadinessIntegrityError",
+    "ProductTestReadiness",
+    "ProductTestReadinessEvidence",
+    "ProductTestReadinessEvaluator",
+    "ProductTestReadinessReport",
+    "SQLiteProductTestReadinessStore",
+    "TestReadinessIntegrityError",
 ]
