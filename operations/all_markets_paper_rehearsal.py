@@ -1,8 +1,8 @@
-"""Deterministic mechanical rehearsal for every governed paper-market family.
+"""Deterministic mechanical rehearsal for every classified paper asset class.
 
-This rehearsal does not assert external data readiness or investment quality.  It
-proves that each classified non-core market can traverse the exact certified
-universe, asset-aware session, quote, contract-multiplier, cross-currency cash,
+This rehearsal does not assert external provider readiness or investment quality.
+It proves that all classified liquid public-market families can traverse the
+certified universe, session, quote, contract-multiplier, cross-currency cash,
 portfolio-state, and reconciliation boundaries without live-order authority.
 """
 
@@ -15,16 +15,13 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cio import CandidateAssetClass
-from governance.asset_class_scope import (
-    AssetClassApprovalState,
-    TradingSessionModel,
-    UNIVERSAL_GOVERNED_ASSET_CLASSES,
-)
+from governance.asset_class_scope import AssetClassApprovalState, TradingSessionModel
 from governance.eligible_universe import (
     CertifiedEligibleUniversePublication,
     EligibleUniverseCertificationState,
     SQLiteCertifiedEligibleUniverseStore,
 )
+from operations.universal_paper_availability import ALL_CLASSIFIED_ASSET_CLASSES
 from portfolio.construction_models import (
     ConstructionStatus,
     PortfolioConstructionResult,
@@ -40,10 +37,7 @@ from portfolio.multi_asset_execution import (
     MultiAssetQuote,
     SQLiteMultiAssetPaperExecutionStore,
 )
-from portfolio.state import (
-    CanonicalPortfolioSnapshot,
-    SQLiteCanonicalPortfolioStore,
-)
+from portfolio.state import CanonicalPortfolioSnapshot, SQLiteCanonicalPortfolioStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,9 +58,7 @@ class RehearsalInstrument:
 
     @property
     def instrument_identifier(self) -> str:
-        return (
-            f"instrument:{self.asset_class.value}:{self.venue}:{self.symbol}"
-        )
+        return f"instrument:{self.asset_class.value}:{self.venue}:{self.symbol}"
 
     @property
     def approval_identifier(self) -> str:
@@ -74,6 +66,21 @@ class RehearsalInstrument:
 
 
 _INSTRUMENTS = (
+    RehearsalInstrument(
+        "AAPL", CandidateAssetClass.US_EQUITY, "NASDAQ", "US",
+        "common_stock", "USD", "USD", 199.90, 200.10, 200.00, 1.0, 1.0,
+        TradingSessionModel.EXCHANGE_LOCAL,
+    ),
+    RehearsalInstrument(
+        "SPY", CandidateAssetClass.US_ETF, "NYSEARCA", "US",
+        "fund", "USD", "USD", 599.90, 600.10, 600.00, 1.0, 1.0,
+        TradingSessionModel.EXCHANGE_LOCAL,
+    ),
+    RehearsalInstrument(
+        "BIL", CandidateAssetClass.CASH_EQUIVALENT, "NYSEARCA", "US",
+        "fund", "USD", "USD", 91.49, 91.51, 91.50, 1.0, 1.0,
+        TradingSessionModel.EXCHANGE_LOCAL,
+    ),
     RehearsalInstrument(
         "SHEL", CandidateAssetClass.INTERNATIONAL_EQUITY, "LSE", "GB",
         "common_stock", "GBP", "GBP", 19.95, 20.05, 20.00, 1.25, 1.0,
@@ -127,16 +134,7 @@ _INSTRUMENTS = (
 )
 
 
-
-
 def _reset_rehearsal_state(root: Path) -> None:
-    """Remove only fixture databases created by this deterministic rehearsal.
-
-    Release validation may be retried in the same working directory.  The
-    rehearsal owns these three database names, so resetting them is safer than
-    interpreting prior fixture state as a production resume request.
-    """
-
     for name in ("eligible-universe.db", "portfolio.db", "execution.db"):
         database = root / name
         for suffix in ("", "-shm", "-wal", "-journal"):
@@ -259,7 +257,7 @@ class AllMarketsPaperRehearsalReport:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": "all-markets-paper-rehearsal.v1",
+            "schema_version": "all-markets-paper-rehearsal.v2",
             "identifier": self.identifier,
             "evaluated_at": self.evaluated_at.isoformat(),
             "status": self.status,
@@ -271,7 +269,11 @@ class AllMarketsPaperRehearsalReport:
             "reconciliation_difference": self.reconciliation_difference,
             "blockers": list(self.blockers),
             "fixture_data_only": True,
+            "all_classified_asset_classes_covered": (
+                self.expected_asset_classes == self.filled_asset_classes
+            ),
             "external_data_ready": False,
+            "live_order_routing_authorized": False,
             "real_money_authorized": False,
         }
 
@@ -283,12 +285,14 @@ def run_all_markets_paper_rehearsal(
 ) -> AllMarketsPaperRehearsalReport:
     if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
         raise ValueError("evaluated_at must be timezone-aware")
-    expected = tuple(sorted(item.value for item in UNIVERSAL_GOVERNED_ASSET_CLASSES))
+    expected = tuple(
+        sorted(item.value for item in ALL_CLASSIFIED_ASSET_CLASSES)
+    )
     configured = tuple(sorted(item.asset_class.value for item in _INSTRUMENTS))
     blockers: list[str] = []
     if configured != expected:
         blockers.append(
-            "rehearsal instruments do not exactly cover the governed market scope"
+            "rehearsal instruments do not exactly cover every classified asset class"
         )
     root_context = (
         tempfile.TemporaryDirectory(prefix="capital-intelligence-rehearsal-")
@@ -302,16 +306,20 @@ def run_all_markets_paper_rehearsal(
     _reset_rehearsal_state(root)
     try:
         profiles = {item.symbol: _profile(item) for item in _INSTRUMENTS}
-        quotes = {item.symbol: _quote(item, as_of=evaluated_at) for item in _INSTRUMENTS}
+        quotes = {
+            item.symbol: _quote(item, as_of=evaluated_at)
+            for item in _INSTRUMENTS
+        }
+        class_weight = 0.01
         trades = tuple(
             TradeProposal(
                 symbol=item.symbol,
                 side=TradeSide.BUY,
                 from_weight=0.0,
-                to_weight=0.01,
-                trade_weight=0.01,
+                to_weight=class_weight,
+                trade_weight=class_weight,
                 estimated_cost_return=0.001,
-                reason="all-market mechanical rehearsal",
+                reason="universal asset-class mechanical rehearsal",
             )
             for item in _INSTRUMENTS
         )
@@ -321,10 +329,12 @@ def run_all_markets_paper_rehearsal(
             as_of=evaluated_at - timedelta(minutes=1),
             status=ConstructionStatus.FEASIBLE,
             policy_version="portfolio-construction.v1",
-            target_cash_weight=0.90,
-            target_weights=tuple((item.symbol, 0.01) for item in _INSTRUMENTS),
+            target_cash_weight=round(1.0 - class_weight * len(_INSTRUMENTS), 8),
+            target_weights=tuple(
+                (item.symbol, class_weight) for item in _INSTRUMENTS
+            ),
             trades=trades,
-            turnover=0.10,
+            turnover=round(class_weight * len(_INSTRUMENTS), 8),
             estimated_cost_return=0.001,
             expected_return_before=0.05,
             expected_return_after_cost=0.049,
@@ -333,7 +343,8 @@ def run_all_markets_paper_rehearsal(
             blocks=(),
             eligible_universe_publication_identifier=publication_identifier,
             instrument_identifiers=tuple(
-                (item.symbol, item.instrument_identifier) for item in _INSTRUMENTS
+                (item.symbol, item.instrument_identifier)
+                for item in _INSTRUMENTS
             ),
         )
         universe_store = SQLiteCertifiedEligibleUniverseStore(
@@ -354,8 +365,8 @@ def run_all_markets_paper_rehearsal(
                 eligible_instrument_identifiers=tuple(
                     item.instrument_identifier for item in _INSTRUMENTS
                 ),
-                source_versions=(("rehearsal-fixture", "v1"),),
-                model_versions=(("execution", "mechanical-rehearsal.v1"),),
+                source_versions=(("rehearsal-fixture", "v2"),),
+                model_versions=(("execution", "mechanical-rehearsal.v2"),),
                 instrument_approval_identifiers=tuple(
                     (item.instrument_identifier, item.approval_identifier)
                     for item in _INSTRUMENTS
@@ -397,7 +408,7 @@ def run_all_markets_paper_rehearsal(
             blockers.append(f"execution batch status is {batch.status.value}")
         missing = sorted(set(expected) - set(filled))
         if missing:
-            blockers.append("markets without fills: " + ", ".join(missing))
+            blockers.append("asset classes without fills: " + ", ".join(missing))
         if not batch.reconciliation.reconciled:
             blockers.append("portfolio reconciliation failed")
         if batch.ending_snapshot.cash_amount < 0:
