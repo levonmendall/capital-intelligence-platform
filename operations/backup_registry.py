@@ -135,6 +135,13 @@ CANONICAL_BACKUP_AUTHORITIES: tuple[CanonicalBackupAuthority, ...] = (
         "evidence",
     ),
     CanonicalBackupAuthority(
+        "free_provider_connections",
+        "CAPITAL_INTELLIGENCE_FREE_PROVIDER_DATABASE",
+        "free_provider_connections.db",
+        "evidence",
+        required_for_decision_reproduction=False,
+    ),
+    CanonicalBackupAuthority(
         "institutional_journal",
         "CAPITAL_INTELLIGENCE_JOURNAL_DATABASE",
         "institutional_journal.db",
