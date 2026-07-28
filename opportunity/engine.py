@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cio import CandidateDecisionRecord, RecommendationUniversePolicy
+from cio.robustness import (
+    RobustCandidateAssessment,
+    RobustCandidateAssessor,
+    RobustDecisionPolicy,
+)
 from opportunity.models import (
     AlternativeKind,
     CandidateQualification,
@@ -24,7 +29,7 @@ def _clamp(value: float) -> float:
 class OpportunityQualificationPolicy:
     """Versioned committee-attention and opportunity-ranking rules."""
 
-    version: str = "opportunity-qualification.v1"
+    version: str = "opportunity-qualification.v2"
     minimum_net_expected_return: float = 0.05
     minimum_probability_of_success: float = 0.55
     minimum_evidence_score: float = 0.70
@@ -90,16 +95,18 @@ class OpportunityQualificationPolicy:
 
 
 class OpportunityEngine:
-    """Reduce the investable universe to a ranked specialist-review queue."""
+    """Reduce the investable universe to a robust ranked specialist-review queue."""
 
     def __init__(
         self,
         *,
         universe_policy: RecommendationUniversePolicy | None = None,
         qualification_policy: OpportunityQualificationPolicy | None = None,
+        robustness_policy: RobustDecisionPolicy | None = None,
     ) -> None:
         self.universe_policy = universe_policy or RecommendationUniversePolicy()
         self.policy = qualification_policy or OpportunityQualificationPolicy()
+        self.robust_assessor = RobustCandidateAssessor(robustness_policy)
 
     def build_queue(
         self,
@@ -131,25 +138,32 @@ class OpportunityEngine:
             tuple[
                 CandidateDecisionRecord,
                 CandidateQualification,
+                RobustCandidateAssessment,
                 tuple[ScoreComponent, ...],
                 float,
             ]
         ] = []
         rejected: list[CandidateQualification] = []
         for candidate in candidates:
-            qualification = self.qualify(candidate, context)
+            qualification, robustness = self._qualify_with_robustness(
+                candidate,
+                context,
+            )
             if not qualification.qualified:
                 rejected.append(qualification)
                 continue
-            components = self._components(candidate, qualification)
+            components = self._components(candidate, qualification, robustness)
             score = round(sum(item.contribution for item in components), 8)
-            qualified.append((candidate, qualification, components, score))
+            qualified.append(
+                (candidate, qualification, robustness, components, score)
+            )
 
         qualified.sort(
             key=lambda item: (
-                item[3],
-                item[0].net_expected_return,
-                item[1].opportunity_edge,
+                item[4],
+                item[2].stressed_edge,
+                item[2].robust_edge,
+                item[2].annualized_geometric_return,
                 item[0].evidence_quality.score,
                 item[0].instrument.symbol,
             ),
@@ -163,10 +177,13 @@ class OpportunityEngine:
                 score=score,
                 components=components,
             )
-            for index, (candidate, qualification, components, score) in enumerate(
-                qualified,
-                start=1,
-            )
+            for index, (
+                candidate,
+                qualification,
+                _robustness,
+                components,
+                score,
+            ) in enumerate(qualified, start=1)
         )
         return OpportunityQueue(
             context_identifier=context.identifier,
@@ -180,6 +197,24 @@ class OpportunityEngine:
         candidate: CandidateDecisionRecord,
         context: OpportunitySetContext,
     ) -> CandidateQualification:
+        qualification, _ = self._qualify_with_robustness(candidate, context)
+        return qualification
+
+    def robustness(
+        self,
+        candidate: CandidateDecisionRecord,
+        context: OpportunitySetContext,
+    ) -> RobustCandidateAssessment:
+        """Return the disclosed robustness assessment used by qualification."""
+
+        _, robustness = self._qualify_with_robustness(candidate, context)
+        return robustness
+
+    def _qualify_with_robustness(
+        self,
+        candidate: CandidateDecisionRecord,
+        context: OpportunitySetContext,
+    ) -> tuple[CandidateQualification, RobustCandidateAssessment]:
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be a CandidateDecisionRecord")
         if not isinstance(context, OpportunitySetContext):
@@ -232,6 +267,10 @@ class OpportunityEngine:
             candidate.net_expected_return - effective_opportunity_cost,
             8,
         )
+        robustness = self.robust_assessor.assess(
+            candidate,
+            alternative_return=effective_opportunity_cost,
+        )
         reasons: list[str] = []
         if not universe.direct_recommendation_allowed:
             reasons.extend(universe.reasons)
@@ -277,51 +316,69 @@ class OpportunityEngine:
             <= self.policy.minimum_portfolio_contribution
         ):
             reasons.append("expected portfolio contribution is not positive")
+        reasons.extend(robustness.reasons)
 
         if reasons:
-            return CandidateQualification(
+            return (
+                CandidateQualification(
+                    candidate_identifier=candidate.identifier,
+                    outcome=QualificationOutcome.REJECTED,
+                    policy_version=self.policy.version,
+                    universe=universe,
+                    effective_opportunity_cost=effective_opportunity_cost,
+                    opportunity_edge=opportunity_edge,
+                    reasons=tuple(dict.fromkeys(reasons)),
+                ),
+                robustness,
+            )
+        return (
+            CandidateQualification(
                 candidate_identifier=candidate.identifier,
-                outcome=QualificationOutcome.REJECTED,
+                outcome=QualificationOutcome.QUALIFIED,
                 policy_version=self.policy.version,
                 universe=universe,
                 effective_opportunity_cost=effective_opportunity_cost,
                 opportunity_edge=opportunity_edge,
-                reasons=tuple(dict.fromkeys(reasons)),
-            )
-        return CandidateQualification(
-            candidate_identifier=candidate.identifier,
-            outcome=QualificationOutcome.QUALIFIED,
-            policy_version=self.policy.version,
-            universe=universe,
-            effective_opportunity_cost=effective_opportunity_cost,
-            opportunity_edge=opportunity_edge,
-            reasons=(
-                "candidate clears universe, return, evidence, liquidity, cost, downside, opportunity, and portfolio-contribution requirements",
+                reasons=(
+                    "candidate clears universe, arithmetic return, geometric robustness, adverse-probability stress, evidence, liquidity, cost, downside, opportunity, and portfolio-contribution requirements",
+                ),
             ),
+            robustness,
         )
 
     def _components(
         self,
         candidate: CandidateDecisionRecord,
         qualification: CandidateQualification,
+        robustness: RobustCandidateAssessment,
     ) -> tuple[ScoreComponent, ...]:
         weights = self.policy.weights
         cost = candidate.implementation_cost_return
+        probability_quality = min(
+            candidate.probability_of_success,
+            1.0 - robustness.probability_of_loss,
+        ) * robustness.evidence_reliability
         raw_and_normalized = (
             (
                 "net_expected_return",
-                candidate.net_expected_return,
-                _clamp((candidate.net_expected_return + 0.10) / 0.40),
+                robustness.evidence_adjusted_return,
+                _clamp((robustness.evidence_adjusted_return + 0.10) / 0.40),
             ),
             (
                 "probability_of_success",
-                candidate.probability_of_success,
-                candidate.probability_of_success,
+                probability_quality,
+                _clamp(probability_quality),
             ),
             (
                 "downside_protection",
-                candidate.expected_downside,
-                _clamp(1.0 - abs(min(candidate.expected_downside, 0.0)) / 0.50),
+                robustness.worst_case_portfolio_return,
+                _clamp(
+                    1.0
+                    - abs(min(robustness.worst_case_portfolio_return, 0.0))
+                    / abs(
+                        self.robust_assessor.policy.minimum_worst_case_portfolio_return
+                    )
+                ),
             ),
             (
                 "evidence_quality",
@@ -345,8 +402,8 @@ class OpportunityEngine:
             ),
             (
                 "opportunity_edge",
-                qualification.opportunity_edge,
-                _clamp(qualification.opportunity_edge / 0.20),
+                robustness.stressed_edge,
+                _clamp(robustness.stressed_edge / 0.20),
             ),
             (
                 "portfolio_contribution",
