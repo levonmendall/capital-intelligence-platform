@@ -12,7 +12,8 @@ import streamlit as st
 
 
 APP_SUBTITLE = (
-    "A living capital-allocation command system for one governed portfolio."
+    "A living capital-allocation command system for one governed portfolio. "
+    "The interface stays quiet until evidence earns attention."
 )
 
 
