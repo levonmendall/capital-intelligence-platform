@@ -23,6 +23,7 @@ from providers.alpaca_paper import (
     AlpacaPaperClient,
     AlpacaPaperProviderError,
     AlpacaPaperSettings,
+    create_alpaca_paper_client,
 )
 
 
@@ -502,7 +503,7 @@ def write_pilot_profiles(
 
 
 def default_alpaca_client() -> AlpacaPaperClient:
-    return AlpacaPaperClient(AlpacaPaperSettings.from_env())
+    return create_alpaca_paper_client()
 
 
 __all__ = [

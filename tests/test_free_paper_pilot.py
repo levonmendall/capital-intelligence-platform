@@ -20,6 +20,7 @@ from providers.alpaca_paper import (
     AlpacaPaperProviderError,
     AlpacaPaperQuoteProvider,
     AlpacaPaperSettings,
+    create_alpaca_paper_client,
 )
 
 
@@ -243,4 +244,27 @@ def test_common_alpaca_environment_aliases_are_supported(monkeypatch) -> None:
     assert settings.paper_base_url == "https://paper-api.alpaca.markets"
     assert settings.data_base_url == "https://data.alpaca.markets"
     assert settings.data_feed == "iex"
+
+def test_authenticated_pair_selection_uses_matching_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("APCA_API_KEY_ID", "wrong-key")
+    monkeypatch.setenv("ALPACA_API_KEY_ID", "matching-key")
+    monkeypatch.setenv("APCA_API_SECRET_KEY", "wrong-secret")
+    monkeypatch.setenv("ALPACA_API_SECRET_KEY", "matching-secret")
+
+    attempts: list[tuple[str, str]] = []
+
+    def authenticated_get(url: str, **kwargs: Any) -> _Response:
+        headers = kwargs["headers"]
+        pair = (headers["APCA-API-KEY-ID"], headers["APCA-API-SECRET-KEY"])
+        attempts.append(pair)
+        if pair == ("matching-key", "matching-secret") and url.endswith("/v2/account"):
+            return _Response({"status": "ACTIVE"})
+        return _Response({"message": "unauthorized"}, status_code=401)
+
+    client = create_alpaca_paper_client(http_get=authenticated_get)
+
+    assert client.settings.api_key_id == "matching-key"
+    assert client.settings.secret_key == "matching-secret"
+    assert attempts[-1] == ("matching-key", "matching-secret")
+    assert len(attempts) == 4
 
