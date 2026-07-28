@@ -9,7 +9,7 @@ result is an abstention control, not a performance promise.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import exp, isfinite, log1p, sqrt
+from math import exp, floor, isfinite, log1p, sqrt
 
 from cio.models import CandidateDecisionRecord
 
@@ -104,14 +104,12 @@ class RobustCandidateAssessor:
         candidate: CandidateDecisionRecord,
         *,
         alternative_return: float,
+        position_weight: float | None = None,
     ) -> RobustCandidateAssessment:
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be a CandidateDecisionRecord")
         alternative = _finite(alternative_return, field_name="alternative_return")
-        weight = min(
-            max(candidate.maximum_position_weight, self.policy.minimum_reference_weight),
-            self.policy.reference_position_weight,
-        )
+        weight = self._position_weight(candidate, position_weight=position_weight)
         distribution = candidate.scenario_distribution
         returns = tuple(item.total_return for item in distribution)
         probabilities = tuple(item.probability for item in distribution)
@@ -173,7 +171,7 @@ class RobustCandidateAssessor:
             for value, probability in zip(returns, probabilities, strict=True)
             if value - candidate.implementation_cost_return < 0.0
         )
-        horizon_alternative = self._horizon_return(
+        horizon_alternative = self.horizon_return(
             alternative,
             horizon_days=candidate.decision_horizon_days,
         )
@@ -236,14 +234,102 @@ class RobustCandidateAssessor:
         )
 
 
+    def maximum_supported_weight(
+        self,
+        candidate: CandidateDecisionRecord,
+        *,
+        alternative_return: float,
+        maximum_weight: float | None = None,
+    ) -> float:
+        """Return the largest target that passes the complete robustness policy.
+
+        The search evaluates the final candidate distribution at the actual target
+        weight.  It is intentionally conservative: when even the smallest feasible
+        test weight fails, no positive robust allocation is returned.
+        """
+
+        if not isinstance(candidate, CandidateDecisionRecord):
+            raise TypeError("candidate must be a CandidateDecisionRecord")
+        cap = candidate.maximum_position_weight
+        if maximum_weight is not None:
+            requested = _finite(maximum_weight, field_name="maximum_weight")
+            if not 0.0 <= requested <= 1.0:
+                raise ValueError("maximum_weight must be between 0.0 and 1.0")
+            cap = min(cap, requested)
+        if cap <= 0.0:
+            return 0.0
+
+        if self.assess(
+            candidate,
+            alternative_return=alternative_return,
+            position_weight=cap,
+        ).passed:
+            return round(cap, 8)
+
+        floor_weight = min(self.policy.minimum_reference_weight, cap)
+        if not self.assess(
+            candidate,
+            alternative_return=alternative_return,
+            position_weight=floor_weight,
+        ).passed:
+            return 0.0
+
+        low = floor_weight
+        high = cap
+        for _ in range(50):
+            middle = (low + high) / 2.0
+            if self.assess(
+                candidate,
+                alternative_return=alternative_return,
+                position_weight=middle,
+            ).passed:
+                low = middle
+            else:
+                high = middle
+        supported = floor(low * 100_000_000) / 100_000_000
+        while supported > 0.0:
+            if self.assess(
+                candidate,
+                alternative_return=alternative_return,
+                position_weight=supported,
+            ).passed:
+                return round(supported, 8)
+            supported = round(max(0.0, supported - 0.00000001), 8)
+        return 0.0
+
+    def _position_weight(
+        self,
+        candidate: CandidateDecisionRecord,
+        *,
+        position_weight: float | None,
+    ) -> float:
+        if position_weight is None:
+            return min(
+                max(
+                    candidate.maximum_position_weight,
+                    self.policy.minimum_reference_weight,
+                ),
+                self.policy.reference_position_weight,
+            )
+        requested = _finite(position_weight, field_name="position_weight")
+        if not 0.0 < requested <= 1.0:
+            raise ValueError("position_weight must be above 0.0 and at most 1.0")
+        if requested > candidate.maximum_position_weight + 1e-12:
+            raise ValueError(
+                "position_weight cannot exceed candidate.maximum_position_weight"
+            )
+        return requested
+
     @staticmethod
-    def _horizon_return(annual_return: float, *, horizon_days: int) -> float:
+    def horizon_return(annual_return: float, *, horizon_days: int) -> float:
         """Convert an annual capital alternative into the candidate horizon."""
 
         years = horizon_days / 365.25
         if annual_return <= -1.0:
             return -1.0
         return exp(log1p(annual_return) * years) - 1.0
+
+    _horizon_return = horizon_return
 
     @staticmethod
     def _annualized_scenarios(

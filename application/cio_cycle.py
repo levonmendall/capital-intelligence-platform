@@ -567,6 +567,10 @@ class CanonicalCIOCycle:
             raise ValueError(
                 "candidate current weight does not match portfolio state"
             )
+        annualized_return = ConstructionIntent.annualized_return(
+            candidate.net_expected_return,
+            horizon_days=candidate.decision_horizon_days,
+        )
         if current_weight > 0.0 and candidate.net_expected_return <= -0.05:
             action = CIOAction.EXIT
             requested_target_weight = 0.0
@@ -575,14 +579,19 @@ class CanonicalCIOCycle:
             requested_target_weight = round(current_weight / 2.0, 8)
         else:
             action = CIOAction.INCREASE if current_weight > 0.0 else CIOAction.BUY
+            # This preview establishes only a feasible ceiling and exact funding
+            # source. Final sizing occurs after specialist return reconciliation.
             requested_target_weight = candidate.maximum_position_weight
         intent = ConstructionIntent(
             candidate_identifier=candidate.identifier,
             symbol=candidate.instrument.symbol,
             action=action,
             requested_target_weight=requested_target_weight,
-            expected_return=candidate.net_expected_return,
-            opportunity_edge=candidate.opportunity_edge,
+            expected_return=annualized_return,
+            opportunity_edge=round(
+                annualized_return - candidate.opportunity_cost_return,
+                8,
+            ),
             maximum_position_weight=candidate.maximum_position_weight,
             sector=profile.sector,
             factor_loadings=profile.factor_loadings,
@@ -649,7 +658,7 @@ class CanonicalCIOCycle:
             expected_portfolio_contribution=(
                 0.0
                 if proposed is None
-                else candidate.net_expected_return
+                else annualized_return
                 * (proposed - current_weight)
             ),
             opportunity_cost_return=(

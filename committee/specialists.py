@@ -663,7 +663,7 @@ class IndependentSpecialistService:
             independent_first_pass=True,
             position=position,
             conclusion=(
-                "The candidate has a feasible portfolio expression."
+                "The candidate has a feasible portfolio ceiling and identified funding source; final sizing remains with the CIO after reconciliation."
                 if proposed is not None and not blocks
                 else "No fully feasible portfolio expression is currently available."
             ),

@@ -82,6 +82,9 @@ class PortfolioConstructionEngine:
             reasons=reasons,
             blocks=blocks,
         )
+        reduction_target = dict(target)
+        reduction_reasons = self._copy_lists(reasons)
+        reduction_funding = self._copy_lists(funding_for)
         self._apply_positive_allocations(
             request=request,
             target=target,
@@ -97,6 +100,11 @@ class PortfolioConstructionEngine:
             for symbol, weight in target.items()
             if weight > _EPSILON
         }
+        reduction_target = {
+            symbol: round(weight, 8)
+            for symbol, weight in reduction_target.items()
+            if weight > _EPSILON
+        }
         target_cash = round(1.0 - sum(target.values()), 8)
         trades = self._trades(
             current=current,
@@ -107,6 +115,51 @@ class PortfolioConstructionEngine:
         )
         turnover = round(sum(item.trade_weight for item in trades), 8)
         cost = round(sum(item.estimated_cost_return for item in trades), 8)
+
+        # Positive allocations must improve the reduction-only portfolio after
+        # all transition costs. Risk-reducing exits and reductions are preserved
+        # even when no proposed purchase clears this portfolio-level hurdle.
+        positive_allocation = any(
+            target.get(symbol, 0.0)
+            > reduction_target.get(symbol, 0.0) + _EPSILON
+            for symbol in set(target) | set(reduction_target)
+        )
+        if positive_allocation:
+            reduction_cash = self._cash_weight(reduction_target)
+            reduction_cost = self._cost(request, reduction_target, assets)
+            reduction_after_cost = self._expected_return(
+                weights=reduction_target,
+                cash_weight=reduction_cash,
+                assets=assets,
+                cash_return=request.cash_expected_return,
+            ) - reduction_cost
+            proposed_after_cost = self._expected_return(
+                weights=target,
+                cash_weight=target_cash,
+                assets=assets,
+                cash_return=request.cash_expected_return,
+            ) - cost
+            incremental_improvement = proposed_after_cost - reduction_after_cost
+            if (
+                incremental_improvement + _EPSILON
+                < self.policy.minimum_expected_return_improvement
+            ):
+                blocks.append(
+                    "positive allocations were removed because the complete portfolio did not improve expected return after costs by the policy minimum"
+                )
+                target = reduction_target
+                reasons = reduction_reasons
+                funding_for = reduction_funding
+                target_cash = round(1.0 - sum(target.values()), 8)
+                trades = self._trades(
+                    current=current,
+                    target=target,
+                    assets=assets,
+                    reasons=reasons,
+                    funding_for=funding_for,
+                )
+                turnover = round(sum(item.trade_weight for item in trades), 8)
+                cost = round(sum(item.estimated_cost_return for item in trades), 8)
         constraints = self._constraint_checks(
             request=request,
             target=target,
@@ -302,6 +355,19 @@ class PortfolioConstructionEngine:
         for intent in ordered:
             starting = target.get(intent.symbol, 0.0)
             requested = intent.requested_target_weight or 0.0
+            acquisition_cost = (
+                intent.transaction_cost_bps + intent.slippage_bps
+            ) / 10_000
+            cash_edge_after_cost = (
+                intent.expected_return
+                - request.cash_expected_return
+                - acquisition_cost
+            )
+            if cash_edge_after_cost < self.policy.minimum_replacement_edge:
+                blocks.append(
+                    f"{intent.symbol} does not clear the cash alternative after acquisition costs"
+                )
+                continue
             position_limit = min(
                 requested,
                 intent.maximum_position_weight,
@@ -423,7 +489,13 @@ class PortfolioConstructionEngine:
                 and symbol not in protected_positive
                 and asset.funding_eligible
                 and target.get(symbol, 0.0) > asset.minimum_weight
-                and intent.expected_return - asset.expected_return
+                and (
+                    intent.expected_return
+                    - asset.expected_return
+                    - (intent.transaction_cost_bps + intent.slippage_bps)
+                    / 10_000
+                    - asset.total_cost_bps / 10_000
+                )
                 >= self.policy.minimum_replacement_edge
             ),
             key=lambda asset: (

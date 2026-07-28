@@ -174,6 +174,46 @@ def test_short_horizon_returns_are_compared_on_an_annualized_geometric_basis() -
     assert assessment.annualized_geometric_return > candidate.net_expected_return
 
 
+def test_robustness_is_enforced_at_the_actual_target_weight() -> None:
+    candidate = _candidate(
+        "TAIL",
+        base=0.20,
+        bull=0.45,
+        bear=-0.60,
+        base_probability=0.60,
+        bull_probability=0.30,
+        bear_probability=0.10,
+        stated_success=0.90,
+    )
+    assessor = RobustCandidateAssessor()
+
+    five_percent = assessor.assess(
+        candidate,
+        alternative_return=0.04,
+        position_weight=0.05,
+    )
+    ten_percent = assessor.assess(
+        candidate,
+        alternative_return=0.04,
+        position_weight=0.10,
+    )
+    supported = assessor.maximum_supported_weight(
+        candidate,
+        alternative_return=0.04,
+        maximum_weight=0.10,
+    )
+
+    assert five_percent.passed
+    assert not ten_percent.passed
+    assert any("worst-case portfolio loss" in reason for reason in ten_percent.reasons)
+    assert 0.05 <= supported < 0.10
+    assert assessor.assess(
+        candidate,
+        alternative_return=0.04,
+        position_weight=supported,
+    ).passed
+
+
 def _observation(index: int, *, negative: bool = False) -> DecisionLearningObservation:
     decision_at = AS_OF + timedelta(days=index * 10)
     success = index % 5 != 0

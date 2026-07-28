@@ -412,6 +412,64 @@ def test_expected_return_improvement_is_net_of_costs() -> None:
     assert result.expected_return_improvement > 0.0
 
 
+def test_positive_allocation_is_removed_when_portfolio_improvement_is_immaterial() -> None:
+    marginal = _intent(
+        "TINY",
+        target=0.005,
+        maximum_position_weight=0.005,
+        expected_return=0.0511,
+        opportunity_edge=0.0111,
+    )
+
+    result = PortfolioConstructionEngine(_policy()).construct(
+        _request(intents=(marginal,))
+    )
+
+    assert result.status is ConstructionStatus.BLOCKED
+    assert "TINY" not in _weights(result)
+    assert result.trades == ()
+    assert any("did not improve expected return" in block for block in result.blocks)
+
+
+def test_return_gate_preserves_risk_reductions_when_a_purchase_is_removed() -> None:
+    positions = (
+        _asset("LEGACY", 0.10, expected_return=-0.08),
+        _asset("CORE", 0.70, expected_return=0.07),
+    )
+    exit_intent = _intent(
+        "LEGACY",
+        action=CIOAction.EXIT,
+        target=0.0,
+        expected_return=-0.08,
+        maximum_position_weight=0.10,
+        sector="Legacy",
+        bucket="legacy",
+    )
+    marginal = _intent(
+        "TINY",
+        target=0.005,
+        maximum_position_weight=0.005,
+        expected_return=0.0511,
+        opportunity_edge=0.0111,
+        rank=2,
+    )
+
+    result = PortfolioConstructionEngine(_policy()).construct(
+        _request(
+            cash=0.20,
+            positions=positions,
+            intents=(exit_intent, marginal),
+        )
+    )
+
+    assert result.status is ConstructionStatus.PARTIAL
+    assert "LEGACY" not in _weights(result)
+    assert "TINY" not in _weights(result)
+    assert len(result.trades) == 1
+    assert result.trades[0].symbol == "LEGACY"
+    assert result.trades[0].side is TradeSide.SELL
+
+
 def test_engine_source_does_not_use_cio_confidence_for_position_size() -> None:
     source = Path("portfolio/construction_engine.py").read_text(encoding="utf-8")
 

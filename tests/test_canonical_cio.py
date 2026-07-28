@@ -121,6 +121,7 @@ def _analysis(
     blocks: tuple[str, ...] = (),
     weight: float | None = None,
     funding: str | None = None,
+    return_impact: float = 0.02,
 ) -> SpecialistAnalysis:
     return SpecialistAnalysis(
         candidate_identifier=candidate_identifier,
@@ -129,7 +130,7 @@ def _analysis(
         independent_first_pass=True,
         position=position,
         conclusion=f"{role.value} conclusion",
-        expected_return_impact=0.02,
+        expected_return_impact=return_impact,
         confidence=confidence,
         supporting_evidence=(f"{role.value} supporting evidence",),
         contradictory_evidence=(),
@@ -151,6 +152,7 @@ def _packet(
     opposed_role: SpecialistRole | None = None,
     opposed_confidence: float = 0.80,
     weight: float | None = 0.06,
+    return_impact: float = 0.02,
 ) -> IndependentSpecialistPacket:
     analyses = []
     for role in SpecialistRole:
@@ -180,6 +182,7 @@ def _packet(
                     if role is SpecialistRole.PORTFOLIO_RISK and weight is not None
                     else None
                 ),
+                return_impact=return_impact,
             )
         )
     return IndependentSpecialistPacket(
@@ -362,6 +365,58 @@ def test_evidence_veto_forces_insufficient_evidence() -> None:
         "filing timestamp cannot be reproduced",
     )
     assert decision.final_confidence <= 0.25
+
+
+def test_evidence_veto_reduces_an_existing_holding_instead_of_preserving_risk() -> None:
+    candidate = _candidate(current_weight=0.08)
+    universe = RecommendationUniversePolicy().evaluate(candidate.instrument)
+
+    decision = ChiefInvestmentOfficer().synthesize(
+        candidate,
+        universe,
+        _packet(
+            evidence_vetoes=("filing timestamp cannot be reproduced",),
+            weight=0.08,
+        ),
+    )
+
+    assert decision.action is CIOAction.REDUCE
+    assert decision.recommended_position_weight == pytest.approx(0.04)
+
+
+def test_positive_holding_is_reduced_when_a_superior_alternative_exists() -> None:
+    candidate = _candidate(
+        current_weight=0.08,
+        base_return=0.08,
+        bull_return=0.14,
+        bear_return=0.01,
+        opportunity_cost=0.12,
+    )
+    universe = RecommendationUniversePolicy().evaluate(candidate.instrument)
+
+    decision = ChiefInvestmentOfficer().synthesize(
+        candidate,
+        universe,
+        _packet(weight=0.08),
+    )
+
+    assert candidate.net_expected_return > 0.0
+    assert decision.action in {CIOAction.REDUCE, CIOAction.EXIT}
+
+
+def test_adverse_specialist_reconciliation_can_block_preliminary_maximum_size() -> None:
+    candidate = _candidate()
+    universe = RecommendationUniversePolicy().evaluate(candidate.instrument)
+
+    decision = ChiefInvestmentOfficer().synthesize(
+        candidate,
+        universe,
+        _packet(weight=0.10, return_impact=-0.06),
+    )
+
+    assert decision.return_reconciliation.expected_return < candidate.net_expected_return
+    assert decision.action is not CIOAction.BUY
+    assert decision.recommended_position_weight is None
 
 
 def test_portfolio_block_produces_watch_without_position_size() -> None:
