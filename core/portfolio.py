@@ -119,7 +119,23 @@ def get_portfolio_totals() -> dict:
             "cash": 0.0,
             "nav": 0.0,
             "total_return": 0.0,
+            "total_pnl": 0.0,
+            "realized_pnl": 0.0,
+            "unrealized_pnl": 0.0,
+            "cash_fx_pnl": 0.0,
+            "non_trade_pnl": 0.0,
+            "net_external_flows": 0.0,
+            "fees_paid": 0.0,
+            "accounting_residual": 0.0,
+            "period_pnl": 0.0,
+            "day_pnl": 0.0,
+            "day_return": 0.0,
+            "as_of": None,
         }
+    details = snapshot_details(
+        snapshot,
+        history=store.history(CANONICAL_PORTFOLIO_CODE, limit=250),
+    )
     return {
         "mandate_count": 1,
         "portfolio_count": 1,
@@ -128,6 +144,18 @@ def get_portfolio_totals() -> dict:
         "cash": snapshot.total_cash_value,
         "nav": snapshot.nav,
         "total_return": snapshot.total_return,
+        "total_pnl": snapshot.total_pnl,
+        "realized_pnl": snapshot.realized_pnl,
+        "unrealized_pnl": snapshot.unrealized_pnl,
+        "cash_fx_pnl": snapshot.cash_fx_pnl,
+        "non_trade_pnl": snapshot.non_trade_pnl,
+        "net_external_flows": snapshot.net_external_flows,
+        "fees_paid": snapshot.fees_paid,
+        "accounting_residual": snapshot.accounting_residual,
+        "period_pnl": details["period_pnl"],
+        "day_pnl": details["day_pnl"],
+        "day_return": details["day_return"],
+        "as_of": snapshot.as_of.isoformat(),
     }
 
 

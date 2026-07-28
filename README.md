@@ -102,7 +102,7 @@ Environment presents certified macroeconomic and market evidence. It is diagnost
 
 ### Portfolio — Construction engine
 
-Portfolio shows the sole canonical portfolio, capital deployment, holdings, cash, construction status, costs, constraints, paper trades, and value history. Construction determines feasible sizing and funding but cannot change the CIO decision or submit an order.
+Portfolio shows the sole canonical portfolio, capital deployment, holdings, cash, construction status, costs, constraints, paper trades, and value history. It also separates total, realized, unrealized, FX, and non-trade P&L using current governed marks and preserved average cost. Construction determines feasible sizing and funding but cannot change the CIO decision or submit an order.
 
 ### History — Institutional decision memory
 
@@ -178,7 +178,7 @@ The construction engine receives approved CIO intent and the actual canonical po
 
 CIO confidence measures evidence reliability. It is intentionally absent from the sizing algorithm.
 
-`SQLiteCanonicalPortfolioStore` is the sole active authority for cash, holdings, valuation history, and implementation lineage.
+`SQLiteCanonicalPortfolioStore` is the sole active authority for cash, holdings, valuation history, implementation lineage, realized and unrealized P&L, non-trade income and expense, external cash flows, and corporate-action adjustments. Valuation-only snapshots update every current position without requiring a trade and fail closed on stale or incomplete quote and FX evidence.
 
 ## Living theses and evaluation
 
@@ -427,6 +427,7 @@ tests/                         Decision, architecture, readiness, and security t
 - [Provider certification](docs/PROVIDER_CERTIFICATION.md)
 - [Complete-universe screening](docs/FULL_UNIVERSE_SCREENING.md)
 - [Portfolio construction](docs/PORTFOLIO_CONSTRUCTION.md)
+- [Canonical performance accounting](docs/PERFORMANCE_ACCOUNTING.md)
 - [Canonical portfolio state](docs/CANONICAL_PORTFOLIO_STATE.md)
 - [Thesis monitoring](docs/THESIS_MONITORING_OPERATIONS.md)
 - [Paper-operation evidence](docs/PAPER_OPERATION_EVIDENCE.md)

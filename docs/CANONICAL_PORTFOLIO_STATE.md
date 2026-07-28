@@ -19,9 +19,13 @@ python run_portfolio_migration.py \
 
 Migration opens the legacy database in query-only mode and appends one complete canonical snapshot for each historical portfolio record. Exact replay is idempotent. Conflicting reuse is rejected. Historical strategy labels remain migration evidence only and cannot create a new active mandate or portfolio authority.
 
-## Implementation updates
+## Implementation and valuation updates
 
-Canonical paper execution is the only implementation authority permitted to append a later state snapshot. Legacy `core.trading` remains offline migration/test code and is not imported by the active app, API, scheduler, construction engine, rebalancer, paper executor, backup path, or reporting facade.
+Canonical paper execution appends reconciled fill snapshots. The governed mark-to-market service may append a later valuation-only snapshot after validating complete current quote and FX coverage. Governed cash-flow and position-adjustment services may append evidenced income, expense, external-flow, lifecycle-cash, and share-split snapshots. Each path preserves the same append-only authority and accounting identity.
+
+Legacy `core.trading` remains offline migration/test code and is not imported by the active app, API, scheduler, construction engine, rebalancer, paper executor, backup path, or reporting facade.
+
+See [Canonical performance accounting](PERFORMANCE_ACCOUNTING.md).
 
 ## Failure boundary
 
