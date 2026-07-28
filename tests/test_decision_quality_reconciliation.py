@@ -164,8 +164,17 @@ def _analysis(
     )
 
 
-def _packet(candidate: CandidateDecisionRecord, *, duplicate_origins: bool) -> IndependentSpecialistPacket:
-    shared = "origin:shared" if duplicate_origins else None
+def _packet(
+    candidate: CandidateDecisionRecord,
+    *,
+    duplicate_origins: bool,
+    baseline_origin: bool = False,
+) -> IndependentSpecialistPacket:
+    shared = (
+        "origin:candidate"
+        if baseline_origin
+        else ("origin:shared" if duplicate_origins else None)
+    )
     return IndependentSpecialistPacket(
         candidate_identifier=candidate.identifier,
         analyses=(
@@ -263,6 +272,29 @@ def test_duplicate_evidence_origins_reduce_specialist_adjustments() -> None:
         item.applied_impact for item in independent.adjustments
     )
     assert duplicated.evidence_origin_count < independent.evidence_origin_count
+
+
+def test_specialist_evidence_already_used_by_baseline_is_discounted() -> None:
+    candidate = _candidate("BASELINE")
+
+    novel = SpecialistReturnReconciler().reconcile(
+        candidate,
+        _packet(candidate, duplicate_origins=False),
+        alternative_return=0.04,
+    )
+    repeated = SpecialistReturnReconciler().reconcile(
+        candidate,
+        _packet(
+            candidate,
+            duplicate_origins=False,
+            baseline_origin=True,
+        ),
+        alternative_return=0.04,
+    )
+
+    assert sum(item.applied_impact for item in repeated.adjustments) < sum(
+        item.applied_impact for item in novel.adjustments
+    )
 
 
 def test_options_require_and_preserve_nonlinear_payoff_distribution() -> None:

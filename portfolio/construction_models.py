@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from math import isfinite
+from math import exp, isfinite, log1p
 
 from cio import CIOAction, CIODecision, CandidateDecisionRecord
 
@@ -114,7 +114,7 @@ class ExposureLimit:
 
 @dataclass(frozen=True, slots=True)
 class PortfolioConstructionPolicy:
-    version: str = "portfolio-construction.v1"
+    version: str = "portfolio-construction.v2"
     minimum_cash_weight: float = 0.02
     maximum_position_weight: float = 0.10
     default_maximum_sector_weight: float = 0.25
@@ -122,6 +122,7 @@ class PortfolioConstructionPolicy:
     maximum_turnover: float = 0.20
     maximum_total_cost_return: float = 0.005
     minimum_replacement_edge: float = 0.01
+    minimum_expected_return_improvement: float = 0.0001
     maximum_daily_volume_participation: float = 0.10
     execution_days: int = 3
     sector_limits: tuple[ExposureLimit, ...] = ()
@@ -142,6 +143,7 @@ class PortfolioConstructionPolicy:
             "maximum_turnover",
             "maximum_total_cost_return",
             "minimum_replacement_edge",
+            "minimum_expected_return_improvement",
             "maximum_daily_volume_participation",
         ):
             object.__setattr__(
@@ -443,13 +445,18 @@ class ConstructionIntent:
             raise TypeError("decision must be CIODecision")
         if decision.candidate_identifier != candidate.identifier:
             raise ValueError("decision and candidate identifiers do not match")
+        expected_return = cls.annualized_return(
+            decision.expected_return,
+            horizon_days=decision.decision_horizon_days,
+        )
+        alternative_return = decision.return_reconciliation.alternative_return
         return cls(
             candidate_identifier=candidate.identifier,
             symbol=candidate.instrument.symbol,
             action=decision.action,
             requested_target_weight=decision.recommended_position_weight,
-            expected_return=decision.expected_return,
-            opportunity_edge=candidate.opportunity_edge,
+            expected_return=expected_return,
+            opportunity_edge=round(expected_return - alternative_return, 8),
             maximum_position_weight=candidate.maximum_position_weight,
             sector=sector,
             factor_loadings=factor_loadings,
@@ -462,6 +469,15 @@ class ConstructionIntent:
             priority_rank=priority_rank,
             instrument_identifier=candidate.instrument.instrument_id,
         )
+
+    @staticmethod
+    def annualized_return(total_return: float, *, horizon_days: int) -> float:
+        """Normalize a decision-horizon total return for portfolio comparison."""
+
+        if total_return <= -1.0:
+            return -1.0
+        years = horizon_days / 365.25
+        return round(exp(log1p(total_return) / years) - 1.0, 8)
 
 
 @dataclass(frozen=True, slots=True)

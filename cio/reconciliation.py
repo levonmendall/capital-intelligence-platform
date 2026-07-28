@@ -21,7 +21,7 @@ from cio.models import (
 class SpecialistReconciliationPolicy:
     """Conservative rules for incorporating independent specialist evidence."""
 
-    version: str = "specialist-return-reconciliation.v1"
+    version: str = "specialist-return-reconciliation.v2"
     specialist_adjustment_share: float = 0.35
     maximum_total_adjustment: float = 0.15
     minimum_overlap_discount: float = 0.25
@@ -90,6 +90,7 @@ class SpecialistReturnReconciler:
             item.role: self._origins(item)
             for item in analyses
         }
+        baseline_origins = self._candidate_origins(candidate)
         origin_frequency: dict[str, int] = {}
         for origins in origin_sets.values():
             for origin in origins:
@@ -98,9 +99,18 @@ class SpecialistReturnReconciler:
         provisional: list[tuple[SpecialistAnalysis, tuple[str, ...], float, float]] = []
         for analysis in analyses:
             origins = origin_sets[analysis.role]
+            specialist_independence = (
+                sum(1.0 / origin_frequency[item] for item in origins) / len(origins)
+            )
+            baseline_overlap = (
+                len(set(origins).intersection(baseline_origins)) / len(origins)
+            )
+            baseline_novelty = 1.0 - baseline_overlap * (
+                1.0 - self.policy.minimum_overlap_discount
+            )
             overlap_discount = max(
                 self.policy.minimum_overlap_discount,
-                sum(1.0 / origin_frequency[item] for item in origins) / len(origins),
+                specialist_independence * baseline_novelty,
             )
             applied = (
                 analysis.expected_return_impact
@@ -162,7 +172,7 @@ class SpecialistReturnReconciler:
             if item.total_return - implementation_cost > horizon_alternative
         )
         evidence_origins = {
-            *candidate.evidence_identifiers,
+            *(self._normalize_origin(item) for item in candidate.evidence_identifiers),
             *(origin for origins in origin_sets.values() for origin in origins),
         }
         return ReturnReconciliation(
@@ -181,17 +191,44 @@ class SpecialistReturnReconciler:
             bounds_correction_applied=bounds_correction,
         )
 
-    @staticmethod
-    def _origins(analysis: SpecialistAnalysis) -> tuple[str, ...]:
+    @classmethod
+    def _origins(cls, analysis: SpecialistAnalysis) -> tuple[str, ...]:
         declared = getattr(analysis, "evidence_origin_identifiers", ())
         if declared:
-            return tuple(dict.fromkeys(declared))
+            return tuple(
+                dict.fromkeys(cls._normalize_origin(item) for item in declared)
+            )
         return tuple(
             dict.fromkeys(
-                "evidence-text:"
-                + hashlib.sha256(item.strip().lower().encode("utf-8")).hexdigest()
-                for item in analysis.supporting_evidence
+                cls._text_origin(item) for item in analysis.supporting_evidence
             )
+        )
+
+    @classmethod
+    def _candidate_origins(
+        cls,
+        candidate: CandidateDecisionRecord,
+    ) -> frozenset[str]:
+        origins = {
+            cls._normalize_origin(item) for item in candidate.evidence_identifiers
+        }
+        for item in (
+            *candidate.supporting_evidence,
+            *candidate.contradictory_evidence,
+        ):
+            origins.add(cls._normalize_origin(item))
+            origins.add(cls._text_origin(item))
+        return frozenset(origins)
+
+    @staticmethod
+    def _normalize_origin(value: str) -> str:
+        return value.strip().lower()
+
+    @staticmethod
+    def _text_origin(value: str) -> str:
+        return (
+            "evidence-text:"
+            + hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
         )
 
     @staticmethod

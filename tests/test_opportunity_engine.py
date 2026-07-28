@@ -17,6 +17,7 @@ from opportunity import (
     AlternativeKind,
     AlternativeUse,
     OpportunityEngine,
+    OpportunityQualificationPolicy,
     OpportunitySetContext,
     QualificationOutcome,
 )
@@ -217,6 +218,35 @@ def test_context_recalculates_opportunity_cost_against_current_holding() -> None
         candidate.net_expected_return - 0.079
     )
     assert qualification.qualified
+
+
+@pytest.mark.parametrize(
+    ("policy", "reason_fragment"),
+    (
+        (
+            OpportunityQualificationPolicy(minimum_net_expected_return=0.50),
+            "absolute return threshold",
+        ),
+        (
+            OpportunityQualificationPolicy(minimum_opportunity_edge=0.20),
+            "opportunity edge",
+        ),
+        (
+            OpportunityQualificationPolicy(maximum_expected_downside=-0.10),
+            "downside",
+        ),
+    ),
+)
+def test_each_declared_qualification_hurdle_has_screening_authority(
+    policy: OpportunityQualificationPolicy,
+    reason_fragment: str,
+) -> None:
+    qualification = OpportunityEngine(
+        qualification_policy=policy
+    ).qualify(_candidate("ACME"), _context())
+
+    assert not qualification.qualified
+    assert any(reason_fragment in reason for reason in qualification.reasons)
 
 
 def test_stale_recorded_opportunity_cost_is_rejected() -> None:

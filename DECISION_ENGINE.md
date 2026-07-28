@@ -64,6 +64,8 @@ Ranking must consider probability-weighted expected return, probability of succe
 
 Conviction or a composite score alone may not determine ranking.
 
+Qualification comparisons use horizon-normalized, evidence-adjusted geometric returns. The absolute-return, opportunity-edge, downside, probability, evidence, liquidity, and cost thresholds are executable policy controls, not descriptive configuration. Candidate-supplied portfolio contribution cannot qualify an asset; realized portfolio contribution is determined by final construction.
+
 ## Independent specialist process
 
 The committee contains five specialists plus the CIO:
@@ -135,6 +137,8 @@ The CIO:
 
 The objective is not consensus. Weighted vote aggregation and average specialist confidence may be retained only as disclosed supporting diagnostics. They may not become the final CIO action or overwrite material dissent.
 
+Specialist return adjustments are discounted when they repeat evidence already used by the baseline model or by another specialist. The portfolio specialist supplies a feasible allocation ceiling and exact funding source. The CIO applies specialist reconciliation first, then sizes the final action from the reconciled distribution and tests robustness at the proposed weight.
+
 ## Permitted CIO outputs
 
 - `buy`
@@ -164,6 +168,8 @@ The CIO must abstain from an action recommendation when:
 
 No action is a complete, terminal, reviewable decision. It records evidence, rationale, future action triggers, and review timing.
 
+Current holdings face both an ownership hurdle and a capital-allocation hurdle. A positive standalone forecast does not justify retaining a holding when a feasible alternative is materially superior after horizon normalization and costs. Weak or stale evidence blocks new exposure and can require a conservative reduction of an existing holding rather than preserving risk by default.
+
 ## Confidence
 
 Confidence describes evidence strength and decision reliability. It does not guarantee a return.
@@ -176,9 +182,11 @@ Confidence must later be calibrated against observed outcomes over a sufficient 
 
 ## Portfolio-construction boundary
 
-The CIO determines what should be owned. The portfolio layer determines how much to own, what funds it, when implementation occurs, and how to minimize costs while enforcing constraints.
+The portfolio layer first determines the feasible allocation ceiling and exact funding source. After specialist reconciliation, the CIO selects the final target within that ceiling. Final construction then validates the complete portfolio, transition costs, liquidity, turnover, concentration, and implementation constraints.
 
 Position size is not a direct transform of a score or CIO confidence. It also depends on expected return, downside, volatility, liquidity, correlation, concentration, factor exposure, cash, turnover, cost, drawdown policy, and portfolio state.
+
+Every purchase must clear the cash alternative after acquisition cost. Every replacement must clear the funded holding after both purchase and sale costs. Positive allocations are removed when the complete proposed portfolio does not improve expected return after all transition costs by the versioned minimum; risk-reducing exits and reductions remain preserved.
 
 Individual investor goals, retirement targets, preferred philosophies, and behavioral profiles are prohibited portfolio-optimization inputs.
 

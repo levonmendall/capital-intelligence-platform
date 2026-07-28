@@ -30,7 +30,7 @@ def _clamp(value: float) -> float:
 class OpportunityQualificationPolicy:
     """Versioned committee-attention and opportunity-ranking rules."""
 
-    version: str = "opportunity-qualification.v3"
+    version: str = "opportunity-qualification.v4"
     minimum_net_expected_return: float = 0.05
     minimum_probability_of_success: float = 0.55
     minimum_evidence_score: float = 0.70
@@ -39,7 +39,6 @@ class OpportunityQualificationPolicy:
     minimum_opportunity_edge: float = 0.01
     maximum_expected_downside: float = -0.35
     maximum_implementation_cost_return: float = 0.02
-    minimum_portfolio_contribution: float = 0.0
     opportunity_cost_tolerance: float = 0.005
 
     expected_return_weight: float = 0.25
@@ -273,6 +272,9 @@ class OpportunityEngine:
             candidate,
             alternative_return=effective_opportunity_cost,
         )
+        # The disclosed edge retains its legacy arithmetic meaning for schema
+        # compatibility. Qualification authority uses the horizon-normalized,
+        # evidence-adjusted geometric edge below.
         holding_review = candidate.current_portfolio_weight > 0.0
         reasons: list[str] = []
         if not universe.direct_recommendation_allowed:
@@ -296,6 +298,22 @@ class OpportunityEngine:
             reasons.append("at least one evidence-quality dimension is below threshold")
         if candidate.liquidity_score < self.policy.minimum_liquidity_score:
             reasons.append("candidate liquidity is below threshold")
+        if (
+            robustness.evidence_adjusted_return
+            < self.policy.minimum_net_expected_return
+        ):
+            reasons.append(
+                "horizon-normalized evidence-adjusted expected return is below the absolute return threshold"
+            )
+        if robustness.robust_edge < self.policy.minimum_opportunity_edge:
+            reasons.append(
+                "horizon-normalized opportunity edge is below the required margin"
+            )
+        scenario_downside = min(
+            item.total_return for item in candidate.scenario_distribution
+        ) - candidate.implementation_cost_return
+        if scenario_downside < self.policy.maximum_expected_downside:
+            reasons.append("expected downside exceeds the qualification limit")
         if (
             robustness.effective_probability_of_success
             < self.policy.minimum_probability_of_success
@@ -355,7 +373,7 @@ class OpportunityEngine:
                 effective_opportunity_cost=effective_opportunity_cost,
                 opportunity_edge=opportunity_edge,
                 reasons=(
-                    "candidate clears universe, horizon-normalized geometric robustness, scenario-derived probability, evidence, liquidity, cost, and opportunity requirements; portfolio contribution remains pending final construction",
+                    "candidate clears universe, absolute return, horizon-normalized geometric robustness, scenario-derived probability, downside, evidence, liquidity, cost, and opportunity-edge requirements; portfolio contribution remains subject to final construction",
                 ),
             ),
             robustness,
