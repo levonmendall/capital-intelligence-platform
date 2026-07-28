@@ -106,7 +106,7 @@ def test_default_scope_fails_closed_until_sources_are_licensed_and_certified() -
     assert report.real_money_authorized is False
 
 
-def test_three_ready_independent_sources_can_satisfy_current_events() -> None:
+def test_three_ready_independent_sources_satisfy_news_but_not_maximum_scope() -> None:
     sources = (
         _source("official-source", "official"),
         _source("licensed-newswire", "newswire"),
@@ -122,10 +122,11 @@ def test_three_ready_independent_sources_can_satisfy_current_events() -> None:
         environment=environment,
     )
 
-    assert report.state is DecisionInformationReadinessState.READY
+    assert report.state is DecisionInformationReadinessState.PARTIAL
     assert report.current_events_and_news_ready is True
-    assert report.all_domains_ready is True
-    assert report.blockers == ()
+    assert report.maximum_scope_declared is False
+    assert report.all_domains_ready is False
+    assert report.domains[0].blockers == ()
 
 
 def test_syndicated_sources_do_not_count_as_independent() -> None:
