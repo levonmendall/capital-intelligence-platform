@@ -1,5 +1,6 @@
 name: Repair Alpaca quote cutoff
 
+# One-time repair trigger.
 on:
   push:
     branches:
