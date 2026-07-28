@@ -65,8 +65,10 @@ from governance.paper_trading_launch import (
     PaperTradingLaunchReport,
     PaperTradingLaunchState,
     SQLitePaperTradingControlStore,
-    SQLitePaperTradingLaunchStore,
     require_paper_execution_authorization,
+)
+from governance.paper_trading_launch_authority import (
+    SQLitePaperTradingLaunchStore,
 )
 from governance.product_readiness import (
     ProductTestReadiness,
