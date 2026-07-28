@@ -1,64 +1,129 @@
 # Capital Intelligence Platform
 
-Capital Intelligence is an explainable, evidence-governed AI Chief Investment Officer designed to maximize long-term compounded portfolio returns.
+**A dark-first, evidence-governed AI Chief Investment Officer for one $250,000 USD paper portfolio.**
+
+Capital Intelligence continuously analyzes supported liquid public markets, compares every qualified opportunity with cash and current holdings, and determines whether the portfolio has a better evidence-supported use of capital.
+
+[Open the current Streamlit experience](https://dgmb3pd9uzhv2jmruwqeub.streamlit.app)
 
 > **Every recommendation is compared against all other available uses of capital, implemented at the portfolio level, continuously monitored against an explicit thesis, and evaluated afterward using the exact evidence available when the decision was made.**
 
-That sentence is the operating rule for the product. A security is never evaluated in isolation, analytical confidence never becomes position size, ownership never exists without a falsifiable thesis, and retrospective evaluation never substitutes hindsight data for the original evidence package.
+That rule governs the product. A security is never evaluated in isolation, analytical confidence never becomes position size, ownership never exists without a falsifiable thesis, and retrospective evaluation never substitutes hindsight data for the original decision package.
 
-The binding product contract is [GOVERNING_SPECIFICATION.md](GOVERNING_SPECIFICATION.md).
+The binding product and engineering contract is [GOVERNING_SPECIFICATION.md](GOVERNING_SPECIFICATION.md).
 
-## Current readiness
+---
 
-The product has a strong canonical architecture and a governed CIO decision process, but it is **not yet approved for controlled paper testing**. Development remains open. The software does not execute live trades.
+## Project at a glance
 
-Readiness is deliberately split into four different statuses:
-
-| Status | What it proves | What it does not prove |
-| --- | --- | --- |
-| System health | The API or worker process is alive | That dependencies or the investment process work |
-| Dependency readiness | Required databases, configuration, providers, and secrets are available | That a daily operation completed |
-| Operational readiness | The complete daily workflow, SLOs, resilience evidence, reconciliation, and incidents are acceptable | That a baseline is approved for testing |
-| Paper-test readiness | One immutable code/process baseline satisfies every governed product-test gate | Live-trading authority or proven performance |
-
-A running API is never interpreted as proof that the complete investment process can execute. Every readiness report permanently preserves:
-
-```text
-real_money_authorized = false
-performance_claims_permitted = false
-```
-
-## Governing objective and constraints
-
-The sole investment objective is to maximize long-term compounded portfolio returns after costs.
-
-Risk, liquidity, concentration, correlation, factor exposure, turnover, transaction costs, slippage, leverage, drawdown, evidence quality, data freshness, and implementation feasibility are constraints that protect compounding. Personal goals, retirement dates, preferred investing styles, behavioral memory, and user-selected mandates do not enter candidate ranking, specialist analysis, CIO synthesis, portfolio construction, or alerts.
-
-The only active portfolio code is `COMPOUNDING`. Initialization creates one USD paper portfolio with $250,000 and safely archives valid but incompatible legacy paper databases before resetting them.
-
-## Asset-class governance
-
-Market data availability does not create recommendation authority. Every asset class has an explicit state.
-
-| Product state | Universal scope |
+| Area | Current project contract |
 | --- | --- |
-| Required analysis | Global equities, sovereign and corporate fixed income, cash, commodities, FX, crypto, real estate, futures, options, volatility, and other liquid alternatives |
-| Available for governed paper allocation | Every classified liquid public-market family; each instrument must pass point-in-time identity, data, valuation, expected-return, liquidity, risk, cost, execution, custody, settlement, lifecycle, thesis, and evaluation gates |
-| Core policy eligible | Plain, liquid U.S.-listed equities and ETFs plus cash and short-duration U.S. Treasury equivalents |
-| Capability governed | International equities, broad fixed income, commodities, FX, crypto, real estate, futures, options, volatility, alternatives, and complex or derivative-based wrappers |
-| Fail closed | Unclassified instruments, missing or expired approvals, unsupported leverage or contract structures, inaccessible or illiquid markets, and any incomplete capability stack |
+| Objective | Maximize long-term compounded portfolio returns after implementation costs |
+| Active portfolio | One portfolio: `COMPOUNDING` |
+| Initial paper capital | **$250,000 USD** |
+| Market scope | Required analysis across all supported liquid public-market families |
+| Allocation scope | Direct paper allocation only after instrument-level capability approval |
+| Decision authority | Five independent specialists plus one Chief Investment Officer |
+| Portfolio sizing | Construction and funding logic; CIO confidence is not a sizing input |
+| Product surfaces | Today, Environment, Portfolio, and History |
+| Interface | Signature command-system design with dark mode as the preset and light mode as an alternate |
+| Execution | Research and paper only; no broker submission or live-money authority |
+| Readiness | Core architecture is implemented; controlled paper testing still requires production data, burn-in, resilience evidence, and formal governance approval |
+
+## What the platform is
+
+Capital Intelligence is designed to behave like a disciplined institutional investment office working continuously on behalf of one portfolio.
+
+It:
+
+- observes the global financial system;
+- converts raw information into point-in-time evidence;
+- identifies and ranks possible uses of capital;
+- evaluates qualified opportunities through independent investment disciplines;
+- produces a final CIO decision, including abstention;
+- constructs a feasible portfolio-level implementation;
+- monitors every active ownership thesis; and
+- evaluates decisions using the information that was actually available at the time.
+
+It is **not** a financial planner, personal-goal robo-advisor, financial-news feed, isolated stock-scoring tool, social trading product, or live brokerage system.
+
+## One objective, one portfolio
+
+The sole governing objective is:
+
+> **Maximize long-term compounded portfolio returns.**
+
+Risk, liquidity, concentration, correlation, factor exposure, turnover, costs, leverage, drawdown, data freshness, evidence quality, and implementation feasibility are protective constraints. They do not create competing portfolios or user-selected investment philosophies.
+
+The only active portfolio code is `COMPOUNDING`. Initialization creates exactly one USD paper portfolio with **$250,000**. Valid but incompatible legacy portfolio databases are archived before the active state is reset.
+
+Global equities, rates, credit, cash, commodities, foreign exchange, crypto, real-estate securities, options, volatility, futures, and other approved alternatives are analyzed as possible evidence or exposures inside this one portfolio. They never become separate growth, income, crypto, tactical, global, or defensive portfolios.
+
+## All-market analysis and governed allocation
+
+Market availability does not create recommendation authority.
+
+| State | Meaning |
+| --- | --- |
+| Required analysis | All supported liquid public-market families must remain visible to the opportunity process |
+| Governed paper allocation | A classified instrument may be allocated only after its complete point-in-time capability stack is approved |
+| Core policy eligible | Plain, liquid U.S.-listed equities and ETFs, cash, and short-duration U.S. Treasury equivalents |
+| Capability governed | International equities, broad fixed income, commodities, FX, crypto, real estate, derivatives, volatility, alternatives, and complex wrappers |
+| Fail closed | Missing identity, data, valuation, liquidity, execution, custody, settlement, lifecycle, thesis, evaluation, or governance capability |
 | Never authorized here | Live trading, broker submission, or real-money authority |
 
-Universal-market approval is point-in-time, expiring, append-only, and fail closed. A symbol, provider response, forecast, exchange listing, or model score is never sufficient approval. Market families are not categorically excluded; individual instruments remain unavailable until their exact implementation capability is certified.
+The active universe is provider-driven and point-in-time. A static symbol list, exchange listing, provider response, model score, or domestic wrapper is never sufficient approval by itself.
 
-See [Universal governed market scope](docs/MULTI_ASSET_EXPANSION.md).
+See [Governed multi-asset expansion](docs/MULTI_ASSET_EXPANSION.md).
 
-## The only active decision path
+---
+
+## Signature product experience
+
+The Streamlit product is intentionally limited to four primary screens. The presentation is dark-first and uses a custom command-system layer rather than a generic dashboard layout.
+
+### Today — Decision command console
+
+The daily CIO surface answers:
+
+1. What changed?
+2. Why does it matter?
+3. What opportunity or risk emerged?
+4. Should the portfolio change?
+5. How confident is the governed conclusion?
+
+When no qualified opportunity or complete CIO record exists, Today displays an honest standby or no-action state rather than manufacturing a recommendation.
+
+### Environment — Market telemetry field
+
+Environment presents certified macroeconomic and market evidence. It is diagnostic and cannot issue an investment action. Decision-time evidence and observations received after the cutoff must remain separate so the interface never creates a hindsight view.
+
+### Portfolio — Construction engine
+
+Portfolio shows the sole canonical portfolio, capital deployment, holdings, cash, construction status, costs, constraints, paper trades, and value history. Construction determines feasible sizing and funding but cannot change the CIO decision or submit an order.
+
+### History — Institutional decision memory
+
+History exposes canonical CIO briefings, living theses, evaluations, attribution, calibration, and paper activity. The underlying journal is append-only and hash-chained.
+
+Run the authenticated interface:
+
+```bash
+streamlit run secure_app.py
+```
+
+The presentation system lives in `premium_ui.py`. Dark mode is the configured default; users may switch to the alternate light appearance without changing any investment or data behavior.
+
+---
+
+## Canonical decision process
 
 ```text
-Point-in-time certified evidence
+Certified point-in-time evidence
         ↓
-Complete eligible-universe comparison
+Provider-driven eligible universe
+        ↓
+Complete capital-alternative comparison
         ↓
 Qualification and opportunity ranking
         ↓
@@ -72,18 +137,16 @@ Reconciled paper implementation
         ↓
 Living-thesis monitoring
         ↓
-Point-in-time outcome and attribution evaluation
+Point-in-time evaluation and attribution
 ```
 
-Older regime-allocation, weighted-committee, score-first, personal-goal, and Investor Memory workflows are not active decision authorities. They may exist only in isolated migration or historical research boundaries and must not appear in production entrypoints, CI release gates, or user-facing decision documentation.
+A failure, incomplete universe, stale evidence, unresolved disagreement, implementation block, or weak opportunity edge can stop the process. “No superior opportunity” and “No material change” are valid governed outcomes.
 
-### Opportunity comparison
+Older regime-allocation, weighted-committee, score-first, personal-goal, Investor Memory, conviction-trend, and multiple-mandate workflows are not active decision authorities.
 
-Every candidate is compared with cash, current holdings, and every other qualified candidate available at the decision cutoff. Weak, stale, redundant, illiquid, cost-disadvantaged, or infeasible candidates are rejected before specialist review. “No superior opportunity” is a valid outcome.
+## Independent specialist committee
 
-### Independent specialist committee
-
-The active committee contains:
+The active investment organization contains:
 
 1. Macro & Economic Strategist
 2. Market Strategist
@@ -92,62 +155,131 @@ The active committee contains:
 5. Evidence & Governance Officer
 6. Chief Investment Officer
 
-The first five produce independent analysis. Evidence & Governance may veto inadequate or irreproducible evidence. Portfolio & Risk may reject an infeasible expression. Only the CIO issues the final investment action.
+The first five complete independent first-pass analysis against the same evidence boundary. They do not see or average one another’s conclusions before submission.
 
-### Portfolio implementation
+- Evidence & Governance may veto inadequate, stale, or irreproducible evidence.
+- Portfolio & Risk may block an infeasible implementation.
+- Dissent remains visible.
+- Only the CIO issues the final user-facing investment action.
 
-The construction engine determines feasible target weights and funding sources under cash, position, liquidity, sector, factor, correlation, turnover, cost, currency, custody, settlement, and retained-weight controls. CIO confidence is not a sizing input.
+## Portfolio construction
 
-Paper execution is a separate authority. It applies market sessions, identity, quote and FX freshness, liquidity participation, spread, commissions, cash, ownership, and reconciliation. It has no broker or live-order authority.
+The construction engine receives approved CIO intent and the actual canonical portfolio state. It:
 
-### Living thesis and evaluation
+- applies exits and reductions before additions;
+- allocates positive intents in opportunity-rank order;
+- uses cash above the required reserve first;
+- reduces only explicitly funding-eligible holdings when replacement edge is sufficient;
+- tests funding transactionally and restores unnecessary sales;
+- enforces position, sector, factor, correlation, liquidity, cash, turnover, cost, and currency constraints; and
+- emits non-executing paper trade proposals.
 
-Implemented ownership requires an explicit thesis containing the original rationale, expected return, horizon, assumptions, catalysts, risks, invalidation conditions, monitoring indicators, evidence lineage, confidence, and review timing.
+CIO confidence measures evidence reliability. It is intentionally absent from the sizing algorithm.
 
-Later evaluation uses the frozen decision-time package. Multi-asset attribution separates local asset return, currency translation, interaction, implementation cost, and total base-currency portfolio contribution.
+`SQLiteCanonicalPortfolioStore` is the sole active authority for cash, holdings, valuation history, and implementation lineage.
+
+## Living theses and evaluation
+
+Implemented ownership requires a living thesis containing:
+
+- original rationale and expected return;
+- investment horizon;
+- assumptions and catalysts;
+- risks and invalidation conditions;
+- monitoring indicators;
+- supporting and contradictory evidence;
+- evidence lineage and confidence; and
+- review timing.
+
+The original thesis is immutable. New evidence creates new snapshots and may strengthen, stabilize, weaken, invalidate, or identify a superior replacement. Monitoring may request CIO review but cannot trade autonomously.
+
+Evaluation uses the frozen decision-time package and the original alternative set. Multi-asset attribution separates local return, currency translation, interaction, implementation cost, and total base-currency contribution. Hindsight alternatives and future-known information are rejected.
 
 ## Forecasting boundary
 
-Forecasts are supporting evidence, never an independent decision authority. A governed forecast record must preserve:
+Forecasts are supporting evidence, not an independent decision authority.
 
-- target and horizon;
-- as-of timestamp and knowledge cutoff;
-- model and data versions;
-- scenario probabilities;
-- confidence and uncertainty;
-- calibration method;
-- historical accuracy at the same horizon;
-- source and originating-fact lineage; and
-- limitations and invalidation conditions.
+A governed forecast preserves its target, horizon, knowledge cutoff, model and data versions, scenario probabilities, uncertainty, calibration method, historical accuracy, source lineage, limitations, and invalidation conditions.
 
-A forecast may influence a specialist evidence packet. It cannot create a candidate, change opportunity ranking, size a position, issue a CIO action, or bypass asset-class governance.
+A forecast cannot create a candidate, alter ranking, size a position, issue a CIO action, or bypass market-governance requirements.
 
-## Daily Capital Intelligence experience
+---
 
-Run the authenticated Streamlit entrypoint:
+## Current readiness
+
+The core institutional CIO architecture is implemented as software. The repository includes:
+
+- point-in-time evidence and provenance contracts;
+- provider and security-master certification controls;
+- complete-universe publication and screening requirements;
+- candidate qualification and capital-alternative comparison;
+- five independent specialists and CIO-only action authority;
+- portfolio-level construction and funding;
+- one append-only canonical portfolio-state source;
+- append-only CIO, thesis, construction, execution, and evaluation history;
+- continuous thesis-review orchestration;
+- point-in-time attribution and confidence calibration;
+- a read-only institutional API;
+- a fail-closed twelve-stage daily operation;
+- authentication, authorization, backups, restore verification, SLOs, incident evidence, and resilience controls; and
+- deterministic CI, CodeQL, dependency audit, and container security gates.
+
+The project is **not yet approved as a production investment manager or for live-money execution**. Controlled paper testing still requires one immutable baseline with:
+
+- reviewed production stage bindings and licensed provider credentials;
+- complete production-grade point-in-time market coverage for every approved asset class;
+- verified backup and recovery coverage for every active authority;
+- successful multi-day operating burn-in;
+- production-scale outage, corruption, takeover, recovery, and reconciliation exercises;
+- sufficient out-of-sample decisions across market regimes;
+- zero unresolved critical integrity or reconciliation failures; and
+- formal human governance approval.
+
+Every readiness report preserves:
+
+```text
+real_money_authorized = false
+performance_claims_permitted = false
+```
+
+A running application, API, worker, or successful single-day cycle does not prove paper-test readiness.
+
+---
+
+## Local setup
+
+The supported local environment is Python 3.11.
 
 ```bash
+git clone https://github.com/levonmendall/capital-intelligence-platform-.git
+cd capital-intelligence-platform-
+
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+python initialize.py
 streamlit run secure_app.py
 ```
 
-The product retains four deliberately simple screens:
+For Windows PowerShell, activate the environment with:
 
-1. **Today** — the canonical CIO briefing: what changed, why it matters, the opportunity or risk, whether the portfolio should change, confidence, and evidence that would change the conclusion.
-2. **Environment** — the certified evidence snapshot used by the decision, with observations received after the cutoff shown separately as subsequent developments. Environment cannot issue a recommendation.
-3. **Portfolio** — canonical holdings, construction, currency exposure, paper activity, costs, constraints, and implementation blocks.
-4. **History** — CIO decisions, frozen evidence, living theses, point-in-time evaluations, attribution, and paper fills.
+```powershell
+.venv\Scripts\Activate.ps1
+```
 
-The Environment contract is a readiness requirement: decision-time evidence and later observations must never be blended into one hindsight view.
+Provider credentials, database paths, stage bindings, and deployment settings are environment-controlled. See [Data sources and governance](DATA_SOURCES.md) and [Operations](docs/OPERATIONS.md).
 
 ## Production API
 
-Run the API:
+Start the read-only API:
 
 ```bash
 uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
-Primary institutional read endpoints include:
+Primary institutional endpoints include:
 
 ```text
 GET /v1/cio/latest
@@ -160,84 +292,6 @@ GET /v1/cio/theses
 GET /v1/cio/process
 ```
 
-The API is query-only for investment authority. It exposes no live trade or allocation mutation route.
-
-## Canonical daily operations
-
-The repository ships one complete twelve-stage plan:
-
-```text
-deploy/canonical-daily-operations.json
-```
-
-The stages are:
-
-1. provider certification
-2. security-master activation
-3. eligible-universe publication
-4. complete-universe screening
-5. production-context assembly
-6. canonical CIO cycle
-7. paper construction and execution
-8. thesis monitoring
-9. outcome evaluation
-10. operational evidence review
-11. canonical alert delivery
-12. SLO assessment
-
-A failure or reconciliation problem blocks every downstream stage.
-
-### Multi-worker safety
-
-Daily orchestration uses:
-
-- worker ownership;
-- expiring operation leases;
-- expiring stage locks;
-- operation and stage heartbeats;
-- monotonically increasing fencing tokens; and
-- atomic fence verification before authoritative publication.
-
-A replacement worker may resume after expiry with a higher token. A stale worker cannot publish results after losing ownership.
-
-### Plan and binding validation
-
-The repository plan invokes `run_daily_stage_adapter.py` for every stage. Deployment injects the reviewed command-binding document:
-
-```text
-CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS=/run/secrets/canonical-daily-stage-bindings.json
-```
-
-Validate before starting workers:
-
-```bash
-python run_daily_operations.py --validate-plan
-```
-
-Run one operation or the durable loop:
-
-```bash
-python run_daily_operations.py
-python run_daily_operations.py --loop
-```
-
-The checked-in validation bindings are synthetic container fixtures only. They cannot be used as production authority.
-
-See [Canonical daily operations](docs/CANONICAL_DAILY_OPERATIONS.md).
-
-## Deployment
-
-Prepare environment and the reviewed stage-binding secret:
-
-```bash
-cp deploy/staging.env.example deploy/staging.env
-export CAPITAL_INTELLIGENCE_ENV_FILE=deploy/staging.env
-export CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS_FILE=/secure/reviewed-bindings.json
-docker compose up --build -d
-```
-
-The scheduler validates its complete plan before entering the loop. Docker fails early when the reviewed binding file is absent.
-
 Operational endpoints include:
 
 ```text
@@ -249,11 +303,46 @@ GET /operations/slo
 GET /metrics
 ```
 
-These endpoints report system or dependency state. They do not declare paper-test readiness.
+The API is query-only for investment authority and exposes no live-trade or allocation-mutation route.
+
+## Canonical daily operation
+
+The repository ships one complete twelve-stage operation plan at:
+
+```text
+deploy/canonical-daily-operations.json
+```
+
+The stages are:
+
+1. provider certification;
+2. security-master activation;
+3. eligible-universe publication;
+4. complete-universe screening;
+5. production-context assembly;
+6. canonical CIO cycle;
+7. paper construction and execution;
+8. thesis monitoring;
+9. outcome evaluation;
+10. operational evidence review;
+11. canonical alert delivery; and
+12. SLO assessment.
+
+A failure or reconciliation problem blocks downstream authority.
+
+Validate and run the plan:
+
+```bash
+python run_daily_operations.py --validate-plan
+python run_daily_operations.py
+python run_daily_operations.py --loop
+```
+
+Daily orchestration uses expiring worker leases, stage locks, heartbeats, monotonically increasing fencing tokens, and atomic fence verification. A stale worker cannot publish after losing ownership.
+
+See [Canonical daily operations](docs/CANONICAL_DAILY_OPERATIONS.md).
 
 ## Deterministic validation
-
-The supported local test environment is Python 3.11.
 
 ```bash
 python -m compileall -q .
@@ -262,18 +351,29 @@ python run_daily_operations.py --validate-plan
 pytest -q --maxfail=1
 ```
 
-Container acceptance uses a separate validation image:
+Container acceptance uses the validation image:
 
 ```bash
 docker build --target validation -t capital-intelligence:validation .
 docker run --rm capital-intelligence:validation
 ```
 
-That command runs the fenced twelve-stage workflow through isolated subprocesses and the persisted-authority-to-real-CIO integration under explicit time limits. The production `runtime` image does not include test tooling.
+The production runtime image does not include test tooling.
+
+## Deployment
+
+Prepare the environment and reviewed stage-binding secret:
+
+```bash
+cp deploy/staging.env.example deploy/staging.env
+export CAPITAL_INTELLIGENCE_ENV_FILE=deploy/staging.env
+export CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS_FILE=/secure/reviewed-bindings.json
+docker compose up --build -d
+```
+
+The scheduler validates its full plan before entering the loop. Docker fails early when the reviewed binding file is absent.
 
 ## Backup and recovery
-
-Canonical backup and restore commands are:
 
 ```bash
 python run_backup.py
@@ -281,39 +381,31 @@ python run_backup.py --healthcheck
 python run_restore.py backups/<archive>.tar.gz.fernet --verify-only
 ```
 
-Paper-test readiness requires backups to cover every active authority needed to reproduce a decision: provider and security-master certification, universe eligibility, screening, production context, CIO journal, portfolio state, theses, execution, approvals, asset-specific evidence, evaluations, operations, incidents, SLOs, resilience, and readiness reports. Retired legacy authorities must not remain in the active backup manifest.
+Readiness requires backup coverage for every active authority needed to reproduce a decision, including provider and security-master certification, universe eligibility, screening, production context, CIO journal, canonical portfolio state, theses, paper execution, approvals, evaluations, operations, incidents, resilience, SLOs, and readiness reports.
 
-## Burn-in and failure testing
+---
 
-Before a controlled paper cohort starts, one immutable code and process baseline must complete a multi-day operation burn-in and pass scenarios covering:
+## Repository structure
 
-- provider outage and recovery;
-- stale or future-known data;
-- incomplete screening;
-- worker termination and fenced takeover;
-- database lock, corruption, and unavailability;
-- encrypted backup restoration;
-- execution hold and retry;
-- duplicate alert suppression;
-- valid no-action days; and
-- complete decision evidence-lineage reconstruction.
+```text
+app.py                         Signature four-screen Streamlit experience
+premium_ui.py                  Dark-first command-system presentation layer
+secure_app.py                  Authenticated Streamlit entrypoint
+initialize.py                  Canonical initialization and readiness checks
 
-A clean single-day run is insufficient.
-
-## Remaining readiness work
-
-The highest-priority architecture upgrades are now represented in the canonical design, including fenced multi-worker operations, a complete twelve-stage plan, startup validation, isolated stage timeouts, and container acceptance. Controlled paper testing still requires evidence that the following are complete for one immutable baseline:
-
-- reviewed production stage bindings and licensed provider credentials;
-- complete provider and point-in-time market coverage for every approved asset class;
-- full active-authority backup and restore verification;
-- Environment decision-snapshot and subsequent-observation separation;
-- deterministic full release validation and duration budgets;
-- required resilience campaigns and multi-day burn-in;
-- zero unresolved critical incidents, integrity failures, or reconciliation failures; and
-- formal human governance approval.
-
-The repository does not claim proven alpha, authorize real money, permit production-performance claims, or treat development activity after the baseline as part of the test sample.
+cio/                           Decision contracts, synthesis, persistence, cycle
+opportunity/                   Eligibility, qualification, comparison, ranking
+committee/                     Independent specialist analysis
+portfolio/                     Construction, canonical state, paper execution
+thesis/                        Living-thesis records and monitoring
+evaluation/                    Point-in-time outcomes, attribution, calibration
+providers/                     Data retrieval, certification, and provenance
+api/                           Query-only institutional API
+reporting/                     Daily CIO briefing assembly
+deploy/                        Operations plans and deployment configuration
+docs/                          Architecture, governance, evidence, and operations
+tests/                         Decision, architecture, readiness, and security tests
+```
 
 ## Documentation
 
@@ -342,3 +434,9 @@ The repository does not claim proven alpha, authorize real money, permit product
 - [Legacy authority isolation](docs/LEGACY_AUTHORITY_ISOLATION.md)
 - [Data sources and governance](DATA_SOURCES.md)
 - [Operations](docs/OPERATIONS.md)
+
+---
+
+## Safety statement
+
+Capital Intelligence is currently a research and paper-investment system. It does not authorize live trading, provide broker connectivity, claim proven alpha, or permit production-performance claims. A future execution layer would require separate technical controls, independent governance approval, and a new authorization boundary; it may not bypass the CIO, construction, canonical portfolio state, thesis, or evaluation process.
