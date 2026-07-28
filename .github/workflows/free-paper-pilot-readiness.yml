@@ -34,8 +34,8 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       CAPITAL_INTELLIGENCE_ENVIRONMENT: development
-      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID || secrets.ALPACA_API_KEY }}
-      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY || secrets.ALPACA_SECRET_KEY || secrets.ALPACA_API_SECRET }}
+      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID || secrets.ALPACA_API_KEY_ID || secrets.ALPACA_API_KEY }}
+      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY || secrets.ALPACA_API_SECRET_KEY || secrets.ALPACA_SECRET_KEY || secrets.ALPACA_API_SECRET }}
       APCA_API_BASE_URL: https://paper-api.alpaca.markets
       APCA_DATA_BASE_URL: https://data.alpaca.markets
       APCA_DATA_FEED: iex
@@ -59,11 +59,11 @@ jobs:
         shell: bash
         run: |
           if [ -z "${APCA_API_KEY_ID}" ]; then
-            echo "Missing repository secret APCA_API_KEY_ID (or ALPACA_API_KEY)."
+            echo "Missing Alpaca paper key secret. Supported names: APCA_API_KEY_ID, ALPACA_API_KEY_ID, or ALPACA_API_KEY."
             exit 2
           fi
           if [ -z "${APCA_API_SECRET_KEY}" ]; then
-            echo "Missing repository secret APCA_API_SECRET_KEY (or ALPACA_SECRET_KEY / ALPACA_API_SECRET)."
+            echo "Missing Alpaca paper secret. Supported names: APCA_API_SECRET_KEY, ALPACA_API_SECRET_KEY, ALPACA_SECRET_KEY, or ALPACA_API_SECRET."
             exit 2
           fi
 
@@ -84,9 +84,12 @@ jobs:
           import json
           from pathlib import Path
 
-          source = Path("reports/free-paper-pilot-readiness.json")
+          reports = Path("reports")
+          reports.mkdir(parents=True, exist_ok=True)
+          source = reports / "free-paper-pilot-readiness.json"
+          summary_path = reports / "free-paper-pilot-summary.txt"
           if not source.exists():
-              Path("reports/free-paper-pilot-summary.txt").write_text(
+              summary_path.write_text(
                   "Free paper pilot readiness did not produce a report. Check the prior workflow step.\n",
                   encoding="utf-8",
               )
@@ -101,7 +104,7 @@ jobs:
               f"blockers={'; '.join(payload.get('blockers', [])) or 'none'}",
           ]
           summary = "\n".join(lines) + "\n"
-          Path("reports/free-paper-pilot-summary.txt").write_text(summary, encoding="utf-8")
+          summary_path.write_text(summary, encoding="utf-8")
           with Path(__import__('os').environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8') as handle:
               handle.write("## Free paper pilot readiness\n\n```text\n" + summary + "```\n")
           PY
