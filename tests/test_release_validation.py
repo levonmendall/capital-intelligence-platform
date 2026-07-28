@@ -45,6 +45,8 @@ def test_release_plan_is_one_ordered_bounded_command_surface() -> None:
         "initialize_platform",
         "validate_daily_plan",
         "run_intelligence",
+        "validate_all_markets_internal_readiness",
+        "rehearse_all_markets_paper_execution",
         "full_test_suite",
     )
     assert tuple(item.name for item in complete[-3:]) == (

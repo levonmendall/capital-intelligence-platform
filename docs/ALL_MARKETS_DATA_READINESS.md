@@ -46,9 +46,11 @@ that still must be selected and certified:
 - fixed-income terms, pricing, and liquidity; and
 - an independent crypto validation source.
 
-A placeholder becomes usable only after `enabled` is true, all rights and
-capability fields are approved, required environment variables are configured,
-and a certification identifier is recorded when certification is required.
+A placeholder becomes usable only after an active record in the append-only
+provider activation registry enables it, all rights and capability fields are
+approved, required environment variables are configured, and a certification
+identifier is recorded. The source-controlled manifest remains fail closed and
+does not need to be edited for deployment activation.
 
 ## Command
 
@@ -75,6 +77,7 @@ Evaluate with an environment file and persist the report atomically:
 
 ```bash
 python run_data_readiness.py \
+  --provider-activation-database database/provider-activations.db \
   --env-file /run/secrets/data-providers.env \
   --output database/all-markets-data-readiness.json
 ```
@@ -114,10 +117,11 @@ For each external provider:
 4. Reconcile identifiers, currencies, calendars, corporate actions, and prices.
 5. Define freshness, completeness, and service-level policy.
 6. Run deterministic provider certification.
-7. Record the certification identifier and approved limitations in the manifest.
-8. Configure credentials through the deployment secret manager.
-9. Run `run_data_readiness.py` and retain its report as readiness evidence.
-10. Keep every affected instrument blocked until its separate capability and execution approvals are active.
+7. Record the certification identifier, approved domains, limitations, and expiry in an immutable `ProviderActivation` document.
+8. Append the activation with `run_provider_activation.py`; do not place secret values or deployment approvals in the source manifest.
+9. Configure credentials and provider binding documents through the deployment secret manager.
+10. Run `run_data_readiness.py` and retain its report as readiness evidence.
+11. Keep every affected instrument blocked until its separate capability and execution approvals are active.
 
 ## Current controlled-test scope
 
@@ -126,3 +130,28 @@ The development manifest now places U.S. and international equities, cash, fixed
 This does not claim that provider onboarding is complete. The default report remains blocked until the external data supply chain is selected, licensed, configured, historically backfilled, and certified for each market. Individual instruments also require active point-in-time capability approvals before they can enter the certified universe.
 
 Derivative markets additionally require certified contract, margin/collateral, and volatility-surface data.
+
+## Final activation guide
+
+See [All-Markets Paper Activation](ALL_MARKETS_PAPER_ACTIVATION.md) for the provider-neutral connector, activation registry, mechanical rehearsal, and final readiness commands.
+
+
+## Canonical runtime bindings
+
+Manifest readiness is necessary but not sufficient. The final paper-readiness command also requires configured runtime bindings for `security_master`, `quotes_liquidity`, and `candidate_screening`, because these datasets feed the authoritative security-master and complete-universe screening authorities.
+
+```bash
+python run_all_markets_paper_readiness.py \
+  --provider-binding /run/secrets/global-reference-data-binding.json \
+  --provider-binding /run/secrets/global-market-data-binding.json \
+  --provider-binding /run/secrets/candidate-screening-binding.json \
+  --env-file /run/secrets/data-providers.env \
+  --require-paper-ready
+```
+
+A provider activation without a matching reviewed runtime binding remains blocked.
+
+
+## Maximum decision-information activation
+
+The combined data gate overlays `config/maximum_decision_information_scope.json` with the append-only decision-information activation registry. Source-controlled placeholders remain disabled; operators activate reviewed sources with `run_decision_information_activation.py` and configure canonical `decision-information-record.v1` ingestion separately.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 from datetime import datetime, timezone
@@ -20,7 +21,28 @@ from data import (
     SecurityMasterIngestionService,
     SecurityMasterProviderError,
 )
-from providers import SECEdgarProvider
+from providers import SECEdgarProvider, build_configured_security_master_provider
+
+
+def _provider(reference: str | None, *, now: datetime):
+    if reference:
+        if ":" not in reference:
+            raise ValueError("--provider-factory must use module:function")
+        module_name, function_name = reference.split(":", 1)
+        module = importlib.import_module(module_name)
+        factory = getattr(module, function_name, None)
+        if not callable(factory):
+            raise ValueError(f"provider factory {reference!r} is not callable")
+        return factory()
+    if os.getenv("CAPITAL_INTELLIGENCE_SECURITY_MASTER_DATASET_BINDING"):
+        return build_configured_security_master_provider()
+    provider = SECEdgarProvider(clock=lambda: now)
+    if not provider.configured:
+        raise ValueError(
+            "configure CAPITAL_INTELLIGENCE_SECURITY_MASTER_DATASET_BINDING "
+            "or SEC_USER_AGENT before security-master ingestion"
+        )
+    return provider
 
 
 def _database_path(value: str | None) -> Path:
@@ -145,6 +167,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--database", help="Override the security-master database path.")
     parser.add_argument(
+        "--provider-factory",
+        help=(
+            "Optional no-argument SecurityMasterProvider factory in module:function "
+            "form. When omitted, the configured dataset binding is preferred and "
+            "the SEC discovery feed remains the fallback."
+        ),
+    )
+    parser.add_argument(
         "--status",
         action="store_true",
         help="Report current catalog integrity, activation, freshness, and readiness.",
@@ -185,13 +215,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     as_of = _timestamp(args.as_of, default=now)
     if as_of > now:
         parser.error("--as-of cannot be in the future")
-    provider = SECEdgarProvider(clock=lambda: now)
-    if not provider.configured:
-        parser.error(
-            "SEC_USER_AGENT is required to retrieve the SEC current ticker feed"
-        )
+    try:
+        provider = _provider(args.provider_factory, now=now)
+    except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as error:
+        parser.error(str(error))
     query = SecurityMasterIngestionQuery(
-        identifier=f"sec-edgar-current:{now.isoformat()}",
+        identifier=f"security-master-ingestion:{now.isoformat()}",
         as_of=as_of,
         knowledge_cutoff=now,
         requested_at=now,
