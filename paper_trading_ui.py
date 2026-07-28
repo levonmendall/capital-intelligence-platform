@@ -19,8 +19,8 @@ from portfolio.constants import CANONICAL_PORTFOLIO_CODE
 
 def _approval_database() -> Path:
     data_dir = Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database"))
-    configured = os.getenv("CAPITAL_INTELLIGENCE_PAPER_DECISION_APPROVAL_DATABASE")
-    return Path(configured).expanduser() if configured else data_dir / "paper_decision_approvals.db"
+    configured = os.getenv("CAPITAL_INTELLIGENCE_PAPER_TEST_GOVERNANCE_DATABASE")
+    return Path(configured).expanduser() if configured else data_dir / "paper_test_governance.db"
 
 
 def _identifier(value: object) -> str | None:
@@ -46,7 +46,9 @@ def render_paper_decision_controls(
     if not isinstance(trades, list) or not trades:
         return
     if construction.get("blocks"):
-        st.warning("This implementation is blocked and cannot be approved for paper execution.")
+        st.warning(
+            "This implementation is blocked and cannot be approved for paper execution."
+        )
         return
 
     decision_identifier = (
@@ -73,10 +75,15 @@ def render_paper_decision_controls(
     )
 
     if principal is None:
-        st.info("Open the authenticated application to approve or decline this paper implementation.")
+        st.info(
+            "Open the authenticated application to approve or decline this paper implementation."
+        )
         return
     can_manage = getattr(principal, "can_access_mandate", None)
-    if not callable(can_manage) or not can_manage(CANONICAL_PORTFOLIO_CODE, write=True):
+    if not callable(can_manage) or not can_manage(
+        CANONICAL_PORTFOLIO_CODE,
+        write=True,
+    ):
         st.info("Your account has read-only access to this portfolio.")
         return
 
