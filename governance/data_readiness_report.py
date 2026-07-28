@@ -24,15 +24,12 @@ class DatasetReadinessAssessment:
             "asset_class": self.asset_class.value,
             "market_state": self.market_state.value,
             "domain": self.domain.value,
-            "required_provider_identifiers": list(
-                self.required_provider_identifiers
-            ),
+            "required_provider_identifiers": list(self.required_provider_identifiers),
             "ready_provider_identifiers": list(self.ready_provider_identifiers),
             "minimum_ready_providers": self.minimum_ready_providers,
             "ready": self.ready,
             "blockers": list(self.blockers),
         }
-
 
 @dataclass(frozen=True, slots=True)
 class MarketDataReadinessAssessment:
@@ -55,7 +52,6 @@ class MarketDataReadinessAssessment:
             "ready": self.ready,
             "datasets": [item.to_dict() for item in self.datasets],
         }
-
 
 @dataclass(frozen=True, slots=True)
 class AllMarketsDataReadinessReport:
@@ -93,18 +89,22 @@ class AllMarketsDataReadinessReport:
         code_version: str,
         authority_identifiers: tuple[str, ...],
         limitations: tuple[str, ...] = (),
+        additional_evidence_identifiers: tuple[str, ...] = (),
     ) -> "ReadinessGateCertification":
-        """Build the existing certified-data gate only from a ready report.
+        """Build the certified-data gate only from ready governed evidence.
 
-        Persistence remains a separate explicit governance action through
-        ``run_test_readiness_evidence.py``.
+        Additional evidence allows the market-data report to be bound to separate
+        readiness authorities such as maximum decision-information coverage.
+        Persistence remains an explicit governance action.
         """
-
         if not self.global_test_data_ready:
             raise DataReadinessError(
-                "cannot certify the product data gate while all-markets data "
-                "readiness is incomplete"
+                "cannot certify the product data gate while all-markets data readiness is incomplete"
             )
+        if not isinstance(additional_evidence_identifiers, tuple) or not all(
+            isinstance(item, str) and item.strip() for item in additional_evidence_identifiers
+        ):
+            raise TypeError("additional_evidence_identifiers must contain non-empty strings")
         from governance.readiness_evidence import (
             ReadinessGate,
             ReadinessGateCertification,
@@ -116,6 +116,15 @@ class AllMarketsDataReadinessReport:
             for item in self.markets
             if item.state is not MarketDataScopeState.PROHIBITED
         )
+        evidence = tuple(
+            dict.fromkeys(
+                (
+                    self.evidence_identifier,
+                    self.manifest_identifier,
+                    *additional_evidence_identifiers,
+                )
+            )
+        )
         return ReadinessGateCertification(
             identifier=identifier,
             gate=ReadinessGate.CERTIFIED_DATA,
@@ -126,10 +135,7 @@ class AllMarketsDataReadinessReport:
             baseline_identifier=baseline_identifier,
             process_version=process_version,
             code_version=code_version,
-            evidence_identifiers=(
-                self.evidence_identifier,
-                self.manifest_identifier,
-            ),
+            evidence_identifiers=evidence,
             authority_identifiers=authority_identifiers,
             limitations=scope_limitations + limitations,
         )
@@ -146,13 +152,9 @@ class AllMarketsDataReadinessReport:
             "paper_eligible_data_ready": self.paper_eligible_data_ready,
             "decision_relevant_data_ready": self.decision_relevant_data_ready,
             "evidence_only_data_ready": self.evidence_only_data_ready,
-            "missing_environment_variables": list(
-                self.missing_environment_variables
-            ),
+            "missing_environment_variables": list(self.missing_environment_variables),
             "blockers": list(self.blockers),
             "markets": [item.to_dict() for item in self.markets],
             "evidence_identifier": self.evidence_identifier,
             "real_money_authorized": False,
         }
-
-
