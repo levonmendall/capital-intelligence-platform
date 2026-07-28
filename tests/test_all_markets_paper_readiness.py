@@ -62,7 +62,7 @@ def test_repository_is_internally_ready_while_external_activation_fails_closed(
     assert "no runtime provider activations are active" in report.external_blockers
 
 
-def test_all_markets_mechanical_rehearsal_executes_every_governed_class(
+def test_all_markets_mechanical_rehearsal_executes_every_classified_class(
     tmp_path: Path,
 ) -> None:
     report = run_all_markets_paper_rehearsal(
@@ -71,7 +71,7 @@ def test_all_markets_mechanical_rehearsal_executes_every_governed_class(
     )
 
     assert report.complete is True
-    assert report.fill_count == 10
+    assert report.fill_count == len(report.expected_asset_classes) == 13
     assert report.filled_asset_classes == report.expected_asset_classes
     assert report.reconciliation_difference < 1e-7
     assert report.ending_cash > 0.0
@@ -165,7 +165,9 @@ def test_complete_external_activation_can_reach_paper_ready(tmp_path: Path) -> N
                             "dataset_type": item.value,
                             "path": f"v1/{item.value}/{{symbol}}",
                         }
-                        for item in sorted(dataset_types, key=lambda value: value.value)
+                        for item in sorted(
+                            dataset_types, key=lambda value: value.value
+                        )
                     ],
                 }
             ),

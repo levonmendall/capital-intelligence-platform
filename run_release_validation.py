@@ -70,6 +70,21 @@ def _steps(*, include_container: bool) -> tuple[ReleaseValidationStep, ...]:
             120,
         ),
         ReleaseValidationStep(
+            "validate_universal_paper_asset_classes",
+            (
+                python,
+                "run_universal_paper_availability.py",
+                "--evaluated-at",
+                "2026-07-28T00:00:00+00:00",
+                "--working-directory",
+                "reports/universal-paper-availability",
+                "--output",
+                "reports/universal-paper-availability.json",
+                "--require-available",
+            ),
+            180,
+        ),
+        ReleaseValidationStep(
             "rehearse_all_markets_paper_execution",
             (
                 python,
