@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from governance.commodity_readiness import require_commodity_readiness_report
 from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from cio import CandidateAssetClass
 from governance import AssetClassApprovalState
@@ -135,6 +136,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--quote-provider", required=True)
     parser.add_argument("--as-of", required=True)
     parser.add_argument(
+        "--commodity-readiness-report",
+        default=os.getenv("CAPITAL_INTELLIGENCE_COMMODITY_READINESS_REPORT"),
+        help=(
+            "Ready, unexpired commodity prerequisite report bound to the exact "
+            "eligible-universe publication"
+        ),
+    )
+    parser.add_argument(
         "--portfolio-database",
         default=os.getenv(
             "CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE",
@@ -167,6 +176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         construction_payload = _load(args.construction)
         if not isinstance(construction_payload, Mapping):
             raise ValueError("construction JSON must encode an object")
+        construction = _construction(construction_payload)
         profiles_payload = _load(args.profiles)
         if not isinstance(profiles_payload, list):
             raise ValueError("profiles JSON must encode a list")
@@ -177,6 +187,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         as_of = datetime.fromisoformat(args.as_of.replace("Z", "+00:00"))
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must be timezone-aware")
+        if not args.commodity_readiness_report:
+            raise ValueError(
+                "commodity readiness report is required before paper execution"
+            )
+        require_commodity_readiness_report(
+            args.commodity_readiness_report,
+            as_of=as_of,
+            eligible_universe_publication_identifier=(
+                construction.eligible_universe_publication_identifier
+            ),
+        )
         portfolio_store = SQLiteCanonicalPortfolioStore(args.portfolio_database)
         portfolio = portfolio_store.latest(args.portfolio_code)
         if portfolio is None:
@@ -193,7 +214,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             policy=MultiAssetExecutionPolicy(),
         ).execute(
-            construction=_construction(construction_payload),
+            construction=construction,
             decision_identifier=args.decision_identifier,
             portfolio=portfolio,
             profiles=profile_map,
