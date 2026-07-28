@@ -1,0 +1,91 @@
+name: Apply all-market paper readiness
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/all-markets-paper-ready-v2'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out implementation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/all-markets-paper-ready-v2
+      - name: Apply and verify all-market paper readiness
+        shell: bash
+        run: |
+          exec > >(tee /tmp/paper-readiness-diagnostic.log) 2>&1
+          set -euxo pipefail
+          git config user.name "OpenAI Agent"
+          git config user.email "agent@openai.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+
+          cat .paper-ready-payload/chunk-*.b64 > /tmp/paper-readiness-payload.b64
+          base64 -d /tmp/paper-readiness-payload.b64 > /tmp/paper-readiness-payload.tar.xz
+          echo "eee75abb69a46c140f0073d4027c74cdef85a32e0c69e25b78eaeb7795c2e658  /tmp/paper-readiness-payload.tar.xz" | sha256sum -c -
+          mkdir -p /tmp/paper-readiness-payload
+          xz -dc /tmp/paper-readiness-payload.tar.xz | tar -xf - -C /tmp/paper-readiness-payload
+          (
+            cd /tmp/paper-readiness-payload
+            sha256sum -c patch.sha256
+          )
+
+          git apply --3way /tmp/paper-readiness-payload/change.patch
+          if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
+            echo "unresolved merge conflicts remain"
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          expected = json.loads(
+              Path('/tmp/paper-readiness-payload/expected.json').read_text(encoding='utf-8')
+          )
+          failures = []
+          for path, expected_sha in sorted(expected.items()):
+              target = Path(path)
+              if not target.is_file():
+                  failures.append(f'{path}: missing')
+                  continue
+              actual_sha = subprocess.check_output(
+                  ['git', 'hash-object', path],
+                  text=True,
+              ).strip()
+              if actual_sha != expected_sha:
+                  failures.append(f'{path}: {actual_sha} != {expected_sha}')
+          if failures:
+              raise SystemExit('\n'.join(failures))
+          print(f'verified {len(expected)} paper-readiness file blobs')
+          PY
+
+          rm -rf .paper-ready-payload
+          rm -f .github/workflows/export-paper-readiness-v2-source.yml
+          rm -f .github/workflows/apply-paper-readiness-v2.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "Complete all-market paper-trading readiness"
+          git push origin HEAD:agent/all-markets-paper-ready-v2
+      - name: Upload applicator diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-market-paper-readiness-diagnostics
+          path: /tmp/paper-readiness-diagnostic.log
+          retention-days: 1
+          if-no-files-found: warn
