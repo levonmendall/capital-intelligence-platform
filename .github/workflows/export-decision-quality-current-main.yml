@@ -1,4 +1,4 @@
-name: Export decision-quality current main
+name: Export decision-quality source inputs
 
 on:
   pull_request:
@@ -21,12 +21,26 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
-      - name: Package source
+      - name: Package current main
         run: |
           zip -qr /tmp/capital-intelligence-current-main.zip . -x '.git/*'
-      - name: Upload source archive
+      - name: Upload current main
         uses: actions/upload-artifact@v4
         with:
           name: decision-quality-current-main
           path: /tmp/capital-intelligence-current-main.zip
+          retention-days: 1
+      - name: Check out pending all-market readiness branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/all-markets-paper-ready-v2
+          clean: true
+      - name: Package pending readiness source
+        run: |
+          zip -qr /tmp/all-markets-paper-readiness-pr143.zip . -x '.git/*'
+      - name: Upload pending readiness source
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-markets-paper-readiness-pr143
+          path: /tmp/all-markets-paper-readiness-pr143.zip
           retention-days: 1
