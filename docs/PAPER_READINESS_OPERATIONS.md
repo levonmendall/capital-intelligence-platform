@@ -11,6 +11,7 @@ python run_paper_readiness_status.py \
   --baseline-identifier <IMMUTABLE_BASELINE> \
   --process-version <PROCESS_VERSION> \
   --code-version <TESTED_COMMIT_SHA> \
+  --provider-activation-database database/provider_activations.db \
   --reconciliation-report reports/eodhd-reconciliation.json \
   --execution-calibration-report reports/execution-calibration.json \
   --recovery-report reports/recovery-drill.json \
@@ -21,21 +22,31 @@ The command reports each of the eight objectives separately and never prints cre
 
 ## 1. Licensed and certified market-data providers
 
-`config/paper_readiness_provider_requirements.json` lists the explicit provider roles and the environment-variable names required for licensing, certification, credentials, and binding files.
+`config/paper_readiness_provider_requirements.json` lists the provider roles, canonical provider identifiers, credentials, and runtime binding files needed for the controlled paper test.
 
-A configured token is not evidence of a license. An endpoint response is not certification. The status command requires explicit approval and certification identifiers in addition to credentials.
+Credentials are not approval evidence. Commercial and venue-specific providers must have a current append-only activation in `CAPITAL_INTELLIGENCE_PROVIDER_ACTIVATION_DATABASE`. An enabled activation records reviewed usage rights, point-in-time support, historical coverage, provenance, service levels, storage and backup rights, derived-analytics rights, paper-simulation rights, certification, approver, sources, effective date, and expiration.
+
+Create a reviewed activation from the template:
+
+```bash
+python run_provider_activation.py \
+  --activation reviewed-provider-activation.json \
+  --database database/provider_activations.db
+```
 
 The current required provider roles are:
 
 - official FRED macro evidence;
 - official SEC issuer evidence;
+- official global macro, FX, and benchmark evidence;
 - EODHD broad historical multi-asset data;
 - Coinbase and Kraken independent crypto evidence;
 - survivorship-safe historical reference and corporate-action data;
-- execution-grade non-crypto quotes; and
+- execution-grade global quotes and liquidity;
+- global fundamentals and filing normalization; and
 - evaluated fixed-income pricing.
 
-The historical reference, execution-quote, and evaluated fixed-income roles remain external procurement decisions. Their missing approval, certification, and credential variables remain visible blockers.
+FRED and SEC use their checked-in official-source policy. Every other role requires a current governed activation. The historical reference, execution-quote, global fundamentals, global macro, and evaluated fixed-income roles remain external procurement decisions.
 
 ## 2. Reviewed production bindings and credentials
 
@@ -53,11 +64,11 @@ python run_stage_binding_governance.py \
   --code-version <TESTED_COMMIT_SHA>
 ```
 
-Secrets are injected at runtime. Approval records contain variable names only. Any binding change requires a new digest approval.
+Provider-neutral dataset bindings are mounted separately for security master, universe metrics, candidate screening, and decision information. Secrets are injected at runtime. Approval records contain identifiers and digests, not secret values. Any binding change requires a new approval.
 
 ## 3. Live provider smoke evidence
 
-The repository now includes a credential-safe provider probe:
+The repository includes a credential-safe provider probe:
 
 ```bash
 python run_provider_smoke.py \
@@ -75,7 +86,7 @@ python run_provider_smoke.py \
   --output reports/provider-smoke.json
 ```
 
-The GitHub workflow `.github/workflows/paper-readiness-provider-smoke.yml` injects the existing `FRED_API_KEY` repository secret and runs the official FRED probe without exposing the key. Scheduled execution remains disabled until the repository variable below is set:
+The GitHub workflow `.github/workflows/paper-readiness-provider-smoke.yml` injects the existing `FRED_API_KEY` repository secret and runs the official FRED probe without exposing the key. Scheduled execution remains disabled until:
 
 ```text
 PAPER_READINESS_AUTOMATION_ENABLED=true
@@ -89,7 +100,7 @@ PAPER_READINESS_REQUIRE_EODHD=true
 
 The EODHD token should be stored as `CAPITAL_INTELLIGENCE_EODHD_API_TOKEN`. Its binding JSON may be stored as the protected secret `CAPITAL_INTELLIGENCE_EODHD_BINDINGS_JSON` for this smoke workflow. Deployment should continue using a mounted secret file.
 
-A successful smoke report proves access only. It deliberately sets licensing and certification to false.
+A successful smoke report proves access only. It cannot create an activation, certify a provider, or approve usage rights.
 
 ## 4. Backfills and reconciliation
 
@@ -168,6 +179,13 @@ Days cannot be pre-created or backdated into existence. Each credited day requir
 
 The required failure campaign includes provider outage, stale or future data, incomplete screening, fenced worker takeover, unavailable or corrupted databases, encrypted backup restore, execution hold and retry, duplicate-alert suppression, valid no-action handling, and evidence-lineage reconstruction.
 
+The all-market rehearsal command can exercise provider activation, configured dataset adapters, security-master publication, full-universe screening, decision-information retrieval, evidence generation, and multi-asset paper execution before those days are credited:
+
+```bash
+python run_all_markets_paper_rehearsal.py \
+  --scenario reviewed-all-market-rehearsal.json
+```
+
 ## 7. Encrypted recovery drill
 
 Create a complete encrypted canonical backup on the target deployment:
@@ -186,7 +204,7 @@ python run_recovery_drill.py \
   > reports/recovery-drill.json
 ```
 
-A passing report must restore every required authority, pass SQLite integrity checks and lineage probes, meet recovery-time and recovery-point objectives, and record zero production mutations. Repository tests cannot substitute for this deployment-specific drill.
+A passing report must restore every required authority, including provider and decision-information activations, pass SQLite integrity checks and lineage probes, meet recovery-time and recovery-point objectives, and record zero production mutations. Repository tests cannot substitute for this deployment-specific drill.
 
 ## 8. Human approval and runtime activation
 
@@ -213,9 +231,14 @@ The activation command verifies the latest human decision, exact eligibility-pac
 The following work is completed by this implementation:
 
 - the existing FRED secret is wired into a protected live smoke workflow;
+- free public providers can be checked on pull requests;
 - provider access can be probed without secret disclosure;
+- provider and decision-information approvals are append-only and expiring;
+- licensed vendors can be attached through a provider-neutral dataset connector;
+- canonical pipeline adapters can consume configured vendor datasets;
 - backfills can be cryptographically reconciled;
 - execution cost can be measured against independent quote evidence;
+- all-market readiness and rehearsal commands are available;
 - all eight objectives can be reported together from persisted authorities; and
 - incomplete external or human prerequisites remain explicit blockers.
 
