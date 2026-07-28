@@ -1,0 +1,906 @@
+{
+  "identifier": "maximum-decision-information-scope.development.v1",
+  "schema_version": "maximum-decision-information-manifest.v1",
+  "objective": "Acquire and govern the widest practical set of decision-relevant structured, unstructured, current-event, news, positioning, physical-economy, on-chain, and alternative information while preserving point-in-time availability, licensing, provenance, reliability, independence, corrections, and portfolio-impact lineage.",
+  "require_complete_scope": true,
+  "sources": [
+    {
+      "identifier": "official-public-authorities",
+      "source_name": "UNASSIGNED_OFFICIAL_GLOBAL_AUTHORITIES",
+      "role": "official",
+      "independence_group": "official-public-authorities",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "current_events_news",
+        "geopolitical_security",
+        "government_policy_regulation",
+        "central_bank_communications",
+        "elections_political_risk",
+        "legal_litigation_sanctions",
+        "public_health",
+        "cybersecurity_incidents",
+        "commodity_physical_balances",
+        "weather_climate_disasters",
+        "energy_grid_power",
+        "labor_web_activity",
+        "real_estate_activity",
+        "patents_technology_innovation"
+      ],
+      "authoritative_domains": [
+        "current_events_news",
+        "geopolitical_security",
+        "government_policy_regulation",
+        "central_bank_communications",
+        "elections_political_risk",
+        "legal_litigation_sanctions",
+        "public_health",
+        "cybersecurity_incidents",
+        "commodity_physical_balances",
+        "weather_climate_disasters",
+        "energy_grid_power",
+        "labor_web_activity",
+        "real_estate_activity",
+        "patents_technology_innovation"
+      ],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_OFFICIAL_EVENTS_SOURCE_CONFIG"
+      ],
+      "limitations": [
+        "Implement and certify original government, regulator, central-bank, court, election, health, cyber, weather, and statistical sources rather than relying on summaries."
+      ]
+    },
+    {
+      "identifier": "official-sec-edgar",
+      "source_name": "SEC EDGAR",
+      "role": "official",
+      "independence_group": "sec-edgar",
+      "enabled": true,
+      "usage_rights_approved": true,
+      "storage_and_backup_approved": true,
+      "derived_analytics_approved": true,
+      "internal_display_approved": true,
+      "paper_simulation_approved": true,
+      "event_time_supported": true,
+      "publication_time_supported": true,
+      "availability_time_supported": true,
+      "correction_history_supported": true,
+      "historical_coverage_supported": false,
+      "provenance_complete": true,
+      "entity_mapping_supported": true,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": true,
+      "manipulation_controls_defined": true,
+      "deduplication_supported": true,
+      "service_level_defined": true,
+      "certification_required": false,
+      "certification_identifier": null,
+      "domains": [
+        "filings_corporate_disclosures",
+        "management_guidance",
+        "insider_institutional_ownership",
+        "legal_litigation_sanctions"
+      ],
+      "authoritative_domains": [
+        "filings_corporate_disclosures",
+        "management_guidance",
+        "insider_institutional_ownership",
+        "legal_litigation_sanctions"
+      ],
+      "credential_environment_variables": [
+        "SEC_USER_AGENT"
+      ],
+      "limitations": [
+        "The current adapter covers recent submissions and company facts; older archives and complete ownership forms require expansion."
+      ]
+    },
+    {
+      "identifier": "commercial-global-newswire",
+      "source_name": "UNASSIGNED_LICENSED_GLOBAL_NEWSWIRE",
+      "role": "primary",
+      "independence_group": "global-newswire",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "current_events_news",
+        "geopolitical_security",
+        "government_policy_regulation",
+        "central_bank_communications",
+        "elections_political_risk",
+        "legal_litigation_sanctions",
+        "public_health",
+        "cybersecurity_incidents",
+        "credit_ratings_defaults",
+        "supply_chain_shipping_inventories",
+        "social_search_sentiment"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_GLOBAL_NEWS_PROVIDER",
+        "CAPITAL_INTELLIGENCE_GLOBAL_NEWS_API_KEY"
+      ],
+      "limitations": [
+        "Must retain original publication timestamps, updates, corrections, source attribution, topic/entity tags, and archive rights."
+      ]
+    },
+    {
+      "identifier": "commercial-independent-journalism",
+      "source_name": "UNASSIGNED_INDEPENDENT_GLOBAL_JOURNALISM_SOURCE",
+      "role": "secondary",
+      "independence_group": "independent-journalism",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "current_events_news",
+        "geopolitical_security",
+        "elections_political_risk",
+        "cybersecurity_incidents"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_JOURNALISM_PROVIDER",
+        "CAPITAL_INTELLIGENCE_JOURNALISM_API_KEY"
+      ],
+      "limitations": [
+        "Must be contractually and editorially independent from the primary newswire and preserve correction history."
+      ]
+    },
+    {
+      "identifier": "issuer-relations-disclosures",
+      "source_name": "UNASSIGNED_GLOBAL_ISSUER_RELATIONS_SOURCE",
+      "role": "primary",
+      "independence_group": "issuer-primary-disclosures",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "filings_corporate_disclosures",
+        "earnings_call_transcripts",
+        "management_guidance"
+      ],
+      "authoritative_domains": [
+        "filings_corporate_disclosures",
+        "earnings_call_transcripts",
+        "management_guidance"
+      ],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ISSUER_DISCLOSURE_PROVIDER",
+        "CAPITAL_INTELLIGENCE_ISSUER_DISCLOSURE_API_KEY"
+      ],
+      "limitations": [
+        "Must preserve the issuer publication time and distinguish prepared remarks, Q&A, presentations, and later corrections."
+      ]
+    },
+    {
+      "identifier": "commercial-transcripts-estimates",
+      "source_name": "UNASSIGNED_TRANSCRIPTS_ESTIMATES_PROVIDER",
+      "role": "primary",
+      "independence_group": "transcripts-estimates",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "filings_corporate_disclosures",
+        "earnings_call_transcripts",
+        "management_guidance",
+        "analyst_estimates_revisions"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_TRANSCRIPTS_ESTIMATES_PROVIDER",
+        "CAPITAL_INTELLIGENCE_TRANSCRIPTS_ESTIMATES_API_KEY"
+      ],
+      "limitations": [
+        "Must retain point-in-time consensus snapshots, analyst population changes, transcript versions, and estimate revision timestamps."
+      ]
+    },
+    {
+      "identifier": "commercial-derivatives-positioning",
+      "source_name": "UNASSIGNED_DERIVATIVES_POSITIONING_PROVIDER",
+      "role": "primary",
+      "independence_group": "derivatives-positioning",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "options_implied_expectations",
+        "futures_positioning",
+        "fund_flows_positioning"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_DERIVATIVES_POSITIONING_PROVIDER",
+        "CAPITAL_INTELLIGENCE_DERIVATIVES_POSITIONING_API_KEY"
+      ],
+      "limitations": [
+        "Must supply raw option chains and surfaces, futures open interest and commitments, fund flows, methodology, and revision history."
+      ]
+    },
+    {
+      "identifier": "commercial-market-intelligence",
+      "source_name": "UNASSIGNED_MARKET_INTELLIGENCE_PROVIDER",
+      "role": "validation",
+      "independence_group": "market-intelligence",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "analyst_estimates_revisions",
+        "credit_ratings_defaults",
+        "options_implied_expectations",
+        "fund_flows_positioning",
+        "short_interest_securities_lending",
+        "consumer_activity",
+        "real_estate_activity",
+        "onchain_crypto_network",
+        "social_search_sentiment"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_MARKET_INTELLIGENCE_PROVIDER",
+        "CAPITAL_INTELLIGENCE_MARKET_INTELLIGENCE_API_KEY"
+      ],
+      "limitations": [
+        "Independent validation source for estimates, ratings, positioning, activity, and derived signals; methodology must be disclosed."
+      ]
+    },
+    {
+      "identifier": "commercial-ownership-lending",
+      "source_name": "UNASSIGNED_OWNERSHIP_SECURITIES_LENDING_PROVIDER",
+      "role": "primary",
+      "independence_group": "ownership-lending",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "credit_ratings_defaults",
+        "short_interest_securities_lending",
+        "insider_institutional_ownership"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_OWNERSHIP_LENDING_PROVIDER",
+        "CAPITAL_INTELLIGENCE_OWNERSHIP_LENDING_API_KEY"
+      ],
+      "limitations": [
+        "Must preserve report dates, settlement lags, borrow availability, fees, ownership filing times, rating actions, and default events."
+      ]
+    },
+    {
+      "identifier": "official-market-statistics",
+      "source_name": "UNASSIGNED_OFFICIAL_MARKET_AND_PHYSICAL_STATISTICS",
+      "role": "official",
+      "independence_group": "official-market-statistics",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "futures_positioning",
+        "commodity_physical_balances",
+        "weather_climate_disasters",
+        "energy_grid_power"
+      ],
+      "authoritative_domains": [
+        "futures_positioning",
+        "commodity_physical_balances",
+        "weather_climate_disasters",
+        "energy_grid_power"
+      ],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_OFFICIAL_MARKET_STATISTICS_CONFIG"
+      ],
+      "limitations": [
+        "Integrate original CFTC, energy, agriculture, inventory, weather, grid, and equivalent global official releases with vintages."
+      ]
+    },
+    {
+      "identifier": "commercial-physical-supply-chain",
+      "source_name": "UNASSIGNED_PHYSICAL_COMMODITY_SUPPLY_CHAIN_PROVIDER",
+      "role": "primary",
+      "independence_group": "physical-supply-chain",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "commodity_physical_balances",
+        "supply_chain_shipping_inventories",
+        "energy_grid_power"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_PHYSICAL_SUPPLY_CHAIN_PROVIDER",
+        "CAPITAL_INTELLIGENCE_PHYSICAL_SUPPLY_CHAIN_API_KEY"
+      ],
+      "limitations": [
+        "Must preserve vessel, port, inventory, production, outage, power, and commodity-flow observation times and revision policy."
+      ]
+    },
+    {
+      "identifier": "commercial-weather-disaster",
+      "source_name": "UNASSIGNED_WEATHER_CLIMATE_DISASTER_PROVIDER",
+      "role": "primary",
+      "independence_group": "weather-disaster",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "weather_climate_disasters"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_WEATHER_DISASTER_PROVIDER",
+        "CAPITAL_INTELLIGENCE_WEATHER_DISASTER_API_KEY"
+      ],
+      "limitations": [
+        "Must provide observation and forecast vintages, model identifiers, uncertainty, disaster footprints, and correction history."
+      ]
+    },
+    {
+      "identifier": "commercial-alternative-activity",
+      "source_name": "UNASSIGNED_ALTERNATIVE_ACTIVITY_PROVIDER",
+      "role": "alternative",
+      "independence_group": "alternative-activity",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "supply_chain_shipping_inventories",
+        "consumer_activity",
+        "labor_web_activity",
+        "real_estate_activity"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ALTERNATIVE_ACTIVITY_PROVIDER",
+        "CAPITAL_INTELLIGENCE_ALTERNATIVE_ACTIVITY_API_KEY"
+      ],
+      "limitations": [
+        "Card, web, app, jobs, mobility, housing, satellite, and similar data require bias, panel-stability, privacy, and methodology controls."
+      ]
+    },
+    {
+      "identifier": "commercial-onchain-intelligence",
+      "source_name": "UNASSIGNED_ONCHAIN_INTELLIGENCE_PROVIDER",
+      "role": "primary",
+      "independence_group": "onchain-intelligence",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "onchain_crypto_network"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ONCHAIN_PROVIDER",
+        "CAPITAL_INTELLIGENCE_ONCHAIN_API_KEY"
+      ],
+      "limitations": [
+        "Must preserve chain, network, block height, finality, address-label version, reorganization policy, and cross-chain methodology."
+      ]
+    },
+    {
+      "identifier": "commercial-social-search",
+      "source_name": "UNASSIGNED_SOCIAL_SEARCH_PROVIDER",
+      "role": "alternative",
+      "independence_group": "social-search",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "social_search_sentiment"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_SOCIAL_SEARCH_PROVIDER",
+        "CAPITAL_INTELLIGENCE_SOCIAL_SEARCH_API_KEY"
+      ],
+      "limitations": [
+        "Bots, coordinated behavior, sampling changes, deletion, edits, geography, and platform-policy changes must be explicitly controlled."
+      ]
+    },
+    {
+      "identifier": "commercial-innovation-research",
+      "source_name": "UNASSIGNED_PATENT_TECHNOLOGY_RESEARCH_PROVIDER",
+      "role": "secondary",
+      "independence_group": "innovation-research",
+      "enabled": false,
+      "usage_rights_approved": false,
+      "storage_and_backup_approved": false,
+      "derived_analytics_approved": false,
+      "internal_display_approved": false,
+      "paper_simulation_approved": false,
+      "event_time_supported": false,
+      "publication_time_supported": false,
+      "availability_time_supported": false,
+      "correction_history_supported": false,
+      "historical_coverage_supported": false,
+      "provenance_complete": false,
+      "entity_mapping_supported": false,
+      "geographic_mapping_supported": false,
+      "reliability_policy_defined": false,
+      "manipulation_controls_defined": false,
+      "deduplication_supported": false,
+      "service_level_defined": false,
+      "certification_required": true,
+      "certification_identifier": null,
+      "domains": [
+        "patents_technology_innovation"
+      ],
+      "authoritative_domains": [],
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_INNOVATION_RESEARCH_PROVIDER",
+        "CAPITAL_INTELLIGENCE_INNOVATION_RESEARCH_API_KEY"
+      ],
+      "limitations": [
+        "Must preserve filing, publication, grant, citation, assignee, taxonomy, and knowledge-availability history."
+      ]
+    }
+  ],
+  "requirements": [
+    {
+      "domain": "current_events_news",
+      "source_identifiers": ["official-public-authorities", "commercial-global-newswire", "commercial-independent-journalism"],
+      "minimum_ready_sources": 3,
+      "minimum_independence_groups": 3,
+      "authoritative_required": false,
+      "rationale": "Continuously detect material current events with an original public source plus two editorially independent licensed sources."
+    },
+    {
+      "domain": "geopolitical_security",
+      "source_identifiers": ["official-public-authorities", "commercial-global-newswire", "commercial-independent-journalism"],
+      "minimum_ready_sources": 3,
+      "minimum_independence_groups": 3,
+      "authoritative_required": false,
+      "rationale": "Geopolitical events require official attribution and independent reporting before portfolio escalation."
+    },
+    {
+      "domain": "government_policy_regulation",
+      "source_identifiers": ["official-public-authorities", "commercial-global-newswire"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Policy and regulation require original authority publication plus licensed event coverage."
+    },
+    {
+      "domain": "central_bank_communications",
+      "source_identifiers": ["official-public-authorities", "commercial-global-newswire"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Central-bank statements, speeches, minutes, and implementation notices require original publication and independent timestamped coverage."
+    },
+    {
+      "domain": "elections_political_risk",
+      "source_identifiers": ["official-public-authorities", "commercial-global-newswire", "commercial-independent-journalism"],
+      "minimum_ready_sources": 3,
+      "minimum_independence_groups": 3,
+      "authoritative_required": false,
+      "rationale": "Election results, polling changes, and political-risk events require official and independently corroborated evidence."
+    },
+    {
+      "domain": "legal_litigation_sanctions",
+      "source_identifiers": ["official-public-authorities", "official-sec-edgar", "commercial-global-newswire"],
+      "minimum_ready_sources": 3,
+      "minimum_independence_groups": 3,
+      "authoritative_required": false,
+      "rationale": "Court, enforcement, sanctions, and issuer legal disclosures require original authorities, issuer filings, and event coverage."
+    },
+    {
+      "domain": "public_health",
+      "source_identifiers": ["official-public-authorities", "commercial-global-newswire"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Health events require original health-authority evidence and independent event reporting."
+    },
+    {
+      "domain": "cybersecurity_incidents",
+      "source_identifiers": ["official-public-authorities", "commercial-global-newswire", "commercial-independent-journalism"],
+      "minimum_ready_sources": 3,
+      "minimum_independence_groups": 3,
+      "authoritative_required": false,
+      "rationale": "Cyber incidents require authority or issuer confirmation and two independent reports because early claims are often incomplete."
+    },
+    {
+      "domain": "filings_corporate_disclosures",
+      "source_identifiers": ["official-sec-edgar", "issuer-relations-disclosures", "commercial-transcripts-estimates"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Corporate disclosures require original filings or issuer releases plus an independent normalized source."
+    },
+    {
+      "domain": "earnings_call_transcripts",
+      "source_identifiers": ["issuer-relations-disclosures", "commercial-transcripts-estimates"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Earnings calls require issuer-primary material and a timestamped licensed transcript with version history."
+    },
+    {
+      "domain": "management_guidance",
+      "source_identifiers": ["official-sec-edgar", "issuer-relations-disclosures", "commercial-transcripts-estimates"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Guidance must be tied to the original issuer or filing and independently normalized."
+    },
+    {
+      "domain": "analyst_estimates_revisions",
+      "source_identifiers": ["commercial-transcripts-estimates", "commercial-market-intelligence"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Point-in-time consensus and revisions require two independent methodologies."
+    },
+    {
+      "domain": "credit_ratings_defaults",
+      "source_identifiers": ["commercial-ownership-lending", "commercial-global-newswire", "commercial-market-intelligence"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Ratings, defaults, and credit events require primary event data and independent confirmation."
+    },
+    {
+      "domain": "options_implied_expectations",
+      "source_identifiers": ["commercial-derivatives-positioning", "commercial-market-intelligence"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Volatility surfaces, skew, term structure, and implied distributions require raw-market and independent derived validation."
+    },
+    {
+      "domain": "futures_positioning",
+      "source_identifiers": ["official-market-statistics", "commercial-derivatives-positioning"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Official commitments and commercial open-interest positioning must be reconciled point in time."
+    },
+    {
+      "domain": "fund_flows_positioning",
+      "source_identifiers": ["commercial-derivatives-positioning", "commercial-market-intelligence"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "ETF, fund, futures, and cross-asset flows require independent source and methodology checks."
+    },
+    {
+      "domain": "short_interest_securities_lending",
+      "source_identifiers": ["commercial-ownership-lending", "commercial-market-intelligence"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Short interest, borrow availability, fees, utilization, and settlement lags require two independent views."
+    },
+    {
+      "domain": "insider_institutional_ownership",
+      "source_identifiers": ["official-sec-edgar", "commercial-ownership-lending"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Ownership changes require original filings plus normalized holdings and effective-date history."
+    },
+    {
+      "domain": "commodity_physical_balances",
+      "source_identifiers": ["official-market-statistics", "commercial-physical-supply-chain"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Production, stocks, inventories, outages, and flows require official balances and physical-market validation."
+    },
+    {
+      "domain": "supply_chain_shipping_inventories",
+      "source_identifiers": ["commercial-physical-supply-chain", "commercial-alternative-activity", "commercial-global-newswire"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Shipping, ports, inventories, and supply-chain disruptions require physical observations and independent event or alternative evidence."
+    },
+    {
+      "domain": "weather_climate_disasters",
+      "source_identifiers": ["official-public-authorities", "official-market-statistics", "commercial-weather-disaster"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Weather and disaster impacts require official observations plus versioned forecast or footprint data."
+    },
+    {
+      "domain": "energy_grid_power",
+      "source_identifiers": ["official-market-statistics", "commercial-physical-supply-chain"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Power demand, grid constraints, outages, generation mix, and fuel balances require official and physical-market sources."
+    },
+    {
+      "domain": "consumer_activity",
+      "source_identifiers": ["commercial-alternative-activity", "commercial-market-intelligence"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Spending, mobility, web, app, and engagement signals require independent panels and methodology controls."
+    },
+    {
+      "domain": "labor_web_activity",
+      "source_identifiers": ["official-public-authorities", "commercial-alternative-activity"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Labor conditions combine official releases with jobs, web, and activity data while preserving panel and revision history."
+    },
+    {
+      "domain": "real_estate_activity",
+      "source_identifiers": ["official-public-authorities", "commercial-alternative-activity", "commercial-market-intelligence"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Property activity requires official records and at least one independent transaction, listing, or activity source."
+    },
+    {
+      "domain": "onchain_crypto_network",
+      "source_identifiers": ["commercial-onchain-intelligence", "commercial-market-intelligence"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "On-chain activity requires chain-native evidence plus independent labels and methodology validation."
+    },
+    {
+      "domain": "social_search_sentiment",
+      "source_identifiers": ["commercial-social-search", "commercial-global-newswire", "commercial-market-intelligence"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Social and search signals may only supplement corroborated events and market evidence; manipulation controls are mandatory."
+    },
+    {
+      "domain": "patents_technology_innovation",
+      "source_identifiers": ["official-public-authorities", "commercial-innovation-research"],
+      "minimum_ready_sources": 2,
+      "minimum_independence_groups": 2,
+      "authoritative_required": false,
+      "rationale": "Innovation evidence requires original patent or research records and normalized assignee, taxonomy, and citation history."
+    }
+  ]
+}
