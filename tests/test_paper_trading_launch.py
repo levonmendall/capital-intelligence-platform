@@ -1,4 +1,4 @@
-"""Acceptance tests for sustained paper-trading launch and halt authority."""
+"""Acceptance tests for sustained operational paper-launch certification."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from governance import (
     SQLitePaperTradingLaunchStore,
     require_paper_execution_authorization,
 )
-from run_paper_trading_control import main as control_main
 from run_paper_trading_launch import main as launch_main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -127,7 +126,7 @@ def test_policy_and_example_evidence_match_schema() -> None:
     assert policy.required_portfolio_count == 1
 
 
-def test_complete_sustained_evidence_authorizes_only_controlled_paper_launch() -> None:
+def test_complete_sustained_evidence_is_ready_but_paper_only() -> None:
     report = PaperTradingLaunchEvaluator().evaluate(_evidence())
 
     assert report.state is PaperTradingLaunchState.READY
@@ -176,18 +175,17 @@ def test_latest_blocked_assessment_supersedes_prior_ready_report(
     tmp_path: Path,
 ) -> None:
     store = SQLitePaperTradingLaunchStore(tmp_path / "launch.db")
-    ready = PaperTradingLaunchEvaluator().evaluate(_evidence())
-    blocked_evidence = replace(
-        _evidence(),
-        identifier="paper-launch-evidence:newer-blocked",
-        observed_at=NOW + timedelta(minutes=1),
-        knowledge_cutoff=NOW + timedelta(minutes=1),
-        window_end=NOW + timedelta(minutes=1),
-        unresolved_orders=1,
+    store.append(PaperTradingLaunchEvaluator().evaluate(_evidence()))
+    blocked = PaperTradingLaunchEvaluator().evaluate(
+        replace(
+            _evidence(),
+            identifier="paper-launch-evidence:newer-blocked",
+            observed_at=NOW + timedelta(minutes=1),
+            knowledge_cutoff=NOW + timedelta(minutes=1),
+            window_end=NOW + timedelta(minutes=1),
+            unresolved_orders=1,
+        )
     )
-    blocked = PaperTradingLaunchEvaluator().evaluate(blocked_evidence)
-
-    store.append(ready)
     store.append(blocked)
 
     assert blocked.state is PaperTradingLaunchState.BLOCKED
@@ -202,7 +200,7 @@ def test_latest_blocked_assessment_supersedes_prior_ready_report(
     )
 
 
-def test_launch_and_control_stores_are_append_only_and_tamper_evident(
+def test_launch_and_runtime_control_stores_are_append_only(
     tmp_path: Path,
 ) -> None:
     launch_store = SQLitePaperTradingLaunchStore(tmp_path / "launch.db")
@@ -215,8 +213,8 @@ def test_launch_and_control_stores_are_append_only_and_tamper_evident(
         baseline_identifier=BASELINE,
         process_version=PROCESS,
         code_version=CODE,
-        reason="Activate reviewed controlled paper baseline.",
-        authority_identifiers=("authority:investment-committee",),
+        reason="Exercise the runtime switch.",
+        authority_identifiers=("authority:risk",),
         launch_report_identifier=launch.identifier,
     )
 
@@ -235,15 +233,14 @@ def test_launch_and_control_stores_are_append_only_and_tamper_evident(
             )
         connection.execute("DROP TRIGGER paper_trading_launch_reports_no_update")
         connection.execute(
-            "UPDATE paper_trading_launch_reports SET payload_json='{}' "
-            "WHERE sequence=1"
+            "UPDATE paper_trading_launch_reports SET payload_json='{}' WHERE sequence=1"
         )
 
     with pytest.raises(PaperTradingLaunchIntegrityError):
         launch_store.verify_integrity()
 
 
-def test_execution_requires_current_launch_and_active_exact_control(
+def test_operational_launch_helper_requires_active_runtime_switch(
     tmp_path: Path,
 ) -> None:
     launch_store = SQLitePaperTradingLaunchStore(tmp_path / "launch.db")
@@ -261,19 +258,19 @@ def test_execution_requires_current_launch_and_active_exact_control(
             as_of=NOW,
         )
 
-    activation = PaperTradingControlEvent(
-        identifier="paper-control:active:test",
-        state=PaperTradingControlState.ACTIVE,
-        effective_at=NOW,
-        baseline_identifier=BASELINE,
-        process_version=PROCESS,
-        code_version=CODE,
-        reason="Reviewed activation.",
-        authority_identifiers=("authority:investment-committee",),
-        launch_report_identifier=launch.identifier,
+    control_store.append(
+        PaperTradingControlEvent(
+            identifier="paper-control:active:test",
+            state=PaperTradingControlState.ACTIVE,
+            effective_at=NOW,
+            baseline_identifier=BASELINE,
+            process_version=PROCESS,
+            code_version=CODE,
+            reason="Exercise activation.",
+            authority_identifiers=("authority:risk",),
+            launch_report_identifier=launch.identifier,
+        )
     )
-    control_store.append(activation)
-
     authorization = require_paper_execution_authorization(
         launch_store=launch_store,
         control_store=control_store,
@@ -283,36 +280,14 @@ def test_execution_requires_current_launch_and_active_exact_control(
         as_of=NOW + timedelta(minutes=1),
     )
     assert authorization.launch_report.identifier == launch.identifier
-    assert activation.identifier in authorization.source_identifiers
-
-    control_store.append(
-        PaperTradingControlEvent(
-            identifier="paper-control:halt:test",
-            state=PaperTradingControlState.HALTED,
-            effective_at=NOW + timedelta(minutes=2),
-            baseline_identifier=BASELINE,
-            process_version=PROCESS,
-            code_version=CODE,
-            reason="Exercise global halt control.",
-            authority_identifiers=("authority:risk",),
-        )
-    )
-    with pytest.raises(PaperTradingLaunchError, match="halted"):
-        require_paper_execution_authorization(
-            launch_store=launch_store,
-            control_store=control_store,
-            baseline_identifier=BASELINE,
-            process_version=PROCESS,
-            code_version=CODE,
-            as_of=NOW + timedelta(minutes=3),
-        )
 
 
 def test_expiry_and_version_mismatch_fail_closed(tmp_path: Path) -> None:
-    policy = PaperTradingLaunchPolicy(authorization_ttl_hours=1)
     launch_store = SQLitePaperTradingLaunchStore(tmp_path / "launch.db")
     control_store = SQLitePaperTradingControlStore(tmp_path / "control.db")
-    launch = PaperTradingLaunchEvaluator(policy).evaluate(_evidence())
+    launch = PaperTradingLaunchEvaluator(
+        PaperTradingLaunchPolicy(authorization_ttl_hours=1)
+    ).evaluate(_evidence())
     launch_store.append(launch)
     control_store.append(
         PaperTradingControlEvent(
@@ -322,7 +297,7 @@ def test_expiry_and_version_mismatch_fail_closed(tmp_path: Path) -> None:
             baseline_identifier=BASELINE,
             process_version=PROCESS,
             code_version=CODE,
-            reason="Temporary test activation.",
+            reason="Temporary activation.",
             authority_identifiers=("authority:test",),
             launch_report_identifier=launch.identifier,
         )
@@ -348,17 +323,12 @@ def test_expiry_and_version_mismatch_fail_closed(tmp_path: Path) -> None:
         )
 
 
-def test_launch_and_control_clis_persist_safe_authority(
+def test_launch_cli_persists_credential_safe_report(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     evidence_path = tmp_path / "evidence.json"
-    evidence_path.write_text(
-        json.dumps(_evidence().to_dict()),
-        encoding="utf-8",
-    )
-    launch_db = tmp_path / "launch.db"
-    control_db = tmp_path / "control.db"
+    evidence_path.write_text(json.dumps(_evidence().to_dict()), encoding="utf-8")
 
     assert (
         launch_main(
@@ -366,44 +336,14 @@ def test_launch_and_control_clis_persist_safe_authority(
                 "--evidence",
                 str(evidence_path),
                 "--database",
-                str(launch_db),
+                str(tmp_path / "launch.db"),
                 "--require-ready",
                 "--compact",
             )
         )
         == 0
     )
-    launch_payload = json.loads(capsys.readouterr().out)
-    assert launch_payload["state"] == PaperTradingLaunchState.READY.value
-    assert launch_payload["secret_values_disclosed"] is False
-
-    assert (
-        control_main(
-            (
-                "activate",
-                "--baseline-identifier",
-                BASELINE,
-                "--process-version",
-                PROCESS,
-                "--code-version",
-                CODE,
-                "--effective-at",
-                NOW.isoformat(),
-                "--identifier",
-                "paper-control:cli:activate",
-                "--reason",
-                "Reviewed CLI activation.",
-                "--authority-identifier",
-                "authority:cli-test",
-                "--launch-database",
-                str(launch_db),
-                "--control-database",
-                str(control_db),
-                "--compact",
-            )
-        )
-        == 0
-    )
-    control_payload = json.loads(capsys.readouterr().out)
-    assert control_payload["state"] == PaperTradingControlState.ACTIVE.value
-    assert control_payload["real_money_authorized"] is False
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["state"] == PaperTradingLaunchState.READY.value
+    assert payload["secret_values_disclosed"] is False
+    assert payload["real_money_authorized"] is False
