@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from api.config import ApiSettings
-from api.repositories import DailySnapshotRepository, JournalRepository, RepositoryUnavailableError
+from api.repositories import DailySnapshotRepository, JournalRepository
 from core.portfolio import (
     get_mandate_details,
     get_portfolio_totals,
@@ -62,28 +62,28 @@ def diagnostic_snapshots() -> DailySnapshotRepository:
 def _latest(event_type: str) -> dict[str, Any] | None:
     try:
         return cio_journal().latest_payload(event_type)
-    except RepositoryUnavailableError:
+    except (RuntimeError, OSError):
         return None
 
 
 def _history(event_type: str, *, limit: int = 50) -> tuple[dict[str, Any], ...]:
     try:
         return cio_journal().history(event_type, limit=limit)
-    except RepositoryUnavailableError:
+    except (RuntimeError, OSError):
         return ()
 
 
 def _latest_theses() -> tuple[dict[str, Any], ...]:
     try:
         return cio_journal().latest_per_aggregate("thesis_snapshot", limit=200)
-    except RepositoryUnavailableError:
+    except (RuntimeError, OSError):
         return ()
 
 
 def _diagnostic_environment() -> dict[str, Any] | None:
     try:
         return diagnostic_snapshots().latest_payload()
-    except RepositoryUnavailableError:
+    except (RuntimeError, OSError):
         return None
 
 
