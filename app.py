@@ -27,6 +27,7 @@ from premium_ui import (
     format_percent,
     page_header,
     render_app_header,
+    render_navigation,
     render_sidebar,
     text_card,
 )
@@ -299,8 +300,10 @@ def _render_history() -> None:
             display_frame(frame)
 
 
-apply_global_style()
-page = render_sidebar(PRIMARY_SURFACES)
+dark_mode = bool(st.session_state.get("dark_mode", False))
+apply_global_style(dark_mode=dark_mode)
+render_sidebar()
+page, dark_mode = render_navigation(PRIMARY_SURFACES)
 render_app_header(page)
 if page == "Today":
     _render_today()
