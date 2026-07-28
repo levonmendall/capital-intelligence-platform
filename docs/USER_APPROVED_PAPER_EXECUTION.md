@@ -6,12 +6,12 @@ Capital Intelligence may analyze markets, issue a CIO conclusion, and construct 
 
 This consent is an additional authority. It does not replace:
 
-1. the controlled paper-test eligibility package and human release decision;
-2. sustained paper-launch certification;
-3. the active runtime risk switch;
-4. instrument, universe, provider, quote, session, cost, and reconciliation controls.
+1. the controlled paper-test eligibility package and human release decision in staging or production;
+2. sustained paper-launch certification in staging or production;
+3. the active runtime risk switch in staging or production;
+4. instrument, universe, provider, quote, session, cost, liquidity, and reconciliation controls.
 
-No step authorizes real money, brokerage submission, custody, or live orders.
+No step authorizes real money, custody, or a live brokerage order. Alpaca supplies paper-account, market-clock, asset, and IEX quote evidence; the canonical portfolio records internal simulated fills.
 
 ## Streamlit workflow
 
@@ -36,21 +36,54 @@ The approval is bound to:
 - an approval timestamp and 24-hour expiry; and
 - the sole `COMPOUNDING` portfolio.
 
-Approval events are append-only and tamper-evident. They are stored as additional tables in the canonical `paper_test_governance.db`, so the existing governance backup and recovery authority covers them.
+Approval events are append-only and tamper-evident. They are stored in `paper_test_governance.db`.
 
-While an approved implementation is pending, the Portfolio approval panel refreshes every five seconds. After successful execution, it changes to the completed state and displays a one-time Streamlit completion toast without requiring a manual page refresh.
+The Streamlit runtime now co-locates the execution worker with the approval database and canonical portfolio databases. Approval triggers an immediate attempt. A background fragment checks every 30 seconds while the application is active, and the Portfolio approval panel checks every five seconds while it is open. A construction-level lease and the canonical execution store prevent duplicate execution.
 
-## Execute the approved implementation
+After successful execution, the approval changes to `executed`, the Portfolio surface displays the execution identifier, and a one-time completion toast appears without a manual refresh.
 
-Use the consent-gated entrypoint instead of calling the lower-level executor directly:
+## Streamlit deployment configuration
+
+Root-level Streamlit secrets must include one matching Alpaca paper pair:
+
+```toml
+APCA_API_KEY_ID = "replace-with-paper-key-id"
+APCA_API_SECRET_KEY = "replace-with-paper-secret"
+APCA_API_BASE_URL = "https://paper-api.alpaca.markets"
+APCA_DATA_BASE_URL = "https://data.alpaca.markets"
+APCA_DATA_FEED = "iex"
+
+CAPITAL_INTELLIGENCE_ENVIRONMENT = "paper"
+CAPITAL_INTELLIGENCE_STREAMLIT_PAPER_EXECUTION_ENABLED = "true"
+CAPITAL_INTELLIGENCE_DATA_DIR = "database"
+```
+
+`paper`, `development`, and `test` environments use the repository's explicit development launch-gate bypass unless `CAPITAL_INTELLIGENCE_STREAMLIT_PAPER_EXECUTION_DEVELOPMENT_BYPASS=false` is configured. The lower-level executor refuses that bypass in `staging` or `production`.
+
+For staging or production, also configure exact authority versions and populate the three append-only operational authority databases:
+
+```text
+CAPITAL_INTELLIGENCE_TEST_BASELINE_IDENTIFIER
+CAPITAL_INTELLIGENCE_INVESTMENT_PROCESS_VERSION
+CAPITAL_INTELLIGENCE_RELEASE
+CAPITAL_INTELLIGENCE_PAPER_TEST_GOVERNANCE_DATABASE
+CAPITAL_INTELLIGENCE_PAPER_LAUNCH_DATABASE
+CAPITAL_INTELLIGENCE_PAPER_CONTROL_DATABASE
+```
+
+The application and worker must use the same `CAPITAL_INTELLIGENCE_DATA_DIR` or explicit database paths. The co-located Streamlit worker satisfies this requirement within one runtime. A deployment that uses multiple replicas requires shared persistent storage or a managed database.
+
+## Manual execution entrypoint
+
+Operators may still use the consent-gated command directly:
 
 ```bash
 python run_approved_paper_execution.py \
   --construction artifacts/portfolio-construction.json \
   --decision-identifier <CIO_DECISION_IDENTIFIER> \
-  --profiles config/active-paper-instrument-profiles.json \
-  --session-provider <MODULE:FACTORY> \
-  --quote-provider <MODULE:FACTORY> \
+  --profiles artifacts/exact-trade-profiles.json \
+  --session-provider providers.alpaca_paper:create_alpaca_paper_session_provider \
+  --quote-provider providers.alpaca_paper:create_alpaca_paper_quote_provider \
   --as-of <CURRENT_TIMEZONE_AWARE_TIMESTAMP> \
   --baseline-identifier <IMMUTABLE_BASELINE> \
   --process-version <PROCESS_VERSION> \
@@ -58,26 +91,29 @@ python run_approved_paper_execution.py \
   --require-complete
 ```
 
-The entrypoint first requires current user approval for the exact construction hash. It then delegates to `run_multi_asset_paper_execution.py`, which independently requires the active entry, launch, and runtime authorities and applies the existing paper-only execution controls.
+The Streamlit worker materializes the exact approved construction and only the profiles corresponding to proposed trades before invoking this entrypoint.
 
-A successful execution appends an `executed` event to the approval history. That prevents the same consent from being reused for a second implementation. A failed or held execution leaves the approval pending until it expires or is revoked, permitting a governed retry without changing the approved construction.
+A successful execution appends an `executed` event to the approval history. That prevents the same consent from being reused. A failed or held execution leaves approval pending until it expires or is revoked, permitting a governed retry without changing the approved construction.
 
-After the executed event is recorded, the worker creates a `Paper transaction completed` alert for the authenticated approver under the existing `IMPLEMENTATION` topic. The in-app alert is immediately available in the authenticated Notifications inbox. Email is queued when the user has enabled the email channel and configured an address. User alert preferences remain authoritative.
-
-The completion alert is deduplicated by user, execution identifier, and channel. A notification-store failure cannot cause the already completed paper transaction to run again; the worker reports `completed_with_notification_error` while retaining a successful execution result.
+After the executed event is recorded, the worker creates a `Paper transaction completed` alert for the authenticated approver under the existing `IMPLEMENTATION` topic. The in-app alert is immediately available. Email is queued when the user has enabled email and configured an address.
 
 ## Fail-closed behavior
 
-Paper execution is blocked when:
+Paper execution is blocked or held when:
 
 - no authenticated approval exists;
 - the construction changes after approval;
 - approval is declined, revoked, expired, or already executed;
 - the user lacks write access;
-- construction is blocked;
-- controlled paper launch authority is unavailable;
+- automatic execution is disabled or Alpaca credentials are missing from the runtime;
+- construction is blocked or outside the free listed-wrapper pilot;
+- the market is closed;
+- an asset is inactive, non-tradable, or non-fractionable;
+- quotes are unavailable, stale, crossed, materially future-dated, or lack sufficient notional;
+- eligible-universe or portfolio lineage is unavailable;
+- staging or production paper authorities are unavailable;
 - the runtime switch is halted;
-- provider, quote, session, eligibility, portfolio, turnover, drawdown, or reconciliation checks fail.
+- turnover, cash, drawdown, cost, or reconciliation checks fail.
 
 Every result preserves:
 
