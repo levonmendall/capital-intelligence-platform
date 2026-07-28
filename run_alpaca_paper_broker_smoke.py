@@ -13,10 +13,8 @@ from governance.provider_activation import (
     ProviderActivation,
     SQLiteProviderActivationStore,
 )
-from operations.alpaca_paper_broker import (
-    AlpacaPaperBrokerExecutor,
-    SQLiteAlpacaPaperBrokerStore,
-)
+from operations.alpaca_paper_broker import SQLiteAlpacaPaperBrokerStore
+from operations.alpaca_paper_round_trip import FeeAwareAlpacaPaperBrokerExecutor
 from providers.alpaca_paper_broker import create_alpaca_paper_broker_client
 
 
@@ -85,7 +83,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         activation_sequence = activation_store.append(activation)
         activation_store.verify_integrity()
         broker_store = SQLiteAlpacaPaperBrokerStore(args.broker_event_database)
-        report = AlpacaPaperBrokerExecutor(
+        report = FeeAwareAlpacaPaperBrokerExecutor(
             client=create_alpaca_paper_broker_client(),
             activation_store=activation_store,
             event_store=broker_store,
