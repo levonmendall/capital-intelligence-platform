@@ -1,0 +1,25 @@
+name: Export universal-market source
+
+on:
+  push:
+    branches:
+      - agent/universal-paper-markets
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Package source
+        run: |
+          zip -qr /tmp/capital-intelligence-platform-source.zip . -x '.git/*'
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-market-source
+          path: /tmp/capital-intelligence-platform-source.zip
+          retention-days: 1
