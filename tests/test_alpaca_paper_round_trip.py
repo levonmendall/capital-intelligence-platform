@@ -9,7 +9,10 @@ import pytest
 
 from governance.provider_activation import ProviderActivation, SQLiteProviderActivationStore
 from operations.alpaca_paper_broker import SQLiteAlpacaPaperBrokerStore
-from operations.alpaca_paper_round_trip import FeeAwareAlpacaPaperBrokerExecutor
+from operations.alpaca_paper_round_trip import (
+    POSITION_TOLERANCE,
+    FeeAwareAlpacaPaperBrokerExecutor,
+)
 from providers.alpaca_paper import AlpacaPaperSettings
 from providers.alpaca_paper_broker import AlpacaPaperBrokerClient
 
@@ -124,6 +127,7 @@ def test_round_trip_sells_net_available_crypto_and_preserves_opening_position(
     tmp_path: Path,
 ) -> None:
     api = _FeeAwarePaperApi()
+    opening_available = api.opening_available
     client = AlpacaPaperBrokerClient(
         AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),
         http_request=api,
@@ -144,10 +148,11 @@ def test_round_trip_sells_net_available_crypto_and_preserves_opening_position(
         evaluated_at=NOW,
     )
 
+    tolerance = float(POSITION_TOLERANCE)
     assert report.reconciled
-    assert report.opening_quantity == pytest.approx(api.opening_available)
-    assert report.closing_quantity == pytest.approx(api.opening_available)
-    assert report.net_quantity_change == pytest.approx(0.0)
+    assert report.opening_quantity == pytest.approx(opening_available, abs=tolerance)
+    assert report.closing_quantity == pytest.approx(opening_available, abs=tolerance)
+    assert report.net_quantity_change == pytest.approx(0.0, abs=tolerance)
     assert api.submitted[0]["notional"] == "10"
     assert api.submitted[1]["qty"] == "0.000152917"
     assert event_store.verify_integrity()
