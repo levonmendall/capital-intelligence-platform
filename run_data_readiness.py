@@ -1,4 +1,4 @@
-"""Evaluate market data and maximum decision-information coverage safely."""
+"""Evaluate market data, maximum information, and public live coverage safely."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from governance import (
     AllMarketsDataReadinessEvaluator,
@@ -34,6 +34,13 @@ def _default_information_manifest() -> str:
     return os.getenv(
         "CAPITAL_INTELLIGENCE_DECISION_INFORMATION_MANIFEST",
         "config/maximum_decision_information_scope.json",
+    )
+
+
+def _default_public_live_report() -> str:
+    return os.getenv(
+        "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_REPORT",
+        "database/public-live-information-report.json",
     )
 
 
@@ -72,6 +79,22 @@ def _timestamp(value: str, *, field_name: str) -> datetime:
     return parsed
 
 
+def _load_public_live_report(path: str | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    report_path = Path(path).expanduser()
+    if not report_path.exists():
+        return None
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("public live information report must be a JSON object")
+    payload.pop("records", None)
+    payload["secret_values_disclosed"] = False
+    payload["full_article_text_stored"] = False
+    payload["real_money_authorized"] = False
+    return payload
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -85,6 +108,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum decision-relevant information manifest JSON.",
     )
     parser.add_argument(
+        "--public-live-report",
+        default=_default_public_live_report(),
+        help="Latest persisted public live-information coverage report JSON.",
+    )
+    parser.add_argument(
         "--env-file",
         help="Optional KEY=VALUE file overlaid on the runtime environment.",
     )
@@ -96,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", help="Optional path for the combined JSON report.")
     parser.add_argument(
         "--gate-certification-output",
-        help="Write certified-data gate JSON only when both scopes are ready.",
+        help="Write certified-data gate JSON only when both governed scopes are ready.",
     )
     parser.add_argument("--gate-identifier")
     parser.add_argument("--baseline-identifier")
@@ -114,11 +142,18 @@ def _write(path: str, payload: Mapping[str, object]) -> None:
     destination = Path(path).expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     temporary.replace(destination)
 
 
-def _combined_payload(market_report, information_report) -> dict[str, object]:
+def _combined_payload(
+    market_report,
+    information_report,
+    public_live_report: Mapping[str, Any] | None = None,
+) -> dict[str, object]:
     payload = market_report.to_dict()
     combined_ready = (
         market_report.global_test_data_ready and information_report.all_domains_ready
@@ -134,13 +169,26 @@ def _combined_payload(market_report, information_report) -> dict[str, object]:
         state = "partial"
     else:
         state = "blocked"
+    live_successes = (
+        0
+        if public_live_report is None
+        else int(public_live_report.get("successful_source_count", 0))
+    )
+    live_records = (
+        0
+        if public_live_report is None
+        else int(public_live_report.get("live_record_count", 0))
+    )
     payload.update(
         {
-            "schema_version": "combined-market-and-decision-information-readiness-report.v1",
+            "schema_version": "combined-market-information-and-live-coverage-report.v1",
             "state": state,
             "market_data_ready": market_report.global_test_data_ready,
             "maximum_decision_information_ready": information_report.all_domains_ready,
             "current_events_and_news_ready": information_report.current_events_and_news_ready,
+            "public_live_information_available": public_live_report is not None,
+            "public_live_successful_source_count": live_successes,
+            "public_live_record_count": live_records,
             "global_test_data_ready": combined_ready,
             "missing_environment_variables": sorted(
                 set(market_report.missing_environment_variables)
@@ -151,6 +199,7 @@ def _combined_payload(market_report, information_report) -> dict[str, object]:
                 *(f"decision-information: {item}" for item in information_report.blockers),
             ],
             "decision_information": information_report.to_dict(),
+            "public_live_information": public_live_report,
             "evidence_identifier": (
                 "combined-data-readiness:"
                 f"{market_report.manifest_identifier}:"
@@ -180,6 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     {
                         "market_manifest_identifier": market_manifest.identifier,
                         "information_manifest_identifier": information_manifest.identifier,
+                        "public_live_report_path": args.public_live_report,
                         "required_environment_variables": required,
                         "secret_values_disclosed": False,
                     },
@@ -197,7 +247,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             information_manifest,
             environment=environment,
         )
-        payload = _combined_payload(market_report, information_report)
+        public_live_report = _load_public_live_report(args.public_live_report)
+        payload = _combined_payload(
+            market_report,
+            information_report,
+            public_live_report,
+        )
         if args.output:
             _write(args.output, payload)
         if args.gate_certification_output:
@@ -221,6 +276,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError(
                     "gate certification output requires: " + ", ".join(missing)
                 )
+            additional_evidence = [
+                information_report.evidence_identifier,
+                information_report.manifest_identifier,
+            ]
+            if public_live_report is not None:
+                additional_evidence.append(
+                    "public-live-information:"
+                    + str(public_live_report.get("catalog_identifier", "unknown"))
+                    + ":"
+                    + str(public_live_report.get("evaluated_at", "unknown"))
+                )
             certification = market_report.to_readiness_gate_certification(
                 identifier=args.gate_identifier,
                 certified_at=_timestamp(args.certified_at, field_name="--certified-at"),
@@ -230,18 +296,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 process_version=args.process_version,
                 code_version=args.code_version,
                 authority_identifiers=tuple(args.authority_identifier),
-                additional_evidence_identifiers=(
-                    information_report.evidence_identifier,
-                    information_report.manifest_identifier,
-                ),
+                additional_evidence_identifiers=tuple(additional_evidence),
                 limitations=(
                     "maximum decision-relevant information scope is required for this baseline",
+                    "public live coverage supplements but does not replace licensed institutional sources",
                 ),
             )
             _write(args.gate_certification_output, certification.to_dict())
     except (
         DataReadinessError,
         DecisionInformationReadinessError,
+        json.JSONDecodeError,
         KeyError,
         OSError,
         TypeError,
@@ -249,7 +314,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     ) as error:
         print(
             json.dumps(
-                {"state": "blocked", "error": str(error), "real_money_authorized": False},
+                {
+                    "state": "blocked",
+                    "error": str(error),
+                    "secret_values_disclosed": False,
+                    "real_money_authorized": False,
+                },
                 sort_keys=True,
             )
         )

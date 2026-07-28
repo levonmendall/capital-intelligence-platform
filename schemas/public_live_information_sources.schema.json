@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capital-intelligence.local/schemas/public-live-information-sources.v1.json",
+  "title": "Public Live Information Source Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["identifier", "sources"],
+  "properties": {
+    "identifier": {"type": "string", "minLength": 1},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/source"}
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identifier",
+        "source_name",
+        "parser",
+        "endpoint",
+        "source_type",
+        "independence_group",
+        "enabled",
+        "required",
+        "credential_environment_variables",
+        "parameters",
+        "headers",
+        "maximum_records",
+        "domains",
+        "impact_channels",
+        "reliability",
+        "relevance",
+        "materiality",
+        "license_identifier",
+        "usage_rights_identifier",
+        "limitations"
+      ],
+      "properties": {
+        "identifier": {"type": "string", "minLength": 1},
+        "source_name": {"type": "string", "minLength": 1},
+        "parser": {
+          "enum": [
+            "gdelt_doc",
+            "rss_atom",
+            "cftc_socrata",
+            "nws_alerts",
+            "usgs_geojson",
+            "cisa_kev",
+            "treasury_fiscal",
+            "world_bank",
+            "eia_v2"
+          ]
+        },
+        "endpoint": {"type": "string", "pattern": "^https://"},
+        "source_type": {
+          "enum": [
+            "official",
+            "regulatory",
+            "issuer",
+            "newswire",
+            "journalism",
+            "research",
+            "market",
+            "alternative",
+            "social",
+            "validation"
+          ]
+        },
+        "independence_group": {"type": "string", "minLength": 1},
+        "enabled": {"type": "boolean"},
+        "required": {"type": "boolean"},
+        "credential_environment_variables": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}
+        },
+        "user_agent_environment_variable": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "parameters": {"type": "object"},
+        "headers": {
+          "type": "object",
+          "additionalProperties": {"type": "string"}
+        },
+        "maximum_records": {"type": "integer", "minimum": 1, "maximum": 5000},
+        "domains": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "impact_channels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "growth",
+              "inflation",
+              "policy",
+              "liquidity",
+              "discount_rate",
+              "earnings",
+              "credit",
+              "supply",
+              "demand",
+              "commodity",
+              "currency",
+              "volatility",
+              "regulation",
+              "geopolitical",
+              "operational",
+              "cyber",
+              "climate_weather",
+              "positioning",
+              "sentiment",
+              "counterparty"
+            ]
+          }
+        },
+        "reliability": {"type": "number", "minimum": 0, "maximum": 1},
+        "relevance": {"type": "number", "minimum": 0, "maximum": 1},
+        "materiality": {"type": "number", "minimum": 0, "maximum": 1},
+        "license_identifier": {"type": "string", "minLength": 1},
+        "usage_rights_identifier": {"type": "string", "minLength": 1},
+        "limitations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

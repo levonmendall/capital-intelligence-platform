@@ -1,5 +1,4 @@
 """External data providers for the Capital Intelligence Platform."""
-"""External data-provider adapters."""
 
 from providers.fred import FREDRetrievalPolicy
 from providers.fred_cache import (
@@ -8,6 +7,18 @@ from providers.fred_cache import (
     JsonFREDCache,
     MemoryFREDCache,
     fred_cache_key,
+)
+from providers.public_live_information import (
+    PublicLiveCoverageReport,
+    PublicLiveInformationError,
+    PublicLiveInformationProvider,
+    PublicLiveSourceCatalog,
+    PublicLiveSourceDefinition,
+    PublicLiveSourceResult,
+    load_public_live_source_catalog,
+)
+from providers.public_live_information_runtime import (
+    GovernedPublicLiveInformationProvider,
 )
 from providers.sec_edgar import (
     SECEdgarProvider,
@@ -18,9 +29,17 @@ __all__ = [
     "FREDCache",
     "FREDCacheRecord",
     "FREDRetrievalPolicy",
+    "GovernedPublicLiveInformationProvider",
     "JsonFREDCache",
     "MemoryFREDCache",
+    "PublicLiveCoverageReport",
+    "PublicLiveInformationError",
+    "PublicLiveInformationProvider",
+    "PublicLiveSourceCatalog",
+    "PublicLiveSourceDefinition",
+    "PublicLiveSourceResult",
     "SECEdgarProvider",
     "SECEdgarProviderError",
     "fred_cache_key",
+    "load_public_live_source_catalog",
 ]

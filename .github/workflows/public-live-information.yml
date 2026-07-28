@@ -1,0 +1,97 @@
+name: Collect Public Live Information
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "17 * * * *"
+
+  push:
+    branches:
+      - main
+    paths:
+      - "providers/public_live_information.py"
+      - "config/public_live_information_sources.json"
+      - "schemas/public_live_information_sources.schema.json"
+      - "run_public_live_information.py"
+      - ".github/workflows/public-live-information.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-live-information
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      SEC_USER_AGENT: Capital Intelligence Platform https://github.com/levonmendall/capital-intelligence-platform-
+      EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Collect required public live sources
+        id: required
+        shell: bash
+        run: |
+          set +e
+          python run_public_live_information.py \
+            --required-only \
+            --compact \
+            --output database/public-live-information-report.json \
+            --records-output database/public-live-information-records.json \
+            > reports-public-live-required.json
+          code=$?
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Collect optional public live sources
+        id: optional
+        shell: bash
+        run: |
+          set +e
+          python run_public_live_information.py \
+            --compact \
+            --output reports/public-live-information-full.json \
+            --records-output reports/public-live-information-records-full.json \
+            > reports-public-live-full.json
+          code=$?
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload credential-safe live coverage evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: public-live-information
+          path: |
+            database/public-live-information-report.json
+            database/public-live-information-records.json
+            reports/public-live-information-full.json
+            reports/public-live-information-records-full.json
+            reports-public-live-required.json
+            reports-public-live-full.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Require public baseline availability
+        if: always()
+        run: test "${{ steps.required.outputs.exit_code }}" = "0"
