@@ -57,6 +57,23 @@ from governance.forecast_evidence import (
     GovernedForecastEvidence,
     SQLiteForecastEvidenceStore,
 )
+from governance.paper_trading_launch import (
+    PaperExecutionAuthorization,
+    PaperTradingControlEvent,
+    PaperTradingControlState,
+    PaperTradingLaunchError,
+    PaperTradingLaunchEvidence,
+    PaperTradingLaunchEvaluator,
+    PaperTradingLaunchIntegrityError,
+    PaperTradingLaunchPolicy,
+    PaperTradingLaunchReport,
+    PaperTradingLaunchState,
+    SQLitePaperTradingControlStore,
+    require_paper_execution_authorization,
+)
+from governance.paper_trading_launch_authority import (
+    SQLitePaperTradingLaunchStore,
+)
 from governance.product_readiness import (
     ProductTestReadiness,
     ProductTestReadinessEvidence,
@@ -92,10 +109,18 @@ _LAZY_PAPER_TEST_ENTRY_EXPORTS = {
     "canonical_process_bundle_sha256",
 }
 
+_LAZY_COMBINED_PAPER_EXECUTION_EXPORTS = {
+    "CombinedPaperExecutionAuthorization",
+    "require_combined_paper_execution_authorization",
+}
+
 
 def __getattr__(name: str):
     if name in _LAZY_PAPER_TEST_ENTRY_EXPORTS:
         module = importlib.import_module("governance.paper_test_entry")
+        return getattr(module, name)
+    if name in _LAZY_COMBINED_PAPER_EXECUTION_EXPORTS:
+        module = importlib.import_module("governance.paper_execution_authority")
         return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -138,6 +163,7 @@ __all__ = [
     "AssetClassGovernanceIntegrityError",
     "AssetClassScopeAssessment",
     "AssetClassScopeAuthority",
+    "CombinedPaperExecutionAuthorization",
     "ControlledPaperTestEligibilityPackage",
     "ControlledPaperTestEntryDecision",
     "CustodySettlementModel",
@@ -147,12 +173,22 @@ __all__ = [
     "GovernedForecastEvidence",
     "InvestmentProcessFreeze",
     "OperationalReadinessSnapshot",
+    "PaperExecutionAuthorization",
     "PaperTestEligibilityState",
     "PaperTestEntryDecisionState",
     "PaperTestEntryGovernanceError",
     "PaperTestEntryIntegrityError",
     "PaperTestEntryPackageAssembler",
     "PaperTestGovernanceEventType",
+    "PaperTradingControlEvent",
+    "PaperTradingControlState",
+    "PaperTradingLaunchError",
+    "PaperTradingLaunchEvidence",
+    "PaperTradingLaunchEvaluator",
+    "PaperTradingLaunchIntegrityError",
+    "PaperTradingLaunchPolicy",
+    "PaperTradingLaunchReport",
+    "PaperTradingLaunchState",
     "ProcessFreezeState",
     "ProductTestReadiness",
     "ProductTestReadinessEvidence",
@@ -168,9 +204,13 @@ __all__ = [
     "SQLiteAssetClassApprovalStore",
     "SQLiteForecastEvidenceStore",
     "SQLitePaperTestEntryGovernanceStore",
+    "SQLitePaperTradingControlStore",
+    "SQLitePaperTradingLaunchStore",
     "SQLiteProductTestReadinessStore",
     "SQLiteReadinessEvidenceStore",
     "TestReadinessIntegrityError",
     "TradingSessionModel",
     "canonical_process_bundle_sha256",
+    "require_combined_paper_execution_authorization",
+    "require_paper_execution_authorization",
 ]
