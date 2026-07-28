@@ -5,15 +5,77 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
+import requests
+
+from data import MarketDataQuery
+from providers.crypto_venues import (
+    CoinbaseExchangeProvider,
+    CryptoVenueBindingRegistry,
+)
 from providers.free_connections import (
     FreeProviderConnectionError,
     FreeProviderConnectionVerifier,
     SQLiteFreeProviderConnectionStore,
     load_free_provider_catalog,
 )
+
+
+class _CoinbaseConnectivityResponse:
+    """Hide optional exchange time from the non-authoritative health adapter."""
+
+    def __init__(self, response: Any) -> None:
+        self._response = response
+        self.status_code = int(getattr(response, "status_code", 0))
+
+    def json(self) -> Any:
+        payload = self._response.json()
+        if not isinstance(payload, dict):
+            return payload
+        normalized = dict(payload)
+        normalized.pop("time", None)
+        return normalized
+
+
+class CoinbaseConnectivityProbeProvider:
+    """Use the probe cutoff for Coinbase connectivity timestamps.
+
+    Coinbase's public level-one response may omit a timestamp or publish one a few
+    milliseconds after a health query begins. The canonical provider must reject
+    that condition for point-in-time investment evidence. This runner-only wrapper
+    deliberately removes the optional source timestamp and freezes the fallback to
+    the connectivity-query cutoff. Connection reports remain non-authoritative and
+    cannot enter decision, readiness, execution, or real-money paths.
+    """
+
+    def __init__(
+        self,
+        *,
+        bindings: CryptoVenueBindingRegistry,
+        timeout: int = 15,
+        http_get: Callable[..., Any] | None = None,
+    ) -> None:
+        self._bindings = bindings
+        self._timeout = timeout
+        self._http_get = http_get or requests.get
+
+    def fetch(self, query: MarketDataQuery):
+        if not isinstance(query, MarketDataQuery):
+            raise TypeError("query must be MarketDataQuery")
+
+        def health_get(*args: Any, **kwargs: Any) -> _CoinbaseConnectivityResponse:
+            return _CoinbaseConnectivityResponse(self._http_get(*args, **kwargs))
+
+        provider = CoinbaseExchangeProvider(
+            bindings=self._bindings,
+            timeout=self._timeout,
+            clock=lambda: query.as_of,
+            http_get=health_get,
+        )
+        return provider.fetch(query)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,6 +128,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = FreeProviderConnectionVerifier(
             catalog,
             repository_root=args.repository_root,
+            coinbase_factory=CoinbaseConnectivityProbeProvider,
         ).verify()
         sequence = None if args.no_persist else store.append(report)
         print(
