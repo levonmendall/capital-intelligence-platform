@@ -17,6 +17,9 @@ from providers.public_live_information import (
     PublicLiveSourceResult,
     load_public_live_source_catalog,
 )
+from providers.public_live_information_extended import (
+    ImpactfulPublicLiveInformationProvider,
+)
 from providers.public_live_information_runtime import (
     GovernedPublicLiveInformationProvider,
 )
@@ -30,6 +33,7 @@ __all__ = [
     "FREDCacheRecord",
     "FREDRetrievalPolicy",
     "GovernedPublicLiveInformationProvider",
+    "ImpactfulPublicLiveInformationProvider",
     "JsonFREDCache",
     "MemoryFREDCache",
     "PublicLiveCoverageReport",
