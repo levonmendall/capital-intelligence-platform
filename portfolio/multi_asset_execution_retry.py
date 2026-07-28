@@ -61,8 +61,12 @@ class MultiAssetPaperExecutionOrchestrator(_BaseOrchestrator):
                 "integrity_specialist must be a "
                 "PortfolioValuationExecutionIntegritySpecialist"
             )
+        default_integrity_path = Path(self.portfolio_store.path).with_name(
+            "portfolio_integrity.db"
+        )
         self.integrity_store = (
-            integrity_store or SQLitePortfolioIntegrityCertificationStore()
+            integrity_store
+            or SQLitePortfolioIntegrityCertificationStore(default_integrity_path)
         )
         if not isinstance(
             self.integrity_store,
