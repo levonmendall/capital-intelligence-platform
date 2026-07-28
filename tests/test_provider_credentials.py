@@ -9,6 +9,7 @@ import run_provider_secret_validation as command
 from providers.provider_credentials import (
     AlphaVantageCredentialProbe,
     DatabentoCredentialProbe,
+    EODHDCredentialProbe,
     ProviderCredentialProbeError,
     TwelveDataCredentialProbe,
     environment_credential,
@@ -121,6 +122,43 @@ def test_databento_probe_uses_basic_auth_and_lists_datasets() -> None:
     assert evidence["execution_authority"] is False
 
 
+def test_eodhd_probe_validates_user_entitlement() -> None:
+    captured: dict[str, Any] = {}
+
+    def http_get(url: str, **kwargs: Any) -> _Response:
+        captured.update({"url": url, **kwargs})
+        return _Response(
+            {
+                "name": "Provider Test",
+                "subscriptionType": "free",
+                "apiRequests": 2,
+                "apiRequestsDate": "2026-07-28",
+                "dailyRateLimit": 1000,
+            }
+        )
+
+    evidence = EODHDCredentialProbe(
+        "eodhd-secret",
+        http_get=http_get,
+    ).probe()
+
+    assert captured["params"]["api_token"] == "eodhd-secret"
+    assert captured["params"]["fmt"] == "json"
+    assert evidence["usage_metadata_available"] is True
+    assert evidence["subscription_metadata_available"] is True
+    assert evidence["execution_authority"] is False
+
+
+def test_eodhd_unrecognized_payload_fails_closed() -> None:
+    provider = EODHDCredentialProbe(
+        "eodhd-secret",
+        http_get=lambda *_args, **_kwargs: _Response({"message": "invalid token"}),
+    )
+
+    with pytest.raises(ProviderCredentialProbeError, match="entitlement metadata"):
+        provider.probe()
+
+
 def test_command_redacts_every_supported_secret(monkeypatch) -> None:
     monkeypatch.setenv("EODHD_API_KEY", "sensitive-provider-value")
 
@@ -146,7 +184,7 @@ def test_command_report_remains_non_authoritative(monkeypatch, tmp_path) -> None
     }
     monkeypatch.setattr(command, "_alpaca", lambda: passing("alpaca-paper"))
     monkeypatch.setattr(command, "_fred", lambda: passing("fred"))
-    monkeypatch.setattr(command, "_eodhd", lambda _as_of: passing("eodhd"))
+    monkeypatch.setattr(command, "_eodhd", lambda: passing("eodhd"))
     monkeypatch.setattr(command, "_openfigi", lambda: passing("openfigi"))
     monkeypatch.setattr(command, "_alpha_vantage", lambda: passing("alpha-vantage"))
     monkeypatch.setattr(command, "_databento", lambda: passing("databento"))
@@ -170,6 +208,6 @@ def test_command_report_remains_non_authoritative(monkeypatch, tmp_path) -> None
 def test_screenshot_aliases_are_supported() -> None:
     assert "ALPHAVANTAGE_API_KEY" in AlphaVantageCredentialProbe.environment_names
     assert "DATABENTO_API_KEY" in DatabentoCredentialProbe.environment_names
-    assert "EODHD_API_KEY" in command.EODHD_NAMES
+    assert "EODHD_API_KEY" in EODHDCredentialProbe.environment_names
     assert "OPEN_FIGI_API_KEY" in command.OPENFIGI_NAMES
     assert "TWELVE_API_KEY" in TwelveDataCredentialProbe.environment_names
