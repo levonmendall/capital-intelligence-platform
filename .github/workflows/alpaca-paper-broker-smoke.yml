@@ -11,6 +11,7 @@ on:
       - "run_alpaca_paper_broker_smoke.py"
       - "tests/test_alpaca_paper_broker.py"
       - "tests/test_alpaca_paper_broker_backup.py"
+      - "tests/test_alpaca_paper_smoke_cli.py"
   push:
     branches:
       - main
@@ -23,6 +24,7 @@ on:
       - "run_alpaca_paper_broker_smoke.py"
       - "tests/test_alpaca_paper_broker.py"
       - "tests/test_alpaca_paper_broker_backup.py"
+      - "tests/test_alpaca_paper_smoke_cli.py"
 
 permissions:
   contents: read
@@ -66,7 +68,11 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run deterministic broker integration tests
-        run: python -m pytest -q tests/test_alpaca_paper_broker.py tests/test_alpaca_paper_broker_backup.py
+        run: >-
+          python -m pytest -q
+          tests/test_alpaca_paper_broker.py
+          tests/test_alpaca_paper_broker_backup.py
+          tests/test_alpaca_paper_smoke_cli.py
 
       - name: Require Alpaca paper credentials
         if: github.event_name != 'pull_request'
@@ -89,7 +95,7 @@ jobs:
           python run_alpaca_paper_broker_smoke.py \
             --activation config/alpaca_paper_broker_activation.json \
             --symbol BTC/USD \
-            --notional 1 \
+            --notional 10 \
             --output reports/alpaca-paper-broker-smoke.json \
             --require-reconciled
 
