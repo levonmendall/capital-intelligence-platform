@@ -1,5 +1,27 @@
 """External data providers for the Capital Intelligence Platform."""
 
+from providers.configured_dataset import (
+    ConfiguredDatasetBinding,
+    ConfiguredDatasetProvider,
+    ConfiguredDatasetProviderError,
+    ConfiguredDatasetProviderSettings,
+    TransportResponse,
+    build_from_environment as build_configured_dataset_provider,
+)
+from providers.configured_information import (
+    ConfiguredDecisionInformationError,
+    ConfiguredDecisionInformationProvider,
+    build_configured_decision_information_provider,
+)
+from providers.configured_pipeline import (
+    ConfiguredCandidateScreeningProvider,
+    ConfiguredPipelineAdapterError,
+    ConfiguredSecurityMasterProvider,
+    ConfiguredUniverseMetricsProvider,
+    build_configured_candidate_screening_provider,
+    build_configured_security_master_provider,
+    build_configured_universe_metrics_provider,
+)
 from providers.fred import FREDRetrievalPolicy
 from providers.fred_cache import (
     FREDCache,
@@ -29,6 +51,22 @@ from providers.sec_edgar import (
 )
 
 __all__ = [
+    "ConfiguredDatasetBinding",
+    "build_configured_decision_information_provider",
+    "ConfiguredDecisionInformationProvider",
+    "ConfiguredDecisionInformationError",
+    "ConfiguredDatasetProvider",
+    "ConfiguredDatasetProviderError",
+    "ConfiguredDatasetProviderSettings",
+    "ConfiguredCandidateScreeningProvider",
+    "ConfiguredPipelineAdapterError",
+    "ConfiguredSecurityMasterProvider",
+    "ConfiguredUniverseMetricsProvider",
+    "build_configured_candidate_screening_provider",
+    "build_configured_security_master_provider",
+    "build_configured_universe_metrics_provider",
+    "TransportResponse",
+    "build_configured_dataset_provider",
     "FREDCache",
     "FREDCacheRecord",
     "FREDRetrievalPolicy",

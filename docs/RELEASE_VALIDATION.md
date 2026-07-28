@@ -30,10 +30,12 @@ The default command runs:
 2. platform initialization;
 3. complete twelve-stage plan validation;
 4. canonical intelligence initialization;
-5. the full deterministic test inventory;
-6. Python 3.11 validation-image build;
-7. in-container fenced workflow and canonical CIO acceptance; and
-8. hardened runtime-image build.
+5. universal-market internal-readiness validation;
+6. deterministic all-market paper-execution rehearsal;
+7. the full deterministic test inventory;
+8. Python 3.11 validation-image build;
+9. in-container fenced workflow and canonical CIO acceptance; and
+10. hardened runtime-image build.
 
 For local diagnostics without Docker:
 
@@ -68,6 +70,8 @@ Each step has a wall-clock limit:
 | Initialization | 5 minutes |
 | Daily plan validation | 2 minutes |
 | Intelligence initialization | 5 minutes |
+| Universal-market internal readiness | 2 minutes |
+| All-market paper-execution rehearsal | 3 minutes |
 | Full test inventory | 25 minutes |
 | Validation image build | 10 minutes |
 | Container acceptance | 10 minutes |
@@ -103,4 +107,4 @@ A green functional report cannot hide a security failure, and a green security w
 
 ## Release boundary
 
-This command proves that the repository code, shipped plan, synthetic container workflow, and canonical CIO integration pass on the tested commit. It does not prove licensed provider availability, production stage-binding approval, backup restoration, multi-day burn-in, operational SLO history, market certification, or human governance approval. Those remain separate readiness evidence for the same immutable baseline.
+This command proves that the repository code, shipped plan, universal market capability map, deterministic all-market execution mechanics, synthetic container workflow, and canonical CIO integration pass on the tested commit. It does not prove licensed provider availability, production dataset or stage-binding approval, historical backfill completion, backup restoration, multi-day burn-in, operational SLO history, market certification, custody or clearing access, or human governance approval. Those remain separate readiness evidence for the same immutable baseline.

@@ -5,9 +5,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from governance import (
+    DecisionInformationActivationAuthority,
+    DecisionInformationActivationError,
+    SQLiteDecisionInformationActivationStore,
+)
 from governance.decision_information_readiness import (
     DecisionInformationReadinessError,
     DecisionInformationReadinessState,
@@ -21,6 +27,22 @@ def _default_manifest() -> str:
         "CAPITAL_INTELLIGENCE_DECISION_INFORMATION_MANIFEST",
         "config/maximum_decision_information_scope.json",
     )
+
+
+def _default_activation_database() -> str:
+    return os.getenv(
+        "CAPITAL_INTELLIGENCE_DECISION_INFORMATION_ACTIVATION_DATABASE",
+        "database/decision_information_activations.db",
+    )
+
+
+def _timestamp(value: str | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("--evaluated-at must include a UTC offset")
+    return parsed
 
 
 def _environment_file(path: str | None) -> dict[str, str]:
@@ -59,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default=_default_manifest())
     parser.add_argument("--env-file")
+    parser.add_argument(
+        "--activation-database",
+        default=_default_activation_database(),
+    )
+    parser.add_argument("--evaluated-at")
     parser.add_argument("--show-required-environment", action="store_true")
     parser.add_argument("--output")
     parser.add_argument("--compact", action="store_true")
@@ -77,14 +104,37 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             print(json.dumps(payload, indent=None if args.compact else 2, sort_keys=True))
             return 0
+        evaluated_at = _timestamp(args.evaluated_at)
+        overlay = DecisionInformationActivationAuthority(
+            SQLiteDecisionInformationActivationStore(args.activation_database)
+        ).overlay(manifest, evaluated_at=evaluated_at)
         report = MaximumDecisionInformationReadinessEvaluator().evaluate(
-            manifest,
+            overlay.manifest,
             environment=_environment_file(args.env_file),
         )
         payload = report.to_dict()
+        payload.update(
+            {
+                "activation_evaluated_at": evaluated_at.isoformat(),
+                "activation_identifiers": list(overlay.activation_identifiers),
+                "inactive_source_identifiers": list(
+                    overlay.inactive_source_identifiers
+                ),
+                "activation_database": str(
+                    Path(args.activation_database).expanduser()
+                ),
+            }
+        )
         if args.output:
             _write(args.output, payload)
-    except (DecisionInformationReadinessError, KeyError, OSError, TypeError, ValueError) as error:
+    except (
+        DecisionInformationReadinessError,
+        DecisionInformationActivationError,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+    ) as error:
         print(json.dumps({"state": "blocked", "error": str(error), "real_money_authorized": False}, sort_keys=True))
         return 4
     print(json.dumps(payload, indent=None if args.compact else 2, sort_keys=True))

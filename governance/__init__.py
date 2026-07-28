@@ -36,6 +36,14 @@ from governance.data_readiness import (
     load_data_readiness_manifest,
     manifest_from_payload as data_readiness_manifest_from_payload,
 )
+from governance.decision_information_activation import (
+    DecisionInformationActivationAuthority,
+    DecisionInformationActivationError,
+    DecisionInformationActivationIntegrityError,
+    DecisionInformationActivationOverlay,
+    DecisionInformationSourceActivation,
+    SQLiteDecisionInformationActivationStore,
+)
 from governance.decision_information_readiness import (
     DecisionInformationCoverageRequirement,
     DecisionInformationDomain,
@@ -74,6 +82,14 @@ from governance.paper_trading_launch import (
 from governance.paper_trading_launch_authority import (
     SQLitePaperTradingLaunchStore,
 )
+from governance.provider_activation import (
+    ProviderActivation,
+    ProviderActivationAuthority,
+    ProviderActivationError,
+    ProviderActivationIntegrityError,
+    ProviderActivationOverlay,
+    SQLiteProviderActivationStore,
+)
 from governance.product_readiness import (
     ProductTestReadiness,
     ProductTestReadinessEvidence,
@@ -109,6 +125,7 @@ _LAZY_PAPER_TEST_ENTRY_EXPORTS = {
     "canonical_process_bundle_sha256",
 }
 
+
 _LAZY_COMBINED_PAPER_EXECUTION_EXPORTS = {
     "CombinedPaperExecutionAuthorization",
     "require_combined_paper_execution_authorization",
@@ -141,6 +158,11 @@ __all__ = [
     "ProviderDataCapability",
     "data_readiness_manifest_from_payload",
     "load_data_readiness_manifest",
+    "DecisionInformationActivationAuthority",
+    "DecisionInformationActivationError",
+    "DecisionInformationActivationIntegrityError",
+    "DecisionInformationActivationOverlay",
+    "DecisionInformationSourceActivation",
     "DecisionInformationCoverageRequirement",
     "DecisionInformationDomain",
     "DecisionInformationDomainAssessment",
@@ -190,6 +212,12 @@ __all__ = [
     "PaperTradingLaunchReport",
     "PaperTradingLaunchState",
     "ProcessFreezeState",
+    "ProviderActivation",
+    "ProviderActivationAuthority",
+    "ProviderActivationError",
+    "ProviderActivationIntegrityError",
+    "ProviderActivationOverlay",
+    "SQLiteProviderActivationStore",
     "ProductTestReadiness",
     "ProductTestReadinessEvidence",
     "ProductTestReadinessEvidenceAssembler",
@@ -202,6 +230,7 @@ __all__ = [
     "ReadinessGateCertification",
     "ReadinessGateState",
     "SQLiteAssetClassApprovalStore",
+    "SQLiteDecisionInformationActivationStore",
     "SQLiteForecastEvidenceStore",
     "SQLitePaperTestEntryGovernanceStore",
     "SQLitePaperTradingControlStore",
