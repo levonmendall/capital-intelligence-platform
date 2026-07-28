@@ -1,0 +1,108 @@
+name: Verify Free Paper Pilot Readiness
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - pr-166-free-paper-pilot
+    paths:
+      - ".github/workflows/free-paper-pilot-readiness.yml"
+      - "providers/alpaca_paper.py"
+      - "operations/free_paper_pilot.py"
+      - "config/free_paper_pilot_universe.json"
+      - "run_free_paper_pilot_readiness.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: free-paper-pilot-readiness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_ENVIRONMENT: development
+      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID || secrets.ALPACA_API_KEY }}
+      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY || secrets.ALPACA_SECRET_KEY || secrets.ALPACA_API_SECRET }}
+      APCA_API_BASE_URL: https://paper-api.alpaca.markets
+      APCA_DATA_BASE_URL: https://data.alpaca.markets
+      APCA_DATA_FEED: iex
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Require both Alpaca paper credentials
+        shell: bash
+        run: |
+          if [ -z "${APCA_API_KEY_ID}" ]; then
+            echo "Missing repository secret APCA_API_KEY_ID (or ALPACA_API_KEY)."
+            exit 2
+          fi
+          if [ -z "${APCA_API_SECRET_KEY}" ]; then
+            echo "Missing repository secret APCA_API_SECRET_KEY (or ALPACA_SECRET_KEY / ALPACA_API_SECRET)."
+            exit 2
+          fi
+
+      - name: Verify live paper account and free IEX pilot universe
+        shell: bash
+        run: |
+          mkdir -p reports
+          python run_free_paper_pilot_readiness.py \
+            --output reports/free-paper-pilot-readiness.json \
+            --profiles-output reports/free-paper-pilot-profiles.json \
+            --require-configuration-ready
+
+      - name: Publish credential-safe summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = Path("reports/free-paper-pilot-readiness.json")
+          if not source.exists():
+              Path("reports/free-paper-pilot-summary.txt").write_text(
+                  "Free paper pilot readiness did not produce a report. Check the prior workflow step.\n",
+                  encoding="utf-8",
+              )
+              raise SystemExit(0)
+          payload = json.loads(source.read_text(encoding="utf-8"))
+          lines = [
+              f"configuration_ready={payload.get('configuration_ready')}",
+              f"execution_ready_now={payload.get('execution_ready_now')}",
+              f"market_open={payload.get('market_open')}",
+              f"account_status={payload.get('account_status')}",
+              f"validated_symbols={len(payload.get('validated_symbols', []))}",
+              f"blockers={'; '.join(payload.get('blockers', [])) or 'none'}",
+          ]
+          summary = "\n".join(lines) + "\n"
+          Path("reports/free-paper-pilot-summary.txt").write_text(summary, encoding="utf-8")
+          with Path(__import__('os').environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8') as handle:
+              handle.write("## Free paper pilot readiness\n\n```text\n" + summary + "```\n")
+          PY
+
+      - name: Upload credential-safe readiness evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: free-paper-pilot-readiness
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 14
