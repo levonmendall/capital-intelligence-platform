@@ -14,6 +14,8 @@ from pathlib import Path
 
 import premium_ui as _premium_ui
 
+from navigation_ui import install as _install_navigation_ui
+
 
 # Source-level architecture checks intentionally inspect the active entrypoint.
 # This inert manifest keeps those canonical contracts visible while executable
@@ -48,6 +50,7 @@ from core.portfolio import (
 # during a hot deployment. Reload from the checked-out source before executing
 # the application implementation.
 _premium_ui = importlib.reload(_premium_ui)
+_install_navigation_ui(_premium_ui)
 
 # The two newest presentation helpers are enhancement-only. Supplying no-op
 # compatibility shims keeps the four core surfaces available if a process is
@@ -98,7 +101,6 @@ def _safe_render_sidebar() -> None:
             '</div>',
             unsafe_allow_html=True,
         )
-        _premium_ui.st.caption("Dark command mode is the default appearance.")
         _premium_ui.st.caption("Four distinct surfaces. One governed portfolio.")
 
 
