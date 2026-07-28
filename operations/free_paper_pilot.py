@@ -409,6 +409,9 @@ def assess_free_paper_pilot_readiness(
                 # Explicit point-in-time evaluations remain strict and immutable.
                 now = datetime.now(timezone.utc)
             maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)
+            maximum_future_skew = (
+                timedelta(seconds=5) if dynamic_evaluation_time else timedelta(0)
+            )
             for symbol in validated:
                 quote = quotes[symbol]
                 bid = float(quote["bp"])
@@ -426,8 +429,12 @@ def assess_free_paper_pilot_readiness(
                 )
                 if observed.tzinfo is None or observed.utcoffset() is None:
                     raise ValueError(f"{symbol} quote timestamp lacks an offset")
-                if observed > now:
+                if observed > now + maximum_future_skew:
                     raise ValueError(f"{symbol} quote is future-known")
+                if observed > now:
+                    warnings.append(
+                        f"{symbol}: quote timestamp is within the 5-second provider clock tolerance"
+                    )
                 quote_times.append((symbol, observed.isoformat()))
                 if market_open and now - observed > maximum_age:
                     blockers.append(
