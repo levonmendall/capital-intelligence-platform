@@ -34,7 +34,26 @@ jobs:
           cat .universal-market-patch/chunk-*.b64 \
             | base64 -d \
             | gzip -d > /tmp/universal-market.patch
+          set +e
           git apply --3way /tmp/universal-market.patch
+          apply_status=$?
+          set -e
+          mapfile -t unresolved < <(git diff --name-only --diff-filter=U)
+          if [[ $apply_status -ne 0 ]]; then
+            if [[ ${#unresolved[@]} -ne 1 || "${unresolved[0]}" != "governance/__init__.py" ]]; then
+              printf 'unexpected patch conflicts: %s\n' "${unresolved[*]:-none}"
+              exit "$apply_status"
+            fi
+          fi
+          cat .universal-market-patch/governance-init.py.gz.b64 \
+            | base64 -d \
+            | gzip -d > governance/__init__.py
+          git add governance/__init__.py
+          if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
+            echo "unresolved merge conflicts remain"
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
           cat .universal-market-patch/expected-blobs.json.gz.b64 \
             | base64 -d \
             | gzip -d > /tmp/expected-blobs.json
