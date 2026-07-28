@@ -49,6 +49,27 @@ def _aware(value: object, *, field_name: str) -> datetime:
 
 
 @dataclass(frozen=True, slots=True)
+class HumanPaperTestEntryAuthorization:
+    """Latest active human approval for the latest exact eligibility package."""
+
+    package: ControlledPaperTestEligibilityPackage
+    decision: ControlledPaperTestEntryDecision
+
+    @property
+    def source_identifiers(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                (
+                    self.package.identifier,
+                    self.package.fingerprint,
+                    self.decision.identifier,
+                    *self.package.evidence_identifiers,
+                )
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CombinedPaperExecutionAuthorization:
     """Exact paper-only authorization lineage for one execution boundary."""
 
@@ -79,22 +100,15 @@ class CombinedPaperExecutionAuthorization:
         )
 
 
-def require_combined_paper_execution_authorization(
+def require_human_paper_test_entry(
     *,
     entry_store: SQLitePaperTestEntryGovernanceStore,
-    launch_store: SQLitePaperTradingLaunchStore,
-    control_store: SQLitePaperTradingControlStore,
     baseline_identifier: str,
     process_version: str,
     code_version: str,
     as_of: datetime,
-) -> CombinedPaperExecutionAuthorization:
-    """Return the exact active paper authorization or fail closed.
-
-    The latest package and latest decision govern. A later blocked package,
-    suspension, revocation, expired decision, blocked launch, expired launch, or
-    runtime halt prevents execution immediately.
-    """
+) -> HumanPaperTestEntryAuthorization:
+    """Require the latest eligible package and its active human approval."""
 
     baseline = _text(baseline_identifier, field_name="baseline_identifier")
     process = _text(process_version, field_name="process_version")
@@ -149,6 +163,39 @@ def require_combined_paper_execution_authorization(
             "entry decision eligibility fingerprint does not match"
         )
 
+    return HumanPaperTestEntryAuthorization(package=package, decision=decision)
+
+
+def require_combined_paper_execution_authorization(
+    *,
+    entry_store: SQLitePaperTestEntryGovernanceStore,
+    launch_store: SQLitePaperTradingLaunchStore,
+    control_store: SQLitePaperTradingControlStore,
+    baseline_identifier: str,
+    process_version: str,
+    code_version: str,
+    as_of: datetime,
+) -> CombinedPaperExecutionAuthorization:
+    """Return the exact active paper authorization or fail closed.
+
+    The latest package and latest decision govern. A later blocked package,
+    suspension, revocation, expired decision, blocked launch, expired launch, or
+    runtime halt prevents execution immediately.
+    """
+
+    baseline = _text(baseline_identifier, field_name="baseline_identifier")
+    process = _text(process_version, field_name="process_version")
+    code = _text(code_version, field_name="code_version")
+    timestamp = _aware(as_of, field_name="as_of")
+
+    human = require_human_paper_test_entry(
+        entry_store=entry_store,
+        baseline_identifier=baseline,
+        process_version=process,
+        code_version=code,
+        as_of=timestamp,
+    )
+
     launch = launch_store.latest_ready(
         baseline_identifier=baseline,
         process_version=process,
@@ -175,8 +222,8 @@ def require_combined_paper_execution_authorization(
         )
 
     return CombinedPaperExecutionAuthorization(
-        entry_package=package,
-        entry_decision=decision,
+        entry_package=human.package,
+        entry_decision=human.decision,
         launch_report=launch,
         control_event_identifier=control.identifier,
     )
@@ -184,5 +231,7 @@ def require_combined_paper_execution_authorization(
 
 __all__ = [
     "CombinedPaperExecutionAuthorization",
+    "HumanPaperTestEntryAuthorization",
     "require_combined_paper_execution_authorization",
+    "require_human_paper_test_entry",
 ]
