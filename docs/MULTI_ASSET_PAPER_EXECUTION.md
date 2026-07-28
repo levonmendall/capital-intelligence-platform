@@ -64,7 +64,7 @@ Cash cannot become negative. Spot FX remains an unlevered owned paper instrument
 
 ## Cross-currency state and lineage
 
-Fills preserve local price, local gross value, base-currency gross value, commission, spread cost, FX rate, quote source, FX source, quote certification, venue, instrument identity, approval, custody or settlement identity, and execution-model version.
+Fills preserve local price, local gross value, base-currency gross value, commission, spread cost, relieved local and base cost basis, realized local and base P&L, FX rate, quote source, FX source, quote certification, venue, instrument identity, approval, custody or settlement identity, and execution-model version.
 
 The ending state is appended to `SQLiteCanonicalPortfolioStore`, which remains the sole active portfolio authority.
 
@@ -80,7 +80,7 @@ ending NAV
 - bid/ask execution cost
 ```
 
-An unreconciled batch publishes no canonical portfolio state.
+The execution also proves that its change in accounting residual is zero within tolerance. An unreconciled batch publishes no canonical portfolio state. Open positions are revalued independently through the governed mark-to-market service described in [Canonical performance accounting](PERFORMANCE_ACCOUNTING.md).
 
 ## Durable retries
 
