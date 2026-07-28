@@ -4,7 +4,7 @@
 
 Capital Intelligence continuously analyzes supported liquid public markets, compares every qualified opportunity with cash and current holdings, and determines whether the portfolio has a better evidence-supported use of capital.
 
-The software does not execute live trades.
+The software does not execute live trades and does not claim proven alpha.
 
 [Open the current Streamlit experience](https://dgmb3pd9uzhv2jmruwqeub.streamlit.app)
 
