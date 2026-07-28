@@ -71,6 +71,8 @@ jobs:
             exit 2
           fi
 
+      # The readiness command authenticates complete credential pairs and evaluates
+      # live quote timing only after the provider response has arrived.
       - name: Verify live paper account and free IEX pilot universe
         shell: bash
         run: |
