@@ -1,0 +1,42 @@
+name: Apply Alpaca authenticated pairing
+
+on:
+  push:
+    branches:
+      - fix-alpaca-authenticated-pairing
+    paths:
+      - "tools/repair_alpaca_pairing.py"
+      - ".github/workflows/apply-alpaca-authenticated-pairing.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "tools/repair_alpaca_pairing.py"
+      - ".github/workflows/apply-alpaca-authenticated-pairing.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: fix-alpaca-authenticated-pairing
+          fetch-depth: 0
+
+      - name: Apply authenticated credential pairing
+        run: python tools/repair_alpaca_pairing.py
+
+      - name: Commit repaired integration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Authenticate Alpaca credential pairs before use"
+          git push origin HEAD:fix-alpaca-authenticated-pairing
