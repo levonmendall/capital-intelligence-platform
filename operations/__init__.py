@@ -119,6 +119,16 @@ _LAZY_READINESS_EXPORTS = {
     "OperationalReadinessAssemblyPolicy",
     "OperationalReadinessAssemblyResult",
 }
+_LAZY_MARKET_READINESS_EXPORTS = {
+    "CANONICAL_PIPELINE_DATASET_TYPES",
+    "DATA_DOMAIN_DATASET_TYPE",
+    "UniversalPaperMarketReadinessReport",
+    "assess_universal_paper_market_readiness",
+}
+_LAZY_MARKET_REHEARSAL_EXPORTS = {
+    "AllMarketsPaperRehearsalReport",
+    "run_all_markets_paper_rehearsal",
+}
 
 
 def __getattr__(name: str):
@@ -126,6 +136,14 @@ def __getattr__(name: str):
         from operations import readiness
 
         return getattr(readiness, name)
+    if name in _LAZY_MARKET_READINESS_EXPORTS:
+        from operations import paper_market_readiness
+
+        return getattr(paper_market_readiness, name)
+    if name in _LAZY_MARKET_REHEARSAL_EXPORTS:
+        from operations import all_markets_paper_rehearsal
+
+        return getattr(all_markets_paper_rehearsal, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

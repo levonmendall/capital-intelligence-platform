@@ -1,0 +1,50 @@
+{
+  "schema_version": "provider-activation.v1",
+  "identifier": "activation:commercial-global-market-data:replace-with-version",
+  "provider_identifier": "commercial-global-market-data",
+  "provider_name": "Replace with licensed provider legal name",
+  "enabled": true,
+  "approved_domains": [
+    "market_prices",
+    "quotes_liquidity",
+    "fx_rates",
+    "crypto_market_structure",
+    "commodity_curves",
+    "benchmarks",
+    "derivative_contracts",
+    "margin_collateral",
+    "volatility_surfaces",
+    "execution_inputs"
+  ],
+  "authoritative_domains": [
+    "market_prices",
+    "quotes_liquidity",
+    "fx_rates",
+    "crypto_market_structure",
+    "commodity_curves",
+    "benchmarks",
+    "derivative_contracts",
+    "margin_collateral",
+    "volatility_surfaces",
+    "execution_inputs"
+  ],
+  "usage_rights_approved": true,
+  "point_in_time_supported": true,
+  "historical_coverage_supported": true,
+  "provenance_complete": true,
+  "service_level_defined": true,
+  "storage_and_backup_approved": true,
+  "derived_analytics_approved": true,
+  "paper_simulation_approved": true,
+  "certification_identifier": "certification:replace-with-approved-report",
+  "approved_by": "replace-with-data-governance-authority",
+  "rationale": "Replace with reviewed licensing, coverage, quality, and operational rationale.",
+  "approved_at": "2026-07-28T00:00:00+00:00",
+  "effective_at": "2026-07-28T00:00:00+00:00",
+  "expires_at": "2027-01-28T00:00:00+00:00",
+  "source_identifiers": [
+    "contract:replace-me",
+    "certification-suite:replace-me"
+  ],
+  "real_money_authorized": false
+}

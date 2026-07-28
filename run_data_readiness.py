@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -13,6 +13,12 @@ from governance import (
     AllMarketsDataReadinessEvaluator,
     AllMarketsDataReadinessState,
     DataReadinessError,
+    DecisionInformationActivationAuthority,
+    DecisionInformationActivationError,
+    SQLiteDecisionInformationActivationStore,
+    ProviderActivationAuthority,
+    ProviderActivationError,
+    SQLiteProviderActivationStore,
     load_data_readiness_manifest,
 )
 from governance.decision_information_readiness import (
@@ -41,6 +47,20 @@ def _default_public_live_report() -> str:
     return os.getenv(
         "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_REPORT",
         "database/public-live-information-report.json",
+    )
+
+
+def _default_provider_activation_database() -> str:
+    return os.getenv(
+        "CAPITAL_INTELLIGENCE_PROVIDER_ACTIVATION_DATABASE",
+        "database/provider-activations.db",
+    )
+
+
+def _default_information_activation_database() -> str:
+    return os.getenv(
+        "CAPITAL_INTELLIGENCE_DECISION_INFORMATION_ACTIVATION_DATABASE",
+        "database/decision_information_activations.db",
     )
 
 
@@ -115,6 +135,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--env-file",
         help="Optional KEY=VALUE file overlaid on the runtime environment.",
+    )
+    parser.add_argument(
+        "--provider-activation-database",
+        default=_default_provider_activation_database(),
+        help=(
+            "Append-only provider activation registry. Active records overlay "
+            "source-controlled provider templates without exposing secrets."
+        ),
+    )
+    parser.add_argument(
+        "--information-activation-database",
+        default=_default_information_activation_database(),
+        help=(
+            "Append-only decision-information source activation registry. "
+            "Active records overlay source-controlled source templates."
+        ),
+    )
+    parser.add_argument(
+        "--evaluated-at",
+        help="Timezone-aware timestamp used to resolve active provider approvals.",
     )
     parser.add_argument(
         "--show-required-environment",
@@ -239,6 +279,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         environment = _environment_file(args.env_file)
+        evaluated_at = (
+            datetime.now(timezone.utc)
+            if args.evaluated_at is None
+            else _timestamp(args.evaluated_at, field_name="--evaluated-at")
+        )
+        activation_overlay = ProviderActivationAuthority(
+            SQLiteProviderActivationStore(args.provider_activation_database)
+        ).overlay(market_manifest, evaluated_at=evaluated_at)
+        information_activation_overlay = DecisionInformationActivationAuthority(
+            SQLiteDecisionInformationActivationStore(
+                args.information_activation_database
+            )
+        ).overlay(information_manifest, evaluated_at=evaluated_at)
+        market_manifest = activation_overlay.manifest
+        information_manifest = information_activation_overlay.manifest
         market_report = AllMarketsDataReadinessEvaluator().evaluate(
             market_manifest,
             environment=environment,
@@ -252,6 +307,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             market_report,
             information_report,
             public_live_report,
+        )
+        payload.update(
+            {
+                "provider_activation_evaluated_at": evaluated_at.isoformat(),
+                "provider_activation_identifiers": list(
+                    activation_overlay.activation_identifiers
+                ),
+                "inactive_provider_identifiers": list(
+                    activation_overlay.inactive_provider_identifiers
+                ),
+                "provider_activation_database": str(
+                    Path(args.provider_activation_database).expanduser()
+                ),
+                "decision_information_activation_identifiers": list(
+                    information_activation_overlay.activation_identifiers
+                ),
+                "inactive_decision_information_source_identifiers": list(
+                    information_activation_overlay.inactive_source_identifiers
+                ),
+                "decision_information_activation_database": str(
+                    Path(args.information_activation_database).expanduser()
+                ),
+            }
         )
         if args.output:
             _write(args.output, payload)
@@ -279,6 +357,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             additional_evidence = [
                 information_report.evidence_identifier,
                 information_report.manifest_identifier,
+                *activation_overlay.activation_identifiers,
+                *information_activation_overlay.activation_identifiers,
             ]
             if public_live_report is not None:
                 additional_evidence.append(
@@ -306,6 +386,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         DataReadinessError,
         DecisionInformationReadinessError,
+        DecisionInformationActivationError,
+        ProviderActivationError,
         json.JSONDecodeError,
         KeyError,
         OSError,

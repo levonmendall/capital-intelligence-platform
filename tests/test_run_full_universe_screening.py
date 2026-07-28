@@ -138,3 +138,75 @@ def test_cli_rejects_invalid_factory_syntax(tmp_path) -> None:
         assert error.code == 2
     else:
         raise AssertionError("invalid provider factory must terminate argument parsing")
+
+
+def test_cli_uses_configured_pipeline_bindings_when_factories_are_omitted(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    context = tmp_path / "context.json"
+    context.write_text(
+        json.dumps(
+            {
+                "identifier": "context:configured",
+                "as_of": "2026-07-26T12:00:00+00:00",
+                "alternatives": [
+                    {
+                        "identifier": "cash",
+                        "kind": "cash",
+                        "expected_return": 0.04,
+                        "implementation_cost_return": 0.0,
+                        "evidence_quality": 1.0,
+                        "liquidity_score": 1.0,
+                        "current_weight": 1.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_UNIVERSE_METRICS_DATASET_BINDING",
+        str(tmp_path / "metrics.json"),
+    )
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_CANDIDATE_SCREENING_DATASET_BINDING",
+        str(tmp_path / "candidates.json"),
+    )
+    monkeypatch.setattr(
+        "run_full_universe_screening.build_configured_universe_metrics_provider",
+        lambda: MetricsProvider(),
+    )
+    monkeypatch.setattr(
+        "run_full_universe_screening.build_configured_candidate_screening_provider",
+        lambda: CandidateProvider(),
+    )
+
+    result = main(
+        [
+            "--cycle-id",
+            "cycle:configured",
+            "--scheduled-for",
+            "2026-07-26T11:00:00+00:00",
+            "--as-of",
+            "2026-07-26T12:00:00+00:00",
+            "--knowledge-cutoff",
+            "2026-07-26T12:00:00+00:00",
+            "--started-at",
+            "2026-07-26T12:00:01+00:00",
+            "--context",
+            str(context),
+            "--security-master-database",
+            str(tmp_path / "security-master.db"),
+            "--screening-database",
+            str(tmp_path / "screening.db"),
+            "--slo-database",
+            str(tmp_path / "slo.db"),
+            "--journal-database",
+            str(tmp_path / "journal.db"),
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 3
+    assert payload["status"] == "failed"
+    assert "no security-master catalog has been activated" in payload["error"]

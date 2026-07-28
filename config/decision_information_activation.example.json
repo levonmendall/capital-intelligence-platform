@@ -1,0 +1,40 @@
+{
+  "schema_version": "decision-information-source-activation.v1",
+  "identifier": "activation:licensed-global-newswire:replace-with-version",
+  "source_identifier": "licensed-global-newswire",
+  "source_name": "Replace with reviewed licensed source name",
+  "enabled": true,
+  "approved_domains": [
+    "current_events_news",
+    "geopolitical_security",
+    "government_policy_regulation"
+  ],
+  "authoritative_domains": [],
+  "usage_rights_approved": true,
+  "storage_and_backup_approved": true,
+  "derived_analytics_approved": true,
+  "internal_display_approved": true,
+  "paper_simulation_approved": true,
+  "event_time_supported": true,
+  "publication_time_supported": true,
+  "availability_time_supported": true,
+  "correction_history_supported": true,
+  "historical_coverage_supported": true,
+  "provenance_complete": true,
+  "entity_mapping_supported": true,
+  "geographic_mapping_supported": true,
+  "reliability_policy_defined": true,
+  "manipulation_controls_defined": true,
+  "deduplication_supported": true,
+  "service_level_defined": true,
+  "certification_identifier": "certification:replace-with-approved-report",
+  "approved_by": "replace-with-information-governance-authority",
+  "rationale": "Replace with approved source, rights, reliability, and operating rationale.",
+  "approved_at": "2026-07-28T00:00:00+00:00",
+  "effective_at": "2026-07-28T00:00:00+00:00",
+  "expires_at": "2026-08-27T00:00:00+00:00",
+  "evidence_identifiers": [
+    "license-review:replace-with-id",
+    "coverage-validation:replace-with-id"
+  ]
+}

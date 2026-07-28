@@ -20,6 +20,7 @@ from governance.paper_trading_launch import (
     SQLitePaperTradingControlStore,
 )
 from governance.paper_trading_launch_authority import SQLitePaperTradingLaunchStore
+from governance.provider_activation import SQLiteProviderActivationStore
 from governance.stage_binding_approval import (
     SQLiteStageBindingApprovalStore,
     require_approved_stage_bindings,
@@ -157,6 +158,7 @@ class PaperReadinessStatusReport:
 @dataclass(frozen=True, slots=True)
 class PaperReadinessStatusInputs:
     provider_requirements: str | Path | None = None
+    provider_activation_database: str | Path | None = None
     stage_bindings: str | Path | None = None
     stage_binding_database: str | Path | None = None
     reconciliation_reports: tuple[str | Path, ...] = ()
@@ -200,6 +202,9 @@ class PaperReadinessStatusAssembler:
     def _providers(
         self,
         path: str | Path | None,
+        activation_database: str | Path | None,
+        *,
+        evaluated_at: datetime,
     ) -> tuple[PaperReadinessObjective, PaperReadinessObjective]:
         if path is None:
             missing = ("provider operational requirements were not supplied",)
@@ -211,28 +216,74 @@ class PaperReadinessStatusAssembler:
         providers = manifest.get("providers")
         if not isinstance(providers, list) or not providers:
             raise ValueError("provider requirements must contain providers")
+
+        store = None
+        store_error: str | None = None
+        if activation_database is not None:
+            try:
+                store = SQLiteProviderActivationStore(activation_database)
+                store.verify_integrity()
+            except (OSError, TypeError, ValueError, RuntimeError) as error:
+                store_error = str(error)
+
         licensing_blockers: list[str] = []
         credential_blockers: list[str] = []
-        evidence: list[str] = []
+        licensing_evidence: list[str] = []
         for item in providers:
             if not isinstance(item, Mapping):
                 raise ValueError("provider requirement must encode an object")
             name = _text(item.get("name"), field_name="provider.name")
             if not bool(item.get("required", True)):
                 continue
-            for field_name, target in (
-                ("license_approval_environment", licensing_blockers),
-                ("certification_environment", licensing_blockers),
-            ):
-                variable = item.get(field_name)
-                if variable is None:
-                    continue
-                variable_name = _text(variable, field_name=field_name)
-                value = self.environ.get(variable_name)
-                if not value:
-                    target.append(f"{name}: {variable_name} is unavailable")
+            provider_identifier = _text(
+                item.get("provider_identifier"),
+                field_name="provider.provider_identifier",
+            )
+            activation_required = bool(item.get("activation_required", True))
+            if activation_required:
+                if store_error is not None:
+                    licensing_blockers.append(
+                        f"{name}: provider activation registry is invalid: {store_error}"
+                    )
+                elif store is None:
+                    licensing_blockers.append(
+                        f"{name}: provider activation database is unavailable"
+                    )
                 else:
-                    evidence.append(value)
+                    activation = store.active(
+                        provider_identifier,
+                        evaluated_at=evaluated_at,
+                    )
+                    if activation is None:
+                        licensing_blockers.append(
+                            f"{name}: active provider approval is unavailable"
+                        )
+                    elif not activation.enabled:
+                        licensing_blockers.append(
+                            f"{name}: latest provider approval is disabled"
+                        )
+                    else:
+                        licensing_evidence.extend(
+                            (
+                                activation.identifier,
+                                activation.certification_identifier,
+                                *activation.source_identifiers,
+                            )
+                        )
+            else:
+                source_authority = item.get("source_authority_identifier")
+                if source_authority is None:
+                    licensing_blockers.append(
+                        f"{name}: source-controlled approval identifier is unavailable"
+                    )
+                else:
+                    licensing_evidence.append(
+                        _text(
+                            source_authority,
+                            field_name="source_authority_identifier",
+                        )
+                    )
+
             for variable in item.get("credential_environments", ()):
                 variable_name = _text(variable, field_name="credential_environment")
                 if not self.environ.get(variable_name):
@@ -254,7 +305,7 @@ class PaperReadinessStatusAssembler:
             self._objective(
                 "licensed_and_certified_market_data_providers",
                 licensing_blockers,
-                evidence,
+                licensing_evidence,
             ),
             self._objective(
                 "reviewed_production_bindings_and_credentials",
@@ -475,7 +526,13 @@ class PaperReadinessStatusAssembler:
                 code_version=code_version,
                 as_of=as_of,
             )
-        except (PaperTradingLaunchError, OSError, TypeError, ValueError, RuntimeError) as error:
+        except (
+            PaperTradingLaunchError,
+            OSError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ) as error:
             return PaperReadinessStatusAssembler._objective(
                 "activation_of_runtime_risk_switch",
                 (str(error),),
@@ -501,7 +558,9 @@ class PaperReadinessStatusAssembler:
         process = _text(process_version, field_name="process_version")
         code = _text(code_version, field_name="code_version")
         provider_objective, credential_objective = self._providers(
-            inputs.provider_requirements
+            inputs.provider_requirements,
+            inputs.provider_activation_database,
+            evaluated_at=timestamp,
         )
         stage_blockers, stage_evidence = self._stage_bindings(
             inputs=inputs,
