@@ -63,7 +63,11 @@ class AlpacaPaperOrderRequest:
             "client_order_id",
             _text(self.client_order_id, field_name="client_order_id"),
         )
-        object.__setattr__(self, "symbol", _text(self.symbol, field_name="symbol").upper())
+        object.__setattr__(
+            self,
+            "symbol",
+            _text(self.symbol, field_name="symbol").upper(),
+        )
         side = _text(self.side, field_name="side").lower()
         if side not in {"buy", "sell"}:
             raise ValueError("side must be buy or sell")
@@ -176,10 +180,16 @@ class AlpacaPaperBrokerClient:
                 timeout=self.settings.timeout_seconds,
             )
         except requests.RequestException as error:
-            raise AlpacaPaperProviderError("Alpaca paper brokerage request failed") from error
+            raise AlpacaPaperProviderError(
+                "Alpaca paper brokerage request failed"
+            ) from error
         status = int(getattr(response, "status_code", 0))
         if allow_not_found and status == 404:
-            return AlpacaPaperApiResponse(payload=None, request_id=None, status_code=status)
+            return AlpacaPaperApiResponse(
+                payload=None,
+                request_id=None,
+                status_code=status,
+            )
         if status < 200 or status >= 300:
             message = ""
             try:
@@ -189,11 +199,15 @@ class AlpacaPaperBrokerClient:
             except ValueError:
                 message = ""
             detail = f": {message}" if message else ""
-            raise AlpacaPaperProviderError(f"Alpaca paper brokerage returned HTTP {status}{detail}")
+            raise AlpacaPaperProviderError(
+                f"Alpaca paper brokerage returned HTTP {status}{detail}"
+            )
         request_id = None
         headers = getattr(response, "headers", {})
         if isinstance(headers, Mapping):
-            raw_request_id = headers.get("X-Request-ID") or headers.get("x-request-id")
+            raw_request_id = headers.get("X-Request-ID") or headers.get(
+                "x-request-id"
+            )
             if isinstance(raw_request_id, str) and raw_request_id.strip():
                 request_id = raw_request_id.strip()
         if status == 204:
@@ -214,7 +228,9 @@ class AlpacaPaperBrokerClient:
     def account(self) -> Mapping[str, Any]:
         response = self._request("GET", "/v2/account")
         if not isinstance(response.payload, Mapping):
-            raise AlpacaPaperProviderError("Alpaca account response must be an object")
+            raise AlpacaPaperProviderError(
+                "Alpaca account response must be an object"
+            )
         return response.payload
 
     def submit_order(
@@ -228,14 +244,18 @@ class AlpacaPaperBrokerClient:
             json_payload=request.to_payload(),
         )
         if not isinstance(response.payload, Mapping):
-            raise AlpacaPaperProviderError("Alpaca order response must be an object")
+            raise AlpacaPaperProviderError(
+                "Alpaca order response must be an object"
+            )
         return response.payload, response.request_id
 
     def order(self, order_id: str) -> Mapping[str, Any]:
         resolved = quote(_text(order_id, field_name="order_id"), safe="")
         response = self._request("GET", f"/v2/orders/{resolved}")
         if not isinstance(response.payload, Mapping):
-            raise AlpacaPaperProviderError("Alpaca order response must be an object")
+            raise AlpacaPaperProviderError(
+                "Alpaca order response must be an object"
+            )
         return response.payload
 
     def cancel_order(self, order_id: str) -> str | None:
@@ -244,17 +264,25 @@ class AlpacaPaperBrokerClient:
         return response.request_id
 
     def position(self, symbol: str) -> Mapping[str, Any] | None:
-        resolved = quote(_text(symbol, field_name="symbol").upper(), safe="")
-        response = self._request(
-            "GET",
-            f"/v2/positions/{resolved}",
-            allow_not_found=True,
-        )
-        if response.payload is None:
-            return None
-        if not isinstance(response.payload, Mapping):
-            raise AlpacaPaperProviderError("Alpaca position response must be an object")
-        return response.payload
+        normalized = _text(symbol, field_name="symbol").upper()
+        candidates = [normalized]
+        if "/" in normalized:
+            candidates.append(normalized.replace("/", ""))
+        for candidate in dict.fromkeys(candidates):
+            resolved = quote(candidate, safe="")
+            response = self._request(
+                "GET",
+                f"/v2/positions/{resolved}",
+                allow_not_found=True,
+            )
+            if response.payload is None:
+                continue
+            if not isinstance(response.payload, Mapping):
+                raise AlpacaPaperProviderError(
+                    "Alpaca position response must be an object"
+                )
+            return response.payload
+        return None
 
     def fill_activities(
         self,
@@ -283,7 +311,9 @@ class AlpacaPaperBrokerClient:
         if not isinstance(response.payload, list) or not all(
             isinstance(item, Mapping) for item in response.payload
         ):
-            raise AlpacaPaperProviderError("Alpaca fill activities must be an array")
+            raise AlpacaPaperProviderError(
+                "Alpaca fill activities must be an array"
+            )
         return tuple(response.payload)
 
 
