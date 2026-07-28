@@ -94,7 +94,7 @@ class _FeeAwarePaperApi:
                     "id": f"fee-fill-{order_number}",
                     "activity_type": "FILL",
                     "order_id": order_id,
-                    "symbol": "BTCUSD",
+                    "symbol": "BTC/USD",
                     "side": side,
                     "qty": str(fill_quantity),
                     "price": "65231.15",
