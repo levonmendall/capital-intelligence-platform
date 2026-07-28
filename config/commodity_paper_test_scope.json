@@ -1,0 +1,78 @@
+{
+  "identifier": "commodity-paper-test-scope.v1",
+  "schema_version": "commodity-paper-test-scope.v1",
+  "maximum_evidence_age_hours": 36,
+  "require_us_listed_etf": true,
+  "require_unlevered": true,
+  "prohibit_inverse": true,
+  "prohibit_direct_derivatives": true,
+  "required_benchmarks": [
+    {
+      "identifier": "gold",
+      "minimum_history_years": 10,
+      "require_forward_curve": true
+    },
+    {
+      "identifier": "silver",
+      "minimum_history_years": 10,
+      "require_forward_curve": true
+    },
+    {
+      "identifier": "wti_crude",
+      "minimum_history_years": 10,
+      "require_forward_curve": true
+    },
+    {
+      "identifier": "brent_crude",
+      "minimum_history_years": 10,
+      "require_forward_curve": true
+    },
+    {
+      "identifier": "natural_gas",
+      "minimum_history_years": 10,
+      "require_forward_curve": true
+    },
+    {
+      "identifier": "copper",
+      "minimum_history_years": 10,
+      "require_forward_curve": true
+    },
+    {
+      "identifier": "agriculture",
+      "minimum_history_years": 10,
+      "require_forward_curve": true
+    }
+  ],
+  "required_proxy_categories": [
+    {
+      "category": "gold",
+      "minimum_eligible_proxies": 1,
+      "example_symbols": ["IAU", "GLD"]
+    },
+    {
+      "category": "silver",
+      "minimum_eligible_proxies": 1,
+      "example_symbols": ["SIVR", "SLV"]
+    },
+    {
+      "category": "oil_energy",
+      "minimum_eligible_proxies": 1,
+      "example_symbols": ["USO", "BNO"]
+    },
+    {
+      "category": "industrial_metals",
+      "minimum_eligible_proxies": 1,
+      "example_symbols": ["CPER", "DBB"]
+    },
+    {
+      "category": "agriculture",
+      "minimum_eligible_proxies": 1,
+      "example_symbols": ["DBA"]
+    },
+    {
+      "category": "broad_commodity",
+      "minimum_eligible_proxies": 1,
+      "example_symbols": ["PDBC", "DBC"]
+    }
+  ]
+}
