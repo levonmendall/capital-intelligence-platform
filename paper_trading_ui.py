@@ -118,8 +118,8 @@ def render_paper_decision_controls(
                 st.info(f"Approved; execution is currently held: {attempt.detail}")
             else:
                 st.success(
-                    "Approved and queued for paper execution. The worker checks the "
-                    "implementation automatically while the application is running."
+                    "Approved and queued for paper execution. Status refreshes automatically "
+                    "while the application is running."
                 )
             if attempt.attempted_at is not None:
                 st.caption(
