@@ -6,6 +6,19 @@ on:
   schedule:
     - cron: "43 11 * * *"
 
+  pull_request:
+    paths:
+      - "providers/fred.py"
+      - "providers/sec_edgar.py"
+      - "providers/crypto_venues.py"
+      - "providers/openfigi.py"
+      - "providers/gleif.py"
+      - "providers/free_connections.py"
+      - "config/free_provider_connections.json"
+      - "config/crypto_venue_bindings.free.json"
+      - "run_free_provider_connections.py"
+      - ".github/workflows/free-provider-connectivity.yml"
+
   push:
     branches:
       - main
@@ -25,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: free-provider-connectivity
+  group: free-provider-connectivity-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
