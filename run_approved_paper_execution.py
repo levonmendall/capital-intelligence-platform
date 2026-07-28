@@ -63,6 +63,7 @@ def _forwarded_arguments(args: argparse.Namespace, remaining: Sequence[str]) -> 
         "--portfolio-code",
         args.portfolio_code,
         *remaining,
+        "--require-complete",
     ]
 
 
