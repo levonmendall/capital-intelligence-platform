@@ -189,7 +189,7 @@ def _observation(index: int, *, negative: bool = False) -> DecisionLearningObser
         decision_at=decision_at,
         evaluated_at=decision_at + timedelta(days=31),
         horizon_days=30,
-        forecast_probability=0.70,
+        forecast_probability=0.72,
         realized_success=success,
         value_added_vs_best_alternative=value_added,
         value_added_vs_cash=value_added + 0.005,
