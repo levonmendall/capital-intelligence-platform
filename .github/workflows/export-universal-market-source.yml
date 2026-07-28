@@ -49,6 +49,10 @@ jobs:
             | base64 -d \
             | gzip -d > governance/__init__.py
           git add governance/__init__.py
+          cat .universal-market-patch/test-universal-market-scope.py.gz.b64 \
+            | base64 -d \
+            | gzip -d > tests/test_universal_market_scope.py
+          git add tests/test_universal_market_scope.py
           if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
             echo "unresolved merge conflicts remain"
             git diff --name-only --diff-filter=U
