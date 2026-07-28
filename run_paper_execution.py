@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
+from governance.commodity_readiness import require_commodity_readiness_report
 from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from cio.persistence import SQLiteCIOJournal
 from portfolio.constants import CANONICAL_PORTFOLIO_CODE
@@ -113,6 +115,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-provider", required=True, help="module:factory returning a MarketSessionProvider")
     parser.add_argument("--quote-provider", required=True, help="module:factory returning a PaperQuoteProvider")
     parser.add_argument("--as-of", required=True, help="Timezone-aware execution timestamp")
+    parser.add_argument(
+        "--commodity-readiness-report",
+        default=os.getenv("CAPITAL_INTELLIGENCE_COMMODITY_READINESS_REPORT"),
+        help=(
+            "Ready, unexpired commodity prerequisite report bound to the exact "
+            "eligible-universe publication"
+        ),
+    )
     parser.add_argument("--store-db", default="database/paper_execution.db")
     parser.add_argument("--portfolio-db", default="database/canonical_portfolio.db")
     parser.add_argument(
@@ -139,10 +149,21 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         construction = _construction(_load(args.construction))
-        portfolio = portfolio_from_dict(_load(args.portfolio))
         as_of = datetime.fromisoformat(args.as_of)
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must be timezone-aware")
+        if not args.commodity_readiness_report:
+            raise ValueError(
+                "commodity readiness report is required before paper execution"
+            )
+        require_commodity_readiness_report(
+            args.commodity_readiness_report,
+            as_of=as_of,
+            eligible_universe_publication_identifier=(
+                construction.eligible_universe_publication_identifier
+            ),
+        )
+        portfolio = portfolio_from_dict(_load(args.portfolio))
         journal = (
             None if args.without_journal else SQLiteCIOJournal(args.journal_db)
         )
