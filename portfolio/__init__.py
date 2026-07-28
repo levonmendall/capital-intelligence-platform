@@ -57,7 +57,6 @@ from portfolio.performance import (
     PortfolioCashFlowBooking,
     PortfolioCashFlowKind,
     PortfolioCashFlowService,
-    PortfolioMarkToMarketService,
     PortfolioPerformanceError,
     PortfolioPositionAdjustment,
     PortfolioPositionAdjustmentService,
@@ -65,6 +64,7 @@ from portfolio.performance import (
     PortfolioValuationReport,
     PositionValuationChange,
 )
+from portfolio.performance_integrity import PortfolioMarkToMarketService
 from portfolio.opportunity_cost import (
     CapitalFundingSource,
     FundingCandidate,
