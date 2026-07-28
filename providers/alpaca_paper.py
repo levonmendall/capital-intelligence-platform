@@ -51,6 +51,16 @@ def _text(value: object, *, field_name: str) -> str:
     return normalized
 
 
+def _environment_value(*names: str, default: str = "") -> str:
+    """Return the first non-empty credential/configuration alias without logging it."""
+
+    for name in names:
+        value = os.getenv(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return default
+
+
 def _timestamp(value: object, *, field_name: str) -> datetime:
     if not isinstance(value, str) or not value.strip():
         raise AlpacaPaperProviderError(f"{field_name} is unavailable")
@@ -92,11 +102,32 @@ class AlpacaPaperSettings:
     @classmethod
     def from_env(cls) -> "AlpacaPaperSettings":
         settings = cls(
-            api_key_id=os.getenv("APCA_API_KEY_ID", ""),
-            secret_key=os.getenv("APCA_API_SECRET_KEY", ""),
-            paper_base_url=os.getenv("APCA_API_BASE_URL", DEFAULT_PAPER_BASE_URL),
-            data_base_url=os.getenv("APCA_DATA_BASE_URL", DEFAULT_DATA_BASE_URL),
-            data_feed=os.getenv("APCA_DATA_FEED", DEFAULT_DATA_FEED),
+            api_key_id=_environment_value(
+                "APCA_API_KEY_ID",
+                "ALPACA_API_KEY_ID",
+                "ALPACA_API_KEY",
+            ),
+            secret_key=_environment_value(
+                "APCA_API_SECRET_KEY",
+                "ALPACA_API_SECRET_KEY",
+                "ALPACA_SECRET_KEY",
+                "ALPACA_API_SECRET",
+            ),
+            paper_base_url=_environment_value(
+                "APCA_API_BASE_URL",
+                "ALPACA_API_BASE_URL",
+                default=DEFAULT_PAPER_BASE_URL,
+            ),
+            data_base_url=_environment_value(
+                "APCA_DATA_BASE_URL",
+                "ALPACA_DATA_BASE_URL",
+                default=DEFAULT_DATA_BASE_URL,
+            ),
+            data_feed=_environment_value(
+                "APCA_DATA_FEED",
+                "ALPACA_DATA_FEED",
+                default=DEFAULT_DATA_FEED,
+            ),
         )
         host = (urlparse(settings.paper_base_url).hostname or "").lower()
         if host != "paper-api.alpaca.markets":

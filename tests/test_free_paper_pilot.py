@@ -220,3 +220,27 @@ def test_free_pilot_contains_no_broker_order_submission_path() -> None:
     assert "development-only" in runner_source
     assert "--development-bypass-launch-gate" in runner_source
     assert "run_approved_paper_execution" in runner_source
+
+def test_common_alpaca_environment_aliases_are_supported(monkeypatch) -> None:
+    for name in (
+        "APCA_API_KEY_ID",
+        "APCA_API_SECRET_KEY",
+        "APCA_API_BASE_URL",
+        "APCA_DATA_BASE_URL",
+        "APCA_DATA_FEED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ALPACA_API_KEY_ID", "alias-paper-key")
+    monkeypatch.setenv("ALPACA_API_SECRET_KEY", "alias-paper-secret")
+    monkeypatch.setenv("ALPACA_API_BASE_URL", "https://paper-api.alpaca.markets")
+    monkeypatch.setenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets")
+    monkeypatch.setenv("ALPACA_DATA_FEED", "iex")
+
+    settings = AlpacaPaperSettings.from_env()
+
+    assert settings.api_key_id == "alias-paper-key"
+    assert settings.secret_key == "alias-paper-secret"
+    assert settings.paper_base_url == "https://paper-api.alpaca.markets"
+    assert settings.data_base_url == "https://data.alpaca.markets"
+    assert settings.data_feed == "iex"
+
