@@ -6,8 +6,8 @@
   "reporting_currency": "USD",
   "quote_provider": "alpaca-paper-iex",
   "execution_mode": "internal-simulated-fills-only",
-  "minimum_cash_weight": 0.20,
-  "maximum_batch_turnover": 0.10,
+  "minimum_cash_weight": 0.2,
+  "maximum_batch_turnover": 0.1,
   "maximum_single_instrument_weight": 0.45,
   "maximum_crypto_proxy_weight": 0.05,
   "maximum_volatility_proxy_weight": 0.02,
@@ -64,7 +64,7 @@
       "country_code": "US",
       "currency": "USD",
       "instrument_type": "fund",
-      "maximum_weight": 0.50
+      "maximum_weight": 0.45
     },
     {
       "symbol": "LQD",
@@ -100,7 +100,7 @@
       "country_code": "US",
       "currency": "USD",
       "instrument_type": "fund",
-      "maximum_weight": 0.80
+      "maximum_weight": 0.8
     },
     {
       "symbol": "DBC",
@@ -136,7 +136,7 @@
       "country_code": "US",
       "currency": "USD",
       "instrument_type": "fund",
-      "maximum_weight": 0.10
+      "maximum_weight": 0.1
     },
     {
       "symbol": "IBIT",
@@ -172,7 +172,7 @@
       "country_code": "US",
       "currency": "USD",
       "instrument_type": "fund",
-      "maximum_weight": 0.10
+      "maximum_weight": 0.1
     },
     {
       "symbol": "PUTW",
@@ -184,7 +184,7 @@
       "country_code": "US",
       "currency": "USD",
       "instrument_type": "fund",
-      "maximum_weight": 0.10
+      "maximum_weight": 0.1
     },
     {
       "symbol": "VIXY",
@@ -208,7 +208,7 @@
       "country_code": "US",
       "currency": "USD",
       "instrument_type": "fund",
-      "maximum_weight": 0.10
+      "maximum_weight": 0.1
     }
   ],
   "direct_instrument_classes_prohibited": [
