@@ -13,10 +13,11 @@ from typing import Any, Mapping, Sequence
 from cio import CandidateAssetClass
 from governance import (
     AssetClassApprovalState,
+    SQLitePaperTestEntryGovernanceStore,
     SQLitePaperTradingControlStore,
     SQLitePaperTradingLaunchStore,
     TradingSessionModel,
-    require_paper_execution_authorization,
+    require_combined_paper_execution_authorization,
 )
 from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from portfolio import (
@@ -192,6 +193,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--paper-test-entry-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_PAPER_TEST_GOVERNANCE_DATABASE",
+            str(data_dir / "paper_test_governance.db"),
+        ),
+    )
+    parser.add_argument(
         "--paper-launch-database",
         default=os.getenv(
             "CAPITAL_INTELLIGENCE_PAPER_LAUNCH_DATABASE",
@@ -207,11 +215,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--baseline-identifier",
-        default=os.getenv("CAPITAL_INTELLIGENCE_TEST_BASELINE"),
+        default=(
+            os.getenv("CAPITAL_INTELLIGENCE_TEST_BASELINE_IDENTIFIER")
+            or os.getenv("CAPITAL_INTELLIGENCE_TEST_BASELINE")
+        ),
     )
     parser.add_argument(
         "--process-version",
-        default=os.getenv("CAPITAL_INTELLIGENCE_PROCESS_VERSION"),
+        default=(
+            os.getenv("CAPITAL_INTELLIGENCE_INVESTMENT_PROCESS_VERSION")
+            or os.getenv("CAPITAL_INTELLIGENCE_PROCESS_VERSION")
+        ),
     )
     parser.add_argument(
         "--code-version",
@@ -222,7 +236,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Explicit local-development bypass. Refused in staging or production "
-            "and never considered launch evidence."
+            "and never considered launch or entry evidence."
         ),
     )
     parser.add_argument("--portfolio-code", default="COMPOUNDING")
@@ -231,8 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    args = build_parser().parse_args(argv)
     authorization = None
     try:
         construction_payload = _load(args.construction)
@@ -250,13 +263,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must be timezone-aware")
 
-        environment = os.getenv(
-            "CAPITAL_INTELLIGENCE_DEPLOYMENT_ENVIRONMENT", "development"
+        environment = (
+            os.getenv("CAPITAL_INTELLIGENCE_ENVIRONMENT")
+            or os.getenv("CAPITAL_INTELLIGENCE_DEPLOYMENT_ENVIRONMENT")
+            or "development"
         ).strip().lower()
         if args.development_bypass_launch_gate:
             if environment in {"staging", "production"}:
                 raise ValueError(
-                    "paper launch bypass is prohibited in staging and production"
+                    "paper authority bypass is prohibited in staging and production"
                 )
         else:
             missing = [
@@ -270,10 +285,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             ]
             if missing:
                 raise ValueError(
-                    "paper execution requires exact launch versions: "
+                    "paper execution requires exact authority versions: "
                     + ", ".join(missing)
                 )
-            authorization = require_paper_execution_authorization(
+            authorization = require_combined_paper_execution_authorization(
+                entry_store=SQLitePaperTestEntryGovernanceStore(
+                    args.paper_test_entry_database
+                ),
                 launch_store=SQLitePaperTradingLaunchStore(
                     args.paper_launch_database
                 ),
@@ -352,15 +370,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 4
 
     payload = batch_to_dict(batch)
-    payload["paper_launch_authorization"] = (
+    payload["paper_execution_authorization"] = (
         None
         if authorization is None
         else {
+            "eligibility_package_identifier": (
+                authorization.entry_package.identifier
+            ),
+            "eligibility_package_fingerprint": (
+                authorization.entry_package.fingerprint
+            ),
+            "human_entry_decision_identifier": (
+                authorization.entry_decision.identifier
+            ),
+            "cohort_identifier": authorization.cohort_identifier,
             "launch_report_identifier": authorization.launch_report.identifier,
             "launch_evidence_identifier": (
                 authorization.launch_report.evidence_identifier
             ),
-            "control_event_identifier": authorization.control_event.identifier,
+            "runtime_control_event_identifier": (
+                authorization.control_event_identifier
+            ),
             "source_identifiers": list(authorization.source_identifiers),
         }
     )
