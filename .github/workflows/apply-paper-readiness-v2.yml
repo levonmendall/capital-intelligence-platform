@@ -39,7 +39,22 @@ jobs:
           xz -dc /tmp/paper-readiness-payload.tar.xz | tar -xf - -C /tmp/paper-readiness-payload
           echo "d125c69c8b0a357e69d170c9d71f3fb36f3aa48171bba99ddda6398321d733c4  /tmp/paper-readiness-payload/change.patch" | sha256sum -c -
 
+          set +e
           git apply --3way --exclude=README.md /tmp/paper-readiness-payload/change.patch
+          apply_status=$?
+          set -e
+          mapfile -t unresolved < <(git diff --name-only --diff-filter=U)
+          if [[ $apply_status -ne 0 ]]; then
+            if [[ ${#unresolved[@]} -ne 1 || "${unresolved[0]}" != "governance/__init__.py" ]]; then
+              printf 'unexpected patch conflicts: %s\n' "${unresolved[*]:-none}"
+              exit "$apply_status"
+            fi
+          fi
+
+          base64 -d .paper-ready-payload/governance-init.py.xz.b64 \
+            | xz -dc > governance/__init__.py
+          echo "e1bd6c8f1bc1a026897fa9bf81b70840c996a94464fb43d9f251b7e5b47ce0bf  governance/__init__.py" | sha256sum -c -
+          git add governance/__init__.py
           if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
             echo "unresolved merge conflicts remain"
             git diff --name-only --diff-filter=U
@@ -54,7 +69,7 @@ jobs:
           expected = json.loads(
               Path('/tmp/paper-readiness-payload/expected.json').read_text(encoding='utf-8')
           )
-          ignored = {'README.md'}
+          ignored = {'README.md', 'governance/__init__.py'}
           failures = []
           verified = 0
           for path, expected_sha in sorted(expected.items()):
@@ -72,6 +87,17 @@ jobs:
                   failures.append(f'{path}: {actual_sha} != {expected_sha}')
               else:
                   verified += 1
+          governance_sha = subprocess.check_output(
+              ['git', 'hash-object', 'governance/__init__.py'],
+              text=True,
+          ).strip()
+          if governance_sha != 'f0342fc5865bcb45f4f8b66b56604fabcdb54cae':
+              failures.append(
+                  'governance/__init__.py: '
+                  f'{governance_sha} != f0342fc5865bcb45f4f8b66b56604fabcdb54cae'
+              )
+          else:
+              verified += 1
           if failures:
               raise SystemExit('\n'.join(failures))
           print(f'verified {verified} paper-readiness file blobs')
