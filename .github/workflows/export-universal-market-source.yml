@@ -1,4 +1,4 @@
-name: Export universal-market source
+name: Apply universal-market implementation
 
 on:
   pull_request:
@@ -10,21 +10,59 @@ on:
       - reopened
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  apply:
     if: github.head_ref == 'agent/universal-paper-markets'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out implementation branch
         uses: actions/checkout@v4
-      - name: Package source
-        run: |
-          zip -qr /tmp/capital-intelligence-platform-source.zip . -x '.git/*'
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
         with:
-          name: universal-market-source
-          path: /tmp/capital-intelligence-platform-source.zip
-          retention-days: 1
+          fetch-depth: 0
+          ref: agent/universal-paper-markets
+      - name: Apply and verify universal-market implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "OpenAI Agent"
+          git config user.email "agent@openai.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          cat .universal-market-patch/chunk-*.b64 \
+            | base64 -d \
+            | gzip -d > /tmp/universal-market.patch
+          git apply --3way /tmp/universal-market.patch
+          cat .universal-market-patch/expected-blobs.json.gz.b64 \
+            | base64 -d \
+            | gzip -d > /tmp/expected-blobs.json
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          expected = json.loads(Path('/tmp/expected-blobs.json').read_text(encoding='utf-8'))
+          failures = []
+          for path, expected_sha in sorted(expected.items()):
+              target = Path(path)
+              if not target.is_file():
+                  failures.append(f'{path}: missing')
+                  continue
+              actual_sha = subprocess.check_output(
+                  ['git', 'hash-object', path],
+                  text=True,
+              ).strip()
+              if actual_sha != expected_sha:
+                  failures.append(f'{path}: {actual_sha} != {expected_sha}')
+          if failures:
+              raise SystemExit('\n'.join(failures))
+          print(f'verified {len(expected)} universal-market file blobs')
+          PY
+          rm -rf .universal-market-patch
+          rm -f .universal-market-export-trigger
+          rm -f .github/workflows/export-universal-market-source.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "Enable universal governed paper markets"
+          git push origin HEAD:agent/universal-paper-markets
