@@ -1,0 +1,63 @@
+name: Repair PR166 Alpaca credential aliases
+
+on:
+  push:
+    branches:
+      - pr-166-free-paper-pilot
+    paths:
+      - ".github/workflows/repair-pr166-alpaca-env.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: pr-166-free-paper-pilot
+          fetch-depth: 0
+
+      - name: Add runtime credential aliases and regression coverage
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          provider = Path("providers/alpaca_paper.py")
+          source = provider.read_text(encoding="utf-8")
+          marker = '''def _timestamp(value: object, *, field_name: str) -> datetime:\n'''
+          helper = '''def _environment_value(*names: str, default: str = "") -> str:\n    """Return the first non-empty credential/configuration alias without logging it."""\n\n    for name in names:\n        value = os.getenv(name)\n        if isinstance(value, str) and value.strip():\n            return value.strip()\n    return default\n\n\n'''
+          if helper not in source:
+              if source.count(marker) != 1:
+                  raise SystemExit("Alpaca timestamp insertion point was not found exactly once")
+              source = source.replace(marker, helper + marker)
+
+          old = '''        settings = cls(\n            api_key_id=os.getenv("APCA_API_KEY_ID", ""),\n            secret_key=os.getenv("APCA_API_SECRET_KEY", ""),\n            paper_base_url=os.getenv("APCA_API_BASE_URL", DEFAULT_PAPER_BASE_URL),\n            data_base_url=os.getenv("APCA_DATA_BASE_URL", DEFAULT_DATA_BASE_URL),\n            data_feed=os.getenv("APCA_DATA_FEED", DEFAULT_DATA_FEED),\n        )\n'''
+          new = '''        settings = cls(\n            api_key_id=_environment_value(\n                "APCA_API_KEY_ID",\n                "ALPACA_API_KEY_ID",\n                "ALPACA_API_KEY",\n            ),\n            secret_key=_environment_value(\n                "APCA_API_SECRET_KEY",\n                "ALPACA_API_SECRET_KEY",\n                "ALPACA_SECRET_KEY",\n                "ALPACA_API_SECRET",\n            ),\n            paper_base_url=_environment_value(\n                "APCA_API_BASE_URL",\n                "ALPACA_API_BASE_URL",\n                default=DEFAULT_PAPER_BASE_URL,\n            ),\n            data_base_url=_environment_value(\n                "APCA_DATA_BASE_URL",\n                "ALPACA_DATA_BASE_URL",\n                default=DEFAULT_DATA_BASE_URL,\n            ),\n            data_feed=_environment_value(\n                "APCA_DATA_FEED",\n                "ALPACA_DATA_FEED",\n                default=DEFAULT_DATA_FEED,\n            ),\n        )\n'''
+          if old not in source and new not in source:
+              raise SystemExit("Alpaca environment settings block was not found")
+          source = source.replace(old, new)
+          provider.write_text(source, encoding="utf-8")
+
+          tests = Path("tests/test_free_paper_pilot.py")
+          test_source = tests.read_text(encoding="utf-8")
+          addition = '''\n\ndef test_common_alpaca_environment_aliases_are_supported(monkeypatch) -> None:\n    for name in (\n        "APCA_API_KEY_ID",\n        "APCA_API_SECRET_KEY",\n        "APCA_API_BASE_URL",\n        "APCA_DATA_BASE_URL",\n        "APCA_DATA_FEED",\n    ):\n        monkeypatch.delenv(name, raising=False)\n    monkeypatch.setenv("ALPACA_API_KEY_ID", "alias-paper-key")\n    monkeypatch.setenv("ALPACA_API_SECRET_KEY", "alias-paper-secret")\n    monkeypatch.setenv("ALPACA_API_BASE_URL", "https://paper-api.alpaca.markets")\n    monkeypatch.setenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets")\n    monkeypatch.setenv("ALPACA_DATA_FEED", "iex")\n\n    settings = AlpacaPaperSettings.from_env()\n\n    assert settings.api_key_id == "alias-paper-key"\n    assert settings.secret_key == "alias-paper-secret"\n    assert settings.paper_base_url == "https://paper-api.alpaca.markets"\n    assert settings.data_base_url == "https://data.alpaca.markets"\n    assert settings.data_feed == "iex"\n'''
+          if "test_common_alpaca_environment_aliases_are_supported" not in test_source:
+              tests.write_text(test_source.rstrip() + addition + "\n", encoding="utf-8")
+
+          Path(".github/workflows/repair-pr166-alpaca-env.yml").unlink()
+          PY
+
+      - name: Commit Alpaca credential compatibility
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add providers/alpaca_paper.py tests/test_free_paper_pilot.py .github/workflows/repair-pr166-alpaca-env.yml
+          git commit -m "Support common Alpaca credential aliases"
+          git push origin HEAD:pr-166-free-paper-pilot
