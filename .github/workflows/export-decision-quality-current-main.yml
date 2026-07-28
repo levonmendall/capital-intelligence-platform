@@ -23,6 +23,7 @@ jobs:
           ref: main
       - name: Package current main
         run: |
+          # Refresh after premium HTML rendering hotfix.
           git rev-parse HEAD > /tmp/current-main-sha.txt
           zip -qr /tmp/capital-intelligence-current-main.zip . -x '.git/*'
       - name: Upload current main
