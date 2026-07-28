@@ -23,6 +23,7 @@ from cio import (
     CandidateDecisionRecord,
     CandidateInstrument,
     EvidenceQuality,
+    PayoffDistributionPoint,
 )
 from cio.persistence import (
     SQLiteCIOJournal,
@@ -1344,6 +1345,14 @@ def _candidate_from_payload(payload: Mapping[str, Any]) -> CandidateDecisionReco
             str(item) for item in payload["evidence_identifiers"]
         ),
         model_versions=tuple(str(item) for item in payload["model_versions"]),
+        payoff_distribution=tuple(
+            PayoffDistributionPoint(
+                label=str(item["label"]),
+                total_return=float(item["total_return"]),
+                probability=float(item["probability"]),
+            )
+            for item in payload.get("payoff_distribution", ())
+        ),
     )
 
 

@@ -319,7 +319,9 @@ The system requires a formal mechanism for deciding what deserves committee atte
 
 Responsibilities include screening the investable universe; identifying improving and deteriorating assets; detecting valuation dislocations, regime beneficiaries, catalysts, and weakening theses; comparing candidates with current holdings; estimating expected and probability-weighted return and downside; evaluating opportunity cost; ranking candidates; and rejecting weak or redundant candidates.
 
-A candidate reaches the committee only when minimum expected-return, evidence-quality, liquidity, freshness, analytical-coverage, and implementation-feasibility requirements are met.
+New-capital candidates reach the committee only when horizon-normalized expected-return, scenario-derived success probability, evidence-quality, liquidity, freshness, analytical-coverage, robustness, and implementation requirements are met.
+
+Every current holding follows a separate mandatory review lane. A holding cannot disappear because it fails acquisition thresholds; deterioration, thesis invalidation, unsupported implementation, or a superior replacement must still reach independent specialist review and the CIO for an explicit Hold, Reduce, Exit, or Replace conclusion.
 
 ---
 
@@ -340,7 +342,7 @@ Required fields:
 * Estimated fair value
 * Expected upside
 * Expected downside
-* Probability of success
+* Probability of success derived from the same governed outcome distribution and measured against the horizon-matched best alternative
 * Primary catalysts
 * Key risks
 * Critical assumptions
@@ -352,7 +354,7 @@ Required fields:
 * Liquidity
 * Transaction costs
 * Opportunity cost
-* Portfolio contribution
+* Preliminary portfolio context, clearly separated from final marginal portfolio contribution determined during construction
 * Committee conclusions
 * Documented disagreements
 * Final confidence
@@ -360,6 +362,8 @@ Required fields:
 * Recommended position size
 * Monitoring indicators
 * Review date
+
+For nonlinear instruments, the common summary must be backed by a governed payoff distribution that preserves path, convexity, expiration, margin, collateral, and maximum-loss behavior as applicable. Asset-specific metrics must preserve units, directionality, applicable horizon, methodology, uncertainty, and source/model lineage.
 
 This schema gives the CIO comparable inputs and makes every decision auditable and testable.
 
@@ -402,7 +406,7 @@ Primary question: **What are price, positioning, participation, and liquidity co
 
 Mission: determine intrinsic quality, fair value, and expected return.
 
-For equities and equity ETFs, evaluate revenue, earnings, cash flow, margins, return on capital, balance-sheet quality, management execution, competitive advantages, capital allocation, industry structure, valuation, revisions, and long-term growth. Output quality, fair-value and expected-return ranges, catalysts, risks, assumptions, and invalidation conditions.
+For equities and equity ETFs, evaluate revenue, earnings, cash flow, margins, return on capital, balance-sheet quality, management execution, competitive advantages, capital allocation, industry structure, valuation, revisions, and long-term growth. For fixed income, FX, commodities, crypto, real estate, futures, options, volatility, and alternatives, use an independently governed asset-specific valuation and return model. When no independent model exists, abstain rather than repeat the candidate's original estimate. Output quality, fair-value and expected-return ranges, catalysts, risks, assumptions, and invalidation conditions.
 
 Primary question: **Does this asset offer an attractive expected return relative to its price and fundamental outlook?**
 
@@ -428,7 +432,7 @@ Primary question: **Can this decision be objectively defended and reproduced usi
 
 Mission: select the strongest available use of capital based on all specialist analyses.
 
-The CIO does not duplicate specialist research. It reviews independent assessments, compares expected returns, evaluates downside and opportunity cost, resolves disagreements, preserves dissent, determines final confidence, approves or rejects candidates, selects the final action, approves the thesis, produces the user explanation, and determines whether no action is preferable.
+The CIO does not duplicate specialist research. It reviews independent assessments, reconciles dependency-discounted specialist impacts into one coherent outcome distribution, compares horizon-matched expected returns, evaluates downside and opportunity cost, resolves disagreements, preserves dissent, determines final confidence, approves or rejects candidates, selects the final action, approves the thesis, produces the user explanation, and determines whether no action is preferable. The final expected return, downside, and probability of success must reconcile mathematically to the same adjusted distribution.
 
 Primary question: **Given all available evidence and alternatives, what is the best use of capital?**
 
@@ -446,7 +450,9 @@ The objective is not consensus. The objective is the strongest defensible capita
 
 # 16. Recommendation Ranking
 
-Candidates must be ranked using expected return, probability of success, downside severity, horizon, evidence quality and freshness, liquidity, transaction costs, opportunity cost, portfolio contribution, thesis clarity, and invalidation clarity.
+Acquisition candidates must be ranked using horizon-normalized robust return, distribution-derived probability of success, downside severity, evidence quality and freshness, originating-fact independence, liquidity, transaction costs, opportunity cost, thesis clarity, and invalidation clarity. Caller-supplied preliminary portfolio-contribution estimates cannot qualify, reject, or order candidates.
+
+After specialist review, the feasible set is ordered again using marginal portfolio contribution at executable sizes, actual funding sources, correlations, currency exposure, concentration, turnover, and costs. Exits and reductions are evaluated before additions.
 
 The governing question is:
 
@@ -474,7 +480,7 @@ Abstention is a valid and often preferable CIO decision.
 
 Every approved decision includes action, asset, expected return, horizon, position size, thesis, supporting and contradictory evidence, assumptions, catalysts, risks, invalidation conditions, portfolio impact, opportunity cost, confidence, review date, and a plain-English explanation.
 
-Confidence describes evidence strength and decision reliability. It is not a guarantee of future return.
+Confidence describes evidence strength and decision reliability. It is not a guarantee of future return. Repeated reports derived from the same originating fact cannot increase evidence independence or confidence merely through repetition.
 
 ---
 

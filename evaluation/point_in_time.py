@@ -201,7 +201,12 @@ class DecisionEvidenceSnapshot:
     thesis_invalidation_conditions: tuple[str, ...]
     thesis_monitoring_indicators: tuple[str, ...]
     code_version: str
-    schema_version: str = "decision-evidence-snapshot.v1"
+    schema_version: str = "decision-evidence-snapshot.v2"
+    analysis_lane: str = "acquisition"
+    original_expected_return: float | None = None
+    reconciled_probability_of_success: float | None = None
+    reconciliation_policy_version: str | None = None
+    evidence_origin_count: int | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -219,6 +224,48 @@ class DecisionEvidenceSnapshot:
                 field_name,
                 value.upper() if field_name == "symbol" else value,
             )
+        object.__setattr__(
+            self,
+            "analysis_lane",
+            _required_text(self.analysis_lane, field_name="analysis_lane"),
+        )
+        if self.original_expected_return is not None:
+            object.__setattr__(
+                self,
+                "original_expected_return",
+                _finite(
+                    self.original_expected_return,
+                    field_name="original_expected_return",
+                ),
+            )
+        if self.reconciled_probability_of_success is not None:
+            object.__setattr__(
+                self,
+                "reconciled_probability_of_success",
+                _finite(
+                    self.reconciled_probability_of_success,
+                    field_name="reconciled_probability_of_success",
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+            )
+        if self.reconciliation_policy_version is not None:
+            object.__setattr__(
+                self,
+                "reconciliation_policy_version",
+                _required_text(
+                    self.reconciliation_policy_version,
+                    field_name="reconciliation_policy_version",
+                ),
+            )
+        if self.evidence_origin_count is not None:
+            if isinstance(self.evidence_origin_count, bool) or not isinstance(
+                self.evidence_origin_count, int
+            ):
+                raise TypeError("evidence_origin_count must be an integer")
+            if self.evidence_origin_count < 1:
+                raise ValueError("evidence_origin_count must be positive")
+
         _aware(self.captured_at, field_name="captured_at")
         _aware(self.decision_as_of, field_name="decision_as_of")
         if self.captured_at < self.decision_as_of:
@@ -469,6 +516,15 @@ class DecisionEvidenceSnapshot:
             ),
             "code_version": self.code_version,
             "schema_version": self.schema_version,
+            "analysis_lane": self.analysis_lane,
+            "original_expected_return": self.original_expected_return,
+            "reconciled_probability_of_success": (
+                self.reconciled_probability_of_success
+            ),
+            "reconciliation_policy_version": (
+                self.reconciliation_policy_version
+            ),
+            "evidence_origin_count": self.evidence_origin_count,
         }
         if include_fingerprint:
             payload["fingerprint"] = self.fingerprint
@@ -560,8 +616,16 @@ class DecisionEvidenceSnapshot:
             decision_horizon_days=decision.decision_horizon_days,
             current_price=candidate.current_price,
             expected_return=decision.expected_return,
-            expected_downside=candidate.expected_downside,
-            probability_of_success=candidate.probability_of_success,
+            expected_downside=(
+                candidate.expected_downside
+                if decision.return_reconciliation is None
+                else decision.return_reconciliation.expected_downside
+            ),
+            probability_of_success=(
+                candidate.probability_of_success
+                if decision.return_reconciliation is None
+                else decision.return_reconciliation.probability_of_success
+            ),
             final_confidence=decision.final_confidence,
             current_portfolio_weight=candidate.current_portfolio_weight,
             recommended_position_weight=decision.recommended_position_weight,
@@ -589,6 +653,27 @@ class DecisionEvidenceSnapshot:
                 () if thesis is None else thesis.monitoring_indicators
             ),
             code_version=code_version,
+            analysis_lane=ranked.qualification.analysis_lane.value,
+            original_expected_return=(
+                None
+                if decision.return_reconciliation is None
+                else decision.return_reconciliation.original_expected_return
+            ),
+            reconciled_probability_of_success=(
+                None
+                if decision.return_reconciliation is None
+                else decision.return_reconciliation.probability_of_success
+            ),
+            reconciliation_policy_version=(
+                None
+                if decision.return_reconciliation is None
+                else decision.return_reconciliation.policy_version
+            ),
+            evidence_origin_count=(
+                None
+                if decision.return_reconciliation is None
+                else decision.return_reconciliation.evidence_origin_count
+            ),
         )
 
 

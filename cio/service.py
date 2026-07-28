@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from cio.committee import IndependentSpecialistPacket
 from cio.models import (
     CIOAction,
     CIODecision,
     CandidateDecisionRecord,
+    ReturnReconciliation,
     SpecialistPosition,
+)
+from cio.reconciliation import (
+    SpecialistReconciliationPolicy,
+    SpecialistReturnReconciler,
 )
 from cio.robustness import (
     RobustCandidateAssessment,
@@ -23,7 +28,7 @@ from cio.universe import UniverseAssessment
 class CIOSynthesisPolicy:
     """Versioned materiality, evidence, and abstention rules."""
 
-    version: str = "cio-synthesis.v2"
+    version: str = "cio-synthesis.v3"
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     minimum_net_expected_return: float = 0.05
@@ -63,9 +68,11 @@ class ChiefInvestmentOfficer:
         policy: CIOSynthesisPolicy | None = None,
         *,
         robustness_policy: RobustDecisionPolicy | None = None,
+        reconciliation_policy: SpecialistReconciliationPolicy | None = None,
     ) -> None:
         self.policy = policy or CIOSynthesisPolicy()
         self.robust_assessor = RobustCandidateAssessor(robustness_policy)
+        self.reconciler = SpecialistReturnReconciler(reconciliation_policy)
 
     def synthesize(
         self,
@@ -85,8 +92,17 @@ class ChiefInvestmentOfficer:
             raise ValueError("universe assessment does not match the candidate")
         specialists.validate_against(candidate)
 
-        robustness = self.robust_assessor.assess(
+        reconciliation = self.reconciler.reconcile(
             candidate,
+            specialists,
+            alternative_return=candidate.opportunity_cost_return,
+        )
+        robustness_candidate = self._robustness_candidate(
+            candidate,
+            reconciliation,
+        )
+        robustness = self.robust_assessor.assess(
+            robustness_candidate,
             alternative_return=candidate.opportunity_cost_return,
         )
         dissent = specialists.strongest_dissent()
@@ -98,11 +114,13 @@ class ChiefInvestmentOfficer:
             universe=universe,
             specialists=specialists,
             robustness=robustness,
+            reconciliation=reconciliation,
         )
         final_confidence = self._confidence(
             candidate,
             specialists=specialists,
             has_dissent=dissent is not None,
+            reconciliation=reconciliation,
         )
         funding_source = (
             portfolio.funding_source
@@ -120,7 +138,8 @@ class ChiefInvestmentOfficer:
             position_weight=position_weight,
         )
         opportunity_cost = (
-            f"Arithmetic net expected return is {candidate.net_expected_return:.2%}; "
+            f"Original arithmetic net expected return is {candidate.net_expected_return:.2%}; "
+            f"specialist-reconciled expected return is {reconciliation.expected_return:.2%}; "
             f"the best recorded alternative is "
             f"{candidate.opportunity_cost_return:.2%}; "
             f"the arithmetic opportunity edge is "
@@ -137,6 +156,7 @@ class ChiefInvestmentOfficer:
             confidence=final_confidence,
             has_dissent=dissent is not None,
             robustness=robustness,
+            reconciliation=reconciliation,
         )
         return CIODecision(
             identifier=(
@@ -144,10 +164,10 @@ class ChiefInvestmentOfficer:
             ),
             candidate_identifier=candidate.identifier,
             as_of=candidate.as_of,
-            schema_version="cio-decision.v1",
+            schema_version="cio-decision.v2",
             action=action,
             final_confidence=final_confidence,
-            expected_return=candidate.net_expected_return,
+            expected_return=reconciliation.expected_return,
             decision_horizon_days=candidate.decision_horizon_days,
             recommended_position_weight=position_weight,
             funding_source=funding_source,
@@ -168,6 +188,7 @@ class ChiefInvestmentOfficer:
             review_at=candidate.review_at,
             explanation=explanation,
             policy_version=self.policy.version,
+            return_reconciliation=reconciliation,
         )
 
     def _select_action(
@@ -177,14 +198,8 @@ class ChiefInvestmentOfficer:
         universe: UniverseAssessment,
         specialists: IndependentSpecialistPacket,
         robustness: RobustCandidateAssessment,
+        reconciliation: ReturnReconciliation,
     ) -> tuple[CIOAction, float | None, str]:
-        if not universe.direct_recommendation_allowed:
-            return (
-                CIOAction.INSUFFICIENT_EVIDENCE,
-                None,
-                "The instrument is not eligible for a direct recommendation: "
-                + "; ".join(universe.reasons),
-            )
         if specialists.evidence_vetoes:
             return (
                 CIOAction.INSUFFICIENT_EVIDENCE,
@@ -225,17 +240,22 @@ class ChiefInvestmentOfficer:
                 + roles,
             )
 
-        expected_return = candidate.net_expected_return
+        expected_return = reconciliation.expected_return
+        holding_risk_return = min(candidate.net_expected_return, expected_return)
+        opportunity_edge = round(
+            expected_return - reconciliation.horizon_alternative_return,
+            8,
+        )
         current_weight = candidate.current_portfolio_weight
         portfolio = specialists.portfolio_recommendation
 
-        if current_weight > 0.0 and expected_return <= self.policy.exit_threshold:
+        if current_weight > 0.0 and holding_risk_return <= self.policy.exit_threshold:
             return (
                 CIOAction.EXIT,
                 0.0,
                 "The cost-adjusted expected return is materially negative and no evidence veto prevents action.",
             )
-        if current_weight > 0.0 and expected_return < self.policy.reduce_threshold:
+        if current_weight > 0.0 and holding_risk_return < self.policy.reduce_threshold:
             target = portfolio.recommended_position_weight
             if target is None or target >= current_weight:
                 target = round(current_weight / 2.0, 8)
@@ -244,19 +264,26 @@ class ChiefInvestmentOfficer:
                 target,
                 "The cost-adjusted expected return is negative but does not meet the full-exit threshold.",
             )
-        if expected_return < self.policy.minimum_net_expected_return:
+        if not universe.direct_recommendation_allowed:
+            return (
+                CIOAction.INSUFFICIENT_EVIDENCE,
+                None,
+                "The instrument is not eligible for new or increased exposure: "
+                + "; ".join(universe.reasons),
+            )
+        if reconciliation.probability_of_success < 0.50:
             if current_weight > 0.0:
                 return (
                     CIOAction.HOLD,
                     None,
-                    "Expected return does not justify increasing the holding, but the evidence does not support a reduction.",
+                    "The reconciled distribution does not yet support increasing the holding.",
                 )
             return (
                 CIOAction.NO_SUPERIOR_OPPORTUNITY,
                 None,
-                "The candidate does not satisfy the minimum cost-adjusted expected-return threshold.",
+                "The reconciled probability of outperforming the best alternative is below 50%.",
             )
-        if candidate.opportunity_edge < self.policy.minimum_opportunity_edge:
+        if opportunity_edge < self.policy.minimum_opportunity_edge:
             if current_weight > 0.0:
                 return (
                     CIOAction.HOLD,
@@ -323,12 +350,15 @@ class ChiefInvestmentOfficer:
         *,
         specialists: IndependentSpecialistPacket,
         has_dissent: bool,
+        reconciliation: ReturnReconciliation,
     ) -> float:
         calculated = (
             candidate.evidence_quality.score * 0.55
             + specialists.median_confidence * 0.25
             + specialists.support_ratio * 0.20
         )
+        origin_factor = min(1.0, reconciliation.evidence_origin_count / 3.0)
+        calculated *= 0.75 + 0.25 * origin_factor
         calculated = min(calculated, candidate.evidence_quality.ceiling)
         if has_dissent:
             calculated = min(calculated, 0.75)
@@ -337,6 +367,28 @@ class ChiefInvestmentOfficer:
         if specialists.implementation_blocks:
             calculated = min(calculated, 0.50)
         return round(max(0.0, min(1.0, calculated)), 6)
+
+    @staticmethod
+    def _robustness_candidate(
+        candidate: CandidateDecisionRecord,
+        reconciliation: ReturnReconciliation,
+    ) -> CandidateDecisionRecord:
+        by_label = {item.label.lower(): item for item in reconciliation.outcomes}
+        updates = {
+            "payoff_distribution": reconciliation.outcomes,
+            "probability_of_success": reconciliation.probability_of_success,
+            "expected_downside": reconciliation.expected_downside,
+        }
+        if {"base", "bull", "bear"}.issubset(by_label):
+            updates.update(
+                base_case_return=by_label["base"].total_return,
+                bull_case_return=by_label["bull"].total_return,
+                bear_case_return=by_label["bear"].total_return,
+                base_case_probability=by_label["base"].probability,
+                bull_case_probability=by_label["bull"].probability,
+                bear_case_probability=by_label["bear"].probability,
+            )
+        return replace(candidate, **updates)
 
     @staticmethod
     def _thesis(candidate: CandidateDecisionRecord, action: CIOAction) -> str:
@@ -373,6 +425,7 @@ class ChiefInvestmentOfficer:
         confidence: float,
         has_dissent: bool,
         robustness: RobustCandidateAssessment,
+        reconciliation: ReturnReconciliation,
     ) -> str:
         dissent_text = (
             " Material specialist dissent is preserved in the decision record."
@@ -381,9 +434,11 @@ class ChiefInvestmentOfficer:
         )
         return (
             f"What changed: {candidate.primary_catalysts[0]} "
-            f"Why it matters: arithmetic cost-adjusted expected return is "
-            f"{candidate.net_expected_return:.2%}, expected downside is "
-            f"{candidate.expected_downside:.2%}, robust edge is "
+            f"Why it matters: original cost-adjusted expected return is "
+            f"{candidate.net_expected_return:.2%}; specialist-reconciled expected return is "
+            f"{reconciliation.expected_return:.2%}, reconciled downside is "
+            f"{reconciliation.expected_downside:.2%}, reconciled success probability is "
+            f"{reconciliation.probability_of_success:.0%}, robust edge is "
             f"{robustness.robust_edge:.2%}, and stressed edge is "
             f"{robustness.stressed_edge:.2%}. "
             f"CIO decision: {action.value.replace('_', ' ')}. {reason} "

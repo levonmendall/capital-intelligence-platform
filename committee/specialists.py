@@ -143,6 +143,7 @@ class MarketSpecialistContext:
     evidence: tuple[str, ...]
     risks: tuple[str, ...]
     entry_conditions: tuple[str, ...]
+    evidence_identifiers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _aware(self.as_of, field_name="as_of")
@@ -183,6 +184,60 @@ class MarketSpecialistContext:
             ("evidence", 1),
             ("risks", 1),
             ("entry_conditions", 1),
+            ("evidence_identifiers", 0),
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _text_tuple(
+                    getattr(self, field_name),
+                    field_name=field_name,
+                    minimum=minimum,
+                ),
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class AssetValuationSpecialistContext:
+    """Independent asset-specific valuation evidence for non-company instruments."""
+
+    as_of: datetime
+    asset_class: CandidateAssetClass
+    expected_return_impact: float
+    confidence: float
+    valuation_evidence: tuple[str, ...]
+    contradictory_evidence: tuple[str, ...]
+    critical_assumptions: tuple[str, ...]
+    risks: tuple[str, ...]
+    limitations: tuple[str, ...]
+    change_conditions: tuple[str, ...]
+    evidence_identifiers: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _aware(self.as_of, field_name="as_of")
+        if not isinstance(self.asset_class, CandidateAssetClass):
+            raise TypeError("asset_class must be CandidateAssetClass")
+        object.__setattr__(
+            self,
+            "expected_return_impact",
+            _bounded(
+                self.expected_return_impact,
+                field_name="expected_return_impact",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "confidence",
+            _ratio(self.confidence, field_name="confidence"),
+        )
+        for field_name, minimum in (
+            ("valuation_evidence", 1),
+            ("contradictory_evidence", 0),
+            ("critical_assumptions", 1),
+            ("risks", 1),
+            ("limitations", 1),
+            ("change_conditions", 1),
+            ("evidence_identifiers", 1),
         ):
             object.__setattr__(
                 self,
@@ -258,6 +313,7 @@ class CandidateSpecialistContext:
     market: MarketSpecialistContext
     portfolio: PortfolioSpecialistContext
     company: CompanyAnalysis | None = None
+    asset_valuation: AssetValuationSpecialistContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -283,6 +339,13 @@ class CandidateSpecialistContext:
             CompanyAnalysis,
         ):
             raise TypeError("company must be CompanyAnalysis or None")
+        if self.asset_valuation is not None and not isinstance(
+            self.asset_valuation,
+            AssetValuationSpecialistContext,
+        ):
+            raise TypeError(
+                "asset_valuation must be AssetValuationSpecialistContext or None"
+            )
         if any(
             item.as_of > self.analysis_completed_at
             for item in (self.macro, self.market, self.portfolio)
@@ -293,6 +356,13 @@ class CandidateSpecialistContext:
         if self.company is not None and self.company.as_of > self.analysis_completed_at:
             raise ValueError(
                 "company analysis cannot be newer than completion time"
+            )
+        if (
+            self.asset_valuation is not None
+            and self.asset_valuation.as_of > self.analysis_completed_at
+        ):
+            raise ValueError(
+                "asset valuation analysis cannot be newer than completion time"
             )
 
 
@@ -400,6 +470,7 @@ class IndependentSpecialistService:
                 "Macro relationships may change across regimes",
             ),
             change_conditions=macro.scenarios,
+            evidence_origin_identifiers=macro.evidence_identifiers,
         )
 
     def _market(
@@ -436,6 +507,9 @@ class IndependentSpecialistService:
                 "Market behavior can reverse before fundamentals change",
             ),
             change_conditions=market.entry_conditions,
+            evidence_origin_identifiers=(
+                market.evidence_identifiers or market.evidence
+            ),
         )
 
     def _fundamental(
@@ -444,57 +518,65 @@ class IndependentSpecialistService:
         context: CandidateSpecialistContext,
     ) -> SpecialistAnalysis:
         company = context.company
-        equity_candidate = candidate.instrument.asset_class is CandidateAssetClass.US_EQUITY
-        if equity_candidate and company is None:
+        asset_valuation = context.asset_valuation
+        equity_candidate = candidate.instrument.asset_class in {
+            CandidateAssetClass.US_EQUITY,
+            CandidateAssetClass.INTERNATIONAL_EQUITY,
+        }
+        if company is None and asset_valuation is not None:
+            if asset_valuation.asset_class is not candidate.instrument.asset_class:
+                raise ValueError("asset valuation class does not match candidate")
+            return SpecialistAnalysis(
+                candidate_identifier=candidate.identifier,
+                role=SpecialistRole.FUNDAMENTAL_VALUATION,
+                completed_at=self._completed(context, 3),
+                independent_first_pass=True,
+                position=_position(asset_valuation.expected_return_impact),
+                conclusion=(
+                    "Independent asset-specific valuation and return-driver evidence was reviewed."
+                ),
+                expected_return_impact=asset_valuation.expected_return_impact,
+                confidence=asset_valuation.confidence,
+                supporting_evidence=asset_valuation.valuation_evidence,
+                contradictory_evidence=asset_valuation.contradictory_evidence,
+                critical_assumptions=asset_valuation.critical_assumptions,
+                risks=asset_valuation.risks,
+                limitations=asset_valuation.limitations,
+                change_conditions=asset_valuation.change_conditions,
+                evidence_origin_identifiers=asset_valuation.evidence_identifiers,
+            )
+        if company is None:
+            requirement = (
+                "point-in-time company quality and valuation analysis"
+                if equity_candidate
+                else "independent asset-specific valuation analysis"
+            )
             return SpecialistAnalysis(
                 candidate_identifier=candidate.identifier,
                 role=SpecialistRole.FUNDAMENTAL_VALUATION,
                 completed_at=self._completed(context, 3),
                 independent_first_pass=True,
                 position=SpecialistPosition.ABSTAIN,
-                conclusion=(
-                    "Required point-in-time company quality and valuation analysis is unavailable."
-                ),
+                conclusion=f"Required {requirement} is unavailable.",
                 expected_return_impact=0.0,
                 confidence=0.0,
                 supporting_evidence=(
-                    "The candidate record discloses missing company analysis",
+                    "The candidate record discloses the missing independent valuation packet",
                 ),
                 contradictory_evidence=(),
                 critical_assumptions=(
-                    "Company analysis is required before an equity recommendation",
+                    "Independent valuation evidence is required before a recommendation",
                 ),
                 risks=(
-                    "Intrinsic value and business quality cannot be independently verified",
+                    "The candidate return estimate cannot be independently verified",
                 ),
                 limitations=(
-                    "No normalized company factor packet was supplied",
+                    "No independent company or asset-specific valuation packet was supplied",
                 ),
                 change_conditions=(
-                    "Provide accepted point-in-time financials and all eight company factors",
+                    "Provide point-in-time independent valuation and return-driver evidence",
                 ),
-            )
-        if company is None:
-            impact = candidate.net_expected_return - candidate.opportunity_cost_return
-            return SpecialistAnalysis(
-                candidate_identifier=candidate.identifier,
-                role=SpecialistRole.FUNDAMENTAL_VALUATION,
-                completed_at=self._completed(context, 3),
-                independent_first_pass=True,
-                position=_position(impact),
-                conclusion=(
-                    "The non-equity candidate's disclosed expected return and valuation evidence were reviewed."
-                ),
-                expected_return_impact=impact,
-                confidence=candidate.evidence_quality.ceiling,
-                supporting_evidence=candidate.supporting_evidence,
-                contradictory_evidence=candidate.contradictory_evidence,
-                critical_assumptions=candidate.critical_assumptions,
-                risks=candidate.key_risks,
-                limitations=(
-                    "The candidate does not use an individual-company fundamental model",
-                ),
-                change_conditions=candidate.invalidation_conditions,
+                evidence_origin_identifiers=candidate.evidence_identifiers,
             )
         if company.symbol != candidate.instrument.symbol:
             raise ValueError("company analysis symbol does not match candidate")
@@ -546,6 +628,12 @@ class IndependentSpecialistService:
                 "Initial factor thresholds require walk-forward calibration",
             ),
             change_conditions=candidate.invalidation_conditions,
+            evidence_origin_identifiers=tuple(
+                dict.fromkeys(
+                    item.evidence[0]
+                    for item in (quality, growth, earnings_quality, valuation)
+                )
+            ),
         )
 
     def _portfolio(
@@ -673,10 +761,12 @@ class IndependentSpecialistService:
                 "Recalculate after material data revisions",
             ),
             veto_reasons=tuple(vetoes),
+            evidence_origin_identifiers=candidate.evidence_identifiers,
         )
 
 
 __all__ = [
+    "AssetValuationSpecialistContext",
     "CandidateSpecialistContext",
     "IndependentSpecialistService",
     "MacroSpecialistContext",

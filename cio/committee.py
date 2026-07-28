@@ -68,6 +68,7 @@ class SpecialistAnalysis:
     implementation_blocks: tuple[str, ...] = ()
     recommended_position_weight: float | None = None
     funding_source: str | None = None
+    evidence_origin_identifiers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -117,6 +118,7 @@ class SpecialistAnalysis:
             ("change_conditions", 1),
             ("veto_reasons", 0),
             ("implementation_blocks", 0),
+            ("evidence_origin_identifiers", 0),
         ):
             object.__setattr__(
                 self,

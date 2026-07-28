@@ -195,6 +195,7 @@ class DecisionLearningPolicy:
     significance_alpha: float = 0.05
     material_failure_value_added: float = -0.01
     material_calibration_excess: float = 0.10
+    minimum_segment_observations: int = 10
 
     def __post_init__(self) -> None:
         if not self.version.strip():
@@ -204,6 +205,7 @@ class DecisionLearningPolicy:
             "minimum_regimes",
             "minimum_asset_classes",
             "minimum_observation_span_days",
+            "minimum_segment_observations",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int):
@@ -279,6 +281,48 @@ class DecisionLearningReport:
         if include_fingerprint:
             payload["fingerprint"] = self.fingerprint
         return payload
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionLearningSegmentReport:
+    dimension: str
+    segment: str
+    observation_count: int
+    state: DecisionLearningState
+    success_rate: float
+    brier_score: float
+    calibration_gap: float
+    mean_value_added_vs_best_alternative: float
+    reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        for field_name in ("dimension", "segment"):
+            object.__setattr__(
+                self,
+                field_name,
+                _required_text(getattr(self, field_name), field_name=field_name),
+            )
+        if isinstance(self.observation_count, bool) or not isinstance(
+            self.observation_count, int
+        ):
+            raise TypeError("observation_count must be an integer")
+        if self.observation_count < 1:
+            raise ValueError("observation_count must be positive")
+        if not isinstance(self.state, DecisionLearningState):
+            raise TypeError("state must be DecisionLearningState")
+        for field_name in (
+            "success_rate",
+            "brier_score",
+            "calibration_gap",
+            "mean_value_added_vs_best_alternative",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _finite(getattr(self, field_name), field_name=field_name),
+            )
+        if not isinstance(self.reasons, tuple) or not self.reasons:
+            raise ValueError("segment report requires reasons")
 
 
 class DecisionLearningEvaluator:
@@ -470,11 +514,95 @@ class DecisionLearningEvaluator:
             reasons=reasons,
         )
 
+    def evaluate_segments(
+        self,
+        observations: tuple[DecisionLearningObservation, ...],
+        *,
+        generated_at: datetime,
+    ) -> tuple[DecisionLearningSegmentReport, ...]:
+        if not isinstance(observations, tuple) or not observations:
+            raise ValueError("at least one matured observation is required")
+        generated = _aware(generated_at, field_name="generated_at")
+        if any(item.evaluated_at > generated for item in observations):
+            raise ValueError("generated_at cannot predate an evaluation")
+        groups: dict[tuple[str, str], list[DecisionLearningObservation]] = {}
+        for item in observations:
+            keys = (
+                ("asset_class", item.asset_class),
+                ("market_regime", item.market_regime),
+                ("horizon_bucket", self._horizon_bucket(item.horizon_days)),
+            )
+            for key in keys:
+                groups.setdefault(key, []).append(item)
+        return tuple(
+            self._segment_report(dimension, segment, tuple(items))
+            for (dimension, segment), items in sorted(groups.items())
+        )
+
+    def _segment_report(
+        self,
+        dimension: str,
+        segment: str,
+        observations: tuple[DecisionLearningObservation, ...],
+    ) -> DecisionLearningSegmentReport:
+        outcomes = [1.0 if item.realized_success else 0.0 for item in observations]
+        probabilities = [
+            min(max(item.forecast_probability, 0.000001), 0.999999)
+            for item in observations
+        ]
+        success_rate = mean(outcomes)
+        brier = mean(
+            (probability - outcome) ** 2
+            for probability, outcome in zip(probabilities, outcomes, strict=True)
+        )
+        calibration_gap = mean(probabilities) - success_rate
+        mean_value = mean(
+            item.value_added_vs_best_alternative for item in observations
+        )
+        reasons: list[str] = []
+        if len(observations) < self.policy.minimum_segment_observations:
+            state = DecisionLearningState.INSUFFICIENT_EVIDENCE
+            reasons.append("segment observation count is below the minimum")
+        elif (
+            brier > self.policy.maximum_brier_score
+            or abs(calibration_gap) > self.policy.maximum_absolute_calibration_gap
+            or mean_value < self.policy.material_failure_value_added
+        ):
+            state = DecisionLearningState.WATCH
+            reasons.append(
+                "segment calibration or value-added performance requires review"
+            )
+        else:
+            state = DecisionLearningState.RETAIN
+            reasons.append("segment calibration and value-added checks passed")
+        return DecisionLearningSegmentReport(
+            dimension=dimension,
+            segment=segment,
+            observation_count=len(observations),
+            state=state,
+            success_rate=round(success_rate, 10),
+            brier_score=round(brier, 10),
+            calibration_gap=round(calibration_gap, 10),
+            mean_value_added_vs_best_alternative=round(mean_value, 10),
+            reasons=tuple(reasons),
+        )
+
+    @staticmethod
+    def _horizon_bucket(horizon_days: int) -> str:
+        if horizon_days <= 30:
+            return "1-30_days"
+        if horizon_days <= 90:
+            return "31-90_days"
+        if horizon_days <= 365:
+            return "91-365_days"
+        return "over_365_days"
+
 
 __all__ = [
     "DecisionLearningEvaluator",
     "DecisionLearningObservation",
     "DecisionLearningPolicy",
     "DecisionLearningReport",
+    "DecisionLearningSegmentReport",
     "DecisionLearningState",
 ]

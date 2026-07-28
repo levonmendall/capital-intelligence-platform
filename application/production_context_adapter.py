@@ -27,6 +27,7 @@ from application.production_context_contract import (
 from application.production_context_runtime import (
     RepositoryProductionCanonicalCIOContextProvider as _StoredContextProvider,
 )
+from committee.specialists import AssetValuationSpecialistContext
 from governance import EXPANSION_ASSET_CLASSES
 from portfolio.state import SQLiteCanonicalPortfolioStore
 from screening import (
@@ -50,6 +51,35 @@ def _merge_versions(
                 )
             merged[name] = version
     return tuple(sorted(merged.items()))
+
+
+def _asset_valuation_context(packet) -> AssetValuationSpecialistContext:
+    metrics = dict(packet.metrics)
+    raw_impact = float(metrics.get("expected_return_impact", 0.0))
+    impact = max(-1.0, min(1.0, raw_impact))
+    confidence = min(
+        0.95,
+        max(0.50, 0.40 + 0.10 * packet.independent_origin_count),
+    )
+    return AssetValuationSpecialistContext(
+        as_of=packet.as_of,
+        asset_class=packet.asset_class,
+        expected_return_impact=impact,
+        confidence=confidence,
+        valuation_evidence=tuple(
+            dict.fromkeys(packet.valuation_basis + packet.return_drivers)
+        ),
+        contradictory_evidence=packet.risks,
+        critical_assumptions=packet.valuation_basis,
+        risks=packet.risks,
+        limitations=packet.limitations,
+        change_conditions=packet.invalidation_conditions,
+        evidence_identifiers=tuple(
+            dict.fromkeys(
+                (packet.identifier, *packet.evidence_identifiers, *packet.originating_fact_identifiers)
+            )
+        ),
+    )
 
 
 class RepositoryProductionCanonicalCIOContextProvider:
@@ -398,13 +428,26 @@ class RepositoryProductionCanonicalCIOContextProvider:
                 field_name="model_versions",
             ),
         )
+        specialist_contexts = tuple(
+            replace(
+                context,
+                asset_valuation=(
+                    None
+                    if context.candidate_identifier not in packet_by_candidate
+                    else _asset_valuation_context(
+                        packet_by_candidate[context.candidate_identifier]
+                    )
+                ),
+            )
+            for context in base_context.specialist_contexts
+        )
         return ProductionCanonicalCIOContext(
             identifier=base_context.identifier,
             screening_cycle_identifier=(
                 base_context.screening_cycle_identifier
             ),
             opportunity_context=base_context.opportunity_context,
-            specialist_contexts=base_context.specialist_contexts,
+            specialist_contexts=specialist_contexts,
             portfolio=base_context.portfolio,
             code_version=base_context.code_version,
             manifest=manifest,

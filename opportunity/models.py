@@ -25,6 +25,13 @@ class QualificationOutcome(str, Enum):
     REJECTED = "rejected"
 
 
+class AnalysisLane(str, Enum):
+    """Why the candidate must reach specialist and CIO review."""
+
+    ACQUISITION = "acquisition"
+    HOLDING_REVIEW = "holding_review"
+
+
 def _required_text(value: object, *, field_name: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{field_name} must be a string")
@@ -167,6 +174,7 @@ class CandidateQualification:
     effective_opportunity_cost: float
     opportunity_edge: float
     reasons: tuple[str, ...]
+    analysis_lane: AnalysisLane = AnalysisLane.ACQUISITION
 
     def __post_init__(self) -> None:
         for field_name in ("candidate_identifier", "policy_version"):
@@ -177,6 +185,8 @@ class CandidateQualification:
             )
         if not isinstance(self.outcome, QualificationOutcome):
             raise TypeError("outcome must be a QualificationOutcome")
+        if not isinstance(self.analysis_lane, AnalysisLane):
+            raise TypeError("analysis_lane must be an AnalysisLane")
         if not isinstance(self.universe, UniverseAssessment):
             raise TypeError("universe must be a UniverseAssessment")
         for field_name in ("effective_opportunity_cost", "opportunity_edge"):
@@ -195,6 +205,10 @@ class CandidateQualification:
     @property
     def qualified(self) -> bool:
         return self.outcome is QualificationOutcome.QUALIFIED
+
+    @property
+    def mandatory_holding_review(self) -> bool:
+        return self.analysis_lane is AnalysisLane.HOLDING_REVIEW
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,7 +328,18 @@ class OpportunityQueue:
 
     @property
     def has_qualified_opportunity(self) -> bool:
-        return bool(self.ranked)
+        return any(
+            item.qualification.analysis_lane is AnalysisLane.ACQUISITION
+            for item in self.ranked
+        )
+
+    @property
+    def holding_reviews(self) -> tuple[RankedOpportunity, ...]:
+        return tuple(
+            item
+            for item in self.ranked
+            if item.qualification.analysis_lane is AnalysisLane.HOLDING_REVIEW
+        )
 
     @property
     def top(self) -> RankedOpportunity | None:
@@ -322,6 +347,7 @@ class OpportunityQueue:
 
 
 __all__ = [
+    "AnalysisLane",
     "AlternativeKind",
     "AlternativeUse",
     "CandidateQualification",

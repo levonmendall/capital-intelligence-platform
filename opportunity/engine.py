@@ -11,6 +11,7 @@ from cio.robustness import (
     RobustDecisionPolicy,
 )
 from opportunity.models import (
+    AnalysisLane,
     AlternativeKind,
     CandidateQualification,
     OpportunityQueue,
@@ -29,7 +30,7 @@ def _clamp(value: float) -> float:
 class OpportunityQualificationPolicy:
     """Versioned committee-attention and opportunity-ranking rules."""
 
-    version: str = "opportunity-qualification.v2"
+    version: str = "opportunity-qualification.v3"
     minimum_net_expected_return: float = 0.05
     minimum_probability_of_success: float = 0.55
     minimum_evidence_score: float = 0.70
@@ -160,6 +161,7 @@ class OpportunityEngine:
 
         qualified.sort(
             key=lambda item: (
+                1 if item[1].analysis_lane is AnalysisLane.HOLDING_REVIEW else 0,
                 item[4],
                 item[2].stressed_edge,
                 item[2].robust_edge,
@@ -271,6 +273,7 @@ class OpportunityEngine:
             candidate,
             alternative_return=effective_opportunity_cost,
         )
+        holding_review = candidate.current_portfolio_weight > 0.0
         reasons: list[str] = []
         if not universe.direct_recommendation_allowed:
             reasons.extend(universe.reasons)
@@ -284,13 +287,6 @@ class OpportunityEngine:
             reasons.append(
                 "recorded candidate opportunity cost does not match the point-in-time opportunity set baseline alternatives"
             )
-        if candidate.net_expected_return < self.policy.minimum_net_expected_return:
-            reasons.append("cost-adjusted expected return is below threshold")
-        if (
-            candidate.probability_of_success
-            < self.policy.minimum_probability_of_success
-        ):
-            reasons.append("probability of success is below threshold")
         if candidate.evidence_quality.score < self.policy.minimum_evidence_score:
             reasons.append("aggregate evidence quality is below threshold")
         if (
@@ -300,23 +296,42 @@ class OpportunityEngine:
             reasons.append("at least one evidence-quality dimension is below threshold")
         if candidate.liquidity_score < self.policy.minimum_liquidity_score:
             reasons.append("candidate liquidity is below threshold")
-        if opportunity_edge < self.policy.minimum_opportunity_edge:
+        if (
+            robustness.effective_probability_of_success
+            < self.policy.minimum_probability_of_success
+        ):
             reasons.append(
-                "candidate does not materially improve on the strongest available use of capital"
+                "scenario-derived probability of outperforming the best alternative is below threshold"
             )
-        if candidate.expected_downside < self.policy.maximum_expected_downside:
-            reasons.append("expected downside exceeds the qualification limit")
         if (
             candidate.implementation_cost_return
             > self.policy.maximum_implementation_cost_return
         ):
             reasons.append("implementation costs exceed the qualification limit")
-        if (
-            candidate.expected_portfolio_contribution
-            <= self.policy.minimum_portfolio_contribution
-        ):
-            reasons.append("expected portfolio contribution is not positive")
+        if robustness.evidence_adjusted_return <= effective_opportunity_cost:
+            reasons.append(
+                "horizon-normalized expected return does not clear the best capital alternative"
+            )
         reasons.extend(robustness.reasons)
+
+        if holding_review:
+            diagnostics = tuple(dict.fromkeys(reasons))
+            return (
+                CandidateQualification(
+                    candidate_identifier=candidate.identifier,
+                    outcome=QualificationOutcome.QUALIFIED,
+                    policy_version=self.policy.version,
+                    universe=universe,
+                    effective_opportunity_cost=effective_opportunity_cost,
+                    opportunity_edge=opportunity_edge,
+                    reasons=(
+                        "current holdings receive mandatory specialist and CIO review even when they fail acquisition thresholds",
+                        *diagnostics,
+                    ),
+                    analysis_lane=AnalysisLane.HOLDING_REVIEW,
+                ),
+                robustness,
+            )
 
         if reasons:
             return (
@@ -340,7 +355,7 @@ class OpportunityEngine:
                 effective_opportunity_cost=effective_opportunity_cost,
                 opportunity_edge=opportunity_edge,
                 reasons=(
-                    "candidate clears universe, arithmetic return, geometric robustness, adverse-probability stress, evidence, liquidity, cost, downside, opportunity, and portfolio-contribution requirements",
+                    "candidate clears universe, horizon-normalized geometric robustness, scenario-derived probability, evidence, liquidity, cost, and opportunity requirements; portfolio contribution remains pending final construction",
                 ),
             ),
             robustness,
@@ -354,10 +369,10 @@ class OpportunityEngine:
     ) -> tuple[ScoreComponent, ...]:
         weights = self.policy.weights
         cost = candidate.implementation_cost_return
-        probability_quality = min(
-            candidate.probability_of_success,
-            1.0 - robustness.probability_of_loss,
-        ) * robustness.evidence_reliability
+        probability_quality = (
+            robustness.effective_probability_of_success
+            * robustness.evidence_reliability
+        )
         raw_and_normalized = (
             (
                 "net_expected_return",
@@ -407,8 +422,8 @@ class OpportunityEngine:
             ),
             (
                 "portfolio_contribution",
-                candidate.expected_portfolio_contribution,
-                _clamp((candidate.expected_portfolio_contribution + 0.02) / 0.07),
+                0.0,
+                0.5,
             ),
             (
                 "cost_efficiency",

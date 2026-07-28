@@ -14,6 +14,7 @@ from cio import (
 )
 from cio.persistence import CIOJournalEventType, SQLiteCIOJournal
 from committee.specialists import (
+    AssetValuationSpecialistContext,
     CandidateSpecialistContext,
     IndependentSpecialistService,
     MacroSpecialistContext,
@@ -237,6 +238,7 @@ class CandidateCycleContext:
     macro: MacroSpecialistContext
     market: MarketSpecialistContext
     company: CompanyAnalysis | None = None
+    asset_valuation: AssetValuationSpecialistContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -260,6 +262,13 @@ class CandidateCycleContext:
             CompanyAnalysis,
         ):
             raise TypeError("company must be CompanyAnalysis or None")
+        if self.asset_valuation is not None and not isinstance(
+            self.asset_valuation,
+            AssetValuationSpecialistContext,
+        ):
+            raise TypeError(
+                "asset_valuation must be AssetValuationSpecialistContext or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,6 +427,7 @@ class CanonicalCIOCycle:
                 market=base_context.market,
                 portfolio=portfolio_context,
                 company=base_context.company,
+                asset_valuation=base_context.asset_valuation,
             )
             packet = self.specialist_service.analyze(
                 candidate,
@@ -448,6 +458,7 @@ class CanonicalCIOCycle:
             cycle_identifier=cycle_identifier,
             decisions=tuple(decisions),
             ranked_by_candidate=ranked_by_candidate,
+            packets_by_candidate=packets_by_candidate,
             portfolio=portfolio,
         )
         if self.journal is not None and construction is not None:
@@ -556,14 +567,20 @@ class CanonicalCIOCycle:
             raise ValueError(
                 "candidate current weight does not match portfolio state"
             )
-        action = (
-            CIOAction.INCREASE if current_weight > 0.0 else CIOAction.BUY
-        )
+        if current_weight > 0.0 and candidate.net_expected_return <= -0.05:
+            action = CIOAction.EXIT
+            requested_target_weight = 0.0
+        elif current_weight > 0.0 and candidate.net_expected_return < 0.0:
+            action = CIOAction.REDUCE
+            requested_target_weight = round(current_weight / 2.0, 8)
+        else:
+            action = CIOAction.INCREASE if current_weight > 0.0 else CIOAction.BUY
+            requested_target_weight = candidate.maximum_position_weight
         intent = ConstructionIntent(
             candidate_identifier=candidate.identifier,
             symbol=candidate.instrument.symbol,
             action=action,
-            requested_target_weight=candidate.maximum_position_weight,
+            requested_target_weight=requested_target_weight,
             expected_return=candidate.net_expected_return,
             opportunity_edge=candidate.opportunity_edge,
             maximum_position_weight=candidate.maximum_position_weight,
@@ -590,7 +607,7 @@ class CanonicalCIOCycle:
         )
         proposed = (
             target_weight
-            if target_weight > current_weight + 0.000001
+            if abs(target_weight - current_weight) > 0.000001
             else None
         )
         funding_symbols = tuple(
@@ -649,12 +666,26 @@ class CanonicalCIOCycle:
         cycle_identifier: str,
         decisions: tuple[CIODecision, ...],
         ranked_by_candidate: dict[str, object],
+        packets_by_candidate: dict[str, IndependentSpecialistPacket],
         portfolio: CyclePortfolioState,
     ) -> PortfolioConstructionResult | None:
+        actionable = tuple(
+            decision for decision in decisions if decision.action in _ACTIONABLE
+        )
+        ordered = sorted(
+            actionable,
+            key=lambda decision: (
+                0
+                if decision.action in {CIOAction.EXIT, CIOAction.REDUCE}
+                else 1,
+                -packets_by_candidate[
+                    decision.candidate_identifier
+                ].portfolio_recommendation.expected_return_impact,
+                ranked_by_candidate[decision.candidate_identifier].rank,
+            ),
+        )
         intents: list[ConstructionIntent] = []
-        for decision in decisions:
-            if decision.action not in _ACTIONABLE:
-                continue
+        for priority_rank, decision in enumerate(ordered, start=1):
             ranked = ranked_by_candidate[decision.candidate_identifier]
             candidate = ranked.candidate
             profile = portfolio.profile(candidate.identifier)
@@ -665,7 +696,7 @@ class CanonicalCIOCycle:
                     sector=profile.sector,
                     factor_loadings=profile.factor_loadings,
                     correlation_bucket=profile.correlation_bucket,
-                    priority_rank=ranked.rank,
+                    priority_rank=priority_rank,
                 )
             )
         if not intents:
