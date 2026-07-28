@@ -2,9 +2,17 @@ name: Verify Free Paper Pilot Readiness
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/free-paper-pilot-readiness.yml"
+      - "providers/alpaca_paper.py"
+      - "operations/free_paper_pilot.py"
+      - "config/free_paper_pilot_universe.json"
+      - "run_free_paper_pilot_readiness.py"
   push:
     branches:
       - pr-166-free-paper-pilot
+      - main
     paths:
       - ".github/workflows/free-paper-pilot-readiness.yml"
       - "providers/alpaca_paper.py"
