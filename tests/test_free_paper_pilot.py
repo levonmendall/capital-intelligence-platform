@@ -303,3 +303,50 @@ def test_live_readiness_uses_post_response_time_for_quote_cutoff() -> None:
     assert len(report.quote_timestamps) == 15
     assert not any("future-known" in blocker for blocker in report.blockers)
 
+def test_closed_market_zero_top_of_book_holds_execution_without_blocking_configuration() -> None:
+    def closed_market_http_get(url: str, **kwargs: Any) -> _Response:
+        if url.endswith("/v2/clock"):
+            return _Response(
+                {
+                    "is_open": False,
+                    "timestamp": (NOW - timedelta(seconds=2)).isoformat(),
+                }
+            )
+        if url.endswith("/v2/stocks/quotes/latest"):
+            symbols = str(kwargs["params"]["symbols"]).split(",")
+            return _Response(
+                {
+                    "quotes": {
+                        symbol: {
+                            "bp": 0.0,
+                            "ap": 0.0,
+                            "bs": 0,
+                            "as": 0,
+                            "t": (NOW - timedelta(seconds=3)).isoformat(),
+                        }
+                        for symbol in symbols
+                    }
+                }
+            )
+        return _http_get(url, **kwargs)
+
+    universe = load_free_paper_pilot_universe(
+        ROOT / "config" / "free_paper_pilot_universe.json"
+    )
+    client = AlpacaPaperClient(
+        AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),
+        http_get=closed_market_http_get,
+    )
+
+    report = assess_free_paper_pilot_readiness(
+        universe=universe,
+        client=client,
+        evaluated_at=NOW,
+    )
+
+    assert report.configuration_ready
+    assert not report.execution_ready_now
+    assert not report.market_open
+    assert len(report.quote_timestamps) == 15
+    assert any("closed-market IEX top of book" in warning for warning in report.warnings)
+

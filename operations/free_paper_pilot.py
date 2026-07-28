@@ -413,8 +413,14 @@ def assess_free_paper_pilot_readiness(
                 quote = quotes[symbol]
                 bid = float(quote["bp"])
                 ask = float(quote["ap"])
-                if bid <= 0.0 or ask <= 0.0 or ask < bid:
-                    raise ValueError(f"{symbol} quote is invalid or crossed")
+                if bid <= 0.0 or ask <= 0.0:
+                    if market_open:
+                        raise ValueError(f"{symbol} quote is not executable")
+                    warnings.append(
+                        f"{symbol}: closed-market IEX top of book is not executable; execution remains held"
+                    )
+                elif ask < bid:
+                    raise ValueError(f"{symbol} quote is crossed")
                 observed = datetime.fromisoformat(
                     str(quote["t"]).replace("Z", "+00:00")
                 )
