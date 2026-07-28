@@ -6,6 +6,13 @@ on:
       - agent/add-cross-asset-forecast-specialist
     paths:
       - .github/workflows/apply-cross-asset-forecast-specialist.yml
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
@@ -15,9 +22,10 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out branch
+      - name: Check out source branch
         uses: actions/checkout@v4
         with:
+          ref: agent/add-cross-asset-forecast-specialist
           fetch-depth: 0
 
       - name: Verify and apply specialist patch
@@ -42,5 +50,3 @@ jobs:
           git diff --cached --check
           git commit -m "Add cross-asset forecast and scenario specialist"
           git push origin HEAD:agent/add-cross-asset-forecast-specialist
-
-# Existing-workflow push retrigger.
