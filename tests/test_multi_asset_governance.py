@@ -1,4 +1,4 @@
-"""Fail-closed tests for crypto, FX, and global-market expansion governance."""
+"""Fail-closed tests for universal liquid-market capability governance."""
 
 from __future__ import annotations
 
@@ -43,6 +43,11 @@ def _candidate(
         analytical_coverage=0.95,
         security_master_snapshot_identifier="security-master:test",
         security_master_record_identifiers=("record:test",),
+        instrument_type={
+            CandidateAssetClass.CRYPTO: "token",
+            CandidateAssetClass.FX: "spot",
+            CandidateAssetClass.INTERNATIONAL_EQUITY: "common_stock",
+        }.get(asset_class, "other"),
     )
 
 
@@ -189,7 +194,7 @@ def test_complete_active_approval_allows_paper_recommendation_scope(
     assert assessment.disposition is UniverseDisposition.DIRECT_RECOMMENDATION
     assert assessment.asset_class_approval_identifier == approval.identifier
     assert assessment.asset_class_approval_state is AssetClassApprovalState.PAPER_ELIGIBLE
-    assert assessment.asset_class_policy_version == "multi-asset-scope-governance.v1"
+    assert assessment.asset_class_policy_version == "universal-market-scope-governance.v1"
 
 
 def test_research_approval_cannot_authorize_portfolio_action(tmp_path: Path) -> None:

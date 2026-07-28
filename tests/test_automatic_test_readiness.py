@@ -26,6 +26,7 @@ from governance import (
     SQLiteAssetClassApprovalStore,
     SQLiteReadinessEvidenceStore,
     TradingSessionModel,
+    UNIVERSAL_GOVERNED_ASSET_CLASSES,
 )
 from run_test_readiness import main as readiness_main
 
@@ -90,33 +91,62 @@ def _operational(
 
 
 def _profile(asset_class: CandidateAssetClass) -> AssetClassCapabilityProfile:
-    if asset_class is CandidateAssetClass.CRYPTO:
-        venues = ("COINBASE",)
-        countries = ("GLOBAL",)
-        session = TradingSessionModel.CONTINUOUS_24_7
-        custody = CustodySettlementModel.QUALIFIED_DIGITAL_ASSET_CUSTODY
-    elif asset_class is CandidateAssetClass.FX:
-        venues = ("EBS",)
-        countries = ("GLOBAL",)
-        session = TradingSessionModel.CONTINUOUS_24_5
-        custody = CustodySettlementModel.PRIME_BROKER_SPOT_FX
-    elif asset_class is CandidateAssetClass.INTERNATIONAL_EQUITY:
-        venues = ("LSE",)
-        countries = ("GB",)
-        session = TradingSessionModel.EXCHANGE_LOCAL
-        custody = CustodySettlementModel.BROKER_CUSTODIED_SECURITY
-    else:
-        raise AssertionError("unsupported expansion asset class")
+    config = {
+        CandidateAssetClass.INTERNATIONAL_EQUITY: (
+            "LSE", "GB", "common_stock", TradingSessionModel.EXCHANGE_LOCAL,
+            CustodySettlementModel.BROKER_CUSTODIED_SECURITY,
+        ),
+        CandidateAssetClass.FIXED_INCOME: (
+            "TRACE", "US", "bond", TradingSessionModel.DEALER_24_5,
+            CustodySettlementModel.CENTRAL_SECURITIES_DEPOSITORY,
+        ),
+        CandidateAssetClass.COMMODITY: (
+            "CME", "US", "future", TradingSessionModel.EXCHANGE_LOCAL,
+            CustodySettlementModel.FUTURES_CLEARING,
+        ),
+        CandidateAssetClass.FX: (
+            "EBS", "GLOBAL", "spot", TradingSessionModel.CONTINUOUS_24_5,
+            CustodySettlementModel.PRIME_BROKER_SPOT_FX,
+        ),
+        CandidateAssetClass.CRYPTO: (
+            "COINBASE", "GLOBAL", "token", TradingSessionModel.CONTINUOUS_24_7,
+            CustodySettlementModel.QUALIFIED_DIGITAL_ASSET_CUSTODY,
+        ),
+        CandidateAssetClass.REAL_ESTATE: (
+            "NYSE", "US", "common_stock", TradingSessionModel.EXCHANGE_LOCAL,
+            CustodySettlementModel.BROKER_CUSTODIED_SECURITY,
+        ),
+        CandidateAssetClass.FUTURE: (
+            "CME", "US", "future", TradingSessionModel.EXCHANGE_LOCAL,
+            CustodySettlementModel.FUTURES_CLEARING,
+        ),
+        CandidateAssetClass.OPTION: (
+            "CBOE", "US", "option", TradingSessionModel.EXCHANGE_LOCAL,
+            CustodySettlementModel.OPTIONS_CLEARING,
+        ),
+        CandidateAssetClass.VOLATILITY: (
+            "CFE", "US", "future", TradingSessionModel.EXCHANGE_LOCAL,
+            CustodySettlementModel.FUTURES_CLEARING,
+        ),
+        CandidateAssetClass.ALTERNATIVE: (
+            "NYSEARCA", "US", "fund", TradingSessionModel.EXCHANGE_LOCAL,
+            CustodySettlementModel.BROKER_CUSTODIED_SECURITY,
+        ),
+    }
+    venue, country, instrument_type, session, custody = config[asset_class]
+    derivative = instrument_type in {"future", "option", "perpetual"}
     prefix = asset_class.value
     return AssetClassCapabilityProfile(
         asset_class=asset_class,
         state=AssetClassApprovalState.PAPER_ELIGIBLE,
-        approved_venues=venues,
-        approved_country_codes=countries,
+        approved_venues=(venue,),
+        approved_country_codes=(country,),
         base_currency="USD",
         supported_quote_currencies=("USD",),
         trading_session_model=session,
         custody_settlement_model=custody,
+        allowed_instrument_types=(instrument_type,),
+        maximum_gross_leverage=1.0,
         identity_model_version=f"{prefix}.identity.v1",
         valuation_model_version=f"{prefix}.valuation.v1",
         expected_return_model_version=f"{prefix}.expected-return.v1",
@@ -126,6 +156,14 @@ def _profile(asset_class: CandidateAssetClass) -> AssetClassCapabilityProfile:
         execution_model_version=f"{prefix}.execution.v1",
         thesis_model_version=f"{prefix}.thesis.v1",
         evaluation_model_version=f"{prefix}.evaluation.v1",
+        contract_model_version=f"{prefix}.contract.v1" if derivative else None,
+        margin_model_version=f"{prefix}.margin.v1" if derivative else None,
+        lifecycle_model_version=f"{prefix}.lifecycle.v1" if derivative else None,
+        roll_model_version=(
+            f"{prefix}.roll.v1"
+            if instrument_type in {"future", "perpetual"}
+            else None
+        ),
         security_master_certification_identifier=f"cert:{prefix}:security-master",
         market_data_certification_identifier=f"cert:{prefix}:market-data",
         analytical_evidence_certification_identifier=f"cert:{prefix}:evidence",
@@ -168,11 +206,7 @@ def _append_all_gates(store: SQLiteReadinessEvidenceStore) -> None:
 
 
 def _append_all_asset_approvals(store: SQLiteAssetClassApprovalStore) -> None:
-    for asset_class in (
-        CandidateAssetClass.CRYPTO,
-        CandidateAssetClass.FX,
-        CandidateAssetClass.INTERNATIONAL_EQUITY,
-    ):
+    for asset_class in UNIVERSAL_GOVERNED_ASSET_CLASSES:
         store.append(_approval(asset_class))
 
 
@@ -361,9 +395,13 @@ def test_asset_approval_process_or_code_mismatch_blocks_only_that_market(
 ) -> None:
     evidence_store, asset_store = _stores(tmp_path)
     _append_all_gates(evidence_store)
-    asset_store.append(_approval(CandidateAssetClass.CRYPTO, code="commit:wrong"))
-    asset_store.append(_approval(CandidateAssetClass.FX))
-    asset_store.append(_approval(CandidateAssetClass.INTERNATIONAL_EQUITY))
+    for asset_class in UNIVERSAL_GOVERNED_ASSET_CLASSES:
+        asset_store.append(
+            _approval(
+                asset_class,
+                code=("commit:wrong" if asset_class is CandidateAssetClass.CRYPTO else CODE),
+            )
+        )
     evidence_store.append_operational(_operational())
 
     evidence = _assemble(evidence_store, asset_store)

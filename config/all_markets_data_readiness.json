@@ -1,5 +1,5 @@
 {
-  "identifier": "all-markets-data-supply.development.v1",
+  "identifier": "all-markets-data-supply.development.v2",
   "schema_version": "all-markets-data-manifest.v1",
   "reporting_currency": "USD",
   "require_complete_candidate_scope": true,
@@ -108,6 +108,9 @@
         "crypto_market_structure",
         "commodity_curves",
         "benchmarks",
+        "derivative_contracts",
+        "margin_collateral",
+        "volatility_surfaces",
         "execution_inputs"
       ],
       "authoritative_domains": [
@@ -117,6 +120,9 @@
         "crypto_market_structure",
         "commodity_curves",
         "benchmarks",
+        "derivative_contracts",
+        "margin_collateral",
+        "volatility_surfaces",
         "execution_inputs"
       ],
       "credential_environment_variables": [
@@ -393,7 +399,7 @@
     {
       "asset_class": "us_equity",
       "state": "paper_eligible",
-      "rationale": "Liquid U.S. equities remain part of the direct controlled paper-test universe.",
+      "rationale": "Us Equity is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
       "requirements": [
         {
           "domain": "security_master",
@@ -485,7 +491,7 @@
     {
       "asset_class": "us_etf",
       "state": "paper_eligible",
-      "rationale": "Liquid U.S.-listed funds remain part of the direct controlled paper-test universe.",
+      "rationale": "Us Etf is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
       "requirements": [
         {
           "domain": "security_master",
@@ -567,7 +573,7 @@
     {
       "asset_class": "cash_equivalent",
       "state": "paper_eligible",
-      "rationale": "Cash and short-duration Treasury equivalents are mandatory competing uses of capital.",
+      "rationale": "Cash Equivalent is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
       "requirements": [
         {
           "domain": "security_master",
@@ -644,8 +650,8 @@
     },
     {
       "asset_class": "fixed_income",
-      "state": "decision_relevant",
-      "rationale": "Global rates and credit must be compared with equities and cash before broad bond paper execution is authorized.",
+      "state": "paper_eligible",
+      "rationale": "Fixed Income is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
       "requirements": [
         {
           "domain": "security_master",
@@ -718,13 +724,21 @@
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
         }
       ]
     },
     {
       "asset_class": "international_equity",
-      "state": "evidence_only",
-      "rationale": "Global listed equities enter the decision comparison as evidence until their full paper-execution vertical slice is certified.",
+      "state": "paper_eligible",
+      "rationale": "International Equity is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
       "requirements": [
         {
           "domain": "security_master",
@@ -811,13 +825,21 @@
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
         }
       ]
     },
     {
       "asset_class": "commodity",
-      "state": "evidence_only",
-      "rationale": "Commodity markets inform inflation, liquidity, and opportunity comparisons; derivatives remain non-executable.",
+      "state": "paper_eligible",
+      "rationale": "Commodity is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
       "requirements": [
         {
           "domain": "market_prices",
@@ -877,13 +899,29 @@
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
+        },
+        {
+          "domain": "security_master",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
         }
       ]
     },
     {
       "asset_class": "fx",
-      "state": "evidence_only",
-      "rationale": "Spot FX informs currency and global liquidity decisions until unlevered paper execution is separately certified.",
+      "state": "paper_eligible",
+      "rationale": "Fx is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
       "requirements": [
         {
           "domain": "market_prices",
@@ -936,13 +974,29 @@
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
+        },
+        {
+          "domain": "security_master",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
         }
       ]
     },
     {
       "asset_class": "crypto",
-      "state": "evidence_only",
-      "rationale": "Spot crypto is analyzed across independent venues until venue, custody, liquidity, and execution certification permits paper exposure.",
+      "state": "paper_eligible",
+      "rationale": "Crypto is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
       "requirements": [
         {
           "domain": "security_master",
@@ -1001,13 +1055,328 @@
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
+        },
+        {
+          "domain": "market_calendars",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        }
+      ]
+    },
+    {
+      "asset_class": "real_estate",
+      "state": "paper_eligible",
+      "rationale": "Real Estate is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
+      "requirements": [
+        {
+          "domain": "security_master",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "market_prices",
+          "provider_identifiers": [
+            "commercial-global-market-data",
+            "eodhd-primary"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "quotes_liquidity",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "market_calendars",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "fundamentals",
+          "provider_identifiers": [
+            "commercial-global-fundamentals",
+            "eodhd-primary"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "corporate_actions",
+          "provider_identifiers": [
+            "commercial-global-reference-data",
+            "eodhd-primary"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        }
+      ]
+    },
+    {
+      "asset_class": "future",
+      "state": "paper_eligible",
+      "rationale": "Future is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
+      "requirements": [
+        {
+          "domain": "security_master",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "market_prices",
+          "provider_identifiers": [
+            "commercial-global-market-data",
+            "eodhd-primary"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "quotes_liquidity",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "market_calendars",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "benchmarks",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "commodity_curves",
+          "provider_identifiers": [
+            "commercial-global-market-data",
+            "eodhd-primary"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "derivative_contracts",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "margin_collateral",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        }
+      ]
+    },
+    {
+      "asset_class": "option",
+      "state": "paper_eligible",
+      "rationale": "Option is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
+      "requirements": [
+        {
+          "domain": "security_master",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "market_prices",
+          "provider_identifiers": [
+            "commercial-global-market-data",
+            "eodhd-primary"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "quotes_liquidity",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "market_calendars",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "derivative_contracts",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "margin_collateral",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "volatility_surfaces",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        }
+      ]
+    },
+    {
+      "asset_class": "volatility",
+      "state": "paper_eligible",
+      "rationale": "Volatility is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
+      "requirements": [
+        {
+          "domain": "security_master",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "market_prices",
+          "provider_identifiers": [
+            "commercial-global-market-data",
+            "eodhd-primary"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "quotes_liquidity",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "market_calendars",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "benchmarks",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "derivative_contracts",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "margin_collateral",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "volatility_surfaces",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
         }
       ]
     },
     {
       "asset_class": "alternative",
-      "state": "evidence_only",
-      "rationale": "Liquid public proxies for alternative assets may inform opportunity cost; private and illiquid assets cannot be executed.",
+      "state": "paper_eligible",
+      "rationale": "Alternative is available to the universal paper-allocation process when every declared dataset and instrument-level capability gate is certified at the decision timestamp.",
       "requirements": [
         {
           "domain": "security_master",
@@ -1043,19 +1412,37 @@
           ],
           "minimum_ready_providers": 1,
           "authoritative_required": true
+        },
+        {
+          "domain": "quotes_liquidity",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "market_calendars",
+          "provider_identifiers": [
+            "commercial-global-reference-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
+        },
+        {
+          "domain": "execution_inputs",
+          "provider_identifiers": [
+            "commercial-global-market-data"
+          ],
+          "minimum_ready_providers": 1,
+          "authoritative_required": true
         }
       ]
     },
     {
-      "asset_class": "option",
-      "state": "prohibited",
-      "rationale": "Options remain outside the controlled test until pricing, Greeks, margin, exercise, assignment, and settlement controls are built.",
-      "requirements": []
-    },
-    {
       "asset_class": "other",
       "state": "prohibited",
-      "rationale": "Unclassified instruments fail closed and cannot enter evidence or portfolio decisions.",
+      "rationale": "Unclassified instruments fail closed; classification is required before evidence, screening, or paper allocation.",
       "requirements": []
     }
   ]

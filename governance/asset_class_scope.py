@@ -1,10 +1,10 @@
-"""Append-only approval authority for expanding the direct investment universe.
+"""Append-only capability authority for universal liquid-market allocation.
 
-Identity support or available market data never makes an asset class investable by
-itself. Crypto, foreign exchange, and international equities may enter the
-canonical screening and CIO process only after a human governance record proves
-that the complete asset-specific data, analytical, portfolio, implementation,
-and evaluation stack is certified for paper operation.
+Every classified liquid public-market family may compete for capital. Identity or
+market-data availability alone never makes an instrument investable: a human
+governance record must prove the complete asset-specific analytical, portfolio,
+execution, custody, settlement, lifecycle, thesis, and evaluation stack for paper
+operation. Unclassified instruments remain fail-closed.
 """
 
 from __future__ import annotations
@@ -21,13 +21,22 @@ from typing import Any, Mapping
 from cio.models import CandidateAssetClass, CandidateInstrument
 
 
-EXPANSION_ASSET_CLASSES = frozenset(
+CORE_POLICY_ASSET_CLASSES = frozenset(
     {
-        CandidateAssetClass.INTERNATIONAL_EQUITY,
-        CandidateAssetClass.FX,
-        CandidateAssetClass.CRYPTO,
+        CandidateAssetClass.US_EQUITY,
+        CandidateAssetClass.US_ETF,
+        CandidateAssetClass.CASH_EQUIVALENT,
     }
 )
+
+UNIVERSAL_GOVERNED_ASSET_CLASSES = frozenset(
+    set(CandidateAssetClass)
+    - set(CORE_POLICY_ASSET_CLASSES)
+    - {CandidateAssetClass.OTHER}
+)
+
+# Backward-compatible name retained for callers while its scope is now universal.
+EXPANSION_ASSET_CLASSES = UNIVERSAL_GOVERNED_ASSET_CLASSES
 
 
 class AssetClassGovernanceError(RuntimeError):
@@ -52,6 +61,7 @@ class TradingSessionModel(str, Enum):
     """Canonical market availability pattern used by implementation controls."""
 
     EXCHANGE_LOCAL = "exchange_local"
+    DEALER_24_5 = "dealer_24_5"
     CONTINUOUS_24_5 = "continuous_24_5"
     CONTINUOUS_24_7 = "continuous_24_7"
 
@@ -60,8 +70,12 @@ class CustodySettlementModel(str, Enum):
     """Approved paper-operating representation of custody and settlement risk."""
 
     BROKER_CUSTODIED_SECURITY = "broker_custodied_security"
+    CENTRAL_SECURITIES_DEPOSITORY = "central_securities_depository"
     PRIME_BROKER_SPOT_FX = "prime_broker_spot_fx"
     QUALIFIED_DIGITAL_ASSET_CUSTODY = "qualified_digital_asset_custody"
+    FUTURES_CLEARING = "futures_clearing"
+    OPTIONS_CLEARING = "options_clearing"
+    COLLATERALIZED_DERIVATIVE = "collateralized_derivative"
 
 
 def _text(value: object, *, field_name: str) -> str:
@@ -109,6 +123,15 @@ def _aware(value: object, *, field_name: str) -> datetime:
     return value
 
 
+def _positive_number(value: object, *, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{field_name} must be numeric")
+    normalized = float(value)
+    if not normalized > 0.0 or normalized == float("inf"):
+        raise ValueError(f"{field_name} must be finite and positive")
+    return round(normalized, 12)
+
+
 def _canonical_json(value: Mapping[str, Any]) -> str:
     try:
         return json.dumps(
@@ -123,12 +146,7 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True, slots=True)
 class AssetClassCapabilityProfile:
-    """Asset-specific capabilities required before paper recommendations are legal.
-
-    A profile is intentionally broader than a provider manifest. It proves that
-    the entire decision loop—not only data retrieval—has a certified model and
-    operating implementation for the asset class.
-    """
+    """Complete instrument-family capability proof for governed paper allocation."""
 
     asset_class: CandidateAssetClass
     state: AssetClassApprovalState
@@ -138,6 +156,8 @@ class AssetClassCapabilityProfile:
     supported_quote_currencies: tuple[str, ...]
     trading_session_model: TradingSessionModel
     custody_settlement_model: CustodySettlementModel
+    allowed_instrument_types: tuple[str, ...] = ()
+    maximum_gross_leverage: float = 1.0
     identity_model_version: str | None = None
     valuation_model_version: str | None = None
     expected_return_model_version: str | None = None
@@ -147,6 +167,10 @@ class AssetClassCapabilityProfile:
     execution_model_version: str | None = None
     thesis_model_version: str | None = None
     evaluation_model_version: str | None = None
+    contract_model_version: str | None = None
+    margin_model_version: str | None = None
+    lifecycle_model_version: str | None = None
+    roll_model_version: str | None = None
     security_master_certification_identifier: str | None = None
     market_data_certification_identifier: str | None = None
     analytical_evidence_certification_identifier: str | None = None
@@ -154,169 +178,213 @@ class AssetClassCapabilityProfile:
     custody_settlement_identifier: str | None = None
     source_identifiers: tuple[str, ...] = ()
     limitations: tuple[str, ...] = ()
-    schema_version: str = "asset-class-capability-profile.v1"
+    schema_version: str = "asset-class-capability-profile.v2"
 
     def __post_init__(self) -> None:
         if not isinstance(self.asset_class, CandidateAssetClass):
             raise TypeError("asset_class must be a CandidateAssetClass")
-        if self.asset_class not in EXPANSION_ASSET_CLASSES:
+        if self.asset_class not in UNIVERSAL_GOVERNED_ASSET_CLASSES:
             raise ValueError(
-                "asset-class expansion approval is limited to international "
-                "equity, FX, and crypto"
+                "capability approval is required only for classified non-core "
+                "liquid public-market families"
             )
         if not isinstance(self.state, AssetClassApprovalState):
             raise TypeError("state must be an AssetClassApprovalState")
         if not isinstance(self.trading_session_model, TradingSessionModel):
             raise TypeError("trading_session_model must be TradingSessionModel")
         if not isinstance(self.custody_settlement_model, CustodySettlementModel):
-            raise TypeError(
-                "custody_settlement_model must be CustodySettlementModel"
-            )
-        object.__setattr__(
-            self,
-            "approved_venues",
-            _texts(
-                self.approved_venues,
-                field_name="approved_venues",
-                uppercase=True,
-            ),
-        )
-        object.__setattr__(
-            self,
-            "approved_country_codes",
-            _texts(
-                self.approved_country_codes,
-                field_name="approved_country_codes",
-                uppercase=True,
-            ),
-        )
-        object.__setattr__(
-            self,
-            "base_currency",
-            _text(self.base_currency, field_name="base_currency").upper(),
-        )
-        object.__setattr__(
-            self,
-            "supported_quote_currencies",
-            _texts(
-                self.supported_quote_currencies,
-                field_name="supported_quote_currencies",
-                uppercase=True,
-            ),
-        )
+            raise TypeError("custody_settlement_model must be CustodySettlementModel")
+        object.__setattr__(self, "approved_venues", _texts(self.approved_venues, field_name="approved_venues", uppercase=True))
+        object.__setattr__(self, "approved_country_codes", _texts(self.approved_country_codes, field_name="approved_country_codes", uppercase=True))
+        object.__setattr__(self, "base_currency", _text(self.base_currency, field_name="base_currency").upper())
+        object.__setattr__(self, "supported_quote_currencies", _texts(self.supported_quote_currencies, field_name="supported_quote_currencies", uppercase=True))
+        types = self.allowed_instrument_types or _default_instrument_types(self.asset_class)
+        object.__setattr__(self, "allowed_instrument_types", _texts(tuple(item.lower() for item in types), field_name="allowed_instrument_types", minimum=1))
+        object.__setattr__(self, "maximum_gross_leverage", _positive_number(self.maximum_gross_leverage, field_name="maximum_gross_leverage"))
         optional_fields = (
-            "identity_model_version",
-            "valuation_model_version",
-            "expected_return_model_version",
-            "liquidity_model_version",
-            "cost_model_version",
-            "portfolio_risk_model_version",
-            "execution_model_version",
-            "thesis_model_version",
-            "evaluation_model_version",
-            "security_master_certification_identifier",
+            "identity_model_version", "valuation_model_version",
+            "expected_return_model_version", "liquidity_model_version",
+            "cost_model_version", "portfolio_risk_model_version",
+            "execution_model_version", "thesis_model_version",
+            "evaluation_model_version", "contract_model_version",
+            "margin_model_version", "lifecycle_model_version",
+            "roll_model_version", "security_master_certification_identifier",
             "market_data_certification_identifier",
             "analytical_evidence_certification_identifier",
             "execution_certification_identifier",
             "custody_settlement_identifier",
         )
         for field_name in optional_fields:
-            object.__setattr__(
-                self,
-                field_name,
-                _optional_text(getattr(self, field_name), field_name=field_name),
-            )
-        object.__setattr__(
-            self,
-            "source_identifiers",
-            _texts(self.source_identifiers, field_name="source_identifiers"),
-        )
-        object.__setattr__(
-            self,
-            "limitations",
-            _texts(self.limitations, field_name="limitations"),
-        )
-        object.__setattr__(
-            self,
-            "schema_version",
-            _text(self.schema_version, field_name="schema_version"),
-        )
+            object.__setattr__(self, field_name, _optional_text(getattr(self, field_name), field_name=field_name))
+        object.__setattr__(self, "source_identifiers", _texts(self.source_identifiers, field_name="source_identifiers"))
+        object.__setattr__(self, "limitations", _texts(self.limitations, field_name="limitations"))
+        object.__setattr__(self, "schema_version", _text(self.schema_version, field_name="schema_version"))
         self._validate_asset_specific_structure()
-        if self.state is AssetClassApprovalState.PAPER_ELIGIBLE:
-            missing = self.missing_paper_capabilities
-            if missing:
-                raise ValueError(
-                    "paper-eligible asset-class profile is incomplete: "
-                    + ", ".join(missing)
-                )
+        if self.state is AssetClassApprovalState.PAPER_ELIGIBLE and self.missing_paper_capabilities:
+            raise ValueError(
+                "paper-eligible asset-class profile is incomplete: "
+                + ", ".join(self.missing_paper_capabilities)
+            )
 
     def _validate_asset_specific_structure(self) -> None:
+        types = set(self.allowed_instrument_types)
+        listed_types = {"common_stock", "preferred_stock", "fund"}
+        derivative_types = {"future", "perpetual", "option"}
+
         if self.asset_class is CandidateAssetClass.CRYPTO:
-            if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_7:
-                raise ValueError("crypto requires the continuous 24/7 session model")
-            if (
-                self.custody_settlement_model
-                is not CustodySettlementModel.QUALIFIED_DIGITAL_ASSET_CUSTODY
-            ):
-                raise ValueError(
-                    "crypto requires the qualified digital-asset custody model"
+            if types <= {"token", "spot", "stablecoin"}:
+                if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_7:
+                    raise ValueError("direct crypto requires the continuous 24/7 session model")
+                if self.custody_settlement_model is not CustodySettlementModel.QUALIFIED_DIGITAL_ASSET_CUSTODY:
+                    raise ValueError("direct crypto requires qualified digital-asset custody")
+            elif types <= {"fund"}:
+                self._require_listed_security_structure("listed crypto funds")
+            else:
+                raise ValueError("one crypto approval cannot mix direct tokens and listed wrappers")
+            return
+
+        if self.asset_class is CandidateAssetClass.FX:
+            if types <= {"spot"}:
+                if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_5:
+                    raise ValueError("spot FX requires the continuous 24/5 session model")
+                if self.custody_settlement_model is not CustodySettlementModel.PRIME_BROKER_SPOT_FX:
+                    raise ValueError("spot FX requires the prime-broker spot-FX model")
+            elif types <= {"fund"}:
+                self._require_listed_security_structure("listed currency funds")
+            else:
+                raise ValueError("one FX approval cannot mix spot pairs and listed wrappers")
+            return
+
+        if self.asset_class in {
+            CandidateAssetClass.INTERNATIONAL_EQUITY,
+            CandidateAssetClass.REAL_ESTATE,
+            CandidateAssetClass.ALTERNATIVE,
+        }:
+            if not types <= listed_types | {"spot"}:
+                raise ValueError(f"{self.asset_class.value} contains an unsupported instrument structure")
+            self._require_listed_security_structure(self.asset_class.value)
+            return
+
+        if self.asset_class is CandidateAssetClass.FIXED_INCOME:
+            if types <= {"fund"}:
+                self._require_listed_security_structure("listed fixed-income funds")
+            elif types <= {"bond"}:
+                if self.trading_session_model not in {TradingSessionModel.EXCHANGE_LOCAL, TradingSessionModel.DEALER_24_5}:
+                    raise ValueError("fixed income requires exchange or dealer-market sessions")
+                if self.custody_settlement_model not in {CustodySettlementModel.BROKER_CUSTODIED_SECURITY, CustodySettlementModel.CENTRAL_SECURITIES_DEPOSITORY}:
+                    raise ValueError("fixed income requires broker or central-depository settlement")
+            else:
+                raise ValueError("one fixed-income approval cannot mix bonds and listed funds")
+            return
+
+        if self.asset_class is CandidateAssetClass.COMMODITY:
+            if types <= {"fund", "spot"}:
+                self._require_listed_security_structure("listed or custodied commodity exposure")
+            elif types <= {"future"}:
+                self._require_derivative_structure(
+                    "commodity futures",
+                    {CustodySettlementModel.FUTURES_CLEARING, CustodySettlementModel.COLLATERALIZED_DERIVATIVE},
                 )
-        elif self.asset_class is CandidateAssetClass.FX:
-            if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_5:
-                raise ValueError("spot FX requires the continuous 24/5 session model")
-            if (
-                self.custody_settlement_model
-                is not CustodySettlementModel.PRIME_BROKER_SPOT_FX
-            ):
-                raise ValueError("FX requires the prime-broker spot-FX model")
-        elif self.asset_class is CandidateAssetClass.INTERNATIONAL_EQUITY:
-            if self.trading_session_model is not TradingSessionModel.EXCHANGE_LOCAL:
-                raise ValueError(
-                    "international equities require local-exchange sessions"
+            else:
+                raise ValueError("one commodity approval cannot mix cash wrappers and futures")
+            return
+
+        if self.asset_class is CandidateAssetClass.FUTURE:
+            if not types <= {"future", "perpetual"}:
+                raise ValueError("future approvals may contain only future or perpetual contracts")
+            self._require_derivative_structure(
+                "futures",
+                {CustodySettlementModel.FUTURES_CLEARING, CustodySettlementModel.COLLATERALIZED_DERIVATIVE},
+            )
+            return
+
+        if self.asset_class is CandidateAssetClass.OPTION:
+            if not types <= {"option"}:
+                raise ValueError("option approvals may contain only listed option contracts")
+            self._require_derivative_structure(
+                "options",
+                {CustodySettlementModel.OPTIONS_CLEARING, CustodySettlementModel.COLLATERALIZED_DERIVATIVE},
+            )
+            return
+
+        if self.asset_class is CandidateAssetClass.VOLATILITY:
+            if types <= {"fund"}:
+                self._require_listed_security_structure("listed volatility funds")
+            elif types <= derivative_types:
+                self._require_derivative_structure(
+                    "volatility derivatives",
+                    {
+                        CustodySettlementModel.FUTURES_CLEARING,
+                        CustodySettlementModel.OPTIONS_CLEARING,
+                        CustodySettlementModel.COLLATERALIZED_DERIVATIVE,
+                    },
                 )
-            if (
-                self.custody_settlement_model
-                is not CustodySettlementModel.BROKER_CUSTODIED_SECURITY
-            ):
-                raise ValueError(
-                    "international equities require broker-custodied settlement"
-                )
+            else:
+                raise ValueError("one volatility approval cannot mix listed funds and derivatives")
+
+    def _require_listed_security_structure(self, label: str) -> None:
+        if self.trading_session_model is not TradingSessionModel.EXCHANGE_LOCAL:
+            raise ValueError(f"{label} requires local-exchange sessions")
+        if self.custody_settlement_model is not CustodySettlementModel.BROKER_CUSTODIED_SECURITY:
+            raise ValueError(f"{label} requires broker-custodied settlement")
+
+    def _require_derivative_structure(
+        self,
+        label: str,
+        permitted_custody: set[CustodySettlementModel],
+    ) -> None:
+        if self.trading_session_model is not TradingSessionModel.EXCHANGE_LOCAL:
+            raise ValueError(f"{label} requires exchange-local sessions")
+        if self.custody_settlement_model not in permitted_custody:
+            raise ValueError(f"{label} requires certified derivatives clearing")
 
     @property
     def missing_paper_capabilities(self) -> tuple[str, ...]:
-        fields = (
-            "identity_model_version",
-            "valuation_model_version",
-            "expected_return_model_version",
-            "liquidity_model_version",
-            "cost_model_version",
-            "portfolio_risk_model_version",
-            "execution_model_version",
-            "thesis_model_version",
+        fields = [
+            "identity_model_version", "valuation_model_version",
+            "expected_return_model_version", "liquidity_model_version",
+            "cost_model_version", "portfolio_risk_model_version",
+            "execution_model_version", "thesis_model_version",
             "evaluation_model_version",
             "security_master_certification_identifier",
             "market_data_certification_identifier",
             "analytical_evidence_certification_identifier",
             "execution_certification_identifier",
             "custody_settlement_identifier",
-        )
-        missing = [field_name for field_name in fields if getattr(self, field_name) is None]
+        ]
+        derivative_types = set(self.allowed_instrument_types) & {"future", "perpetual", "option"}
+        if derivative_types:
+            fields.extend(("contract_model_version", "margin_model_version", "lifecycle_model_version"))
+        if derivative_types & {"future", "perpetual"}:
+            fields.append("roll_model_version")
+        missing = [name for name in fields if getattr(self, name) is None]
         if not self.approved_venues:
             missing.append("approved_venues")
         if not self.approved_country_codes:
             missing.append("approved_country_codes")
         if not self.supported_quote_currencies:
             missing.append("supported_quote_currencies")
+        if not self.allowed_instrument_types:
+            missing.append("allowed_instrument_types")
         if not self.source_identifiers:
             missing.append("source_identifiers")
         return tuple(missing)
 
     @property
     def paper_eligible(self) -> bool:
-        return (
-            self.state is AssetClassApprovalState.PAPER_ELIGIBLE
-            and not self.missing_paper_capabilities
-        )
+        return self.state is AssetClassApprovalState.PAPER_ELIGIBLE and not self.missing_paper_capabilities
+
+    def permits(self, instrument: CandidateInstrument) -> tuple[str, ...]:
+        reasons: list[str] = []
+        if instrument.venue not in self.approved_venues:
+            reasons.append(f"venue {instrument.venue} is outside the asset-class approval")
+        if instrument.country_code not in self.approved_country_codes:
+            reasons.append(f"country {instrument.country_code} is outside the asset-class approval")
+        if instrument.instrument_type not in self.allowed_instrument_types:
+            reasons.append(f"instrument type {instrument.instrument_type} is outside the asset-class approval")
+        if abs(instrument.leverage_multiplier) > self.maximum_gross_leverage + 1e-9:
+            reasons.append("instrument leverage exceeds the asset-class approval")
+        return tuple(reasons)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -328,28 +396,21 @@ class AssetClassCapabilityProfile:
             "supported_quote_currencies": list(self.supported_quote_currencies),
             "trading_session_model": self.trading_session_model.value,
             "custody_settlement_model": self.custody_settlement_model.value,
-            "identity_model_version": self.identity_model_version,
-            "valuation_model_version": self.valuation_model_version,
-            "expected_return_model_version": self.expected_return_model_version,
-            "liquidity_model_version": self.liquidity_model_version,
-            "cost_model_version": self.cost_model_version,
-            "portfolio_risk_model_version": self.portfolio_risk_model_version,
-            "execution_model_version": self.execution_model_version,
-            "thesis_model_version": self.thesis_model_version,
-            "evaluation_model_version": self.evaluation_model_version,
-            "security_master_certification_identifier": (
-                self.security_master_certification_identifier
-            ),
-            "market_data_certification_identifier": (
-                self.market_data_certification_identifier
-            ),
-            "analytical_evidence_certification_identifier": (
-                self.analytical_evidence_certification_identifier
-            ),
-            "execution_certification_identifier": (
-                self.execution_certification_identifier
-            ),
-            "custody_settlement_identifier": self.custody_settlement_identifier,
+            "allowed_instrument_types": list(self.allowed_instrument_types),
+            "maximum_gross_leverage": self.maximum_gross_leverage,
+            **{name: getattr(self, name) for name in (
+                "identity_model_version", "valuation_model_version",
+                "expected_return_model_version", "liquidity_model_version",
+                "cost_model_version", "portfolio_risk_model_version",
+                "execution_model_version", "thesis_model_version",
+                "evaluation_model_version", "contract_model_version",
+                "margin_model_version", "lifecycle_model_version",
+                "roll_model_version", "security_master_certification_identifier",
+                "market_data_certification_identifier",
+                "analytical_evidence_certification_identifier",
+                "execution_certification_identifier",
+                "custody_settlement_identifier",
+            )},
             "source_identifiers": list(self.source_identifiers),
             "limitations": list(self.limitations),
             "schema_version": self.schema_version,
@@ -361,49 +422,45 @@ class AssetClassCapabilityProfile:
             asset_class=CandidateAssetClass(str(payload["asset_class"])),
             state=AssetClassApprovalState(str(payload["state"])),
             approved_venues=tuple(str(item) for item in payload.get("approved_venues", ())),
-            approved_country_codes=tuple(
-                str(item) for item in payload.get("approved_country_codes", ())
-            ),
+            approved_country_codes=tuple(str(item) for item in payload.get("approved_country_codes", ())),
             base_currency=str(payload["base_currency"]),
-            supported_quote_currencies=tuple(
-                str(item) for item in payload.get("supported_quote_currencies", ())
-            ),
-            trading_session_model=TradingSessionModel(
-                str(payload["trading_session_model"])
-            ),
-            custody_settlement_model=CustodySettlementModel(
-                str(payload["custody_settlement_model"])
-            ),
-            identity_model_version=payload.get("identity_model_version"),
-            valuation_model_version=payload.get("valuation_model_version"),
-            expected_return_model_version=payload.get("expected_return_model_version"),
-            liquidity_model_version=payload.get("liquidity_model_version"),
-            cost_model_version=payload.get("cost_model_version"),
-            portfolio_risk_model_version=payload.get("portfolio_risk_model_version"),
-            execution_model_version=payload.get("execution_model_version"),
-            thesis_model_version=payload.get("thesis_model_version"),
-            evaluation_model_version=payload.get("evaluation_model_version"),
-            security_master_certification_identifier=payload.get(
-                "security_master_certification_identifier"
-            ),
-            market_data_certification_identifier=payload.get(
-                "market_data_certification_identifier"
-            ),
-            analytical_evidence_certification_identifier=payload.get(
-                "analytical_evidence_certification_identifier"
-            ),
-            execution_certification_identifier=payload.get(
-                "execution_certification_identifier"
-            ),
-            custody_settlement_identifier=payload.get("custody_settlement_identifier"),
-            source_identifiers=tuple(
-                str(item) for item in payload.get("source_identifiers", ())
-            ),
+            supported_quote_currencies=tuple(str(item) for item in payload.get("supported_quote_currencies", ())),
+            trading_session_model=TradingSessionModel(str(payload["trading_session_model"])),
+            custody_settlement_model=CustodySettlementModel(str(payload["custody_settlement_model"])),
+            allowed_instrument_types=tuple(str(item) for item in payload.get("allowed_instrument_types", ())),
+            maximum_gross_leverage=float(payload.get("maximum_gross_leverage", 1.0)),
+            **{name: payload.get(name) for name in (
+                "identity_model_version", "valuation_model_version",
+                "expected_return_model_version", "liquidity_model_version",
+                "cost_model_version", "portfolio_risk_model_version",
+                "execution_model_version", "thesis_model_version",
+                "evaluation_model_version", "contract_model_version",
+                "margin_model_version", "lifecycle_model_version",
+                "roll_model_version", "security_master_certification_identifier",
+                "market_data_certification_identifier",
+                "analytical_evidence_certification_identifier",
+                "execution_certification_identifier",
+                "custody_settlement_identifier",
+            )},
+            source_identifiers=tuple(str(item) for item in payload.get("source_identifiers", ())),
             limitations=tuple(str(item) for item in payload.get("limitations", ())),
-            schema_version=str(
-                payload.get("schema_version", "asset-class-capability-profile.v1")
-            ),
+            schema_version=str(payload.get("schema_version", "asset-class-capability-profile.v2")),
         )
+
+
+def _default_instrument_types(asset_class: CandidateAssetClass) -> tuple[str, ...]:
+    return {
+        CandidateAssetClass.INTERNATIONAL_EQUITY: ("common_stock", "preferred_stock", "fund"),
+        CandidateAssetClass.FIXED_INCOME: ("bond",),
+        CandidateAssetClass.COMMODITY: ("future",),
+        CandidateAssetClass.FX: ("spot",),
+        CandidateAssetClass.CRYPTO: ("token", "spot", "stablecoin"),
+        CandidateAssetClass.REAL_ESTATE: ("common_stock", "fund"),
+        CandidateAssetClass.FUTURE: ("future", "perpetual"),
+        CandidateAssetClass.OPTION: ("option",),
+        CandidateAssetClass.VOLATILITY: ("future", "option"),
+        CandidateAssetClass.ALTERNATIVE: ("fund", "common_stock", "spot"),
+    }[asset_class]
 
 
 @dataclass(frozen=True, slots=True)
@@ -685,6 +742,19 @@ class SQLiteAssetClassApprovalStore:
             for row in rows
         )
 
+    def active_approvals(
+        self,
+        asset_class: CandidateAssetClass,
+        *,
+        evaluated_at: datetime,
+    ) -> tuple[AssetClassApproval, ...]:
+        if not isinstance(asset_class, CandidateAssetClass):
+            raise TypeError("asset_class must be CandidateAssetClass")
+        timestamp = _aware(evaluated_at, field_name="evaluated_at")
+        return tuple(
+            item for item in self.approvals(asset_class) if item.active_at(timestamp)
+        )
+
     def active(
         self,
         asset_class: CandidateAssetClass,
@@ -693,11 +763,8 @@ class SQLiteAssetClassApprovalStore:
     ) -> AssetClassApproval | None:
         if not isinstance(asset_class, CandidateAssetClass):
             raise TypeError("asset_class must be CandidateAssetClass")
-        timestamp = _aware(evaluated_at, field_name="evaluated_at")
-        matching = tuple(
-            item
-            for item in self.approvals(asset_class)
-            if item.active_at(timestamp)
+        matching = self.active_approvals(
+            asset_class, evaluated_at=evaluated_at
         )
         return None if not matching else matching[-1]
 
@@ -735,29 +802,24 @@ class SQLiteAssetClassApprovalStore:
 
 
 class AssetClassScopeAuthority:
-    """Resolve expanded-market recommendation eligibility at one timestamp."""
+    """Resolve universal governed-market recommendation eligibility at one timestamp."""
 
     def __init__(
         self,
         store: SQLiteAssetClassApprovalStore,
         *,
-        policy_version: str = "multi-asset-scope-governance.v1",
+        policy_version: str = "universal-market-scope-governance.v1",
     ) -> None:
         if not isinstance(store, SQLiteAssetClassApprovalStore):
             raise TypeError("store must be SQLiteAssetClassApprovalStore")
         self.store = store
         self.policy_version = _text(policy_version, field_name="policy_version")
 
-    def assess(
-        self,
-        instrument: CandidateInstrument,
-        *,
-        evaluated_at: datetime,
-    ) -> AssetClassScopeAssessment:
+    def assess(self, instrument: CandidateInstrument, *, evaluated_at: datetime) -> AssetClassScopeAssessment:
         if not isinstance(instrument, CandidateInstrument):
             raise TypeError("instrument must be CandidateInstrument")
         timestamp = _aware(evaluated_at, field_name="evaluated_at")
-        if instrument.asset_class not in EXPANSION_ASSET_CLASSES:
+        if instrument.asset_class not in UNIVERSAL_GOVERNED_ASSET_CLASSES:
             return AssetClassScopeAssessment(
                 instrument_id=instrument.instrument_id,
                 asset_class=instrument.asset_class,
@@ -765,16 +827,13 @@ class AssetClassScopeAuthority:
                 approval_identifier=None,
                 approval_state=None,
                 policy_version=self.policy_version,
-                reasons=(
-                    "asset class is outside the governed crypto, FX, and global-equity expansion",
-                ),
+                reasons=("asset class is not a classified governed non-core liquid market",),
             )
         self.store.verify_integrity()
-        approval = self.store.active(
-            instrument.asset_class,
-            evaluated_at=timestamp,
+        approvals = self.store.active_approvals(
+            instrument.asset_class, evaluated_at=timestamp
         )
-        if approval is None:
+        if not approvals:
             return AssetClassScopeAssessment(
                 instrument_id=instrument.instrument_id,
                 asset_class=instrument.asset_class,
@@ -782,52 +841,54 @@ class AssetClassScopeAuthority:
                 approval_identifier=None,
                 approval_state=None,
                 policy_version=self.policy_version,
-                reasons=(
-                    "no active asset-class governance approval exists at the decision timestamp",
-                ),
+                reasons=("no active asset-class governance approval exists at the decision timestamp",),
             )
-        profile = approval.profile
-        reasons: list[str] = []
-        if not profile.paper_eligible:
-            reasons.append(
-                f"asset-class approval state is {profile.state.value}, not paper_eligible"
-            )
-        if instrument.venue not in profile.approved_venues:
-            reasons.append(
-                f"venue {instrument.venue} is outside the asset-class approval"
-            )
-        if instrument.country_code not in profile.approved_country_codes:
-            reasons.append(
-                f"country {instrument.country_code} is outside the asset-class approval"
-            )
-        if reasons:
+        for approval in reversed(approvals):
+            profile = approval.profile
+            structural_reasons = profile.permits(instrument)
+            if structural_reasons:
+                continue
+            if not profile.paper_eligible:
+                return AssetClassScopeAssessment(
+                    instrument_id=instrument.instrument_id,
+                    asset_class=instrument.asset_class,
+                    direct_recommendation_allowed=False,
+                    approval_identifier=approval.identifier,
+                    approval_state=profile.state,
+                    policy_version=self.policy_version,
+                    reasons=(
+                        f"asset-class approval state is {profile.state.value}, not paper_eligible",
+                    ),
+                )
             return AssetClassScopeAssessment(
                 instrument_id=instrument.instrument_id,
                 asset_class=instrument.asset_class,
-                direct_recommendation_allowed=False,
+                direct_recommendation_allowed=True,
                 approval_identifier=approval.identifier,
                 approval_state=profile.state,
                 policy_version=self.policy_version,
-                reasons=tuple(reasons),
+                reasons=(
+                    "instrument family, structure, leverage, venue, and jurisdiction are covered by an active complete paper-eligibility approval",
+                ),
             )
+        latest = approvals[-1]
+        reasons = ([] if latest.profile.paper_eligible else [
+            f"asset-class approval state is {latest.profile.state.value}, not paper_eligible"
+        ])
+        reasons.extend(latest.profile.permits(instrument))
         return AssetClassScopeAssessment(
             instrument_id=instrument.instrument_id,
             asset_class=instrument.asset_class,
-            direct_recommendation_allowed=True,
-            approval_identifier=approval.identifier,
-            approval_state=profile.state,
+            direct_recommendation_allowed=False,
+            approval_identifier=latest.identifier,
+            approval_state=latest.profile.state,
             policy_version=self.policy_version,
-            reasons=(
-                "asset class, venue, and jurisdiction are covered by an active complete paper-eligibility approval",
+            reasons=tuple(reasons) or (
+                "no active structure-specific approval matches the instrument",
             ),
         )
 
-    def require_paper_eligible(
-        self,
-        instrument: CandidateInstrument,
-        *,
-        evaluated_at: datetime,
-    ) -> AssetClassScopeAssessment:
+    def require_paper_eligible(self, instrument: CandidateInstrument, *, evaluated_at: datetime) -> AssetClassScopeAssessment:
         assessment = self.assess(instrument, evaluated_at=evaluated_at)
         if not assessment.direct_recommendation_allowed:
             raise AssetClassGovernanceError("; ".join(assessment.reasons))
@@ -835,7 +896,9 @@ class AssetClassScopeAuthority:
 
 
 __all__ = [
+    "CORE_POLICY_ASSET_CLASSES",
     "EXPANSION_ASSET_CLASSES",
+    "UNIVERSAL_GOVERNED_ASSET_CLASSES",
     "AssetClassApproval",
     "AssetClassApprovalState",
     "AssetClassCapabilityProfile",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from math import isfinite
 
 
 class SecurityMasterError(LookupError):
@@ -21,6 +22,9 @@ class AssetClass(str, Enum):
     COMMODITY = "commodity"
     FX = "fx"
     CRYPTO = "crypto"
+    REAL_ESTATE = "real_estate"
+    VOLATILITY = "volatility"
+    ALTERNATIVE = "alternative"
 
 
 class InstrumentType(str, Enum):
@@ -166,6 +170,10 @@ class Instrument:
     quote_currency: str | None = None
     settlement_currency: str | None = None
     network: str | None = None
+    economic_exposure: AssetClass | None = None
+    leverage_multiplier: float = 1.0
+    uses_derivatives: bool = False
+    replication_method: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -230,6 +238,34 @@ class Instrument:
             raise ValueError(
                 "crypto instruments cannot use an equity type"
             )
+        if self.economic_exposure is not None and not isinstance(
+            self.economic_exposure,
+            AssetClass,
+        ):
+            raise TypeError("economic_exposure must be an AssetClass")
+        if isinstance(self.leverage_multiplier, bool) or not isinstance(
+            self.leverage_multiplier,
+            (int, float),
+        ):
+            raise TypeError("leverage_multiplier must be numeric")
+        leverage = float(self.leverage_multiplier)
+        if not isfinite(leverage) or not -10.0 <= leverage <= 10.0:
+            raise ValueError(
+                "leverage_multiplier must be finite and between -10 and 10"
+            )
+        if abs(leverage) < 0.00000001:
+            raise ValueError("leverage_multiplier cannot be zero")
+        object.__setattr__(self, "leverage_multiplier", leverage)
+        if not isinstance(self.uses_derivatives, bool):
+            raise TypeError("uses_derivatives must be a bool")
+        object.__setattr__(
+            self,
+            "replication_method",
+            _optional_text(
+                self.replication_method,
+                field_name="replication_method",
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -112,4 +112,4 @@ Poor outcomes must be attributed to analysis, sizing, execution, timing, or unav
 
 A core feature belongs only when it improves the platform’s ability to compound capital over the long term while preserving evidence integrity, reproducibility, no-action outcomes, and user clarity.
 
-Features centered on individual financial-goal optimization, retirement planning, behavioral coaching, personalized philosophies, social investing, news feeds, high-frequency trading, unvalidated alternative signals, premature asset expansion, or autonomous process rewriting are out of scope for Version 1.
+Features centered on individual financial-goal optimization, retirement planning, behavioral coaching, personalized philosophies, social investing, news feeds, high-frequency trading, unvalidated alternative signals, ungoverned instrument implementation, or autonomous process rewriting are out of scope for Version 1.

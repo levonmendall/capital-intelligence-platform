@@ -22,6 +22,7 @@ from cio.universe import (
 from data.security import (
     AssetClass,
     Instrument,
+    InstrumentType,
     InstrumentIdentifier,
     Issuer,
     SecurityMasterError,
@@ -1026,7 +1027,11 @@ class Version1UniverseBuilder:
                 instrument_id=instrument.instrument_id,
                 symbol=listing.symbol,
                 name=instrument.name,
-                asset_class=_candidate_asset_class(instrument.asset_class, metric),
+                asset_class=_candidate_asset_class(
+                    instrument.asset_class,
+                    metric,
+                    instrument_type=instrument.instrument_type,
+                ),
                 venue=listing.venue,
                 country_code=listing.country_code,
                 average_daily_dollar_volume=metric.average_daily_dollar_volume,
@@ -1046,6 +1051,22 @@ class Version1UniverseBuilder:
                 ),
                 is_us_treasury=metric.is_us_treasury,
                 effective_duration_years=metric.effective_duration_years,
+                instrument_type=instrument.instrument_type.value,
+                economic_exposure_class=_candidate_exposure_class(
+                    instrument.economic_exposure,
+                    country_code=listing.country_code,
+                ),
+                leverage_multiplier=instrument.leverage_multiplier,
+                uses_derivatives=(
+                    instrument.uses_derivatives
+                    or instrument.instrument_type
+                    in {
+                        InstrumentType.FUTURE,
+                        InstrumentType.PERPETUAL,
+                        InstrumentType.OPTION,
+                    }
+                ),
+                replication_method=instrument.replication_method,
             )
             assessment = self.policy.evaluate(candidate)
             if assessment.disposition is not UniverseDisposition.DIRECT_RECOMMENDATION:
@@ -1096,7 +1117,13 @@ class Version1UniverseBuilder:
 def _candidate_asset_class(
     asset_class: AssetClass,
     metric: SecurityMasterMarketMetrics,
+    *,
+    instrument_type: InstrumentType,
 ) -> CandidateAssetClass:
+    if instrument_type is InstrumentType.OPTION:
+        return CandidateAssetClass.OPTION
+    if instrument_type in {InstrumentType.FUTURE, InstrumentType.PERPETUAL}:
+        return CandidateAssetClass.FUTURE
     if asset_class is AssetClass.EQUITY:
         return CandidateAssetClass.US_EQUITY
     if asset_class is AssetClass.ETF:
@@ -1111,7 +1138,36 @@ def _candidate_asset_class(
         return CandidateAssetClass.FX
     if asset_class is AssetClass.CRYPTO:
         return CandidateAssetClass.CRYPTO
+    if asset_class is AssetClass.REAL_ESTATE:
+        return CandidateAssetClass.REAL_ESTATE
+    if asset_class is AssetClass.VOLATILITY:
+        return CandidateAssetClass.VOLATILITY
+    if asset_class is AssetClass.ALTERNATIVE:
+        return CandidateAssetClass.ALTERNATIVE
     return CandidateAssetClass.OTHER
+
+
+def _candidate_exposure_class(
+    asset_class: AssetClass | None,
+    *,
+    country_code: str,
+) -> CandidateAssetClass | None:
+    if asset_class is None or asset_class is AssetClass.UNKNOWN:
+        return None
+    country = country_code.strip().upper()
+    if asset_class is AssetClass.EQUITY:
+        return CandidateAssetClass.US_EQUITY if country == "US" else CandidateAssetClass.INTERNATIONAL_EQUITY
+    if asset_class is AssetClass.ETF:
+        return CandidateAssetClass.US_ETF if country == "US" else CandidateAssetClass.INTERNATIONAL_EQUITY
+    return {
+        AssetClass.FIXED_INCOME: CandidateAssetClass.FIXED_INCOME,
+        AssetClass.COMMODITY: CandidateAssetClass.COMMODITY,
+        AssetClass.FX: CandidateAssetClass.FX,
+        AssetClass.CRYPTO: CandidateAssetClass.CRYPTO,
+        AssetClass.REAL_ESTATE: CandidateAssetClass.REAL_ESTATE,
+        AssetClass.VOLATILITY: CandidateAssetClass.VOLATILITY,
+        AssetClass.ALTERNATIVE: CandidateAssetClass.ALTERNATIVE,
+    }.get(asset_class, CandidateAssetClass.OTHER)
 
 
 def _earliest(first: datetime | None, second: datetime | None) -> datetime | None:

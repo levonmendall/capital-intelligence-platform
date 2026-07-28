@@ -132,9 +132,41 @@ def test_default_manifest_declares_every_candidate_market() -> None:
     )
     states = {item.asset_class: item.state for item in manifest.markets}
     assert states[CandidateAssetClass.US_EQUITY] is MarketDataScopeState.PAPER_ELIGIBLE
-    assert states[CandidateAssetClass.FIXED_INCOME] is MarketDataScopeState.DECISION_RELEVANT
-    assert states[CandidateAssetClass.CRYPTO] is MarketDataScopeState.EVIDENCE_ONLY
-    assert states[CandidateAssetClass.OPTION] is MarketDataScopeState.PROHIBITED
+    for asset_class in set(CandidateAssetClass) - {CandidateAssetClass.OTHER}:
+        assert states[asset_class] is MarketDataScopeState.PAPER_ELIGIBLE
+    assert states[CandidateAssetClass.OTHER] is MarketDataScopeState.PROHIBITED
+
+
+
+
+def test_derivative_markets_require_contract_margin_and_surface_data() -> None:
+    manifest = load_data_readiness_manifest(DEFAULT_MANIFEST)
+    requirements = {
+        item.asset_class: {requirement.domain for requirement in item.requirements}
+        for item in manifest.markets
+    }
+
+    assert {
+        DataDomain.DERIVATIVE_CONTRACTS,
+        DataDomain.MARGIN_COLLATERAL,
+    } <= requirements[CandidateAssetClass.FUTURE]
+    for asset_class in (CandidateAssetClass.OPTION, CandidateAssetClass.VOLATILITY):
+        assert {
+            DataDomain.DERIVATIVE_CONTRACTS,
+            DataDomain.MARGIN_COLLATERAL,
+            DataDomain.VOLATILITY_SURFACES,
+        } <= requirements[asset_class]
+
+    provider = next(
+        item
+        for item in manifest.providers
+        if item.identifier == "commercial-global-market-data"
+    )
+    assert {
+        DataDomain.DERIVATIVE_CONTRACTS,
+        DataDomain.MARGIN_COLLATERAL,
+        DataDomain.VOLATILITY_SURFACES,
+    } <= set(provider.authoritative_domains)
 
 
 def test_default_manifest_fails_closed_until_external_providers_are_onboarded() -> None:

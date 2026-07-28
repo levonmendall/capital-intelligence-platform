@@ -1,10 +1,11 @@
-"""Governed paper-only execution for crypto, FX, and global listed markets.
+"""Governed paper-only execution across all classified liquid public markets.
 
 The authority consumes the same ``MultiAssetInstrumentProfile`` used by governed
-portfolio construction.  It never creates a competing instrument, approval,
-custody, leverage, or execution-model contract.  It routes paper activity through
-asset-aware sessions, certified point-in-time quotes, and canonical cross-currency
-portfolio state.  No broker or live-order capability exists here.
+portfolio construction. It never creates a competing instrument, approval,
+custody, leverage, margin, contract, or execution-model authority. Paper activity
+is routed through asset-aware sessions, certified point-in-time quotes, contract
+multipliers, and canonical cross-currency portfolio state. No live-order authority
+exists here.
 """
 
 from __future__ import annotations
@@ -149,6 +150,13 @@ class MultiAssetExecutionPolicy:
     crypto_commission_bps: float = 10.0
     fx_commission_bps: float = 1.0
     international_equity_commission_bps: float = 5.0
+    fixed_income_commission_bps: float = 2.0
+    commodity_commission_bps: float = 4.0
+    real_estate_commission_bps: float = 5.0
+    future_commission_bps: float = 2.0
+    option_commission_bps: float = 5.0
+    volatility_commission_bps: float = 5.0
+    alternative_commission_bps: float = 6.0
     minimum_trade_base_amount: float = 1.0
     reconciliation_tolerance: float = 0.01
 
@@ -175,6 +183,13 @@ class MultiAssetExecutionPolicy:
             "crypto_commission_bps",
             "fx_commission_bps",
             "international_equity_commission_bps",
+            "fixed_income_commission_bps",
+            "commodity_commission_bps",
+            "real_estate_commission_bps",
+            "future_commission_bps",
+            "option_commission_bps",
+            "volatility_commission_bps",
+            "alternative_commission_bps",
             "minimum_trade_base_amount",
             "reconciliation_tolerance",
         ):
@@ -189,29 +204,45 @@ class MultiAssetExecutionPolicy:
             return {
                 CandidateAssetClass.CRYPTO: TradingSessionModel.CONTINUOUS_24_7,
                 CandidateAssetClass.FX: TradingSessionModel.CONTINUOUS_24_5,
-                CandidateAssetClass.INTERNATIONAL_EQUITY: (
-                    TradingSessionModel.EXCHANGE_LOCAL
-                ),
+                CandidateAssetClass.FIXED_INCOME: TradingSessionModel.DEALER_24_5,
+                CandidateAssetClass.INTERNATIONAL_EQUITY: TradingSessionModel.EXCHANGE_LOCAL,
+                CandidateAssetClass.COMMODITY: TradingSessionModel.EXCHANGE_LOCAL,
+                CandidateAssetClass.REAL_ESTATE: TradingSessionModel.EXCHANGE_LOCAL,
+                CandidateAssetClass.FUTURE: TradingSessionModel.EXCHANGE_LOCAL,
+                CandidateAssetClass.OPTION: TradingSessionModel.EXCHANGE_LOCAL,
+                CandidateAssetClass.VOLATILITY: TradingSessionModel.EXCHANGE_LOCAL,
+                CandidateAssetClass.ALTERNATIVE: TradingSessionModel.EXCHANGE_LOCAL,
             }[asset_class]
         except KeyError as error:
             raise MultiAssetExecutionError(
-                f"{asset_class.value} is outside governed multi-asset execution"
+                f"{asset_class.value} is outside classified governed execution"
             ) from error
 
     def commission_bps(self, asset_class: CandidateAssetClass) -> float:
         return {
             CandidateAssetClass.CRYPTO: self.crypto_commission_bps,
             CandidateAssetClass.FX: self.fx_commission_bps,
-            CandidateAssetClass.INTERNATIONAL_EQUITY: (
-                self.international_equity_commission_bps
-            ),
+            CandidateAssetClass.INTERNATIONAL_EQUITY: self.international_equity_commission_bps,
+            CandidateAssetClass.FIXED_INCOME: self.fixed_income_commission_bps,
+            CandidateAssetClass.COMMODITY: self.commodity_commission_bps,
+            CandidateAssetClass.REAL_ESTATE: self.real_estate_commission_bps,
+            CandidateAssetClass.FUTURE: self.future_commission_bps,
+            CandidateAssetClass.OPTION: self.option_commission_bps,
+            CandidateAssetClass.VOLATILITY: self.volatility_commission_bps,
+            CandidateAssetClass.ALTERNATIVE: self.alternative_commission_bps,
         }[asset_class]
 
     @staticmethod
-    def fractional_quantity(asset_class: CandidateAssetClass) -> bool:
+    def fractional_quantity(
+        asset_class: CandidateAssetClass,
+        instrument_type: str | None = None,
+    ) -> bool:
+        if instrument_type is not None:
+            return instrument_type in {"spot", "token", "stablecoin", "bond"}
         return asset_class in {
             CandidateAssetClass.CRYPTO,
             CandidateAssetClass.FX,
+            CandidateAssetClass.FIXED_INCOME,
         }
 
 
@@ -366,6 +397,7 @@ class MultiAssetPaperFill:
     approval_identifier: str
     custody_settlement_identifier: str
     execution_model_version: str
+    contract_multiplier: float = 1.0
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -399,6 +431,7 @@ class MultiAssetPaperFill:
             "commission_local",
             "commission_base",
             "adverse_spread_base",
+            "contract_multiplier",
         ):
             object.__setattr__(
                 self,
@@ -898,7 +931,10 @@ class MultiAssetPaperExecutionOrchestrator:
             if prior is not None and prior.status is MultiAssetOrderStatus.FILLED:
                 continue
             profile = normalized_profiles[trade.symbol]
-            model = self.policy.session_model(profile.asset_class)
+            model = (
+                profile.trading_session_model
+                or self.policy.session_model(profile.asset_class)
+            )
             session = self.session_provider.session(
                 profile,
                 session_model=model,
@@ -1147,15 +1183,21 @@ class MultiAssetPaperExecutionOrchestrator:
             raise MultiAssetExecutionError("profile trade must match profile symbol")
         if (
             trade.side is TradeSide.BUY
-            and profile.asset_class in {
-                CandidateAssetClass.CRYPTO,
-                CandidateAssetClass.FX,
-            }
-            and (not profile.unlevered or not profile.spot_only)
+            and profile.asset_class in {CandidateAssetClass.CRYPTO, CandidateAssetClass.FX}
+            and (not profile.unlevered or not profile.spot_only or profile.gross_leverage > 1.0 + _EPSILON)
         ):
             raise MultiAssetExecutionError(
                 f"{profile.symbol} execution requires unlevered spot exposure"
             )
+        derivatives = {CandidateAssetClass.FUTURE, CandidateAssetClass.OPTION, CandidateAssetClass.VOLATILITY}
+        if trade.side is TradeSide.BUY and profile.asset_class in derivatives:
+            required = (profile.contract_model_version, profile.margin_model_version, profile.lifecycle_model_version)
+            if any(item is None for item in required):
+                raise MultiAssetExecutionError(f"{profile.symbol} derivative execution profile is incomplete")
+            if profile.asset_class in {CandidateAssetClass.FUTURE, CandidateAssetClass.VOLATILITY} and profile.roll_model_version is None:
+                raise MultiAssetExecutionError(f"{profile.symbol} requires a certified roll model")
+            if not profile.defined_risk:
+                raise MultiAssetExecutionError(f"{profile.symbol} requires defined paper risk")
 
     @staticmethod
     def _profile_identifier(profile: MultiAssetInstrumentProfile) -> str:
@@ -1165,6 +1207,17 @@ class MultiAssetPaperExecutionOrchestrator:
                 profile.approval_identifier,
                 profile.custody_settlement_identifier,
                 profile.execution_model_version,
+                profile.instrument_type,
+                str(profile.contract_multiplier),
+                profile.contract_model_version or "no-contract-model",
+                profile.margin_model_version or "no-margin-model",
+                profile.lifecycle_model_version or "no-lifecycle-model",
+                profile.roll_model_version or "no-roll-model",
+                (
+                    "default-session"
+                    if profile.trading_session_model is None
+                    else profile.trading_session_model.value
+                ),
             )
         )
 
@@ -1255,7 +1308,7 @@ class MultiAssetPaperExecutionOrchestrator:
             )
         fill_price = quote.bid if trade.side is TradeSide.SELL else quote.ask
         mark_price = quote.last
-        per_unit_base = fill_price * quote.fx_rate_to_base
+        per_unit_base = fill_price * quote.fx_rate_to_base * profile.contract_multiplier
         base_cap = min(
             requested_remaining,
             quote.available_base_notional * self.policy.maximum_volume_participation,
@@ -1292,7 +1345,9 @@ class MultiAssetPaperExecutionOrchestrator:
         raw_quantity = min(base_cap / per_unit_base, quantity_cap)
         quantity = (
             round(max(0.0, raw_quantity), 12)
-            if self.policy.fractional_quantity(profile.asset_class)
+            if self.policy.fractional_quantity(
+                profile.asset_class, profile.instrument_type
+            )
             else float(max(0, floor(raw_quantity)))
         )
         if quantity <= _EPSILON:
@@ -1312,7 +1367,7 @@ class MultiAssetPaperExecutionOrchestrator:
                 current_position,
             )
 
-        gross_local = round(quantity * fill_price, 12)
+        gross_local = round(quantity * fill_price * profile.contract_multiplier, 12)
         gross_base = round(gross_local * quote.fx_rate_to_base, 8)
         commission_local = round(
             gross_local * self.policy.commission_bps(profile.asset_class) / 10_000,
@@ -1320,7 +1375,7 @@ class MultiAssetPaperExecutionOrchestrator:
         )
         commission_base = round(commission_local * quote.fx_rate_to_base, 8)
         adverse_spread_base = round(
-            quantity * abs(fill_price - mark_price) * quote.fx_rate_to_base,
+            quantity * abs(fill_price - mark_price) * quote.fx_rate_to_base * profile.contract_multiplier,
             8,
         )
         if trade.side is TradeSide.BUY:
@@ -1362,6 +1417,7 @@ class MultiAssetPaperExecutionOrchestrator:
                     fx_rate_to_base=quote.fx_rate_to_base,
                     fx_rate_observed_at=quote.fx_observed_at,
                     fx_rate_source_identifier=quote.fx_source_identifier,
+                    contract_multiplier=profile.contract_multiplier,
                 )
             )
 
@@ -1392,6 +1448,7 @@ class MultiAssetPaperExecutionOrchestrator:
             approval_identifier=profile.approval_identifier,
             custody_settlement_identifier=profile.custody_settlement_identifier,
             execution_model_version=profile.execution_model_version,
+            contract_multiplier=profile.contract_multiplier,
         )
         cumulative_amount = round(already_filled + gross_base, 8)
         status = (
@@ -1433,11 +1490,11 @@ class MultiAssetPaperExecutionOrchestrator:
         old_base_cost = 0.0 if current is None else current.cost_basis
         total_quantity = round(old_quantity + quantity, 12)
         average_local = round(
-            (old_local_cost + gross_local + commission_local) / total_quantity,
+            (old_local_cost + gross_local + commission_local) / (total_quantity * profile.contract_multiplier),
             12,
         )
         average_base = round(
-            (old_base_cost + gross_base + commission_base) / total_quantity,
+            (old_base_cost + gross_base + commission_base) / (total_quantity * profile.contract_multiplier),
             12,
         )
         return CanonicalPortfolioPosition(
@@ -1457,6 +1514,7 @@ class MultiAssetPaperExecutionOrchestrator:
             fx_rate_to_base=quote.fx_rate_to_base,
             fx_rate_observed_at=quote.fx_observed_at,
             fx_rate_source_identifier=quote.fx_source_identifier,
+            contract_multiplier=profile.contract_multiplier,
         )
 
     @staticmethod
@@ -1477,7 +1535,7 @@ class MultiAssetPaperExecutionOrchestrator:
             price=fill.fill_price_local,
             gross_amount=fill.gross_amount_local,
             cost_amount=fill.commission_local,
-            rationale="Governed multi-asset paper fill; no broker order submitted.",
+            rationale="Governed universal-market paper fill; no broker order submitted.",
             source_identifier=fill.quote_source_identifier,
             price_currency=fill.price_currency,
             settlement_currency=fill.settlement_currency,
@@ -1497,7 +1555,7 @@ class MultiAssetPaperExecutionOrchestrator:
             value += (
                 position.market_value
                 if quote is None
-                else position.quantity * quote.last * quote.fx_rate_to_base
+                else position.quantity * quote.last * quote.fx_rate_to_base * position.contract_multiplier
             )
         return round(value, 8)
 
@@ -1553,6 +1611,7 @@ def fill_to_dict(value: MultiAssetPaperFill) -> dict[str, Any]:
         "approval_identifier": value.approval_identifier,
         "custody_settlement_identifier": value.custody_settlement_identifier,
         "execution_model_version": value.execution_model_version,
+        "contract_multiplier": value.contract_multiplier,
     }
 
 
@@ -1657,6 +1716,7 @@ def batch_from_dict(value: Mapping[str, Any]) -> MultiAssetExecutionBatch:
                     item["custody_settlement_identifier"]
                 ),
                 execution_model_version=str(item["execution_model_version"]),
+                contract_multiplier=float(item.get("contract_multiplier", 1.0)),
             )
             for item in value.get("fills", ())
         ),
