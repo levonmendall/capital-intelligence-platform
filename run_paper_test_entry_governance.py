@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from governance.paper_test_entry import (
-    ControlledPaperTestEligibilityPackage,
     ControlledPaperTestEntryDecision,
     InvestmentProcessFreeze,
     PaperTestEntryGovernanceError,
@@ -21,6 +20,7 @@ from governance.paper_test_entry import (
 from governance.product_readiness import (
     ProductTestReadiness,
     ProductTestReadinessReport,
+    SQLiteProductTestReadinessStore,
 )
 from governance.stage_binding_approval import SQLiteStageBindingApprovalStore
 from operations.paper_test_campaign import SQLitePaperTestCampaignStore
@@ -58,6 +58,7 @@ def _latest_readiness(
     database = Path(path).expanduser()
     if not database.is_file():
         return None
+    SQLiteProductTestReadinessStore(database).verify_integrity()
     with sqlite3.connect(database) as connection:
         row = connection.execute(
             "SELECT payload_json FROM product_test_readiness_reports "
