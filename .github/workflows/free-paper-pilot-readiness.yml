@@ -11,7 +11,6 @@ on:
       - "run_free_paper_pilot_readiness.py"
   push:
     branches:
-      - pr-166-free-paper-pilot
       - main
     paths:
       - ".github/workflows/free-paper-pilot-readiness.yml"
@@ -30,6 +29,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    environment: development
     timeout-minutes: 15
     env:
       PYTHONPATH: ${{ github.workspace }}
