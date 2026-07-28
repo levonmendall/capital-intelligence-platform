@@ -1,0 +1,69 @@
+{
+  "schema_version": "free-provider-connections.v1",
+  "providers": [
+    {
+      "identifier": "fred",
+      "enabled": true,
+      "required_environment_variables": ["FRED_API_KEY"],
+      "health_probe": {"series_id": "DGS10"},
+      "readiness_authority": false,
+      "limitations": [
+        "A free registered FRED API key is required.",
+        "The probe verifies official point-in-time macro access but does not certify complete global macro coverage."
+      ]
+    },
+    {
+      "identifier": "sec_edgar",
+      "enabled": true,
+      "required_environment_variables": ["SEC_USER_AGENT"],
+      "health_probe": {"resource": "company_tickers_exchange"},
+      "readiness_authority": false,
+      "limitations": [
+        "A descriptive application name and monitored contact email are required in SEC_USER_AGENT.",
+        "The current SEC ticker file is not a complete historical security master."
+      ]
+    },
+    {
+      "identifier": "coinbase_exchange",
+      "enabled": true,
+      "required_environment_variables": [],
+      "health_probe": {"instrument_id": "instrument:crypto:btcusd", "venue": "COINBASE"},
+      "readiness_authority": false,
+      "limitations": [
+        "Public spot venue evidence only; no account, custody, order-entry, or complete-market authority."
+      ]
+    },
+    {
+      "identifier": "kraken_spot",
+      "enabled": true,
+      "required_environment_variables": [],
+      "health_probe": {"instrument_id": "instrument:crypto:btcusd", "venue": "KRAKEN"},
+      "readiness_authority": false,
+      "limitations": [
+        "Public spot venue evidence only; no account, custody, order-entry, or complete-market authority."
+      ]
+    },
+    {
+      "identifier": "openfigi",
+      "enabled": true,
+      "required_environment_variables": [],
+      "optional_environment_variables": ["OPENFIGI_API_KEY"],
+      "health_probe": {"id_type": "ID_BB_GLOBAL", "id_value": "BBG000B9XRY4"},
+      "readiness_authority": false,
+      "limitations": [
+        "Anonymous requests use the lower public rate limit; a free API key is optional.",
+        "OpenFIGI mapping is supporting identity evidence and is not a historical security master."
+      ]
+    },
+    {
+      "identifier": "gleif",
+      "enabled": true,
+      "required_environment_variables": [],
+      "health_probe": {"lei": "HWUPKR0MPOU8FGXBT394"},
+      "readiness_authority": false,
+      "limitations": [
+        "GLEIF legal-entity evidence does not provide complete tradable-instrument, listing, corporate-action, or market-price coverage."
+      ]
+    }
+  ]
+}
