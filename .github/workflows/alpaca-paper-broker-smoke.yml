@@ -10,6 +10,7 @@ on:
       - "config/alpaca_paper_broker_activation.json"
       - "run_alpaca_paper_broker_smoke.py"
       - "tests/test_alpaca_paper_broker.py"
+      - "tests/test_alpaca_paper_broker_backup.py"
   push:
     branches:
       - main
@@ -17,9 +18,11 @@ on:
       - ".github/workflows/alpaca-paper-broker-smoke.yml"
       - "providers/alpaca_paper_broker.py"
       - "operations/alpaca_paper_broker.py"
+      - "operations/backup_registry.py"
       - "config/alpaca_paper_broker_activation.json"
       - "run_alpaca_paper_broker_smoke.py"
       - "tests/test_alpaca_paper_broker.py"
+      - "tests/test_alpaca_paper_broker_backup.py"
 
 permissions:
   contents: read
@@ -55,11 +58,14 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install locked dependencies
+      - name: Install locked runtime dependencies
         run: pip install --require-hashes -r requirements.lock
 
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
       - name: Run deterministic broker integration tests
-        run: python -m pytest -q tests/test_alpaca_paper_broker.py
+        run: python -m pytest -q tests/test_alpaca_paper_broker.py tests/test_alpaca_paper_broker_backup.py
 
       - name: Require Alpaca paper credentials
         if: github.event_name != 'pull_request'
