@@ -23,13 +23,14 @@ SCHEMA = ROOT / "schemas" / "maximum_decision_information_scope.schema.json"
 
 
 def _source(identifier: str, group: str) -> DecisionInformationSourceCapability:
+    domains = tuple(DecisionInformationDomain)
     return DecisionInformationSourceCapability(
         identifier=identifier,
         source_name=identifier,
         role=DecisionInformationSourceRole.PRIMARY,
         independence_group=group,
         enabled=True,
-        domains=(DecisionInformationDomain.CURRENT_EVENTS_NEWS,),
+        domains=domains,
         authoritative_domains=(),
         credential_environment_variables=(f"{identifier.upper().replace('-', '_')}_KEY",),
         usage_rights_approved=True,
@@ -58,18 +59,19 @@ def _manifest(*sources: DecisionInformationSourceCapability) -> MaximumDecisionI
     return MaximumDecisionInformationManifest(
         identifier="maximum-information:test",
         schema_version="maximum-decision-information-manifest.v1",
-        objective="Test independently corroborated current events.",
-        require_complete_scope=False,
+        objective="Test independently corroborated maximum information coverage.",
+        require_complete_scope=True,
         sources=tuple(sources),
-        requirements=(
+        requirements=tuple(
             DecisionInformationCoverageRequirement(
-                domain=DecisionInformationDomain.CURRENT_EVENTS_NEWS,
+                domain=domain,
                 source_identifiers=tuple(item.identifier for item in sources),
                 minimum_ready_sources=len(sources),
                 minimum_independence_groups=len(sources),
                 authoritative_required=False,
-                rationale="Require every fixture source.",
-            ),
+                rationale="Require every fixture source and independence group.",
+            )
+            for domain in DecisionInformationDomain
         ),
     )
 
@@ -106,7 +108,7 @@ def test_default_scope_fails_closed_until_sources_are_licensed_and_certified() -
     assert report.real_money_authorized is False
 
 
-def test_three_ready_independent_sources_satisfy_news_but_not_maximum_scope() -> None:
+def test_three_ready_independent_sources_can_satisfy_maximum_scope() -> None:
     sources = (
         _source("official-source", "official"),
         _source("licensed-newswire", "newswire"),
@@ -122,11 +124,11 @@ def test_three_ready_independent_sources_satisfy_news_but_not_maximum_scope() ->
         environment=environment,
     )
 
-    assert report.state is DecisionInformationReadinessState.PARTIAL
+    assert report.state is DecisionInformationReadinessState.READY
     assert report.current_events_and_news_ready is True
-    assert report.maximum_scope_declared is False
-    assert report.all_domains_ready is False
-    assert report.domains[0].blockers == ()
+    assert report.maximum_scope_declared is True
+    assert report.all_domains_ready is True
+    assert report.blockers == ()
 
 
 def test_syndicated_sources_do_not_count_as_independent() -> None:
@@ -145,7 +147,11 @@ def test_syndicated_sources_do_not_count_as_independent() -> None:
     )
 
     assert report.all_domains_ready is False
-    assessment = report.domains[0]
+    assessment = next(
+        item
+        for item in report.domains
+        if item.domain is DecisionInformationDomain.CURRENT_EVENTS_NEWS
+    )
     assert assessment.ready_source_identifiers == (
         "news-copy-a",
         "news-copy-b",
