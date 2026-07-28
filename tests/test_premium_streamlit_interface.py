@@ -18,6 +18,27 @@ def test_premium_interface_keeps_four_simple_surfaces() -> None:
     assert "AI Chief Investment Officer · Paper mode" in ui
 
 
+def test_four_screen_navigation_is_visible_in_the_main_workspace() -> None:
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    ui = (ROOT / "premium_ui.py").read_text(encoding="utf-8")
+
+    assert "page, dark_mode = render_navigation(PRIMARY_SURFACES)" in app
+    assert "Four-screen workspace" in ui
+    assert 'horizontal=True' in ui
+    assert "Use the four-screen navigation at the top" in ui
+
+
+def test_runtime_dark_mode_is_available_and_persistent() -> None:
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    ui = (ROOT / "premium_ui.py").read_text(encoding="utf-8")
+
+    assert 'st.session_state.get("dark_mode", False)' in app
+    assert "apply_global_style(dark_mode=dark_mode)" in app
+    assert 'st.toggle("Dark mode", key="dark_mode")' in ui
+    assert "--app-bg:#070b14" in ui
+    assert "--surface:#111827" in ui
+
+
 def test_streamlit_theme_is_versioned_with_the_application() -> None:
     theme = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
 
