@@ -15,6 +15,7 @@ from pathlib import Path
 import premium_ui as _premium_ui
 
 from navigation_ui import install as _install_navigation_ui
+from paper_trading_ui import render_paper_decision_controls
 
 
 # Source-level architecture checks intentionally inspect the active entrypoint.
@@ -38,6 +39,8 @@ except (RuntimeError, OSError):
 except (RuntimeError, OSError):
 except (RuntimeError, OSError):
 except (RuntimeError, OSError):
+render_paper_decision_controls(
+authenticated_principal
 from core.portfolio import (
     get_mandate_details,
     get_portfolio_totals,
@@ -160,6 +163,23 @@ _premium_ui.allocation_bar = _safe_allocation_bar
 
 _source_path = Path(__file__).with_name("app_impl.py")
 _source = _source_path.read_text(encoding="utf-8")
+
+# Add the consent control at the exact canonical construction boundary. The
+# checked anchor makes deployment fail loudly instead of silently losing user
+# approval when the implementation source changes.
+_approval_anchor = '    construction = _latest("portfolio_construction")\n'
+if _source.count(_approval_anchor) != 1:
+    raise RuntimeError("paper decision approval insertion point is unavailable")
+_source = _source.replace(
+    _approval_anchor,
+    _approval_anchor
+    + '    render_paper_decision_controls(\n'
+    + '        construction=construction,\n'
+    + '        briefing=_latest("daily_cio_briefing"),\n'
+    + '        principal=globals().get("authenticated_principal"),\n'
+    + '    )\n',
+    1,
+)
 
 # ``secure_app.py`` executes this entrypoint with session-authorized portfolio
 # bindings. Preserve those bindings by removing the implementation's direct

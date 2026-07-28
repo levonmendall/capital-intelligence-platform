@@ -305,6 +305,7 @@ with st.sidebar:
 
 execution_globals = {
     "__name__": "__main__",
+    "authenticated_principal": principal,
     **_authorized_bindings(principal),
 }
 exec(compile(_authorized_source(), "app.py", "exec"), execution_globals)
