@@ -1,5 +1,9 @@
 """Human-governed approval authorities surrounding the canonical CIO process."""
 
+from __future__ import annotations
+
+import importlib
+
 from governance.asset_class_scope import (
     CORE_POLICY_ASSET_CLASSES,
     EXPANSION_ASSET_CLASSES,
@@ -73,6 +77,29 @@ from governance.readiness_evidence import (
     SQLiteReadinessEvidenceStore,
 )
 
+_LAZY_PAPER_TEST_ENTRY_EXPORTS = {
+    "ControlledPaperTestEligibilityPackage",
+    "ControlledPaperTestEntryDecision",
+    "InvestmentProcessFreeze",
+    "PaperTestEligibilityState",
+    "PaperTestEntryDecisionState",
+    "PaperTestEntryGovernanceError",
+    "PaperTestEntryIntegrityError",
+    "PaperTestEntryPackageAssembler",
+    "PaperTestGovernanceEventType",
+    "ProcessFreezeState",
+    "SQLitePaperTestEntryGovernanceStore",
+    "canonical_process_bundle_sha256",
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_PAPER_TEST_ENTRY_EXPORTS:
+        module = importlib.import_module("governance.paper_test_entry")
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "AllMarketsDataManifest",
     "AllMarketsDataReadinessEvaluator",
@@ -111,12 +138,22 @@ __all__ = [
     "AssetClassGovernanceIntegrityError",
     "AssetClassScopeAssessment",
     "AssetClassScopeAuthority",
+    "ControlledPaperTestEligibilityPackage",
+    "ControlledPaperTestEntryDecision",
     "CustodySettlementModel",
     "ForecastEvidenceError",
     "ForecastEvidenceIntegrityError",
     "ForecastScenario",
     "GovernedForecastEvidence",
+    "InvestmentProcessFreeze",
     "OperationalReadinessSnapshot",
+    "PaperTestEligibilityState",
+    "PaperTestEntryDecisionState",
+    "PaperTestEntryGovernanceError",
+    "PaperTestEntryIntegrityError",
+    "PaperTestEntryPackageAssembler",
+    "PaperTestGovernanceEventType",
+    "ProcessFreezeState",
     "ProductTestReadiness",
     "ProductTestReadinessEvidence",
     "ProductTestReadinessEvidenceAssembler",
@@ -130,8 +167,10 @@ __all__ = [
     "ReadinessGateState",
     "SQLiteAssetClassApprovalStore",
     "SQLiteForecastEvidenceStore",
+    "SQLitePaperTestEntryGovernanceStore",
     "SQLiteProductTestReadinessStore",
     "SQLiteReadinessEvidenceStore",
     "TestReadinessIntegrityError",
     "TradingSessionModel",
+    "canonical_process_bundle_sha256",
 ]
