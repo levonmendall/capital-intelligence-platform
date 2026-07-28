@@ -14,17 +14,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from data.provider_dataset import ProviderDatasetQuery, ProviderDatasetType
 from providers.alpaca_paper import (
     AlpacaPaperProviderError,
     create_alpaca_paper_client,
 )
-from providers.eodhd import EODHDProvider
 from providers.fred import FREDProvider
 from providers.openfigi import OpenFigiMappingJob, OpenFigiProvider
 from providers.provider_credentials import (
     AlphaVantageCredentialProbe,
     DatabentoCredentialProbe,
+    EODHDCredentialProbe,
     ProviderCredentialProbeError,
     TwelveDataCredentialProbe,
 )
@@ -42,11 +41,7 @@ ALPACA_SECRET_NAMES = (
     "ALPACA_API_SECRET",
 )
 FRED_NAMES = ("FRED_API_KEY",)
-EODHD_NAMES = (
-    "EODHD_API_KEY",
-    "EODHD_API_TOKEN",
-    "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN",
-)
+EODHD_NAMES = EODHDCredentialProbe.environment_names
 OPENFIGI_NAMES = (
     "OPEN_FIGI_API_KEY",
     "OPENFIGI_API_KEY",
@@ -179,24 +174,12 @@ def _fred() -> dict[str, Any]:
     return _try_single_credentials("fred", FRED_NAMES, probe)
 
 
-def _eodhd(as_of: datetime) -> dict[str, Any]:
-    def probe(value: str) -> dict[str, Any]:
-        snapshot = EODHDProvider(api_token=value).fetch_dataset(
-            ProviderDatasetQuery(
-                dataset_type=ProviderDatasetType.ACCOUNT_ENTITLEMENT,
-                provider_symbol="ACCOUNT",
-                as_of=as_of,
-                limit=1,
-            )
-        )
-        return {
-            "probe": "account-entitlement",
-            "source_version": snapshot.source_version,
-            "quality_state": snapshot.quality_state.value,
-            "content_hash": snapshot.content_hash,
-        }
-
-    return _try_single_credentials("eodhd", EODHD_NAMES, probe)
+def _eodhd() -> dict[str, Any]:
+    return _try_single_credentials(
+        "eodhd",
+        EODHD_NAMES,
+        lambda value: EODHDCredentialProbe(value).probe(),
+    )
 
 
 def _openfigi() -> dict[str, Any]:
@@ -277,7 +260,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         providers = [
             _alpaca(),
             _fred(),
-            _eodhd(evaluated_at),
+            _eodhd(),
             _openfigi(),
             _alpha_vantage(),
             _databento(),
