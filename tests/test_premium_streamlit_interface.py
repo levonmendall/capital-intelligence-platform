@@ -40,3 +40,9 @@ def test_secure_app_source_adapter_remains_compatible() -> None:
     assert expected_import in app
     assert expected_import in secure
     assert 'exec(compile(_authorized_source(), "app.py", "exec"), execution_globals)' in secure
+
+
+def test_optional_dashboard_reads_fail_soft_in_streamlit_surface() -> None:
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+
+    assert app.count("except (RuntimeError, OSError):") >= 4
