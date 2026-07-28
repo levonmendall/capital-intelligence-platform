@@ -67,14 +67,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             json.dumps(
                 {
-                    "available": false,
+                    "available": False,
                     "status": "failed",
                     "error": str(error),
-                    "live_order_routing_authorized": false,
-                    "real_money_authorized": false
+                    "live_order_routing_authorized": False,
+                    "real_money_authorized": False,
                 },
                 sort_keys=True,
-            ).replace("false", "false")
+            )
         )
         return 4
 
