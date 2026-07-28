@@ -7,10 +7,12 @@ on:
       - ".github/workflows/alpaca-paper-broker-smoke.yml"
       - "providers/alpaca_paper_broker.py"
       - "operations/alpaca_paper_broker.py"
+      - "operations/alpaca_paper_round_trip.py"
       - "config/alpaca_paper_broker_activation.json"
       - "run_alpaca_paper_broker_smoke.py"
       - "tests/test_alpaca_paper_broker.py"
       - "tests/test_alpaca_paper_broker_backup.py"
+      - "tests/test_alpaca_paper_round_trip.py"
       - "tests/test_alpaca_paper_smoke_cli.py"
   push:
     branches:
@@ -19,11 +21,13 @@ on:
       - ".github/workflows/alpaca-paper-broker-smoke.yml"
       - "providers/alpaca_paper_broker.py"
       - "operations/alpaca_paper_broker.py"
+      - "operations/alpaca_paper_round_trip.py"
       - "operations/backup_registry.py"
       - "config/alpaca_paper_broker_activation.json"
       - "run_alpaca_paper_broker_smoke.py"
       - "tests/test_alpaca_paper_broker.py"
       - "tests/test_alpaca_paper_broker_backup.py"
+      - "tests/test_alpaca_paper_round_trip.py"
       - "tests/test_alpaca_paper_smoke_cli.py"
 
 permissions:
@@ -72,6 +76,7 @@ jobs:
           python -m pytest -q
           tests/test_alpaca_paper_broker.py
           tests/test_alpaca_paper_broker_backup.py
+          tests/test_alpaca_paper_round_trip.py
           tests/test_alpaca_paper_smoke_cli.py
 
       - name: Require Alpaca paper credentials
