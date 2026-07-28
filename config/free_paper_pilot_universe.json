@@ -1,6 +1,6 @@
 {
   "schema_version": "free-paper-pilot-universe.v1",
-  "identifier": "free-paper-pilot-us-listed-wrappers.v1",
+  "identifier": "free-paper-pilot-us-listed-wrappers.v2",
   "objective": "Begin controlled paper operation across the major economic asset classes using unlevered, liquid, U.S.-listed instruments and free Alpaca paper/IEX evidence while direct complex instruments remain analysis-only.",
   "portfolio_code": "COMPOUNDING",
   "reporting_currency": "USD",
@@ -175,9 +175,9 @@
       "maximum_weight": 0.1
     },
     {
-      "symbol": "PUTW",
-      "instrument_identifier": "instrument:us-etf:putw",
-      "name": "WisdomTree PutWrite Strategy Fund",
+      "symbol": "WTPI",
+      "instrument_identifier": "instrument:us-etf:wtpi",
+      "name": "WisdomTree Equity Premium Income Fund",
       "execution_asset_class": "us_etf",
       "economic_exposure": "option_strategies",
       "venue": "NYSEARCA",
