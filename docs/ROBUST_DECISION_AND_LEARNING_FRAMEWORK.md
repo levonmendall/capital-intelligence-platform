@@ -67,6 +67,8 @@ The report evaluates:
 - implementation drag; and
 - worst realized drawdown.
 
+Reports are reproducible only from the exact frozen decision, evaluation, model, policy, and evidence versions recorded in their observations.
+
 ## Governance states
 
 | State | Meaning |
