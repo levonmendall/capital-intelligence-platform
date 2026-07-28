@@ -366,7 +366,7 @@ def _hero_visual(profile: SurfaceProfile) -> str:
             '<span class="pulse-node one"></span>'
             '<span class="pulse-node two"></span>'
             '<span class="pulse-node three"></span>'
-            f'<div class="visual-core">{label}</div></div>'
+            f'<div class="visual-core signal-core">{label}</div></div>'
         )
     if profile.slug == "environment":
         return (
@@ -374,12 +374,12 @@ def _hero_visual(profile: SurfaceProfile) -> str:
             '<div class="field-orbit"></div><div class="field-orbit second"></div>'
             '<span class="field-dot a"></span><span class="field-dot b"></span>'
             '<span class="field-dot c"></span>'
-            f'<div class="visual-core">{label}</div></div>'
+            f'<div class="visual-core signal-core">{label}</div></div>'
         )
     if profile.slug == "portfolio":
         return (
             '<div class="surface-visual visual-portfolio">'
-            f'<div class="visual-core">{label}</div>'
+            f'<div class="visual-core signal-core">{label}</div>'
             '<div class="capital-tick"></div></div>'
         )
     return (
@@ -403,7 +403,7 @@ def render_app_header(active_page: str) -> None:
         </style>
         <div class="surface-marker surface-{profile.slug}"></div>
         <div class="hero-shell"><div class="hero-card"><div class="hero-grid"><div>
-            <div class="hero-kicker">{escape(profile.kicker)}</div>
+            <div class="hero-kicker">Capital Intelligence Operating System // {escape(profile.kicker)}</div>
             <h1 class="hero-title">{escape(profile.title)}</h1>
             <p class="hero-copy">{escape(profile.copy)}</p>
             <div class="hero-meta">
