@@ -89,7 +89,7 @@ jobs:
           python run_alpaca_paper_broker_smoke.py \
             --activation config/alpaca_paper_broker_activation.json \
             --symbol BTC/USD \
-            --notional 1 \
+            --notional 10 \
             --output reports/alpaca-paper-broker-smoke.json \
             --require-reconciled
 
