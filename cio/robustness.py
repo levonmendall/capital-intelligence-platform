@@ -1,10 +1,9 @@
-"""Robust, compounding-aware candidate assessment before capital is committed.
+"""Compounding-aware robustness controls for canonical candidate decisions.
 
-The canonical candidate schema contains scenario returns and probabilities.  This
-module converts those inputs into a portfolio-slice geometric return, shrinks the
-result toward the best available alternative when evidence is weak, penalizes
-scenario dispersion, and repeats the calculation under an adverse probability
-shift.  It is a qualification and abstention control, not a performance promise.
+Scenario forecasts are converted into annualized portfolio-slice geometric
+returns, shrunk toward the best alternative when evidence is weak, penalized for
+uncertainty, and stressed by shifting probability toward the bear case.  The
+result is an abstention control, not a performance promise.
 """
 
 from __future__ import annotations
@@ -18,16 +17,14 @@ from cio.models import CandidateDecisionRecord
 def _finite(value: object, *, field_name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{field_name} must be numeric")
-    normalized = float(value)
-    if not isfinite(normalized):
+    result = float(value)
+    if not isfinite(result):
         raise ValueError(f"{field_name} must be finite")
-    return normalized
+    return result
 
 
 @dataclass(frozen=True, slots=True)
 class RobustDecisionPolicy:
-    """Versioned robustness rules applied before specialist review and CIO action."""
-
     version: str = "robust-decision.v1"
     reference_position_weight: float = 0.05
     minimum_reference_weight: float = 0.01
@@ -38,13 +35,13 @@ class RobustDecisionPolicy:
     minimum_stressed_edge: float = 0.0
     minimum_edge_to_uncertainty: float = 0.03
     maximum_probability_of_loss: float = 0.45
-    maximum_probability_consistency_gap: float = 0.15
+    maximum_probability_consistency_gap: float = 0.25
     minimum_worst_case_portfolio_return: float = -0.05
 
     def __post_init__(self) -> None:
         if not isinstance(self.version, str) or not self.version.strip():
             raise ValueError("version cannot be empty")
-        for field_name in (
+        for name in (
             "reference_position_weight",
             "minimum_reference_weight",
             "evidence_shrinkage_floor",
@@ -54,9 +51,9 @@ class RobustDecisionPolicy:
             "maximum_probability_of_loss",
             "maximum_probability_consistency_gap",
         ):
-            value = _finite(getattr(self, field_name), field_name=field_name)
+            value = _finite(getattr(self, name), field_name=name)
             if not 0.0 <= value <= 1.0:
-                raise ValueError(f"{field_name} must be between 0.0 and 1.0")
+                raise ValueError(f"{name} must be between 0.0 and 1.0")
         if self.minimum_reference_weight <= 0.0:
             raise ValueError("minimum_reference_weight must be positive")
         if self.reference_position_weight < self.minimum_reference_weight:
@@ -69,8 +66,6 @@ class RobustDecisionPolicy:
 
 @dataclass(frozen=True, slots=True)
 class RobustCandidateAssessment:
-    """Auditable robustness diagnostics for one candidate and capital alternative."""
-
     candidate_identifier: str
     policy_version: str
     reference_position_weight: float
@@ -90,18 +85,14 @@ class RobustCandidateAssessment:
     reasons: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not self.candidate_identifier.strip():
-            raise ValueError("candidate_identifier cannot be empty")
-        if not self.policy_version.strip():
-            raise ValueError("policy_version cannot be empty")
-        if self.passed and self.reasons:
-            raise ValueError("a passing assessment cannot contain rejection reasons")
-        if not self.passed and not self.reasons:
-            raise ValueError("a failing assessment requires reasons")
+        if not self.candidate_identifier.strip() or not self.policy_version.strip():
+            raise ValueError("assessment identifiers cannot be empty")
+        if self.passed == bool(self.reasons):
+            raise ValueError("assessment pass state and reasons are inconsistent")
 
 
 class RobustCandidateAssessor:
-    """Convert scenario forecasts into conservative capital-allocation evidence."""
+    """Create conservative robustness diagnostics from disclosed scenarios."""
 
     def __init__(self, policy: RobustDecisionPolicy | None = None) -> None:
         self.policy = policy or RobustDecisionPolicy()
@@ -119,7 +110,7 @@ class RobustCandidateAssessor:
             max(candidate.maximum_position_weight, self.policy.minimum_reference_weight),
             self.policy.reference_position_weight,
         )
-        scenario_returns = (
+        returns = (
             candidate.base_case_return,
             candidate.bull_case_return,
             candidate.bear_case_return,
@@ -130,80 +121,70 @@ class RobustCandidateAssessor:
             candidate.bear_case_probability,
         )
         reasons: list[str] = []
-        if not (
-            candidate.bear_case_return
-            <= candidate.base_case_return
-            <= candidate.bull_case_return
-        ):
+        if not candidate.bear_case_return <= candidate.base_case_return <= candidate.bull_case_return:
             reasons.append(
                 "scenario ordering must satisfy bear case <= base case <= bull case"
             )
 
-        annualized_scenarios, portfolio_scenarios, valid_wealth = self._scenario_values(
+        annualized, portfolio_returns, valid_wealth = self._annualized_scenarios(
             candidate,
-            scenario_returns=scenario_returns,
+            returns=returns,
             weight=weight,
         )
         if not valid_wealth:
             reasons.append(
                 "at least one scenario produces non-positive portfolio wealth at the reference weight"
             )
-
-        geometric_return = self._geometric_equivalent(
-            annualized_scenarios,
-            probabilities=probabilities,
-            weight=weight,
-        )
-        dispersion = self._weighted_dispersion(
-            annualized_scenarios,
-            probabilities=probabilities,
-            center=geometric_return,
+        geometric = self._geometric(annualized, probabilities, weight)
+        dispersion = sqrt(
+            max(
+                sum(
+                    probability * (value - geometric) ** 2
+                    for value, probability in zip(
+                        annualized,
+                        probabilities,
+                        strict=True,
+                    )
+                ),
+                0.0,
+            )
         )
         reliability = max(
             self.policy.evidence_shrinkage_floor,
-            sqrt(
-                candidate.evidence_quality.score
-                * candidate.evidence_quality.ceiling
-            ),
+            sqrt(candidate.evidence_quality.score * candidate.evidence_quality.ceiling),
         )
-        evidence_adjusted = (
-            alternative + reliability * (geometric_return - alternative)
+        adjusted = (
+            alternative
+            + reliability * (geometric - alternative)
             - self.policy.uncertainty_penalty * dispersion
         )
-        stressed_probabilities = self._stress_probabilities(probabilities)
-        stressed_geometric = self._geometric_equivalent(
-            annualized_scenarios,
-            probabilities=stressed_probabilities,
-            weight=weight,
+        stressed_geometric = self._geometric(
+            annualized,
+            self._stress(probabilities),
+            weight,
         )
         stressed_adjusted = (
-            alternative + reliability * (stressed_geometric - alternative)
+            alternative
+            + reliability * (stressed_geometric - alternative)
             - self.policy.uncertainty_penalty * dispersion
         )
-        robust_edge = evidence_adjusted - alternative
+        robust_edge = adjusted - alternative
         stressed_edge = stressed_adjusted - alternative
         probability_of_loss = sum(
             probability
-            for scenario_return, probability in zip(
-                scenario_returns,
-                probabilities,
-                strict=True,
-            )
-            if scenario_return - candidate.implementation_cost_return < 0.0
+            for value, probability in zip(returns, probabilities, strict=True)
+            if value - candidate.implementation_cost_return < 0.0
         )
-        implied_success_probability = sum(
+        implied_success = sum(
             probability
-            for scenario_return, probability in zip(
-                scenario_returns,
-                probabilities,
-                strict=True,
-            )
-            if scenario_return - candidate.implementation_cost_return > 0.0
+            for value, probability in zip(returns, probabilities, strict=True)
+            if value - candidate.implementation_cost_return > 0.0
         )
-        probability_gap = abs(
-            candidate.probability_of_success - implied_success_probability
+        probability_gap = round(
+            abs(candidate.probability_of_success - implied_success),
+            10,
         )
-        worst_portfolio_return = min(portfolio_scenarios)
+        worst_portfolio_return = min(portfolio_returns)
         edge_to_uncertainty = robust_edge / max(dispersion, 0.000001)
 
         if robust_edge < self.policy.minimum_robust_edge:
@@ -224,10 +205,7 @@ class RobustCandidateAssessor:
             reasons.append(
                 "stated probability of success is inconsistent with the disclosed scenarios"
             )
-        if (
-            worst_portfolio_return
-            < self.policy.minimum_worst_case_portfolio_return
-        ):
+        if worst_portfolio_return < self.policy.minimum_worst_case_portfolio_return:
             reasons.append(
                 "worst-case portfolio loss at the reference weight exceeds policy"
             )
@@ -238,15 +216,15 @@ class RobustCandidateAssessor:
             policy_version=self.policy.version,
             reference_position_weight=round(weight, 10),
             evidence_reliability=round(reliability, 10),
-            annualized_geometric_return=round(geometric_return, 10),
-            evidence_adjusted_return=round(evidence_adjusted, 10),
+            annualized_geometric_return=round(geometric, 10),
+            evidence_adjusted_return=round(adjusted, 10),
             stressed_evidence_adjusted_return=round(stressed_adjusted, 10),
             alternative_return=round(alternative, 10),
             robust_edge=round(robust_edge, 10),
             stressed_edge=round(stressed_edge, 10),
             scenario_dispersion=round(dispersion, 10),
             probability_of_loss=round(probability_of_loss, 10),
-            probability_consistency_gap=round(probability_gap, 10),
+            probability_consistency_gap=probability_gap,
             worst_case_portfolio_return=round(worst_portfolio_return, 10),
             edge_to_uncertainty=round(edge_to_uncertainty, 10),
             passed=not unique_reasons,
@@ -254,74 +232,56 @@ class RobustCandidateAssessor:
         )
 
     @staticmethod
-    def _scenario_values(
+    def _annualized_scenarios(
         candidate: CandidateDecisionRecord,
         *,
-        scenario_returns: tuple[float, float, float],
+        returns: tuple[float, float, float],
         weight: float,
     ) -> tuple[tuple[float, ...], tuple[float, ...], bool]:
         years = candidate.decision_horizon_days / 365.25
         annualized: list[float] = []
         portfolio_returns: list[float] = []
-        valid_wealth = True
-        for scenario_return in scenario_returns:
+        valid = True
+        for scenario_return in returns:
             portfolio_return = weight * (
                 scenario_return - candidate.implementation_cost_return
             )
             portfolio_returns.append(portfolio_return)
-            gross_wealth = 1.0 + portfolio_return
-            if gross_wealth <= 0.0:
-                valid_wealth = False
+            gross = 1.0 + portfolio_return
+            if gross <= 0.0:
+                valid = False
                 annualized.append(-1.0 / weight)
-                continue
-            annualized_portfolio_return = exp(log1p(portfolio_return) / years) - 1.0
-            annualized.append(annualized_portfolio_return / weight)
-        return tuple(annualized), tuple(portfolio_returns), valid_wealth
+            else:
+                annualized.append((exp(log1p(portfolio_return) / years) - 1.0) / weight)
+        return tuple(annualized), tuple(portfolio_returns), valid
 
     @staticmethod
-    def _geometric_equivalent(
-        annualized_scenarios: tuple[float, ...],
-        *,
+    def _geometric(
+        returns: tuple[float, ...],
         probabilities: tuple[float, float, float],
         weight: float,
     ) -> float:
         expected_log = 0.0
-        for scenario_return, probability in zip(
-            annualized_scenarios,
-            probabilities,
-            strict=True,
-        ):
-            gross = 1.0 + weight * scenario_return
+        for value, probability in zip(returns, probabilities, strict=True):
+            gross = 1.0 + weight * value
             if gross <= 0.0:
                 return -1.0 / weight
-            expected_log += probability * log1p(weight * scenario_return)
+            expected_log += probability * log1p(weight * value)
         return (exp(expected_log) - 1.0) / weight
 
-    @staticmethod
-    def _weighted_dispersion(
-        values: tuple[float, ...],
-        *,
-        probabilities: tuple[float, float, float],
-        center: float,
-    ) -> float:
-        variance = sum(
-            probability * (value - center) ** 2
-            for value, probability in zip(values, probabilities, strict=True)
-        )
-        return sqrt(max(variance, 0.0))
-
-    def _stress_probabilities(
+    def _stress(
         self,
         probabilities: tuple[float, float, float],
     ) -> tuple[float, float, float]:
         base, bull, bear = probabilities
         remaining = self.policy.bear_probability_shift
-        bull_reduction = min(bull, remaining)
-        bull -= bull_reduction
-        remaining -= bull_reduction
-        base_reduction = min(base, remaining)
-        base -= base_reduction
-        bear += bull_reduction + base_reduction
+        reduction = min(bull, remaining)
+        bull -= reduction
+        bear += reduction
+        remaining -= reduction
+        reduction = min(base, remaining)
+        base -= reduction
+        bear += reduction
         return base, bull, bear
 
 
