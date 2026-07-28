@@ -1,0 +1,263 @@
++                robustness.evidence_adjusted_return
++                < self.policy.minimum_net_expected_return
++            ):
++                reason = "The holding no longer clears the absolute ownership-return hurdle."
++            elif reconciliation.expected_downside < self.policy.maximum_expected_downside:
++                reason = "The reconciled downside exceeds the ownership-risk limit."
++            else:
++                reason = "The cost-adjusted expected return is negative but does not meet the full-exit threshold."
++            return CIOAction.REDUCE, target, reason
++
++        if not universe.direct_recommendation_allowed:
++            if current_weight > 0.0:
++                return (
++                    CIOAction.HOLD,
++                    None,
++                    "The instrument remains under review, but policy prohibits new or increased direct exposure: "
++                    + "; ".join(universe.reasons),
++                )
+             return (
+                 CIOAction.INSUFFICIENT_EVIDENCE,
+                 None,
+-                "Evidence quality or one required evidence dimension is below policy threshold.",
++                "The instrument is not eligible for new or increased exposure: "
++                + "; ".join(universe.reasons),
+             )
++
+         if specialists.implementation_blocks:
+             return (
+                 CIOAction.WATCH,
+@@ -240,109 +351,167 @@ class ChiefInvestmentOfficer:
+                 + roles,
+             )
+ 
+-        expected_return = reconciliation.expected_return
+-        holding_risk_return = min(candidate.net_expected_return, expected_return)
+-        opportunity_edge = round(
+-            expected_return - reconciliation.horizon_alternative_return,
+-            8,
+-        )
+-        current_weight = candidate.current_portfolio_weight
+-        portfolio = specialists.portfolio_recommendation
+-
+-        if current_weight > 0.0 and holding_risk_return <= self.policy.exit_threshold:
+-            return (
+-                CIOAction.EXIT,
+-                0.0,
+-                "The cost-adjusted expected return is materially negative and no evidence veto prevents action.",
+-            )
+-        if current_weight > 0.0 and holding_risk_return < self.policy.reduce_threshold:
+-            target = portfolio.recommended_position_weight
+-            if target is None or target >= current_weight:
+-                target = round(current_weight / 2.0, 8)
+-            return (
+-                CIOAction.REDUCE,
+-                target,
+-                "The cost-adjusted expected return is negative but does not meet the full-exit threshold.",
+-            )
+-        if not universe.direct_recommendation_allowed:
++        if (
++            robustness.effective_probability_of_success
++            < self.policy.minimum_probability_of_success
++        ):
++            if current_weight > 0.0:
++                return (
++                    CIOAction.HOLD,
++                    None,
++                    "The reconciled distribution does not support increasing the holding at the required success probability.",
++                )
+             return (
+-                CIOAction.INSUFFICIENT_EVIDENCE,
++                CIOAction.NO_SUPERIOR_OPPORTUNITY,
+                 None,
+-                "The instrument is not eligible for new or increased exposure: "
+-                + "; ".join(universe.reasons),
++                "The reconciled probability of outperforming the best alternative is below policy.",
+             )
+-        if reconciliation.probability_of_success < 0.50:
++        if (
++            robustness.evidence_adjusted_return
++            < self.policy.minimum_net_expected_return
++        ):
+             if current_weight > 0.0:
+                 return (
+                     CIOAction.HOLD,
+                     None,
+-                    "The reconciled distribution does not yet support increasing the holding.",
++                    "The holding remains owned, but its reconciled return does not clear the absolute hurdle for additional capital.",
+                 )
+             return (
+                 CIOAction.NO_SUPERIOR_OPPORTUNITY,
+                 None,
+-                "The reconciled probability of outperforming the best alternative is below 50%.",
++                "The specialist-reconciled return is below the horizon-normalized absolute return hurdle.",
++            )
++        if reconciliation.expected_downside < self.policy.maximum_expected_downside:
++            if current_weight > 0.0:
++                return CIOAction.HOLD, None, "Downside risk blocks any increase."
++            return (
++                CIOAction.NO_SUPERIOR_OPPORTUNITY,
++                None,
++                "The reconciled downside exceeds the acquisition limit.",
+             )
+         if opportunity_edge < self.policy.minimum_opportunity_edge:
+             if current_weight > 0.0:
+                 return (
+                     CIOAction.HOLD,
+                     None,
+-                    "The candidate does not improve materially on the recorded alternative use of capital.",
++                    "The holding is not sufficiently superior to justify more capital, but the replacement gap is not large enough to force a reduction.",
+                 )
+             return (
+                 CIOAction.NO_SUPERIOR_OPPORTUNITY,
+                 None,
+                 "The candidate does not offer a material cost-adjusted advantage over the recorded alternative.",
+             )
+-        if not robustness.passed:
+-            reason = (
+-                "Positive allocation is blocked by robust decision controls: "
+-                + "; ".join(robustness.reasons)
+-            )
+-            if current_weight > 0.0:
+-                return CIOAction.HOLD, None, reason
+-            return CIOAction.NO_SUPERIOR_OPPORTUNITY, None, reason
++
+         if portfolio.recommended_position_weight is None:
+             return (
+                 CIOAction.WATCH,
+                 None,
+-                "The opportunity is analytically qualified but lacks a feasible portfolio-size proposal.",
++                "The opportunity is analytically qualified but lacks a feasible portfolio-size ceiling.",
++            )
++        if portfolio.funding_source is None and (
++            current_weight == 0.0
++            or portfolio.recommended_position_weight > current_weight
++        ):
++            return (
++                CIOAction.WATCH,
++                None,
++                "A positive allocation is not authorized until its exact funding source is identified.",
+             )
+-        target = min(
++
++        feasible_cap = min(
+             portfolio.recommended_position_weight,
+             candidate.maximum_position_weight,
+         )
+-        if target <= 0.0:
++        if feasible_cap <= 0.0:
+             return (
+                 CIOAction.WATCH,
+                 None,
+                 "The portfolio analysis did not identify a positive feasible allocation.",
+             )
++        robust_cap = self.robust_assessor.maximum_supported_weight(
++            robustness_candidate,
++            alternative_return=candidate.opportunity_cost_return,
++            maximum_weight=feasible_cap,
++        )
++        if robust_cap <= 0.0:
++            reason = (
++                "Positive allocation is blocked by robust decision controls: "
++                + "; ".join(robustness.reasons)
++            )
++            if current_weight > 0.0:
++                target = min(current_weight, robust_cap)
++                if target < current_weight - self.policy.material_weight_change:
++                    return CIOAction.REDUCE, target, reason
++                return CIOAction.HOLD, None, reason
++            return CIOAction.NO_SUPERIOR_OPPORTUNITY, None, reason
++
++        target = self._confidence_aware_target(
++            robust_cap=robust_cap,
++            robustness=robustness,
++            reconciliation=reconciliation,
++        )
++        if target <= 0.0:
++            return (
++                CIOAction.WATCH,
++                None,
++                "The reconciled uncertainty supports no positive allocation.",
++            )
+         if current_weight == 0.0:
+             return (
+                 CIOAction.BUY,
+                 target,
+-                "The candidate clears evidence, arithmetic return, geometric compounding, uncertainty, adverse-probability stress, opportunity, and implementation thresholds.",
++                "The candidate clears evidence, absolute return, geometric compounding, uncertainty, downside, opportunity, funding, and implementation thresholds at the final target weight.",
+             )
+         difference = target - current_weight
+         if difference >= self.policy.material_weight_change:
+             return (
+                 CIOAction.INCREASE,
+                 target,
+-                "The candidate remains a robust superior use of capital and the feasible target is materially above the current weight.",
++                "The holding remains a robust superior use of capital and the final reconciled target is materially above the current weight.",
+             )
+         if difference <= -self.policy.material_weight_change:
+             return (
+                 CIOAction.REDUCE,
+                 target,
+-                "The thesis remains valid, but the feasible target is materially below the current weight.",
++                "The thesis remains valid, but final reconciled robustness supports a materially smaller position.",
+             )
+         return (
+             CIOAction.NO_MATERIAL_CHANGE,
+             None,
+-            "The candidate remains valid but the feasible allocation change is immaterial.",
++            "The holding remains valid and the final reconciled allocation change is immaterial.",
++        )
++
++    @staticmethod
++    def _conservative_reduction_target(
++        *,
++        current_weight: float,
++        proposed_weight: float | None,
++    ) -> float:
++        target = round(current_weight / 2.0, 8)
++        if proposed_weight is not None and proposed_weight < current_weight:
++            target = min(target, proposed_weight)
++        return round(max(0.0, target), 8)
++
++    def _confidence_aware_target(
++        self,
++        *,
++        robust_cap: float,
++        robustness: RobustCandidateAssessment,
++        reconciliation: ReturnReconciliation,
++    ) -> float:
++        evidence_scale = min(1.0, robustness.evidence_reliability / 0.85)
++        probability_scale = min(
++            1.0,
++            reconciliation.probability_of_success
++            / max(self.policy.minimum_probability_of_success + 0.05, 0.60),
++        )
++        edge_scale = min(
++            1.0,
++            max(0.0, robustness.robust_edge)
++            / max(self.policy.minimum_opportunity_edge * 2.0, 0.02),
+         )
++        scale = min(evidence_scale, probability_scale, edge_scale)
++        return round(max(0.0, robust_cap * scale), 8)
+ 
+     def _confidence(
+         self,
+diff --git a/committee/specialists.py b/committee/specialists.py
+index d32480d..e954b85 100644
+--- a/committee/specialists.py
++++ b/committee/specialists.py
+@@ -663,7 +663,7 @@ class IndependentSpecialistService:
+             independent_first_pass=True,
+             position=position,
+             conclusion=(
+-                "The candidate has a feasible portfolio expression."
++                "The candidate has a feasible portfolio ceiling and identified funding source; final sizing remains with the CIO after reconciliation."
+                 if proposed is not None and not blocks
+                 else "No fully feasible portfolio expression is currently available."
+             ),
+diff --git a/opportunity/engine.py b/opportunity/engine.py
+index d84cfc6..547f24e 100644
+--- a/opportunity/engine.py
++++ b/opportunity/engine.py
+@@ -30,7 +30,7 @@ def _clamp(value: float) -> float:
+ class OpportunityQualificationPolicy:
