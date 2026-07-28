@@ -60,7 +60,7 @@ class _FeeAwarePaperApi:
                 {
                     "symbol": "BTC/USD",
                     "qty": str(self.available),
-                    "qty_available": str(self.available),
+                    "qty_available": None,
                 }
             )
         if method == "POST" and url.endswith("/v2/orders"):
@@ -122,7 +122,7 @@ def _activation() -> ProviderActivation:
     return ProviderActivation.from_dict(payload)
 
 
-def test_round_trip_sells_net_available_crypto_and_preserves_opening_position(
+def test_round_trip_falls_back_to_total_quantity_and_preserves_opening_position(
     tmp_path: Path,
 ) -> None:
     api = _FeeAwarePaperApi()
