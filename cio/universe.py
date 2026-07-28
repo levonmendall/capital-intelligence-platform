@@ -1,20 +1,21 @@
-"""Versioned direct-recommendation universe policy.
+"""Universal liquid-market recommendation policy with capability-based gates.
 
-Broader markets may supply evidence, but only eligible instruments may proceed to
-a direct CIO portfolio action. Crypto, FX, and international equity identities
-remain intelligence-only unless an explicit point-in-time asset-class approval
-proves the complete paper-operating capability stack.
+Every classified liquid public-market family may compete for capital. Core U.S.
+securities retain direct policy eligibility; all other market families and complex
+wrappers require an explicit point-in-time approval of their complete paper
+operating capability stack.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 
 from cio.models import CandidateAssetClass, CandidateInstrument
 from governance.asset_class_scope import (
-    EXPANSION_ASSET_CLASSES,
+    CORE_POLICY_ASSET_CLASSES,
+    UNIVERSAL_GOVERNED_ASSET_CLASSES,
     AssetClassApprovalState,
     AssetClassScopeAuthority,
 )
@@ -76,7 +77,7 @@ class UniverseAssessment:
 
 @dataclass(frozen=True, slots=True)
 class RecommendationUniversePolicy:
-    """Focused scope with explicit liquidity, coverage, and expansion governance."""
+    """Universal scope with explicit liquidity, coverage, and capability governance."""
 
     version: str = "recommendation-universe.v1"
     minimum_average_daily_dollar_volume: float = 5_000_000.0
@@ -134,14 +135,15 @@ class RecommendationUniversePolicy:
         approval_identifier: str | None = None
         approval_state: AssetClassApprovalState | None = None
         asset_class_policy_version: str | None = None
-        if instrument.asset_class in EXPANSION_ASSET_CLASSES:
+        governed_asset_class = self._governed_asset_class(instrument)
+        if governed_asset_class is not None:
             if self.asset_class_authority is None:
                 return UniverseAssessment(
                     instrument_id=instrument.instrument_id,
                     disposition=UniverseDisposition.INTELLIGENCE_ONLY,
                     policy_version=self.version,
                     reasons=(
-                        "expanded asset class is intelligence-only because no configured governance authority exists",
+                        "instrument is intelligence-only because its market or economic exposure lacks a configured capability authority",
                     ),
                 )
             if as_of is None:
@@ -150,15 +152,17 @@ class RecommendationUniversePolicy:
                     disposition=UniverseDisposition.INTELLIGENCE_ONLY,
                     policy_version=self.version,
                     reasons=(
-                        "expanded asset class is intelligence-only because eligibility requires a point-in-time evaluation timestamp",
+                        "instrument is intelligence-only because capability eligibility requires a point-in-time timestamp",
                     ),
-                    asset_class_policy_version=(
-                        self.asset_class_authority.policy_version
-                    ),
+                    asset_class_policy_version=self.asset_class_authority.policy_version,
                 )
+            governed_instrument = (
+                instrument
+                if instrument.asset_class is governed_asset_class
+                else replace(instrument, asset_class=governed_asset_class)
+            )
             scope = self.asset_class_authority.assess(
-                instrument,
-                evaluated_at=as_of,
+                governed_instrument, evaluated_at=as_of
             )
             approval_identifier = scope.approval_identifier
             approval_state = scope.approval_state
@@ -168,9 +172,7 @@ class RecommendationUniversePolicy:
                     instrument_id=instrument.instrument_id,
                     disposition=UniverseDisposition.INTELLIGENCE_ONLY,
                     policy_version=self.version,
-                    reasons=tuple(
-                        f"intelligence-only: {reason}" for reason in scope.reasons
-                    ),
+                    reasons=tuple(f"intelligence-only: {reason}" for reason in scope.reasons),
                     asset_class_approval_identifier=approval_identifier,
                     asset_class_approval_state=approval_state,
                     asset_class_policy_version=asset_class_policy_version,
@@ -238,6 +240,27 @@ class RecommendationUniversePolicy:
             )
         return assessment
 
+    @staticmethod
+    def _governed_asset_class(
+        instrument: CandidateInstrument,
+    ) -> CandidateAssetClass | None:
+        exposure = instrument.economic_exposure_class
+        if exposure in UNIVERSAL_GOVERNED_ASSET_CLASSES:
+            return exposure
+        if instrument.asset_class in UNIVERSAL_GOVERNED_ASSET_CLASSES:
+            return instrument.asset_class
+        complex_wrapper = (
+            instrument.asset_class in CORE_POLICY_ASSET_CLASSES
+            and (
+                instrument.uses_derivatives
+                or abs(instrument.leverage_multiplier) > 1.0 + 1e-9
+                or instrument.instrument_type in {"future", "perpetual", "option"}
+                or (instrument.replication_method or "").lower()
+                in {"synthetic", "swap", "derivative"}
+            )
+        )
+        return CandidateAssetClass.ALTERNATIVE if complex_wrapper else None
+
     def _scope_reasons(
         self,
         instrument: CandidateInstrument,
@@ -272,7 +295,7 @@ class RecommendationUniversePolicy:
             return ()
 
         return (
-            f"{instrument.asset_class.value} is intelligence-only under the active recommendation policy",
+            f"{instrument.asset_class.value} is unclassified or outside the supported liquid public-market taxonomy",
         )
 
 

@@ -443,6 +443,12 @@ def _instrument_payload(value: Instrument) -> dict[str, Any]:
         "quote_currency": value.quote_currency,
         "settlement_currency": value.settlement_currency,
         "network": value.network,
+        "economic_exposure": (
+            None if value.economic_exposure is None else value.economic_exposure.value
+        ),
+        "leverage_multiplier": value.leverage_multiplier,
+        "uses_derivatives": value.uses_derivatives,
+        "replication_method": value.replication_method,
     }
 
 
@@ -460,6 +466,14 @@ def _instrument_from_payload(payload: dict[str, Any]) -> Instrument:
         quote_currency=payload.get("quote_currency"),
         settlement_currency=payload.get("settlement_currency"),
         network=payload.get("network"),
+        economic_exposure=(
+            None
+            if payload.get("economic_exposure") is None
+            else AssetClass(str(payload["economic_exposure"]))
+        ),
+        leverage_multiplier=float(payload.get("leverage_multiplier", 1.0)),
+        uses_derivatives=bool(payload.get("uses_derivatives", False)),
+        replication_method=payload.get("replication_method"),
     )
 
 

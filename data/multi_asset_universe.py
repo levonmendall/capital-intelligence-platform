@@ -13,7 +13,7 @@ from datetime import datetime
 
 from cio.models import CandidateAssetClass, CandidateInstrument
 from cio.universe import RecommendationUniversePolicy, UniverseDisposition
-from data.security import AssetClass
+from data.security import AssetClass, InstrumentType
 from data.security_master import (
     PointInTimeSecurityMasterSnapshot,
     SecurityMasterError,
@@ -97,6 +97,7 @@ class MultiAssetUniverseBuilder:
                 name=instrument.name,
                 asset_class=_candidate_asset_class(
                     instrument.asset_class,
+                    instrument_type=instrument.instrument_type,
                     country_code=listing.country_code,
                     metric=metric,
                 ),
@@ -119,6 +120,22 @@ class MultiAssetUniverseBuilder:
                 ),
                 is_us_treasury=metric.is_us_treasury,
                 effective_duration_years=metric.effective_duration_years,
+                instrument_type=instrument.instrument_type.value,
+                economic_exposure_class=_candidate_exposure_class(
+                    instrument.economic_exposure,
+                    country_code=listing.country_code,
+                ),
+                leverage_multiplier=instrument.leverage_multiplier,
+                uses_derivatives=(
+                    instrument.uses_derivatives
+                    or instrument.instrument_type
+                    in {
+                        InstrumentType.FUTURE,
+                        InstrumentType.PERPETUAL,
+                        InstrumentType.OPTION,
+                    }
+                ),
+                replication_method=instrument.replication_method,
             )
             assessment = self.policy.evaluate(candidate, as_of=snapshot.as_of)
             if assessment.disposition is not UniverseDisposition.DIRECT_RECOMMENDATION:
@@ -179,10 +196,15 @@ class MultiAssetUniverseBuilder:
 def _candidate_asset_class(
     asset_class: AssetClass,
     *,
+    instrument_type: InstrumentType,
     country_code: str,
     metric: SecurityMasterMarketMetrics,
 ) -> CandidateAssetClass:
     country = country_code.strip().upper()
+    if instrument_type is InstrumentType.OPTION:
+        return CandidateAssetClass.OPTION
+    if instrument_type in {InstrumentType.FUTURE, InstrumentType.PERPETUAL}:
+        return CandidateAssetClass.FUTURE
     if asset_class is AssetClass.EQUITY:
         return (
             CandidateAssetClass.US_EQUITY
@@ -205,7 +227,40 @@ def _candidate_asset_class(
         return CandidateAssetClass.FX
     if asset_class is AssetClass.CRYPTO:
         return CandidateAssetClass.CRYPTO
+    if asset_class is AssetClass.REAL_ESTATE:
+        return CandidateAssetClass.REAL_ESTATE
+    if asset_class is AssetClass.VOLATILITY:
+        return CandidateAssetClass.VOLATILITY
+    if asset_class is AssetClass.ALTERNATIVE:
+        return CandidateAssetClass.ALTERNATIVE
     return CandidateAssetClass.OTHER
+
+
+def _candidate_exposure_class(
+    asset_class: AssetClass | None,
+    *,
+    country_code: str,
+) -> CandidateAssetClass | None:
+    if asset_class is None or asset_class is AssetClass.UNKNOWN:
+        return None
+    country = country_code.strip().upper()
+    if asset_class is AssetClass.EQUITY:
+        return (
+            CandidateAssetClass.US_EQUITY
+            if country == "US"
+            else CandidateAssetClass.INTERNATIONAL_EQUITY
+        )
+    if asset_class is AssetClass.ETF:
+        return CandidateAssetClass.US_ETF if country == "US" else CandidateAssetClass.INTERNATIONAL_EQUITY
+    return {
+        AssetClass.FIXED_INCOME: CandidateAssetClass.FIXED_INCOME,
+        AssetClass.COMMODITY: CandidateAssetClass.COMMODITY,
+        AssetClass.FX: CandidateAssetClass.FX,
+        AssetClass.CRYPTO: CandidateAssetClass.CRYPTO,
+        AssetClass.REAL_ESTATE: CandidateAssetClass.REAL_ESTATE,
+        AssetClass.VOLATILITY: CandidateAssetClass.VOLATILITY,
+        AssetClass.ALTERNATIVE: CandidateAssetClass.ALTERNATIVE,
+    }.get(asset_class, CandidateAssetClass.OTHER)
 
 
 def _earliest(

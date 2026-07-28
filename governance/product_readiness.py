@@ -71,6 +71,13 @@ class ProductTestReadinessEvidence:
     crypto_market_ready: bool
     spot_fx_market_ready: bool
     international_equity_market_ready: bool
+    fixed_income_market_ready: bool
+    commodity_market_ready: bool
+    real_estate_market_ready: bool
+    futures_market_ready: bool
+    options_market_ready: bool
+    volatility_market_ready: bool
+    alternative_market_ready: bool
     certified_data_ready: bool
     complete_screening_ready: bool
     production_context_ready: bool
@@ -98,7 +105,11 @@ class ProductTestReadinessEvidence:
                 object.__setattr__(self, field_name, _text(value, field_name=field_name))
         boolean_fields = (
             "development_remains_open", "core_us_market_ready", "crypto_market_ready",
-            "spot_fx_market_ready", "international_equity_market_ready", "certified_data_ready",
+            "spot_fx_market_ready", "international_equity_market_ready",
+            "fixed_income_market_ready", "commodity_market_ready",
+            "real_estate_market_ready", "futures_market_ready",
+            "options_market_ready", "volatility_market_ready",
+            "alternative_market_ready", "certified_data_ready",
             "complete_screening_ready", "production_context_ready", "portfolio_construction_ready",
             "paper_execution_ready", "thesis_and_evaluation_ready", "daily_operations_ready",
             "four_screen_product_ready", "security_suite_ready", "resilience_campaign_ready",
@@ -128,6 +139,13 @@ class ProductTestReadinessEvidence:
             "crypto_market_ready": self.crypto_market_ready,
             "spot_fx_market_ready": self.spot_fx_market_ready,
             "international_equity_market_ready": self.international_equity_market_ready,
+            "fixed_income_market_ready": self.fixed_income_market_ready,
+            "commodity_market_ready": self.commodity_market_ready,
+            "real_estate_market_ready": self.real_estate_market_ready,
+            "futures_market_ready": self.futures_market_ready,
+            "options_market_ready": self.options_market_ready,
+            "volatility_market_ready": self.volatility_market_ready,
+            "alternative_market_ready": self.alternative_market_ready,
             "certified_data_ready": self.certified_data_ready,
             "complete_screening_ready": self.complete_screening_ready,
             "production_context_ready": self.production_context_ready,
@@ -148,9 +166,22 @@ class ProductTestReadinessEvidence:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "ProductTestReadinessEvidence":
+        normalized = dict(payload)
+        # Older persisted evidence predated universal-market readiness gates.
+        # Missing fields fail closed rather than being inferred as ready.
+        for field_name in (
+            "fixed_income_market_ready",
+            "commodity_market_ready",
+            "real_estate_market_ready",
+            "futures_market_ready",
+            "options_market_ready",
+            "volatility_market_ready",
+            "alternative_market_ready",
+        ):
+            normalized.setdefault(field_name, False)
         return cls(
             **{
-                **dict(payload),
+                **normalized,
                 "assessed_at": datetime.fromisoformat(str(payload["assessed_at"])),
                 "evidence_identifiers": tuple(payload["evidence_identifiers"]),
                 "open_development_items": tuple(payload.get("open_development_items", ())),
@@ -195,7 +226,11 @@ class ProductTestReadinessEvaluator:
 
     _REQUIRED_FLAGS = (
         "core_us_market_ready", "crypto_market_ready", "spot_fx_market_ready",
-        "international_equity_market_ready", "certified_data_ready", "complete_screening_ready",
+        "international_equity_market_ready", "fixed_income_market_ready",
+        "commodity_market_ready", "real_estate_market_ready",
+        "futures_market_ready", "options_market_ready",
+        "volatility_market_ready", "alternative_market_ready",
+        "certified_data_ready", "complete_screening_ready",
         "production_context_ready", "portfolio_construction_ready", "paper_execution_ready",
         "thesis_and_evaluation_ready", "daily_operations_ready", "four_screen_product_ready",
         "security_suite_ready", "resilience_campaign_ready", "paper_only_disclosures_ready",

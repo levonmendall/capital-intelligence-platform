@@ -1,4 +1,4 @@
-"""Record and inspect governed crypto, FX, and global-market approvals."""
+"""Record and inspect universal governed liquid-market approvals."""
 
 from __future__ import annotations
 
@@ -69,18 +69,45 @@ def _status_payload(
     authority = AssetClassScopeAuthority(store)
     markets: list[dict[str, Any]] = []
     for asset_class in sorted(EXPANSION_ASSET_CLASSES, key=lambda item: item.value):
-        approval = store.active(asset_class, evaluated_at=evaluated_at)
+        approvals = store.active_approvals(asset_class, evaluated_at=evaluated_at)
+        approval = approvals[-1] if approvals else None
         markets.append(
             {
                 "asset_class": asset_class.value,
                 "active_approval_identifier": (
                     None if approval is None else approval.identifier
                 ),
+                "active_approval_identifiers": [
+                    item.identifier for item in approvals
+                ],
+                "active_capability_profiles": [
+                    {
+                        "approval_identifier": item.identifier,
+                        "approval_state": item.profile.state.value,
+                        "paper_eligible": item.profile.paper_eligible,
+                        "allowed_instrument_types": list(
+                            item.profile.allowed_instrument_types
+                        ),
+                        "approved_venues": list(item.profile.approved_venues),
+                        "approved_country_codes": list(
+                            item.profile.approved_country_codes
+                        ),
+                        "maximum_gross_leverage": (
+                            item.profile.maximum_gross_leverage
+                        ),
+                        "effective_at": item.effective_at.isoformat(),
+                        "expires_at": item.expires_at.isoformat(),
+                        "missing_paper_capabilities": list(
+                            item.profile.missing_paper_capabilities
+                        ),
+                    }
+                    for item in approvals
+                ],
                 "approval_state": (
                     None if approval is None else approval.profile.state.value
                 ),
-                "paper_eligible": (
-                    False if approval is None else approval.profile.paper_eligible
+                "paper_eligible": any(
+                    item.profile.paper_eligible for item in approvals
                 ),
                 "effective_at": (
                     None if approval is None else approval.effective_at.isoformat()
@@ -121,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--asset-class",
         choices=tuple(item.value for item in EXPANSION_ASSET_CLASSES),
-        help="Filter approval history to one expansion asset class.",
+        help="Filter approval history to one governed non-core asset class.",
     )
     parser.add_argument("--evaluated-at")
     return parser

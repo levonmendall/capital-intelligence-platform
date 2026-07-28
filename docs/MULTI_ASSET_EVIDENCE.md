@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The comparable `CandidateDecisionRecord` remains the common decision schema. Crypto, foreign exchange, and international listed markets additionally require a complete asset-specific evidence packet before a qualified candidate can enter the scheduled CIO context.
+The comparable `CandidateDecisionRecord` remains the common decision schema. Every classified non-core liquid public market additionally requires a complete asset-specific evidence packet before a qualified candidate can enter the scheduled CIO context.
 
 The packet is an evidence boundary, not another recommendation engine. It cannot add candidates, change rankings, size positions, issue a CIO action, or infer missing inputs.
 

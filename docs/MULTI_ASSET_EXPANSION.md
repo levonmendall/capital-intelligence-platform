@@ -1,144 +1,96 @@
-# Governed Multi-Asset Expansion
+# Universal Governed Market Scope
 
 ## Governing rule
 
-> **Every recommendation is compared against all other available uses of capital, implemented at the portfolio level, continuously monitored against an explicit thesis, and evaluated afterward using the exact evidence available when the decision was made.**
+> **Every classified liquid public market may compete for capital, but no individual instrument may receive paper capital until its exact point-in-time implementation capability is certified.**
 
-## Product objective
+The sole mandate remains `COMPOUNDING`. Asset classes do not create separate portfolios, objectives, committees, or user-selected strategies.
 
-Crypto, foreign exchange, and global listed markets extend the opportunity set under the same sole `COMPOUNDING` mandate. They do not create a crypto mandate, currency mandate, global mandate, tactical mandate, or user-selectable investment philosophy.
+## Universal availability
 
-Development remains open. The investment process is not frozen and the product is not declared test ready by this expansion foundation.
+The governed paper-allocation taxonomy includes:
 
-## Authority boundary
+- U.S. and international equities and listed funds;
+- sovereign, agency, municipal, investment-grade, high-yield, and other public fixed income;
+- cash and cash equivalents;
+- commodities and precious metals;
+- foreign exchange;
+- crypto and digital assets;
+- listed real estate and infrastructure;
+- futures and other exchange-traded contracts;
+- listed options;
+- volatility instruments; and
+- other classified liquid public alternatives.
 
-An asset class may appear in identity, market-data, macro, or Environment evidence without being eligible for a portfolio recommendation. Direct paper recommendation requires an active, unexpired `AssetClassApproval` with state `paper_eligible`.
+`OTHER` is not an investable catch-all. An instrument must first be classified into a governed economic exposure and instrument structure. Private, stale-priced, inaccessible, or materially illiquid assets remain outside direct paper execution until the platform can represent their economics honestly.
 
-The approval must prove the complete asset-specific capability stack:
+## Capability—not asset-class—boundary
 
-- point-in-time identity and venue history;
-- licensed and certified market data;
-- valuation methodology;
-- expected-return methodology;
-- liquidity methodology;
-- transaction-cost and slippage methodology;
-- portfolio risk and exposure methodology;
-- paper-execution methodology;
-- custody and settlement representation;
-- living-thesis methodology;
-- outcome-evaluation methodology;
-- approved venues and jurisdictions;
-- supported quote currencies and USD conversion boundary;
-- source identifiers, versions, limitations, and governance record.
+Core plain U.S. equities, plain U.S. ETFs, cash, and short-duration Treasury equivalents retain direct policy eligibility. Every non-core market and every complex wrapper requires an active, unexpired `AssetClassApproval` with state `paper_eligible`.
 
-A symbol, provider response, model output, or new enum value is never sufficient approval.
+The approval proves:
 
-## Lifecycle states
+- point-in-time identity, venue, contract, and corporate-action history;
+- licensed and certified prices, quotes, liquidity, and reference data;
+- valuation and expected-return methodology;
+- risk, concentration, correlation, leverage, and margin methodology;
+- transaction-cost, slippage, carry, roll, and financing methodology;
+- paper execution, market sessions, holidays, halts, and reconciliation;
+- custody, clearing, settlement, currency, tax, and collateral representation;
+- contract lifecycle, expiration, exercise, assignment, delivery, and roll behavior where applicable;
+- living-thesis monitoring and point-in-time outcome evaluation; and
+- approved instrument types, leverage limits, venues, jurisdictions, quote currencies, source versions, and limitations.
+
+A U.S.-listed wrapper does not bypass the governance of its economic exposure. Leveraged, inverse, synthetic, derivative-based, crypto, commodity, volatility, or alternative ETFs are routed to the corresponding capability approval.
+
+## Instrument states
 
 | State | Permitted use |
 | --- | --- |
 | `evidence_only` | Environment and cross-market evidence only |
-| `research_approved` | Offline and shadow research; no CIO action |
-| `paper_eligible` | May enter canonical screening and paper portfolio decisions when all other gates pass |
-| `suspended` | New screening and actions blocked while evidence is investigated |
-| `revoked` | Direct recommendation prohibited |
+| `research_approved` | Offline and shadow decisions; no active CIO action |
+| `paper_eligible` | May enter certified screening, construction, and paper execution when every instrument gate passes |
+| `suspended` | New exposure blocked while evidence or implementation is investigated |
+| `revoked` | New exposure prohibited; an owned position may be reduce-only under certified execution lineage |
 
-Only `paper_eligible` authorizes direct recommendation scope. It does not authorize live trading.
+## Asset-specific operating requirements
 
-## Initial market boundaries
+### Equities, listed funds, real estate, and listed alternatives
 
-### Crypto
+Require primary-listing identity, local calendars, corporate actions, accounting and filing boundaries, local taxes, FX attribution, settlement, market access, and duplicate-exposure detection.
 
-Initial direct scope is spot exposure only. Perpetuals, futures, options, leverage, staking, lending, yield products, privacy assets, and decentralized-finance protocols remain evidence-only until separately governed.
+### Fixed income
 
-Required implementation characteristics include:
+Require instrument terms, accrued interest, clean and dirty pricing, yield, duration, convexity, ratings, calls, defaults, recovery, dealer liquidity, calendars, settlement, and benchmark lineage.
 
-- continuous 24/7 market sessions;
-- venue-specific identity and quote lineage;
-- qualified digital-asset custody representation;
-- fragmentation-aware liquidity and cost modeling;
-- stablecoin and quote-currency risk treatment;
-- on-chain/network and fork/event evidence;
-- venue outage, halt, withdrawal, and depeg controls; and
-- no assumption that repeated vendor reports are independent facts.
+### Commodities and futures
+
+Require spot-versus-futures separation, contract multipliers, margin, collateral, curve shape, carry, roll, expiry, delivery, position limits, session breaks, and underlying-market evidence. Initial paper futures are fully collateralized and cannot create portfolio leverage above the certified limit.
 
 ### Foreign exchange
 
-Initial direct scope is unlevered spot FX paper exposure. Forwards, swaps, options, carry leverage, margin, and emerging-market convertibility risk remain evidence-only until separately governed.
+Require explicit base and quote currencies, point-in-time USD translation, settlement and rollover, fixing and holiday controls, spread and liquidity windows, convertibility, and no hidden notional leverage.
 
-Required implementation characteristics include:
+### Crypto
 
-- continuous 24/5 session behavior;
-- explicit base and quote currencies;
-- USD portfolio translation at the same point-in-time cutoff;
-- prime-broker style paper settlement representation;
-- rollover, holiday, fixing, spread, and liquidity-window controls;
-- central-bank, rates, balance-of-payments, and funding evidence; and
-- no hidden leverage through notional sizing.
+Require 24/7 sessions, network and token identity, multi-venue validation, qualified custody representation, fragmentation-aware liquidity, stablecoin and quote-currency risk, forks and network events, and venue outage, withdrawal, halt, and depeg controls.
 
-### Global listed markets
+### Options and volatility
 
-Initial direct scope is liquid developed-market listed equities and listed funds on explicitly approved exchanges. Local derivatives, depositary-receipt substitutions, frontier markets, restricted shares, and inaccessible listings remain evidence-only until separately governed.
-
-Required implementation characteristics include:
-
-- issuer-to-listing identity across venues and currencies;
-- historical listings, delistings, corporate actions, and benchmark membership;
-- local exchange calendars and holidays;
-- local accounting and filing availability boundaries;
-- withholding-tax and transaction-tax assumptions where applicable;
-- currency translation and FX contribution attribution;
-- local liquidity, settlement, and market-access controls; and
-- duplicate economic-exposure detection across primary listings and depositary receipts.
+Require contract identity, multiplier, strike, expiry, exercise style, settlement, implied-volatility surface, Greeks, maximum loss, margin, assignment and exercise, corporate-action adjustment, liquidity, path dependency, and lifecycle/roll controls. Initial option paper allocation is limited to long, premium-funded, defined-risk positions until short-option and portfolio-margin authorities are separately certified.
 
 ## Canonical software authority
 
-`SQLiteAssetClassApprovalStore` is the append-only governance record. It uses a contiguous SHA-256 chain and database triggers that reject updates and deletes.
+- `SQLiteAssetClassApprovalStore` is the append-only, SHA-256-chained governance record.
+- `AssetClassScopeAuthority` resolves the latest active capability approval and validates instrument type, leverage, venue, and jurisdiction.
+- `RecommendationUniversePolicy` routes all classified non-core instruments and complex wrappers through that authority.
+- `MultiAssetUniverseBuilder` preserves instrument structure, economic exposure, leverage, derivative use, and approval lineage.
+- `GovernedMultiAssetConstructionEngine` enforces class, currency, leverage, margin, and defined-risk constraints without changing CIO ranking.
+- `MultiAssetPaperExecutionOrchestrator` applies asset-aware sessions, contract multipliers, quotes, FX, costs, ownership, and reconciliation.
+- `CertifiedExecutionEligibilityAuthority` binds execution to the exact certified universe publication and permits unsupported legacy holdings only to be reduced or closed.
 
-`AssetClassScopeAuthority` resolves the latest active approval at the decision timestamp and checks the candidate venue and jurisdiction. Missing, expired, incomplete, suspended, revoked, mismatched, or integrity-invalid approval blocks direct recommendation.
+## Readiness boundary
 
-`RecommendationUniversePolicy` preserves the existing U.S. equity, U.S. ETF, and short-duration Treasury scope. Expanded markets require the additional asset-class authority and an explicit point-in-time timestamp.
+All classified market families are available in the product architecture, but availability is not fabricated readiness. A market whose providers, models, approvals, or operating evidence are incomplete remains blocked at the instrument gate. The version-controlled data manifest intentionally declares every classified market `paper_eligible` in scope while its disabled provider requirements keep the overall readiness report blocked until onboarding and certification are real.
 
-`MultiAssetUniverseBuilder` classifies international listings separately from U.S. listings and preserves the asset-class approval identifier in universe membership lineage. It returns the same downstream universe contracts so screening, production context, specialists, CIO synthesis, construction, thesis monitoring, and evaluation do not gain competing authority.
-
-## Governance command
-
-Append a reviewed approval:
-
-```bash
-python run_asset_class_governance.py \
-  --approval reviewed-crypto-paper-approval.json
-```
-
-Inspect active market status:
-
-```bash
-python run_asset_class_governance.py --status
-```
-
-The status response permanently reports:
-
-```text
- development_open = true
- test_ready = false
- real_money_authorized = false
-```
-
-Those fields cannot be changed merely by appending an asset-class approval.
-
-## Required follow-on vertical slices
-
-The governance foundation does not fabricate provider access or certify models. Each market still requires a complete vertical slice:
-
-1. licensed provider onboarding and certification;
-2. point-in-time security-master coverage;
-3. market, fundamental, macro, and asset-specific evidence normalization;
-4. asset-specific candidate construction;
-5. complete-universe screening and reconciliation;
-6. cross-currency canonical portfolio valuation;
-7. asset-specific paper execution and reconciliation;
-8. thesis monitoring and outcome evaluation;
-9. resilience exercises;
-10. technical burn-in and human governance review.
-
-The product remains in development until all selected market slices satisfy those gates together.
+No approval or readiness status authorizes live trading, leverage beyond its certified limit, or performance claims.

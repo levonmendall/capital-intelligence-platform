@@ -1,4 +1,4 @@
-"""Point-in-time return attribution for governed expanded markets.
+"""Point-in-time return attribution for universal governed markets.
 
 The canonical evaluator already owns selection, sizing, timing, implementation
 cost, alternative comparison, and process quality.  This module adds the missing
@@ -166,7 +166,7 @@ class MultiAssetReturnObservation:
             raise TypeError("asset_class must be CandidateAssetClass")
         if self.asset_class not in EXPANSION_ASSET_CLASSES:
             raise ValueError(
-                "multi-asset attribution is limited to crypto, FX, and international equity"
+                "multi-asset attribution is limited to classified governed non-core markets"
             )
         object.__setattr__(
             self,

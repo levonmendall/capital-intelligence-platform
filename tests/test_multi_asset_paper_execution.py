@@ -1,4 +1,4 @@
-"""Integration tests for crypto, FX, and global paper execution."""
+"""Integration tests for universal governed paper execution."""
 
 from __future__ import annotations
 
@@ -45,11 +45,15 @@ INSTRUMENT_IDENTIFIERS = {
     "BTC-USD": "instrument:crypto:COINBASE:BTC-USD",
     "EURUSD": "instrument:fx:EBS:EURUSD",
     "SHEL": "instrument:international_equity:LSE:SHEL",
+    "ESZ6": "instrument:future:CME:ESZ6",
+    "SPY-C": "instrument:option:CBOE:SPY-C",
 }
 APPROVAL_IDENTIFIERS = {
     "BTC-USD": "approval:crypto:paper-v1",
     "EURUSD": "approval:fx:paper-v1",
     "SHEL": "approval:international_equity:paper-v1",
+    "ESZ6": "approval:future:paper-v1",
+    "SPY-C": "approval:option:paper-v1",
 }
 
 
@@ -341,6 +345,93 @@ def test_global_equity_preserves_local_price_and_point_in_time_fx(
         (profile.symbol, TradingSessionModel.EXCHANGE_LOCAL)
     ]
 
+
+
+def test_fully_collateralized_future_uses_contract_multiplier_and_reconciles(
+    tmp_path: Path,
+) -> None:
+    profile = _profile(
+        "ESZ6",
+        CandidateAssetClass.FUTURE,
+        venue="CME",
+    )
+    profile = replace(
+        profile,
+        instrument_type="future",
+        contract_multiplier=50.0,
+        contract_model_version="contract:future:v1",
+        margin_model_version="margin:fully-collateralized:v1",
+        lifecycle_model_version="lifecycle:future:v1",
+        roll_model_version="roll:future:v1",
+        trading_session_model=TradingSessionModel.EXCHANGE_LOCAL,
+    )
+    quote = _quote(profile, bid=100.0, ask=100.0, last=100.0)
+    sessions = SessionProvider()
+    orchestrator, _, _, portfolio = _orchestrator(
+        tmp_path,
+        sessions,
+        QuoteProvider({profile.symbol: quote}),
+    )
+
+    batch = orchestrator.execute(
+        construction=_construction(_buy(profile.symbol, 0.05)),
+        decision_identifier="decision:future:1",
+        portfolio=portfolio,
+        profiles={profile.symbol: profile},
+        as_of=AS_OF,
+    )
+
+    fill = batch.fills[0]
+    position = batch.ending_snapshot.positions[0]
+    assert fill.quantity == 1
+    assert fill.contract_multiplier == 50
+    assert fill.gross_amount_base == 5_000
+    assert position.contract_multiplier == 50
+    assert position.market_value == 5_000
+    assert batch.reconciliation.reconciled is True
+    assert sessions.calls == [(profile.symbol, TradingSessionModel.EXCHANGE_LOCAL)]
+
+
+def test_long_option_is_premium_funded_with_defined_risk(
+    tmp_path: Path,
+) -> None:
+    profile = _profile(
+        "SPY-C",
+        CandidateAssetClass.OPTION,
+        venue="CBOE",
+    )
+    profile = replace(
+        profile,
+        instrument_type="option",
+        contract_multiplier=100.0,
+        defined_risk=True,
+        contract_model_version="contract:option:v1",
+        margin_model_version="margin:long-premium:v1",
+        lifecycle_model_version="lifecycle:option:v1",
+        trading_session_model=TradingSessionModel.EXCHANGE_LOCAL,
+    )
+    quote = _quote(profile, bid=5.0, ask=5.0, last=5.0)
+    orchestrator, _, _, portfolio = _orchestrator(
+        tmp_path,
+        SessionProvider(),
+        QuoteProvider({profile.symbol: quote}),
+    )
+
+    batch = orchestrator.execute(
+        construction=_construction(_buy(profile.symbol, 0.05)),
+        decision_identifier="decision:option:1",
+        portfolio=portfolio,
+        profiles={profile.symbol: profile},
+        as_of=AS_OF,
+    )
+
+    fill = batch.fills[0]
+    assert fill.quantity == 10
+    assert fill.contract_multiplier == 100
+    assert fill.gross_amount_base == 5_000
+    assert batch.ending_snapshot.positions[0].market_value == 5_000
+    assert batch.ending_snapshot.cash_amount >= 0
+    assert batch.reconciliation.reconciled is True
 
 def test_closed_fx_session_holds_without_requesting_quote(tmp_path: Path) -> None:
     profile = _profile("EURUSD", CandidateAssetClass.FX, venue="EBS")
