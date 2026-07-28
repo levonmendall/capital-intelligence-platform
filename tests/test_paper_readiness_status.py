@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from governance.data_readiness import DataDomain
+from governance.provider_activation import (
+    ProviderActivation,
+    SQLiteProviderActivationStore,
+)
 from operations.execution_calibration import (
     ExecutionCalibrationReport,
     ExecutionCalibrationState,
@@ -36,18 +41,44 @@ def _evidence(tmp_path: Path):
     _write_json(
         requirements,
         {
-            "schema_version": "paper-readiness-provider-requirements.v1",
+            "schema_version": "paper-readiness-provider-requirements.v2",
             "providers": [
                 {
                     "name": "test provider",
+                    "provider_identifier": "test-provider",
                     "required": True,
+                    "activation_required": True,
                     "credential_environments": ["TEST_PROVIDER_TOKEN"],
                     "binding_environments": ["TEST_PROVIDER_BINDINGS"],
-                    "license_approval_environment": "TEST_PROVIDER_LICENSE",
-                    "certification_environment": "TEST_PROVIDER_CERTIFICATION",
                 }
             ],
         },
+    )
+    activation_store = SQLiteProviderActivationStore(tmp_path / "provider-activation.db")
+    activation_store.append(
+        ProviderActivation(
+            identifier="provider-activation:test-provider:1",
+            provider_identifier="test-provider",
+            provider_name="Test Provider",
+            enabled=True,
+            approved_domains=(DataDomain.MARKET_PRICES,),
+            authoritative_domains=(DataDomain.MARKET_PRICES,),
+            usage_rights_approved=True,
+            point_in_time_supported=True,
+            historical_coverage_supported=True,
+            provenance_complete=True,
+            service_level_defined=True,
+            storage_and_backup_approved=True,
+            derived_analytics_approved=True,
+            paper_simulation_approved=True,
+            certification_identifier="provider-certification:test",
+            approved_by="data-governance:test",
+            rationale="Synthetic readiness-status acceptance evidence.",
+            approved_at=NOW - timedelta(days=1),
+            effective_at=NOW - timedelta(hours=1),
+            expires_at=NOW + timedelta(days=1),
+            source_identifiers=("license-approval:test",),
+        )
     )
     reconciliation = ProviderReconciliationReport(
         identifier="provider-reconciliation:test",
@@ -85,17 +116,23 @@ def _evidence(tmp_path: Path):
     )
     calibration_path = tmp_path / "calibration.json"
     _write_json(calibration_path, calibration.to_dict())
-    return requirements, binding, reconciliation_path, calibration_path
+    return (
+        requirements,
+        binding,
+        activation_store.path,
+        reconciliation_path,
+        calibration_path,
+    )
 
 
 def test_status_completes_only_supported_objectives(tmp_path: Path) -> None:
-    requirements, binding, reconciliation, calibration = _evidence(tmp_path)
+    requirements, binding, activation_db, reconciliation, calibration = _evidence(
+        tmp_path
+    )
     assembler = PaperReadinessStatusAssembler(
         {
             "TEST_PROVIDER_TOKEN": "secret-value-not-reported",
             "TEST_PROVIDER_BINDINGS": str(binding),
-            "TEST_PROVIDER_LICENSE": "license-approval:test",
-            "TEST_PROVIDER_CERTIFICATION": "provider-certification:test",
         }
     )
 
@@ -107,13 +144,18 @@ def test_status_completes_only_supported_objectives(tmp_path: Path) -> None:
         code_version=CODE,
         inputs=PaperReadinessStatusInputs(
             provider_requirements=requirements,
+            provider_activation_database=activation_db,
             reconciliation_reports=(reconciliation,),
             execution_calibration_report=calibration,
         ),
     )
     by_name = {item.name: item for item in report.objectives}
 
-    assert by_name["licensed_and_certified_market_data_providers"].complete
+    provider_objective = by_name["licensed_and_certified_market_data_providers"]
+    assert provider_objective.complete
+    assert "provider-activation:test-provider:1" in (
+        provider_objective.evidence_identifiers
+    )
     assert by_name["completed_backfills_and_reconciliation"].complete
     assert by_name["execution_price_and_cost_calibration"].complete
     assert by_name["reviewed_production_bindings_and_credentials"].state is (
@@ -135,7 +177,7 @@ def test_status_cli_fails_closed_without_operating_evidence(
     tmp_path: Path,
     capsys,
 ) -> None:
-    requirements, _, _, _ = _evidence(tmp_path)
+    requirements, _, _, _, _ = _evidence(tmp_path)
 
     exit_code = status_main(
         (
@@ -149,6 +191,8 @@ def test_status_cli_fails_closed_without_operating_evidence(
             NOW.isoformat(),
             "--provider-requirements",
             str(requirements),
+            "--provider-activation-database",
+            str(tmp_path / "empty-provider-activation.db"),
             "--stage-binding-database",
             str(tmp_path / "stage-binding.db"),
             "--campaign-database",
