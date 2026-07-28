@@ -23,6 +23,7 @@ from providers.alpaca_paper import (
     AlpacaPaperClient,
     AlpacaPaperProviderError,
     AlpacaPaperSettings,
+    create_alpaca_paper_client,
 )
 
 
@@ -353,6 +354,7 @@ def assess_free_paper_pilot_readiness(
         raise TypeError("universe must be FreePaperPilotUniverse")
     if not isinstance(client, AlpacaPaperClient):
         raise TypeError("client must be AlpacaPaperClient")
+    dynamic_evaluation_time = evaluated_at is None
     now = evaluated_at or datetime.now(timezone.utc)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("evaluated_at must be timezone-aware")
@@ -402,20 +404,37 @@ def assess_free_paper_pilot_readiness(
     if len(validated) == len(universe.instruments):
         try:
             quotes = client.latest_quotes(validated)
+            if dynamic_evaluation_time:
+                # Live readiness is evaluated after the provider response arrives.
+                # Explicit point-in-time evaluations remain strict and immutable.
+                now = datetime.now(timezone.utc)
             maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)
+            maximum_future_skew = (
+                timedelta(seconds=5) if dynamic_evaluation_time else timedelta(0)
+            )
             for symbol in validated:
                 quote = quotes[symbol]
                 bid = float(quote["bp"])
                 ask = float(quote["ap"])
-                if bid <= 0.0 or ask <= 0.0 or ask < bid:
-                    raise ValueError(f"{symbol} quote is invalid or crossed")
+                if bid <= 0.0 or ask <= 0.0:
+                    if market_open:
+                        raise ValueError(f"{symbol} quote is not executable")
+                    warnings.append(
+                        f"{symbol}: closed-market IEX top of book is not executable; execution remains held"
+                    )
+                elif ask < bid:
+                    raise ValueError(f"{symbol} quote is crossed")
                 observed = datetime.fromisoformat(
                     str(quote["t"]).replace("Z", "+00:00")
                 )
                 if observed.tzinfo is None or observed.utcoffset() is None:
                     raise ValueError(f"{symbol} quote timestamp lacks an offset")
-                if observed > now:
+                if observed > now + maximum_future_skew:
                     raise ValueError(f"{symbol} quote is future-known")
+                if observed > now:
+                    warnings.append(
+                        f"{symbol}: quote timestamp is within the 5-second provider clock tolerance"
+                    )
                 quote_times.append((symbol, observed.isoformat()))
                 if market_open and now - observed > maximum_age:
                     blockers.append(
@@ -502,7 +521,7 @@ def write_pilot_profiles(
 
 
 def default_alpaca_client() -> AlpacaPaperClient:
-    return AlpacaPaperClient(AlpacaPaperSettings.from_env())
+    return create_alpaca_paper_client()
 
 
 __all__ = [

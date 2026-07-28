@@ -20,6 +20,7 @@ from providers.alpaca_paper import (
     AlpacaPaperProviderError,
     AlpacaPaperQuoteProvider,
     AlpacaPaperSettings,
+    create_alpaca_paper_client,
 )
 
 
@@ -243,4 +244,143 @@ def test_common_alpaca_environment_aliases_are_supported(monkeypatch) -> None:
     assert settings.paper_base_url == "https://paper-api.alpaca.markets"
     assert settings.data_base_url == "https://data.alpaca.markets"
     assert settings.data_feed == "iex"
+
+def test_authenticated_pair_selection_uses_matching_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("APCA_API_KEY_ID", "wrong-key")
+    monkeypatch.setenv("ALPACA_API_KEY_ID", "matching-key")
+    monkeypatch.setenv("APCA_API_SECRET_KEY", "wrong-secret")
+    monkeypatch.setenv("ALPACA_API_SECRET_KEY", "matching-secret")
+
+    attempts: list[tuple[str, str]] = []
+
+    def authenticated_get(url: str, **kwargs: Any) -> _Response:
+        headers = kwargs["headers"]
+        pair = (headers["APCA-API-KEY-ID"], headers["APCA-API-SECRET-KEY"])
+        attempts.append(pair)
+        if pair == ("matching-key", "matching-secret") and url.endswith("/v2/account"):
+            return _Response({"status": "ACTIVE"})
+        return _Response({"message": "unauthorized"}, status_code=401)
+
+    client = create_alpaca_paper_client(http_get=authenticated_get)
+
+    assert client.settings.api_key_id == "matching-key"
+    assert client.settings.secret_key == "matching-secret"
+    assert attempts[-1] == ("matching-key", "matching-secret")
+    assert len(attempts) == 4
+
+def test_live_readiness_uses_post_response_time_for_quote_cutoff() -> None:
+    def current_quote_http_get(url: str, **kwargs: Any) -> _Response:
+        if url.endswith("/v2/stocks/quotes/latest"):
+            symbols = str(kwargs["params"]["symbols"]).split(",")
+            observed = datetime.now(timezone.utc).isoformat()
+            return _Response(
+                {
+                    "quotes": {
+                        symbol: {
+                            "bp": 99.9,
+                            "ap": 100.1,
+                            "bs": 500,
+                            "as": 400,
+                            "t": observed,
+                        }
+                        for symbol in symbols
+                    }
+                }
+            )
+        return _http_get(url, **kwargs)
+
+    universe = load_free_paper_pilot_universe(
+        ROOT / "config" / "free_paper_pilot_universe.json"
+    )
+    client = AlpacaPaperClient(
+        AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),
+        http_get=current_quote_http_get,
+    )
+
+    report = assess_free_paper_pilot_readiness(universe=universe, client=client)
+
+    assert report.configuration_ready
+    assert len(report.quote_timestamps) == 15
+    assert not any("future-known" in blocker for blocker in report.blockers)
+
+def test_closed_market_zero_top_of_book_holds_execution_without_blocking_configuration() -> None:
+    def closed_market_http_get(url: str, **kwargs: Any) -> _Response:
+        if url.endswith("/v2/clock"):
+            return _Response(
+                {
+                    "is_open": False,
+                    "timestamp": (NOW - timedelta(seconds=2)).isoformat(),
+                }
+            )
+        if url.endswith("/v2/stocks/quotes/latest"):
+            symbols = str(kwargs["params"]["symbols"]).split(",")
+            return _Response(
+                {
+                    "quotes": {
+                        symbol: {
+                            "bp": 0.0,
+                            "ap": 0.0,
+                            "bs": 0,
+                            "as": 0,
+                            "t": (NOW - timedelta(seconds=3)).isoformat(),
+                        }
+                        for symbol in symbols
+                    }
+                }
+            )
+        return _http_get(url, **kwargs)
+
+    universe = load_free_paper_pilot_universe(
+        ROOT / "config" / "free_paper_pilot_universe.json"
+    )
+    client = AlpacaPaperClient(
+        AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),
+        http_get=closed_market_http_get,
+    )
+
+    report = assess_free_paper_pilot_readiness(
+        universe=universe,
+        client=client,
+        evaluated_at=NOW,
+    )
+
+    assert report.configuration_ready
+    assert not report.execution_ready_now
+    assert not report.market_open
+    assert len(report.quote_timestamps) == 15
+    assert any("closed-market IEX top of book" in warning for warning in report.warnings)
+
+def test_live_readiness_allows_only_bounded_provider_clock_skew() -> None:
+    def skewed_quote_http_get(url: str, **kwargs: Any) -> _Response:
+        if url.endswith("/v2/stocks/quotes/latest"):
+            symbols = str(kwargs["params"]["symbols"]).split(",")
+            observed = (datetime.now(timezone.utc) + timedelta(seconds=2)).isoformat()
+            return _Response(
+                {
+                    "quotes": {
+                        symbol: {
+                            "bp": 99.9,
+                            "ap": 100.1,
+                            "bs": 500,
+                            "as": 400,
+                            "t": observed,
+                        }
+                        for symbol in symbols
+                    }
+                }
+            )
+        return _http_get(url, **kwargs)
+
+    universe = load_free_paper_pilot_universe(
+        ROOT / "config" / "free_paper_pilot_universe.json"
+    )
+    client = AlpacaPaperClient(
+        AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),
+        http_get=skewed_quote_http_get,
+    )
+
+    report = assess_free_paper_pilot_readiness(universe=universe, client=client)
+
+    assert report.configuration_ready
+    assert any("5-second provider clock tolerance" in warning for warning in report.warnings)
 

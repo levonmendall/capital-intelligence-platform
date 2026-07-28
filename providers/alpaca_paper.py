@@ -61,6 +61,20 @@ def _environment_value(*names: str, default: str = "") -> str:
     return default
 
 
+def _environment_values(*names: str) -> tuple[tuple[str, str], ...]:
+    """Return unique non-empty environment aliases while preserving priority."""
+
+    result: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for name in names:
+        value = os.getenv(name)
+        normalized = value.strip() if isinstance(value, str) else ""
+        if normalized and normalized not in seen:
+            result.append((name, normalized))
+            seen.add(normalized)
+    return tuple(result)
+
+
 def _timestamp(value: object, *, field_name: str) -> datetime:
     if not isinstance(value, str) or not value.strip():
         raise AlpacaPaperProviderError(f"{field_name} is unavailable")
@@ -99,6 +113,17 @@ class AlpacaPaperSettings:
         if self.timeout_seconds < 1:
             raise ValueError("timeout_seconds must be positive")
 
+    def validate_provider_scope(self) -> None:
+        host = (urlparse(self.paper_base_url).hostname or "").lower()
+        if host != "paper-api.alpaca.markets":
+            raise AlpacaPaperProviderError(
+                "APCA_API_BASE_URL must use the Alpaca paper endpoint; live brokerage endpoints are prohibited"
+            )
+        if self.data_feed.lower() != "iex":
+            raise AlpacaPaperProviderError(
+                "the free paper pilot requires APCA_DATA_FEED=iex"
+            )
+
     @classmethod
     def from_env(cls) -> "AlpacaPaperSettings":
         settings = cls(
@@ -129,16 +154,54 @@ class AlpacaPaperSettings:
                 default=DEFAULT_DATA_FEED,
             ),
         )
-        host = (urlparse(settings.paper_base_url).hostname or "").lower()
-        if host != "paper-api.alpaca.markets":
-            raise AlpacaPaperProviderError(
-                "APCA_API_BASE_URL must use the Alpaca paper endpoint; live brokerage endpoints are prohibited"
-            )
-        if settings.data_feed.lower() != "iex":
-            raise AlpacaPaperProviderError(
-                "the free paper pilot requires APCA_DATA_FEED=iex"
-            )
+        settings.validate_provider_scope()
         return settings
+
+    @classmethod
+    def candidates_from_env(cls) -> tuple[tuple[str, "AlpacaPaperSettings"], ...]:
+        keys = _environment_values(
+            "APCA_API_KEY_ID",
+            "ALPACA_API_KEY_ID",
+            "ALPACA_API_KEY",
+        )
+        secrets = _environment_values(
+            "APCA_API_SECRET_KEY",
+            "ALPACA_API_SECRET_KEY",
+            "ALPACA_SECRET_KEY",
+            "ALPACA_API_SECRET",
+        )
+        if not keys:
+            raise ValueError("no Alpaca paper API key ID is configured")
+        if not secrets:
+            raise ValueError("no Alpaca paper API secret is configured")
+        paper_base_url = _environment_value(
+            "APCA_API_BASE_URL",
+            "ALPACA_API_BASE_URL",
+            default=DEFAULT_PAPER_BASE_URL,
+        )
+        data_base_url = _environment_value(
+            "APCA_DATA_BASE_URL",
+            "ALPACA_DATA_BASE_URL",
+            default=DEFAULT_DATA_BASE_URL,
+        )
+        data_feed = _environment_value(
+            "APCA_DATA_FEED",
+            "ALPACA_DATA_FEED",
+            default=DEFAULT_DATA_FEED,
+        )
+        result: list[tuple[str, AlpacaPaperSettings]] = []
+        for key_name, key_value in keys:
+            for secret_name, secret_value in secrets:
+                settings = cls(
+                    api_key_id=key_value,
+                    secret_key=secret_value,
+                    paper_base_url=paper_base_url,
+                    data_base_url=data_base_url,
+                    data_feed=data_feed,
+                )
+                settings.validate_provider_scope()
+                result.append((f"{key_name}+{secret_name}", settings))
+        return tuple(result)
 
 
 class AlpacaPaperClient:
@@ -368,8 +431,21 @@ class AlpacaPaperQuoteProvider:
         return result
 
 
-def create_alpaca_paper_client() -> AlpacaPaperClient:
-    return AlpacaPaperClient(AlpacaPaperSettings.from_env())
+def create_alpaca_paper_client(
+    *,
+    http_get: Callable[..., Any] | None = None,
+) -> AlpacaPaperClient:
+    candidates = AlpacaPaperSettings.candidates_from_env()
+    for _label, settings in candidates:
+        client = AlpacaPaperClient(settings, http_get=http_get)
+        try:
+            client.account()
+        except AlpacaPaperProviderError:
+            continue
+        return client
+    raise AlpacaPaperProviderError(
+        f"no configured Alpaca paper credential pair authenticated ({len(candidates)} combinations attempted)"
+    )
 
 
 def create_alpaca_paper_session_provider() -> AlpacaPaperSessionProvider:

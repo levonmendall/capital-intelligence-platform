@@ -11,7 +11,6 @@ on:
       - "run_free_paper_pilot_readiness.py"
   push:
     branches:
-      - pr-166-free-paper-pilot
       - main
     paths:
       - ".github/workflows/free-paper-pilot-readiness.yml"
@@ -34,8 +33,13 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       CAPITAL_INTELLIGENCE_ENVIRONMENT: development
-      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID || secrets.ALPACA_API_KEY_ID || secrets.ALPACA_API_KEY }}
-      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY || secrets.ALPACA_API_SECRET_KEY || secrets.ALPACA_SECRET_KEY || secrets.ALPACA_API_SECRET }}
+      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+      ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+      ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
       APCA_API_BASE_URL: https://paper-api.alpaca.markets
       APCA_DATA_BASE_URL: https://data.alpaca.markets
       APCA_DATA_FEED: iex
@@ -55,18 +59,20 @@ jobs:
       - name: Install locked runtime dependencies
         run: pip install --require-hashes -r requirements.lock
 
-      - name: Require both Alpaca paper credentials
+      - name: Require Alpaca paper credential candidates
         shell: bash
         run: |
-          if [ -z "${APCA_API_KEY_ID}" ]; then
-            echo "Missing Alpaca paper key secret. Supported names: APCA_API_KEY_ID, ALPACA_API_KEY_ID, or ALPACA_API_KEY."
+          if [ -z "${APCA_API_KEY_ID}${ALPACA_API_KEY_ID}${ALPACA_API_KEY}" ]; then
+            echo "Missing Alpaca paper key ID candidate."
             exit 2
           fi
-          if [ -z "${APCA_API_SECRET_KEY}" ]; then
-            echo "Missing Alpaca paper secret. Supported names: APCA_API_SECRET_KEY, ALPACA_API_SECRET_KEY, ALPACA_SECRET_KEY, or ALPACA_API_SECRET."
+          if [ -z "${APCA_API_SECRET_KEY}${ALPACA_API_SECRET_KEY}${ALPACA_SECRET_KEY}${ALPACA_API_SECRET}" ]; then
+            echo "Missing Alpaca paper secret candidate."
             exit 2
           fi
 
+      # The readiness command authenticates complete credential pairs and evaluates
+      # live quote timing only after the provider response has arrived.
       - name: Verify live paper account and free IEX pilot universe
         shell: bash
         run: |
