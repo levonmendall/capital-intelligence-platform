@@ -23,10 +23,11 @@ class _Response:
             "sequence": 123,
             "bids": [["6247.58", "6.3578146", 2]],
             "asks": [["6251.52", "2", 1]],
+            "time": "2026-07-28T12:00:01Z",
         }
 
 
-def test_coinbase_connectivity_probe_handles_missing_source_timestamp() -> None:
+def test_coinbase_connectivity_probe_uses_non_authoritative_probe_cutoff() -> None:
     binding = CryptoVenueBinding(
         instrument_id="instrument:crypto:btcusd",
         quote_currency="USD",
