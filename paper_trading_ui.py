@@ -27,13 +27,14 @@ def _identifier(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+@st.fragment(run_every="5s")
 def render_paper_decision_controls(
     *,
     construction: Mapping[str, Any] | None,
     briefing: Mapping[str, Any] | None,
     principal: object | None,
 ) -> None:
-    """Render consent for the exact displayed decision and construction.
+    """Render consent and poll the exact implementation until it resolves.
 
     Approval records intent only. The paper execution worker must separately pass
     provider, launch, runtime-control, portfolio-integrity, quote, and
@@ -91,14 +92,18 @@ def render_paper_decision_controls(
     if latest is not None:
         label = latest.state.value.replace("_", " ").title()
         if latest.state is PaperDecisionApprovalState.EXECUTED:
+            toast_key = f"paper-execution-complete:{latest.identifier}"
+            if not st.session_state.get(toast_key, False):
+                st.toast("Paper transaction completed.", icon="✅")
+                st.session_state[toast_key] = True
             st.success(
                 f"Paper implementation executed: {latest.execution_identifier}."
             )
             return
         if latest.active_at(now):
             st.success(
-                "Approved and queued for paper execution. The worker will act only "
-                "while every controlled-paper authority remains active."
+                "Approved and queued for paper execution. Status refreshes automatically "
+                "while this Portfolio screen remains open."
             )
             st.caption(f"Approval expires {latest.expires_at.isoformat()}.")
             if st.button(
