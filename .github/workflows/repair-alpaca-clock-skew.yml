@@ -1,5 +1,6 @@
 name: Repair Alpaca provider clock skew
 
+# One-time repair trigger.
 on:
   push:
     branches:
