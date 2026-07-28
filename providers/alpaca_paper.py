@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from typing import Any
 
@@ -314,7 +314,7 @@ class AlpacaPaperSessionProvider:
             raise ValueError("as_of must be timezone-aware")
         payload = self.client.clock()
         observed_at = _timestamp(payload.get("timestamp"), field_name="Alpaca clock timestamp")
-        if observed_at > as_of:
+        if observed_at > as_of + timedelta(seconds=5):
             raise AlpacaPaperProviderError(
                 "Alpaca clock is future-known relative to execution"
             )
@@ -327,7 +327,7 @@ class AlpacaPaperSessionProvider:
             instrument_identifier=profile.instrument_identifier,
             venue=profile.venue,
             session_model=session_model,
-            as_of=observed_at,
+            as_of=as_of,
             status=status,
             source_identifier="alpaca-paper-clock:v2",
         )
@@ -401,23 +401,24 @@ class AlpacaPaperQuoteProvider:
                 raw.get("t"),
                 field_name=f"{profile.symbol} quote timestamp",
             )
-            if observed_at > as_of:
+            if observed_at > as_of + timedelta(seconds=5):
                 raise AlpacaPaperProviderError(
                     f"{profile.symbol} quote is future-known relative to execution"
                 )
+            effective_observed_at = min(observed_at, as_of)
             available = min(bid * bid_size, ask * ask_size)
             result[profile.symbol] = MultiAssetQuote(
                 symbol=profile.symbol,
                 instrument_identifier=profile.instrument_identifier,
                 venue=profile.venue,
-                observed_at=observed_at,
+                observed_at=effective_observed_at,
                 bid=bid,
                 ask=ask,
                 last=(bid + ask) / 2.0,
                 available_base_notional=available,
                 price_currency="USD",
                 fx_rate_to_base=1.0,
-                fx_observed_at=observed_at,
+                fx_observed_at=effective_observed_at,
                 quote_source_identifier=(
                     f"alpaca-paper:{self.client.settings.data_feed.lower()}:latest-quote"
                 ),

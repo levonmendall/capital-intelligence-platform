@@ -16,6 +16,7 @@ import premium_ui as _premium_ui
 
 from navigation_ui import install as _install_navigation_ui
 from paper_trading_ui import render_paper_decision_controls
+from streamlit_paper_execution_worker import render_background_paper_execution_worker
 
 
 # Source-level architecture checks intentionally inspect the active entrypoint.
@@ -40,6 +41,7 @@ except (RuntimeError, OSError):
 except (RuntimeError, OSError):
 except (RuntimeError, OSError):
 render_paper_decision_controls(
+render_background_paper_execution_worker(
 authenticated_principal
 from core.portfolio import (
     get_mandate_details,
@@ -178,6 +180,21 @@ _source = _source.replace(
     + '        briefing=_latest("daily_cio_briefing"),\n'
     + '        principal=globals().get("authenticated_principal"),\n'
     + '    )\n',
+    1,
+)
+
+# Keep the execution worker alive on every Streamlit surface. It consumes only an
+# already-authenticated exact approval and is idempotent at the construction hash.
+_worker_anchor = "render_sidebar()\n"
+if _source.count(_worker_anchor) != 1:
+    raise RuntimeError("paper execution worker insertion point is unavailable")
+_source = _source.replace(
+    _worker_anchor,
+    _worker_anchor
+    + 'render_background_paper_execution_worker(\n'
+    + '    construction=_latest("portfolio_construction"),\n'
+    + '    briefing=_latest("daily_cio_briefing"),\n'
+    + ')\n',
     1,
 )
 

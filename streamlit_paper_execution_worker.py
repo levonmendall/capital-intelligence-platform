@@ -15,7 +15,7 @@ import os
 import time
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -314,7 +314,7 @@ def attempt_approved_paper_execution(
             previous_time = datetime.fromisoformat(str(prior["attempted_at"]))
         except (KeyError, TypeError, ValueError):
             previous_time = None
-        if previous_time is not None and timestamp - previous_time < __import__("datetime").timedelta(seconds=_retry_seconds()):
+        if previous_time is not None and timestamp - previous_time < timedelta(seconds=_retry_seconds()):
             return StreamlitPaperExecutionAttempt(
                 state=str(prior.get("state", "held")),
                 detail=str(prior.get("detail", "Paper execution is waiting for retry.")),
