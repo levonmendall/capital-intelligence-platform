@@ -24,32 +24,6 @@
       ]
     },
     {
-      "identifier": "alpaca_free_paper_pilot",
-      "enabled": true,
-      "required_environment_variables": [
-        "APCA_API_KEY_ID",
-        "APCA_API_SECRET_KEY"
-      ],
-      "optional_environment_variables": [
-        "APCA_API_BASE_URL",
-        "APCA_DATA_BASE_URL",
-        "APCA_DATA_FEED"
-      ],
-      "health_probe": {
-        "account": "/v2/account",
-        "clock": "/v2/clock",
-        "quotes": "/v2/stocks/quotes/latest",
-        "required_feed": "iex"
-      },
-      "readiness_authority": "free-paper-pilot-only",
-      "limitations": [
-        "The API base URL must be https://paper-api.alpaca.markets; live brokerage endpoints are rejected.",
-        "The free pilot uses IEX evidence and U.S.-listed wrappers only.",
-        "No Alpaca order-submission endpoint is implemented; fills remain internal simulations.",
-        "This provider does not satisfy institutional all-market readiness."
-      ]
-    },
-    {
       "identifier": "coinbase_exchange",
       "enabled": true,
       "required_environment_variables": [],
