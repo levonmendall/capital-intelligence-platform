@@ -173,6 +173,15 @@ def serialize_candidate_decision(
             ),
             "is_us_treasury": instrument.is_us_treasury,
             "effective_duration_years": instrument.effective_duration_years,
+            "instrument_type": instrument.instrument_type,
+            "economic_exposure_class": (
+                None
+                if instrument.economic_exposure_class is None
+                else instrument.economic_exposure_class.value
+            ),
+            "leverage_multiplier": instrument.leverage_multiplier,
+            "uses_derivatives": instrument.uses_derivatives,
+            "replication_method": instrument.replication_method,
         },
         "current_price": candidate.current_price,
         "decision_horizon_days": candidate.decision_horizon_days,

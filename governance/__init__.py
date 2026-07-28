@@ -1,7 +1,9 @@
 """Human-governed approval authorities surrounding the canonical CIO process."""
 
 from governance.asset_class_scope import (
+    CORE_POLICY_ASSET_CLASSES,
     EXPANSION_ASSET_CLASSES,
+    UNIVERSAL_GOVERNED_ASSET_CLASSES,
     AssetClassApproval,
     AssetClassApprovalState,
     AssetClassCapabilityProfile,
@@ -99,7 +101,9 @@ __all__ = [
     "MaximumDecisionInformationReadinessReport",
     "decision_information_manifest_from_payload",
     "load_maximum_decision_information_manifest",
+    "CORE_POLICY_ASSET_CLASSES",
     "EXPANSION_ASSET_CLASSES",
+    "UNIVERSAL_GOVERNED_ASSET_CLASSES",
     "AssetClassApproval",
     "AssetClassApprovalState",
     "AssetClassCapabilityProfile",

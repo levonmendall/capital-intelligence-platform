@@ -1,4 +1,4 @@
-"""Run governed paper execution across crypto, FX, and global listed markets."""
+"""Run governed paper execution across all classified liquid public markets."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Mapping, Sequence
 
 from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from cio import CandidateAssetClass
-from governance import AssetClassApprovalState
+from governance import AssetClassApprovalState, TradingSessionModel
 from portfolio import (
     MultiAssetExecutionPolicy,
     MultiAssetExecutionStatus,
@@ -120,6 +120,20 @@ def _profile(value: Mapping[str, Any]) -> MultiAssetInstrumentProfile:
                 value["custody_settlement_identifier"]
             ),
             execution_model_version=str(value["execution_model_version"]),
+            instrument_type=str(value.get("instrument_type", "spot")),
+            gross_leverage=float(value.get("gross_leverage", 1.0)),
+            defined_risk=bool(value.get("defined_risk", True)),
+            margin_required=bool(value.get("margin_required", False)),
+            contract_multiplier=float(value.get("contract_multiplier", 1.0)),
+            contract_model_version=(None if value.get("contract_model_version") is None else str(value["contract_model_version"])),
+            margin_model_version=(None if value.get("margin_model_version") is None else str(value["margin_model_version"])),
+            lifecycle_model_version=(None if value.get("lifecycle_model_version") is None else str(value["lifecycle_model_version"])),
+            roll_model_version=(None if value.get("roll_model_version") is None else str(value["roll_model_version"])),
+            trading_session_model=(
+                None
+                if value.get("trading_session_model") is None
+                else TradingSessionModel(str(value["trading_session_model"]))
+            ),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("invalid multi-asset instrument profile") from error

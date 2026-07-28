@@ -180,6 +180,34 @@ _REQUIRED_METRICS: dict[CandidateAssetClass, frozenset[str]] = {
             "implementation_cost_return",
         }
     ),
+    CandidateAssetClass.FIXED_INCOME: frozenset({
+        "yield_to_worst", "duration", "credit_spread",
+        "liquidity_score", "implementation_cost_return",
+    }),
+    CandidateAssetClass.COMMODITY: frozenset({
+        "valuation_signal", "supply_demand_signal", "curve_carry",
+        "liquidity_score", "implementation_cost_return",
+    }),
+    CandidateAssetClass.REAL_ESTATE: frozenset({
+        "fundamental_quality", "valuation_signal", "rate_sensitivity",
+        "liquidity_score", "implementation_cost_return",
+    }),
+    CandidateAssetClass.FUTURE: frozenset({
+        "underlying_return_signal", "curve_carry", "margin_requirement",
+        "liquidity_score", "implementation_cost_return",
+    }),
+    CandidateAssetClass.OPTION: frozenset({
+        "implied_volatility", "delta", "gamma", "theta", "maximum_loss",
+        "liquidity_score", "implementation_cost_return",
+    }),
+    CandidateAssetClass.VOLATILITY: frozenset({
+        "implied_realized_spread", "term_structure", "curve_carry",
+        "liquidity_score", "implementation_cost_return",
+    }),
+    CandidateAssetClass.ALTERNATIVE: frozenset({
+        "valuation_signal", "strategy_exposure", "liquidity_score",
+        "implementation_cost_return",
+    }),
 }
 
 
@@ -225,7 +253,7 @@ class AssetSpecificEvidencePacket:
         if not isinstance(self.asset_class, CandidateAssetClass):
             raise TypeError("asset_class must be CandidateAssetClass")
         if self.asset_class not in EXPANSION_ASSET_CLASSES:
-            raise ValueError("asset-specific packet is only for expanded markets")
+            raise ValueError("asset-specific packet is only for classified governed non-core markets")
         for field_name in ("as_of", "knowledge_cutoff", "fresh_until"):
             _aware(getattr(self, field_name), field_name=field_name)
         if self.knowledge_cutoff < self.as_of:

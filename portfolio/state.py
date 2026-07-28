@@ -145,6 +145,7 @@ class CanonicalPortfolioPosition:
     fx_rate_observed_at: datetime | None = None
     fx_rate_source_identifier: str | None = None
     average_cost_base: float | None = None
+    contract_multiplier: float = 1.0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -230,6 +231,15 @@ class CanonicalPortfolioPosition:
                     field_name="average_cost_base",
                 ),
             )
+        object.__setattr__(
+            self,
+            "contract_multiplier",
+            _number(
+                self.contract_multiplier,
+                field_name="contract_multiplier",
+                minimum=0.000000000001,
+            ),
+        )
         if self.quantity <= 0 or self.mark_price <= 0:
             raise ValueError(
                 "portfolio positions require positive quantity and mark_price"
@@ -245,11 +255,11 @@ class CanonicalPortfolioPosition:
 
     @property
     def local_cost_basis(self) -> float:
-        return round(self.quantity * self.average_cost, 8)
+        return round(self.quantity * self.average_cost * self.contract_multiplier, 8)
 
     @property
     def local_market_value(self) -> float:
-        return round(self.quantity * self.mark_price, 8)
+        return round(self.quantity * self.mark_price * self.contract_multiplier, 8)
 
     @property
     def cost_basis(self) -> float:
@@ -258,7 +268,7 @@ class CanonicalPortfolioPosition:
             if self.average_cost_base is None
             else self.average_cost_base
         )
-        return round(self.quantity * unit_cost, 8)
+        return round(self.quantity * unit_cost * self.contract_multiplier, 8)
 
     @property
     def market_value(self) -> float:
@@ -792,6 +802,7 @@ def position_to_dict(value: CanonicalPortfolioPosition) -> dict[str, Any]:
         ),
         "fx_rate_source_identifier": value.fx_rate_source_identifier,
         "average_cost_base": value.average_cost_base,
+        "contract_multiplier": value.contract_multiplier,
     }
 
 
@@ -900,6 +911,7 @@ def snapshot_from_dict(value: Mapping[str, Any]) -> CanonicalPortfolioSnapshot:
                         if item.get("average_cost_base") is None
                         else float(item["average_cost_base"])
                     ),
+                    contract_multiplier=float(item.get("contract_multiplier", 1.0)),
                 )
                 for item in value.get("positions", ())
             ),

@@ -1265,6 +1265,25 @@ def _candidate_from_payload(payload: Mapping[str, Any]) -> CandidateDecisionReco
             if instrument_payload.get("effective_duration_years") is None
             else float(instrument_payload["effective_duration_years"])
         ),
+        instrument_type=str(instrument_payload.get("instrument_type", "other")),
+        economic_exposure_class=(
+            None
+            if instrument_payload.get("economic_exposure_class") is None
+            else CandidateAssetClass(
+                str(instrument_payload["economic_exposure_class"])
+            )
+        ),
+        leverage_multiplier=float(
+            instrument_payload.get("leverage_multiplier", 1.0)
+        ),
+        uses_derivatives=bool(
+            instrument_payload.get("uses_derivatives", False)
+        ),
+        replication_method=(
+            None
+            if instrument_payload.get("replication_method") is None
+            else str(instrument_payload["replication_method"])
+        ),
     )
     quality = EvidenceQuality(
         reliability=float(quality_payload["reliability"]),

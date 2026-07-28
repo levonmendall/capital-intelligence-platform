@@ -35,6 +35,13 @@ class ReadinessGate(str, Enum):
     CRYPTO_MARKET = "crypto_market_ready"
     SPOT_FX_MARKET = "spot_fx_market_ready"
     INTERNATIONAL_EQUITY_MARKET = "international_equity_market_ready"
+    FIXED_INCOME_MARKET = "fixed_income_market_ready"
+    COMMODITY_MARKET = "commodity_market_ready"
+    REAL_ESTATE_MARKET = "real_estate_market_ready"
+    FUTURES_MARKET = "futures_market_ready"
+    OPTIONS_MARKET = "options_market_ready"
+    VOLATILITY_MARKET = "volatility_market_ready"
+    ALTERNATIVE_MARKET = "alternative_market_ready"
     CERTIFIED_DATA = "certified_data_ready"
     COMPLETE_SCREENING = "complete_screening_ready"
     PRODUCTION_CONTEXT = "production_context_ready"
@@ -532,9 +539,14 @@ class ProductTestReadinessEvidenceAssembler:
     _ASSET_GATES = {
         ReadinessGate.CRYPTO_MARKET: CandidateAssetClass.CRYPTO,
         ReadinessGate.SPOT_FX_MARKET: CandidateAssetClass.FX,
-        ReadinessGate.INTERNATIONAL_EQUITY_MARKET: (
-            CandidateAssetClass.INTERNATIONAL_EQUITY
-        ),
+        ReadinessGate.INTERNATIONAL_EQUITY_MARKET: CandidateAssetClass.INTERNATIONAL_EQUITY,
+        ReadinessGate.FIXED_INCOME_MARKET: CandidateAssetClass.FIXED_INCOME,
+        ReadinessGate.COMMODITY_MARKET: CandidateAssetClass.COMMODITY,
+        ReadinessGate.REAL_ESTATE_MARKET: CandidateAssetClass.REAL_ESTATE,
+        ReadinessGate.FUTURES_MARKET: CandidateAssetClass.FUTURE,
+        ReadinessGate.OPTIONS_MARKET: CandidateAssetClass.OPTION,
+        ReadinessGate.VOLATILITY_MARKET: CandidateAssetClass.VOLATILITY,
+        ReadinessGate.ALTERNATIVE_MARKET: CandidateAssetClass.ALTERNATIVE,
     }
 
     def __init__(
@@ -623,37 +635,50 @@ class ProductTestReadinessEvidenceAssembler:
 
             asset_class = self._ASSET_GATES.get(gate)
             if asset_class is not None:
-                approval = self.asset_class_store.active(
-                    asset_class,
-                    evaluated_at=timestamp,
+                approvals = self.asset_class_store.active_approvals(
+                    asset_class, evaluated_at=timestamp
                 )
-                if approval is None:
+                paper_eligible = tuple(
+                    approval for approval in approvals if approval.profile.paper_eligible
+                )
+                process_matching = tuple(
+                    approval
+                    for approval in paper_eligible
+                    if process is not None and approval.process_version == process
+                )
+                matching = tuple(
+                    approval
+                    for approval in process_matching
+                    if approval.code_version == code
+                )
+                if not approvals:
                     valid = False
                     development_items.append(
                         f"{gate.value}: active asset-class approval unavailable"
                     )
-                else:
-                    evidence_ids.extend(
-                        (
-                            approval.identifier,
-                            approval.governance_identifier,
-                            *approval.profile.source_identifiers,
-                        )
+                elif not paper_eligible:
+                    valid = False
+                    development_items.append(
+                        f"{gate.value}: asset class is not paper eligible"
                     )
-                    if not approval.profile.paper_eligible:
-                        valid = False
-                        development_items.append(
-                            f"{gate.value}: asset class is not paper eligible"
-                        )
-                    if process is None or approval.process_version != process:
-                        valid = False
-                        development_items.append(
-                            f"{gate.value}: asset approval process mismatch"
-                        )
-                    if approval.code_version != code:
-                        valid = False
-                        development_items.append(
-                            f"{gate.value}: asset approval code mismatch"
+                elif not process_matching:
+                    valid = False
+                    development_items.append(
+                        f"{gate.value}: asset approval process mismatch"
+                    )
+                elif not matching:
+                    valid = False
+                    development_items.append(
+                        f"{gate.value}: asset approval code mismatch"
+                    )
+                else:
+                    for approval in matching:
+                        evidence_ids.extend(
+                            (
+                                approval.identifier,
+                                approval.governance_identifier,
+                                *approval.profile.source_identifiers,
+                            )
                         )
             flags[gate.value] = valid
 
@@ -715,6 +740,13 @@ class ProductTestReadinessEvidenceAssembler:
             international_equity_market_ready=flags[
                 ReadinessGate.INTERNATIONAL_EQUITY_MARKET.value
             ],
+            fixed_income_market_ready=flags[ReadinessGate.FIXED_INCOME_MARKET.value],
+            commodity_market_ready=flags[ReadinessGate.COMMODITY_MARKET.value],
+            real_estate_market_ready=flags[ReadinessGate.REAL_ESTATE_MARKET.value],
+            futures_market_ready=flags[ReadinessGate.FUTURES_MARKET.value],
+            options_market_ready=flags[ReadinessGate.OPTIONS_MARKET.value],
+            volatility_market_ready=flags[ReadinessGate.VOLATILITY_MARKET.value],
+            alternative_market_ready=flags[ReadinessGate.ALTERNATIVE_MARKET.value],
             certified_data_ready=flags[ReadinessGate.CERTIFIED_DATA.value],
             complete_screening_ready=flags[ReadinessGate.COMPLETE_SCREENING.value],
             production_context_ready=flags[ReadinessGate.PRODUCTION_CONTEXT.value],

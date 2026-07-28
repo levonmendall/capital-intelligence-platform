@@ -2,14 +2,9 @@
 
 ## Purpose
 
-The controlled test scope considers every canonical asset-class category, but
-consideration does not imply execution authority. The version-controlled
-manifest at `config/all_markets_data_readiness.json` classifies each market as:
+The controlled test scope makes every classified liquid public-market family available for governed paper allocation. The version-controlled manifest at `config/all_markets_data_readiness.json` therefore declares every classified market `paper_eligible` in product scope. `other` remains prohibited because unclassified instruments cannot bypass identity and capability governance.
 
-- `paper_eligible` — may use data in simulated portfolio construction and execution;
-- `decision_relevant` — must be compared as an alternative use of capital;
-- `evidence_only` — may inform the Environment, specialists, and CIO but cannot create exposure; or
-- `prohibited` — must fail closed and cannot enter the decision process.
+`paper_eligible` is a scope declaration, not a readiness claim. A market still fails closed until every required provider, data domain, instrument capability, approval, and execution control is actually ready.
 
 The data-readiness gate is independent of asset-class approval. Data availability
 alone never makes a market investable, and an asset-class approval cannot bypass
@@ -122,19 +117,12 @@ For each external provider:
 7. Record the certification identifier and approved limitations in the manifest.
 8. Configure credentials through the deployment secret manager.
 9. Run `run_data_readiness.py` and retain its report as readiness evidence.
-10. Keep the market evidence-only until its separate asset-class capability and
-    execution approvals are active.
+10. Keep every affected instrument blocked until its separate capability and execution approvals are active.
 
 ## Current controlled-test scope
 
-The development manifest currently sets:
+The development manifest now places U.S. and international equities, cash, fixed income, commodities, FX, crypto, real estate, futures, options, volatility, and liquid alternatives in the intended governed paper scope. Only unclassified `other` instruments are prohibited.
 
-- U.S. equities, U.S. ETFs, and cash equivalents as intended paper-eligible markets;
-- broad fixed income as decision relevant;
-- international equities, commodities, spot FX, crypto, and liquid alternative
-  proxies as evidence only; and
-- options and unclassified instruments as prohibited.
+This does not claim that provider onboarding is complete. The default report remains blocked until the external data supply chain is selected, licensed, configured, historically backfilled, and certified for each market. Individual instruments also require active point-in-time capability approvals before they can enter the certified universe.
 
-These states are policy defaults, not claims that provider onboarding is
-complete. The default report remains blocked until the external data supply
-chain is selected, licensed, configured, and certified.
+Derivative markets additionally require certified contract, margin/collateral, and volatility-surface data.

@@ -24,7 +24,10 @@ class CandidateAssetClass(str, Enum):
     COMMODITY = "commodity"
     FX = "fx"
     CRYPTO = "crypto"
+    REAL_ESTATE = "real_estate"
+    FUTURE = "future"
     OPTION = "option"
+    VOLATILITY = "volatility"
     ALTERNATIVE = "alternative"
     OTHER = "other"
 
@@ -219,6 +222,11 @@ class CandidateInstrument:
     security_master_record_identifiers: tuple[str, ...]
     is_us_treasury: bool = False
     effective_duration_years: float | None = None
+    instrument_type: str = "other"
+    economic_exposure_class: CandidateAssetClass | None = None
+    leverage_multiplier: float = 1.0
+    uses_derivatives: bool = False
+    replication_method: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -291,6 +299,44 @@ class CandidateInstrument:
                     field_name="effective_duration_years",
                     minimum=0.0,
                 ),
+            )
+        object.__setattr__(
+            self,
+            "instrument_type",
+            _required_text(
+                self.instrument_type,
+                field_name="instrument_type",
+            ).lower(),
+        )
+        if self.economic_exposure_class is not None and not isinstance(
+            self.economic_exposure_class,
+            CandidateAssetClass,
+        ):
+            raise TypeError(
+                "economic_exposure_class must be a CandidateAssetClass"
+            )
+        object.__setattr__(
+            self,
+            "leverage_multiplier",
+            _finite(
+                self.leverage_multiplier,
+                field_name="leverage_multiplier",
+                minimum=-10.0,
+                maximum=10.0,
+            ),
+        )
+        if abs(self.leverage_multiplier) < 0.00000001:
+            raise ValueError("leverage_multiplier cannot be zero")
+        if not isinstance(self.uses_derivatives, bool):
+            raise TypeError("uses_derivatives must be a bool")
+        if self.replication_method is not None:
+            object.__setattr__(
+                self,
+                "replication_method",
+                _required_text(
+                    self.replication_method,
+                    field_name="replication_method",
+                ).lower(),
             )
 
 

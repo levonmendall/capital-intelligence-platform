@@ -40,17 +40,18 @@ The only active portfolio code is `COMPOUNDING`. Initialization creates one USD 
 
 Market data availability does not create recommendation authority. Every asset class has an explicit state.
 
-| Product state | Initial scope |
+| Product state | Universal scope |
 | --- | --- |
-| Required analysis | Global equities, government bonds, credit, cash equivalents, commodities, FX, crypto, real estate, options, volatility, and other liquid alternatives |
-| Direct paper allocation | Only instruments that pass point-in-time universe policy and every required asset-specific governance gate |
-| Controlled paper eligible | Crypto spot, unlevered spot FX, and approved international listed equities or funds, but only with active asset-class approval and complete provider, evidence, construction, execution, thesis, and evaluation coverage |
-| Evidence only | Forecasts, unapproved markets, research-only instruments, and cross-market observations that may inform Environment or specialist analysis but cannot produce a direct CIO action |
-| Prohibited | Live trading, leverage, margin, crypto derivatives, FX forwards or swaps, options, staking, lending, DeFi authority, synthetic notional multipliers, and any instrument without approved identity, custody, settlement, data, and execution controls |
+| Required analysis | Global equities, sovereign and corporate fixed income, cash, commodities, FX, crypto, real estate, futures, options, volatility, and other liquid alternatives |
+| Available for governed paper allocation | Every classified liquid public-market family; each instrument must pass point-in-time identity, data, valuation, expected-return, liquidity, risk, cost, execution, custody, settlement, lifecycle, thesis, and evaluation gates |
+| Core policy eligible | Plain, liquid U.S.-listed equities and ETFs plus cash and short-duration U.S. Treasury equivalents |
+| Capability governed | International equities, broad fixed income, commodities, FX, crypto, real estate, futures, options, volatility, alternatives, and complex or derivative-based wrappers |
+| Fail closed | Unclassified instruments, missing or expired approvals, unsupported leverage or contract structures, inaccessible or illiquid markets, and any incomplete capability stack |
+| Never authorized here | Live trading, broker submission, or real-money authority |
 
-Expanded-market approval is point-in-time, expiring, append-only, and fail closed. A symbol, provider response, forecast, or model score is never sufficient approval.
+Universal-market approval is point-in-time, expiring, append-only, and fail closed. A symbol, provider response, forecast, exchange listing, or model score is never sufficient approval. Market families are not categorically excluded; individual instruments remain unavailable until their exact implementation capability is certified.
 
-See [Governed multi-asset expansion](docs/MULTI_ASSET_EXPANSION.md).
+See [Universal governed market scope](docs/MULTI_ASSET_EXPANSION.md).
 
 ## The only active decision path
 

@@ -15,9 +15,7 @@ No state authorizes real money, broker connectivity, or performance claims.
 The baseline must prove readiness for:
 
 - the core U.S. market;
-- governed crypto spot;
-- governed unlevered spot FX;
-- governed international listed equities;
+- universal governed-market capability across international equities, fixed income, commodities, FX, crypto, real estate, futures, options, volatility, and liquid alternatives;
 - certified point-in-time data;
 - complete-universe screening;
 - production context assembly;
@@ -51,7 +49,7 @@ Every gate certification is bound to:
 - governing authority identifiers; and
 - limitations.
 
-Crypto, FX, and international-equity gates additionally require an active `paper_eligible` asset-class approval with the same process and code versions. A readiness certification cannot substitute for the asset-class governance authority.
+Every governed non-core market gate additionally requires an active `paper_eligible` asset-class approval with the same process and code versions. A readiness certification cannot substitute for the asset-class governance authority.
 
 The operational snapshot records unresolved critical incidents, data-integrity failures, reconciliation failures, and their source identifiers. A missing or stale snapshot forces daily-operations, security, and resilience gates to fail closed.
 
