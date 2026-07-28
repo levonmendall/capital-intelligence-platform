@@ -98,18 +98,16 @@ _authorized_names = (
     "get_trade_history",
 )
 if all(name in globals() for name in _authorized_names):
-    _source = _source.replace(
-        '''st.set_page_config(
-    page_title="Capital Intelligence Platform",
-    page_icon="📊",
-    layout="wide",
-)
-
-
-''',
-        "",
-        1,
+    _page_config_block = "".join(
+        (
+            "st.set_page_config(\n",
+            '    page_title="Capital Intelligence Platform",\n',
+            '    page_icon="📊",\n',
+            '    layout="wide",\n',
+            ")\n\n\n",
+        )
     )
+    _source = _source.replace(_page_config_block, "", 1)
     _source = _source.replace(
         '''from core.portfolio import (
     get_mandate_details,
