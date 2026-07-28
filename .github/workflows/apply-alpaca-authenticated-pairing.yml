@@ -29,16 +29,25 @@ jobs:
           ref: fix-alpaca-authenticated-pairing
           fetch-depth: 0
 
-      - name: Apply authenticated credential pairing
-        run: python tools/repair_alpaca_pairing.py
+      - name: Apply code-only authenticated credential pairing
+        shell: bash
+        run: |
+          mkdir -p /tmp/alpaca-repair/.github/workflows /tmp/alpaca-repair/tools
+          cp .github/workflows/free-paper-pilot-readiness.yml /tmp/alpaca-repair/.github/workflows/
+          cp .github/workflows/apply-alpaca-authenticated-pairing.yml /tmp/alpaca-repair/.github/workflows/
+          cp .github/workflows/repair-alpaca-authenticated-pairing.yml /tmp/alpaca-repair/.github/workflows/
+          cp tools/repair_alpaca_pairing.py /tmp/alpaca-repair/tools/
+          python tools/repair_alpaca_pairing.py
+          cp /tmp/alpaca-repair/.github/workflows/free-paper-pilot-readiness.yml .github/workflows/
+          cp /tmp/alpaca-repair/.github/workflows/apply-alpaca-authenticated-pairing.yml .github/workflows/
+          cp /tmp/alpaca-repair/.github/workflows/repair-alpaca-authenticated-pairing.yml .github/workflows/
+          cp /tmp/alpaca-repair/tools/repair_alpaca_pairing.py tools/
 
-      - name: Commit repaired integration
+      - name: Commit repaired integration code
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add providers/alpaca_paper.py operations/free_paper_pilot.py tests/test_free_paper_pilot.py
           git commit -m "Authenticate Alpaca credential pairs before use"
           git push origin HEAD:fix-alpaca-authenticated-pairing
-
-# Existing-workflow trigger commit.
