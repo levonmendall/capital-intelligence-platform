@@ -26,6 +26,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: alpaca-paper-broker-smoke-${{ github.ref }}
@@ -130,3 +131,48 @@ jobs:
           path: reports/
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Publish live smoke commit status
+        if: always() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          state = "success" if os.environ["JOB_STATUS"] == "success" else "failure"
+          description = (
+              "Alpaca paper order and FILL round trip reconciled"
+              if state == "success"
+              else "Alpaca paper order or FILL reconciliation failed"
+          )
+          response = requests.post(
+              (
+                  "https://api.github.com/repos/"
+                  + os.environ["GITHUB_REPOSITORY"]
+                  + "/statuses/"
+                  + os.environ["GITHUB_SHA"]
+              ),
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+              json={
+                  "state": state,
+                  "context": "alpaca-paper-broker/live-smoke",
+                  "description": description,
+                  "target_url": (
+                      "https://github.com/"
+                      + os.environ["GITHUB_REPOSITORY"]
+                      + "/actions/runs/"
+                      + os.environ["GITHUB_RUN_ID"]
+                  ),
+              },
+              timeout=15,
+          )
+          response.raise_for_status()
+          PY
