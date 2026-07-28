@@ -1,5 +1,17 @@
 """External data providers for the Capital Intelligence Platform."""
 
+from providers.environment_aliases import (
+    PROVIDER_ENVIRONMENT_ALIASES,
+    install_provider_environment_aliases,
+    normalize_provider_environment,
+    provider_environment_value,
+)
+
+# Provider modules and configuration bindings retain their established canonical
+# variable contracts. Populate missing canonical values from supported aliases before
+# importing those modules, without replacing canonical values or exposing secrets.
+install_provider_environment_aliases()
+
 from providers.configured_dataset import (
     ConfiguredDatasetBinding,
     ConfiguredDatasetProvider,
@@ -123,6 +135,7 @@ __all__ = [
     "OpenFigiMappingResult",
     "OpenFigiProvider",
     "OpenFigiProviderError",
+    "PROVIDER_ENVIRONMENT_ALIASES",
     "PublicLiveCoverageReport",
     "PublicLiveInformationError",
     "PublicLiveInformationProvider",
@@ -141,7 +154,10 @@ __all__ = [
     "build_configured_universe_metrics_provider",
     "build_kraken_spot_provider",
     "fred_cache_key",
+    "install_provider_environment_aliases",
     "load_crypto_venue_bindings",
     "load_free_provider_catalog",
     "load_public_live_source_catalog",
+    "normalize_provider_environment",
+    "provider_environment_value",
 ]

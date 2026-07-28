@@ -7,6 +7,7 @@ from governance.data_readiness_models import (
     DatasetReadinessAssessment, MarketDataReadinessAssessment, MarketDataScopeState,
 )
 from cio.models import CandidateAssetClass
+from provider_environment import normalize_provider_environment
 
 class AllMarketsDataReadinessEvaluator:
     """Evaluate one complete data manifest against runtime configuration."""
@@ -19,7 +20,9 @@ class AllMarketsDataReadinessEvaluator:
     ) -> AllMarketsDataReadinessReport:
         if not isinstance(manifest, AllMarketsDataManifest):
             raise TypeError("manifest must be AllMarketsDataManifest")
-        runtime = os.environ if environment is None else environment
+        runtime = normalize_provider_environment(
+            os.environ if environment is None else environment
+        )
         provider_by_id = {
             provider.identifier: provider for provider in manifest.providers
         }
@@ -136,5 +139,3 @@ class AllMarketsDataReadinessEvaluator:
             markets=tuple(market_results),
             blockers=tuple(blockers),
         )
-
-

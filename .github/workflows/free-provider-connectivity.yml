@@ -12,8 +12,9 @@ on:
       - "providers/sec_edgar.py"
       - "providers/crypto_venues.py"
       - "providers/openfigi.py"
-      - "providers/gleif.py"
+      - "providers/environment_aliases.py"
       - "providers/free_connections.py"
+      - "providers/__init__.py"
       - "config/free_provider_connections.json"
       - "config/crypto_venue_bindings.free.json"
       - "run_free_provider_connections.py"
@@ -27,8 +28,9 @@ on:
       - "providers/sec_edgar.py"
       - "providers/crypto_venues.py"
       - "providers/openfigi.py"
-      - "providers/gleif.py"
+      - "providers/environment_aliases.py"
       - "providers/free_connections.py"
+      - "providers/__init__.py"
       - "config/free_provider_connections.json"
       - "config/crypto_venue_bindings.free.json"
       - "run_free_provider_connections.py"
@@ -52,6 +54,7 @@ jobs:
       CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS: config/crypto_venue_bindings.free.json
       FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
       SEC_USER_AGENT: Capital Intelligence Platform levonmendall2369@gmail.com
+      OPEN_FIGI_API_KEY: ${{ secrets.OPEN_FIGI_API_KEY }}
       OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
 
     steps:
