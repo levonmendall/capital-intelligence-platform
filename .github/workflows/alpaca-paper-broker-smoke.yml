@@ -14,6 +14,7 @@ on:
       - "tests/test_alpaca_paper_broker_backup.py"
       - "tests/test_alpaca_paper_round_trip.py"
       - "tests/test_alpaca_paper_smoke_cli.py"
+      - "tests/test_alpaca_crypto_position_symbology.py"
   push:
     branches:
       - main
@@ -29,6 +30,7 @@ on:
       - "tests/test_alpaca_paper_broker_backup.py"
       - "tests/test_alpaca_paper_round_trip.py"
       - "tests/test_alpaca_paper_smoke_cli.py"
+      - "tests/test_alpaca_crypto_position_symbology.py"
 
 permissions:
   contents: read
@@ -78,6 +80,7 @@ jobs:
           tests/test_alpaca_paper_broker_backup.py
           tests/test_alpaca_paper_round_trip.py
           tests/test_alpaca_paper_smoke_cli.py
+          tests/test_alpaca_crypto_position_symbology.py
 
       - name: Require Alpaca paper credentials
         if: github.event_name != 'pull_request'
