@@ -6,7 +6,7 @@ Capital Intelligence may become ready for a controlled paper-product test withou
 
 - `development_in_progress` — development remains open and one or more test gates are incomplete.
 - `blocked` — development was marked closed but required authorities still fail.
-- `ready_for_controlled_paper_test` — one immutable baseline satisfies every required gate.
+- `ready_for_controlled_paper_test` — one immutable baseline satisfies every required gate and has a current sustained launch authorization.
 
 No state authorizes real money, broker connectivity, or performance claims.
 
@@ -25,12 +25,13 @@ The baseline must prove readiness for:
 - canonical daily operations;
 - Today, Environment, Portfolio, and History;
 - security validation;
-- resilience exercises; and
-- explicit paper-only disclosures.
+- resilience exercises;
+- explicit paper-only disclosures; and
+- a current sustained paper-launch authorization.
 
 It must also have zero unresolved critical incidents, data-integrity failures, and reconciliation failures.
 
-## Canonical evidence authority
+## Canonical evidence authorities
 
 A caller-supplied set of readiness booleans is not authoritative.
 
@@ -53,6 +54,8 @@ Every governed non-core market gate additionally requires an active `paper_eligi
 
 The operational snapshot records unresolved critical incidents, data-integrity failures, reconciliation failures, and their source identifiers. A missing or stale snapshot forces daily-operations, security, and resilience gates to fail closed.
 
+`SQLitePaperTradingLaunchStore` separately persists the sustained burn-in conclusion. It proves that the exact baseline completed the required live cycles, provider checks, shadow executions, reconciliations, recovery exercises, and circuit-breaker tests. A newer blocked or expired launch assessment supersedes every older approval.
+
 ## Automatic assembly
 
 The default command assembles readiness from persisted authorities:
@@ -62,6 +65,7 @@ python run_test_readiness.py \
   --baseline-identifier test-baseline:multi-asset-alpha.1 \
   --process-version capital-intelligence-investment-process.v1 \
   --code-version <tested-commit-sha> \
+  --paper-launch-database database/paper_trading_launch.db \
   --require-ready
 ```
 
@@ -81,7 +85,16 @@ python run_test_readiness_evidence.py \
   --operational-snapshot artifacts/operational-readiness.json
 ```
 
-Both evidence history and resulting readiness reports are append-only and SHA-256 chained.
+Evaluate and persist the sustained launch evidence:
+
+```bash
+python run_paper_trading_launch.py \
+  --evidence artifacts/paper-trading-launch-evidence.json \
+  --policy config/paper_trading_launch_policy.json \
+  --require-ready
+```
+
+Gate evidence, launch history, global paper-control history, and resulting readiness reports are append-only and SHA-256 chained.
 
 ## Manual compatibility mode
 
@@ -92,7 +105,7 @@ python run_test_readiness.py \
   --manual-evidence artifacts/product-test-readiness.json
 ```
 
-The output is labeled `manual_compatibility`. It is not the canonical path for declaring a test baseline ready.
+The output is labeled `manual_compatibility`. It is not the canonical path for declaring a test baseline ready, cannot activate execution, and does not replace the launch or global control authorities.
 
 ## Open-development rule
 
@@ -100,4 +113,6 @@ Readiness freezes a **test baseline**, not the repository. Mainline development 
 
 ## External boundary
 
-The assembler cannot create licensed provider access, certify real data, complete elapsed operating cycles, or fabricate resilience results. Those authorities must persist valid evidence before their gates can become ready. Development remains open and real-money execution remains unavailable in every readiness state.
+The assembler cannot create licensed provider access, certify real data, complete elapsed operating cycles, calibrate execution costs, or fabricate recovery and resilience results. Those authorities must persist valid evidence before their gates can become ready. Development remains open and real-money execution remains unavailable in every readiness state.
+
+See `docs/PAPER_TRADING_LAUNCH.md` for the burn-in, activation, halt, circuit-breaker, and backup procedure.

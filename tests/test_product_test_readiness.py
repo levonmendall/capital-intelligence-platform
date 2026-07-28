@@ -49,10 +49,15 @@ def _evidence(**overrides) -> ProductTestReadinessEvidence:
         "security_suite_ready": True,
         "resilience_campaign_ready": True,
         "paper_only_disclosures_ready": True,
+        "paper_launch_ready": True,
         "unresolved_critical_incidents": 0,
         "data_integrity_failures": 0,
         "reconciliation_failures": 0,
-        "evidence_identifiers": ("ci:green", "data-certification:approved"),
+        "evidence_identifiers": (
+            "ci:green",
+            "data-certification:approved",
+            "paper-launch:approved",
+        ),
         "open_development_items": ("continue next-version research on main",),
     }
     values.update(overrides)
@@ -66,6 +71,15 @@ def test_ready_baseline_does_not_require_closing_development() -> None:
     assert report.development_items == ("continue next-version research on main",)
     assert report.real_money_authorized is False
     assert report.performance_claims_permitted is False
+
+
+def test_missing_sustained_launch_authority_blocks_readiness() -> None:
+    report = ProductTestReadinessEvaluator().evaluate(
+        _evidence(paper_launch_ready=False)
+    )
+
+    assert report.state is ProductTestReadiness.DEVELOPMENT_IN_PROGRESS
+    assert "paper_launch" in report.blockers
 
 
 def test_missing_market_and_data_authorities_remains_development_in_progress() -> None:

@@ -17,6 +17,8 @@ from governance import (
     AssetClassCapabilityProfile,
     CustodySettlementModel,
     OperationalReadinessSnapshot,
+    PaperTradingLaunchEvidence,
+    PaperTradingLaunchEvaluator,
     ProductTestReadiness,
     ProductTestReadinessEvidenceAssembler,
     ProductTestReadinessEvaluator,
@@ -24,6 +26,7 @@ from governance import (
     ReadinessGateCertification,
     ReadinessGateState,
     SQLiteAssetClassApprovalStore,
+    SQLitePaperTradingLaunchStore,
     SQLiteReadinessEvidenceStore,
     TradingSessionModel,
     UNIVERSAL_GOVERNED_ASSET_CLASSES,
@@ -210,6 +213,60 @@ def _append_all_asset_approvals(store: SQLiteAssetClassApprovalStore) -> None:
         store.append(_approval(asset_class))
 
 
+def _launch_evidence() -> PaperTradingLaunchEvidence:
+    return PaperTradingLaunchEvidence(
+        identifier="paper-launch-evidence:test-ready",
+        observed_at=NOW,
+        knowledge_cutoff=NOW,
+        window_start=NOW - timedelta(days=5),
+        window_end=NOW,
+        baseline_identifier=BASELINE,
+        process_version=PROCESS,
+        code_version=CODE,
+        portfolio_count=1,
+        portfolio_code="COMPOUNDING",
+        starting_capital=250_000.0,
+        base_currency="USD",
+        paper_only_disclosures_verified=True,
+        live_broker_credentials_present=False,
+        canonical_portfolio_integrity_verified=True,
+        eligible_universe_integrity_verified=True,
+        execution_store_integrity_verified=True,
+        scheduled_cycles=5,
+        successful_cycles=5,
+        point_in_time_cycles=5,
+        complete_universe_cycles=5,
+        required_provider_checks=500,
+        successful_required_provider_checks=500,
+        shadow_execution_scenarios=12,
+        reconciled_shadow_execution_scenarios=12,
+        execution_cost_error_bps=10.0,
+        unresolved_orders=0,
+        duplicate_fill_events=0,
+        negative_cash_events=0,
+        stale_quote_acceptances=0,
+        unresolved_critical_incidents=0,
+        data_integrity_failures=0,
+        reconciliation_failures=0,
+        backup_restore_exercises=1,
+        scheduler_replay_exercises=1,
+        kill_switch_exercises=2,
+        provider_failover_exercises=1,
+        market_session_exercises=3,
+        partial_fill_retry_exercises=1,
+        corporate_action_replay_exercises=1,
+        fx_revaluation_exercises=1,
+        production_binding_approval_identifier="binding-approval:test",
+        recovery_certification_identifier="recovery:test",
+        execution_calibration_identifier="execution-calibration:test",
+        execution_policy_version="multi-asset-paper-execution.v1",
+        data_readiness_identifier="combined-data-readiness:test",
+        product_readiness_identifier="prelaunch-readiness:test",
+        evidence_identifiers=("burn-in:test", "provider-health:test"),
+        source_identifiers=("portfolio-chain:test", "execution-chain:test"),
+    )
+
+
 def _assemble(
     evidence_store: SQLiteReadinessEvidenceStore,
     asset_store: SQLiteAssetClassApprovalStore,
@@ -275,7 +332,15 @@ def test_complete_exact_persisted_baseline_can_be_ready_while_development_remain
     _append_all_asset_approvals(asset_store)
     evidence_store.append_operational(_operational())
 
-    evidence = _assemble(evidence_store, asset_store)
+    assembled = _assemble(evidence_store, asset_store)
+    evidence = replace(
+        assembled,
+        paper_launch_ready=True,
+        evidence_identifiers=(
+            *assembled.evidence_identifiers,
+            "paper-launch:test",
+        ),
+    )
     report = ProductTestReadinessEvaluator().evaluate(evidence)
 
     assert report.state is ProductTestReadiness.READY_FOR_CONTROLLED_PAPER_TEST
@@ -286,7 +351,10 @@ def test_complete_exact_persisted_baseline_can_be_ready_while_development_remain
     assert report.real_money_authorized is False
     assert report.performance_claims_permitted is False
     assert all(getattr(evidence, gate.value) is True for gate in ReadinessGate)
-    assert any(item.startswith("asset-approval:crypto") for item in evidence.evidence_identifiers)
+    assert any(
+        item.startswith("asset-approval:crypto")
+        for item in evidence.evidence_identifiers
+    )
 
 
 @pytest.mark.parametrize(
@@ -305,7 +373,11 @@ def test_gate_version_mismatch_fails_exact_baseline(
 ) -> None:
     evidence_store, asset_store = _stores(tmp_path)
     for gate in ReadinessGate:
-        kwargs = {field.removesuffix("_identifier"): value} if field == "baseline_identifier" else {field.removesuffix("_version"): value}
+        kwargs = (
+            {field.removesuffix("_identifier"): value}
+            if field == "baseline_identifier"
+            else {field.removesuffix("_version"): value}
+        )
         if gate is ReadinessGate.CERTIFIED_DATA:
             evidence_store.append_gate(_gate(gate, **kwargs))
         else:
@@ -399,7 +471,11 @@ def test_asset_approval_process_or_code_mismatch_blocks_only_that_market(
         asset_store.append(
             _approval(
                 asset_class,
-                code=("commit:wrong" if asset_class is CandidateAssetClass.CRYPTO else CODE),
+                code=(
+                    "commit:wrong"
+                    if asset_class is CandidateAssetClass.CRYPTO
+                    else CODE
+                ),
             )
         )
     evidence_store.append_operational(_operational())
@@ -446,6 +522,8 @@ def test_readiness_cli_uses_persisted_authorities_by_default(
     _append_all_gates(evidence_store)
     _append_all_asset_approvals(asset_store)
     evidence_store.append_operational(_operational())
+    launch_store = SQLitePaperTradingLaunchStore(tmp_path / "paper-launch.db")
+    launch_store.append(PaperTradingLaunchEvaluator().evaluate(_launch_evidence()))
 
     exit_code = readiness_main(
         (
@@ -461,6 +539,8 @@ def test_readiness_cli_uses_persisted_authorities_by_default(
             str(evidence_store.path),
             "--asset-class-governance-database",
             str(asset_store.path),
+            "--paper-launch-database",
+            str(launch_store.path),
             "--database",
             str(tmp_path / "reports.db"),
             "--development-item",
@@ -474,6 +554,9 @@ def test_readiness_cli_uses_persisted_authorities_by_default(
     assert output["state"] == ProductTestReadiness.READY_FOR_CONTROLLED_PAPER_TEST.value
     assert output["evidence_source"] == "persisted_authorities"
     assert output["development_remains_open"] is True
+    assert output["paper_launch_report_identifier"].startswith(
+        "paper-trading-launch:"
+    )
     assert output["real_money_authorized"] is False
 
 

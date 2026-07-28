@@ -10,9 +10,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from cio import CandidateAssetClass
-from governance import AssetClassApprovalState, TradingSessionModel
+from governance import (
+    AssetClassApprovalState,
+    SQLitePaperTestEntryGovernanceStore,
+    SQLitePaperTradingControlStore,
+    SQLitePaperTradingLaunchStore,
+    TradingSessionModel,
+    require_combined_paper_execution_authorization,
+)
+from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from portfolio import (
     MultiAssetExecutionPolicy,
     MultiAssetExecutionStatus,
@@ -125,10 +132,26 @@ def _profile(value: Mapping[str, Any]) -> MultiAssetInstrumentProfile:
             defined_risk=bool(value.get("defined_risk", True)),
             margin_required=bool(value.get("margin_required", False)),
             contract_multiplier=float(value.get("contract_multiplier", 1.0)),
-            contract_model_version=(None if value.get("contract_model_version") is None else str(value["contract_model_version"])),
-            margin_model_version=(None if value.get("margin_model_version") is None else str(value["margin_model_version"])),
-            lifecycle_model_version=(None if value.get("lifecycle_model_version") is None else str(value["lifecycle_model_version"])),
-            roll_model_version=(None if value.get("roll_model_version") is None else str(value["roll_model_version"])),
+            contract_model_version=(
+                None
+                if value.get("contract_model_version") is None
+                else str(value["contract_model_version"])
+            ),
+            margin_model_version=(
+                None
+                if value.get("margin_model_version") is None
+                else str(value["margin_model_version"])
+            ),
+            lifecycle_model_version=(
+                None
+                if value.get("lifecycle_model_version") is None
+                else str(value["lifecycle_model_version"])
+            ),
+            roll_model_version=(
+                None
+                if value.get("roll_model_version") is None
+                else str(value["roll_model_version"])
+            ),
             trading_session_model=(
                 None
                 if value.get("trading_session_model") is None
@@ -169,18 +192,66 @@ def build_parser() -> argparse.ArgumentParser:
             str(data_dir / "multi_asset_paper_execution.db"),
         ),
     )
+    parser.add_argument(
+        "--paper-test-entry-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_PAPER_TEST_GOVERNANCE_DATABASE",
+            str(data_dir / "paper_test_governance.db"),
+        ),
+    )
+    parser.add_argument(
+        "--paper-launch-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_PAPER_LAUNCH_DATABASE",
+            str(data_dir / "paper_trading_launch.db"),
+        ),
+    )
+    parser.add_argument(
+        "--paper-control-database",
+        default=os.getenv(
+            "CAPITAL_INTELLIGENCE_PAPER_CONTROL_DATABASE",
+            str(data_dir / "paper_trading_control.db"),
+        ),
+    )
+    parser.add_argument(
+        "--baseline-identifier",
+        default=(
+            os.getenv("CAPITAL_INTELLIGENCE_TEST_BASELINE_IDENTIFIER")
+            or os.getenv("CAPITAL_INTELLIGENCE_TEST_BASELINE")
+        ),
+    )
+    parser.add_argument(
+        "--process-version",
+        default=(
+            os.getenv("CAPITAL_INTELLIGENCE_INVESTMENT_PROCESS_VERSION")
+            or os.getenv("CAPITAL_INTELLIGENCE_PROCESS_VERSION")
+        ),
+    )
+    parser.add_argument(
+        "--code-version",
+        default=os.getenv("CAPITAL_INTELLIGENCE_RELEASE"),
+    )
+    parser.add_argument(
+        "--development-bypass-launch-gate",
+        action="store_true",
+        help=(
+            "Explicit local-development bypass. Refused in staging or production "
+            "and never considered launch or entry evidence."
+        ),
+    )
     parser.add_argument("--portfolio-code", default="COMPOUNDING")
     parser.add_argument("--require-complete", action="store_true")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    args = build_parser().parse_args(argv)
+    authorization = None
     try:
         construction_payload = _load(args.construction)
         if not isinstance(construction_payload, Mapping):
             raise ValueError("construction JSON must encode an object")
+        construction = _construction(construction_payload)
         profiles_payload = _load(args.profiles)
         if not isinstance(profiles_payload, list):
             raise ValueError("profiles JSON must encode a list")
@@ -191,32 +262,143 @@ def main(argv: Sequence[str] | None = None) -> int:
         as_of = datetime.fromisoformat(args.as_of.replace("Z", "+00:00"))
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must be timezone-aware")
+
+        environment = (
+            os.getenv("CAPITAL_INTELLIGENCE_ENVIRONMENT")
+            or os.getenv("CAPITAL_INTELLIGENCE_DEPLOYMENT_ENVIRONMENT")
+            or "development"
+        ).strip().lower()
+        if args.development_bypass_launch_gate:
+            if environment in {"staging", "production"}:
+                raise ValueError(
+                    "paper authority bypass is prohibited in staging and production"
+                )
+        else:
+            missing = [
+                name
+                for name, value in (
+                    ("--baseline-identifier", args.baseline_identifier),
+                    ("--process-version", args.process_version),
+                    ("--code-version", args.code_version),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    "paper execution requires exact authority versions: "
+                    + ", ".join(missing)
+                )
+            authorization = require_combined_paper_execution_authorization(
+                entry_store=SQLitePaperTestEntryGovernanceStore(
+                    args.paper_test_entry_database
+                ),
+                launch_store=SQLitePaperTradingLaunchStore(
+                    args.paper_launch_database
+                ),
+                control_store=SQLitePaperTradingControlStore(
+                    args.paper_control_database
+                ),
+                baseline_identifier=args.baseline_identifier,
+                process_version=args.process_version,
+                code_version=args.code_version,
+                as_of=as_of,
+            )
+            if (
+                construction.turnover
+                > authorization.launch_report.maximum_single_batch_turnover + 1e-9
+            ):
+                raise ValueError(
+                    "construction turnover exceeds the active paper-launch circuit breaker"
+                )
+
         portfolio_store = SQLiteCanonicalPortfolioStore(args.portfolio_database)
+        portfolio_store.verify_integrity()
         portfolio = portfolio_store.latest(args.portfolio_code)
         if portfolio is None:
             raise ValueError(
                 f"canonical portfolio {args.portfolio_code!r} is unavailable"
             )
+        if authorization is not None:
+            drawdown = max(
+                0.0,
+                1.0 - (portfolio.nav / portfolio.starting_capital),
+            )
+            if (
+                drawdown
+                > authorization.launch_report.maximum_drawdown_fraction + 1e-9
+            ):
+                raise ValueError(
+                    "paper portfolio drawdown circuit breaker is active"
+                )
+
+        execution_store = SQLiteMultiAssetPaperExecutionStore(
+            args.execution_database
+        )
+        execution_store.verify_integrity()
+        universe_store = SQLiteCertifiedEligibleUniverseStore(
+            args.eligible_universe_database
+        )
+        universe_store.verify_integrity()
         batch = MultiAssetPaperExecutionOrchestrator(
             session_provider=_factory(args.session_provider),
             quote_provider=_factory(args.quote_provider),
-            store=SQLiteMultiAssetPaperExecutionStore(args.execution_database),
+            store=execution_store,
             portfolio_store=portfolio_store,
-            universe_store=SQLiteCertifiedEligibleUniverseStore(
-                args.eligible_universe_database
-            ),
+            universe_store=universe_store,
             policy=MultiAssetExecutionPolicy(),
         ).execute(
-            construction=_construction(construction_payload),
+            construction=construction,
             decision_identifier=args.decision_identifier,
             portfolio=portfolio,
             profiles=profile_map,
             as_of=as_of,
         )
     except (OSError, TypeError, ValueError, RuntimeError) as error:
-        print(json.dumps({"status": "blocked", "error": str(error)}, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "error": str(error),
+                    "development_bypass_used": bool(
+                        args.development_bypass_launch_gate
+                    ),
+                    "real_money_authorized": False,
+                },
+                sort_keys=True,
+            )
+        )
         return 4
-    print(json.dumps(batch_to_dict(batch), sort_keys=True))
+
+    payload = batch_to_dict(batch)
+    payload["paper_execution_authorization"] = (
+        None
+        if authorization is None
+        else {
+            "eligibility_package_identifier": (
+                authorization.entry_package.identifier
+            ),
+            "eligibility_package_fingerprint": (
+                authorization.entry_package.fingerprint
+            ),
+            "human_entry_decision_identifier": (
+                authorization.entry_decision.identifier
+            ),
+            "cohort_identifier": authorization.cohort_identifier,
+            "launch_report_identifier": authorization.launch_report.identifier,
+            "launch_evidence_identifier": (
+                authorization.launch_report.evidence_identifier
+            ),
+            "runtime_control_event_identifier": (
+                authorization.control_event_identifier
+            ),
+            "source_identifiers": list(authorization.source_identifiers),
+        }
+    )
+    payload["development_bypass_used"] = bool(
+        args.development_bypass_launch_gate
+    )
+    payload["real_money_authorized"] = False
+    print(json.dumps(payload, sort_keys=True))
     if args.require_complete and batch.status not in {
         MultiAssetExecutionStatus.COMPLETED,
         MultiAssetExecutionStatus.NO_ACTION,
