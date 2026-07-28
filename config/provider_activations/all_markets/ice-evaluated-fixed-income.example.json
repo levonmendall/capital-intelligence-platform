@@ -1,0 +1,43 @@
+{
+  "approved_at": "2026-07-28T00:00:00+00:00",
+  "approved_by": "replace-with-human-data-governance-authority",
+  "approved_domains": [
+    "security_master",
+    "market_prices",
+    "quotes_liquidity",
+    "fixed_income_terms",
+    "market_calendars",
+    "benchmarks",
+    "execution_inputs"
+  ],
+  "authoritative_domains": [
+    "security_master",
+    "market_prices",
+    "quotes_liquidity",
+    "fixed_income_terms",
+    "market_calendars",
+    "benchmarks",
+    "execution_inputs"
+  ],
+  "certification_identifier": "replace-with-certification:ice-evaluated-fixed-income",
+  "derived_analytics_approved": false,
+  "effective_at": "2026-07-28T00:00:00+00:00",
+  "enabled": false,
+  "expires_at": "2026-08-27T00:00:00+00:00",
+  "historical_coverage_supported": false,
+  "identifier": "activation:ice-evaluated-fixed-income:replace-with-approved-version",
+  "paper_simulation_approved": false,
+  "point_in_time_supported": false,
+  "provenance_complete": false,
+  "provider_identifier": "ice-evaluated-fixed-income",
+  "provider_name": "ICE Data Services evaluated fixed-income pricing",
+  "rationale": "Complete only after contract, license, binding, history, point-in-time, service-level, reconciliation, and paper-simulation review.",
+  "schema_version": "provider-activation.v1",
+  "service_level_defined": false,
+  "source_identifiers": [
+    "replace-with-contract:ice-evaluated-fixed-income",
+    "replace-with-certification:ice-evaluated-fixed-income"
+  ],
+  "storage_and_backup_approved": false,
+  "usage_rights_approved": false
+}

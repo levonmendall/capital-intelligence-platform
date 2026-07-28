@@ -1,0 +1,77 @@
+{
+  "schema_version": "eodhd-instrument-bindings.v1",
+  "bindings": [
+    {
+      "instrument_id": "instrument:us-equity:aapl",
+      "provider_symbol": "AAPL.US",
+      "venue": "XNAS",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:us-etf:spy",
+      "provider_symbol": "SPY.US",
+      "venue": "ARCX",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:intl-equity:shel-lse",
+      "provider_symbol": "SHEL.LSE",
+      "venue": "XLON",
+      "currency": "GBP"
+    },
+    {
+      "instrument_id": "instrument:intl-equity:toyota-tse",
+      "provider_symbol": "7203.TSE",
+      "venue": "XTKS",
+      "currency": "JPY"
+    },
+    {
+      "instrument_id": "instrument:fx:eurusd",
+      "provider_symbol": "EURUSD.FOREX",
+      "venue": "EODHD_FOREX",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:fx:usdjpy",
+      "provider_symbol": "USDJPY.FOREX",
+      "venue": "EODHD_FOREX",
+      "currency": "JPY"
+    },
+    {
+      "instrument_id": "instrument:crypto:btcusd",
+      "provider_symbol": "BTC-USD.CC",
+      "venue": "EODHD_CRYPTO",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:crypto:ethusd",
+      "provider_symbol": "ETH-USD.CC",
+      "venue": "EODHD_CRYPTO",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:commodity:gold",
+      "provider_symbol": "GC.COMM",
+      "venue": "EODHD_COMMODITY",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:commodity:wti",
+      "provider_symbol": "CL.COMM",
+      "venue": "EODHD_COMMODITY",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:benchmark:spx",
+      "provider_symbol": "GSPC.INDX",
+      "venue": "EODHD_INDEX",
+      "currency": "USD"
+    },
+    {
+      "instrument_id": "instrument:benchmark:stoxx600",
+      "provider_symbol": "STOXX.INDX",
+      "venue": "EODHD_INDEX",
+      "currency": "EUR"
+    }
+  ]
+}

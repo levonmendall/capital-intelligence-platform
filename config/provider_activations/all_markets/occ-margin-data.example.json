@@ -1,0 +1,31 @@
+{
+  "approved_at": "2026-07-28T00:00:00+00:00",
+  "approved_by": "replace-with-human-data-governance-authority",
+  "approved_domains": [
+    "margin_collateral"
+  ],
+  "authoritative_domains": [
+    "margin_collateral"
+  ],
+  "certification_identifier": "replace-with-certification:occ-margin-data",
+  "derived_analytics_approved": false,
+  "effective_at": "2026-07-28T00:00:00+00:00",
+  "enabled": false,
+  "expires_at": "2026-08-27T00:00:00+00:00",
+  "historical_coverage_supported": false,
+  "identifier": "activation:occ-margin-data:replace-with-approved-version",
+  "paper_simulation_approved": false,
+  "point_in_time_supported": false,
+  "provenance_complete": false,
+  "provider_identifier": "occ-margin-data",
+  "provider_name": "OCC options margin and risk parameter data",
+  "rationale": "Complete only after contract, license, binding, history, point-in-time, service-level, reconciliation, and paper-simulation review.",
+  "schema_version": "provider-activation.v1",
+  "service_level_defined": false,
+  "source_identifiers": [
+    "replace-with-contract:occ-margin-data",
+    "replace-with-certification:occ-margin-data"
+  ],
+  "storage_and_backup_approved": false,
+  "usage_rights_approved": false
+}

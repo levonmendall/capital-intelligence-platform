@@ -1,0 +1,34 @@
+{
+  "allow_insecure_local": false,
+  "base_url": "https://replace-with-reviewed-normalization-gateway.example.com/derived-volatility-surfaces/",
+  "bindings": [
+    {
+      "availability_basis": "provider_timestamp",
+      "available_at_path": "meta.available_at",
+      "dataset_type": "volatility_surfaces",
+      "limitations": [
+        "Deployment template only. Replace the gateway URL and response paths with reviewed, licensed provider semantics before activation."
+      ],
+      "method": "GET",
+      "observed_at_path": "meta.observed_at",
+      "path": "v1/volatility_surfaces/{symbol}",
+      "payload_path": "data",
+      "provider_record_id_path": "meta.request_id",
+      "quality_state": "live",
+      "query_parameters": {
+        "as_of": "{as_of}",
+        "end_at": "{end_at}",
+        "limit": "{limit}",
+        "start_at": "{start_at}"
+      },
+      "timeout_seconds": 30
+    }
+  ],
+  "credential_environment_variables": [],
+  "default_headers": {
+    "Accept": "application/json"
+  },
+  "provider_identifier": "derived-volatility-surfaces",
+  "schema_version": "configured-dataset-provider.v1",
+  "source_version": "replace-with-certified-provider-version"
+}

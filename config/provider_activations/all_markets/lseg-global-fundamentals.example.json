@@ -1,0 +1,33 @@
+{
+  "approved_at": "2026-07-28T00:00:00+00:00",
+  "approved_by": "replace-with-human-data-governance-authority",
+  "approved_domains": [
+    "fundamentals",
+    "filings"
+  ],
+  "authoritative_domains": [
+    "fundamentals",
+    "filings"
+  ],
+  "certification_identifier": "replace-with-certification:lseg-global-fundamentals",
+  "derived_analytics_approved": false,
+  "effective_at": "2026-07-28T00:00:00+00:00",
+  "enabled": false,
+  "expires_at": "2026-08-27T00:00:00+00:00",
+  "historical_coverage_supported": false,
+  "identifier": "activation:lseg-global-fundamentals:replace-with-approved-version",
+  "paper_simulation_approved": false,
+  "point_in_time_supported": false,
+  "provenance_complete": false,
+  "provider_identifier": "lseg-global-fundamentals",
+  "provider_name": "LSEG global fundamentals and filings",
+  "rationale": "Complete only after contract, license, binding, history, point-in-time, service-level, reconciliation, and paper-simulation review.",
+  "schema_version": "provider-activation.v1",
+  "service_level_defined": false,
+  "source_identifiers": [
+    "replace-with-contract:lseg-global-fundamentals",
+    "replace-with-certification:lseg-global-fundamentals"
+  ],
+  "storage_and_backup_approved": false,
+  "usage_rights_approved": false
+}

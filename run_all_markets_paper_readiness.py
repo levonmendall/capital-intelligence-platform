@@ -12,10 +12,12 @@ from typing import Sequence
 from governance import (
     SQLiteAssetClassApprovalStore,
     SQLiteDecisionInformationActivationStore,
+    load_all_market_provider_bundle,
     load_data_readiness_manifest,
     load_maximum_decision_information_manifest,
 )
 from governance.provider_activation import SQLiteProviderActivationStore
+from data.derivative_market import DerivativeDataCertificationReport
 from operations.paper_market_readiness import (
     assess_universal_paper_market_readiness,
 )
@@ -59,6 +61,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="config/maximum_decision_information_scope.json",
     )
     parser.add_argument(
+        "--provider-bundle",
+        default="config/all_market_provider_bundle.json",
+    )
+    parser.add_argument("--skip-provider-bundle", action="store_true")
+    parser.add_argument(
         "--provider-activation-database",
         default=os.getenv(
             "CAPITAL_INTELLIGENCE_PROVIDER_ACTIVATION_DATABASE",
@@ -80,6 +87,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--provider-binding", action="append", default=[])
+    parser.add_argument(
+        "--derivative-data-certification",
+        help=(
+            "Canonical derivative-data-certification-report.v1 JSON evidence. "
+            "Defaults to CAPITAL_INTELLIGENCE_DERIVATIVE_DATA_CERTIFICATION."
+        ),
+    )
     parser.add_argument("--env-file")
     parser.add_argument("--evaluated-at")
     parser.add_argument("--output")
@@ -87,13 +101,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--require-paper-ready", action="store_true")
     args = parser.parse_args(argv)
     try:
+        environment = _env_file(args.env_file)
+        canonical_binding_variables = (
+            "CAPITAL_INTELLIGENCE_SECURITY_MASTER_DATASET_BINDING",
+            "CAPITAL_INTELLIGENCE_UNIVERSE_METRICS_DATASET_BINDING",
+            "CAPITAL_INTELLIGENCE_CANDIDATE_SCREENING_DATASET_BINDING",
+            "CAPITAL_INTELLIGENCE_DECISION_INFORMATION_DATASET_BINDING",
+        )
+        provider_binding_paths = list(args.provider_binding)
+        for variable in canonical_binding_variables:
+            value = str(environment.get(variable, "")).strip()
+            if value and value not in provider_binding_paths:
+                provider_binding_paths.append(value)
+        derivative_path = (
+            args.derivative_data_certification
+            or str(
+                environment.get(
+                    "CAPITAL_INTELLIGENCE_DERIVATIVE_DATA_CERTIFICATION", ""
+                )
+            ).strip()
+            or None
+        )
         report = assess_universal_paper_market_readiness(
             manifest=load_data_readiness_manifest(args.manifest),
             information_manifest=load_maximum_decision_information_manifest(
                 args.information_manifest
             ),
             evaluated_at=_timestamp(args.evaluated_at),
-            environment=_env_file(args.env_file),
+            environment=environment,
             provider_activation_store=SQLiteProviderActivationStore(
                 args.provider_activation_database
             ),
@@ -105,7 +140,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             asset_class_approval_store=SQLiteAssetClassApprovalStore(
                 args.asset_class_governance_database
             ),
-            provider_binding_paths=tuple(args.provider_binding),
+            provider_binding_paths=tuple(provider_binding_paths),
+            provider_bundle=(
+                None
+                if args.skip_provider_bundle
+                else load_all_market_provider_bundle(args.provider_bundle)
+            ),
+            derivative_data_certification=(
+                None
+                if derivative_path is None
+                else DerivativeDataCertificationReport.from_dict(
+                    json.loads(
+                        Path(derivative_path)
+                        .expanduser()
+                        .read_text(encoding="utf-8")
+                    )
+                )
+            ),
         )
         payload = report.to_dict()
         if args.output:

@@ -155,3 +155,7 @@ A provider activation without a matching reviewed runtime binding remains blocke
 ## Maximum decision-information activation
 
 The combined data gate overlays `config/maximum_decision_information_scope.json` with the append-only decision-information activation registry. Source-controlled placeholders remain disabled; operators activate reviewed sources with `run_decision_information_activation.py` and configure canonical `decision-information-record.v1` ingestion separately.
+
+## Selected institutional provider stack
+
+The concrete multi-provider implementation and activation sequence are documented in [All-Market Institutional Provider Stack](ALL_MARKET_PROVIDER_STACK.md). The selected stack requires LSEG, Databento, ICE Data Services, EODHD, Coinbase, Kraken, CME, OCC, ICE clearing data, and the governed volatility-surface compiler.

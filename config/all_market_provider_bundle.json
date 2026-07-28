@@ -1,0 +1,339 @@
+{
+  "schema_version": "all-market-provider-bundle.v1",
+  "identifier": "provider-bundle:all-markets-institutional.v1",
+  "role_requirements": [
+    {"role": "global_execution_market_data", "minimum_ready_members": 2},
+    {"role": "global_reference_corporate_actions", "minimum_ready_members": 1},
+    {"role": "global_fundamentals", "minimum_ready_members": 1},
+    {"role": "evaluated_fixed_income", "minimum_ready_members": 1},
+    {"role": "broad_historical_multi_asset", "minimum_ready_members": 1},
+    {"role": "crypto_venue_validation", "minimum_ready_members": 2},
+    {"role": "derivative_contract_data", "minimum_ready_members": 1},
+    {"role": "derivative_margin_data", "minimum_ready_members": 3},
+    {"role": "volatility_surface_data", "minimum_ready_members": 1}
+  ],
+  "members": [
+    {
+      "identifier": "bundle-member:lseg-global-market-data",
+      "provider_identifier": "lseg-global-market-data",
+      "provider_name": "LSEG Data Platform global market data",
+      "roles": ["global_execution_market_data"],
+      "binding_kind": "configured_dataset",
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_API_KEY"
+      ],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_BINDING"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_LICENSE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": [
+        "market_prices",
+        "quotes_liquidity",
+        "fx_rates",
+        "commodity_curves",
+        "benchmarks",
+        "market_calendars",
+        "execution_inputs"
+      ],
+      "limitations": [
+        "Contract entitlements must explicitly permit storage, derived analytics, display, and paper simulation.",
+        "Client-specific LSEG endpoint and response mappings belong in the runtime binding, not source control."
+      ]
+    },
+    {
+      "identifier": "bundle-member:lseg-global-reference-data",
+      "provider_identifier": "lseg-global-reference-data",
+      "provider_name": "LSEG DataScope global reference and corporate actions",
+      "roles": ["global_reference_corporate_actions"],
+      "binding_kind": "configured_dataset",
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_REFERENCE_API_KEY"
+      ],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_REFERENCE_BINDING"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_REFERENCE_LICENSE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_REFERENCE_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": [
+        "security_master",
+        "corporate_actions",
+        "market_calendars",
+        "benchmarks"
+      ]
+    },
+    {
+      "identifier": "bundle-member:lseg-global-fundamentals",
+      "provider_identifier": "lseg-global-fundamentals",
+      "provider_name": "LSEG global fundamentals and filings",
+      "roles": ["global_fundamentals"],
+      "binding_kind": "configured_dataset",
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_API_KEY"
+      ],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_BINDING"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_LICENSE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": ["fundamentals", "filings"]
+    },
+    {
+      "identifier": "bundle-member:ice-evaluated-fixed-income",
+      "provider_identifier": "ice-evaluated-fixed-income",
+      "provider_name": "ICE Data Services evaluated fixed-income pricing",
+      "roles": ["evaluated_fixed_income"],
+      "binding_kind": "configured_dataset",
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_API_KEY"
+      ],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_BINDING"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_LICENSE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": [
+        "security_master",
+        "market_prices",
+        "quotes_liquidity",
+        "fixed_income_terms",
+        "market_calendars",
+        "benchmarks",
+        "execution_inputs"
+      ]
+    },
+    {
+      "identifier": "bundle-member:databento-execution-data",
+      "provider_identifier": "databento-execution-data",
+      "provider_name": "Databento direct equities, futures, and options data",
+      "roles": [
+        "global_execution_market_data",
+        "derivative_contract_data"
+      ],
+      "binding_kind": "configured_dataset",
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"
+      ],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_BINDING"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_LICENSE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": [
+        "market_prices",
+        "quotes_liquidity",
+        "derivative_contracts",
+        "market_calendars",
+        "benchmarks",
+        "execution_inputs"
+      ],
+      "limitations": [
+        "Spot FX is not treated as ready through Databento until the contracted dataset is generally available and certified.",
+        "LSEG remains the required global FX and broad international market-data source."
+      ]
+    },
+    {
+      "identifier": "bundle-member:eodhd-primary",
+      "provider_identifier": "eodhd-primary",
+      "provider_name": "EODHD broad historical multi-asset data",
+      "roles": ["broad_historical_multi_asset"],
+      "binding_kind": "eodhd",
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN"
+      ],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_EODHD_BINDINGS"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_EODHD_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_EODHD_LICENSE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_EODHD_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": [
+        "market_history",
+        "corporate_actions",
+        "fundamentals",
+        "fx_rates",
+        "fixed_income_terms",
+        "commodity_curves",
+        "benchmarks"
+      ],
+      "limitations": [
+        "EODHD is historical and analytical evidence; it is not execution-grade bid/ask liquidity."
+      ]
+    },
+    {
+      "identifier": "bundle-member:coinbase-crypto-validation",
+      "provider_identifier": "coinbase-crypto-validation",
+      "provider_name": "Coinbase Exchange public market data",
+      "roles": ["crypto_venue_validation"],
+      "binding_kind": "crypto_venues",
+      "credential_environment_variables": [],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_COINBASE_TERMS_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_COINBASE_PAPER_USE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_COINBASE_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": [
+        "market_prices",
+        "quotes_liquidity",
+        "crypto_market_structure"
+      ]
+    },
+    {
+      "identifier": "bundle-member:kraken-crypto-validation",
+      "provider_identifier": "kraken-crypto-validation",
+      "provider_name": "Kraken spot public market data",
+      "roles": ["crypto_venue_validation"],
+      "binding_kind": "crypto_venues",
+      "credential_environment_variables": [],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_KRAKEN_TERMS_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_KRAKEN_PAPER_USE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_KRAKEN_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": [
+        "market_prices",
+        "quotes_liquidity",
+        "crypto_market_structure"
+      ]
+    },
+    {
+      "identifier": "bundle-member:cme-margin-data",
+      "provider_identifier": "cme-margin-data",
+      "provider_name": "CME clearing margin and SPAN parameter data",
+      "roles": ["derivative_margin_data"],
+      "binding_kind": "configured_dataset",
+      "credential_environment_variables": [],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_CME_MARGIN_BINDING"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_CME_MARGIN_TERMS_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_CME_MARGIN_PAPER_USE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_CME_MARGIN_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": ["margin_collateral"]
+    },
+    {
+      "identifier": "bundle-member:occ-margin-data",
+      "provider_identifier": "occ-margin-data",
+      "provider_name": "OCC options margin and risk parameter data",
+      "roles": ["derivative_margin_data"],
+      "binding_kind": "configured_dataset",
+      "credential_environment_variables": [],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_OCC_MARGIN_BINDING"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_OCC_MARGIN_TERMS_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_OCC_MARGIN_PAPER_USE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_OCC_MARGIN_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": ["margin_collateral"]
+    },
+    {
+      "identifier": "bundle-member:ice-margin-data",
+      "provider_identifier": "ice-margin-data",
+      "provider_name": "ICE clearing margin parameter data",
+      "roles": ["derivative_margin_data"],
+      "binding_kind": "configured_dataset",
+      "credential_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_API_KEY"
+      ],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_BINDING"
+      ],
+      "contract_reference_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_LICENSE_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": ["margin_collateral"]
+    },
+    {
+      "identifier": "bundle-member:derived-volatility-surfaces",
+      "provider_identifier": "derived-volatility-surfaces",
+      "provider_name": "Capital Intelligence certified volatility-surface compiler",
+      "roles": ["volatility_surface_data"],
+      "binding_kind": "configured_dataset",
+      "credential_environment_variables": [],
+      "binding_environment_variables": [
+        "CAPITAL_INTELLIGENCE_VOLATILITY_SURFACE_BINDING"
+      ],
+      "contract_reference_environment_variables": [],
+      "license_approval_environment_variables": [
+        "CAPITAL_INTELLIGENCE_VOLATILITY_SURFACE_MODEL_APPROVAL"
+      ],
+      "certification_environment_variables": [
+        "CAPITAL_INTELLIGENCE_VOLATILITY_SURFACE_CERTIFICATION_ID"
+      ],
+      "required_dataset_types": ["volatility_surfaces"]
+    }
+  ]
+}

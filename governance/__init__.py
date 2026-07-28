@@ -131,6 +131,19 @@ _LAZY_COMBINED_PAPER_EXECUTION_EXPORTS = {
     "require_combined_paper_execution_authorization",
 }
 
+_LAZY_MARKET_DATA_BUNDLE_EXPORTS = {
+    "AllMarketProviderBundle",
+    "MarketDataBundleError",
+    "ProviderBindingKind",
+    "ProviderBundleAssessment",
+    "ProviderBundleMember",
+    "ProviderBundleMemberAssessment",
+    "ProviderBundleRole",
+    "ProviderBundleRoleRequirement",
+    "assess_all_market_provider_bundle",
+    "load_all_market_provider_bundle",
+}
+
 
 def __getattr__(name: str):
     if name in _LAZY_PAPER_TEST_ENTRY_EXPORTS:
@@ -138,6 +151,9 @@ def __getattr__(name: str):
         return getattr(module, name)
     if name in _LAZY_COMBINED_PAPER_EXECUTION_EXPORTS:
         module = importlib.import_module("governance.paper_execution_authority")
+        return getattr(module, name)
+    if name in _LAZY_MARKET_DATA_BUNDLE_EXPORTS:
+        module = importlib.import_module("governance.market_data_bundle")
         return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -155,6 +171,16 @@ __all__ = [
     "MarketDataReadinessAssessment",
     "MarketDataScope",
     "MarketDataScopeState",
+    "AllMarketProviderBundle",
+    "MarketDataBundleError",
+    "ProviderBindingKind",
+    "ProviderBundleAssessment",
+    "ProviderBundleMember",
+    "ProviderBundleMemberAssessment",
+    "ProviderBundleRole",
+    "ProviderBundleRoleRequirement",
+    "assess_all_market_provider_bundle",
+    "load_all_market_provider_bundle",
     "ProviderDataCapability",
     "data_readiness_manifest_from_payload",
     "load_data_readiness_manifest",

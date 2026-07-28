@@ -1,0 +1,53 @@
+{
+  "schema_version": "crypto-venue-bindings.v1",
+  "bindings": [
+    {
+      "instrument_id": "instrument:crypto:btcusd",
+      "quote_currency": "USD",
+      "coinbase_product_id": "BTC-USD",
+      "kraken_symbol": "XBT/USD"
+    },
+    {
+      "instrument_id": "instrument:crypto:ethusd",
+      "quote_currency": "USD",
+      "coinbase_product_id": "ETH-USD",
+      "kraken_symbol": "ETH/USD"
+    },
+    {
+      "instrument_id": "instrument:crypto:solusd",
+      "quote_currency": "USD",
+      "coinbase_product_id": "SOL-USD",
+      "kraken_symbol": "SOL/USD"
+    },
+    {
+      "instrument_id": "instrument:crypto:xrpusd",
+      "quote_currency": "USD",
+      "coinbase_product_id": "XRP-USD",
+      "kraken_symbol": "XRP/USD"
+    },
+    {
+      "instrument_id": "instrument:crypto:adausd",
+      "quote_currency": "USD",
+      "coinbase_product_id": "ADA-USD",
+      "kraken_symbol": "ADA/USD"
+    },
+    {
+      "instrument_id": "instrument:crypto:dogeusd",
+      "quote_currency": "USD",
+      "coinbase_product_id": "DOGE-USD",
+      "kraken_symbol": "XDG/USD"
+    },
+    {
+      "instrument_id": "instrument:crypto:ltcusd",
+      "quote_currency": "USD",
+      "coinbase_product_id": "LTC-USD",
+      "kraken_symbol": "LTC/USD"
+    },
+    {
+      "instrument_id": "instrument:crypto:linkusd",
+      "quote_currency": "USD",
+      "coinbase_product_id": "LINK-USD",
+      "kraken_symbol": "LINK/USD"
+    }
+  ]
+}

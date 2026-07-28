@@ -42,6 +42,19 @@ def _steps(*, include_container: bool) -> tuple[ReleaseValidationStep, ...]:
             300,
         ),
         ReleaseValidationStep(
+            "validate_provider_bundle_implementation",
+            (
+                python,
+                "run_all_market_provider_bundle.py",
+                "--provider-activation-database",
+                "reports/release-provider-bundle-activations.db",
+                "--evaluated-at",
+                "2026-07-28T00:00:00+00:00",
+                "--require-implementation-ready",
+            ),
+            120,
+        ),
+        ReleaseValidationStep(
             "validate_all_markets_internal_readiness",
             (
                 python,

@@ -7,7 +7,9 @@
       "required": true,
       "activation_required": false,
       "source_authority_identifier": "source-policy:official-fred",
-      "credential_environments": ["FRED_API_KEY"],
+      "credential_environments": [
+        "FRED_API_KEY"
+      ],
       "binding_environments": []
     },
     {
@@ -16,7 +18,9 @@
       "required": true,
       "activation_required": false,
       "source_authority_identifier": "source-policy:official-sec-edgar",
-      "credential_environments": ["SEC_USER_AGENT"],
+      "credential_environments": [
+        "SEC_USER_AGENT"
+      ],
       "binding_environments": []
     },
     {
@@ -24,7 +28,9 @@
       "provider_identifier": "official-global-macro",
       "required": true,
       "activation_required": true,
-      "credential_environments": ["CAPITAL_INTELLIGENCE_GLOBAL_MACRO_PROVIDER"],
+      "credential_environments": [
+        "CAPITAL_INTELLIGENCE_GLOBAL_MACRO_PROVIDER"
+      ],
       "binding_environments": []
     },
     {
@@ -32,8 +38,12 @@
       "provider_identifier": "eodhd-primary",
       "required": true,
       "activation_required": true,
-      "credential_environments": ["CAPITAL_INTELLIGENCE_EODHD_API_TOKEN"],
-      "binding_environments": ["CAPITAL_INTELLIGENCE_EODHD_BINDINGS"]
+      "credential_environments": [
+        "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN"
+      ],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_EODHD_BINDINGS"
+      ]
     },
     {
       "name": "Coinbase independent crypto venue",
@@ -41,7 +51,9 @@
       "required": true,
       "activation_required": true,
       "credential_environments": [],
-      "binding_environments": ["CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS"]
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS"
+      ]
     },
     {
       "name": "Kraken independent crypto venue",
@@ -49,12 +61,14 @@
       "required": true,
       "activation_required": true,
       "credential_environments": [],
-      "binding_environments": ["CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS"]
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS"
+      ]
     },
     {
       "name": "Historical global reference and corporate-action provider",
       "provider_identifier": "commercial-global-reference-data",
-      "required": true,
+      "required": false,
       "activation_required": true,
       "credential_environments": [
         "CAPITAL_INTELLIGENCE_GLOBAL_REFERENCE_DATA_PROVIDER",
@@ -67,7 +81,7 @@
     {
       "name": "Execution-grade global market quote provider",
       "provider_identifier": "commercial-global-market-data",
-      "required": true,
+      "required": false,
       "activation_required": true,
       "credential_environments": [
         "CAPITAL_INTELLIGENCE_GLOBAL_MARKET_DATA_PROVIDER",
@@ -80,7 +94,7 @@
     {
       "name": "Global fundamentals and filing provider",
       "provider_identifier": "commercial-global-fundamentals",
-      "required": true,
+      "required": false,
       "activation_required": true,
       "credential_environments": [
         "CAPITAL_INTELLIGENCE_GLOBAL_FUNDAMENTALS_PROVIDER",
@@ -91,13 +105,203 @@
     {
       "name": "Evaluated fixed-income pricing provider",
       "provider_identifier": "commercial-fixed-income-data",
-      "required": true,
+      "required": false,
       "activation_required": true,
       "credential_environments": [
         "CAPITAL_INTELLIGENCE_FIXED_INCOME_DATA_PROVIDER",
         "CAPITAL_INTELLIGENCE_FIXED_INCOME_DATA_API_KEY"
       ],
       "binding_environments": []
+    },
+    {
+      "name": "LSEG Data Platform global market data",
+      "provider_identifier": "lseg-global-market-data",
+      "required": true,
+      "activation_required": true,
+      "source_authority_identifier": "source-policy:lseg-global-market-data",
+      "credential_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_API_KEY"
+      ],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_BINDING"
+      ],
+      "contract_reference_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_LICENSE_APPROVAL"
+      ],
+      "certification_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_CERTIFICATION_ID"
+      ]
+    },
+    {
+      "name": "LSEG DataScope global reference and corporate actions",
+      "provider_identifier": "lseg-global-reference-data",
+      "required": true,
+      "activation_required": true,
+      "source_authority_identifier": "source-policy:lseg-global-reference-data",
+      "credential_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_REFERENCE_API_KEY"
+      ],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_REFERENCE_BINDING"
+      ],
+      "contract_reference_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_REFERENCE_LICENSE_APPROVAL"
+      ],
+      "certification_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_REFERENCE_CERTIFICATION_ID"
+      ]
+    },
+    {
+      "name": "LSEG global fundamentals and filings",
+      "provider_identifier": "lseg-global-fundamentals",
+      "required": true,
+      "activation_required": true,
+      "source_authority_identifier": "source-policy:lseg-global-fundamentals",
+      "credential_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_API_KEY"
+      ],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_BINDING"
+      ],
+      "contract_reference_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_LICENSE_APPROVAL"
+      ],
+      "certification_environments": [
+        "CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_CERTIFICATION_ID"
+      ]
+    },
+    {
+      "name": "ICE Data Services evaluated fixed-income pricing",
+      "provider_identifier": "ice-evaluated-fixed-income",
+      "required": true,
+      "activation_required": true,
+      "source_authority_identifier": "source-policy:ice-evaluated-fixed-income",
+      "credential_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_API_KEY"
+      ],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_BINDING"
+      ],
+      "contract_reference_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_LICENSE_APPROVAL"
+      ],
+      "certification_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_CERTIFICATION_ID"
+      ]
+    },
+    {
+      "name": "Databento direct equities, futures, and options data",
+      "provider_identifier": "databento-execution-data",
+      "required": true,
+      "activation_required": true,
+      "source_authority_identifier": "source-policy:databento-execution-data",
+      "credential_environments": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"
+      ],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_BINDING"
+      ],
+      "contract_reference_environments": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environments": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_LICENSE_APPROVAL"
+      ],
+      "certification_environments": [
+        "CAPITAL_INTELLIGENCE_DATABENTO_CERTIFICATION_ID"
+      ]
+    },
+    {
+      "name": "CME clearing margin and SPAN parameter data",
+      "provider_identifier": "cme-margin-data",
+      "required": true,
+      "activation_required": true,
+      "source_authority_identifier": "source-policy:cme-margin-data",
+      "credential_environments": [],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_CME_MARGIN_BINDING"
+      ],
+      "contract_reference_environments": [
+        "CAPITAL_INTELLIGENCE_CME_MARGIN_TERMS_REFERENCE"
+      ],
+      "license_approval_environments": [
+        "CAPITAL_INTELLIGENCE_CME_MARGIN_PAPER_USE_APPROVAL"
+      ],
+      "certification_environments": [
+        "CAPITAL_INTELLIGENCE_CME_MARGIN_CERTIFICATION_ID"
+      ]
+    },
+    {
+      "name": "OCC options margin and risk parameter data",
+      "provider_identifier": "occ-margin-data",
+      "required": true,
+      "activation_required": true,
+      "source_authority_identifier": "source-policy:occ-margin-data",
+      "credential_environments": [],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_OCC_MARGIN_BINDING"
+      ],
+      "contract_reference_environments": [
+        "CAPITAL_INTELLIGENCE_OCC_MARGIN_TERMS_REFERENCE"
+      ],
+      "license_approval_environments": [
+        "CAPITAL_INTELLIGENCE_OCC_MARGIN_PAPER_USE_APPROVAL"
+      ],
+      "certification_environments": [
+        "CAPITAL_INTELLIGENCE_OCC_MARGIN_CERTIFICATION_ID"
+      ]
+    },
+    {
+      "name": "ICE clearing margin parameter data",
+      "provider_identifier": "ice-margin-data",
+      "required": true,
+      "activation_required": true,
+      "source_authority_identifier": "source-policy:ice-margin-data",
+      "credential_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_API_KEY"
+      ],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_BINDING"
+      ],
+      "contract_reference_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_CONTRACT_REFERENCE"
+      ],
+      "license_approval_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_LICENSE_APPROVAL"
+      ],
+      "certification_environments": [
+        "CAPITAL_INTELLIGENCE_ICE_MARGIN_CERTIFICATION_ID"
+      ]
+    },
+    {
+      "name": "Capital Intelligence certified volatility-surface compiler",
+      "provider_identifier": "derived-volatility-surfaces",
+      "required": true,
+      "activation_required": true,
+      "source_authority_identifier": "source-policy:derived-volatility-surfaces",
+      "credential_environments": [],
+      "binding_environments": [
+        "CAPITAL_INTELLIGENCE_VOLATILITY_SURFACE_BINDING"
+      ],
+      "contract_reference_environments": [],
+      "license_approval_environments": [
+        "CAPITAL_INTELLIGENCE_VOLATILITY_SURFACE_MODEL_APPROVAL"
+      ],
+      "certification_environments": [
+        "CAPITAL_INTELLIGENCE_VOLATILITY_SURFACE_CERTIFICATION_ID"
+      ]
     }
   ]
 }
