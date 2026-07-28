@@ -233,11 +233,15 @@ def _render_today() -> None:
                 "Optionality reserve",
             ),
             (
-                "Paper return",
+                "Total P&L",
+                format_currency(totals.get("total_pnl", 0.0)),
                 format_percent(totals["total_return"]),
-                "Since inception",
             ),
-            ("Mandate", "Compounding", "One portfolio"),
+            (
+                "Today P&L",
+                format_currency(totals.get("day_pnl", 0.0)),
+                format_percent(totals.get("day_return", 0.0)),
+            ),
         ),
         variant="today",
     )
@@ -437,15 +441,29 @@ def _render_portfolio() -> None:
     metric_grid(
         (
             ("NAV", format_currency(mandate["nav"]), "Canonical value"),
-            ("Cash", format_currency(mandate["cash"]), "Available capital"),
             (
-                "Paper return",
+                "Total P&L",
+                format_currency(mandate.get("total_pnl", 0.0)),
                 format_percent(mandate["total_return"]),
-                "Since inception",
             ),
-            ("Holdings", len(mandate["holdings"]), "Active positions"),
+            (
+                "Realized",
+                format_currency(mandate.get("realized_pnl", 0.0)),
+                "Closed positions and lifecycle cash",
+            ),
+            (
+                "Unrealized",
+                format_currency(mandate.get("unrealized_pnl", 0.0)),
+                "Current marks",
+            ),
         ),
         variant="portfolio",
+    )
+    st.caption(
+        "Valuation as of "
+        f"{format_datetime(mandate.get('as_of'))} · "
+        f"Cash {format_currency(mandate['cash'])} · "
+        f"Accounting residual {format_currency(mandate.get('accounting_residual', 0.0))}"
     )
     allocation_bar(cash=mandate["cash"], nav=mandate["nav"])
 
@@ -465,8 +483,10 @@ def _render_portfolio() -> None:
                     "asset_class",
                     "quantity",
                     "current_price",
+                    "cost_basis",
                     "market_value",
                     "unrealized_gain",
+                    "unrealized_return",
                     "price_currency",
                     "updated_at",
                 )
@@ -492,6 +512,9 @@ def _render_portfolio() -> None:
                     "quantity",
                     "price",
                     "gross_amount_base",
+                    "cost_basis_relieved_base",
+                    "realized_pnl_base",
+                    "cost_amount_base",
                     "rationale",
                 )
                 if column in frame.columns
@@ -519,6 +542,10 @@ def _render_portfolio() -> None:
                     "cash_base_total",
                     "holdings_value",
                     "nav",
+                    "total_pnl",
+                    "realized_pnl",
+                    "unrealized_pnl",
+                    "total_return",
                 )
                 if column in frame.columns
             ]
@@ -663,6 +690,9 @@ def _render_history() -> None:
                     "quantity",
                     "price",
                     "gross_amount_base",
+                    "cost_basis_relieved_base",
+                    "realized_pnl_base",
+                    "cost_amount_base",
                     "rationale",
                 )
                 if column in frame.columns

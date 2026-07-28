@@ -869,6 +869,16 @@ def test_global_sell_uses_owned_identity_and_reconciles(tmp_path: Path) -> None:
     assert batch.ending_snapshot.positions == ()
     assert batch.ending_snapshot.cash_amount < 100_000
     assert batch.ending_snapshot.cash_amount > 99_990
+    fill = batch.fills[0]
+    assert fill.cost_basis_relieved_local == pytest.approx(3_600.0)
+    assert fill.cost_basis_relieved_base == pytest.approx(4_500.0)
+    assert fill.realized_pnl_local == pytest.approx(398.0)
+    assert fill.realized_pnl_base == pytest.approx(497.5)
+    event = batch.ending_snapshot.implementation_events[-1]
+    assert event.realized_pnl_base == pytest.approx(497.5)
+    assert event.cost_basis_relieved_base == pytest.approx(4_500.0)
+    assert batch.reconciliation.accounting_reconciled is True
+    assert batch.reconciliation.accounting_residual_change == 0.0
     assert batch.reconciliation.reconciled is True
 
 

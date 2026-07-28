@@ -124,6 +124,10 @@ def _number(
     return round(normalized, 12)
 
 
+def _signed_number(value: object, *, field_name: str) -> float:
+    return _number(value, field_name=field_name)
+
+
 def _currency(value: object, *, field_name: str) -> str:
     normalized = _text(value, field_name=field_name).upper()
     if not 3 <= len(normalized) <= 12:
@@ -406,6 +410,10 @@ class MultiAssetPaperFill:
     commission_local: float
     commission_base: float
     adverse_spread_base: float
+    cost_basis_relieved_local: float
+    cost_basis_relieved_base: float
+    realized_pnl_local: float
+    realized_pnl_base: float
     quote_source_identifier: str
     fx_source_identifier: str
     quote_certification_identifier: str
@@ -446,12 +454,20 @@ class MultiAssetPaperFill:
             "commission_local",
             "commission_base",
             "adverse_spread_base",
+            "cost_basis_relieved_local",
+            "cost_basis_relieved_base",
             "contract_multiplier",
         ):
             object.__setattr__(
                 self,
                 field_name,
                 _number(getattr(self, field_name), field_name=field_name, minimum=0.0),
+            )
+        for field_name in ("realized_pnl_local", "realized_pnl_base"):
+            object.__setattr__(
+                self,
+                field_name,
+                _signed_number(getattr(self, field_name), field_name=field_name),
             )
         if self.quantity <= 0.0:
             raise ValueError("fill quantity must be positive")
@@ -515,6 +531,10 @@ class MultiAssetExecutionReconciliation:
     ending_nav: float
     difference: float
     reconciled: bool
+    beginning_accounting_residual: float = 0.0
+    ending_accounting_residual: float = 0.0
+    accounting_residual_change: float = 0.0
+    accounting_reconciled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -1121,7 +1141,17 @@ class MultiAssetPaperExecutionOrchestrator:
             8,
         )
         difference = round(ending_snapshot.nav - expected_ending_nav, 8)
-        reconciled = abs(difference) <= self.policy.reconciliation_tolerance
+        accounting_residual_change = round(
+            ending_snapshot.accounting_residual - portfolio.accounting_residual,
+            8,
+        )
+        accounting_reconciled = (
+            abs(accounting_residual_change) <= self.policy.reconciliation_tolerance
+        )
+        reconciled = (
+            abs(difference) <= self.policy.reconciliation_tolerance
+            and accounting_reconciled
+        )
         reconciliation = MultiAssetExecutionReconciliation(
             beginning_nav=portfolio.nav,
             revalued_beginning_nav=revalued_beginning_nav,
@@ -1132,6 +1162,10 @@ class MultiAssetPaperExecutionOrchestrator:
             ending_nav=ending_snapshot.nav,
             difference=difference,
             reconciled=reconciled,
+            beginning_accounting_residual=portfolio.accounting_residual,
+            ending_accounting_residual=ending_snapshot.accounting_residual,
+            accounting_residual_change=accounting_residual_change,
+            accounting_reconciled=accounting_reconciled,
         )
         if not reconciled:
             self.store.append(
@@ -1144,6 +1178,9 @@ class MultiAssetPaperExecutionOrchestrator:
                     "difference": difference,
                     "expected_ending_nav": expected_ending_nav,
                     "ending_nav": ending_snapshot.nav,
+                    "accounting_residual_change": accounting_residual_change,
+                    "beginning_accounting_residual": portfolio.accounting_residual,
+                    "ending_accounting_residual": ending_snapshot.accounting_residual,
                 },
             )
             raise MultiAssetExecutionError("multi-asset paper ledger did not reconcile")
@@ -1393,6 +1430,34 @@ class MultiAssetPaperExecutionOrchestrator:
             quantity * abs(fill_price - mark_price) * quote.fx_rate_to_base * profile.contract_multiplier,
             8,
         )
+        cost_basis_relieved_local = 0.0
+        cost_basis_relieved_base = 0.0
+        realized_pnl_local = 0.0
+        realized_pnl_base = 0.0
+        if trade.side is TradeSide.SELL:
+            if current_position is None:
+                raise MultiAssetExecutionError("sell fill is missing the canonical position")
+            cost_basis_relieved_local = round(
+                quantity * current_position.average_cost * profile.contract_multiplier,
+                12,
+            )
+            base_unit_cost = (
+                current_position.average_cost * current_position.fx_rate_to_base
+                if current_position.average_cost_base is None
+                else current_position.average_cost_base
+            )
+            cost_basis_relieved_base = round(
+                quantity * base_unit_cost * profile.contract_multiplier,
+                8,
+            )
+            realized_pnl_local = round(
+                gross_local - commission_local - cost_basis_relieved_local,
+                12,
+            )
+            realized_pnl_base = round(
+                gross_base - commission_base - cost_basis_relieved_base,
+                8,
+            )
         if trade.side is TradeSide.BUY:
             total_cash_use = gross_base + commission_base
             if total_cash_use > available_cash + self.policy.reconciliation_tolerance:
@@ -1457,6 +1522,10 @@ class MultiAssetPaperExecutionOrchestrator:
             commission_local=commission_local,
             commission_base=commission_base,
             adverse_spread_base=adverse_spread_base,
+            cost_basis_relieved_local=cost_basis_relieved_local,
+            cost_basis_relieved_base=cost_basis_relieved_base,
+            realized_pnl_local=realized_pnl_local,
+            realized_pnl_base=realized_pnl_base,
             quote_source_identifier=quote.quote_source_identifier,
             fx_source_identifier=quote.fx_source_identifier,
             quote_certification_identifier=quote.quote_certification_identifier,
@@ -1550,6 +1619,11 @@ class MultiAssetPaperExecutionOrchestrator:
             price=fill.fill_price_local,
             gross_amount=fill.gross_amount_local,
             cost_amount=fill.commission_local,
+            contract_multiplier=fill.contract_multiplier,
+            cost_basis_relieved=fill.cost_basis_relieved_local,
+            cost_basis_relieved_base=fill.cost_basis_relieved_base,
+            realized_pnl=fill.realized_pnl_local,
+            realized_pnl_base=fill.realized_pnl_base,
             rationale="Governed universal-market paper fill; no broker order submitted.",
             source_identifier=fill.quote_source_identifier,
             price_currency=fill.price_currency,
@@ -1588,6 +1662,10 @@ class MultiAssetPaperExecutionOrchestrator:
             ending_nav=portfolio.nav,
             difference=0.0,
             reconciled=True,
+            beginning_accounting_residual=portfolio.accounting_residual,
+            ending_accounting_residual=portfolio.accounting_residual,
+            accounting_residual_change=0.0,
+            accounting_reconciled=True,
         )
 
     def _record(self, batch: MultiAssetExecutionBatch) -> None:
@@ -1620,6 +1698,10 @@ def fill_to_dict(value: MultiAssetPaperFill) -> dict[str, Any]:
         "commission_local": value.commission_local,
         "commission_base": value.commission_base,
         "adverse_spread_base": value.adverse_spread_base,
+        "cost_basis_relieved_local": value.cost_basis_relieved_local,
+        "cost_basis_relieved_base": value.cost_basis_relieved_base,
+        "realized_pnl_local": value.realized_pnl_local,
+        "realized_pnl_base": value.realized_pnl_base,
         "quote_source_identifier": value.quote_source_identifier,
         "fx_source_identifier": value.fx_source_identifier,
         "quote_certification_identifier": value.quote_certification_identifier,
@@ -1663,6 +1745,10 @@ def batch_to_dict(value: MultiAssetExecutionBatch) -> dict[str, Any]:
             "ending_nav": value.reconciliation.ending_nav,
             "difference": value.reconciliation.difference,
             "reconciled": value.reconciliation.reconciled,
+            "beginning_accounting_residual": value.reconciliation.beginning_accounting_residual,
+            "ending_accounting_residual": value.reconciliation.ending_accounting_residual,
+            "accounting_residual_change": value.reconciliation.accounting_residual_change,
+            "accounting_reconciled": value.reconciliation.accounting_reconciled,
         },
         "policy_version": value.policy_version,
         "profile_identifiers": list(value.profile_identifiers),
@@ -1721,6 +1807,10 @@ def batch_from_dict(value: Mapping[str, Any]) -> MultiAssetExecutionBatch:
                 commission_local=float(item["commission_local"]),
                 commission_base=float(item["commission_base"]),
                 adverse_spread_base=float(item["adverse_spread_base"]),
+                cost_basis_relieved_local=float(item.get("cost_basis_relieved_local", 0.0)),
+                cost_basis_relieved_base=float(item.get("cost_basis_relieved_base", 0.0)),
+                realized_pnl_local=float(item.get("realized_pnl_local", 0.0)),
+                realized_pnl_base=float(item.get("realized_pnl_base", 0.0)),
                 quote_source_identifier=str(item["quote_source_identifier"]),
                 fx_source_identifier=str(item["fx_source_identifier"]),
                 quote_certification_identifier=str(
@@ -1745,6 +1835,18 @@ def batch_from_dict(value: Mapping[str, Any]) -> MultiAssetExecutionBatch:
             ending_nav=float(reconciliation["ending_nav"]),
             difference=float(reconciliation["difference"]),
             reconciled=bool(reconciliation["reconciled"]),
+            beginning_accounting_residual=float(
+                reconciliation.get("beginning_accounting_residual", 0.0)
+            ),
+            ending_accounting_residual=float(
+                reconciliation.get("ending_accounting_residual", 0.0)
+            ),
+            accounting_residual_change=float(
+                reconciliation.get("accounting_residual_change", 0.0)
+            ),
+            accounting_reconciled=bool(
+                reconciliation.get("accounting_reconciled", True)
+            ),
         ),
         policy_version=str(value["policy_version"]),
         profile_identifiers=tuple(

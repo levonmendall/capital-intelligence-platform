@@ -55,15 +55,20 @@ def _optional_aware(value: object, *, field_name: str) -> datetime | None:
     return _aware(value, field_name=field_name)
 
 
-def _number(value: object, *, field_name: str, minimum: float = 0.0) -> float:
+def _signed_number(value: object, *, field_name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{field_name} must be numeric")
     normalized = float(value)
     if not isfinite(normalized):
         raise ValueError(f"{field_name} must be finite")
+    return round(normalized, 12)
+
+
+def _number(value: object, *, field_name: str, minimum: float = 0.0) -> float:
+    normalized = _signed_number(value, field_name=field_name)
     if normalized < minimum:
         raise ValueError(f"{field_name} must be at least {minimum}")
-    return round(normalized, 12)
+    return normalized
 
 
 def _currency(value: object, *, field_name: str) -> str:
@@ -91,6 +96,7 @@ class CanonicalCurrencyBalance:
     fx_rate_to_base: float
     updated_at: datetime
     fx_rate_source_identifier: str
+    cost_basis_base: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -121,10 +127,24 @@ class CanonicalCurrencyBalance:
                 field_name="fx_rate_source_identifier",
             ),
         )
+        if self.cost_basis_base is not None:
+            object.__setattr__(
+                self,
+                "cost_basis_base",
+                _number(self.cost_basis_base, field_name="cost_basis_base"),
+            )
 
     @property
     def base_value(self) -> float:
         return round(self.amount * self.fx_rate_to_base, 8)
+
+    @property
+    def preserved_cost_basis_base(self) -> float:
+        return self.base_value if self.cost_basis_base is None else self.cost_basis_base
+
+    @property
+    def unrealized_fx_gain(self) -> float:
+        return round(self.base_value - self.preserved_cost_basis_base, 8)
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,8 +295,16 @@ class CanonicalPortfolioPosition:
         return round(self.local_market_value * self.fx_rate_to_base, 8)
 
     @property
+    def local_unrealized_gain(self) -> float:
+        return round(self.local_market_value - self.local_cost_basis, 8)
+
+    @property
     def unrealized_gain(self) -> float:
         return round(self.market_value - self.cost_basis, 8)
+
+    @property
+    def unrealized_return(self) -> float:
+        return 0.0 if self.cost_basis == 0.0 else round(self.unrealized_gain / self.cost_basis, 12)
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +326,13 @@ class CanonicalImplementationEvent:
     settlement_currency: str = "USD"
     fx_rate_to_base: float = 1.0
     fx_rate_source_identifier: str | None = None
+    contract_multiplier: float = 1.0
+    cost_basis_relieved: float = 0.0
+    cost_basis_relieved_base: float = 0.0
+    realized_pnl: float = 0.0
+    realized_pnl_base: float = 0.0
+    non_trade_pnl_base: float = 0.0
+    external_flow_amount_base: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -317,11 +352,32 @@ class CanonicalImplementationEvent:
                 "symbol",
                 _text(self.symbol, field_name="symbol").upper(),
             )
-        for field_name in ("quantity", "price", "gross_amount", "cost_amount"):
+        for field_name in (
+            "quantity",
+            "price",
+            "gross_amount",
+            "cost_amount",
+            "contract_multiplier",
+            "cost_basis_relieved",
+            "cost_basis_relieved_base",
+        ):
             object.__setattr__(
                 self,
                 field_name,
                 _number(getattr(self, field_name), field_name=field_name),
+            )
+        if self.contract_multiplier <= 0.0:
+            raise ValueError("contract_multiplier must be positive")
+        for field_name in (
+            "realized_pnl",
+            "realized_pnl_base",
+            "non_trade_pnl_base",
+            "external_flow_amount_base",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _signed_number(getattr(self, field_name), field_name=field_name),
             )
         object.__setattr__(self, "rationale", str(self.rationale).strip())
         object.__setattr__(
@@ -382,6 +438,10 @@ class CanonicalImplementationEvent:
     @property
     def cost_amount_base(self) -> float:
         return round(self.cost_amount * self.fx_rate_to_base, 8)
+
+    @property
+    def investment_pnl_base(self) -> float:
+        return round(self.realized_pnl_base + self.non_trade_pnl_base, 8)
 
 
 @dataclass(frozen=True, slots=True)
@@ -537,8 +597,44 @@ class CanonicalPortfolioSnapshot:
         return round(self.total_cash_value + self.holdings_value, 8)
 
     @property
+    def realized_pnl(self) -> float:
+        return round(sum(item.realized_pnl_base for item in self.implementation_events), 8)
+
+    @property
+    def unrealized_pnl(self) -> float:
+        return round(sum(item.unrealized_gain for item in self.positions), 8)
+
+    @property
+    def cash_fx_pnl(self) -> float:
+        return round(sum(item.unrealized_fx_gain for item in self.currency_balances), 8)
+
+    @property
+    def non_trade_pnl(self) -> float:
+        return round(sum(item.non_trade_pnl_base for item in self.implementation_events), 8)
+
+    @property
+    def net_external_flows(self) -> float:
+        return round(sum(item.external_flow_amount_base for item in self.implementation_events), 8)
+
+    @property
+    def fees_paid(self) -> float:
+        return round(sum(item.cost_amount_base for item in self.implementation_events), 8)
+
+    @property
+    def total_pnl(self) -> float:
+        return round(self.nav - self.starting_capital - self.net_external_flows, 8)
+
+    @property
+    def accounted_pnl(self) -> float:
+        return round(self.realized_pnl + self.unrealized_pnl + self.cash_fx_pnl + self.non_trade_pnl, 8)
+
+    @property
+    def accounting_residual(self) -> float:
+        return round(self.total_pnl - self.accounted_pnl, 8)
+
+    @property
     def total_return(self) -> float:
-        return round((self.nav / self.starting_capital) - 1.0, 12)
+        return round(self.total_pnl / self.starting_capital, 12)
 
 
 class CanonicalPortfolioIntegrityError(RuntimeError):
@@ -779,6 +875,8 @@ def currency_balance_to_dict(value: CanonicalCurrencyBalance) -> dict[str, Any]:
         "fx_rate_to_base": value.fx_rate_to_base,
         "updated_at": value.updated_at.isoformat(),
         "fx_rate_source_identifier": value.fx_rate_source_identifier,
+        "cost_basis_base": value.cost_basis_base,
+        "unrealized_fx_gain": value.unrealized_fx_gain,
     }
 
 
@@ -816,6 +914,13 @@ def event_to_dict(value: CanonicalImplementationEvent) -> dict[str, Any]:
         "price": value.price,
         "gross_amount": value.gross_amount,
         "cost_amount": value.cost_amount,
+        "contract_multiplier": value.contract_multiplier,
+        "cost_basis_relieved": value.cost_basis_relieved,
+        "cost_basis_relieved_base": value.cost_basis_relieved_base,
+        "realized_pnl": value.realized_pnl,
+        "realized_pnl_base": value.realized_pnl_base,
+        "non_trade_pnl_base": value.non_trade_pnl_base,
+        "external_flow_amount_base": value.external_flow_amount_base,
         "rationale": value.rationale,
         "source_identifier": value.source_identifier,
         "instrument_identifier": value.instrument_identifier,
@@ -869,6 +974,11 @@ def snapshot_from_dict(value: Mapping[str, Any]) -> CanonicalPortfolioSnapshot:
                     updated_at=datetime.fromisoformat(str(item["updated_at"])),
                     fx_rate_source_identifier=str(
                         item["fx_rate_source_identifier"]
+                    ),
+                    cost_basis_base=(
+                        None
+                        if item.get("cost_basis_base") is None
+                        else float(item["cost_basis_base"])
                     ),
                 )
                 for item in value.get("currency_balances", ())
@@ -927,6 +1037,13 @@ def snapshot_from_dict(value: Mapping[str, Any]) -> CanonicalPortfolioSnapshot:
                     price=float(item.get("price", 0.0)),
                     gross_amount=float(item.get("gross_amount", 0.0)),
                     cost_amount=float(item.get("cost_amount", 0.0)),
+                    contract_multiplier=float(item.get("contract_multiplier", 1.0)),
+                    cost_basis_relieved=float(item.get("cost_basis_relieved", 0.0)),
+                    cost_basis_relieved_base=float(item.get("cost_basis_relieved_base", 0.0)),
+                    realized_pnl=float(item.get("realized_pnl", 0.0)),
+                    realized_pnl_base=float(item.get("realized_pnl_base", 0.0)),
+                    non_trade_pnl_base=float(item.get("non_trade_pnl_base", 0.0)),
+                    external_flow_amount_base=float(item.get("external_flow_amount_base", 0.0)),
                     rationale=str(item.get("rationale", "")),
                     source_identifier=str(
                         item.get("source_identifier", "canonical-portfolio")
@@ -977,6 +1094,15 @@ def snapshot_summary(value: CanonicalPortfolioSnapshot) -> dict[str, Any]:
         "nav": value.nav,
         "as_of": value.as_of.isoformat(),
         "snapshot_identifier": value.identifier,
+        "total_pnl": value.total_pnl,
+        "realized_pnl": value.realized_pnl,
+        "unrealized_pnl": value.unrealized_pnl,
+        "cash_fx_pnl": value.cash_fx_pnl,
+        "non_trade_pnl": value.non_trade_pnl,
+        "net_external_flows": value.net_external_flows,
+        "fees_paid": value.fees_paid,
+        "accounting_residual": value.accounting_residual,
+        "total_return": value.total_return,
     }
 
 
@@ -985,9 +1111,33 @@ def snapshot_details(
     *,
     history: Iterable[CanonicalPortfolioSnapshot] = (),
 ) -> dict[str, Any]:
+    history_items = tuple(history)
+    prior = next(
+        (item for item in history_items if item.identifier != value.identifier),
+        None,
+    )
+    same_day_prior = tuple(
+        item
+        for item in history_items
+        if item.identifier != value.identifier
+        and item.as_of.date() == value.as_of.date()
+        and item.as_of < value.as_of
+    )
+    day_start = min(same_day_prior, key=lambda item: item.as_of) if same_day_prior else prior
     payload = snapshot_summary(value)
     payload["total_return"] = value.total_return
     payload["return_pct"] = value.total_return
+    payload["period_pnl"] = (
+        0.0 if prior is None else round(value.total_pnl - prior.total_pnl, 8)
+    )
+    payload["day_pnl"] = (
+        0.0 if day_start is None else round(value.total_pnl - day_start.total_pnl, 8)
+    )
+    payload["day_return"] = (
+        0.0
+        if day_start is None or day_start.nav == 0.0
+        else round(payload["day_pnl"] / day_start.nav, 12)
+    )
     payload["currency_balances"] = [
         {
             "currency": item.currency,
@@ -1024,7 +1174,9 @@ def snapshot_details(
             "local_market_value": item.local_market_value,
             "cost_basis": item.cost_basis,
             "market_value": item.market_value,
+            "local_unrealized_gain": item.local_unrealized_gain,
             "unrealized_gain": item.unrealized_gain,
+            "unrealized_return": item.unrealized_return,
             "updated_at": item.updated_at.isoformat(),
         }
         for item in value.positions
@@ -1049,6 +1201,13 @@ def snapshot_details(
             "gross_amount_base": item.gross_amount_base,
             "cost_amount": item.cost_amount,
             "cost_amount_base": item.cost_amount_base,
+            "contract_multiplier": item.contract_multiplier,
+            "cost_basis_relieved": item.cost_basis_relieved,
+            "cost_basis_relieved_base": item.cost_basis_relieved_base,
+            "realized_pnl": item.realized_pnl,
+            "realized_pnl_base": item.realized_pnl_base,
+            "non_trade_pnl_base": item.non_trade_pnl_base,
+            "external_flow_amount_base": item.external_flow_amount_base,
             "rationale": item.rationale,
             "source_identifier": item.source_identifier,
             "fx_rate_source_identifier": item.fx_rate_source_identifier,
@@ -1059,6 +1218,11 @@ def snapshot_details(
             reverse=True,
         )
     ]
+    chronological = tuple(sorted(history_items, key=lambda item: item.as_of))
+    prior_by_identifier = {
+        item.identifier: (None if index == 0 else chronological[index - 1])
+        for index, item in enumerate(chronological)
+    }
     payload["snapshots"] = [
         {
             "id": item.identifier,
@@ -1070,8 +1234,25 @@ def snapshot_details(
             "cash_base_total": item.total_cash_value,
             "holdings_value": item.holdings_value,
             "nav": item.nav,
+            "period_pnl": (
+                0.0
+                if prior_by_identifier[item.identifier] is None
+                else round(
+                    item.total_pnl
+                    - prior_by_identifier[item.identifier].total_pnl,
+                    8,
+                )
+            ),
+            "total_pnl": item.total_pnl,
+            "realized_pnl": item.realized_pnl,
+            "unrealized_pnl": item.unrealized_pnl,
+            "cash_fx_pnl": item.cash_fx_pnl,
+            "non_trade_pnl": item.non_trade_pnl,
+            "net_external_flows": item.net_external_flows,
+            "accounting_residual": item.accounting_residual,
+            "total_return": item.total_return,
         }
-        for item in history
+        for item in history_items
     ]
     return payload
 
