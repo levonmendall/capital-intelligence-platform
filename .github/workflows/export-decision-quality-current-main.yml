@@ -30,6 +30,20 @@ jobs:
           name: decision-quality-current-main
           path: /tmp/capital-intelligence-current-main.zip
           retention-days: 1
+      - name: Check out PR 143 original base
+        uses: actions/checkout@v4
+        with:
+          ref: c8b4d73b239136feadd00c56d6685245e6dfcffb
+          clean: true
+      - name: Package PR 143 original base
+        run: |
+          zip -qr /tmp/all-markets-paper-readiness-base.zip . -x '.git/*'
+      - name: Upload PR 143 original base
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-markets-paper-readiness-base
+          path: /tmp/all-markets-paper-readiness-base.zip
+          retention-days: 1
       - name: Check out pending all-market readiness branch
         uses: actions/checkout@v4
         with:
