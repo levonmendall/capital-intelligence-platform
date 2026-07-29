@@ -7,6 +7,12 @@ on:
     paths:
       - ".decision-upgrade/**"
       - ".github/workflows/apply-decision-continuity-governance.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".decision-upgrade/**"
+      - ".github/workflows/apply-decision-continuity-governance.yml"
   workflow_dispatch:
 
 permissions:
@@ -78,6 +84,7 @@ jobs:
           git diff --check
 
       - name: Commit clean production upgrade
+        if: github.event_name != 'pull_request'
         run: |
           git config user.name "capital-intelligence-governance-bot"
           git config user.email "capital-intelligence-governance-bot@users.noreply.github.com"
@@ -85,4 +92,4 @@ jobs:
           git commit -m "Complete decision continuity and governance controls"
           git push origin HEAD:agent/decision-continuity-governance-upgrade
 
-# Triggered after draft PR creation so the clean head receives normal validation.
+# Pull-request runs expose exact migration failures; push runs publish the clean head.
