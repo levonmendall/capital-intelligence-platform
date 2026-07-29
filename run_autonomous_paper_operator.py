@@ -18,8 +18,17 @@ from typing import Any, Sequence
 
 from api.config import ApiSettings
 from api.repositories import JournalRepository, RepositoryUnavailableError
+from cio_pending_transactions import (
+    paper_trading_launch_open,
+    paper_trading_start_at,
+    publish_pending_transaction_report,
+)
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
-from paper_execution_runtime import attempt_paper_execution, paper_execution_mode
+from paper_execution_runtime import (
+    PaperExecutionAttempt,
+    attempt_paper_execution,
+    paper_execution_mode,
+)
 from portfolio.state import ensure_canonical_portfolio_store
 from run_scheduler import build_worker
 
@@ -43,10 +52,37 @@ def _run_pass(*, settings: ApiSettings, worker) -> dict[str, object]:
         journal_detail = str(error)
     else:
         journal_detail = None
-    attempt = attempt_paper_execution(
+
+    mode = paper_execution_mode()
+    launch_at = paper_trading_start_at()
+    launch_open = paper_trading_launch_open(now)
+    publish_pending_transaction_report(
         construction=construction,
         briefing=briefing,
-        now=now,
+        generated_at=now,
+        execution_state="pending" if launch_open else "scheduled",
+    )
+    if launch_open:
+        attempt = attempt_paper_execution(
+            construction=construction,
+            briefing=briefing,
+            now=now,
+        )
+    else:
+        attempt = PaperExecutionAttempt(
+            state="held",
+            detail=(
+                "Paper trading is scheduled to begin at "
+                f"{launch_at.isoformat()}; the CIO report is available before launch."
+            ),
+            attempted_at=now,
+            mode=mode,
+        )
+    report = publish_pending_transaction_report(
+        construction=construction,
+        briefing=briefing,
+        generated_at=now,
+        execution_state=attempt.state,
     )
     return {
         "status": (
@@ -64,12 +100,19 @@ def _run_pass(*, settings: ApiSettings, worker) -> dict[str, object]:
         "delivery_count": len(deliveries),
         "journal_detail": journal_detail,
         "paper_execution": attempt.to_dict(),
-        "execution_mode": paper_execution_mode().value,
+        "execution_mode": mode.value,
+        "paper_trading_start_at": launch_at.isoformat(),
+        "paper_trading_launch_open": launch_open,
+        "pending_transaction_report": {
+            "report_state": report["report_state"],
+            "transaction_count": report["transaction_count"],
+            "summary": report["summary"],
+            "json_path": report["json_path"],
+            "markdown_path": report["markdown_path"],
+        },
         "fixture_stage_bindings_used": False,
         "launch_clearance_required": False,
-        "manual_per_trade_approval_required": (
-            paper_execution_mode().value == "manual"
-        ),
+        "manual_per_trade_approval_required": mode.value == "manual",
         "paper_only": True,
         "real_money_authorized": False,
     }
