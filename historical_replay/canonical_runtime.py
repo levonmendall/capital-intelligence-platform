@@ -1,6 +1,6 @@
 """Production-scale single-pass Canonical CIO historical replay runtime.
 
-The original canonical adapter is intentionally simple and correct, but reopening and
+The reference canonical adapter is intentionally simple and correct, but reopening and
 re-decompressing every historical partition for each cutoff makes a ten-year monthly
 run scale as O(cutoffs × archive). This runtime scans the relevant archive once, sorts
 by historical availability, and advances a monotonic point-in-time cursor.
@@ -97,8 +97,20 @@ class EfficientCanonicalHistoricalReplayEngine(CanonicalHistoricalReplayEngine):
                     opportunity_context=opportunity,
                     specialist_contexts=contexts,
                     portfolio=portfolio,
-                    code_version="historical-canonical-replay.v1",
+                    code_version="historical-canonical-replay.v2",
                 )
+                candidate_map = {item.identifier: item for item in candidates}
+                context_map = {
+                    item.candidate_identifier: item for item in contexts
+                }
+                decision_payloads = [
+                    self._decision_payload(
+                        item,
+                        candidate=candidate_map.get(item.candidate_identifier),
+                        context=context_map.get(item.candidate_identifier),
+                    )
+                    for item in result.decisions
+                ]
                 state.apply_construction(result.construction)
                 state.previous_prices.update(prices)
                 construction = result.construction
@@ -109,9 +121,11 @@ class EfficientCanonicalHistoricalReplayEngine(CanonicalHistoricalReplayEngine):
                     "candidate_count": len(candidates),
                     "decision_count": len(result.decisions),
                     "visible_record_count": len(records),
-                    "decisions": [
-                        self._decision_payload(item) for item in result.decisions
-                    ],
+                    "decisions": decision_payloads,
+                    "prices": dict(prices),
+                    "macro_regime": (
+                        contexts[0].macro.regime if contexts else "unavailable"
+                    ),
                     "construction": (
                         None
                         if construction is None
@@ -144,9 +158,21 @@ class EfficientCanonicalHistoricalReplayEngine(CanonicalHistoricalReplayEngine):
                 blocked += 1
             decisions.append(payload)
 
+        self._attach_realized_outcomes(decisions)
+        realized_outcome_count = sum(
+            1
+            for cutoff in decisions
+            for decision in cutoff.get("decisions", [])
+            if isinstance(decision, dict)
+            and isinstance(
+                decision.get("realized_return_to_next_cutoff"),
+                (int, float),
+            )
+        )
         report = {
-            "schema_version": "canonical-historical-replay.v1",
-            "runtime_version": "single-pass-availability-cursor.v1",
+            "schema_version": "canonical-historical-replay.v2",
+            "runtime_version": "single-pass-availability-cursor.v2",
+            "learning_context_schema_version": "governed-historical-learning.v1",
             "generated_at": iso_timestamp(datetime.now(tz=UTC)),
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
@@ -162,6 +188,7 @@ class EfficientCanonicalHistoricalReplayEngine(CanonicalHistoricalReplayEngine):
             "relevant_record_count": len(relevant),
             "price_record_count": price_record_count,
             "macro_record_count": macro_record_count,
+            "realized_outcome_count": realized_outcome_count,
             "initial_portfolio_value": float(initial_portfolio_value),
             "ending_portfolio_value": state.value,
             "ending_weights": dict(state.weights),
