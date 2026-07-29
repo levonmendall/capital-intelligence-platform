@@ -35,6 +35,8 @@ class HistoricalBackfillCoordinator:
     def run(self, *, start: date, end: date, max_records_per_source: int = 100_000) -> BackfillReport:
         if start > end:
             raise ValueError("start must not be after end")
+        if max_records_per_source <= 0:
+            raise ValueError("max_records_per_source must be positive")
         started = utc_now()
         results: list[SourceResult] = []
         written = duplicates = strict_records = 0
@@ -49,7 +51,18 @@ class HistoricalBackfillCoordinator:
             if effective_start > end:
                 results.append(SourceResult(source.name, "available", warnings=("already_current",)))
                 continue
-            result = source.collect(effective_start, end, max_records=max_records_per_source)
+            try:
+                result = source.collect(
+                    effective_start,
+                    end,
+                    max_records=max_records_per_source,
+                )
+            except Exception as error:
+                result = SourceResult(
+                    source.name,
+                    "failed",
+                    blockers=(f"collector_exception:{type(error).__name__}",),
+                )
             source_written, source_duplicates = self.store.append(result.records)
             written += source_written
             duplicates += source_duplicates
