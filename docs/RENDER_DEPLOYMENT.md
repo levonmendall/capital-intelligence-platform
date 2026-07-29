@@ -59,11 +59,27 @@ Only paths under `/app/database` survive restarts and deployments. The Render se
 /app/database/public-live-information-report.json
 /app/database/public-live-information-records.json
 /app/database/public-live-information-runtime-state.json
+/app/database/backup-authority-activation.json
 /app/database/cio_reports/
 /app/database/backups/
 ```
 
 The complete repository defaults also resolve against `CAPITAL_INTELLIGENCE_DATA_DIR=/app/database`, so newly created authorities remain on the same disk.
+
+## Activation-aware encrypted backups
+
+A fresh persistent disk does not contain every database that may eventually be used by the full institutional platform. Render therefore enables `CAPITAL_INTELLIGENCE_BACKUP_ACTIVATION_AWARE=true`.
+
+Under this policy:
+
+- every SQLite authority that currently exists is included in the encrypted backup;
+- the first observation of an authority records it in `/app/database/backup-authority-activation.json`;
+- an activated authority remains required permanently for that deployment;
+- deletion, corruption, or disappearance of an activated authority blocks subsequent backups;
+- never-created modules do not falsely block the first backup on a fresh deployment; and
+- the default non-Render backup policy remains strict across the complete canonical authority registry.
+
+The activation record does not replace a database or lower its recovery classification. It distinguishes unused modules from state that once existed and must never disappear silently. Restoring an encrypted archive recreates the included SQLite files, which causes those authorities to be activated again on the restored deployment.
 
 ## Startup sequence
 
