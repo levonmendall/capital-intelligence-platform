@@ -1,0 +1,45 @@
+{
+  "schema_version": "databento-instrument-bindings.v1",
+  "bindings": [
+    {
+      "instrument_id": "instrument:us-equity:aapl",
+      "dataset": "DBEQ.BASIC",
+      "provider_symbol": "AAPL",
+      "venue": "DBEQ",
+      "currency": "USD",
+      "stype_in": "raw_symbol"
+    },
+    {
+      "instrument_id": "instrument:us-equity:msft",
+      "dataset": "DBEQ.BASIC",
+      "provider_symbol": "MSFT",
+      "venue": "DBEQ",
+      "currency": "USD",
+      "stype_in": "raw_symbol"
+    },
+    {
+      "instrument_id": "instrument:us-etf:spy",
+      "dataset": "DBEQ.BASIC",
+      "provider_symbol": "SPY",
+      "venue": "DBEQ",
+      "currency": "USD",
+      "stype_in": "raw_symbol"
+    },
+    {
+      "instrument_id": "instrument:us-etf:iwm",
+      "dataset": "DBEQ.BASIC",
+      "provider_symbol": "IWM",
+      "venue": "DBEQ",
+      "currency": "USD",
+      "stype_in": "raw_symbol"
+    },
+    {
+      "instrument_id": "instrument:us-etf:tlt",
+      "dataset": "DBEQ.BASIC",
+      "provider_symbol": "TLT",
+      "venue": "DBEQ",
+      "currency": "USD",
+      "stype_in": "raw_symbol"
+    }
+  ]
+}
