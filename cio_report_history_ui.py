@@ -1,4 +1,4 @@
-"""Streamlit archive of authoritative CIO pending-transaction report states."""
+"""Streamlit archive of CIO reports and research-only historical learning."""
 
 from __future__ import annotations
 
@@ -8,9 +8,12 @@ import pandas as pd
 import streamlit as st
 
 from cio_pending_transactions import pending_transaction_report_history
+from historical_replay_ui import render_canonical_historical_replay
 
 
 def render_cio_report_archive() -> None:
+    render_canonical_historical_replay()
+
     reports = pending_transaction_report_history(limit=250)
     st.markdown("#### CIO report archive")
     if not reports:
