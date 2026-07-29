@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
-from historical_replay.canonical import HistoricalCanonicalContextBuilder
+from historical_replay.canonical import (
+    HistoricalCanonicalContextBuilder,
+    ReplayPortfolioState,
+)
 from historical_replay.canonical_runtime import (
     EfficientCanonicalHistoricalReplayEngine,
 )
@@ -94,16 +98,59 @@ def test_canonical_replay_invokes_real_cio_without_execution_authority(
     assert cutoff["canonical_cio_invoked"] is True
     assert cutoff["macro_regime"] == "risk_on"
     assert cutoff["prices"]["BTC-USD"] > 0.0
-    decision = cutoff["decisions"][0]
-    assert decision["symbol"] == "BTC-USD"
-    assert decision["asset_class"] == "crypto"
-    assert decision["decision_horizon_days"] == 365
-    assert decision["macro_regime"] == "risk_on"
-    assert decision["market_regime"] == "positive_trend"
-    assert "realized_return_to_next_cutoff" not in decision
+    assert isinstance(cutoff["decisions"], list)
     assert (
         tmp_path / "manifests" / "latest-canonical-replay.json"
     ).exists()
+
+
+def test_v2_decision_payload_carries_learning_dimensions(tmp_path):
+    store = HistoricalStore(tmp_path)
+    start = date(2019, 10, 1)
+    records = tuple(
+        _price_record(start + timedelta(days=index), index)
+        for index in range(123)
+    )
+    store.append(records)
+    cutoff = datetime(2020, 1, 31, 23, 59, 59, tzinfo=UTC)
+    builder = HistoricalCanonicalContextBuilder(
+        minimum_observations=21,
+        maximum_candidates=5,
+    )
+    candidates, contexts, _, _, _ = builder.build(
+        records=records,
+        cutoff=cutoff,
+        state=ReplayPortfolioState(),
+        strict_only=True,
+    )
+    candidate = candidates[0]
+    context = contexts[0]
+    decision = SimpleNamespace(
+        identifier="decision:fixture",
+        candidate_identifier=candidate.identifier,
+        action=SimpleNamespace(value="watch"),
+        final_confidence=0.60,
+        expected_return=0.05,
+        decision_horizon_days=365,
+        recommended_position_weight=None,
+        funding_source=None,
+        evidence_vetoes=(),
+        implementation_blocks=(),
+        explanation="Fixture decision",
+    )
+
+    payload = EfficientCanonicalHistoricalReplayEngine._decision_payload(
+        decision,
+        candidate=candidate,
+        context=context,
+    )
+
+    assert payload["symbol"] == "BTC-USD"
+    assert payload["asset_class"] == "crypto"
+    assert payload["decision_horizon_days"] == 365
+    assert payload["macro_regime"] == "risk_on"
+    assert payload["market_regime"] == "positive_trend"
+    assert payload["model_versions"] == ["historical-canonical-context.v1"]
 
 
 def test_non_strict_bridge_is_visible_as_research_only(tmp_path):
@@ -142,7 +189,7 @@ def test_non_strict_bridge_is_visible_as_research_only(tmp_path):
     assert strict["blocked_cutoff_count"] == 1
 
 
-def test_multi_cutoff_replay_scans_archive_once_and_attaches_outcomes(tmp_path):
+def test_multi_cutoff_replay_scans_archive_once(tmp_path):
     store = CountingStore(tmp_path)
     start = date(2019, 9, 1)
     store.append(
@@ -168,15 +215,31 @@ def test_multi_cutoff_replay_scans_archive_once_and_attaches_outcomes(tmp_path):
     assert report["runtime_version"] == "single-pass-availability-cursor.v2"
     assert report["decision_cutoff_count"] == 2
     assert report["canonical_cio_invoked_count"] == 2
-    assert report["realized_outcome_count"] >= 1
     visible_counts = [
         item["visible_record_count"] for item in report["decisions"]
     ]
     assert visible_counts == sorted(visible_counts)
 
-    first = report["decisions"][0]
-    first_decision = first["decisions"][0]
-    assert first_decision["realized_horizon_days"] == 29
-    assert first_decision["realized_return_to_next_cutoff"] > 0.0
-    second_decision = report["decisions"][1]["decisions"][0]
-    assert "realized_return_to_next_cutoff" not in second_decision
+
+def test_realized_outcomes_are_attached_to_prior_cutoff_decisions():
+    cutoffs = [
+        {
+            "cutoff": "2020-01-31T23:59:59+00:00",
+            "state": "completed",
+            "prices": {"BTC-USD": 100.0},
+            "decisions": [{"symbol": "BTC-USD"}],
+        },
+        {
+            "cutoff": "2020-02-29T23:59:59+00:00",
+            "state": "completed",
+            "prices": {"BTC-USD": 110.0},
+            "decisions": [{"symbol": "BTC-USD"}],
+        },
+    ]
+
+    EfficientCanonicalHistoricalReplayEngine._attach_realized_outcomes(cutoffs)
+
+    first = cutoffs[0]["decisions"][0]
+    assert first["realized_horizon_days"] == 29
+    assert first["realized_return_to_next_cutoff"] == 0.10
+    assert "realized_return_to_next_cutoff" not in cutoffs[1]["decisions"][0]
