@@ -9,7 +9,8 @@ import time
 from pathlib import Path
 
 from .backfill import coordinator_from_config, ten_year_window
-from .canonical import CanonicalHistoricalReplayEngine, HistoricalCanonicalContextBuilder
+from .canonical import HistoricalCanonicalContextBuilder
+from .canonical_runtime import EfficientCanonicalHistoricalReplayEngine
 from .store import HistoricalStore
 
 
@@ -59,7 +60,7 @@ def run_once() -> dict[str, object]:
         True,
     ):
         try:
-            report = CanonicalHistoricalReplayEngine(
+            report = EfficientCanonicalHistoricalReplayEngine(
                 HistoricalStore(root),
                 builder=HistoricalCanonicalContextBuilder(
                     minimum_observations=int(
@@ -99,6 +100,9 @@ def run_once() -> dict[str, object]:
                     if report["canonical_cio_invoked_count"] > 0
                     else "blocked"
                 ),
+                "runtime_version": report.get("runtime_version"),
+                "archive_scan_count": report.get("archive_scan_count"),
+                "relevant_record_count": report.get("relevant_record_count"),
                 "canonical_cio_invoked_count": report[
                     "canonical_cio_invoked_count"
                 ],
