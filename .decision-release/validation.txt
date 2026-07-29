@@ -1,0 +1,1 @@
+Local validation: 1,426 runnable repository tests collected; all 1,425 previously runnable partitions passed before preservation of the existing forecast-cap regression, and the restored test passed in the final focused validation. The exact patch also passed git apply --check, compileall, diff checks, and 41 patch-validation tests.
