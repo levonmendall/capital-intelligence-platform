@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Streamlit Community Cloud remains useful for presentation previews, but it is not the operating host for the Capital Intelligence CIO. The application relies on durable SQLite authorities, generated reports, an always-on CIO scheduler, a resumable historical-research archive, and encrypted backups. Those responsibilities require one continuously running service with persistent storage.
+Streamlit Community Cloud remains useful for presentation previews, but it is not the operating host for the Capital Intelligence CIO. The application relies on durable SQLite authorities, generated reports, an always-on CIO scheduler, a resumable historical-research archive, research-only canonical CIO replay, and encrypted backups. Those responsibilities require one continuously running service with persistent storage.
 
 The repository root contains `render.yaml`, which creates one paid Render Docker web service with:
 
@@ -11,11 +11,11 @@ The repository root contains `render.yaml`, which creates one paid Render Docker
 - the read-only FastAPI service on `127.0.0.1:8000`;
 - the autonomous CIO and paper operator;
 - the hourly public-information collector inside the operator;
-- the daily resumable ten-year historical backfill loop;
+- the daily resumable ten-year historical backfill and canonical CIO replay loop;
 - the encrypted backup loop; and
 - one-instance enforcement so SQLite authorities cannot be written by multiple service instances.
 
-The service starts through `run_render_service.py`. Loss of Streamlit, the API, or the CIO operator terminates the supervisor and lets Render restart the complete service. Transient historical-provider or backup-process failures are retried after five minutes without making the user interface unavailable.
+The service starts through `run_render_service.py`. Loss of Streamlit, the API, or the CIO operator terminates the supervisor and lets Render restart the complete service. Transient historical-provider, historical-replay, or backup-process failures are retried after five minutes without making the user interface unavailable.
 
 ## Create the service
 
@@ -27,7 +27,7 @@ The service starts through `run_render_service.py`. Loss of Streamlit, the API, 
 6. Enter the secret values requested during Blueprint creation.
 7. Apply the Blueprint and wait for the health check to pass.
 
-The Blueprint uses the paid `standard` instance. The complete supervised runtime starts Streamlit, FastAPI, the autonomous CIO/paper operator, the historical backfill worker, and encrypted backups in one service; the prior 512 MB Starter allocation produced an out-of-memory termination with exit status 137. Standard is therefore the minimum approved production-paper operating tier for this topology. The service remains fixed at one instance because a persistent disk cannot be attached to multiple instances and the canonical authorities are SQLite databases.
+The Blueprint uses the paid `standard` instance. The complete supervised runtime starts Streamlit, FastAPI, the autonomous CIO/paper operator, historical collection and canonical replay, and encrypted backups in one service; the prior 512 MB Starter allocation produced an out-of-memory termination with exit status 137. Standard is therefore the minimum approved production-paper operating tier for this topology. The service remains fixed at one instance because a persistent disk cannot be attached to multiple instances and the canonical authorities are SQLite databases.
 
 ## Required secret values
 
@@ -66,7 +66,7 @@ Only paths under `/app/database` survive restarts and deployments. The Render se
 /app/database/backups/
 ```
 
-The historical directory contains compressed append-only partitions, per-source checkpoints, backfill manifests, and shadow-replay manifests. The complete repository defaults also resolve against `CAPITAL_INTELLIGENCE_DATA_DIR=/app/database`, so newly created authorities remain on the same disk.
+The historical directory contains compressed append-only partitions, per-source checkpoints, backfill manifests, legacy shadow manifests, and `manifests/latest-canonical-replay.json`. The complete repository defaults also resolve against `CAPITAL_INTELLIGENCE_DATA_DIR=/app/database`, so newly created authorities remain on the same disk.
 
 ## Activation-aware encrypted backups
 
@@ -94,12 +94,12 @@ Every deployment performs this sequence inside the running disk-backed instance:
 5. Initialize or validate the sole `COMPOUNDING` portfolio.
 6. Start the internal API.
 7. Start the autonomous CIO and paper operator.
-8. Start the resumable historical backfill loop.
+8. Start the resumable historical collection and canonical replay loop.
 9. Start the encrypted backup loop.
 10. Start the authenticated Streamlit console on Render's public port.
 11. Report healthy at `/_stcore/health` only while the supervised service remains running.
 
-The operator collects public information immediately when no current runtime collection exists, then no more than once per hour. Collection occurs before the due CIO cycle. The historical loop runs immediately on a new disk and then once per day by default. Missing evidence can produce abstention, degraded historical coverage, or a held implementation; it cannot be converted into a transaction merely to make the interface appear active.
+The operator collects public information immediately when no current runtime collection exists, then no more than once per hour. Collection occurs before the due production CIO cycle. The historical loop runs immediately on a new disk and then once per day by default. It first resumes the ten-year archive, then invokes the production `CanonicalCIOCycle` against isolated historical cutoff contexts. Missing evidence can produce abstention, a blocked historical cutoff, degraded historical coverage, or a held production implementation; it cannot be converted into a transaction merely to make the interface appear active.
 
 ## Verify the first deployment
 
@@ -112,6 +112,7 @@ Confirm the following in Render logs:
 "event": "child_starting", "child": "historical-backfill"
 "event": "child_starting", "child": "encrypted-backup"
 "event": "child_starting", "child": "streamlit"
+"event": "historical_learning_completed"
 ```
 
 Then open the Render service URL and sign in with the bootstrap administrator credentials. Verify:
@@ -123,16 +124,18 @@ Then open the Render service URL and sign in with the bootstrap administrator cr
 - the operator heartbeat is refreshed at least once every 180 seconds;
 - the public-information runtime state exists;
 - `/app/database/historical_replay/manifests/latest-backfill.json` exists after the first collection pass;
+- `/app/database/historical_replay/manifests/latest-canonical-replay.json` exists after the first replay pass;
+- the canonical replay manifest reports `canonical_cio_available=true` and at least one invoked or explicitly blocked cutoff;
 - the pending-transaction report exists; and
 - the backup directory receives an encrypted archive after the first successful backup cycle.
 
-A CIO report may correctly state no action, abstention, held execution, or pending transactions. Only a valid nonblocked construction can reach paper execution. A historical report may correctly be degraded when a free provider is unavailable; its source state and blockers must remain explicit.
+A production CIO report may correctly state no action, abstention, held execution, or pending transactions. Only a valid nonblocked production construction can reach paper execution. A historical report may correctly be degraded when a free provider is unavailable, and a replay cutoff may correctly be blocked when point-in-time evidence is incomplete. Source states and blockers must remain explicit.
 
 ## Deployment behavior
 
 `autoDeployTrigger: checksPass` prevents Render from deploying a `main` commit until the repository checks pass. A persistent disk disables zero-downtime replacement because Render must stop the existing disk owner before starting the new version. This brief restart is required to prevent simultaneous SQLite writers.
 
-The Render health check targets `/_stcore/health`. The supervisor treats the API, Streamlit process, and autonomous CIO operator as critical. Historical collection and encrypted backup are noncritical supervised processes: a transient exit is logged and retried after five minutes without granting data availability or execution authority.
+The Render health check targets `/_stcore/health`. The supervisor treats the API, Streamlit process, and autonomous CIO operator as critical. Historical collection/replay and encrypted backup are noncritical supervised processes: a transient exit is logged and retried after five minutes without granting data availability or execution authority.
 
 ## Community Cloud retirement
 
@@ -140,11 +143,13 @@ After the Render URL is operating and the canonical databases have persisted thr
 
 ## Safety boundary
 
-This deployment remains paper-only:
+This deployment remains paper-only, and historical replay remains research-only:
 
 ```text
 real_money_authorized = false
 performance_claims_permitted = false
+historical_replay.execution_authorized = false
+historical_replay.policy_promotion_authorized = false
 ```
 
-It does not add live brokerage endpoints, leverage, margin, synthetic evidence, or a path around eligibility, quote freshness, liquidity, portfolio integrity, idempotency, reconciliation, point-in-time evidence, or survivorship controls.
+Historical replay applies target weights only to an isolated research portfolio. It does not add live brokerage endpoints, submit Alpaca paper orders, mutate the production paper portfolio, promote a policy, or create a path around eligibility, quote freshness, liquidity, portfolio integrity, idempotency, reconciliation, point-in-time evidence, or survivorship controls.
