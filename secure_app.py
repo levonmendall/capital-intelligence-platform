@@ -310,4 +310,4 @@ execution_globals = {
     "authenticated_principal": principal,
     **_authorized_bindings(principal),
 }
-exec(compile(_authorized_source(), str(app_source_path), "exec"), execution_globals)
+exec(compile(_authorized_source(), "app.py", "exec"), execution_globals)
