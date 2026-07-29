@@ -6,7 +6,6 @@ on:
       - main
 
 permissions:
-  actions: read
   contents: write
 
 jobs:
@@ -32,17 +31,7 @@ jobs:
             echo 'needed=false' >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download reconciliation workspace
-        if: steps.transfer.outputs.needed == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: cio-correction-reconciliation
-          path: /tmp/reconciliation-artifact
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: 30475745757
-
-      - name: Reconstruct reconciled source
+      - name: Recreate and resolve three-way integration
         if: steps.transfer.outputs.needed == 'true'
         shell: bash
         run: |
@@ -50,9 +39,29 @@ jobs:
           cp .github/workflows/apply-cio-corrections.yml /tmp/integration-workflow.yml
           cp .github/workflows/validate.yml /tmp/validate-workflow.yml
 
-          test -f /tmp/reconciliation-artifact/reconciliation.tgz
-          tar -xzf /tmp/reconciliation-artifact/reconciliation.tgz -C "${GITHUB_WORKSPACE}"
-          find . -type f -name '*.rej' -delete
+          cat .automation/corrections.patch.part* > /tmp/corrections.patch.gz.b64
+          test "$(wc -c < /tmp/corrections.patch.gz.b64)" -eq 61792
+          echo 'fed53220bd01c40d47c6f1462d111fab2980fe5fc4162e60f870b99462b4025b  /tmp/corrections.patch.gz.b64' | sha256sum --check
+          base64 --decode /tmp/corrections.patch.gz.b64 > /tmp/corrections.patch.gz
+          echo '43ce27c6f24c45acf8e047d70f22792c4cb983329d1ffd501156457388933244  /tmp/corrections.patch.gz' | sha256sum --check
+          gzip --decompress --stdout /tmp/corrections.patch.gz > /tmp/corrections.patch
+          echo 'f5ac9adf4da7124fb10817b0b3abf594fe7d63722ad27b6d6016b1917e131862  /tmp/corrections.patch' | sha256sum --check
+
+          git config merge.conflictstyle merge
+          set +e
+          git apply --3way --whitespace=nowarn /tmp/corrections.patch
+          three_way_status=$?
+          set -e
+          test "${three_way_status}" -ne 0
+
+          mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+          test "${#conflicts[@]}" -gt 0
+          for path in "${conflicts[@]}"; do
+            sed -i -E \
+              -e 's/^<<<<<<< .*/<<<<<<< current-main/' \
+              -e 's/^>>>>>>> .*/>>>>>>> correction-set/' \
+              "$path"
+          done
 
           cat .automation/manual-reconciliation.part* > /tmp/manual-reconciliation.patch.gz.b64
           test "$(wc -c < /tmp/manual-reconciliation.patch.gz.b64)" -eq 42072
@@ -65,10 +74,18 @@ jobs:
           git apply --check /tmp/manual-reconciliation.patch
           git apply --whitespace=nowarn /tmp/manual-reconciliation.patch
 
+          git add -A
+          test -z "$(git diff --name-only --diff-filter=U)"
+          if grep -R -n -E '^(<<<<<<<|=======|>>>>>>>)' \
+              --exclude-dir=.git --exclude='*.patch*' .; then
+            echo 'Unresolved merge markers remain.' >&2
+            exit 1
+          fi
+
           cp /tmp/integration-workflow.yml .github/workflows/apply-cio-corrections.yml
           cp /tmp/validate-workflow.yml .github/workflows/validate.yml
           rm -rf .automation
-          find . -type f -name '*.rej' -print -quit | grep -q . && exit 1 || true
+          git add -A
 
       - name: Set up Python
         if: steps.transfer.outputs.needed == 'true'
