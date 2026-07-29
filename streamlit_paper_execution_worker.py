@@ -1,4 +1,10 @@
-"""Keep autonomous or manual paper execution active on every Streamlit surface."""
+"""Keep the complete autonomous CIO and paper operation active in Streamlit.
+
+A standalone Streamlit deployment therefore performs the same scheduled CIO cycle,
+report generation, delivery drain, launch gating, and paper execution as the headless
+operator. Existing scheduler and execution leases keep multiple app sessions or an
+attached Docker scheduler idempotent.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +12,7 @@ from typing import Any, Mapping
 
 import streamlit as st
 
-from cio_pending_transactions import paper_trading_launch_open
+from api.config import ApiSettings
 from paper_execution_runtime import (
     PaperExecutionAttempt,
     PaperExecutionMode,
@@ -15,10 +21,20 @@ from paper_execution_runtime import (
     paper_execution_enabled,
     paper_execution_mode,
 )
+from portfolio.state import ensure_canonical_portfolio_store
+from run_autonomous_paper_operator import _run_pass
+from run_scheduler import build_worker
 
-# Historical public name retained for compatibility.
+# Historical public names retained for compatibility.
 StreamlitPaperExecutionAttempt = PaperExecutionAttempt
 streamlit_paper_execution_enabled = paper_execution_enabled
+
+
+@st.cache_resource
+def _streamlit_operator_runtime():
+    settings = ApiSettings.from_env()
+    ensure_canonical_portfolio_store(settings.portfolio_database)
+    return settings, build_worker(settings)
 
 
 @st.fragment(run_every="30s")
@@ -27,13 +43,41 @@ def render_background_paper_execution_worker(
     construction: Mapping[str, Any] | None,
     briefing: Mapping[str, Any] | None,
 ) -> None:
-    if not paper_trading_launch_open():
+    # The parameters preserve the prior public contract. The authoritative pass reloads
+    # the journal after running the due CIO cycle so it cannot execute stale page values.
+    del construction, briefing
+    try:
+        settings, worker = _streamlit_operator_runtime()
+        payload = _run_pass(settings=settings, worker=worker)
+    except (ImportError, AttributeError, OSError, TypeError, ValueError, RuntimeError) as error:
+        st.session_state["capital_intelligence_operator_status"] = {
+            "status": "degraded",
+            "error": str(error),
+            "paper_only": True,
+            "real_money_authorized": False,
+        }
+        st.warning(
+            "The autonomous paper operator is temporarily unavailable. "
+            f"No transaction was executed: {error}"
+        )
         return
-    attempt = attempt_paper_execution(
-        construction=construction,
-        briefing=briefing,
+
+    st.session_state["capital_intelligence_operator_status"] = payload
+    execution = payload.get("paper_execution", {})
+    if not isinstance(execution, Mapping):
+        return
+    execution_identifier = execution.get("execution_identifier")
+    previous_identifier = st.session_state.get(
+        "capital_intelligence_last_rendered_execution_identifier"
     )
-    if attempt.completed:
+    if (
+        execution.get("state") == "completed"
+        and execution_identifier
+        and execution_identifier != previous_identifier
+    ):
+        st.session_state[
+            "capital_intelligence_last_rendered_execution_identifier"
+        ] = execution_identifier
         st.rerun()
 
 
