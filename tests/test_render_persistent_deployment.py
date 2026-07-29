@@ -24,6 +24,7 @@ def test_render_blueprint_defines_one_paid_disk_backed_operating_service() -> No
     assert "healthCheckPath: /_stcore/health" in source
     assert "mountPath: /app/database" in source
     assert "sizeGB: 5" in source
+    assert "maxShutdownDelaySeconds" not in source
     assert "previews:\n  generation: off" in source
 
 
