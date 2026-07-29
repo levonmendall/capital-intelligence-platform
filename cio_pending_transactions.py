@@ -1,13 +1,13 @@
-"""Scheduled paper launch and CIO pending-transaction reporting.
+"""Scheduled paper launch and canonical CIO pending-transaction reporting.
 
-The report is descriptive only. It summarizes the exact canonical CIO construction and
-never creates, changes, sizes, approves, or executes a transaction. Paper execution
-remains governed by the existing eligibility, freshness, liquidity, cost, portfolio,
-idempotency, and reconciliation controls.
+The report summarizes the exact canonical CIO construction. It never creates, changes,
+sizes, approves, or executes a transaction. Existing eligibility, freshness, liquidity,
+cost, portfolio, idempotency, and reconciliation controls remain authoritative.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -16,14 +16,7 @@ from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 
-DEFAULT_PAPER_TRADING_START_AT = datetime(
-    2026,
-    7,
-    29,
-    13,
-    30,
-    tzinfo=timezone.utc,
-)
+DEFAULT_PAPER_TRADING_START_AT = datetime(2026, 7, 29, 13, 30, tzinfo=timezone.utc)
 DEFAULT_REPORT_TIMEZONE = "America/Los_Angeles"
 
 
@@ -55,17 +48,16 @@ def paper_trading_launch_label() -> str:
     timezone_name = os.getenv(
         "CAPITAL_INTELLIGENCE_PAPER_REPORT_TIMEZONE",
         DEFAULT_REPORT_TIMEZONE,
-    ).strip()
-    if not timezone_name:
-        timezone_name = DEFAULT_REPORT_TIMEZONE
+    ).strip() or DEFAULT_REPORT_TIMEZONE
     try:
         zone = ZoneInfo(timezone_name)
     except Exception as error:
         raise ValueError(
             "CAPITAL_INTELLIGENCE_PAPER_REPORT_TIMEZONE must be a valid IANA timezone"
         ) from error
-    local = paper_trading_start_at().astimezone(zone)
-    return local.strftime("%A, %B %d, %Y at %-I:%M %p %Z")
+    return paper_trading_start_at().astimezone(zone).strftime(
+        "%A, %B %d, %Y at %-I:%M %p %Z"
+    )
 
 
 def _data_dir() -> Path:
@@ -83,6 +75,12 @@ def pending_report_directory() -> Path:
     return path
 
 
+def pending_report_history_directory() -> Path:
+    path = pending_report_directory() / "history"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def pending_report_paths() -> tuple[Path, Path]:
     directory = pending_report_directory()
     return (
@@ -92,7 +90,11 @@ def pending_report_paths() -> tuple[Path, Path]:
 
 
 def _sequence(value: object) -> list[Any]:
-    return list(value) if isinstance(value, Sequence) and not isinstance(value, (str, bytes)) else []
+    return (
+        list(value)
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+        else []
+    )
 
 
 def _number(value: object) -> float | None:
@@ -144,6 +146,19 @@ def _transactions(construction: Mapping[str, Any] | None) -> list[dict[str, obje
     return rows
 
 
+def _semantic_fingerprint(report: Mapping[str, Any]) -> str:
+    excluded = {"generated_at", "report_fingerprint", "json_path", "markdown_path"}
+    payload = {key: value for key, value in report.items() if key not in excluded}
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def build_pending_transaction_report(
     *,
     construction: Mapping[str, Any] | None,
@@ -188,10 +203,14 @@ def build_pending_transaction_report(
         transaction["status"] = (
             "executed"
             if resolved_execution_state == "completed"
+            else "blocked"
+            if resolved_execution_state == "blocked"
+            else "held"
+            if resolved_execution_state in {"held", "paused"}
             else "pending_execution"
         )
 
-    return {
+    report: dict[str, object] = {
         "schema_version": "cio-pending-transactions.v1",
         "generated_at": timestamp.isoformat(),
         "portfolio_code": "COMPOUNDING",
@@ -243,6 +262,8 @@ def build_pending_transaction_report(
         "paper_only": True,
         "real_money_authorized": False,
     }
+    report["report_fingerprint"] = _semantic_fingerprint(report)
+    return report
 
 
 def _percentage(value: object) -> str:
@@ -275,7 +296,9 @@ def pending_transaction_report_markdown(report: Mapping[str, Any]) -> str:
         "",
     ]
     transactions = [
-        item for item in _sequence(report.get("transactions")) if isinstance(item, Mapping)
+        item
+        for item in _sequence(report.get("transactions"))
+        if isinstance(item, Mapping)
     ]
     if transactions:
         lines.extend(
@@ -323,16 +346,84 @@ def _atomic_write(path: Path, content: str) -> None:
     temporary.replace(path)
 
 
-def write_pending_transaction_report(
-    report: Mapping[str, Any],
-) -> tuple[Path, Path]:
+def _load_json(path: Path) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def load_pending_transaction_report() -> dict[str, Any] | None:
+    json_path, _ = pending_report_paths()
+    return _load_json(json_path)
+
+
+def pending_transaction_report_history(*, limit: int = 100) -> tuple[dict[str, Any], ...]:
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ValueError("limit must be positive")
+    reports: list[dict[str, Any]] = []
+    try:
+        paths = sorted(
+            pending_report_history_directory().glob("*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return ()
+    for path in paths[:limit]:
+        report = _load_json(path)
+        if report is not None:
+            reports.append(report)
+    return tuple(reports)
+
+
+def write_pending_transaction_report(report: Mapping[str, Any]) -> tuple[Path, Path]:
+    payload = dict(report)
+    fingerprint = str(payload.get("report_fingerprint") or _semantic_fingerprint(payload))
+    payload["report_fingerprint"] = fingerprint
+    json_content = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    markdown_content = pending_transaction_report_markdown(payload)
     json_path, markdown_path = pending_report_paths()
-    _atomic_write(
-        json_path,
-        json.dumps(dict(report), indent=2, sort_keys=True, allow_nan=False) + "\n",
-    )
-    _atomic_write(markdown_path, pending_transaction_report_markdown(report))
+    _atomic_write(json_path, json_content)
+    _atomic_write(markdown_path, markdown_content)
+    history_directory = pending_report_history_directory()
+    history_json = history_directory / f"{fingerprint}.json"
+    history_markdown = history_directory / f"{fingerprint}.md"
+    if not history_json.exists():
+        _atomic_write(history_json, json_content)
+        _atomic_write(history_markdown, markdown_content)
     return json_path, markdown_path
+
+
+def resolve_pending_transaction_report(
+    *,
+    construction: Mapping[str, Any] | None,
+    briefing: Mapping[str, Any] | None,
+    generated_at: datetime | None = None,
+) -> dict[str, Any]:
+    persisted = load_pending_transaction_report()
+    decision_identifier = (
+        str(briefing.get("decision_identifier", "")).strip()
+        if isinstance(briefing, Mapping)
+        else ""
+    )
+    construction_identifier = (
+        str(construction.get("request_identifier", "")).strip()
+        if isinstance(construction, Mapping)
+        else ""
+    )
+    if persisted is not None and (
+        str(persisted.get("decision_identifier", "")) == decision_identifier
+        and str(persisted.get("construction_identifier", ""))
+        == construction_identifier
+    ):
+        return persisted
+    return build_pending_transaction_report(
+        construction=construction,
+        briefing=briefing,
+        generated_at=generated_at,
+    )
 
 
 def publish_pending_transaction_report(
@@ -359,12 +450,16 @@ def publish_pending_transaction_report(
 __all__ = [
     "DEFAULT_PAPER_TRADING_START_AT",
     "build_pending_transaction_report",
+    "load_pending_transaction_report",
     "paper_trading_launch_label",
     "paper_trading_launch_open",
     "paper_trading_start_at",
     "pending_report_directory",
+    "pending_report_history_directory",
     "pending_report_paths",
+    "pending_transaction_report_history",
     "pending_transaction_report_markdown",
     "publish_pending_transaction_report",
+    "resolve_pending_transaction_report",
     "write_pending_transaction_report",
 ]
