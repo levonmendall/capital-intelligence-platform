@@ -200,7 +200,11 @@ for _render_name in (
 
 # Today is the immediate operating summary: live provider/session state and the exact
 # pending CIO implementation are displayed before the narrative decision surface.
-_today_anchor = '    theses = _latest_theses()\n'
+_today_anchor = (
+    'def _render_today() -> None:\n'
+    '    briefing = _latest("daily_cio_briefing")\n'
+    '    theses = _latest_theses()\n'
+)
 if _source.count(_today_anchor) != 1:
     raise RuntimeError("Today live operating insertion point is unavailable")
 _source = _source.replace(
