@@ -147,3 +147,5 @@ jobs:
         env:
           EXIT_CODE: ${{ steps.materialize.outputs.exit_code }}
         run: test "$EXIT_CODE" = "0"
+
+# Final second-stage trigger for committee, sizing, regime, horizon, and realized-outcome integration.
