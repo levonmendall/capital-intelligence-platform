@@ -15,6 +15,12 @@ from pathlib import Path
 import premium_ui as _premium_ui
 
 from cio_pending_transactions_ui import render_pending_transaction_report
+from live_operating_console import (
+    render_live_environment_market_table,
+    render_live_market_status,
+    render_live_portfolio_marks,
+    render_operating_report_history,
+)
 from navigation_ui import install as _install_navigation_ui
 from paper_trading_ui import render_paper_decision_controls
 from streamlit_paper_execution_worker import render_background_paper_execution_worker
@@ -41,6 +47,11 @@ except (RuntimeError, OSError):
 except (RuntimeError, OSError):
 except (RuntimeError, OSError):
 except (RuntimeError, OSError):
+@st.fragment(run_every="30s")
+render_live_market_status(
+render_live_environment_market_table(
+render_live_portfolio_marks(
+render_operating_report_history(
 render_pending_transaction_report(
 render_paper_decision_controls(
 render_background_paper_execution_worker(
@@ -168,6 +179,51 @@ _premium_ui.allocation_bar = _safe_allocation_bar
 _source_path = Path(__file__).with_name("app_impl.py")
 _source = _source_path.read_text(encoding="utf-8")
 
+# Refresh the active operating surface without requiring navigation or a browser
+# reload. Each fragment re-queries the canonical stores and provider-backed views.
+for _render_name in (
+    "_render_today",
+    "_render_environment",
+    "_render_portfolio",
+    "_render_history",
+):
+    _render_anchor = f"def {_render_name}() -> None:\n"
+    if _source.count(_render_anchor) != 1:
+        raise RuntimeError(f"live refresh insertion point unavailable for {_render_name}")
+    _source = _source.replace(
+        _render_anchor,
+        '@st.fragment(run_every="30s")\n' + _render_anchor,
+        1,
+    )
+
+# Today is the immediate operating summary: live provider/session state and the exact
+# pending CIO implementation are displayed before the narrative decision surface.
+_today_anchor = '    theses = _latest_theses()\n'
+if _source.count(_today_anchor) != 1:
+    raise RuntimeError("Today live operating insertion point is unavailable")
+_source = _source.replace(
+    _today_anchor,
+    _today_anchor
+    + '    _today_construction = _latest("portfolio_construction")\n'
+    + '    render_live_market_status()\n'
+    + '    render_pending_transaction_report(\n'
+    + '        construction=_today_construction,\n'
+    + '        briefing=briefing,\n'
+    + '    )\n',
+    1,
+)
+
+# Environment combines the governed regime record, live macro evidence, and the
+# complete provider-backed cross-asset wrapper monitor.
+_environment_anchor = '    dashboard_data = load_dashboard_data()\n'
+if _source.count(_environment_anchor) != 1:
+    raise RuntimeError("Environment live market insertion point is unavailable")
+_source = _source.replace(
+    _environment_anchor,
+    '    render_live_environment_market_table()\n' + _environment_anchor,
+    1,
+)
+
 # Add the pending CIO report and consent control at the exact canonical construction
 # boundary. The checked anchor makes deployment fail loudly instead of silently losing
 # either report visibility or user control when the implementation source changes.
@@ -187,6 +243,24 @@ _source = _source.replace(
     + '        briefing=_pending_cio_briefing,\n'
     + '        principal=globals().get("authenticated_principal"),\n'
     + '    )\n',
+    1,
+)
+
+_portfolio_mark_anchor = '    allocation_bar(cash=mandate["cash"], nav=mandate["nav"])\n'
+if _source.count(_portfolio_mark_anchor) != 1:
+    raise RuntimeError("Portfolio live mark insertion point is unavailable")
+_source = _source.replace(
+    _portfolio_mark_anchor,
+    _portfolio_mark_anchor + '    render_live_portfolio_marks(mandate)\n',
+    1,
+)
+
+_history_anchor = '    trades = get_trade_history(limit=250)\n'
+if _source.count(_history_anchor) != 1:
+    raise RuntimeError("History operating report insertion point is unavailable")
+_source = _source.replace(
+    _history_anchor,
+    _history_anchor + '    render_operating_report_history()\n',
     1,
 )
 
