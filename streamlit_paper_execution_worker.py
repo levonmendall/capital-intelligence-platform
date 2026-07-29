@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 import streamlit as st
 
+from cio_pending_transactions import paper_trading_launch_open
 from paper_execution_runtime import (
     PaperExecutionAttempt,
     PaperExecutionMode,
@@ -26,6 +27,8 @@ def render_background_paper_execution_worker(
     construction: Mapping[str, Any] | None,
     briefing: Mapping[str, Any] | None,
 ) -> None:
+    if not paper_trading_launch_open():
+        return
     attempt = attempt_paper_execution(
         construction=construction,
         briefing=briefing,
