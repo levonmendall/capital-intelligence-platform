@@ -24,6 +24,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: historical-backfill-${{ github.ref }}
@@ -80,3 +81,52 @@ jobs:
             historical-shadow-replay.json
           retention-days: 30
           if-no-files-found: error
+
+  publish-status:
+    if: always() && github.event_name != 'pull_request'
+    needs: [validate, backfill]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: ${{ github.sha }}
+      BACKFILL_RESULT: ${{ needs.backfill.result }}
+    steps:
+      - name: Publish machine-verifiable backfill status
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          result = os.environ["BACKFILL_RESULT"]
+          state = "success" if result == "success" else "failure"
+          description = (
+              "Ten-year historical backfill and shadow replay completed"
+              if state == "success"
+              else f"Historical backfill did not complete: {result}"
+          )
+          payload = json.dumps(
+              {
+                  "state": state,
+                  "context": "historical-replay/backfill",
+                  "description": description[:140],
+              }
+          ).encode("utf-8")
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['TARGET_SHA']}",
+              data=payload,
+              method="POST",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "Content-Type": "application/json",
+                  "User-Agent": "capital-intelligence-historical-replay",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              if response.status != 201:
+                  raise RuntimeError(f"unexpected status publication response: {response.status}")
+          PY
