@@ -1,7 +1,7 @@
 {
-  "version": "paper-trading-launch-policy.v1",
-  "minimum_burn_in_days": 5,
-  "minimum_scheduled_cycles": 5,
+  "version": "paper-trading-launch-policy.v2",
+  "minimum_burn_in_days": 0,
+  "minimum_scheduled_cycles": 1,
   "minimum_successful_cycle_ratio": 1.0,
   "minimum_point_in_time_cycle_ratio": 1.0,
   "minimum_complete_universe_cycle_ratio": 1.0,

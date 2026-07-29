@@ -1,4 +1,4 @@
-"""Record and assess the controlled paper-test burn-in campaign."""
+"""Record optional paper-campaign resilience evidence."""
 
 from __future__ import annotations
 

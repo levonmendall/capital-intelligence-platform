@@ -1,4 +1,4 @@
-"""Evaluate and persist sustained paper-trading launch evidence."""
+"""Evaluate optional institutional paper-campaign evidence."""
 
 from __future__ import annotations
 

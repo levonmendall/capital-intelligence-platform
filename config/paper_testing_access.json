@@ -1,0 +1,21 @@
+{
+  "version": "paper-testing-access.v1",
+  "mode": "immediate_paper_test",
+  "launch_clearance_required": false,
+  "immutable_baseline_required": false,
+  "burn_in_required": false,
+  "operating_exercises_required_for_entry": false,
+  "recovery_certification_required_for_entry": false,
+  "launch_report_required": false,
+  "eligibility_package_required": false,
+  "human_release_approval_required": false,
+  "runtime_activation_required": false,
+  "exact_user_consent_required_for_app_execution": true,
+  "paper_provider_activation_required": true,
+  "eligible_instrument_required": true,
+  "current_market_evidence_required": true,
+  "portfolio_integrity_required": true,
+  "fill_reconciliation_required": true,
+  "paper_only_endpoint_required": true,
+  "real_money_authorized": false
+}

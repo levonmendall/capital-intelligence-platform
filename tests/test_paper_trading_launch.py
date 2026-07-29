@@ -1,4 +1,4 @@
-"""Acceptance tests for sustained operational paper-launch certification."""
+"""Acceptance tests for immediate operational paper-launch certification."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def _evidence(**overrides) -> PaperTradingLaunchEvidence:
         "identifier": "paper-launch-evidence:ready",
         "observed_at": NOW,
         "knowledge_cutoff": NOW,
-        "window_start": NOW - timedelta(days=5),
+        "window_start": NOW,
         "window_end": NOW,
         "baseline_identifier": BASELINE,
         "process_version": PROCESS,
@@ -51,10 +51,10 @@ def _evidence(**overrides) -> PaperTradingLaunchEvidence:
         "canonical_portfolio_integrity_verified": True,
         "eligible_universe_integrity_verified": True,
         "execution_store_integrity_verified": True,
-        "scheduled_cycles": 5,
-        "successful_cycles": 5,
-        "point_in_time_cycles": 5,
-        "complete_universe_cycles": 5,
+        "scheduled_cycles": 1,
+        "successful_cycles": 1,
+        "point_in_time_cycles": 1,
+        "complete_universe_cycles": 1,
         "required_provider_checks": 500,
         "successful_required_provider_checks": 500,
         "shadow_execution_scenarios": 12,
@@ -82,7 +82,7 @@ def _evidence(**overrides) -> PaperTradingLaunchEvidence:
         "data_readiness_identifier": "combined-data-readiness:test",
         "product_readiness_identifier": "prelaunch-readiness:test",
         "evidence_identifiers": (
-            "burn-in:test",
+            "launch-cycle:test",
             "provider-health:test",
             "shadow-execution:test",
         ),
@@ -124,13 +124,16 @@ def test_policy_and_example_evidence_match_schema() -> None:
     assert policy.required_starting_capital == 250_000.0
     assert policy.required_portfolio_code == "COMPOUNDING"
     assert policy.required_portfolio_count == 1
+    assert policy.minimum_burn_in_days == 0
+    assert policy.minimum_scheduled_cycles == 1
 
 
-def test_complete_sustained_evidence_is_ready_but_paper_only() -> None:
+def test_complete_immediate_evidence_is_ready_but_paper_only() -> None:
     report = PaperTradingLaunchEvaluator().evaluate(_evidence())
 
     assert report.state is PaperTradingLaunchState.READY
     assert report.blockers == ()
+    assert _evidence().burn_in_days == 0.0
     assert report.maximum_drawdown_fraction == 0.20
     assert report.maximum_single_batch_turnover == 0.35
     assert report.real_money_authorized is False
@@ -141,10 +144,10 @@ def test_any_operating_or_portfolio_failure_blocks_launch() -> None:
     report = PaperTradingLaunchEvaluator().evaluate(
         _evidence(
             identifier="paper-launch-evidence:blocked",
-            window_start=NOW - timedelta(days=2),
+            window_start=NOW,
             portfolio_count=2,
             starting_capital=249_999.0,
-            successful_cycles=4,
+            successful_cycles=0,
             successful_required_provider_checks=490,
             reconciled_shadow_execution_scenarios=11,
             execution_cost_error_bps=30.0,
@@ -157,7 +160,6 @@ def test_any_operating_or_portfolio_failure_blocks_launch() -> None:
     assert report.state is PaperTradingLaunchState.BLOCKED
     joined = " ".join(report.blockers)
     for expected in (
-        "burn_in_days",
         "portfolio_count",
         "starting_capital",
         "successful_cycle_ratio",

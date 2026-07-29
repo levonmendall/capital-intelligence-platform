@@ -1,8 +1,8 @@
-"""Governed readiness assessment for controlled paper-product testing.
+"""Technical readiness assessment for paper-product testing.
 
-Readiness is evaluated against an immutable test baseline while normal product
-development may continue on later commits. No result authorizes real money,
-performance claims, or broker connectivity.
+Readiness reports remain useful diagnostics, but they are not launch clearance and
+do not require a frozen baseline, recovery campaign, launch report, human release
+decision, or runtime activation. No result authorizes real money.
 """
 
 from __future__ import annotations
@@ -139,10 +139,8 @@ class ProductTestReadinessEvidence:
             "daily_operations_ready",
             "four_screen_product_ready",
             "security_suite_ready",
-            "resilience_campaign_ready",
-            "paper_only_disclosures_ready",
-            "paper_launch_ready",
-        )
+                "paper_only_disclosures_ready",
+            )
         for field_name in boolean_fields:
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be a bool")
@@ -222,8 +220,7 @@ class ProductTestReadinessEvidence:
             "options_market_ready",
             "volatility_market_ready",
             "alternative_market_ready",
-            "paper_launch_ready",
-        ):
+            ):
             normalized.setdefault(field_name, False)
         return cls(
             **{
@@ -295,9 +292,7 @@ class ProductTestReadinessEvaluator:
         "daily_operations_ready",
         "four_screen_product_ready",
         "security_suite_ready",
-        "resilience_campaign_ready",
         "paper_only_disclosures_ready",
-        "paper_launch_ready",
     )
 
     def evaluate(
@@ -311,10 +306,6 @@ class ProductTestReadinessEvaluator:
             for name in self._REQUIRED_FLAGS
             if not getattr(evidence, name)
         ]
-        if evidence.test_baseline_identifier is None:
-            blockers.append("immutable_test_baseline")
-        if evidence.process_version is None:
-            blockers.append("versioned_investment_process")
         if evidence.unresolved_critical_incidents:
             blockers.append("unresolved_critical_incidents")
         if evidence.data_integrity_failures:

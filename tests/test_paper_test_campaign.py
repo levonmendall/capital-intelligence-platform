@@ -1,4 +1,4 @@
-"""Acceptance tests for real elapsed burn-in and controlled failure evidence."""
+"""Acceptance tests for immediate launch readiness and failure evidence."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def _baseline(
     *,
     identifier: str = "paper-baseline:alpha-1",
     code_version: str = "commit:alpha",
-    required_days: int = 5,
+    required_days: int = 0,
 ) -> PaperTestCampaignBaseline:
     return PaperTestCampaignBaseline(
         identifier=identifier,
@@ -124,22 +124,21 @@ def _scenario(
     )
 
 
-def test_campaign_requires_all_real_consecutive_days_and_scenarios() -> None:
+def test_campaign_requires_failure_scenarios_without_elapsed_days() -> None:
     baseline = _baseline()
-    start = baseline.effective_date
-    days = tuple(_day(baseline, start + timedelta(days=index)) for index in range(5))
     scenarios = tuple(_scenario(baseline, kind) for kind in REQUIRED_FAILURE_SCENARIOS)
 
     report = PaperTestCampaignEvaluator().evaluate(
         baseline=baseline,
-        days=days,
+        days=(),
         scenarios=scenarios,
         evaluated_at=CREATED + timedelta(days=8),
     )
 
+    assert baseline.required_consecutive_days == 0
     assert report.state is PaperTestCampaignState.SATISFIED
-    assert report.consecutive_day_count == 5
-    assert report.credited_dates == tuple(item.operation_date for item in days)
+    assert report.consecutive_day_count == 0
+    assert report.credited_dates == ()
     assert set(report.passed_scenarios) == set(REQUIRED_FAILURE_SCENARIOS)
     assert report.missing_scenarios == ()
     assert report.failed_scenarios == ()

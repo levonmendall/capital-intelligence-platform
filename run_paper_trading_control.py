@@ -1,4 +1,4 @@
-"""Activate, halt, or inspect the controlled paper-execution risk switch."""
+"""Manage the optional legacy paper-campaign risk switch."""
 
 from __future__ import annotations
 

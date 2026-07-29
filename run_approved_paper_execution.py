@@ -2,8 +2,9 @@
 
 This is the canonical user-consent bridge. It requires an active approval for the
 exact CIO decision and construction payload, then delegates to the existing
-multi-asset paper executor, which independently enforces launch, runtime,
-portfolio, universe, quote, and reconciliation controls.
+multi-asset paper executor, which independently enforces portfolio, universe,
+quote, safety-limit, and reconciliation controls. No launch-clearance sequence is
+required for paper testing.
 """
 
 from __future__ import annotations

@@ -1,10 +1,10 @@
 """Run exact approved paper implementations inside the Streamlit runtime.
 
-The worker deliberately remains paper-only. It consumes the same SQLite authorities
-written by the authenticated application, materializes the exact approved construction
-and matching free-pilot profiles, then delegates to the canonical consent-gated paper
-executor. Alpaca supplies account, session, asset, and IEX quote evidence; fills remain
-internal simulations and no broker order endpoint is called.
+The worker remains paper-only. It consumes the exact authenticated user approval,
+materializes the approved construction and matching profiles, and delegates to the
+canonical paper executor without a separate launch-clearance sequence. Alpaca supplies
+account, session, asset, and IEX quote evidence; canonical fills remain reconciled paper
+activity and no real-money endpoint is available.
 """
 
 from __future__ import annotations
@@ -79,16 +79,7 @@ def streamlit_paper_execution_enabled() -> bool:
     explicit = os.getenv("CAPITAL_INTELLIGENCE_STREAMLIT_PAPER_EXECUTION_ENABLED")
     if explicit is not None:
         return _truthy(explicit)
-    return _environment() in {"development", "paper", "test"} and _credentials_available()
-
-
-def _development_bypass_enabled() -> bool:
-    explicit = os.getenv(
-        "CAPITAL_INTELLIGENCE_STREAMLIT_PAPER_EXECUTION_DEVELOPMENT_BYPASS"
-    )
-    if explicit is not None:
-        return _truthy(explicit)
-    return _environment() in {"development", "paper", "test"}
+    return _credentials_available()
 
 
 def _data_dir() -> Path:
@@ -254,8 +245,6 @@ def _runner_arguments(
         "--portfolio-code",
         "COMPOUNDING",
     ]
-    if _development_bypass_enabled():
-        arguments.append("--development-bypass-launch-gate")
     return arguments
 
 
