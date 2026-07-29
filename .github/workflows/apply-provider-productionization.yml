@@ -7,6 +7,9 @@ on:
     paths:
       - ".provider-productionization-release/**"
       - ".github/workflows/apply-provider-productionization.yml"
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -17,6 +20,7 @@ concurrency:
 
 jobs:
   apply:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'agent/provider-productionization'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
