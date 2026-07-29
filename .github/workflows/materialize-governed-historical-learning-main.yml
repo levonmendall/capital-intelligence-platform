@@ -1,0 +1,45 @@
+name: Materialize Governed Historical Learning Branch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/materialize-governed-historical-learning-main.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-governed-historical-learning-main
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/governed-historical-learning-input
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Synchronize latest main
+        run: |
+          git fetch origin main
+          git merge --no-edit origin/main
+      - name: Apply governed historical learning integration
+        run: python tools/materialize_governed_historical_learning.py
+      - name: Remove branch-local materializer
+        run: |
+          rm tools/materialize_governed_historical_learning.py
+          rm .github/workflows/materialize-governed-historical-learning.yml
+      - name: Commit materialized source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Integrate governed historical learning into CIO decisions"
+          git push origin HEAD:agent/governed-historical-learning-input
