@@ -97,9 +97,15 @@ jobs:
       - name: Install locked runtime dependencies
         run: pip install --require-hashes -r requirements.lock
 
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Verify dependency consistency
+        run: python -m pip check
+
       - name: Run focused provider productionization tests
         run: |
-          pytest -q \
+          python -m pytest -q \
             tests/test_databento_provider.py \
             tests/test_eodhd_binding_expansion.py \
             tests/test_provider_runtime_diagnostics.py \
