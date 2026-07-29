@@ -63,7 +63,6 @@ replace_one(
     "            scenarios=scenarios,\n            mode=mode,\n            scenario_set_identifier=scenario_identifier,\n        )\n",
 )
 
-# Structured conditions become the only generated thesis-quality score.
 replace_one(
     "application/cio_cycle.py",
     "            thesis = cls._text_clarity(\n                candidate.primary_catalysts + candidate.critical_assumptions\n            )\n            invalidation = cls._text_clarity(candidate.invalidation_conditions)\n",
@@ -75,13 +74,11 @@ regex_one(
     "    def _capture_evaluation_snapshots(",
 )
 
-# Derivative lifecycle flows from exposure profile to final construction intent.
 replace_one(
     "application/cio_cycle.py",
     "                    correlation_bucket=profile.correlation_bucket,\n                    priority_rank=priority_rank,\n",
     "                    correlation_bucket=profile.correlation_bucket,\n                    priority_rank=priority_rank,\n                    derivative_lifecycle=profile.derivative_lifecycle,\n",
 )
-# Final construction uses the same governed scenario set as preview and selects emergency mode.
 replace_one(
     "application/cio_cycle.py",
     "        scenarios = self._joint_portfolio_scenarios(\n            decisions=decisions,\n            ranked_by_candidate=ranked_by_candidate,\n            portfolio=portfolio,\n        )\n        return self.construction_engine.construct(\n            portfolio.request(\n                identifier=f\"construction:{cycle_identifier}\",\n                intents=tuple(intents),\n                scenarios=scenarios,\n            )\n        )\n",
@@ -93,9 +90,8 @@ regex_one(
     "    def _create_theses(",
 )
 
-# Governed production must carry the complete common scenario set.
 replace_one(
-    "application/production_context.py",
-    "        if governed_context:\n            publication_identifiers = qualified_identifiers + rejected_identifiers\n",
-    "        if governed_context:\n            if context.portfolio.scenario_set is None:\n                raise RuntimeError(\n                    \"governed production CIO context requires a complete portfolio scenario set\"\n                )\n            publication_identifiers = qualified_identifiers + rejected_identifiers\n",
+    "application/production_cio.py",
+    "        prior_contexts = ()\n",
+    "        if context.portfolio.scenario_set is None:\n            raise RuntimeError(\n                \"production CIO context requires a complete portfolio scenario set\"\n            )\n        prior_contexts = ()\n",
 )
