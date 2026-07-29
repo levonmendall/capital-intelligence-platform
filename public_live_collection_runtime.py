@@ -131,6 +131,41 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     temporary.replace(path)
 
 
+def _acquire_lock(path: Path, *, now: datetime) -> bool:
+    """Acquire an atomic cross-process lease, removing only clearly stale leases."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stale_after = timedelta(minutes=20)
+    for _ in range(2):
+        try:
+            descriptor = os.open(
+                path,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o600,
+            )
+        except FileExistsError:
+            try:
+                modified_at = datetime.fromtimestamp(
+                    path.stat().st_mtime,
+                    tz=timezone.utc,
+                )
+            except OSError:
+                return False
+            if now - modified_at <= stale_after:
+                return False
+            try:
+                path.unlink()
+            except OSError:
+                return False
+            continue
+        try:
+            os.write(descriptor, (now.isoformat() + "\n").encode("utf-8"))
+        finally:
+            os.close(descriptor)
+        return True
+    return False
+
+
 def collect_public_live_information_if_due(
     *,
     now: datetime | None = None,
@@ -151,6 +186,10 @@ def collect_public_live_information_if_due(
     state_path = _data_path(
         "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_STATE",
         "public-live-information-runtime-state.json",
+    )
+    lock_path = _data_path(
+        "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_LOCK",
+        "public-live-information-runtime.lock",
     )
 
     if not _enabled():
@@ -193,118 +232,148 @@ def collect_public_live_information_if_due(
             next_due_at=next_due_at,
         )
 
-    attempted_payload: dict[str, object] = {
-        "schema_version": "public-live-information-runtime-state.v1",
-        "state": "collecting",
-        "attempted_at": evaluated_at.isoformat(),
-        "report_path": str(report_path),
-        "records_path": str(records_path),
-        "interval_seconds": int(interval.total_seconds()),
-        "real_money_authorized": False,
-    }
-    _write_json(state_path, attempted_payload)
+    if not _acquire_lock(lock_path, now=evaluated_at):
+        return PublicLiveCollectionResult(
+            state="in_progress",
+            detail=(
+                "Another application session owns the runtime public-information "
+                "collection lease."
+            ),
+            evaluated_at=evaluated_at,
+            exit_code=None,
+            report_path=report_path,
+            records_path=records_path,
+            state_path=state_path,
+            required_sources_ready=(
+                bool(previous["required_sources_ready"])
+                if isinstance(previous.get("required_sources_ready"), bool)
+                else None
+            ),
+            source_count=int(previous.get("source_count", 0) or 0),
+            failed_source_count=int(previous.get("failed_source_count", 0) or 0),
+            next_due_at=next_due_at,
+        )
 
     try:
-        catalog_path = os.getenv(
-            "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_SOURCE_CATALOG",
-            "config/public_live_information_sources.json",
-        )
-        catalog = load_public_live_source_catalog(catalog_path)
-        factory = provider_factory or ImpactfulPublicLiveInformationProvider
-        report = factory(catalog).collect(include_optional=True)
-        report_payload = report.to_dict(include_records=False)
-        records_payload = {
-            "schema_version": "public-live-information-record-set.v1",
-            "catalog_identifier": report.catalog_identifier,
-            "evaluated_at": report.evaluated_at.isoformat(),
-            "records": [item.to_dict() for item in report.records],
-            "full_article_text_stored": False,
-            "secret_values_disclosed": False,
-            "real_money_authorized": False,
-        }
-        _write_json(report_path, report_payload)
-        _write_json(records_path, records_payload)
-
-        failed_source_count = sum(1 for item in report.sources if not item.succeeded)
-        if not report.required_sources_ready:
-            exit_code = 3
-            state = "degraded"
-            detail = (
-                "One or more required public sources were unavailable; exact failures "
-                "are persisted and cannot support a CIO decision."
-            )
-        elif failed_source_count:
-            exit_code = 2
-            state = "degraded"
-            detail = (
-                "Required public sources are available, but one or more optional "
-                "sources were unavailable."
-            )
-        else:
-            exit_code = 0
-            state = "available"
-            detail = "Runtime public live-information collection completed."
-
-        completed_at = _aware_utc(report.evaluated_at)
-        next_due_at = completed_at + interval
-        state_payload = {
+        attempted_payload: dict[str, object] = {
             "schema_version": "public-live-information-runtime-state.v1",
-            "state": state,
-            "detail": detail,
+            "state": "collecting",
             "attempted_at": evaluated_at.isoformat(),
-            "completed_at": completed_at.isoformat(),
-            "next_due_at": next_due_at.isoformat(),
-            "exit_code": exit_code,
-            "required_sources_ready": bool(report.required_sources_ready),
-            "source_count": len(report.sources),
-            "failed_source_count": failed_source_count,
-            "record_count": len(report.records),
-            "catalog_identifier": report.catalog_identifier,
             "report_path": str(report_path),
             "records_path": str(records_path),
             "interval_seconds": int(interval.total_seconds()),
-            "full_article_text_stored": False,
-            "secret_values_disclosed": False,
             "real_money_authorized": False,
         }
-        _write_json(state_path, state_payload)
-        return PublicLiveCollectionResult(
-            state=state,
-            detail=detail,
-            evaluated_at=completed_at,
-            exit_code=exit_code,
-            report_path=report_path,
-            records_path=records_path,
-            state_path=state_path,
-            required_sources_ready=bool(report.required_sources_ready),
-            source_count=len(report.sources),
-            failed_source_count=failed_source_count,
-            next_due_at=next_due_at,
-        )
-    except (KeyError, OSError, TypeError, ValueError, RuntimeError) as error:
-        detail = f"Runtime public live-information collector failed: {error}"
-        _write_json(
-            state_path,
-            {
+        _write_json(state_path, attempted_payload)
+
+        try:
+            catalog_path = os.getenv(
+                "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_SOURCE_CATALOG",
+                "config/public_live_information_sources.json",
+            )
+            catalog = load_public_live_source_catalog(catalog_path)
+            factory = provider_factory or ImpactfulPublicLiveInformationProvider
+            report = factory(catalog).collect(include_optional=True)
+            report_payload = report.to_dict(include_records=False)
+            records_payload = {
+                "schema_version": "public-live-information-record-set.v1",
+                "catalog_identifier": report.catalog_identifier,
+                "evaluated_at": report.evaluated_at.isoformat(),
+                "records": [item.to_dict() for item in report.records],
+                "full_article_text_stored": False,
+                "secret_values_disclosed": False,
+                "real_money_authorized": False,
+            }
+            _write_json(report_path, report_payload)
+            _write_json(records_path, records_payload)
+
+            failed_source_count = sum(
+                1 for item in report.sources if not item.succeeded
+            )
+            if not report.required_sources_ready:
+                exit_code = 3
+                state = "degraded"
+                detail = (
+                    "One or more required public sources were unavailable; exact "
+                    "failures are persisted and cannot support a CIO decision."
+                )
+            elif failed_source_count:
+                exit_code = 2
+                state = "degraded"
+                detail = (
+                    "Required public sources are available, but one or more optional "
+                    "sources were unavailable."
+                )
+            else:
+                exit_code = 0
+                state = "available"
+                detail = "Runtime public live-information collection completed."
+
+            completed_at = _aware_utc(report.evaluated_at)
+            next_due_at = completed_at + interval
+            state_payload = {
                 "schema_version": "public-live-information-runtime-state.v1",
-                "state": "failed",
+                "state": state,
                 "detail": detail,
                 "attempted_at": evaluated_at.isoformat(),
-                "completed_at": evaluated_at.isoformat(),
-                "exit_code": 4,
+                "completed_at": completed_at.isoformat(),
+                "next_due_at": next_due_at.isoformat(),
+                "exit_code": exit_code,
+                "required_sources_ready": bool(report.required_sources_ready),
+                "source_count": len(report.sources),
+                "failed_source_count": failed_source_count,
+                "record_count": len(report.records),
+                "catalog_identifier": report.catalog_identifier,
                 "report_path": str(report_path),
                 "records_path": str(records_path),
                 "interval_seconds": int(interval.total_seconds()),
+                "full_article_text_stored": False,
                 "secret_values_disclosed": False,
                 "real_money_authorized": False,
-            },
-        )
-        return PublicLiveCollectionResult(
-            state="failed",
-            detail=detail,
-            evaluated_at=evaluated_at,
-            exit_code=4,
-            report_path=report_path,
-            records_path=records_path,
-            state_path=state_path,
-        )
+            }
+            _write_json(state_path, state_payload)
+            return PublicLiveCollectionResult(
+                state=state,
+                detail=detail,
+                evaluated_at=completed_at,
+                exit_code=exit_code,
+                report_path=report_path,
+                records_path=records_path,
+                state_path=state_path,
+                required_sources_ready=bool(report.required_sources_ready),
+                source_count=len(report.sources),
+                failed_source_count=failed_source_count,
+                next_due_at=next_due_at,
+            )
+        except (KeyError, OSError, TypeError, ValueError, RuntimeError) as error:
+            detail = f"Runtime public live-information collector failed: {error}"
+            _write_json(
+                state_path,
+                {
+                    "schema_version": "public-live-information-runtime-state.v1",
+                    "state": "failed",
+                    "detail": detail,
+                    "attempted_at": evaluated_at.isoformat(),
+                    "completed_at": evaluated_at.isoformat(),
+                    "exit_code": 4,
+                    "report_path": str(report_path),
+                    "records_path": str(records_path),
+                    "interval_seconds": int(interval.total_seconds()),
+                    "secret_values_disclosed": False,
+                    "real_money_authorized": False,
+                },
+            )
+            return PublicLiveCollectionResult(
+                state="failed",
+                detail=detail,
+                evaluated_at=evaluated_at,
+                exit_code=4,
+                report_path=report_path,
+                records_path=records_path,
+                state_path=state_path,
+            )
+    finally:
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
