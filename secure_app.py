@@ -303,9 +303,11 @@ with st.sidebar:
         _clear_session()
         st.rerun()
 
+app_source_path = Path(__file__).with_name("app.py")
 execution_globals = {
     "__name__": "__main__",
+    "__file__": str(app_source_path),
     "authenticated_principal": principal,
     **_authorized_bindings(principal),
 }
-exec(compile(_authorized_source(), "app.py", "exec"), execution_globals)
+exec(compile(_authorized_source(), str(app_source_path), "exec"), execution_globals)
