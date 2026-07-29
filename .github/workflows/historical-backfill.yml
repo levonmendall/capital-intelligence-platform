@@ -11,6 +11,7 @@ on:
       - "config/historical_replay_free_sources.json"
       - "tests/test_historical_replay.py"
       - "tests/test_canonical_historical_replay.py"
+      - "tests/test_canonical_no_action_learning.py"
       - "tests/test_historical_certification_workflow.py"
       - ".github/workflows/historical-backfill.yml"
   push:
@@ -106,6 +107,7 @@ jobs:
           python -m pytest -q \
             tests/test_historical_replay.py \
             tests/test_canonical_historical_replay.py \
+            tests/test_canonical_no_action_learning.py \
             tests/test_historical_certification_workflow.py
       - name: Compile historical replay commands
         run: |
@@ -131,6 +133,12 @@ jobs:
       macro_records: ${{ steps.metrics.outputs.macro_records }}
       archive_scans: ${{ steps.metrics.outputs.archive_scans }}
       runtime_version: ${{ steps.metrics.outputs.runtime_version }}
+      learning_observations: ${{ steps.metrics.outputs.learning_observations }}
+      cio_decision_observations: ${{ steps.metrics.outputs.cio_decision_observations }}
+      qualification_observations: ${{ steps.metrics.outputs.qualification_observations }}
+      realized_outcomes: ${{ steps.metrics.outputs.realized_outcomes }}
+      avoided_losses: ${{ steps.metrics.outputs.avoided_losses }}
+      missed_opportunities: ${{ steps.metrics.outputs.missed_opportunities }}
     env:
       FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
       SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
@@ -179,6 +187,12 @@ jobs:
               "macro_records": int(canonical.get("macro_record_count", 0)),
               "archive_scans": int(canonical.get("archive_scan_count", 0)),
               "runtime_version": str(canonical.get("runtime_version", "unknown")),
+              "learning_observations": int(canonical.get("learning_observation_count", 0)),
+              "cio_decision_observations": int(canonical.get("cio_decision_observation_count", 0)),
+              "qualification_observations": int(canonical.get("qualification_observation_count", 0)),
+              "realized_outcomes": int(canonical.get("realized_outcome_count", 0)),
+              "avoided_losses": int(canonical.get("avoided_loss_count", 0)),
+              "missed_opportunities": int(canonical.get("missed_opportunity_count", 0)),
           }
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
               for name, value in values.items():
@@ -216,6 +230,12 @@ jobs:
       MACRO_RECORDS: ${{ needs.backfill.outputs.macro_records }}
       ARCHIVE_SCANS: ${{ needs.backfill.outputs.archive_scans }}
       RUNTIME_VERSION: ${{ needs.backfill.outputs.runtime_version }}
+      LEARNING_OBSERVATIONS: ${{ needs.backfill.outputs.learning_observations }}
+      CIO_DECISION_OBSERVATIONS: ${{ needs.backfill.outputs.cio_decision_observations }}
+      QUALIFICATION_OBSERVATIONS: ${{ needs.backfill.outputs.qualification_observations }}
+      REALIZED_OUTCOMES: ${{ needs.backfill.outputs.realized_outcomes }}
+      AVOIDED_LOSSES: ${{ needs.backfill.outputs.avoided_losses }}
+      MISSED_OPPORTUNITIES: ${{ needs.backfill.outputs.missed_opportunities }}
     steps:
       - name: Publish durable certification ledger
         shell: bash
@@ -226,7 +246,7 @@ jobs:
           if [[ "${VALIDATION_RESULT}" == "success" && "${BACKFILL_RESULT}" == "success" ]]; then
             STATE="completed"
             STATUS_STATE="success"
-            DESCRIPTION="records=${RECORDS_WRITTEN} strict=${STRICT_RECORDS} canonical=${CANONICAL_INVOKED}/${TOTAL_CUTOFFS} blocked=${BLOCKED_CUTOFFS} scans=${ARCHIVE_SCANS}"
+            DESCRIPTION="obs=${LEARNING_OBSERVATIONS} realized=${REALIZED_OUTCOMES} canonical=${CANONICAL_INVOKED}/${TOTAL_CUTOFFS} blocked=${BLOCKED_CUTOFFS}"
           else
             STATE="failed"
             STATUS_STATE="failure"
@@ -261,6 +281,17 @@ jobs:
           - Blocked cutoffs: **$(value "${BLOCKED_CUTOFFS}")**
           - Archive scans: **$(value "${ARCHIVE_SCANS}")**
           - Runtime version: \`$(value "${RUNTIME_VERSION}")\`
+
+          ## Governed historical learning
+
+          - Total learning observations: **$(value "${LEARNING_OBSERVATIONS}")**
+          - CIO decision observations: **$(value "${CIO_DECISION_OBSERVATIONS}")**
+          - Pre-CIO qualification observations: **$(value "${QUALIFICATION_OBSERVATIONS}")**
+          - Observations with realized outcomes: **$(value "${REALIZED_OUTCOMES}")**
+          - Avoided losses: **$(value "${AVOIDED_LOSSES}")**
+          - Missed opportunities: **$(value "${MISSED_OPPORTUNITIES}")**
+
+          Pre-CIO qualification outcomes remain explicitly distinct from CIO decisions. Raw underlying returns and decision-relative outcome values are both retained in the protected evidence artifact.
 
           ## Permanent safety boundary
 
