@@ -73,6 +73,24 @@ For every weekly or monthly cutoff, the adapter:
 
 The replay begins with the configured research capital, defaulting to `$250,000`. It does not read or mutate the live canonical portfolio database.
 
+## Completion evidence
+
+The scheduled and main-branch GitHub run publishes the commit status context:
+
+```text
+historical-replay/canonical-cio
+```
+
+The status is set to `pending` when collection begins. A successful completion description contains credential-free counts in this form:
+
+```text
+records=<written> strict=<strict records> canonical=<invoked>/<total> blocked=<blocked>
+```
+
+The complete compressed archive, backfill report, legacy shadow report, and canonical replay report are also retained as the run artifact. No provider response bodies, credentials, or archive contents are committed to the repository.
+
+The persistent app exposes the latest canonical manifest in the History surface under **Historical learning**. It shows invocation coverage and blocked cutoffs but does not represent the isolated research portfolio as verified performance.
+
 ## Evidence boundaries
 
 Canonical replay is available in two modes:
