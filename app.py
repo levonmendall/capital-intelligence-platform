@@ -8,6 +8,7 @@ helpers. This prevents a mixed-version hot deployment from taking the app down.
 from __future__ import annotations
 
 import importlib
+import os
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -80,8 +81,32 @@ if not hasattr(_premium_ui, "activity_rail"):
 if not hasattr(_premium_ui, "surface_story"):
     _premium_ui.surface_story = lambda _active_page, _steps: None
 
+_original_render_navigation = _premium_ui.render_navigation
 _original_metric_grid = _premium_ui.metric_grid
 _original_signal_panel = _premium_ui.signal_panel
+
+
+def _render_navigation_with_admin_control(options):
+    """Keep four primary tabs while exposing Render operations on mobile."""
+
+    result = _original_render_navigation(options)
+    principal = globals().get("authenticated_principal")
+    is_render_host = bool(os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip())
+    if (
+        is_render_host
+        and principal is not None
+        and getattr(principal, "is_administrator", False)
+    ):
+        if _premium_ui.st.button(
+            "Production smoke test",
+            key="open-production-smoke-test-main",
+            help=(
+                "Verify Render persistence, the CIO operator, provider evidence, "
+                "governed paper outcomes, and encrypted backups."
+            ),
+        ):
+            _premium_ui.st.session_state["production_smoke_test_open"] = True
+    return result
 
 
 def _compatible_metric_grid(metrics, *, variant: str = "today") -> None:
@@ -172,6 +197,7 @@ def _safe_allocation_bar(*, cash: float, nav: float) -> None:
     _premium_ui.st.markdown(markup, unsafe_allow_html=True)
 
 
+_premium_ui.render_navigation = _render_navigation_with_admin_control
 _premium_ui.metric_grid = _compatible_metric_grid
 _premium_ui.signal_panel = _compatible_signal_panel
 _premium_ui.render_sidebar = _safe_render_sidebar
