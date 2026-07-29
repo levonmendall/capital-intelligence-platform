@@ -36,8 +36,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tr -d '[:space:]' \
-            < .decision-release/decision-process-upgrade.patch.gz.b64 \
+          mapfile -t chunks < <(find .decision-release/chunks -maxdepth 1 -type f -name 'part.*' | sort)
+          test "${#chunks[@]}" -eq 9
+          cat "${chunks[@]}" \
+            | tr -d '[:space:]' \
             | base64 --decode \
             | gzip --decompress > /tmp/decision-process-upgrade.patch
           expected="$(tr -d '[:space:]' < .decision-release/decision-process-upgrade.sha256)"
