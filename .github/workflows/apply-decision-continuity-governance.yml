@@ -84,3 +84,5 @@ jobs:
           git add -A
           git commit -m "Complete decision continuity and governance controls"
           git push origin HEAD:agent/decision-continuity-governance-upgrade
+
+# Triggered after draft PR creation so the clean head receives normal validation.
