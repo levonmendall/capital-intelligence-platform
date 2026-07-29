@@ -14,7 +14,6 @@ services:
     dockerContext: .
     dockerCommand: python run_render_service.py
     healthCheckPath: /_stcore/health
-    maxShutdownDelaySeconds: 60
     disk:
       name: capital-intelligence-state
       mountPath: /app/database
