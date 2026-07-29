@@ -1,122 +1,83 @@
-# User-Approved Paper Execution
+# Autonomous and Manual Paper Execution
 
-## Purpose
+## Default operating mode
 
-Capital Intelligence may analyze markets, issue a CIO conclusion, and construct a proposed implementation without changing the portfolio. A simulated transaction may proceed only after an authenticated user with `MANAGE` access supports the exact displayed decision and construction.
+Capital Intelligence now starts in **automatic paper mode** whenever valid Alpaca
+paper credentials are present. A separate click is not required for every CIO
+construction.
 
-This consent is an additional authority. It does not replace:
+Automatic mode does not weaken the investment or execution process. For each exact
+construction it writes an append-only, SHA-256-bound system authorization and then
+delegates to the existing canonical paper executor. The executor still independently
+requires:
 
-1. the controlled paper-test eligibility package and human release decision in staging or production;
-2. sustained paper-launch certification in staging or production;
-3. the active runtime risk switch in staging or production;
-4. instrument, universe, provider, quote, session, cost, liquidity, and reconciliation controls.
+- one current canonical CIO decision and matching construction;
+- a certified eligible-universe publication;
+- an active and unblocked Alpaca paper account;
+- an open trading session and current, non-crossed IEX quotes;
+- instrument eligibility and exact identity lineage;
+- portfolio, cash, turnover, drawdown, liquidity, leverage and cost compliance;
+- append-only fills; and
+- exact portfolio and accounting reconciliation.
 
-No step authorizes real money, custody, or a live brokerage order. Alpaca supplies paper-account, market-clock, asset, and IEX quote evidence; the canonical portfolio records internal simulated fills.
+Every result preserves `real_money_authorized=false`. Alpaca live brokerage endpoints
+remain rejected.
 
-## Streamlit workflow
-
-Run the authenticated application:
-
-```bash
-streamlit run secure_app.py
-```
-
-When the Portfolio surface contains a valid construction with proposed paper trades, a user with write access can:
-
-- approve the exact implementation;
-- decline it; or
-- revoke an unexpired approval before execution.
-
-The approval is bound to:
-
-- the CIO decision identifier;
-- the construction request identifier;
-- the canonical SHA-256 of the complete construction payload;
-- the authenticated user and session;
-- an approval timestamp and 24-hour expiry; and
-- the sole `COMPOUNDING` portfolio.
-
-Approval events are append-only and tamper-evident. They are stored in `paper_test_governance.db`.
-
-The Streamlit runtime now co-locates the execution worker with the approval database and canonical portfolio databases. Approval triggers an immediate attempt. A background fragment checks every 30 seconds while the application is active, and the Portfolio approval panel checks every five seconds while it is open. A construction-level lease and the canonical execution store prevent duplicate execution.
-
-After successful execution, the approval changes to `executed`, the Portfolio surface displays the execution identifier, and a one-time completion toast appears without a manual refresh.
-
-## Streamlit deployment configuration
-
-Root-level Streamlit secrets must include one matching Alpaca paper pair:
-
-```toml
-APCA_API_KEY_ID = "replace-with-paper-key-id"
-APCA_API_SECRET_KEY = "replace-with-paper-secret"
-APCA_API_BASE_URL = "https://paper-api.alpaca.markets"
-APCA_DATA_BASE_URL = "https://data.alpaca.markets"
-APCA_DATA_FEED = "iex"
-
-CAPITAL_INTELLIGENCE_ENVIRONMENT = "paper"
-CAPITAL_INTELLIGENCE_STREAMLIT_PAPER_EXECUTION_ENABLED = "true"
-CAPITAL_INTELLIGENCE_DATA_DIR = "database"
-```
-
-`paper`, `development`, and `test` environments use the repository's explicit development launch-gate bypass unless `CAPITAL_INTELLIGENCE_STREAMLIT_PAPER_EXECUTION_DEVELOPMENT_BYPASS=false` is configured. The lower-level executor refuses that bypass in `staging` or `production`.
-
-For staging or production, also configure exact authority versions and populate the three append-only operational authority databases:
+## Configuration
 
 ```text
-CAPITAL_INTELLIGENCE_TEST_BASELINE_IDENTIFIER
-CAPITAL_INTELLIGENCE_INVESTMENT_PROCESS_VERSION
-CAPITAL_INTELLIGENCE_RELEASE
-CAPITAL_INTELLIGENCE_PAPER_TEST_GOVERNANCE_DATABASE
-CAPITAL_INTELLIGENCE_PAPER_LAUNCH_DATABASE
-CAPITAL_INTELLIGENCE_PAPER_CONTROL_DATABASE
+APCA_API_KEY_ID=<paper-key>
+APCA_API_SECRET_KEY=<paper-secret>
+APCA_API_BASE_URL=https://paper-api.alpaca.markets
+APCA_DATA_BASE_URL=https://data.alpaca.markets
+APCA_DATA_FEED=iex
+
+CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE=automatic
+CAPITAL_INTELLIGENCE_DATA_DIR=database
 ```
 
-The application and worker must use the same `CAPITAL_INTELLIGENCE_DATA_DIR` or explicit database paths. The co-located Streamlit worker satisfies this requirement within one runtime. A deployment that uses multiple replicas requires shared persistent storage or a managed database.
+Available modes are:
 
-## Manual execution entrypoint
+- `automatic` — default when paper credentials are available;
+- `manual` — retain exact authenticated approval before execution; and
+- `disabled` — monitor and construct without implementing paper trades.
 
-Operators may still use the consent-gated command directly:
+The compatibility variable
+`CAPITAL_INTELLIGENCE_STREAMLIT_PAPER_EXECUTION_ENABLED=false` still disables paper
+execution when no explicit mode is supplied.
+
+## Human pause
+
+Automatic mode preserves a human stop without making that stop a launch prerequisite.
+A portfolio manager can pause the exact construction from the Portfolio surface. The
+latest decline or revocation prevents the autonomous policy from reauthorizing that
+same construction. The manager may explicitly resume it later.
+
+## Headless operation
+
+Paper execution no longer depends on an open Streamlit browser session:
 
 ```bash
-python run_approved_paper_execution.py \
-  --construction artifacts/portfolio-construction.json \
-  --decision-identifier <CIO_DECISION_IDENTIFIER> \
-  --profiles artifacts/exact-trade-profiles.json \
-  --session-provider providers.alpaca_paper:create_alpaca_paper_session_provider \
-  --quote-provider providers.alpaca_paper:create_alpaca_paper_quote_provider \
-  --as-of <CURRENT_TIMEZONE_AWARE_TIMESTAMP> \
-  --baseline-identifier <IMMUTABLE_BASELINE> \
-  --process-version <PROCESS_VERSION> \
-  --code-version <TESTED_COMMIT_SHA> \
-  --require-complete
+python run_autonomous_paper_operator.py --loop
 ```
 
-The Streamlit worker materializes the exact approved construction and only the profiles corresponding to proposed trades before invoking this entrypoint.
+The operator runs the canonical scheduled CIO worker, reads the latest matching
+briefing and construction from the institutional journal, and checks paper execution
+continuously. No recommendation or construction is fabricated when upstream evidence
+is unavailable. Missing evidence produces a monitoring or idle state.
 
-A successful execution appends an `executed` event to the approval history. That prevents the same consent from being reused. A failed or held execution leaves approval pending until it expires or is revoked, permitting a governed retry without changing the approved construction.
+The Docker scheduler service runs this operator by default. The externally bound
+12-stage institutional orchestrator remains available for deployments that need it,
+but it is not a prerequisite for beginning paper operation.
 
-After the executed event is recorded, the worker creates a `Paper transaction completed` alert for the authenticated approver under the existing `IMPLEMENTATION` topic. The in-app alert is immediately available. Email is queued when the user has enabled email and configured an address.
+## Manual compatibility mode
 
-## Fail-closed behavior
-
-Paper execution is blocked or held when:
-
-- no authenticated approval exists;
-- the construction changes after approval;
-- approval is declined, revoked, expired, or already executed;
-- the user lacks write access;
-- automatic execution is disabled or Alpaca credentials are missing from the runtime;
-- construction is blocked or outside the free listed-wrapper pilot;
-- the market is closed;
-- an asset is inactive, non-tradable, or non-fractionable;
-- quotes are unavailable, stale, crossed, materially future-dated, or lack sufficient notional;
-- eligible-universe or portfolio lineage is unavailable;
-- staging or production paper authorities are unavailable;
-- the runtime switch is halted;
-- turnover, cash, drawdown, cost, or reconciliation checks fail.
-
-Every result preserves:
+Set:
 
 ```text
-real_money_authorized = false
+CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE=manual
 ```
+
+The authenticated Portfolio surface then presents approve, decline and revoke controls
+for the exact construction. The lower-level `run_approved_paper_execution.py` command
+continues to support this workflow.

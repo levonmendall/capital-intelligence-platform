@@ -4,7 +4,7 @@
 
 The institutional all-market readiness path remains the long-term standard for direct global equities, individual bonds, spot FX, direct crypto, futures, options, volatility instruments, and other complex assets.
 
-A free data stack cannot honestly satisfy that standard. This pilot creates a narrower, explicit development authority so controlled paper testing can begin without pretending that free IEX or public data is institutional execution evidence.
+A free data stack cannot honestly satisfy that standard. This pilot creates a narrower, explicit paper-only authority so controlled testing can begin without pretending that free IEX or public data is institutional execution evidence.
 
 The pilot:
 
@@ -13,7 +13,7 @@ The pilot:
 - uses an Alpaca paper account and the free IEX feed;
 - invests only through a versioned allowlist of unlevered U.S.-listed securities;
 - represents the major economic asset classes through liquid listed wrappers;
-- requires the exact CIO decision, exact construction, and exact authenticated user approval;
+- requires the exact CIO decision, exact construction, and exact automatic or manual paper authorization;
 - uses the existing certified-universe, quote-age, session, portfolio-integrity, fill, reconciliation, and notification controls;
 - keeps canonical portfolio implementation on the internal append-only paper executor; and
 - separately verifies Alpaca paper order submission and broker fill reconciliation through a governed neutral round trip.
@@ -52,7 +52,8 @@ APCA_API_SECRET_KEY=...
 APCA_API_BASE_URL=https://paper-api.alpaca.markets
 APCA_DATA_BASE_URL=https://data.alpaca.markets
 APCA_DATA_FEED=iex
-CAPITAL_INTELLIGENCE_ENVIRONMENT=development
+CAPITAL_INTELLIGENCE_ENVIRONMENT=paper
+CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE=automatic
 ```
 
 Never commit the key or secret. Both the quote adapter and broker-order adapter reject Alpaca's live brokerage endpoint.
@@ -85,13 +86,13 @@ The command selects a decision timestamp two minutes in the future by default. U
 
 Run the existing canonical cycle using the exact `decision_at` produced by the publication command. The cycle must preserve the returned eligible-universe publication identifier in portfolio construction.
 
-### 4. Review and approve the exact construction
+### 4. Review the exact construction
 
-Open the authenticated Portfolio surface. Review the proposed symbols, weights, funding, turnover, expected costs, and blocks. Approve only the exact displayed construction.
+Open the Portfolio surface to review the proposed symbols, weights, funding, turnover, expected costs, and blocks. Automatic paper mode records an exact-hash system authorization and proceeds without a separate approval click. A portfolio manager may pause the exact implementation at any time.
 
-Approval does not bypass any quote, session, universe, portfolio, or reconciliation control.
+Authorization does not bypass any quote, session, universe, portfolio, or reconciliation control.
 
-### 5. Execute the approved paper construction
+### 5. Execute the paper construction
 
 During U.S. market hours:
 
@@ -111,7 +112,7 @@ The runner:
 4. enforces at least 20% cash;
 5. limits one batch to 10% turnover;
 6. enforces per-instrument, crypto-proxy, and volatility-proxy limits;
-7. requires exact authenticated user approval;
+7. requires exact automatic or manual paper authorization;
 8. delegates to the canonical internal paper executor; and
 9. queues the normal completion notification.
 
@@ -162,6 +163,6 @@ This round trip validates transport and reconciliation. It is not a portfolio re
 
 ## What this changes—and what it does not
 
-This makes controlled free-provider paper testing and Alpaca broker transport verification operationally possible. It does not mark the institutional all-market readiness report as passed. It does not certify direct derivatives, individual global bonds, direct international listings, or institutional execution quality.
+This makes autonomous controlled free-provider paper testing and Alpaca broker transport verification operationally possible. It does not mark the institutional all-market readiness report as passed. It does not certify direct derivatives, individual global bonds, direct international listings, or institutional execution quality.
 
 The canonical portfolio remains the product's sole state authority. Broker verification evidence may support readiness only when the exact provider activation, account environment, request IDs, order snapshots, fill activities, event hashes, and reconciliation conclusion are preserved.

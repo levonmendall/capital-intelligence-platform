@@ -66,15 +66,17 @@ The adapter:
 
 Only that post-fence publication identifier is passed to the next stage. Output created by a delegate after its worker loses ownership cannot become canonical downstream input.
 
-## Deployment files
+## Optional institutional deployment files
 
-The repository plan is:
+The default Docker scheduler runs `run_autonomous_paper_operator.py` and does not require an external stage-binding secret. The complete fenced twelve-stage orchestrator remains available for institutional deployments that explicitly select it.
+
+The repository plan for that optional mode is:
 
 ```text
 /app/deploy/canonical-daily-operations.json
 ```
 
-Deployment injects the reviewed binding document at:
+An institutional deployment injects the reviewed binding document at:
 
 ```text
 /run/secrets/canonical-daily-stage-bindings.json
@@ -86,7 +88,7 @@ The binding document uses schema `canonical-daily-stage-bindings.v1` and must co
 
 ## Startup validation
 
-Before the scheduler loop starts, run:
+Before the optional institutional scheduler loop starts, run:
 
 ```bash
 python run_daily_operations.py --validate-plan
@@ -102,7 +104,7 @@ Validation fails when:
 - the binding secret is unavailable; or
 - environment substitutions remain unresolved.
 
-Docker runs this validation before `--loop`. A missing reviewed binding file is a deployment error; Docker does not fall back to validation fixtures or a retired scheduler.
+When `run_daily_operations.py` is selected, its binding validation remains mandatory and never falls back to validation fixtures. The default Docker paper operator does not invoke this optional orchestrator and therefore does not require its binding secret.
 
 ## Durable stage contract
 
