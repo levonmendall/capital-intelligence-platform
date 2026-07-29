@@ -1,6 +1,6 @@
 """Execute an exact user-approved construction through the free paper pilot.
 
-This command is deliberately limited to development paper operation. It validates
+This command is deliberately limited to paper-only operation. It validates
 the live Alpaca paper account, free IEX quotes, the versioned listed-wrapper
 allowlist, cash and turnover limits, and exact user consent before delegating to
 the canonical internal paper-fill engine. It never submits an Alpaca order.
@@ -52,15 +52,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args, remaining = build_parser().parse_known_args(argv)
     try:
-        environment = (
-            os.getenv("CAPITAL_INTELLIGENCE_ENVIRONMENT")
-            or os.getenv("CAPITAL_INTELLIGENCE_DEPLOYMENT_ENVIRONMENT")
-            or "development"
-        ).strip().lower()
-        if environment != "development":
-            raise ValueError(
-                "the free provider pilot is development-only; staging and production remain governed by the institutional readiness gate"
-            )
         if args.portfolio_code != "COMPOUNDING":
             raise ValueError("the free paper pilot supports only COMPOUNDING")
         as_of = datetime.fromisoformat(args.as_of.replace("Z", "+00:00"))
@@ -122,7 +113,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "providers.alpaca_paper:create_alpaca_paper_session_provider",
                 "--quote-provider",
                 "providers.alpaca_paper:create_alpaca_paper_quote_provider",
-                "--development-bypass-launch-gate",
                 *remaining,
             )
         )

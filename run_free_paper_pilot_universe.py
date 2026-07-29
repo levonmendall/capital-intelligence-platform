@@ -53,15 +53,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output")
     args = parser.parse_args(argv)
     try:
-        environment = (
-            os.getenv("CAPITAL_INTELLIGENCE_ENVIRONMENT")
-            or os.getenv("CAPITAL_INTELLIGENCE_DEPLOYMENT_ENVIRONMENT")
-            or "development"
-        ).strip().lower()
-        if environment != "development":
-            raise ValueError(
-                "free pilot universe publication is development-only"
-            )
         now = datetime.now(timezone.utc)
         decision_at = _decision_at(args.decision_at, now=now)
         universe = load_free_paper_pilot_universe(args.universe)
@@ -120,8 +111,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "profiles_path": str(profiles_path),
             "configuration_readiness": readiness_payload,
             "next_step": (
-                "Run the canonical CIO cycle with the exact decision_at timestamp, "
-                "approve its exact construction, then execute run_free_paper_pilot.py."
+                "Run the canonical CIO cycle with the exact decision_at timestamp. "
+                "Automatic paper mode will execute any valid exact construction."
             ),
             "real_money_authorized": False,
         }

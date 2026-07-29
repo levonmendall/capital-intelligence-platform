@@ -31,12 +31,11 @@ services:
     build:
       context: .
       target: runtime
-    command: ["sh", "-c", "python run_daily_operations.py --validate-plan && exec python run_daily_operations.py --loop"]
+    command: ["python", "run_autonomous_paper_operator.py", "--loop"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
     volumes:
       - capital_data:/app/database
       - capital_backups:/app/backups
-      - ${CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS_FILE:?Set CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS_FILE to the reviewed binding JSON}:/run/secrets/canonical-daily-stage-bindings.json:ro
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777

@@ -29,8 +29,8 @@ The binding product and engineering contract is [GOVERNING_SPECIFICATION.md](GOV
 | Portfolio sizing | Construction and funding logic; CIO confidence is not a sizing input |
 | Product surfaces | Today, Environment, Portfolio, and History |
 | Interface | Signature command-system design with dark mode as the preset and light mode as an alternate |
-| Execution | Research and paper only; no broker submission or live-money authority |
-| Readiness | Core architecture is implemented; paper testing can begin immediately without launch clearance; each transaction still requires current data, eligibility, safety, consent, and reconciliation controls |
+| Execution | Autonomous canonical paper execution by default; no live-money authority |
+| Readiness | Core architecture is implemented; paper testing starts without launch clearance or a manual per-trade click; each transaction still requires current data, eligibility, safety, exact authorization, and reconciliation controls |
 
 ## What the platform is
 
@@ -308,9 +308,19 @@ GET /metrics
 
 The API is query-only for investment authority and exposes no live-trade or allocation-mutation route.
 
-## Canonical daily operation
+## Autonomous paper operation
 
-The repository ships one complete twelve-stage operation plan at:
+The default operating worker starts the canonical scheduler and exact paper executor without an external launch sequence or a browser session:
+
+```bash
+python run_autonomous_paper_operator.py --loop
+```
+
+Automatic mode writes an append-only authorization for the exact construction hash and then delegates to the existing reconciled paper executor. It remains idle when no current canonical construction exists and never substitutes fixtures or synthetic recommendations for missing evidence. Set `CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE=manual` to restore per-construction approval, or `disabled` to monitor without implementation.
+
+## Optional institutional daily operation
+
+The repository also ships one complete twelve-stage operation plan at:
 
 ```text
 deploy/canonical-daily-operations.json
@@ -365,16 +375,15 @@ The production runtime image does not include test tooling.
 
 ## Deployment
 
-Prepare the environment and reviewed stage-binding secret:
+Prepare the environment and start the autonomous paper operator:
 
 ```bash
 cp deploy/staging.env.example deploy/staging.env
 export CAPITAL_INTELLIGENCE_ENV_FILE=deploy/staging.env
-export CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS_FILE=/secure/reviewed-bindings.json
 docker compose up --build -d
 ```
 
-The scheduler validates its full plan before entering the loop. Docker fails early when the reviewed binding file is absent.
+The default scheduler service does not require an external stage-binding secret. Deployments choosing the optional institutional twelve-stage orchestrator must separately supply and validate its real command bindings.
 
 ## Backup and recovery
 

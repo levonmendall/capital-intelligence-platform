@@ -209,17 +209,21 @@ def test_pilot_construction_enforces_scope_cash_turnover_and_symbol_limits() -> 
         )
 
 
-def test_free_pilot_contains_no_broker_order_submission_path() -> None:
+def test_free_pilot_contains_no_live_broker_or_environment_entry_barrier() -> None:
     provider_source = (ROOT / "providers" / "alpaca_paper.py").read_text(
         encoding="utf-8"
     )
     runner_source = (ROOT / "run_free_paper_pilot.py").read_text(
         encoding="utf-8"
     )
+    universe_runner = (ROOT / "run_free_paper_pilot_universe.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "/v2/orders" not in provider_source
-    assert "development-only" in runner_source
-    assert "--development-bypass-launch-gate" in runner_source
+    assert "development-only" not in runner_source
+    assert "development-only" not in universe_runner
+    assert "--development-bypass-launch-gate" not in runner_source
     assert "run_approved_paper_execution" in runner_source
 
 def test_common_alpaca_environment_aliases_are_supported(monkeypatch) -> None:

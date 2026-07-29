@@ -19,10 +19,12 @@ The following are not prerequisites for paper testing:
 - a human release-authority decision;
 - an activated runtime switch.
 
-Exact authenticated user approval for a proposed portfolio implementation remains
-required by the Streamlit approval bridge. This is transaction consent, not launch
-clearance. Provider activation, asset eligibility, portfolio safeguards, append-only
-evidence, reconciliation, and the prohibition on real-money endpoints remain active.
+Automatic paper mode records an append-only authorization for the exact canonical
+construction and does not require a separate per-trade click. Manual approval remains an
+optional compatibility mode, and an authorized portfolio manager may pause or resume an
+exact construction. Provider activation, asset eligibility, portfolio safeguards,
+append-only evidence, reconciliation, and the prohibition on real-money endpoints remain
+active.
 
 The legacy campaign, launch, release, and runtime-control authorities remain in the
 repository only as optional institutional audit tools. They do not block ordinary
