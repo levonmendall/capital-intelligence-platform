@@ -11,9 +11,9 @@ from typing import Any
 
 from cio.historical_learning import (
     HistoricalLearningContext,
-    HistoricalLearningResolver,
     HistoricalLearningStatus,
 )
+from cio.governed_historical_learning import HistoricalLearningResolver
 from cio.committee import IndependentSpecialistPacket, SpecialistAnalysis
 from cio.models import (
     CIOAction,
