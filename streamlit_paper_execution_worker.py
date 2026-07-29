@@ -37,6 +37,11 @@ def _streamlit_operator_runtime():
     return settings, build_worker(settings)
 
 
+def _run_streamlit_operator_pass() -> dict[str, object]:
+    settings, worker = _streamlit_operator_runtime()
+    return _run_pass(settings=settings, worker=worker)
+
+
 @st.fragment(run_every="30s")
 def render_background_paper_execution_worker(
     *,
@@ -47,8 +52,7 @@ def render_background_paper_execution_worker(
     # the journal after running the due CIO cycle so it cannot execute stale page values.
     del construction, briefing
     try:
-        settings, worker = _streamlit_operator_runtime()
-        payload = _run_pass(settings=settings, worker=worker)
+        payload = _run_streamlit_operator_pass()
     except (ImportError, AttributeError, OSError, TypeError, ValueError, RuntimeError) as error:
         st.session_state["capital_intelligence_operator_status"] = {
             "status": "degraded",
