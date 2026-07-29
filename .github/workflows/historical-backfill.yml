@@ -1,0 +1,82 @@
+name: Ten-Year Historical Backfill
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "historical_replay/**"
+      - "run_historical_backfill.py"
+      - "run_historical_shadow_replay.py"
+      - "config/historical_replay_free_sources.json"
+      - "tests/test_historical_replay.py"
+      - ".github/workflows/historical-backfill.yml"
+  push:
+    branches: [main]
+    paths:
+      - "historical_replay/**"
+      - "run_historical_backfill.py"
+      - "run_historical_shadow_replay.py"
+      - "config/historical_replay_free_sources.json"
+      - ".github/workflows/historical-backfill.yml"
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: historical-backfill-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run focused historical replay tests
+        run: python -m pytest -q tests/test_historical_replay.py
+      - name: Compile historical replay commands
+        run: python -m compileall -q historical_replay run_historical_backfill.py run_historical_shadow_replay.py
+
+  backfill:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      CAPITAL_INTELLIGENCE_HISTORICAL_DATA_DIR: database/historical_replay
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Backfill the governed ten-year public-source window
+        run: |
+          python run_historical_backfill.py \
+            --max-records-per-source 100000 \
+            --report historical-backfill-report.json
+      - name: Generate strict monthly shadow replay
+        run: |
+          python run_historical_shadow_replay.py \
+            --cadence monthly \
+            --report historical-shadow-replay.json
+      - name: Upload append-only historical evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ten-year-historical-replay-${{ github.sha }}
+          path: |
+            database/historical_replay
+            historical-backfill-report.json
+            historical-shadow-replay.json
+          retention-days: 30
+          if-no-files-found: error
