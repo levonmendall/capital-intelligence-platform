@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -122,9 +120,18 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
     )
     assert by_name["encrypted-backup"].critical is False
     assert by_name["encrypted-backup"].restart_delay_seconds == 300
-    assert "secure_app.py" in by_name["streamlit"].command
+    assert "render_app.py" in by_name["streamlit"].command
     assert "--server.port=10000" in by_name["streamlit"].command
     assert all(process.critical for process in processes if process.name != "encrypted-backup")
+
+
+def test_render_interface_displays_release_and_persistent_state_identity() -> None:
+    source = Path("render_app.py").read_text(encoding="utf-8")
+
+    assert "Persistent operating host" in source
+    assert "CAPITAL_INTELLIGENCE_RELEASE" in source
+    assert "RENDER_GIT_COMMIT" in source
+    assert "CAPITAL_INTELLIGENCE_DATA_DIR" in source
 
 
 def test_render_supervisor_source_avoids_shell_execution_and_live_money() -> None:
