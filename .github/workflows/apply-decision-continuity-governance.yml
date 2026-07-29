@@ -44,6 +44,7 @@ jobs:
           python .decision-upgrade/phase2.py
           python .decision-upgrade/phase3.py
           python .decision-upgrade/phase4.py
+          python .decision-upgrade/phase5.py
 
       - name: Verify source integrity
         run: |
