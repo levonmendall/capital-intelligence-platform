@@ -1,0 +1,88 @@
+previews:
+  generation: off
+
+services:
+  - type: web
+    name: capital-intelligence-platform
+    runtime: docker
+    plan: starter
+    region: oregon
+    branch: main
+    autoDeployTrigger: checksPass
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python run_render_service.py
+    healthCheckPath: /_stcore/health
+    maxShutdownDelaySeconds: 60
+    disk:
+      name: capital-intelligence-state
+      mountPath: /app/database
+      sizeGB: 5
+    envVars:
+      - key: CAPITAL_INTELLIGENCE_ENVIRONMENT
+        value: production
+      - key: CAPITAL_INTELLIGENCE_DATA_DIR
+        value: /app/database
+      - key: CAPITAL_INTELLIGENCE_LOG_LEVEL
+        value: INFO
+      - key: CAPITAL_INTELLIGENCE_JSON_LOGS
+        value: "true"
+      - key: CAPITAL_INTELLIGENCE_ENFORCE_HTTPS
+        value: "true"
+      - key: CAPITAL_INTELLIGENCE_AUTHENTICATION_REQUIRED
+        value: "true"
+      - key: CAPITAL_INTELLIGENCE_REQUIRE_ENCRYPTED_BACKUPS
+        value: "true"
+      - key: CAPITAL_INTELLIGENCE_REQUIRE_OPERATIONAL_SLOS
+        value: "true"
+      - key: CAPITAL_INTELLIGENCE_BACKUP_DIRECTORY
+        value: /app/database/backups
+      - key: CAPITAL_INTELLIGENCE_BACKUP_INTERVAL_HOURS
+        value: "24"
+      - key: CAPITAL_INTELLIGENCE_BACKUP_RETENTION_DAYS
+        value: "30"
+      - key: CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL
+        value: "false"
+      - key: CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER
+        value: "false"
+      - key: CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT
+        value: "false"
+      - key: CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE
+        value: automatic
+      - key: CAPITAL_INTELLIGENCE_PAPER_REPORT_TIMEZONE
+        value: America/Los_Angeles
+      - key: CAPITAL_INTELLIGENCE_PAPER_CONSTRUCTION_MAX_AGE_HOURS
+        value: "24"
+      - key: CAPITAL_INTELLIGENCE_AUTONOMOUS_PAPER_AUTHORIZATION_HOURS
+        value: "24"
+      - key: CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE
+        value: America/New_York
+      - key: CAPITAL_INTELLIGENCE_SCHEDULER_HOUR
+        value: "7"
+      - key: CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS
+        value: "60"
+      - key: CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED
+        value: "true"
+      - key: CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_INTERVAL_SECONDS
+        value: "3600"
+      - key: CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_CODE
+        value: COMPOUNDING
+      - key: APCA_API_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: APCA_DATA_BASE_URL
+        value: https://data.alpaca.markets
+      - key: APCA_DATA_FEED
+        value: iex
+      - key: SEC_USER_AGENT
+        value: Capital Intelligence Platform levonmendall2369@gmail.com
+      - key: CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: CAPITAL_INTELLIGENCE_BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: APCA_API_KEY_ID
+        sync: false
+      - key: APCA_API_SECRET_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
