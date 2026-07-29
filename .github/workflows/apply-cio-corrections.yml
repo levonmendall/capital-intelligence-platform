@@ -1,4 +1,4 @@
-name: Apply CIO corrections and validate Docker
+name: Integrate CIO corrections and validate Docker
 
 on:
   pull_request:
@@ -6,10 +6,11 @@ on:
       - main
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
-  apply-and-validate:
+  integrate-and-validate:
     if: github.head_ref == 'agent/harden-cio-operations-risk-sizing'
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -21,103 +22,71 @@ jobs:
           ref: agent/harden-cio-operations-risk-sizing
           fetch-depth: 0
 
-      - name: Reconstruct and apply correction patch
-        id: apply
+      - name: Reconstruct reconciled source
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cat .automation/corrections.patch.part* > /tmp/corrections.patch.gz.b64
-          test "$(wc -c < /tmp/corrections.patch.gz.b64)" -eq 61792
-          echo 'fed53220bd01c40d47c6f1462d111fab2980fe5fc4162e60f870b99462b4025b  /tmp/corrections.patch.gz.b64' | sha256sum --check
-          base64 --decode /tmp/corrections.patch.gz.b64 > /tmp/corrections.patch.gz
-          echo '43ce27c6f24c45acf8e047d70f22792c4cb983329d1ffd501156457388933244  /tmp/corrections.patch.gz' | sha256sum --check
-          gzip --decompress --stdout /tmp/corrections.patch.gz > /tmp/corrections.patch
-          echo 'f5ac9adf4da7124fb10817b0b3abf594fe7d63722ad27b6d6016b1917e131862  /tmp/corrections.patch' | sha256sum --check
+          cp .github/workflows/apply-cio-corrections.yml /tmp/integration-workflow.yml
 
-          set +e
-          git apply --reject --whitespace=nowarn /tmp/corrections.patch
-          apply_status=$?
-          set -e
-          mapfile -t rejects < <(find . -type f -name '*.rej' -print | sort)
-          if (( apply_status != 0 || ${#rejects[@]} > 0 )); then
-            printf 'Patch requires manual reconciliation. Rejected hunks:\n'
-            printf '%s\n' "${rejects[@]}"
-            printf '%s\n' "${rejects[@]}" > /tmp/rejected-files.txt
-            tar --exclude=.git --exclude=.automation -czf /tmp/reconciliation.tgz .
-            echo 'conflicts=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'conflicts=false' >> "$GITHUB_OUTPUT"
-          fi
+          curl --fail --location --silent --show-error \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output /tmp/reconciliation.zip \
+            "https://api.github.com/repos/levonmendall/capital-intelligence-platform-/actions/artifacts/8733511745/zip"
+          unzip -q /tmp/reconciliation.zip -d /tmp/reconciliation-artifact
+          tar -xzf /tmp/reconciliation-artifact/reconciliation.tgz -C "${GITHUB_WORKSPACE}"
+          find . -type f -name '*.rej' -delete
 
-      - name: Upload reconciliation workspace
-        if: steps.apply.outputs.conflicts == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: cio-correction-reconciliation
-          path: |
-            /tmp/reconciliation.tgz
-            /tmp/rejected-files.txt
-          retention-days: 1
+          cat .automation/manual-reconciliation.part* > /tmp/manual-reconciliation.patch.gz.b64
+          test "$(wc -c < /tmp/manual-reconciliation.patch.gz.b64)" -eq 42072
+          echo '0a16e356adb0248c41e9a22f0f3c1d5f6cd9a4cffb84f65205f1b275b32b2a60  /tmp/manual-reconciliation.patch.gz.b64' | sha256sum --check
+          base64 --decode /tmp/manual-reconciliation.patch.gz.b64 > /tmp/manual-reconciliation.patch.gz
+          echo '050a2b4a9f9d962fec6eb848db0c7e602aaa17d8356ec2eeb71d0cf905c29781  /tmp/manual-reconciliation.patch.gz' | sha256sum --check
+          gzip --decompress --stdout /tmp/manual-reconciliation.patch.gz > /tmp/manual-reconciliation.patch
+          echo '92aec0c0b5973ee964533ec30cbe238846531fd2ff996acdd0f1d0e1515feb4e  /tmp/manual-reconciliation.patch' | sha256sum --check
+          test "$(wc -c < /tmp/manual-reconciliation.patch)" -eq 129806
 
-      - name: Stop for manual reconciliation
-        if: steps.apply.outputs.conflicts == 'true'
-        run: exit 1
+          git apply --check /tmp/manual-reconciliation.patch
+          git apply --whitespace=nowarn /tmp/manual-reconciliation.patch
+          cp /tmp/integration-workflow.yml .github/workflows/apply-cio-corrections.yml
+          rm -rf .automation
+          find . -type f -name '*.rej' -print -quit | grep -q . && exit 1 || true
 
       - name: Set up Python
-        if: steps.apply.outputs.conflicts != 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.11'
           cache: pip
 
       - name: Install locked dependencies
-        if: steps.apply.outputs.conflicts != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install --require-hashes -r requirements.lock
           pip install -r requirements-dev.txt
           python -m pip check
 
-      - name: Validate Python and canonical workflow
-        if: steps.apply.outputs.conflicts != 'true'
+      - name: Verify Docker CLI
+        run: |
+          docker version
+          docker compose version
+
+      - name: Run complete release validation
         env:
           PYTHONPATH: ${{ github.workspace }}
           CAPITAL_INTELLIGENCE_ENVIRONMENT: test
         run: |
           python scripts/verify_requirements_lock.py
           python -m compileall -q .
-          python run_daily_operations.py \
-            --plan deploy/canonical-daily-operations.smoke.json \
-            --database /tmp/canonical-daily-smoke.db \
-            --code-version "${GITHUB_SHA}" \
-            --scheduled-for 2026-07-29T07:00:00-04:00 \
-            --decision-timestamp 2026-07-29T07:00:00-04:00 \
-            --knowledge-cutoff 2026-07-29T06:59:59-04:00 \
-            --started-at 2026-07-29T07:00:01-04:00
-          pytest -q
+          python run_release_validation.py --report /tmp/release-validation.json
+          cat /tmp/release-validation.json
 
-      - name: Execute Docker CLI validation
-        if: steps.apply.outputs.conflicts != 'true'
+      - name: Commit validated source
         shell: bash
         run: |
           set -euo pipefail
-          docker version
-          docker compose version
-          cp deploy/staging.env.example /tmp/capital-intelligence-staging.env
-          CAPITAL_INTELLIGENCE_ENV_FILE=/tmp/capital-intelligence-staging.env \
-          CAPITAL_INTELLIGENCE_DAILY_OPERATION_PLAN_HOST_PATH="$PWD/deploy/canonical-daily-operations.smoke.json" \
-            docker compose config --quiet
-          docker build --tag capital-intelligence:pr-validation .
-          docker run --rm --entrypoint python capital-intelligence:pr-validation -m compileall -q /app
-          docker run --rm --entrypoint python capital-intelligence:pr-validation initialize.py
-
-      - name: Commit validated correction set
-        if: steps.apply.outputs.conflicts != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf .automation
-          rm -f .github/workflows/apply-cio-corrections.yml
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
           git clean -fdX
