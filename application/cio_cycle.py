@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from cio import (
@@ -11,6 +11,7 @@ from cio import (
     CandidateDecisionRecord,
     ChiefInvestmentOfficer,
     IndependentSpecialistPacket,
+    PriorDecisionContext,
 )
 from cio.persistence import CIOJournalEventType, SQLiteCIOJournal
 from committee.specialists import (
@@ -29,6 +30,7 @@ from opportunity import (
     OpportunityEngine,
     OpportunityQueue,
     OpportunitySetContext,
+    OpportunityRankingInput,
 )
 from portfolio.construction_api import (
     ConstructionIntent,
@@ -38,6 +40,7 @@ from portfolio.construction_api import (
     PortfolioConstructionPolicy,
     PortfolioConstructionRequest,
     PortfolioConstructionResult,
+    PortfolioScenario,
     TradeSide,
 )
 from reporting.daily_cio import DailyCIOBriefing, DailyCIOBriefingBuilder
@@ -209,6 +212,7 @@ class CyclePortfolioState:
         *,
         identifier: str,
         intents: tuple[ConstructionIntent, ...],
+        scenarios: tuple[PortfolioScenario, ...] = (),
     ) -> PortfolioConstructionRequest:
         return PortfolioConstructionRequest(
             identifier=identifier,
@@ -221,6 +225,7 @@ class CyclePortfolioState:
             eligible_universe_publication_identifier=(
                 self.eligible_universe_publication_identifier
             ),
+            scenarios=scenarios,
         )
 
 
@@ -367,6 +372,7 @@ class CanonicalCIOCycle:
         opportunity_context: OpportunitySetContext,
         specialist_contexts: tuple[CandidateCycleContext, ...],
         portfolio: CyclePortfolioState,
+        prior_decision_contexts: tuple[PriorDecisionContext, ...] = (),
         code_version: str | None = None,
     ) -> CanonicalCIOCycleResult:
         cycle_identifier = _required_text(identifier, field_name="identifier")
@@ -395,6 +401,32 @@ class CanonicalCIOCycle:
             )
         if any(item.as_of != portfolio.as_of for item in candidates):
             raise ValueError("all candidates must share cycle timestamp")
+        if not isinstance(prior_decision_contexts, tuple) or not all(
+            isinstance(item, PriorDecisionContext)
+            for item in prior_decision_contexts
+        ):
+            raise TypeError(
+                "prior_decision_contexts must contain PriorDecisionContext values"
+            )
+        prior_map = {item.candidate_identifier: item for item in prior_decision_contexts}
+        if len(prior_map) != len(prior_decision_contexts):
+            raise ValueError("prior decision contexts must be unique by candidate")
+        generated_ranking = self._ranking_inputs(candidates, portfolio)
+        supplied_ranking = {
+            item.candidate_identifier: item
+            for item in opportunity_context.ranking_inputs
+        }
+        supplied_ranking.update(
+            {
+                item.candidate_identifier: item
+                for item in generated_ranking
+                if item.candidate_identifier not in supplied_ranking
+            }
+        )
+        opportunity_context = replace(
+            opportunity_context,
+            ranking_inputs=tuple(supplied_ranking.values()),
+        )
         context_map = {
             item.candidate_identifier: item for item in specialist_contexts
         }
@@ -448,6 +480,8 @@ class CanonicalCIOCycle:
                 candidate,
                 ranked.qualification.universe,
                 packet,
+                capital_comparison=ranked.qualification.capital_comparison,
+                prior_context=prior_map.get(candidate.identifier),
             )
             decisions.append(decision)
             if self.journal is not None:
@@ -524,6 +558,101 @@ class CanonicalCIOCycle:
             briefing=briefing,
         )
 
+
+    @classmethod
+    def _ranking_inputs(
+        cls,
+        candidates: tuple[CandidateDecisionRecord, ...],
+        portfolio: CyclePortfolioState,
+    ) -> tuple[OpportunityRankingInput, ...]:
+        sector_weights: dict[str, float] = {}
+        bucket_weights: dict[str, float] = {}
+        for asset in portfolio.positions:
+            sector_weights[asset.sector] = (
+                sector_weights.get(asset.sector, 0.0) + asset.current_weight
+            )
+            bucket_weights[asset.correlation_bucket] = (
+                bucket_weights.get(asset.correlation_bucket, 0.0)
+                + asset.current_weight
+            )
+        values: list[OpportunityRankingInput] = []
+        for candidate in candidates:
+            try:
+                profile = portfolio.profile(candidate.identifier)
+                profile_sector = profile.sector
+                profile_bucket = profile.correlation_bucket
+            except KeyError:
+                profile_sector = "unclassified"
+                profile_bucket = "unclassified"
+            current = portfolio.current_weight(candidate.instrument.symbol)
+            feasible_delta = max(
+                0.0,
+                min(
+                    candidate.maximum_position_weight - current,
+                    max(0.0, portfolio.cash_weight - 0.02),
+                ),
+            )
+            annualized = ConstructionIntent.annualized_return(
+                candidate.net_expected_return,
+                horizon_days=candidate.decision_horizon_days,
+            )
+            transition_cost = candidate.implementation_cost_return * feasible_delta
+            contribution = (
+                (annualized - portfolio.cash_expected_return) * feasible_delta
+                - transition_cost
+            )
+            concentration = max(
+                sector_weights.get(profile_sector, 0.0),
+                bucket_weights.get(profile_bucket, 0.0),
+            )
+            diversification = max(0.0, min(1.0, 1.0 - concentration))
+            thesis = cls._text_clarity(
+                candidate.primary_catalysts + candidate.critical_assumptions
+            )
+            invalidation = cls._text_clarity(candidate.invalidation_conditions)
+            horizon_factor = min(
+                1.0, max(0.20, candidate.decision_horizon_days / 90.0)
+            )
+            durability = max(
+                0.0,
+                min(
+                    1.0,
+                    horizon_factor
+                    * (
+                        0.50 * candidate.evidence_quality.freshness
+                        + 0.30 * candidate.evidence_quality.completeness
+                        + 0.20 * candidate.evidence_quality.independence
+                    ),
+                ),
+            )
+            values.append(
+                OpportunityRankingInput(
+                    candidate_identifier=candidate.identifier,
+                    marginal_portfolio_contribution=contribution,
+                    diversification_score=diversification,
+                    thesis_clarity_score=thesis,
+                    invalidation_clarity_score=invalidation,
+                    forecast_durability_score=durability,
+                )
+            )
+        return tuple(values)
+
+    @staticmethod
+    def _text_clarity(items: tuple[str, ...]) -> float:
+        if not items:
+            return 0.0
+        tokens = (
+            "above", "below", "increase", "decrease", "decline", "rise",
+            "fall", "days", "month", "quarter", "%", "ratio", "spread",
+            "growth", "margin", "price", "yield", "volume", "earnings",
+        )
+        total = 0.0
+        for item in items:
+            text = item.strip().lower()
+            length = min(1.0, len(text.split()) / 10.0)
+            measurable = 1.0 if any(token in text for token in tokens) else 0.35
+            total += 0.45 * length + 0.55 * measurable
+        return round(max(0.0, min(1.0, total / len(items))), 8)
 
     def _capture_evaluation_snapshots(
         self,
@@ -720,12 +849,100 @@ class CanonicalCIOCycle:
             )
         if not intents:
             return None
+        scenarios = self._joint_portfolio_scenarios(
+            decisions=decisions,
+            ranked_by_candidate=ranked_by_candidate,
+            portfolio=portfolio,
+        )
         return self.construction_engine.construct(
             portfolio.request(
                 identifier=f"construction:{cycle_identifier}",
                 intents=tuple(intents),
+                scenarios=scenarios,
             )
         )
+
+    @staticmethod
+    def _joint_portfolio_scenarios(
+        *,
+        decisions: tuple[CIODecision, ...],
+        ranked_by_candidate: dict[str, object],
+        portfolio: CyclePortfolioState,
+    ) -> tuple[PortfolioScenario, ...]:
+        """Translate reconciled candidate outcomes into common portfolio stresses."""
+
+        actionable = tuple(
+            item
+            for item in decisions
+            if item.return_reconciliation is not None
+            and item.action in _ACTIONABLE | {CIOAction.HOLD, CIOAction.NO_MATERIAL_CHANGE}
+        )
+        if not actionable:
+            return ()
+        labels = ("bear", "base", "bull")
+        probability_by_label: dict[str, list[float]] = {label: [] for label in labels}
+        returns_by_label: dict[str, dict[str, float]] = {label: {} for label in labels}
+        for decision in actionable:
+            ranked = ranked_by_candidate[decision.candidate_identifier]
+            candidate = ranked.candidate
+            distribution = {
+                item.label.lower(): item
+                for item in decision.return_reconciliation.outcomes
+            }
+            if not all(label in distribution for label in labels):
+                ordered = sorted(
+                    decision.return_reconciliation.outcomes,
+                    key=lambda item: item.total_return,
+                )
+                if len(ordered) < 3:
+                    continue
+                distribution = {
+                    "bear": ordered[0],
+                    "base": ordered[len(ordered) // 2],
+                    "bull": ordered[-1],
+                }
+            for label in labels:
+                point = distribution[label]
+                probability_by_label[label].append(point.probability)
+                returns_by_label[label][candidate.instrument.symbol] = (
+                    ConstructionIntent.annualized_return(
+                        point.total_return - candidate.implementation_cost_return,
+                        horizon_days=decision.decision_horizon_days,
+                    )
+                )
+        if not any(probability_by_label.values()):
+            return ()
+        raw_probabilities = {
+            label: (
+                sum(values) / len(values) if values else 0.0
+            )
+            for label, values in probability_by_label.items()
+        }
+        total = sum(raw_probabilities.values())
+        if total <= 0.0:
+            return ()
+        values: list[PortfolioScenario] = []
+        for label in labels:
+            probability = raw_probabilities[label] / total
+            if probability <= 0.0:
+                continue
+            asset_returns = {
+                item.symbol: item.expected_return for item in portfolio.positions
+            }
+            asset_returns.update(returns_by_label[label])
+            values.append(
+                PortfolioScenario(
+                    name=f"joint-{label}",
+                    probability=probability,
+                    cash_return=portfolio.cash_expected_return,
+                    asset_returns=tuple(sorted(asset_returns.items())),
+                )
+            )
+        # Correct floating-point drift on the final scenario.
+        if values:
+            running = sum(item.probability for item in values[:-1])
+            values[-1] = replace(values[-1], probability=1.0 - running)
+        return tuple(values)
 
     def _create_theses(
         self,

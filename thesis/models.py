@@ -260,6 +260,10 @@ class ThesisEvidenceUpdate:
     performance_since_approval: float
     best_replacement_expected_return: float
     next_review_at: datetime
+    consecutive_supportive_updates: int = 1
+    consecutive_opposing_updates: int = 1
+    last_material_change_at: datetime | None = None
+    emergency_override: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -297,6 +301,21 @@ class ThesisEvidenceUpdate:
         )
         if not isinstance(self.data_current, bool):
             raise TypeError("data_current must be a bool")
+        for field_name in (
+            "consecutive_supportive_updates",
+            "consecutive_opposing_updates",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{field_name} must be an integer")
+            if value < 0:
+                raise ValueError(f"{field_name} cannot be negative")
+        if self.last_material_change_at is not None:
+            _aware(self.last_material_change_at, field_name="last_material_change_at")
+            if self.last_material_change_at > self.as_of:
+                raise ValueError("last_material_change_at cannot follow as_of")
+        if not isinstance(self.emergency_override, bool):
+            raise TypeError("emergency_override must be a bool")
         for field_name, minimum in (
             ("evidence_identifiers", 1),
             ("strengthened_indicators", 0),

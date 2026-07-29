@@ -28,9 +28,13 @@ At least one cash alternative is required. Alternative identifiers are unique, c
 8. minimum advantage over the strongest available use of capital;
 9. maximum expected downside;
 10. maximum implementation cost; and
-11. positive expected portfolio contribution.
+11. the applicable asset-class and horizon policy profile.
 
 A rejection records every applicable reason. Rejected candidates do not receive a committee rank and cannot be passed silently as neutral.
+
+The qualification record identifies both the baseline alternative used to verify the candidate record and the true best competing alternative across cash, current holdings, and other qualified candidates. The typed comparison is passed directly to CIO synthesis; the candidate cannot substitute a weaker opportunity cost.
+
+`OpportunityRankingInput` supplies governed portfolio and thesis diagnostics. When no governed marginal contribution is available, that component is neutral rather than inferred from a candidate-supplied estimate. Tactical forecasts receive a durability penalty and capped annualization through the resolved policy profile.
 
 ## Ranking
 
@@ -38,15 +42,18 @@ Qualified candidates are ranked using disclosed components whose weights sum to 
 
 | Component | Weight |
 | --- | ---: |
-| Cost-adjusted expected return | 25% |
-| Probability of success | 12% |
-| Downside protection | 12% |
-| Evidence quality | 16% |
-| Evidence freshness | 6% |
-| Evidence independence | 6% |
-| Liquidity | 8% |
+| Cost-adjusted expected return | 21% |
+| Probability of success | 10% |
+| Downside protection | 10% |
+| Evidence quality | 14% |
+| Evidence freshness | 5% |
+| Evidence independence | 5% |
+| Liquidity | 7% |
 | Opportunity edge | 10% |
-| Expected portfolio contribution | 3% |
+| Governed marginal portfolio contribution | 7% |
+| Thesis clarity | 4% |
+| Invalidation clarity | 3% |
+| Forecast durability | 2% |
 | Cost efficiency | 2% |
 
 Each `RankedOpportunity` stores the raw value, normalized score, weight, and weighted contribution for every component. The final score must reconcile exactly to those contributions.

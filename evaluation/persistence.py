@@ -76,6 +76,28 @@ def serialize_construction(
             }
             for symbol, instrument_identifier in result.instrument_identifiers
         ],
+        "scenario_metrics_before": (
+            None
+            if result.scenario_metrics_before is None
+            else {
+                "expected_geometric_return": result.scenario_metrics_before.expected_geometric_return,
+                "expected_shortfall": result.scenario_metrics_before.expected_shortfall,
+                "worst_case_return": result.scenario_metrics_before.worst_case_return,
+                "probability_outperforming_current": result.scenario_metrics_before.probability_outperforming_current,
+                "liquidity_adjusted_loss": result.scenario_metrics_before.liquidity_adjusted_loss,
+            }
+        ),
+        "scenario_metrics_after": (
+            None
+            if result.scenario_metrics_after is None
+            else {
+                "expected_geometric_return": result.scenario_metrics_after.expected_geometric_return,
+                "expected_shortfall": result.scenario_metrics_after.expected_shortfall,
+                "worst_case_return": result.scenario_metrics_after.worst_case_return,
+                "probability_outperforming_current": result.scenario_metrics_after.probability_outperforming_current,
+                "liquidity_adjusted_loss": result.scenario_metrics_after.liquidity_adjusted_loss,
+            }
+        ),
     }
 
 
@@ -90,7 +112,7 @@ def append_construction(
         aggregate_identifier=result.request_identifier,
         occurred_at=result.as_of,
         payload=serialize_construction(result, code_version=code_version),
-        schema_version="portfolio-construction-result.v2",
+        schema_version="portfolio-construction-result.v3",
         event_identifier=f"event:{result.request_identifier}",
     )
 

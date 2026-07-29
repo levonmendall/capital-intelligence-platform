@@ -17,7 +17,7 @@ from thesis.models import (
 class ThesisMonitoringPolicy:
     """Versioned materiality and review-proposal thresholds."""
 
-    version: str = "thesis-monitoring.v1"
+    version: str = "thesis-monitoring.v2"
     strengthening_return_change: float = 0.03
     weakening_return_change: float = -0.03
     strengthening_confidence_change: float = 0.10
@@ -27,6 +27,9 @@ class ThesisMonitoringPolicy:
     exit_expected_return: float = -0.05
     replacement_edge: float = 0.03
     decisive_replacement_edge: float = 0.10
+    increase_persistence_updates: int = 2
+    reduce_persistence_updates: int = 2
+    cooldown_days: int = 5
 
     def __post_init__(self) -> None:
         if not self.version.strip():
@@ -49,6 +52,16 @@ class ThesisMonitoringPolicy:
             raise ValueError(
                 "decisive_replacement_edge must exceed replacement_edge"
             )
+        for field_name in (
+            "increase_persistence_updates",
+            "reduce_persistence_updates",
+            "cooldown_days",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{field_name} must be an integer")
+            if value < 0:
+                raise ValueError(f"{field_name} cannot be negative")
 
 
 class ThesisMonitor:
@@ -144,6 +157,12 @@ class ThesisMonitor:
         confidence_change: float,
         replacement_edge: float,
     ) -> tuple[ThesisState, ThesisReviewProposal, str]:
+        cooldown_active = (
+            update.last_material_change_at is not None
+            and self.policy.cooldown_days > 0
+            and (update.as_of - update.last_material_change_at).days
+            < self.policy.cooldown_days
+        )
         if update.triggered_invalidation_conditions:
             return (
                 ThesisState.INVALIDATED,
@@ -176,6 +195,19 @@ class ThesisMonitor:
                 "The updated expected return is negative and requires a CIO reduction review.",
             )
         if replacement_edge >= self.policy.replacement_edge:
+            observed = update.consecutive_opposing_updates + 1
+            if (
+                not update.emergency_override
+                and (
+                    observed < self.policy.reduce_persistence_updates
+                    or cooldown_active
+                )
+            ):
+                return (
+                    ThesisState.WEAKENING,
+                    ThesisReviewProposal.CONTINUE_MONITORING,
+                    "A replacement advantage is visible but awaits persistent confirmation or cooldown completion.",
+                )
             return (
                 ThesisState.WEAKENING,
                 ThesisReviewProposal.REVIEW_REDUCE,
@@ -195,6 +227,20 @@ class ThesisMonitor:
                 + "; ".join(update.weakened_indicators)
             )
         if weakening_reasons:
+            observed = update.consecutive_opposing_updates + 1
+            if (
+                not update.emergency_override
+                and (
+                    observed < self.policy.reduce_persistence_updates
+                    or cooldown_active
+                )
+            ):
+                return (
+                    ThesisState.WEAKENING,
+                    ThesisReviewProposal.CONTINUE_MONITORING,
+                    "; ".join(weakening_reasons)
+                    + "; reduction review awaits persistent confirmation or cooldown completion.",
+                )
             return (
                 ThesisState.WEAKENING,
                 ThesisReviewProposal.REVIEW_REDUCE,
@@ -212,6 +258,20 @@ class ThesisMonitor:
                 + "; ".join(update.strengthened_indicators)
             )
         if strengthening_reasons:
+            observed = update.consecutive_supportive_updates + 1
+            if (
+                not update.emergency_override
+                and (
+                    observed < self.policy.increase_persistence_updates
+                    or cooldown_active
+                )
+            ):
+                return (
+                    ThesisState.STRENGTHENING,
+                    ThesisReviewProposal.CONTINUE_MONITORING,
+                    "; ".join(strengthening_reasons)
+                    + "; increase review awaits persistent confirmation or cooldown completion.",
+                )
             return (
                 ThesisState.STRENGTHENING,
                 ThesisReviewProposal.REVIEW_INCREASE,

@@ -14,7 +14,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from math import isfinite
+from math import isfinite, log
 from typing import Any
 
 from cio import (
@@ -22,6 +22,7 @@ from cio import (
     CIODecision,
     CandidateDecisionRecord,
     IndependentSpecialistPacket,
+    PayoffDistributionPoint,
 )
 from opportunity import AlternativeKind, OpportunitySetContext, RankedOpportunity
 from portfolio.construction_api import (
@@ -36,6 +37,12 @@ class EvaluationOutcome(str, Enum):
     VALUE_DESTROYED = "value_destroyed"
     MATCHED_ALTERNATIVE = "matched_alternative"
     NOT_IMPLEMENTED = "not_implemented"
+    CORRECT_ABSTENTION = "correct_abstention"
+    AVOIDED_LOSS = "avoided_loss"
+    MISSED_OPPORTUNITY = "missed_opportunity"
+    INSUFFICIENT_EVIDENCE_CONFIRMED = "insufficient_evidence_confirmed"
+    IMPLEMENTATION_BLOCK_COSTLY = "implementation_block_costly"
+    REVIEW_TIMING_TOO_SLOW = "review_timing_too_slow"
 
 
 class EvaluationProcessVerdict(str, Enum):
@@ -207,6 +214,15 @@ class DecisionEvidenceSnapshot:
     reconciled_probability_of_success: float | None = None
     reconciliation_policy_version: str | None = None
     evidence_origin_count: int | None = None
+    reconciled_outcomes: tuple[PayoffDistributionPoint, ...] = ()
+    best_alternative_identifier: str | None = None
+    baseline_alternative_identifier: str | None = None
+    baseline_opportunity_cost: float | None = None
+    resolved_policy_profile: str | None = None
+    policy_matrix_version: str | None = None
+    prior_decision_identifier: str | None = None
+    persistence_cycles: int = 1
+    hysteresis_applied: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -265,6 +281,44 @@ class DecisionEvidenceSnapshot:
                 raise TypeError("evidence_origin_count must be an integer")
             if self.evidence_origin_count < 1:
                 raise ValueError("evidence_origin_count must be positive")
+        if not isinstance(self.reconciled_outcomes, tuple) or not all(
+            isinstance(item, PayoffDistributionPoint)
+            for item in self.reconciled_outcomes
+        ):
+            raise TypeError("reconciled_outcomes must contain PayoffDistributionPoint values")
+        if self.reconciled_outcomes and abs(
+            sum(item.probability for item in self.reconciled_outcomes) - 1.0
+        ) > 0.000001:
+            raise ValueError("reconciled outcome probabilities must sum to 1.0")
+        for field_name in (
+            "best_alternative_identifier",
+            "baseline_alternative_identifier",
+            "resolved_policy_profile",
+            "policy_matrix_version",
+            "prior_decision_identifier",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(
+                    self, field_name, _required_text(value, field_name=field_name)
+                )
+        if self.baseline_opportunity_cost is not None:
+            object.__setattr__(
+                self,
+                "baseline_opportunity_cost",
+                _finite(
+                    self.baseline_opportunity_cost,
+                    field_name="baseline_opportunity_cost",
+                ),
+            )
+        if isinstance(self.persistence_cycles, bool) or not isinstance(
+            self.persistence_cycles, int
+        ):
+            raise TypeError("persistence_cycles must be an integer")
+        if self.persistence_cycles < 1:
+            raise ValueError("persistence_cycles must be positive")
+        if not isinstance(self.hysteresis_applied, bool):
+            raise TypeError("hysteresis_applied must be a bool")
 
         _aware(self.captured_at, field_name="captured_at")
         _aware(self.decision_as_of, field_name="decision_as_of")
@@ -525,6 +579,22 @@ class DecisionEvidenceSnapshot:
                 self.reconciliation_policy_version
             ),
             "evidence_origin_count": self.evidence_origin_count,
+            "reconciled_outcomes": [
+                {
+                    "label": item.label,
+                    "total_return": item.total_return,
+                    "probability": item.probability,
+                }
+                for item in self.reconciled_outcomes
+            ],
+            "best_alternative_identifier": self.best_alternative_identifier,
+            "baseline_alternative_identifier": self.baseline_alternative_identifier,
+            "baseline_opportunity_cost": self.baseline_opportunity_cost,
+            "resolved_policy_profile": self.resolved_policy_profile,
+            "policy_matrix_version": self.policy_matrix_version,
+            "prior_decision_identifier": self.prior_decision_identifier,
+            "persistence_cycles": self.persistence_cycles,
+            "hysteresis_applied": self.hysteresis_applied,
         }
         if include_fingerprint:
             payload["fingerprint"] = self.fingerprint
@@ -593,6 +663,11 @@ class DecisionEvidenceSnapshot:
                     ranked.qualification.policy_version,
                     ranked.qualification.universe.policy_version,
                     decision.policy_version,
+                    *(
+                        ()
+                        if decision.policy_matrix_version is None
+                        else (decision.policy_matrix_version,)
+                    ),
                     *(
                         ()
                         if construction is None
@@ -674,6 +749,29 @@ class DecisionEvidenceSnapshot:
                 if decision.return_reconciliation is None
                 else decision.return_reconciliation.evidence_origin_count
             ),
+            reconciled_outcomes=(
+                ()
+                if decision.return_reconciliation is None
+                else decision.return_reconciliation.outcomes
+            ),
+            best_alternative_identifier=(
+                decision.best_alternative_identifier
+                or ranked.qualification.best_alternative_identifier
+            ),
+            baseline_alternative_identifier=(
+                ranked.qualification.baseline_alternative_identifier
+            ),
+            baseline_opportunity_cost=(
+                ranked.qualification.baseline_opportunity_cost
+            ),
+            resolved_policy_profile=(
+                decision.resolved_policy_profile
+                or ranked.qualification.resolved_policy_profile
+            ),
+            policy_matrix_version=decision.policy_matrix_version,
+            prior_decision_identifier=decision.prior_decision_identifier,
+            persistence_cycles=decision.persistence_cycles,
+            hysteresis_applied=decision.hysteresis_applied,
         )
 
 
@@ -825,7 +923,16 @@ class PointInTimeDecisionEvaluation:
     process_evidence: tuple[str, ...]
     process_failures: tuple[str, ...]
     outcome_evidence: tuple[str, ...]
-    schema_version: str = "point-in-time-decision-evaluation.v1"
+    forecast_brier_score: float = 0.0
+    scenario_log_score: float = 0.0
+    decision_confidence_brier_score: float = 0.0
+    sizing_efficiency: float = 0.0
+    timing_efficiency: float = 0.0
+    abstention_value: float = 0.0
+    schema_version: str = "point-in-time-decision-evaluation.v2"
+
+    # Fields below are intentionally declared above for backward-compatible
+    # constructor ordering.
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -872,6 +979,29 @@ class PointInTimeDecisionEvaluation:
                 maximum=1.0,
             ),
         )
+        for field_name in (
+            "forecast_brier_score",
+            "decision_confidence_brier_score",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _finite(
+                    getattr(self, field_name),
+                    field_name=field_name,
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+            )
+        for field_name in (
+            "scenario_log_score",
+            "sizing_efficiency",
+            "timing_efficiency",
+            "abstention_value",
+        ):
+            object.__setattr__(
+                self, field_name, _finite(getattr(self, field_name), field_name=field_name)
+            )
         if not isinstance(self.attribution, DecisionReturnAttribution):
             raise TypeError("attribution must be DecisionReturnAttribution")
         for field_name, minimum in (
@@ -934,6 +1064,12 @@ class PointInTimeDecisionEvaluation:
                 ),
             },
             "confidence_brier_score": self.confidence_brier_score,
+            "forecast_brier_score": self.forecast_brier_score,
+            "scenario_log_score": self.scenario_log_score,
+            "decision_confidence_brier_score": self.decision_confidence_brier_score,
+            "sizing_efficiency": self.sizing_efficiency,
+            "timing_efficiency": self.timing_efficiency,
+            "abstention_value": self.abstention_value,
             "process_evidence": list(self.process_evidence),
             "process_failures": list(self.process_failures),
             "outcome_evidence": list(self.outcome_evidence),
@@ -1033,8 +1169,27 @@ class PointInTimeDecisionEvaluator:
             - realized.actual_implementation_cost_return
         )
         active_tolerance = self.policy.flat_active_return_tolerance
+        forecast_success = realized.decision_to_horizon_return > best_return
+        abstention_value = best_return - realized.decision_to_horizon_return
         if implemented <= 0.0:
-            outcome = EvaluationOutcome.NOT_IMPLEMENTED
+            if forecast_success:
+                outcome = (
+                    EvaluationOutcome.IMPLEMENTATION_BLOCK_COSTLY
+                    if snapshot.implementation_blocks
+                    else EvaluationOutcome.MISSED_OPPORTUNITY
+                )
+            elif snapshot.evidence_vetoes or snapshot.action is CIOAction.INSUFFICIENT_EVIDENCE:
+                outcome = EvaluationOutcome.INSUFFICIENT_EVIDENCE_CONFIRMED
+            elif realized.decision_to_horizon_return < min(realized.cash_return, 0.0):
+                outcome = EvaluationOutcome.AVOIDED_LOSS
+            else:
+                outcome = EvaluationOutcome.CORRECT_ABSTENTION
+        elif (
+            attribution.timing < -active_tolerance
+            and attribution.selection > 0.0
+            and abs(attribution.timing) > abs(attribution.selection)
+        ):
+            outcome = EvaluationOutcome.REVIEW_TIMING_TOO_SLOW
         elif net_active > active_tolerance:
             outcome = EvaluationOutcome.VALUE_ADDED
         elif net_active < -active_tolerance:
@@ -1045,7 +1200,7 @@ class PointInTimeDecisionEvaluator:
         process_evidence = (
             "Every original use of capital is preserved in the snapshot",
             "All evidence references were available by the decision timestamp",
-            "Five independent specialist roles are preserved",
+            "Six independent specialist roles are preserved",
             "Model, policy, and code versions are immutable",
             "Portfolio implementation status and costs are captured",
             "Implemented ownership is linked to an explicit monitored thesis",
@@ -1078,8 +1233,21 @@ class PointInTimeDecisionEvaluator:
             if process_failures
             else EvaluationProcessVerdict.DISCIPLINED
         )
-        success = 1.0 if net_active > 0.0 else 0.0
-        brier = (snapshot.probability_of_success - success) ** 2
+        forecast_target = 1.0 if forecast_success else 0.0
+        forecast_brier = (snapshot.probability_of_success - forecast_target) ** 2
+        positive_action = snapshot.action in {CIOAction.BUY, CIOAction.INCREASE, CIOAction.HOLD}
+        decision_correct = forecast_success if positive_action else not forecast_success
+        decision_target = 1.0 if decision_correct else 0.0
+        decision_brier = (snapshot.final_confidence - decision_target) ** 2
+        scenario_log_score = 0.0
+        if snapshot.reconciled_outcomes:
+            realized_candidate = realized.decision_to_horizon_return
+            closest = min(
+                snapshot.reconciled_outcomes,
+                key=lambda item: abs(item.total_return - realized_candidate),
+            )
+            scenario_log_score = -log(max(closest.probability, 1e-12))
+        brier = forecast_brier
         outcome_evidence = (
             f"candidate decision-to-horizon return={realized.decision_to_horizon_return:.6f}",
             f"candidate implementation-to-horizon return={realized.implementation_to_horizon_return:.6f}",
@@ -1125,6 +1293,12 @@ class PointInTimeDecisionEvaluator:
             ),
             attribution=attribution,
             confidence_brier_score=brier,
+            forecast_brier_score=forecast_brier,
+            scenario_log_score=scenario_log_score,
+            decision_confidence_brier_score=decision_brier,
+            sizing_efficiency=attribution.sizing,
+            timing_efficiency=attribution.timing,
+            abstention_value=abstention_value,
             process_evidence=process_evidence,
             process_failures=tuple(process_failures),
             outcome_evidence=outcome_evidence,

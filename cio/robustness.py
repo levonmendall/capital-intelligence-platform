@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from math import exp, floor, isfinite, log1p, sqrt
 
 from cio.models import CandidateDecisionRecord
+from cio.policy_matrix import DecisionPolicyProfile
 
 
 def _finite(value: object, *, field_name: str) -> float:
@@ -25,7 +26,7 @@ def _finite(value: object, *, field_name: str) -> float:
 
 @dataclass(frozen=True, slots=True)
 class RobustDecisionPolicy:
-    version: str = "robust-decision.v2"
+    version: str = "robust-decision.v3"
     reference_position_weight: float = 0.05
     minimum_reference_weight: float = 0.01
     evidence_shrinkage_floor: float = 0.10
@@ -83,6 +84,9 @@ class RobustCandidateAssessment:
     probability_consistency_gap: float
     worst_case_portfolio_return: float
     edge_to_uncertainty: float
+    durability_factor: float
+    durability_adjusted_return: float
+    resolved_policy_profile: str | None
     passed: bool
     reasons: tuple[str, ...]
 
@@ -105,6 +109,7 @@ class RobustCandidateAssessor:
         *,
         alternative_return: float,
         position_weight: float | None = None,
+        policy_profile: DecisionPolicyProfile | None = None,
     ) -> RobustCandidateAssessment:
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be a CandidateDecisionRecord")
@@ -132,10 +137,18 @@ class RobustCandidateAssessor:
                 "at least one scenario produces non-positive portfolio wealth at the reference weight"
             )
         geometric = self._geometric(annualized, probabilities, weight)
+        durability = self._durability_factor(candidate, policy_profile=policy_profile)
+        annualization_cap = (
+            policy_profile.annualization_cap
+            if policy_profile is not None
+            else 1.0
+        )
+        capped_geometric = max(-annualization_cap, min(annualization_cap, geometric))
+        durable_geometric = alternative + durability * (capped_geometric - alternative)
         dispersion = sqrt(
             max(
                 sum(
-                    probability * (value - geometric) ** 2
+                    probability * (value - durable_geometric) ** 2
                     for value, probability in zip(
                         annualized,
                         probabilities,
@@ -151,13 +164,19 @@ class RobustCandidateAssessor:
         )
         adjusted = (
             alternative
-            + reliability * (geometric - alternative)
+            + reliability * (durable_geometric - alternative)
             - self.policy.uncertainty_penalty * dispersion
         )
-        stressed_geometric = self._geometric(
+        stressed_geometric_raw = self._geometric(
             annualized,
             self._stress(probabilities, returns=returns),
             weight,
+        )
+        stressed_geometric_capped = max(
+            -annualization_cap, min(annualization_cap, stressed_geometric_raw)
+        )
+        stressed_geometric = alternative + durability * (
+            stressed_geometric_capped - alternative
         )
         stressed_adjusted = (
             alternative
@@ -187,11 +206,29 @@ class RobustCandidateAssessor:
         worst_portfolio_return = min(portfolio_returns)
         edge_to_uncertainty = robust_edge / max(dispersion, 0.000001)
 
-        if robust_edge < self.policy.minimum_robust_edge:
+        minimum_robust_edge = (
+            policy_profile.minimum_robust_edge
+            if policy_profile is not None
+            else self.policy.minimum_robust_edge
+        )
+        maximum_probability_of_loss = (
+            policy_profile.maximum_probability_of_loss
+            if policy_profile is not None
+            else self.policy.maximum_probability_of_loss
+        )
+        minimum_worst_case = (
+            policy_profile.minimum_worst_case_portfolio_return
+            if policy_profile is not None
+            else self.policy.minimum_worst_case_portfolio_return
+        )
+        if robust_edge < minimum_robust_edge:
             reasons.append(
                 "evidence-adjusted geometric return does not clear the best alternative by the required margin"
             )
-        if stressed_edge < self.policy.minimum_stressed_edge:
+        stressed_floor = self.policy.minimum_stressed_edge
+        if policy_profile is not None:
+            stressed_floor = min(stressed_floor, -0.001)
+        if stressed_edge < stressed_floor:
             reasons.append(
                 "the candidate loses its opportunity edge after an adverse scenario-probability shift"
             )
@@ -199,13 +236,13 @@ class RobustCandidateAssessor:
             reasons.append(
                 "the robust opportunity edge is too small relative to scenario uncertainty"
             )
-        if probability_of_loss > self.policy.maximum_probability_of_loss:
+        if probability_of_loss > maximum_probability_of_loss:
             reasons.append("scenario-implied probability of loss exceeds policy")
         if probability_gap > self.policy.maximum_probability_consistency_gap:
             reasons.append(
                 "stated probability of success is inconsistent with the disclosed scenarios"
             )
-        if worst_portfolio_return < self.policy.minimum_worst_case_portfolio_return:
+        if worst_portfolio_return < minimum_worst_case:
             reasons.append(
                 "worst-case portfolio loss at the reference weight exceeds policy"
             )
@@ -229,6 +266,11 @@ class RobustCandidateAssessor:
             probability_consistency_gap=probability_gap,
             worst_case_portfolio_return=round(worst_portfolio_return, 10),
             edge_to_uncertainty=round(edge_to_uncertainty, 10),
+            durability_factor=round(durability, 10),
+            durability_adjusted_return=round(durable_geometric, 10),
+            resolved_policy_profile=(
+                None if policy_profile is None else policy_profile.identifier
+            ),
             passed=not unique_reasons,
             reasons=unique_reasons,
         )
@@ -240,6 +282,7 @@ class RobustCandidateAssessor:
         *,
         alternative_return: float,
         maximum_weight: float | None = None,
+        policy_profile: DecisionPolicyProfile | None = None,
     ) -> float:
         """Return the largest target that passes the complete robustness policy.
 
@@ -251,6 +294,8 @@ class RobustCandidateAssessor:
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be a CandidateDecisionRecord")
         cap = candidate.maximum_position_weight
+        if policy_profile is not None:
+            cap = min(cap, policy_profile.maximum_position_weight)
         if maximum_weight is not None:
             requested = _finite(maximum_weight, field_name="maximum_weight")
             if not 0.0 <= requested <= 1.0:
@@ -263,6 +308,7 @@ class RobustCandidateAssessor:
             candidate,
             alternative_return=alternative_return,
             position_weight=cap,
+            policy_profile=policy_profile,
         ).passed:
             return round(cap, 8)
 
@@ -271,6 +317,7 @@ class RobustCandidateAssessor:
             candidate,
             alternative_return=alternative_return,
             position_weight=floor_weight,
+            policy_profile=policy_profile,
         ).passed:
             return 0.0
 
@@ -282,6 +329,7 @@ class RobustCandidateAssessor:
                 candidate,
                 alternative_return=alternative_return,
                 position_weight=middle,
+                policy_profile=policy_profile,
             ).passed:
                 low = middle
             else:
@@ -292,10 +340,38 @@ class RobustCandidateAssessor:
                 candidate,
                 alternative_return=alternative_return,
                 position_weight=supported,
+                policy_profile=policy_profile,
             ).passed:
                 return round(supported, 8)
             supported = round(max(0.0, supported - 0.00000001), 8)
         return 0.0
+
+
+    @staticmethod
+    def _durability_factor(
+        candidate: CandidateDecisionRecord,
+        *,
+        policy_profile: DecisionPolicyProfile | None,
+    ) -> float:
+        """Penalize fragile annualized short-horizon forecasts.
+
+        A forecast should not dominate a long-horizon compounding opportunity merely
+        because a small total return annualizes to an extreme number.  Evidence
+        reliability remains handled separately; this factor captures forecast half-life.
+        """
+
+        horizon_factor = min(1.0, max(0.15, candidate.decision_horizon_days / 90.0))
+        floor = (
+            policy_profile.forecast_durability_floor
+            if policy_profile is not None
+            else 0.50
+        )
+        evidence_factor = (
+            0.50 * candidate.evidence_quality.freshness
+            + 0.30 * candidate.evidence_quality.completeness
+            + 0.20 * candidate.evidence_quality.independence
+        )
+        return max(floor, min(1.0, horizon_factor * evidence_factor))
 
     def _position_weight(
         self,

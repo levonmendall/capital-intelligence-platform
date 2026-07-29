@@ -14,6 +14,8 @@ from portfolio.construction_models import (
     PortfolioConstructionPolicy,
     PortfolioConstructionRequest,
     PortfolioConstructionResult,
+    PortfolioScenario,
+    PortfolioScenarioMetrics,
     TradeProposal,
     TradeSide,
 )
@@ -28,6 +30,8 @@ __all__ = [
     "PortfolioConstructionPolicy",
     "PortfolioConstructionRequest",
     "PortfolioConstructionResult",
+    "PortfolioScenario",
+    "PortfolioScenarioMetrics",
     "TradeProposal",
     "TradeSide",
 ]

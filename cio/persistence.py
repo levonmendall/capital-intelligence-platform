@@ -238,6 +238,13 @@ def serialize_candidate_decision(
         "review_at": candidate.review_at.isoformat(),
         "evidence_identifiers": list(candidate.evidence_identifiers),
         "model_versions": list(candidate.model_versions),
+        "evidence_dependencies": [
+            {
+                "identifier": item.identifier,
+                "parent_identifiers": list(item.parent_identifiers),
+            }
+            for item in candidate.evidence_dependencies
+        ],
         "payoff_distribution": [
             {
                 "label": item.label,
@@ -276,6 +283,15 @@ def serialize_opportunity_queue(
                     item.qualification.effective_opportunity_cost
                 ),
                 "opportunity_edge": item.qualification.opportunity_edge,
+                "best_alternative_identifier": item.qualification.best_alternative_identifier,
+                "best_alternative_kind": (
+                    None
+                    if item.qualification.best_alternative_kind is None
+                    else item.qualification.best_alternative_kind.value
+                ),
+                "baseline_alternative_identifier": item.qualification.baseline_alternative_identifier,
+                "baseline_opportunity_cost": item.qualification.baseline_opportunity_cost,
+                "resolved_policy_profile": item.qualification.resolved_policy_profile,
                 "qualification_reasons": list(item.qualification.reasons),
                 "components": [
                     {
@@ -299,6 +315,13 @@ def serialize_opportunity_queue(
                 "universe_policy_version": item.universe.policy_version,
                 "effective_opportunity_cost": item.effective_opportunity_cost,
                 "opportunity_edge": item.opportunity_edge,
+                "best_alternative_identifier": item.best_alternative_identifier,
+                "best_alternative_kind": (
+                    None if item.best_alternative_kind is None else item.best_alternative_kind.value
+                ),
+                "baseline_alternative_identifier": item.baseline_alternative_identifier,
+                "baseline_opportunity_cost": item.baseline_opportunity_cost,
+                "resolved_policy_profile": item.resolved_policy_profile,
                 "reasons": list(item.reasons),
             }
             for item in queue.rejected
@@ -318,6 +341,11 @@ def serialize_specialist_packet(
         "code_version": _code_version(code_version),
         "candidate_identifier": packet.candidate_identifier,
         "support_ratio": packet.support_ratio,
+        "directional_support_ratio": packet.directional_support_ratio,
+        "coverage_ratio": packet.coverage_ratio,
+        "evidence_confidence": packet.evidence_confidence,
+        "implementation_confidence": packet.implementation_confidence,
+        "abstaining_roles": [item.role.value for item in packet.abstentions],
         "median_confidence": packet.median_confidence,
         "evidence_vetoes": list(packet.evidence_vetoes),
         "implementation_blocks": list(packet.implementation_blocks),
@@ -355,6 +383,22 @@ def serialize_specialist_packet(
                 "evidence_origin_identifiers": list(
                     item.evidence_origin_identifiers
                 ),
+                "scenario_adjustments": [
+                    {
+                        "label": adjustment.label,
+                        "return_delta": adjustment.return_delta,
+                        "probability_delta": adjustment.probability_delta,
+                        "path_drawdown_delta": adjustment.path_drawdown_delta,
+                    }
+                    for adjustment in item.scenario_adjustments
+                ],
+                "evidence_dependencies": [
+                    {
+                        "identifier": dependency.identifier,
+                        "parent_identifiers": list(dependency.parent_identifiers),
+                    }
+                    for dependency in item.evidence_dependencies
+                ],
             }
             for item in packet.analyses
         ],
@@ -412,6 +456,13 @@ def serialize_cio_decision(
         "review_at": decision.review_at.isoformat(),
         "explanation": decision.explanation,
         "policy_version": decision.policy_version,
+        "best_alternative_identifier": decision.best_alternative_identifier,
+        "effective_opportunity_cost": decision.effective_opportunity_cost,
+        "prior_decision_identifier": decision.prior_decision_identifier,
+        "persistence_cycles": decision.persistence_cycles,
+        "hysteresis_applied": decision.hysteresis_applied,
+        "resolved_policy_profile": decision.resolved_policy_profile,
+        "policy_matrix_version": decision.policy_matrix_version,
         "return_reconciliation": (
             None
             if decision.return_reconciliation is None
@@ -441,6 +492,13 @@ def serialize_cio_decision(
                 "bounds_correction_applied": (
                     decision.return_reconciliation.bounds_correction_applied
                 ),
+                "probability_normalization_applied": (
+                    decision.return_reconciliation.probability_normalization_applied
+                ),
+                "path_drawdown_by_scenario": [
+                    {"label": label, "drawdown": drawdown}
+                    for label, drawdown in decision.return_reconciliation.path_drawdown_by_scenario
+                ],
                 "outcomes": [
                     {
                         "label": item.label,
@@ -459,6 +517,15 @@ def serialize_cio_decision(
                         "evidence_origin_identifiers": list(
                             item.evidence_origin_identifiers
                         ),
+                        "scenario_adjustments": [
+                            {
+                                "label": adjustment.label,
+                                "return_delta": adjustment.return_delta,
+                                "probability_delta": adjustment.probability_delta,
+                                "path_drawdown_delta": adjustment.path_drawdown_delta,
+                            }
+                            for adjustment in item.scenario_adjustments
+                        ],
                     }
                     for item in decision.return_reconciliation.adjustments
                 ],

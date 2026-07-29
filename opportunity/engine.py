@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cio import CandidateDecisionRecord, RecommendationUniversePolicy
+from cio.policy_matrix import DecisionPolicyMatrix
 from cio.robustness import (
     RobustCandidateAssessment,
     RobustCandidateAssessor,
@@ -16,6 +17,7 @@ from opportunity.models import (
     CandidateQualification,
     OpportunityQueue,
     OpportunitySetContext,
+    OpportunityRankingInput,
     QualificationOutcome,
     RankedOpportunity,
     ScoreComponent,
@@ -30,7 +32,7 @@ def _clamp(value: float) -> float:
 class OpportunityQualificationPolicy:
     """Versioned committee-attention and opportunity-ranking rules."""
 
-    version: str = "opportunity-qualification.v4"
+    version: str = "opportunity-qualification.v5"
     minimum_net_expected_return: float = 0.05
     minimum_probability_of_success: float = 0.55
     minimum_evidence_score: float = 0.70
@@ -41,15 +43,18 @@ class OpportunityQualificationPolicy:
     maximum_implementation_cost_return: float = 0.02
     opportunity_cost_tolerance: float = 0.005
 
-    expected_return_weight: float = 0.25
-    probability_weight: float = 0.12
-    downside_weight: float = 0.12
-    evidence_weight: float = 0.16
-    freshness_weight: float = 0.06
-    independence_weight: float = 0.06
-    liquidity_weight: float = 0.08
+    expected_return_weight: float = 0.21
+    probability_weight: float = 0.10
+    downside_weight: float = 0.10
+    evidence_weight: float = 0.14
+    freshness_weight: float = 0.05
+    independence_weight: float = 0.05
+    liquidity_weight: float = 0.07
     opportunity_edge_weight: float = 0.10
-    portfolio_contribution_weight: float = 0.03
+    portfolio_contribution_weight: float = 0.07
+    thesis_clarity_weight: float = 0.04
+    invalidation_clarity_weight: float = 0.03
+    forecast_durability_weight: float = 0.02
     cost_efficiency_weight: float = 0.02
 
     def __post_init__(self) -> None:
@@ -90,6 +95,9 @@ class OpportunityQualificationPolicy:
             "liquidity": self.liquidity_weight,
             "opportunity_edge": self.opportunity_edge_weight,
             "portfolio_contribution": self.portfolio_contribution_weight,
+            "thesis_clarity": self.thesis_clarity_weight,
+            "invalidation_clarity": self.invalidation_clarity_weight,
+            "forecast_durability": self.forecast_durability_weight,
             "cost_efficiency": self.cost_efficiency_weight,
         }
 
@@ -103,10 +111,13 @@ class OpportunityEngine:
         universe_policy: RecommendationUniversePolicy | None = None,
         qualification_policy: OpportunityQualificationPolicy | None = None,
         robustness_policy: RobustDecisionPolicy | None = None,
+        policy_matrix: DecisionPolicyMatrix | None = None,
     ) -> None:
         self.universe_policy = universe_policy or RecommendationUniversePolicy()
         self.policy = qualification_policy or OpportunityQualificationPolicy()
+        self._default_policy = OpportunityQualificationPolicy()
         self.robust_assessor = RobustCandidateAssessor(robustness_policy)
+        self.policy_matrix = policy_matrix or DecisionPolicyMatrix()
 
     def build_queue(
         self,
@@ -152,7 +163,7 @@ class OpportunityEngine:
             if not qualification.qualified:
                 rejected.append(qualification)
                 continue
-            components = self._components(candidate, qualification, robustness)
+            components = self._components(candidate, qualification, robustness, context)
             score = round(sum(item.contribution for item in components), 8)
             qualified.append(
                 (candidate, qualification, robustness, components, score)
@@ -268,9 +279,26 @@ class OpportunityEngine:
             candidate.net_expected_return - effective_opportunity_cost,
             8,
         )
+        profile = self.policy_matrix.resolve(candidate)
+        minimum_net_expected_return = self._profile_minimum(
+            "minimum_net_expected_return",
+            profile.minimum_net_expected_return,
+        )
+        minimum_opportunity_edge = self._profile_minimum(
+            "minimum_opportunity_edge",
+            profile.minimum_opportunity_edge,
+        )
+        minimum_probability = self._profile_minimum(
+            "minimum_probability_of_success",
+            profile.minimum_probability_of_success,
+        )
+        maximum_downside = self._profile_maximum_downside(
+            profile.maximum_expected_downside
+        )
         robustness = self.robust_assessor.assess(
             candidate,
             alternative_return=effective_opportunity_cost,
+            policy_profile=profile,
         )
         # The disclosed edge retains its legacy arithmetic meaning for schema
         # compatibility. Qualification authority uses the horizon-normalized,
@@ -300,23 +328,23 @@ class OpportunityEngine:
             reasons.append("candidate liquidity is below threshold")
         if (
             robustness.evidence_adjusted_return
-            < self.policy.minimum_net_expected_return
+            < minimum_net_expected_return
         ):
             reasons.append(
                 "horizon-normalized evidence-adjusted expected return is below the absolute return threshold"
             )
-        if robustness.robust_edge < self.policy.minimum_opportunity_edge:
+        if robustness.robust_edge < minimum_opportunity_edge:
             reasons.append(
                 "horizon-normalized opportunity edge is below the required margin"
             )
         scenario_downside = min(
             item.total_return for item in candidate.scenario_distribution
         ) - candidate.implementation_cost_return
-        if scenario_downside < self.policy.maximum_expected_downside:
+        if scenario_downside < maximum_downside:
             reasons.append("expected downside exceeds the qualification limit")
         if (
             robustness.effective_probability_of_success
-            < self.policy.minimum_probability_of_success
+            < minimum_probability
         ):
             reasons.append(
                 "scenario-derived probability of outperforming the best alternative is below threshold"
@@ -342,6 +370,11 @@ class OpportunityEngine:
                     universe=universe,
                     effective_opportunity_cost=effective_opportunity_cost,
                     opportunity_edge=opportunity_edge,
+                    best_alternative_identifier=best_alternative.identifier,
+                    best_alternative_kind=best_alternative.kind,
+                    baseline_alternative_identifier=baseline_alternative.identifier,
+                    baseline_opportunity_cost=baseline_alternative.net_expected_return,
+                    resolved_policy_profile=profile.identifier,
                     reasons=(
                         "current holdings receive mandatory specialist and CIO review even when they fail acquisition thresholds",
                         *diagnostics,
@@ -360,6 +393,11 @@ class OpportunityEngine:
                     universe=universe,
                     effective_opportunity_cost=effective_opportunity_cost,
                     opportunity_edge=opportunity_edge,
+                    best_alternative_identifier=best_alternative.identifier,
+                    best_alternative_kind=best_alternative.kind,
+                    baseline_alternative_identifier=baseline_alternative.identifier,
+                    baseline_opportunity_cost=baseline_alternative.net_expected_return,
+                    resolved_policy_profile=profile.identifier,
                     reasons=tuple(dict.fromkeys(reasons)),
                 ),
                 robustness,
@@ -372,6 +410,10 @@ class OpportunityEngine:
                 universe=universe,
                 effective_opportunity_cost=effective_opportunity_cost,
                 opportunity_edge=opportunity_edge,
+                best_alternative_identifier=best_alternative.identifier,
+                best_alternative_kind=best_alternative.kind,
+                baseline_alternative_identifier=baseline_alternative.identifier,
+                resolved_policy_profile=profile.identifier,
                 reasons=(
                     "candidate clears universe, absolute return, horizon-normalized geometric robustness, scenario-derived probability, downside, evidence, liquidity, cost, and opportunity-edge requirements; portfolio contribution remains subject to final construction",
                 ),
@@ -379,17 +421,47 @@ class OpportunityEngine:
             robustness,
         )
 
+
+    def _profile_minimum(self, field_name: str, profile_value: float) -> float:
+        """Use the matrix by default while preserving explicit stricter overrides."""
+
+        configured = float(getattr(self.policy, field_name))
+        default = float(getattr(self._default_policy, field_name))
+        if abs(configured - default) <= 1e-12:
+            return float(profile_value)
+        return max(configured, float(profile_value))
+
+    def _profile_maximum_downside(self, profile_value: float) -> float:
+        configured = float(self.policy.maximum_expected_downside)
+        default = float(self._default_policy.maximum_expected_downside)
+        if abs(configured - default) <= 1e-12:
+            return float(profile_value)
+        return max(configured, float(profile_value))
+
     def _components(
         self,
         candidate: CandidateDecisionRecord,
         qualification: CandidateQualification,
         robustness: RobustCandidateAssessment,
+        context: OpportunitySetContext,
     ) -> tuple[ScoreComponent, ...]:
         weights = self.policy.weights
         cost = candidate.implementation_cost_return
         probability_quality = (
             robustness.effective_probability_of_success
             * robustness.evidence_reliability
+        )
+        ranking = context.ranking_input(candidate.identifier)
+        generated_default = ranking is None
+        if ranking is None:
+            ranking = self._default_ranking_input(candidate)
+        portfolio_score = (
+            0.50
+            if generated_default
+            else _clamp(
+                0.65 * self._contribution_score(ranking.marginal_portfolio_contribution)
+                + 0.35 * ranking.diversification_score
+            )
         )
         raw_and_normalized = (
             (
@@ -440,8 +512,23 @@ class OpportunityEngine:
             ),
             (
                 "portfolio_contribution",
-                0.0,
-                0.5,
+                ranking.marginal_portfolio_contribution,
+                portfolio_score,
+            ),
+            (
+                "thesis_clarity",
+                ranking.thesis_clarity_score,
+                ranking.thesis_clarity_score,
+            ),
+            (
+                "invalidation_clarity",
+                ranking.invalidation_clarity_score,
+                ranking.invalidation_clarity_score,
+            ),
+            (
+                "forecast_durability",
+                ranking.forecast_durability_score,
+                ranking.forecast_durability_score,
             ),
             (
                 "cost_efficiency",
@@ -461,6 +548,57 @@ class OpportunityEngine:
             )
             for name, raw_value, normalized in raw_and_normalized
         )
+
+
+    @staticmethod
+    def _contribution_score(value: float) -> float:
+        # Map a marginal annual portfolio-return contribution of -2%..+4% to 0..1.
+        return _clamp((value + 0.02) / 0.06)
+
+    @classmethod
+    def _default_ranking_input(
+        cls,
+        candidate: CandidateDecisionRecord,
+    ) -> OpportunityRankingInput:
+        thesis = cls._clarity_score(
+            candidate.primary_catalysts + candidate.critical_assumptions
+        )
+        invalidation = cls._clarity_score(candidate.invalidation_conditions)
+        horizon = candidate.decision_horizon_days
+        horizon_factor = min(1.0, max(0.20, horizon / 90.0))
+        durability = _clamp(
+            horizon_factor
+            * (
+                0.50 * candidate.evidence_quality.freshness
+                + 0.30 * candidate.evidence_quality.completeness
+                + 0.20 * candidate.evidence_quality.independence
+            )
+        )
+        return OpportunityRankingInput(
+            candidate_identifier=candidate.identifier,
+            marginal_portfolio_contribution=0.0,
+            diversification_score=0.50,
+            thesis_clarity_score=thesis,
+            invalidation_clarity_score=invalidation,
+            forecast_durability_score=durability,
+        )
+
+    @staticmethod
+    def _clarity_score(items: tuple[str, ...]) -> float:
+        if not items:
+            return 0.0
+        measurable_tokens = (
+            "above", "below", "increase", "decrease", "decline", "rise",
+            "fall", "days", "month", "quarter", "%", "ratio", "spread",
+            "growth", "margin", "price", "yield", "volume", "earnings",
+        )
+        scores = []
+        for item in items:
+            text = item.strip().lower()
+            length = min(1.0, len(text.split()) / 10.0)
+            measurable = 1.0 if any(token in text for token in measurable_tokens) else 0.35
+            scores.append(0.45 * length + 0.55 * measurable)
+        return _clamp(sum(scores) / len(scores))
 
 
 __all__ = [
