@@ -77,7 +77,11 @@ jobs:
           EOF
           git diff --name-only origin/main...HEAD > "$RUNNER_TEMP/preexisting-files.txt"
           git diff --name-only > "$RUNNER_TEMP/working-files.txt"
-          cat "$RUNNER_TEMP/preexisting-files.txt" "$RUNNER_TEMP/working-files.txt" \
+          git ls-files --others --exclude-standard > "$RUNNER_TEMP/untracked-files.txt"
+          cat \
+            "$RUNNER_TEMP/preexisting-files.txt" \
+            "$RUNNER_TEMP/working-files.txt" \
+            "$RUNNER_TEMP/untracked-files.txt" \
             | grep -v '^\.autonomous-paper-release/' \
             | grep -v '^\.github/workflows/export-autonomous-paper-source.yml$' \
             | grep -v '^\.github/workflows/apply-autonomous-paper-release.yml$' \
