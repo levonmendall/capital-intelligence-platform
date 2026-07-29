@@ -44,4 +44,4 @@ jobs:
           git commit -m "Integrate governed historical learning into CIO decisions"
           git push origin HEAD:agent/governed-historical-learning-input
 
-# Triggered after workflow registration.
+# Triggered by a merged pull request so GitHub Actions receives a push event.
