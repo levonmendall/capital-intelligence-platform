@@ -179,3 +179,26 @@ def test_force_collection_bypasses_hourly_window(monkeypatch, tmp_path) -> None:
 
     assert forced.state == "available"
     assert calls == [True, True]
+
+
+def test_existing_collection_lease_prevents_duplicate_session_collection(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    now = datetime(2026, 7, 29, 13, 20, tzinfo=timezone.utc)
+    lock_path = tmp_path / "public-live-information-runtime.lock"
+    lock_path.write_text(now.isoformat(), encoding="utf-8")
+    calls: list[bool] = []
+
+    result = collect_public_live_information_if_due(
+        now=now,
+        provider_factory=lambda _catalog: _Provider(
+            _Report(evaluated_at=now),
+            calls,
+        ),
+    )
+
+    assert result.state == "in_progress"
+    assert calls == []
+    assert lock_path.exists()
