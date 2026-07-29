@@ -41,7 +41,7 @@ The public stack complements the existing FRED, SEC EDGAR, Coinbase, Kraken, and
 
 ## Required versus optional sources
 
-The required baseline contains stable, high-impact official sources that need no new credential, plus SEC access using the existing descriptive user agent. A required-source outage fails the public-baseline workflow.
+The required baseline contains stable, high-impact official sources that need no new credential, plus SEC access using the existing descriptive user agent. A required-source outage marks the public baseline as degraded, preserves the exact source failures in the uploaded evidence, and emits a GitHub Actions warning. It does not mark the application or listed-wrapper paper launch as failed.
 
 Optional sources are still attempted every hour but do not stop the required baseline. They include free-key services and endpoints that need operating burn-in, including NASA FIRMS, EIA, WHO, IMF, openFDA, and the OFAC consolidated non-SDN export. Their failures remain visible in the report.
 
@@ -87,8 +87,10 @@ Repeated syndicated copies do not count as independent evidence.
 
 `.github/workflows/public-live-information.yml` runs hourly and on demand. It performs two passes:
 
-1. a required public baseline that must succeed; and
+1. a required public baseline whose availability state is recorded; and
 2. a full pass that also attempts optional and free-key sources.
+
+Temporary upstream outages produce a degraded warning rather than a failed application check. A collector implementation failure, invalid catalog, or other inability to produce trustworthy evidence still fails the workflow. Missing public evidence never becomes positive evidence: any CIO decision that depends on an unavailable source remains blocked or abstains under the normal point-in-time controls.
 
 The workflow uploads credential-safe reports and normalized records as a 14-day artifact. Production deployment should run the same CLI from a persistent scheduler and write the report paths to durable storage.
 
