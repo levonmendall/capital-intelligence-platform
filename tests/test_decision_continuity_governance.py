@@ -95,7 +95,7 @@ def test_champion_challenger_requires_governed_independent_promotion() -> None:
     assert any("independent" in item for item in self_promoted.reasons)
 
 
-def test_governed_scenario_authority_requires_exact_complete_coverage() -> None:
+def test_governed_scenario_authority_requires_complete_requested_coverage() -> None:
     scenario_set = GovernedPortfolioScenarioSet(
         identifier="scenario-set:1",
         as_of=AS_OF,
@@ -105,17 +105,28 @@ def test_governed_scenario_authority_requires_exact_complete_coverage() -> None:
         model_versions=("cross-asset:v1",),
         evidence_identifiers=("evidence:macro", "evidence:market"),
         scenarios=(
-            GovernedPortfolioScenario("risk-off", 0.25, 0.01, (("CORE", -0.12), ("NEW", -0.30))),
-            GovernedPortfolioScenario("base", 0.50, 0.02, (("CORE", 0.04), ("NEW", 0.08))),
-            GovernedPortfolioScenario("risk-on", 0.25, 0.03, (("CORE", 0.10), ("NEW", 0.25))),
+            GovernedPortfolioScenario(
+                "risk-off", 0.25, 0.01, (("CORE", -0.12), ("NEW", -0.30))
+            ),
+            GovernedPortfolioScenario(
+                "base", 0.50, 0.02, (("CORE", 0.04), ("NEW", 0.08))
+            ),
+            GovernedPortfolioScenario(
+                "risk-on", 0.25, 0.03, (("CORE", 0.10), ("NEW", 0.25))
+            ),
         ),
     )
 
     scenarios = PortfolioScenarioAuthority().authorize(
         scenario_set, as_of=AS_OF, symbols=("CORE", "NEW")
     )
+    projected = PortfolioScenarioAuthority().authorize(
+        scenario_set, as_of=AS_OF, symbols=("CORE",)
+    )
+
     assert len(scenarios) == 3
-    with pytest.raises(ValueError, match="exactly cover"):
+    assert {symbol for symbol, _ in projected[0].asset_returns} == {"CORE"}
+    with pytest.raises(ValueError, match="cover every requested"):
         PortfolioScenarioAuthority().authorize(
             scenario_set, as_of=AS_OF, symbols=("CORE", "NEW", "MISSING")
         )
@@ -246,7 +257,9 @@ def test_calibration_treats_correct_abstention_as_success() -> None:
     suite = DecisionCalibrationSuiteBuilder().build(
         ((snapshot, evaluation),), as_of=AS_OF
     )
-    abstention = next(item for item in suite.metrics if item.dimension.value == "abstention")
+    abstention = next(
+        item for item in suite.metrics if item.dimension.value == "abstention"
+    )
 
     assert abstention.observed_success_rate == pytest.approx(1.0)
     assert abstention.mean_brier_score == pytest.approx(0.01)
@@ -261,4 +274,6 @@ def test_point_in_time_evaluation_reports_continuous_distribution_score(tmp_path
     )
 
     assert evaluation.scenario_crps >= 0.0
-    assert evaluation.to_dict()["scenario_crps"] == pytest.approx(evaluation.scenario_crps)
+    assert evaluation.to_dict()["scenario_crps"] == pytest.approx(
+        evaluation.scenario_crps
+    )
