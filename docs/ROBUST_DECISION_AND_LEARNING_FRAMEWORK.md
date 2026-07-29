@@ -36,16 +36,17 @@ Every current holding enters a separate mandatory review lane even when it fails
 
 ## Specialist return reconciliation
 
-The six specialists remain independent first-pass reviewers. Macro, market, and asset-specific valuation impacts are then reconciled conservatively into the candidate's full outcome distribution.
+The six specialists remain independent first-pass reviewers. Macro, market, cross-asset forecast, and asset-specific valuation impacts are then reconciled conservatively into the candidate's full outcome distribution.
 
 The reconciler:
 
 - excludes abstentions and never treats narrative repetition as new information;
-- groups evidence by originating-fact identifiers;
-- discounts overlapping origins;
+- groups evidence by originating-fact identifiers and resolves disclosed upstream evidence dependencies;
+- discounts direct and inherited overlap;
 - applies confidence-weighted per-role and total adjustment caps;
-- preserves every original outcome label and probability;
-- adjusts the full distribution rather than only a point estimate; and
+- preserves every original outcome label while allowing governed scenario-specific return and probability changes;
+- preserves expected path-drawdown adjustments by scenario;
+- normalizes probabilities and records any bounds correction; and
 - derives final expected return, downside, and probability of beating the horizon-matched alternative from that same distribution.
 
 For fixed income, FX, commodities, crypto, real estate, futures, options, volatility, and alternatives, the Fundamental & Valuation role requires a genuine asset-specific evidence context. Without one it abstains instead of restating the candidate model.
@@ -56,9 +57,18 @@ Options and volatility candidates require a simulated payoff distribution with a
 
 Asset-specific metrics retain a semantic definition containing unit, directionality, and applicable horizon. Their source observations, model versions, limitations, and originating facts remain attached to the evidence packet.
 
-## Portfolio-aware ordering
+## Portfolio-aware ordering and joint risk
 
-Analytical qualification determines which acquisition candidates deserve review; it does not pretend final portfolio contribution is already known. After specialist preview, final construction orders exits and reductions first, then additions by feasible marginal portfolio contribution, analytical rank, funding, constraints, correlation, currency, and implementation cost.
+Analytical qualification determines which acquisition candidates deserve review; it does not allow a caller-supplied portfolio-contribution estimate to create authority. The canonical cycle supplies governed marginal contribution, diversification, thesis clarity, invalidation clarity, and forecast-durability inputs for ranking.
+
+After specialist preview, final construction preserves exits and reductions first and evaluates multiple deterministic positive-allocation orderings. It selects the strongest complete feasible portfolio rather than accepting one greedy sequence. Common portfolio scenarios measure expected geometric return, expected shortfall, stressed drawdown, probability of improving on the current portfolio, and liquidity-adjusted tail loss. Positive allocations are removed when they fail any required complete-portfolio improvement gate.
+
+
+## Policy profiles and decision stability
+
+`cio.policy_matrix.DecisionPolicyMatrix` resolves a versioned asset-class and horizon profile for every candidate. Diversified liquid assets, standard assets, tactical forecasts, speculative assets, and nonlinear derivatives receive distinct return, opportunity-edge, probability, downside, position-size, robustness, persistence, cooldown, durability, and annualization controls. The strictest applicable acquisition hurdle governs.
+
+The CIO may receive a `PriorDecisionContext` containing the previous action, target, thesis state, consecutive confirming cycles, and last material change. Non-urgent changes require the applicable persistence and cooldown controls. Evidence vetoes, explicit invalidation, severe downside, or emergency overrides bypass those delays.
 
 ## Why geometric return is separate from arithmetic return
 
@@ -68,6 +78,12 @@ The robust assessor therefore retains both views:
 
 - arithmetic expected return for transparent reconciliation with the original candidate record; and
 - geometric, evidence-adjusted, uncertainty-penalized return for positive allocation authority.
+
+## Action and inaction evaluation
+
+Point-in-time evaluation treats action and inaction symmetrically. A mature zero-allocation decision can be classified as correct abstention, avoided loss, missed opportunity, confirmed insufficient evidence, a costly implementation block, or review timing that was too slow. This prevents a conservative process from appearing successful merely because it declined to act.
+
+Forecast calibration is measured against whether the candidate beat the original governing alternative. Scenario log score evaluates the realized return against the reconciled distribution. Decision-confidence calibration, sizing efficiency, timing efficiency, implementation cost, and abstention value remain separate so one good or bad implementation cannot rewrite forecast quality.
 
 ## Outcome learning
 

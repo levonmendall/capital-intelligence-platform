@@ -28,6 +28,8 @@ The governing loop is:
 
 The snapshot rejects evidence with an availability timestamp later than the decision. Its canonical JSON fingerprint changes if any original decision input changes.
 
+The snapshot also preserves the baseline alternative, the true best alternative, the resolved asset/horizon policy profile, prior-decision lineage, persistence cycles, hysteresis status, reconciled scenario distribution, and evidence-dependency lineage needed for exact replay.
+
 ## Realized outcome join
 
 `RealizedDecisionOutcome` is appended after the evaluation horizon. It does not overwrite the snapshot.
@@ -68,11 +70,20 @@ Process is marked flawed only when an enforceable governance rule was violated, 
 - owning an asset without an explicit thesis; or
 - approving a candidate that did not exceed the strongest expected capital alternative.
 
-Outcome is classified independently as value added, value destroyed, matched alternative, or not implemented.
+Outcome is classified independently. Implemented decisions can add value, destroy value, or match the alternative. Inaction is classified as correct abstention, avoided loss, missed opportunity, confirmed insufficient evidence, a costly implementation block, or review timing that was too slow.
 
-## Confidence calibration
+## Calibration and learning separation
 
-`ConfidenceCalibrator` compares the frozen decision confidence with realized active success. It reports Brier score, calibration error, and confidence buckets. It never recalculates historical confidence with newer models.
+The evaluator measures distinct questions with distinct diagnostics:
+
+- forecast Brier score — whether the candidate beat the original governing alternative;
+- scenario log score — how plausible the realized return was under the reconciled distribution;
+- decision-confidence Brier score — whether confidence was justified by decision value added;
+- sizing efficiency — value gained or lost by implementing a different weight;
+- timing efficiency — value gained or lost between decision and implementation; and
+- abstention value — value preserved or forgone by not allocating.
+
+`ConfidenceCalibrator` aggregates frozen confidence without recalculating historical decisions using newer models.
 
 ## Walk-forward and universe integrity
 

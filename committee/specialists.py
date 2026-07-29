@@ -8,7 +8,9 @@ from datetime import datetime, timedelta
 from cio import (
     CandidateAssetClass,
     CandidateDecisionRecord,
+    EvidenceDependency,
     IndependentSpecialistPacket,
+    ScenarioAdjustment,
     SpecialistAnalysis,
     SpecialistPosition,
     SpecialistRole,
@@ -268,6 +270,7 @@ class CrossAssetForecastSpecialistContext:
     change_conditions: tuple[str, ...]
     model_versions: tuple[str, ...]
     evidence_identifiers: tuple[str, ...]
+    evidence_dependencies: tuple[EvidenceDependency, ...] = ()
 
     def __post_init__(self) -> None:
         _aware(self.as_of, field_name="as_of")
@@ -318,6 +321,12 @@ class CrossAssetForecastSpecialistContext:
                     field_name=field_name,
                     minimum=minimum,
                 ),
+            )
+        if not isinstance(self.evidence_dependencies, tuple) or not all(
+            isinstance(item, EvidenceDependency) for item in self.evidence_dependencies
+        ):
+            raise TypeError(
+                "evidence_dependencies must contain EvidenceDependency values"
             )
 
     @property
@@ -692,6 +701,83 @@ class IndependentSpecialistService:
             ),
         )
 
+    @staticmethod
+    def _forecast_candidate_label(
+        candidate: CandidateDecisionRecord,
+        scenario: ForecastScenarioAssessment,
+    ) -> str:
+        labels = {item.label.lower(): item.label for item in candidate.scenario_distribution}
+        lowered = scenario.label.lower()
+        for token, preferred in (
+            ("bear", "bear"),
+            ("down", "bear"),
+            ("recession", "bear"),
+            ("risk-off", "bear"),
+            ("bull", "bull"),
+            ("up", "bull"),
+            ("acceleration", "bull"),
+            ("base", "base"),
+            ("central", "base"),
+        ):
+            if token in lowered and preferred in labels:
+                return labels[preferred]
+        if scenario.candidate_return_impact < 0.0 and "bear" in labels:
+            return labels["bear"]
+        if scenario.candidate_return_impact > 0.0 and "bull" in labels:
+            return labels["bull"]
+        if "base" in labels:
+            return labels["base"]
+        ordered = sorted(
+            candidate.scenario_distribution,
+            key=lambda item: item.total_return,
+        )
+        if scenario.candidate_return_impact < 0.0:
+            return ordered[0].label
+        if scenario.candidate_return_impact > 0.0:
+            return ordered[-1].label
+        return ordered[len(ordered) // 2].label
+
+    @classmethod
+    def _forecast_scenario_adjustments(
+        cls,
+        candidate: CandidateDecisionRecord,
+        forecast: CrossAssetForecastSpecialistContext,
+    ) -> tuple[ScenarioAdjustment, ...]:
+        grouped: dict[str, list[ForecastScenarioAssessment]] = {}
+        for scenario in forecast.scenarios:
+            grouped.setdefault(
+                cls._forecast_candidate_label(candidate, scenario),
+                [],
+            ).append(scenario)
+        baseline_probabilities = {
+            item.label: item.probability for item in candidate.scenario_distribution
+        }
+        adjustments: list[ScenarioAdjustment] = []
+        for label, scenarios in grouped.items():
+            mass = sum(item.probability for item in scenarios)
+            if mass <= 0.0:
+                continue
+            return_delta = sum(
+                item.probability * item.candidate_return_impact
+                for item in scenarios
+            ) / mass
+            path_drawdown = sum(
+                item.probability * item.expected_path_drawdown
+                for item in scenarios
+            ) / mass
+            probability_delta = 0.35 * (
+                mass - baseline_probabilities.get(label, 0.0)
+            )
+            adjustments.append(
+                ScenarioAdjustment(
+                    label=label,
+                    return_delta=return_delta,
+                    probability_delta=probability_delta,
+                    path_drawdown_delta=path_drawdown,
+                )
+            )
+        return tuple(adjustments)
+
     def _forecast(
         self,
         candidate: CandidateDecisionRecord,
@@ -723,9 +809,7 @@ class IndependentSpecialistService:
                     "The forward distribution was not independently validated by the "
                     "forecast specialist",
                 ),
-                limitations=(
-                    "No specialist forecast packet was available",
-                ),
+                limitations=("No specialist forecast packet was available",),
                 change_conditions=(
                     "Attach calibrated governed forecasts with complete candidate-specific "
                     "scenario mappings",
@@ -734,22 +818,14 @@ class IndependentSpecialistService:
             )
 
         quality_failures: list[str] = []
-        if (
-            forecast.calibration_score
-            < self.policy.minimum_forecast_calibration_score
-        ):
+        if forecast.calibration_score < self.policy.minimum_forecast_calibration_score:
             quality_failures.append("forecast calibration is below threshold")
         if forecast.model_agreement < self.policy.minimum_forecast_model_agreement:
             quality_failures.append("forecast model agreement is below threshold")
         if forecast.forecast_stability < self.policy.minimum_forecast_stability:
             quality_failures.append("forecast stability is below threshold")
-        horizon_alignment = forecast.horizon_alignment(
-            candidate.decision_horizon_days
-        )
-        if (
-            horizon_alignment
-            < self.policy.minimum_forecast_horizon_alignment
-        ):
+        horizon_alignment = forecast.horizon_alignment(candidate.decision_horizon_days)
+        if horizon_alignment < self.policy.minimum_forecast_horizon_alignment:
             quality_failures.append(
                 "forecast and candidate decision horizons are not sufficiently aligned"
             )
@@ -812,13 +888,11 @@ class IndependentSpecialistService:
                 )
             ),
             critical_assumptions=(
-                "Scenario-to-candidate return mappings remain valid through the "
-                "decision horizon",
+                "Scenario-to-candidate return mappings remain valid through the decision horizon",
                 "Forecast model dependencies and overlapping evidence remain disclosed",
             ),
             risks=(
-                f"Probability of a material path drawdown is "
-                f"{forecast.path_drawdown_probability:.2%}",
+                f"Probability of a material path drawdown is {forecast.path_drawdown_probability:.2%}",
                 *forecast.limitations,
             ),
             limitations=(
@@ -827,6 +901,12 @@ class IndependentSpecialistService:
             ),
             change_conditions=forecast.change_conditions,
             evidence_origin_identifiers=forecast.evidence_identifiers,
+            scenario_adjustments=(
+                ()
+                if quality_failures
+                else self._forecast_scenario_adjustments(candidate, forecast)
+            ),
+            evidence_dependencies=forecast.evidence_dependencies,
         )
 
     def _fundamental(

@@ -9,9 +9,12 @@ from cio.models import (
     CIOAction,
     CIODecision,
     CandidateDecisionRecord,
+    CapitalAlternativeComparison,
+    PriorDecisionContext,
     ReturnReconciliation,
     SpecialistPosition,
 )
+from cio.policy_matrix import DecisionPolicyMatrix, DecisionPolicyProfile
 from cio.reconciliation import (
     SpecialistReconciliationPolicy,
     SpecialistReturnReconciler,
@@ -28,7 +31,7 @@ from cio.universe import UniverseAssessment
 class CIOSynthesisPolicy:
     """Versioned materiality, evidence, and abstention rules."""
 
-    version: str = "cio-synthesis.v4"
+    version: str = "cio-synthesis.v5"
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     minimum_net_expected_return: float = 0.05
@@ -89,16 +92,21 @@ class ChiefInvestmentOfficer:
         *,
         robustness_policy: RobustDecisionPolicy | None = None,
         reconciliation_policy: SpecialistReconciliationPolicy | None = None,
+        policy_matrix: DecisionPolicyMatrix | None = None,
     ) -> None:
         self.policy = policy or CIOSynthesisPolicy()
         self.robust_assessor = RobustCandidateAssessor(robustness_policy)
         self.reconciler = SpecialistReturnReconciler(reconciliation_policy)
+        self.policy_matrix = policy_matrix or DecisionPolicyMatrix()
 
     def synthesize(
         self,
         candidate: CandidateDecisionRecord,
         universe: UniverseAssessment,
         specialists: IndependentSpecialistPacket,
+        *,
+        capital_comparison: CapitalAlternativeComparison | None = None,
+        prior_context: PriorDecisionContext | None = None,
     ) -> CIODecision:
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be a CandidateDecisionRecord")
@@ -111,11 +119,32 @@ class ChiefInvestmentOfficer:
         if universe.instrument_id != candidate.instrument.instrument_id:
             raise ValueError("universe assessment does not match the candidate")
         specialists.validate_against(candidate)
+        if capital_comparison is not None:
+            if not isinstance(capital_comparison, CapitalAlternativeComparison):
+                raise TypeError("capital_comparison must be CapitalAlternativeComparison")
+            if capital_comparison.candidate_identifier != candidate.identifier:
+                raise ValueError("capital comparison does not match candidate")
+        if prior_context is not None:
+            if not isinstance(prior_context, PriorDecisionContext):
+                raise TypeError("prior_context must be PriorDecisionContext")
+            if prior_context.candidate_identifier != candidate.identifier:
+                raise ValueError("prior decision context does not match candidate")
+        profile = self.policy_matrix.resolve(candidate)
+        effective_alternative = (
+            candidate.opportunity_cost_return
+            if capital_comparison is None
+            else capital_comparison.effective_opportunity_cost
+        )
+        best_alternative_identifier = (
+            None
+            if capital_comparison is None
+            else capital_comparison.best_alternative_identifier
+        )
 
         reconciliation = self.reconciler.reconcile(
             candidate,
             specialists,
-            alternative_return=candidate.opportunity_cost_return,
+            alternative_return=effective_alternative,
         )
         robustness_candidate = self._robustness_candidate(
             candidate,
@@ -123,24 +152,30 @@ class ChiefInvestmentOfficer:
         )
         portfolio_cap = specialists.portfolio_recommendation.recommended_position_weight
         assessment_cap = (
-            min(portfolio_cap, candidate.maximum_position_weight)
+            min(
+                portfolio_cap,
+                candidate.maximum_position_weight,
+                profile.maximum_position_weight,
+            )
             if portfolio_cap is not None and portfolio_cap > 0.0
             else (
                 candidate.current_portfolio_weight
                 if candidate.current_portfolio_weight > 0.0
-                else candidate.maximum_position_weight
+                else min(candidate.maximum_position_weight, profile.maximum_position_weight)
             )
         )
         supported_weight = self.robust_assessor.maximum_supported_weight(
             robustness_candidate,
-            alternative_return=candidate.opportunity_cost_return,
+            alternative_return=effective_alternative,
             maximum_weight=assessment_cap,
+            policy_profile=profile,
         )
         assessment_weight = supported_weight or assessment_cap
         robustness = self.robust_assessor.assess(
             robustness_candidate,
-            alternative_return=candidate.opportunity_cost_return,
+            alternative_return=effective_alternative,
             position_weight=assessment_weight,
+            policy_profile=profile,
         )
         dissent = specialists.strongest_dissent()
         evidence_vetoes = specialists.evidence_vetoes
@@ -153,6 +188,23 @@ class ChiefInvestmentOfficer:
             robustness=robustness,
             robustness_candidate=robustness_candidate,
             reconciliation=reconciliation,
+            effective_alternative=effective_alternative,
+            profile=profile,
+        )
+        action, position_weight, reason, hysteresis_applied, persistence_cycles = (
+            self._apply_hysteresis(
+                candidate,
+                action=action,
+                position_weight=position_weight,
+                reason=reason,
+                prior_context=prior_context,
+                profile=profile,
+                emergency=(
+                    bool(specialists.evidence_vetoes)
+                    or reconciliation.expected_return <= self.policy.exit_threshold
+                    or reconciliation.expected_downside < profile.maximum_expected_downside
+                ),
+            )
         )
         final_confidence = self._confidence(
             candidate,
@@ -174,10 +226,11 @@ class ChiefInvestmentOfficer:
         opportunity_cost = (
             f"Original arithmetic net expected return is {candidate.net_expected_return:.2%}; "
             f"specialist-reconciled expected return is {reconciliation.expected_return:.2%}; "
-            f"the best recorded alternative is "
-            f"{candidate.opportunity_cost_return:.2%}; "
-            f"the arithmetic opportunity edge is "
-            f"{candidate.opportunity_edge:.2%}. "
+            f"the governing best alternative "
+            f"{best_alternative_identifier or 'recorded baseline'} returns "
+            f"{effective_alternative:.2%} annualized; "
+            f"the reconciled horizon-normalized arithmetic edge is "
+            f"{reconciliation.expected_return - reconciliation.horizon_alternative_return:.2%}. "
             f"After geometric compounding, evidence shrinkage, uncertainty, and "
             f"adverse-probability stress, the robust edge is "
             f"{robustness.robust_edge:.2%} and the stressed edge is "
@@ -198,7 +251,7 @@ class ChiefInvestmentOfficer:
             ),
             candidate_identifier=candidate.identifier,
             as_of=candidate.as_of,
-            schema_version="cio-decision.v2",
+            schema_version="cio-decision.v3",
             action=action,
             final_confidence=final_confidence,
             expected_return=reconciliation.expected_return,
@@ -223,6 +276,15 @@ class ChiefInvestmentOfficer:
             explanation=explanation,
             policy_version=self.policy.version,
             return_reconciliation=reconciliation,
+            best_alternative_identifier=best_alternative_identifier,
+            effective_opportunity_cost=effective_alternative,
+            prior_decision_identifier=(
+                None if prior_context is None else prior_context.prior_decision_identifier
+            ),
+            persistence_cycles=persistence_cycles,
+            hysteresis_applied=hysteresis_applied,
+            resolved_policy_profile=profile.identifier,
+            policy_matrix_version=self.policy_matrix.version,
         )
 
     def _select_action(
@@ -234,6 +296,8 @@ class ChiefInvestmentOfficer:
         robustness: RobustCandidateAssessment,
         robustness_candidate: CandidateDecisionRecord,
         reconciliation: ReturnReconciliation,
+        effective_alternative: float,
+        profile: DecisionPolicyProfile,
     ) -> tuple[CIOAction, float | None, str]:
         current_weight = candidate.current_portfolio_weight
         portfolio = specialists.portfolio_recommendation
@@ -292,8 +356,8 @@ class ChiefInvestmentOfficer:
             holding_risk_return < self.policy.reduce_threshold
             or replacement_gap >= self.policy.holding_replacement_reduce_gap
             or robustness.evidence_adjusted_return
-            < self.policy.minimum_net_expected_return
-            or reconciliation.expected_downside < self.policy.maximum_expected_downside
+            < profile.minimum_net_expected_return
+            or reconciliation.expected_downside < profile.maximum_expected_downside
         ):
             target = self._conservative_reduction_target(
                 current_weight=current_weight,
@@ -305,10 +369,10 @@ class ChiefInvestmentOfficer:
                 )
             elif (
                 robustness.evidence_adjusted_return
-                < self.policy.minimum_net_expected_return
+                < profile.minimum_net_expected_return
             ):
                 reason = "The holding no longer clears the absolute ownership-return hurdle."
-            elif reconciliation.expected_downside < self.policy.maximum_expected_downside:
+            elif reconciliation.expected_downside < profile.maximum_expected_downside:
                 reason = "The reconciled downside exceeds the ownership-risk limit."
             else:
                 reason = "The cost-adjusted expected return is negative but does not meet the full-exit threshold."
@@ -353,7 +417,7 @@ class ChiefInvestmentOfficer:
 
         if (
             robustness.effective_probability_of_success
-            < self.policy.minimum_probability_of_success
+            < profile.minimum_probability_of_success
         ):
             if current_weight > 0.0:
                 return (
@@ -368,7 +432,7 @@ class ChiefInvestmentOfficer:
             )
         if (
             robustness.evidence_adjusted_return
-            < self.policy.minimum_net_expected_return
+            < profile.minimum_net_expected_return
         ):
             if current_weight > 0.0:
                 return (
@@ -381,7 +445,7 @@ class ChiefInvestmentOfficer:
                 None,
                 "The specialist-reconciled return is below the horizon-normalized absolute return hurdle.",
             )
-        if reconciliation.expected_downside < self.policy.maximum_expected_downside:
+        if reconciliation.expected_downside < profile.maximum_expected_downside:
             if current_weight > 0.0:
                 return CIOAction.HOLD, None, "Downside risk blocks any increase."
             return (
@@ -389,7 +453,7 @@ class ChiefInvestmentOfficer:
                 None,
                 "The reconciled downside exceeds the acquisition limit.",
             )
-        if opportunity_edge < self.policy.minimum_opportunity_edge:
+        if opportunity_edge < profile.minimum_opportunity_edge:
             if current_weight > 0.0:
                 return (
                     CIOAction.HOLD,
@@ -421,6 +485,7 @@ class ChiefInvestmentOfficer:
         feasible_cap = min(
             portfolio.recommended_position_weight,
             candidate.maximum_position_weight,
+            profile.maximum_position_weight,
         )
         if feasible_cap <= 0.0:
             return (
@@ -430,8 +495,9 @@ class ChiefInvestmentOfficer:
             )
         robust_cap = self.robust_assessor.maximum_supported_weight(
             robustness_candidate,
-            alternative_return=candidate.opportunity_cost_return,
+            alternative_return=effective_alternative,
             maximum_weight=feasible_cap,
+            policy_profile=profile,
         )
         if robust_cap <= 0.0:
             reason = (
@@ -449,6 +515,7 @@ class ChiefInvestmentOfficer:
             robust_cap=robust_cap,
             robustness=robustness,
             reconciliation=reconciliation,
+            profile=profile,
         )
         if target <= 0.0:
             return (
@@ -481,6 +548,66 @@ class ChiefInvestmentOfficer:
             "The holding remains valid and the final reconciled allocation change is immaterial.",
         )
 
+    def _apply_hysteresis(
+        self,
+        candidate: CandidateDecisionRecord,
+        *,
+        action: CIOAction,
+        position_weight: float | None,
+        reason: str,
+        prior_context: PriorDecisionContext | None,
+        profile: DecisionPolicyProfile,
+        emergency: bool,
+    ) -> tuple[CIOAction, float | None, str, bool, int]:
+        """Require persistent evidence for non-urgent portfolio changes."""
+
+        if prior_context is None:
+            return action, position_weight, reason, False, 1
+        if emergency or prior_context.emergency_override:
+            cycles = max(1, prior_context.consecutive_opposing_cycles + 1)
+            return action, position_weight, reason, False, cycles
+
+        required = 1
+        observed = 1
+        if action is CIOAction.BUY:
+            required = profile.entry_persistence_cycles
+            observed = prior_context.consecutive_supportive_cycles + 1
+        elif action is CIOAction.INCREASE:
+            required = profile.increase_persistence_cycles
+            observed = prior_context.consecutive_supportive_cycles + 1
+        elif action in {CIOAction.REDUCE, CIOAction.EXIT}:
+            required = profile.reduce_persistence_cycles
+            observed = prior_context.consecutive_opposing_cycles + 1
+
+        cooldown_active = False
+        if prior_context.last_material_change_at is not None and profile.cooldown_days > 0:
+            elapsed = (candidate.as_of - prior_context.last_material_change_at).days
+            cooldown_active = elapsed < profile.cooldown_days
+        if required <= 1 and not cooldown_active:
+            return action, position_weight, reason, False, observed
+        if observed >= required and not cooldown_active:
+            return action, position_weight, reason, False, observed
+
+        remaining = max(0, required - observed)
+        detail = (
+            f" Action is deferred by hysteresis: {observed}/{required} persistent "
+            "cycles are confirmed"
+        )
+        if remaining:
+            detail += f"; {remaining} additional cycle(s) are required"
+        if cooldown_active:
+            detail += f"; the {profile.cooldown_days}-day cooldown remains active"
+        detail += "."
+        if candidate.current_portfolio_weight > 0.0:
+            deferred = (
+                CIOAction.HOLD
+                if action in {CIOAction.INCREASE, CIOAction.REDUCE, CIOAction.EXIT}
+                else CIOAction.NO_MATERIAL_CHANGE
+            )
+        else:
+            deferred = CIOAction.WATCH
+        return deferred, None, reason + detail, True, observed
+
     @staticmethod
     def _conservative_reduction_target(
         *,
@@ -498,17 +625,18 @@ class ChiefInvestmentOfficer:
         robust_cap: float,
         robustness: RobustCandidateAssessment,
         reconciliation: ReturnReconciliation,
+        profile: DecisionPolicyProfile,
     ) -> float:
         evidence_scale = min(1.0, robustness.evidence_reliability / 0.85)
         probability_scale = min(
             1.0,
             reconciliation.probability_of_success
-            / max(self.policy.minimum_probability_of_success + 0.05, 0.60),
+            / max(profile.minimum_probability_of_success + 0.05, 0.60),
         )
         edge_scale = min(
             1.0,
             max(0.0, robustness.robust_edge)
-            / max(self.policy.minimum_opportunity_edge * 2.0, 0.02),
+            / max(profile.minimum_opportunity_edge * 2.0, 0.02),
         )
         scale = min(evidence_scale, probability_scale, edge_scale)
         return round(max(0.0, robust_cap * scale), 8)
@@ -521,13 +649,17 @@ class ChiefInvestmentOfficer:
         has_dissent: bool,
         reconciliation: ReturnReconciliation,
     ) -> float:
+        directional = specialists.directional_support_ratio
         calculated = (
-            candidate.evidence_quality.score * 0.55
-            + specialists.median_confidence * 0.25
-            + specialists.support_ratio * 0.20
+            candidate.evidence_quality.score * 0.35
+            + specialists.evidence_confidence * 0.15
+            + specialists.implementation_confidence * 0.10
+            + specialists.median_confidence * 0.15
+            + directional * 0.15
+            + specialists.coverage_ratio * 0.10
         )
-        origin_factor = min(1.0, reconciliation.evidence_origin_count / 3.0)
-        calculated *= 0.75 + 0.25 * origin_factor
+        origin_factor = min(1.0, reconciliation.evidence_origin_count / 4.0)
+        calculated *= 0.70 + 0.20 * origin_factor + 0.10 * specialists.coverage_ratio
         calculated = min(calculated, candidate.evidence_quality.ceiling)
         if has_dissent:
             calculated = min(calculated, 0.75)

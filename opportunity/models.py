@@ -7,7 +7,11 @@ from datetime import datetime
 from enum import Enum
 from math import isfinite
 
-from cio import CandidateDecisionRecord, UniverseAssessment
+from cio import (
+    CapitalAlternativeComparison,
+    CandidateDecisionRecord,
+    UniverseAssessment,
+)
 
 
 class AlternativeKind(str, Enum):
@@ -118,12 +122,58 @@ class AlternativeUse:
 
 
 @dataclass(frozen=True, slots=True)
+class OpportunityRankingInput:
+    """Portfolio and thesis diagnostics used only to order qualified candidates."""
+
+    candidate_identifier: str
+    marginal_portfolio_contribution: float
+    diversification_score: float
+    thesis_clarity_score: float
+    invalidation_clarity_score: float
+    forecast_durability_score: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "candidate_identifier",
+            _required_text(
+                self.candidate_identifier, field_name="candidate_identifier"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "marginal_portfolio_contribution",
+            _finite(
+                self.marginal_portfolio_contribution,
+                field_name="marginal_portfolio_contribution",
+            ),
+        )
+        for field_name in (
+            "diversification_score",
+            "thesis_clarity_score",
+            "invalidation_clarity_score",
+            "forecast_durability_score",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _finite(
+                    getattr(self, field_name),
+                    field_name=field_name,
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class OpportunitySetContext:
     """Point-in-time current holdings, cash, and qualified alternatives."""
 
     identifier: str
     as_of: datetime
     alternatives: tuple[AlternativeUse, ...]
+    ranking_inputs: tuple[OpportunityRankingInput, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -148,6 +198,30 @@ class OpportunitySetContext:
             raise ValueError("opportunity set must include a cash alternative")
         if sum(item.current_weight for item in self.alternatives) > 1.000001:
             raise ValueError("alternative current weights cannot exceed 1.0")
+        if not isinstance(self.ranking_inputs, tuple) or not all(
+            isinstance(item, OpportunityRankingInput) for item in self.ranking_inputs
+        ):
+            raise TypeError(
+                "ranking_inputs must contain OpportunityRankingInput values"
+            )
+        ranking_ids = tuple(item.candidate_identifier for item in self.ranking_inputs)
+        if len(ranking_ids) != len(set(ranking_ids)):
+            raise ValueError("ranking inputs must be unique per candidate")
+
+    def ranking_input(
+        self, candidate_identifier: str
+    ) -> OpportunityRankingInput | None:
+        resolved = _required_text(
+            candidate_identifier, field_name="candidate_identifier"
+        )
+        return next(
+            (
+                item
+                for item in self.ranking_inputs
+                if item.candidate_identifier == resolved
+            ),
+            None,
+        )
 
     def best_alternative(self) -> AlternativeUse:
         """Return the strongest cost-adjusted current use of capital."""
@@ -175,6 +249,11 @@ class CandidateQualification:
     opportunity_edge: float
     reasons: tuple[str, ...]
     analysis_lane: AnalysisLane = AnalysisLane.ACQUISITION
+    best_alternative_identifier: str | None = None
+    best_alternative_kind: AlternativeKind | None = None
+    baseline_alternative_identifier: str | None = None
+    baseline_opportunity_cost: float | None = None
+    resolved_policy_profile: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("candidate_identifier", "policy_version"):
@@ -201,6 +280,60 @@ class CandidateQualification:
             raise TypeError("reasons must contain non-empty strings")
         if not self.reasons:
             raise ValueError("qualification must explain its outcome")
+        for field_name in (
+            "best_alternative_identifier",
+            "baseline_alternative_identifier",
+            "resolved_policy_profile",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(
+                    self,
+                    field_name,
+                    _required_text(value, field_name=field_name),
+                )
+        if self.best_alternative_kind is not None and not isinstance(
+            self.best_alternative_kind, AlternativeKind
+        ):
+            raise TypeError("best_alternative_kind must be AlternativeKind or None")
+        if self.baseline_opportunity_cost is not None:
+            object.__setattr__(
+                self,
+                "baseline_opportunity_cost",
+                _finite(
+                    self.baseline_opportunity_cost,
+                    field_name="baseline_opportunity_cost",
+                ),
+            )
+
+    @property
+    def capital_comparison(self) -> CapitalAlternativeComparison:
+        best_identifier = (
+            self.best_alternative_identifier
+            or self.baseline_alternative_identifier
+            or "capital-alternative:unidentified"
+        )
+        baseline_identifier = (
+            self.baseline_alternative_identifier
+            or self.best_alternative_identifier
+            or "capital-alternative:baseline"
+        )
+        return CapitalAlternativeComparison(
+            candidate_identifier=self.candidate_identifier,
+            best_alternative_identifier=best_identifier,
+            best_alternative_kind=(
+                "unknown"
+                if self.best_alternative_kind is None
+                else self.best_alternative_kind.value
+            ),
+            effective_opportunity_cost=self.effective_opportunity_cost,
+            baseline_alternative_identifier=baseline_identifier,
+            baseline_opportunity_cost=(
+                self.effective_opportunity_cost
+                if self.baseline_opportunity_cost is None
+                else self.baseline_opportunity_cost
+            ),
+        )
 
     @property
     def qualified(self) -> bool:
@@ -352,6 +485,7 @@ __all__ = [
     "AlternativeUse",
     "CandidateQualification",
     "OpportunityQueue",
+    "OpportunityRankingInput",
     "OpportunitySetContext",
     "QualificationOutcome",
     "RankedOpportunity",

@@ -306,7 +306,7 @@ def test_ranking_is_fully_disclosed_and_reconciles_to_score() -> None:
         _context(),
     ).ranked[0]
 
-    assert len(ranked.components) == 10
+    assert len(ranked.components) == 13
     assert sum(component.weight for component in ranked.components) == pytest.approx(1.0)
     assert sum(
         component.contribution for component in ranked.components
@@ -321,6 +321,9 @@ def test_ranking_is_fully_disclosed_and_reconciles_to_score() -> None:
         "liquidity",
         "opportunity_edge",
         "portfolio_contribution",
+        "thesis_clarity",
+        "invalidation_clarity",
+        "forecast_durability",
         "cost_efficiency",
     }
 

@@ -114,7 +114,7 @@ class ExposureLimit:
 
 @dataclass(frozen=True, slots=True)
 class PortfolioConstructionPolicy:
-    version: str = "portfolio-construction.v2"
+    version: str = "portfolio-construction.v3"
     minimum_cash_weight: float = 0.02
     maximum_position_weight: float = 0.10
     default_maximum_sector_weight: float = 0.25
@@ -123,6 +123,12 @@ class PortfolioConstructionPolicy:
     maximum_total_cost_return: float = 0.005
     minimum_replacement_edge: float = 0.01
     minimum_expected_return_improvement: float = 0.0001
+    minimum_geometric_return_improvement: float = 0.0
+    minimum_probability_outperforming_current: float = 0.50
+    maximum_expected_shortfall: float = -0.12
+    maximum_stressed_drawdown: float = -0.20
+    maximum_liquidity_adjusted_loss: float = -0.22
+    optimizer_beam_width: int = 4
     maximum_daily_volume_participation: float = 0.10
     execution_days: int = 3
     sector_limits: tuple[ExposureLimit, ...] = ()
@@ -144,6 +150,8 @@ class PortfolioConstructionPolicy:
             "maximum_total_cost_return",
             "minimum_replacement_edge",
             "minimum_expected_return_improvement",
+            "minimum_geometric_return_improvement",
+            "minimum_probability_outperforming_current",
             "maximum_daily_volume_participation",
         ):
             object.__setattr__(
@@ -156,6 +164,21 @@ class PortfolioConstructionPolicy:
                     maximum=1.0,
                 ),
             )
+        for field_name in (
+            "maximum_expected_shortfall",
+            "maximum_stressed_drawdown",
+            "maximum_liquidity_adjusted_loss",
+        ):
+            value = _finite(getattr(self, field_name), field_name=field_name)
+            if value >= 0.0:
+                raise ValueError(f"{field_name} must be negative")
+            object.__setattr__(self, field_name, value)
+        if isinstance(self.optimizer_beam_width, bool) or not isinstance(
+            self.optimizer_beam_width, int
+        ):
+            raise TypeError("optimizer_beam_width must be an integer")
+        if self.optimizer_beam_width < 1:
+            raise ValueError("optimizer_beam_width must be positive")
         if self.minimum_cash_weight >= 1.0:
             raise ValueError("minimum_cash_weight must be below 1.0")
         if self.maximum_position_weight <= 0.0:
@@ -481,6 +504,67 @@ class ConstructionIntent:
 
 
 @dataclass(frozen=True, slots=True)
+class PortfolioScenario:
+    """One common scenario applied to the complete portfolio."""
+
+    name: str
+    probability: float
+    cash_return: float
+    asset_returns: tuple[tuple[str, float], ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", _required_text(self.name, field_name="name"))
+        object.__setattr__(
+            self, "probability", _finite(self.probability, field_name="probability", minimum=0.0, maximum=1.0)
+        )
+        object.__setattr__(self, "cash_return", _finite(self.cash_return, field_name="cash_return"))
+        if not isinstance(self.asset_returns, tuple):
+            raise TypeError("asset_returns must be a tuple")
+        normalized = tuple(
+            (
+                _required_text(symbol, field_name="scenario symbol").upper(),
+                _finite(value, field_name=f"scenario_return:{symbol}", minimum=-1.0),
+            )
+            for symbol, value in self.asset_returns
+        )
+        if len(normalized) != len({symbol for symbol, _ in normalized}):
+            raise ValueError("scenario asset returns must be unique")
+        object.__setattr__(self, "asset_returns", normalized)
+
+    def return_for(self, symbol: str, fallback: float) -> float:
+        resolved = symbol.strip().upper()
+        return next((value for name, value in self.asset_returns if name == resolved), fallback)
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioScenarioMetrics:
+    expected_geometric_return: float
+    expected_shortfall: float
+    worst_case_return: float
+    probability_outperforming_current: float
+    liquidity_adjusted_loss: float
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "expected_geometric_return",
+            "expected_shortfall",
+            "worst_case_return",
+            "liquidity_adjusted_loss",
+        ):
+            object.__setattr__(self, field_name, _finite(getattr(self, field_name), field_name=field_name))
+        object.__setattr__(
+            self,
+            "probability_outperforming_current",
+            _finite(
+                self.probability_outperforming_current,
+                field_name="probability_outperforming_current",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PortfolioConstructionRequest:
     identifier: str
     as_of: datetime
@@ -490,6 +574,7 @@ class PortfolioConstructionRequest:
     positions: tuple[PortfolioAsset, ...]
     intents: tuple[ConstructionIntent, ...]
     eligible_universe_publication_identifier: str | None = None
+    scenarios: tuple[PortfolioScenario, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -549,6 +634,16 @@ class PortfolioConstructionRequest:
             - 1.0
         ) > 0.000001:
             raise ValueError("portfolio weights and cash must sum to 1.0")
+        if not isinstance(self.scenarios, tuple) or not all(
+            isinstance(item, PortfolioScenario) for item in self.scenarios
+        ):
+            raise TypeError("scenarios must contain PortfolioScenario values")
+        if self.scenarios:
+            if abs(sum(item.probability for item in self.scenarios) - 1.0) > 0.000001:
+                raise ValueError("portfolio scenario probabilities must sum to 1.0")
+            names = tuple(item.name for item in self.scenarios)
+            if len(names) != len(set(names)):
+                raise ValueError("portfolio scenario names must be unique")
         object.__setattr__(
             self,
             "eligible_universe_publication_identifier",
@@ -665,6 +760,8 @@ class PortfolioConstructionResult:
     blocks: tuple[str, ...]
     eligible_universe_publication_identifier: str | None = None
     instrument_identifiers: tuple[tuple[str, str], ...] = ()
+    scenario_metrics_before: PortfolioScenarioMetrics | None = None
+    scenario_metrics_after: PortfolioScenarioMetrics | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("request_identifier", "policy_version"):
@@ -737,6 +834,10 @@ class PortfolioConstructionResult:
             raise TypeError("blocks must contain non-empty strings")
         if self.status is ConstructionStatus.FEASIBLE and self.blocks:
             raise ValueError("feasible result cannot contain blocks")
+        for field_name in ("scenario_metrics_before", "scenario_metrics_after"):
+            value = getattr(self, field_name)
+            if value is not None and not isinstance(value, PortfolioScenarioMetrics):
+                raise TypeError(f"{field_name} must be PortfolioScenarioMetrics or None")
         object.__setattr__(
             self,
             "eligible_universe_publication_identifier",
@@ -799,6 +900,8 @@ __all__ = [
     "PortfolioConstructionPolicy",
     "PortfolioConstructionRequest",
     "PortfolioConstructionResult",
+    "PortfolioScenario",
+    "PortfolioScenarioMetrics",
     "TradeProposal",
     "TradeSide",
 ]

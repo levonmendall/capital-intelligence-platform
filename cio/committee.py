@@ -8,7 +8,9 @@ from statistics import median
 
 from cio.models import (
     CandidateDecisionRecord,
+    EvidenceDependency,
     MaterialDissent,
+    ScenarioAdjustment,
     SpecialistPosition,
     SpecialistRole,
 )
@@ -69,6 +71,8 @@ class SpecialistAnalysis:
     recommended_position_weight: float | None = None
     funding_source: str | None = None
     evidence_origin_identifiers: tuple[str, ...] = ()
+    scenario_adjustments: tuple[ScenarioAdjustment, ...] = ()
+    evidence_dependencies: tuple[EvidenceDependency, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -129,6 +133,24 @@ class SpecialistAnalysis:
                     minimum=minimum,
                 ),
             )
+        if not isinstance(self.scenario_adjustments, tuple) or not all(
+            isinstance(item, ScenarioAdjustment) for item in self.scenario_adjustments
+        ):
+            raise TypeError(
+                "scenario_adjustments must contain ScenarioAdjustment values"
+            )
+        scenario_labels = tuple(item.label for item in self.scenario_adjustments)
+        if len(scenario_labels) != len(set(scenario_labels)):
+            raise ValueError("specialist scenario adjustments cannot duplicate labels")
+        if not isinstance(self.evidence_dependencies, tuple) or not all(
+            isinstance(item, EvidenceDependency) for item in self.evidence_dependencies
+        ):
+            raise TypeError(
+                "evidence_dependencies must contain EvidenceDependency values"
+            )
+        dependency_ids = tuple(item.identifier for item in self.evidence_dependencies)
+        if len(dependency_ids) != len(set(dependency_ids)):
+            raise ValueError("specialist evidence dependencies must be unique")
         if self.veto_reasons and self.role is not SpecialistRole.EVIDENCE_GOVERNANCE:
             raise ValueError(
                 "only the Evidence & Governance Officer may issue evidence vetoes"
@@ -227,26 +249,78 @@ class IndependentSpecialistPacket:
         return self.for_role(SpecialistRole.PORTFOLIO_RISK)
 
     @property
+    def directional_analyses(self) -> tuple[SpecialistAnalysis, ...]:
+        directional_roles = {
+            SpecialistRole.MACRO_ECONOMIC,
+            SpecialistRole.MARKET,
+            SpecialistRole.CROSS_ASSET_FORECAST,
+            SpecialistRole.FUNDAMENTAL_VALUATION,
+        }
+        return tuple(
+            item for item in self.analyses if item.role in directional_roles
+        )
+
+    @property
+    def directional_active(self) -> tuple[SpecialistAnalysis, ...]:
+        return tuple(
+            item
+            for item in self.directional_analyses
+            if item.position is not SpecialistPosition.ABSTAIN
+        )
+
+    @property
     def median_confidence(self) -> float:
-        return round(median(item.confidence for item in self.analyses), 6)
+        values = tuple(item.confidence for item in self.directional_active)
+        return round(median(values), 6) if values else 0.0
+
+    @property
+    def directional_support_ratio(self) -> float:
+        active = self.directional_active
+        if not active:
+            return 0.0
+        supportive = sum(
+            item.position is SpecialistPosition.SUPPORTIVE for item in active
+        )
+        return round(supportive / len(active), 6)
 
     @property
     def support_ratio(self) -> float:
-        supportive = sum(
-            item.position is SpecialistPosition.SUPPORTIVE
-            for item in self.analyses
+        """Backward-compatible alias for directional support only."""
+
+        return self.directional_support_ratio
+
+    @property
+    def coverage_ratio(self) -> float:
+        directional = self.directional_analyses
+        if not directional:
+            return 0.0
+        covered = sum(
+            item.position is not SpecialistPosition.ABSTAIN for item in directional
         )
-        return round(supportive / len(self.analyses), 6)
+        return round(covered / len(directional), 6)
+
+    @property
+    def evidence_confidence(self) -> float:
+        return self.for_role(SpecialistRole.EVIDENCE_GOVERNANCE).confidence
+
+    @property
+    def implementation_confidence(self) -> float:
+        return self.for_role(SpecialistRole.PORTFOLIO_RISK).confidence
 
     @property
     def opposing(self) -> tuple[SpecialistAnalysis, ...]:
         return tuple(
             item
+            for item in self.directional_analyses
+            if item.position is SpecialistPosition.OPPOSED
+        )
+
+    @property
+    def abstentions(self) -> tuple[SpecialistAnalysis, ...]:
+        return tuple(
+            item
             for item in self.analyses
-            if item.position in {
-                SpecialistPosition.OPPOSED,
-                SpecialistPosition.ABSTAIN,
-            }
+            if item.position is SpecialistPosition.ABSTAIN
         )
 
     def strongest_dissent(self) -> MaterialDissent | None:

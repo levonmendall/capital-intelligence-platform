@@ -66,6 +66,10 @@ Conviction or a composite score alone may not determine ranking.
 
 Qualification comparisons use horizon-normalized, evidence-adjusted geometric returns. The absolute-return, opportunity-edge, downside, probability, evidence, liquidity, and cost thresholds are executable policy controls, not descriptive configuration. Candidate-supplied portfolio contribution cannot qualify an asset; realized portfolio contribution is determined by final construction.
 
+The opportunity engine records both the baseline alternative used to validate the candidate and the true best competing use of capital across cash, current holdings, and other qualified candidates. That typed comparison is passed into CIO synthesis and becomes the governing opportunity cost for reconciliation, robustness, replacement, sizing, explanation, and later attribution.
+
+Ranking uses governed marginal portfolio contribution, diversification, thesis clarity, invalidation clarity, and forecast durability when those inputs are available. Short-horizon forecasts receive durability and annualization controls so a fragile tactical estimate cannot dominate a durable compounding opportunity solely because its return annualizes to an extreme value.
+
 ## Independent specialist process
 
 The committee contains six specialists plus the CIO:
@@ -142,7 +146,9 @@ The CIO:
 
 The objective is not consensus. Weighted vote aggregation and average specialist confidence may be retained only as disclosed supporting diagnostics. They may not become the final CIO action or overwrite material dissent.
 
-Specialist return adjustments are discounted when they repeat evidence already used by the baseline model or by another specialist. The portfolio specialist supplies a feasible allocation ceiling and exact funding source. The CIO applies specialist reconciliation first, then sizes the final action from the reconciled distribution and tests robustness at the proposed weight.
+Specialist return adjustments are discounted when they repeat evidence already used by the baseline model, by another specialist, or through a disclosed upstream evidence-dependency graph. Reconciliation preserves scenario-specific return changes, probability changes, and path-drawdown effects instead of flattening every conclusion into one parallel shift. The portfolio specialist supplies a feasible allocation ceiling and exact funding source. The CIO applies specialist reconciliation first, then sizes the final action from the reconciled distribution and tests robustness at the proposed weight.
+
+Asset-class and horizon policy profiles set stricter return, probability, downside, robust-edge, position-size, persistence, cooldown, and forecast-durability requirements for tactical, speculative, leveraged, nonlinear, and long-horizon opportunities. The resolved profile is stored in the decision.
 
 ## Permitted CIO outputs
 
@@ -181,6 +187,8 @@ Confidence describes evidence strength and decision reliability. It does not gua
 
 Confidence must be derived from disclosed dimensions such as evidence reliability, independence, freshness, completeness, analytical coverage, conflict, model limitations, scenario robustness, and specialist agreement after preserving dissent.
 
+Directional agreement is calculated only from specialists whose mandate includes a directional return conclusion. Evidence integrity, implementation feasibility, analytical coverage, ordinary abstention, and material opposition remain separate diagnostics. An abstention lowers coverage confidence but is not automatically treated as opposing dissent.
+
 Missing data lowers coverage and confidence. It does not default to neutral unless a versioned policy explicitly permits that treatment.
 
 Confidence must later be calibrated against observed outcomes over a sufficient sample.
@@ -192,6 +200,8 @@ The portfolio layer first determines the feasible allocation ceiling and exact f
 Position size is not a direct transform of a score or CIO confidence. It also depends on expected return, downside, volatility, liquidity, correlation, concentration, factor exposure, cash, turnover, cost, drawdown policy, and portfolio state.
 
 Every purchase must clear the cash alternative after acquisition cost. Every replacement must clear the funded holding after both purchase and sale costs. Positive allocations are removed when the complete proposed portfolio does not improve expected return after all transition costs by the versioned minimum; risk-reducing exits and reductions remain preserved.
+
+Final construction evaluates deterministic multi-start allocation candidates rather than accepting one greedy order. The complete proposed portfolio must improve expected geometric return and satisfy joint scenario controls for expected shortfall, stressed drawdown, probability of outperforming the current portfolio, and liquidity-adjusted tail loss. Common bear, base, and bull scenarios are evaluated across all approved positions together; risk-reducing trades remain preserved if additions fail.
 
 Individual investor goals, retirement targets, preferred philosophies, and behavioral profiles are prohibited portfolio-optimization inputs.
 
@@ -210,6 +220,8 @@ Approved decisions become append-only living theses with:
 
 Every active thesis must be compared with qualified alternatives and may not remain owned without current justification.
 
+Entry, increase, reduce, and exit boundaries use stateful hysteresis, minimum signal persistence, and post-implementation cooldowns to prevent unnecessary oscillation. Explicit invalidation, evidence vetoes, severe downside, liquidity deterioration, or other emergency controls bypass persistence and cooldown delays.
+
 ## Explainability and AI
 
 AI may explain structured evidence, compare alternatives, identify contradictions, and render reports. It may not invent data, alter deterministic calculations, hide missing or conflicting evidence, create investor objectives, override a veto or implementation block, manufacture CIO authority, or generate unconstrained allocations.
@@ -223,5 +235,7 @@ Persist the complete input snapshot, evidence lineage, candidate record, special
 Subsequent evaluation attaches realized outcomes without rewriting what was known at decision time.
 
 Evaluation must distinguish process quality from outcome and attribute value creation or destruction to analysis, sizing, execution, timing, evidence, assumptions, and opportunity selection.
+
+No-action decisions are evaluated as decisions rather than recorded only as not implemented. Mature outcomes distinguish correct abstention, avoided loss, missed opportunity, confirmed insufficient evidence, costly implementation blocks, and review timing that was too slow. Forecast Brier score, scenario log score, decision-confidence calibration, sizing efficiency, timing efficiency, and abstention value are measured separately.
 
 Model changes require point-in-time historical testing, out-of-sample validation, paper trading, comparison with the prior version, governance approval, versioning, rollback capability, and documented acceptance criteria.

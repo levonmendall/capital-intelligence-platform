@@ -8,9 +8,10 @@ when they enable a feasible approved allocation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from cio import CIOAction
+from math import exp, log1p
 from portfolio.construction_models import (
     ConstructionIntent,
     ConstructionStatus,
@@ -19,6 +20,7 @@ from portfolio.construction_models import (
     PortfolioConstructionPolicy,
     PortfolioConstructionRequest,
     PortfolioConstructionResult,
+    PortfolioScenarioMetrics,
     TradeProposal,
     TradeSide,
 )
@@ -85,7 +87,7 @@ class PortfolioConstructionEngine:
         reduction_target = dict(target)
         reduction_reasons = self._copy_lists(reasons)
         reduction_funding = self._copy_lists(funding_for)
-        self._apply_positive_allocations(
+        self._apply_optimized_positive_allocations(
             request=request,
             target=target,
             assets=assets,
@@ -140,13 +142,57 @@ class PortfolioConstructionEngine:
                 cash_return=request.cash_expected_return,
             ) - cost
             incremental_improvement = proposed_after_cost - reduction_after_cost
+            scenario_failures: list[str] = []
+            if request.scenarios:
+                reduction_metrics = self._scenario_metrics(
+                    request=request,
+                    weights=reduction_target,
+                    assets=assets,
+                    comparison_weights=reduction_target,
+                )
+                proposed_metrics = self._scenario_metrics(
+                    request=request,
+                    weights=target,
+                    assets=assets,
+                    comparison_weights=reduction_target,
+                )
+                if (
+                    proposed_metrics.expected_geometric_return
+                    + _EPSILON
+                    < reduction_metrics.expected_geometric_return
+                    + self.policy.minimum_geometric_return_improvement
+                ):
+                    scenario_failures.append(
+                        "expected geometric return did not improve by the policy minimum"
+                    )
+                if (
+                    proposed_metrics.probability_outperforming_current + _EPSILON
+                    < self.policy.minimum_probability_outperforming_current
+                ):
+                    scenario_failures.append(
+                        "probability of outperforming the reduction-only portfolio is below policy"
+                    )
+                if proposed_metrics.expected_shortfall < self.policy.maximum_expected_shortfall:
+                    scenario_failures.append("portfolio expected shortfall exceeds policy")
+                if proposed_metrics.worst_case_return < self.policy.maximum_stressed_drawdown:
+                    scenario_failures.append("portfolio stressed drawdown exceeds policy")
+                if (
+                    proposed_metrics.liquidity_adjusted_loss
+                    < self.policy.maximum_liquidity_adjusted_loss
+                ):
+                    scenario_failures.append("liquidity-adjusted tail loss exceeds policy")
             if (
                 incremental_improvement + _EPSILON
                 < self.policy.minimum_expected_return_improvement
+                or scenario_failures
             ):
-                blocks.append(
+                detail = (
                     "positive allocations were removed because the complete portfolio did not improve expected return after costs by the policy minimum"
+                    if not scenario_failures
+                    else "positive allocations were removed by joint portfolio scenario controls: "
+                    + "; ".join(scenario_failures)
                 )
+                blocks.append(detail)
                 target = reduction_target
                 reasons = reduction_reasons
                 funding_for = reduction_funding
@@ -217,6 +263,26 @@ class PortfolioConstructionEngine:
             request=request,
             trades=tuple(trades),
         )
+        scenario_before = (
+            None
+            if not request.scenarios
+            else self._scenario_metrics(
+                request=request,
+                weights=current,
+                assets=assets,
+                comparison_weights=current,
+            )
+        )
+        scenario_after = (
+            None
+            if not request.scenarios
+            else self._scenario_metrics(
+                request=request,
+                weights=target,
+                assets=assets,
+                comparison_weights=current,
+            )
+        )
         return PortfolioConstructionResult(
             request_identifier=request.identifier,
             as_of=request.as_of,
@@ -236,6 +302,8 @@ class PortfolioConstructionEngine:
                 request.eligible_universe_publication_identifier
             ),
             instrument_identifiers=instrument_identifiers,
+            scenario_metrics_before=scenario_before,
+            scenario_metrics_after=scenario_after,
         )
 
     @staticmethod
@@ -327,6 +395,257 @@ class PortfolioConstructionEngine:
                 blocks.append(
                     f"{intent.symbol} was only partially reduced to {target[intent.symbol]:.2%}"
                 )
+
+    def _apply_optimized_positive_allocations(
+        self,
+        *,
+        request: PortfolioConstructionRequest,
+        target: dict[str, float],
+        assets: dict[str, _AssetState],
+        intents: dict[str, ConstructionIntent],
+        reasons: dict[str, list[str]],
+        funding_for: dict[str, list[str]],
+        blocks: list[str],
+    ) -> None:
+        """Beam-search complete portfolios instead of accepting one greedy order.
+
+        Each beam state is a complete, feasible target produced after a different
+        allocation sequence.  The search can terminate before using every approved
+        intent, which permits the globally stronger subset to beat a locally ranked
+        but portfolio-inferior addition.
+        """
+
+        positive = tuple(
+            sorted(
+                (
+                    item
+                    for item in request.intents
+                    if item.action in {CIOAction.BUY, CIOAction.INCREASE}
+                ),
+                key=lambda item: (item.priority_rank, item.symbol),
+            )
+        )
+        if len(positive) <= 1:
+            self._apply_positive_allocations(
+                request=request,
+                target=target,
+                assets=assets,
+                intents=intents,
+                reasons=reasons,
+                funding_for=funding_for,
+                blocks=blocks,
+            )
+            return
+
+        # score, target, reasons, funding, blocks, remaining intents
+        beam: list[
+            tuple[
+                float,
+                dict[str, float],
+                dict[str, list[str]],
+                dict[str, list[str]],
+                list[str],
+                tuple[ConstructionIntent, ...],
+            ]
+        ] = [
+            (
+                self._optimization_score(
+                    request=request, target=target, assets=assets, comparison=target
+                ),
+                dict(target),
+                self._copy_lists(reasons),
+                self._copy_lists(funding_for),
+                list(blocks),
+                positive,
+            )
+        ]
+        completed: list[
+            tuple[
+                float,
+                dict[str, float],
+                dict[str, list[str]],
+                dict[str, list[str]],
+                list[str],
+            ]
+        ] = []
+        comparison = dict(target)
+
+        while beam:
+            expansions: list[
+                tuple[
+                    float,
+                    dict[str, float],
+                    dict[str, list[str]],
+                    dict[str, list[str]],
+                    list[str],
+                    tuple[ConstructionIntent, ...],
+                ]
+            ] = []
+            for _, state_target, state_reasons, state_funding, state_blocks, remaining in beam:
+                if not remaining:
+                    completed.append(
+                        (
+                            self._optimization_score(
+                                request=request,
+                                target=state_target,
+                                assets=assets,
+                                comparison=comparison,
+                            ),
+                            state_target,
+                            state_reasons,
+                            state_funding,
+                            state_blocks,
+                        )
+                    )
+                    continue
+
+                # Stopping early is a governed portfolio choice, not a silent drop.
+                omitted = list(state_blocks)
+                omitted.extend(
+                    f"{item.symbol} was not selected by the complete-portfolio optimizer"
+                    for item in remaining
+                )
+                completed.append(
+                    (
+                        self._optimization_score(
+                            request=request,
+                            target=state_target,
+                            assets=assets,
+                            comparison=comparison,
+                        ),
+                        dict(state_target),
+                        self._copy_lists(state_reasons),
+                        self._copy_lists(state_funding),
+                        omitted,
+                    )
+                )
+
+                for selected in remaining:
+                    trial_target = dict(state_target)
+                    trial_reasons = self._copy_lists(state_reasons)
+                    trial_funding = self._copy_lists(state_funding)
+                    trial_blocks = list(state_blocks)
+                    selected_intent = replace(selected, priority_rank=1)
+                    trial_request = replace(request, intents=(selected_intent,))
+                    self._apply_positive_allocations(
+                        request=trial_request,
+                        target=trial_target,
+                        assets=assets,
+                        intents=intents,
+                        reasons=trial_reasons,
+                        funding_for=trial_funding,
+                        blocks=trial_blocks,
+                    )
+                    next_remaining = tuple(
+                        item for item in remaining if item.symbol != selected.symbol
+                    )
+                    score = self._optimization_score(
+                        request=request,
+                        target=trial_target,
+                        assets=assets,
+                        comparison=comparison,
+                    )
+                    expansions.append(
+                        (
+                            score,
+                            trial_target,
+                            trial_reasons,
+                            trial_funding,
+                            trial_blocks,
+                            next_remaining,
+                        )
+                    )
+
+            if not expansions:
+                break
+            unique: dict[
+                tuple[tuple[tuple[str, float], ...], tuple[str, ...]],
+                tuple[
+                    float,
+                    dict[str, float],
+                    dict[str, list[str]],
+                    dict[str, list[str]],
+                    list[str],
+                    tuple[ConstructionIntent, ...],
+                ],
+            ] = {}
+            for state in expansions:
+                key = (
+                    tuple(sorted((symbol, round(weight, 8)) for symbol, weight in state[1].items())),
+                    tuple(item.symbol for item in state[5]),
+                )
+                existing = unique.get(key)
+                if existing is None or (state[0], -len(state[4])) > (
+                    existing[0],
+                    -len(existing[4]),
+                ):
+                    unique[key] = state
+            beam = sorted(
+                unique.values(),
+                key=lambda state: (
+                    state[0],
+                    -len(state[4]),
+                    tuple(sorted(state[1].items())),
+                ),
+                reverse=True,
+            )[: self.policy.optimizer_beam_width]
+
+        if not completed:
+            return
+        best = max(
+            completed,
+            key=lambda state: (
+                state[0],
+                -len(state[4]),
+                tuple(sorted(state[1].items())),
+            ),
+        )
+        _, best_target, best_reasons, best_funding, best_blocks = best
+        target.clear()
+        target.update(best_target)
+        reasons.clear()
+        reasons.update(best_reasons)
+        funding_for.clear()
+        funding_for.update(best_funding)
+        blocks.clear()
+        blocks.extend(best_blocks)
+
+    def _optimization_score(
+        self,
+        *,
+        request: PortfolioConstructionRequest,
+        target: dict[str, float],
+        assets: dict[str, _AssetState],
+        comparison: dict[str, float],
+    ) -> float:
+        cash = self._cash_weight(target)
+        score = self._expected_return(
+            weights=target,
+            cash_weight=cash,
+            assets=assets,
+            cash_return=request.cash_expected_return,
+        ) - self._cost(request, target, assets)
+        if request.scenarios:
+            metrics = self._scenario_metrics(
+                request=request,
+                weights=target,
+                assets=assets,
+                comparison_weights=comparison,
+            )
+            score += metrics.expected_geometric_return
+            score += 0.25 * metrics.expected_shortfall
+            score += 0.10 * metrics.worst_case_return
+            score += 0.02 * metrics.probability_outperforming_current
+            score += 0.05 * metrics.liquidity_adjusted_loss
+        current = {item.symbol: item.current_weight for item in request.positions}
+        priority_tiebreak = sum(
+            max(0.0, target.get(item.symbol, 0.0) - current.get(item.symbol, 0.0))
+            / item.priority_rank
+            for item in request.intents
+            if item.action in {CIOAction.BUY, CIOAction.INCREASE}
+        )
+        score += 0.0000001 * priority_tiebreak
+        return round(score, 12)
 
     def _apply_positive_allocations(
         self,
@@ -659,6 +978,75 @@ class PortfolioConstructionEngine:
                 return candidate
             candidate = round(max(0.0, candidate - 0.00000001), 8)
         return 0.0
+
+    def _scenario_metrics(
+        self,
+        *,
+        request: PortfolioConstructionRequest,
+        weights: dict[str, float],
+        assets: dict[str, _AssetState],
+        comparison_weights: dict[str, float],
+    ) -> PortfolioScenarioMetrics:
+        returns: list[tuple[float, float, float]] = []
+        cash = self._cash_weight(weights)
+        comparison_cash = self._cash_weight(comparison_weights)
+        for scenario in request.scenarios:
+            scenario_return = cash * scenario.cash_return
+            comparison_return = comparison_cash * scenario.cash_return
+            for symbol, asset in assets.items():
+                value = scenario.return_for(symbol, asset.expected_return)
+                scenario_return += weights.get(symbol, 0.0) * value
+                comparison_return += comparison_weights.get(symbol, 0.0) * value
+            returns.append((scenario.probability, scenario_return, comparison_return))
+        expected_log = sum(
+            probability * log1p(max(-0.999999999, value))
+            for probability, value, _ in returns
+        )
+        geometric = exp(expected_log) - 1.0
+        ordered = sorted(returns, key=lambda item: item[1])
+        remaining = 0.20
+        tail_total = 0.0
+        tail_probability = 0.0
+        for probability, value, _ in ordered:
+            if remaining <= _EPSILON:
+                break
+            used = min(probability, remaining)
+            tail_total += used * value
+            tail_probability += used
+            remaining -= used
+        shortfall = tail_total / max(tail_probability, _EPSILON)
+        worst = min(value for _, value, _ in returns)
+        outperform = sum(
+            probability
+            for probability, value, comparison in returns
+            if value > comparison + _EPSILON
+        )
+        ties = sum(
+            probability
+            for probability, value, comparison in returns
+            if abs(value - comparison) <= _EPSILON
+        )
+        outperform += 0.5 * ties
+        turnover_penalty = self._cost(request, weights, assets)
+        liquidity_penalty = 0.0
+        current = {item.symbol: item.current_weight for item in request.positions}
+        for symbol, weight in weights.items():
+            trade = abs(weight - current.get(symbol, 0.0))
+            adv_capacity = max(
+                assets[symbol].average_daily_dollar_volume
+                * self.policy.execution_days
+                * self.policy.maximum_daily_volume_participation,
+                1.0,
+            )
+            notional = trade * request.portfolio_value
+            liquidity_penalty += trade * min(0.05, notional / adv_capacity * 0.01)
+        return PortfolioScenarioMetrics(
+            expected_geometric_return=geometric,
+            expected_shortfall=shortfall,
+            worst_case_return=worst,
+            probability_outperforming_current=outperform,
+            liquidity_adjusted_loss=worst - turnover_penalty - liquidity_penalty,
+        )
 
     def _is_feasible(
         self,

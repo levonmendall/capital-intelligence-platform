@@ -66,6 +66,140 @@ class SpecialistPosition(str, Enum):
     ABSTAIN = "abstain"
 
 
+@dataclass(frozen=True, slots=True)
+class EvidenceDependency:
+    """One evidence node and the upstream evidence it depends on."""
+
+    identifier: str
+    parent_identifiers: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "identifier",
+            _required_text(self.identifier, field_name="identifier").lower(),
+        )
+        object.__setattr__(
+            self,
+            "parent_identifiers",
+            tuple(
+                dict.fromkeys(
+                    _required_text(item, field_name="parent_identifiers").lower()
+                    for item in self.parent_identifiers
+                )
+            ),
+        )
+        if self.identifier in self.parent_identifiers:
+            raise ValueError("evidence dependency cannot reference itself")
+
+
+@dataclass(frozen=True, slots=True)
+class ScenarioAdjustment:
+    """One specialist's candidate-scenario return and probability adjustment."""
+
+    label: str
+    return_delta: float = 0.0
+    probability_delta: float = 0.0
+    path_drawdown_delta: float = 0.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "label", _required_text(self.label, field_name="label"))
+        for field_name in (
+            "return_delta",
+            "probability_delta",
+            "path_drawdown_delta",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _finite(getattr(self, field_name), field_name=field_name),
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CapitalAlternativeComparison:
+    """Opportunity-engine handoff of the true best available use of capital."""
+
+    candidate_identifier: str
+    best_alternative_identifier: str
+    best_alternative_kind: str
+    effective_opportunity_cost: float
+    baseline_alternative_identifier: str
+    baseline_opportunity_cost: float
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "candidate_identifier",
+            "best_alternative_identifier",
+            "best_alternative_kind",
+            "baseline_alternative_identifier",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _required_text(getattr(self, field_name), field_name=field_name),
+            )
+        for field_name in (
+            "effective_opportunity_cost",
+            "baseline_opportunity_cost",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _finite(getattr(self, field_name), field_name=field_name),
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class PriorDecisionContext:
+    """State supplied to the CIO for hysteresis, persistence, and cooldown."""
+
+    candidate_identifier: str
+    prior_decision_identifier: str
+    prior_action: CIOAction
+    prior_target_weight: float | None
+    decided_at: datetime
+    thesis_state: "ThesisState"
+    consecutive_supportive_cycles: int = 0
+    consecutive_opposing_cycles: int = 0
+    last_material_change_at: datetime | None = None
+    emergency_override: bool = False
+
+    def __post_init__(self) -> None:
+        for field_name in ("candidate_identifier", "prior_decision_identifier"):
+            object.__setattr__(
+                self,
+                field_name,
+                _required_text(getattr(self, field_name), field_name=field_name),
+            )
+        if not isinstance(self.prior_action, CIOAction):
+            raise TypeError("prior_action must be a CIOAction")
+        if self.prior_target_weight is not None:
+            object.__setattr__(
+                self,
+                "prior_target_weight",
+                _ratio(self.prior_target_weight, field_name="prior_target_weight"),
+            )
+        _aware(self.decided_at, field_name="decided_at")
+        if not isinstance(self.thesis_state, ThesisState):
+            raise TypeError("thesis_state must be a ThesisState")
+        if self.last_material_change_at is not None:
+            _aware(self.last_material_change_at, field_name="last_material_change_at")
+            if self.last_material_change_at > self.decided_at:
+                raise ValueError("last_material_change_at cannot follow decided_at")
+        for field_name in (
+            "consecutive_supportive_cycles",
+            "consecutive_opposing_cycles",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{field_name} must be an integer")
+            if value < 0:
+                raise ValueError(f"{field_name} cannot be negative")
+        if not isinstance(self.emergency_override, bool):
+            raise TypeError("emergency_override must be a bool")
+
+
 class ThesisState(str, Enum):
     """Living-thesis lifecycle states required by the governing specification."""
 
@@ -402,6 +536,7 @@ class CandidateDecisionRecord:
     evidence_identifiers: tuple[str, ...]
     model_versions: tuple[str, ...]
     payoff_distribution: tuple[PayoffDistributionPoint, ...] = ()
+    evidence_dependencies: tuple[EvidenceDependency, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("identifier", "schema_version"):
@@ -505,6 +640,15 @@ class CandidateDecisionRecord:
                 raise ValueError("payoff distribution probabilities must sum to 1.0")
             if len(self.payoff_distribution) < 3:
                 raise ValueError("payoff distribution must contain at least three outcomes")
+        if not isinstance(self.evidence_dependencies, tuple) or not all(
+            isinstance(item, EvidenceDependency) for item in self.evidence_dependencies
+        ):
+            raise TypeError(
+                "evidence_dependencies must contain EvidenceDependency values"
+            )
+        dependency_ids = tuple(item.identifier for item in self.evidence_dependencies)
+        if len(dependency_ids) != len(set(dependency_ids)):
+            raise ValueError("evidence dependency identifiers must be unique")
         if self.instrument.asset_class in {
             CandidateAssetClass.OPTION,
             CandidateAssetClass.VOLATILITY,
@@ -621,6 +765,7 @@ class SpecialistReturnAdjustment:
     overlap_discount: float
     applied_impact: float
     evidence_origin_identifiers: tuple[str, ...]
+    scenario_adjustments: tuple[ScenarioAdjustment, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.role, SpecialistRole):
@@ -646,6 +791,15 @@ class SpecialistReturnAdjustment:
                 minimum=1,
             ),
         )
+        if not isinstance(self.scenario_adjustments, tuple) or not all(
+            isinstance(item, ScenarioAdjustment) for item in self.scenario_adjustments
+        ):
+            raise TypeError(
+                "scenario_adjustments must contain ScenarioAdjustment values"
+            )
+        labels = tuple(item.label for item in self.scenario_adjustments)
+        if len(labels) != len(set(labels)):
+            raise ValueError("scenario adjustments cannot duplicate labels")
 
 
 @dataclass(frozen=True, slots=True)
@@ -665,6 +819,8 @@ class ReturnReconciliation:
     evidence_origin_count: int
     adjustments: tuple[SpecialistReturnAdjustment, ...]
     bounds_correction_applied: bool = False
+    probability_normalization_applied: bool = False
+    path_drawdown_by_scenario: tuple[tuple[str, float], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -742,6 +898,23 @@ class ReturnReconciliation:
             raise TypeError("adjustments must contain SpecialistReturnAdjustment values")
         if not isinstance(self.bounds_correction_applied, bool):
             raise TypeError("bounds_correction_applied must be a bool")
+        if not isinstance(self.probability_normalization_applied, bool):
+            raise TypeError("probability_normalization_applied must be a bool")
+        if not isinstance(self.path_drawdown_by_scenario, tuple):
+            raise TypeError("path_drawdown_by_scenario must be a tuple")
+        normalized_path: list[tuple[str, float]] = []
+        for label, drawdown in self.path_drawdown_by_scenario:
+            resolved_label = _required_text(label, field_name="path scenario label")
+            resolved_drawdown = _finite(
+                drawdown,
+                field_name="path drawdown",
+                minimum=-1.0,
+                maximum=0.0,
+            )
+            normalized_path.append((resolved_label, resolved_drawdown))
+        if len(normalized_path) != len({label for label, _ in normalized_path}):
+            raise ValueError("path drawdown scenario labels must be unique")
+        object.__setattr__(self, "path_drawdown_by_scenario", tuple(normalized_path))
 
 
 @dataclass(frozen=True, slots=True)
@@ -776,6 +949,13 @@ class CIODecision:
     explanation: str
     policy_version: str
     return_reconciliation: ReturnReconciliation | None = None
+    best_alternative_identifier: str | None = None
+    effective_opportunity_cost: float | None = None
+    prior_decision_identifier: str | None = None
+    persistence_cycles: int = 1
+    hysteresis_applied: bool = False
+    resolved_policy_profile: str | None = None
+    policy_matrix_version: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -835,6 +1015,59 @@ class CIODecision:
             self.dissent, MaterialDissent
         ):
             raise TypeError("dissent must be MaterialDissent or None")
+        if self.best_alternative_identifier is not None:
+            object.__setattr__(
+                self,
+                "best_alternative_identifier",
+                _required_text(
+                    self.best_alternative_identifier,
+                    field_name="best_alternative_identifier",
+                ),
+            )
+        if self.effective_opportunity_cost is not None:
+            object.__setattr__(
+                self,
+                "effective_opportunity_cost",
+                _finite(
+                    self.effective_opportunity_cost,
+                    field_name="effective_opportunity_cost",
+                ),
+            )
+        if self.prior_decision_identifier is not None:
+            object.__setattr__(
+                self,
+                "prior_decision_identifier",
+                _required_text(
+                    self.prior_decision_identifier,
+                    field_name="prior_decision_identifier",
+                ),
+            )
+        if isinstance(self.persistence_cycles, bool) or not isinstance(
+            self.persistence_cycles, int
+        ):
+            raise TypeError("persistence_cycles must be an integer")
+        if self.persistence_cycles < 1:
+            raise ValueError("persistence_cycles must be positive")
+        if not isinstance(self.hysteresis_applied, bool):
+            raise TypeError("hysteresis_applied must be a bool")
+        if self.resolved_policy_profile is not None:
+            object.__setattr__(
+                self,
+                "resolved_policy_profile",
+                _required_text(
+                    self.resolved_policy_profile,
+                    field_name="resolved_policy_profile",
+                ),
+            )
+        if self.policy_matrix_version is not None:
+            object.__setattr__(
+                self,
+                "policy_matrix_version",
+                _required_text(
+                    self.policy_matrix_version,
+                    field_name="policy_matrix_version",
+                ),
+            )
         if self.return_reconciliation is not None:
             if not isinstance(self.return_reconciliation, ReturnReconciliation):
                 raise TypeError(
