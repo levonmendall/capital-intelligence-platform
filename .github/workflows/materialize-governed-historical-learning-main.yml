@@ -20,6 +20,7 @@ concurrency:
 env:
   STATUS_ISSUE: "214"
   TARGET_BRANCH: agent/governed-historical-learning-input
+  TEMP_WORKFLOW: .github/workflows/materialize-governed-historical-learning-main.yml
 
 jobs:
   materialize:
@@ -65,7 +66,17 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             echo "== Synchronize latest main =="
             git fetch origin main
-            git merge --no-edit origin/main
+            if ! git merge --no-edit origin/main; then
+              conflicts="$(git diff --name-only --diff-filter=U)"
+              if [[ "$conflicts" != "$TEMP_WORKFLOW" ]]; then
+                echo "Unexpected merge conflicts:"
+                printf '%s\n' "$conflicts"
+                exit 1
+              fi
+              echo "Resolving the known temporary-workflow conflict by preserving its deletion."
+              git rm -f "$TEMP_WORKFLOW"
+              git commit --no-edit
+            fi
             if [[ -f tools/materialize_governed_historical_learning.py ]]; then
               echo "== Apply governed historical learning integration =="
               python tools/materialize_governed_historical_learning.py
@@ -75,7 +86,7 @@ jobs:
             echo "== Remove temporary execution files =="
             rm -f tools/materialize_governed_historical_learning.py
             rm -f .github/workflows/materialize-governed-historical-learning.yml
-            rm -f .github/workflows/materialize-governed-historical-learning-main.yml
+            rm -f "$TEMP_WORKFLOW"
             rm -f materialization.log
             echo "== Validate and publish target branch =="
             git add -A
@@ -83,7 +94,7 @@ jobs:
             if git diff --cached --quiet; then
               echo "No source changes remained to commit."
             else
-              git commit -m "Synchronize governed historical learning implementation"
+              git commit -m "Complete governed historical learning implementation"
             fi
             git push origin HEAD:$TARGET_BRANCH
           ) > "$log_path" 2>&1
@@ -148,4 +159,4 @@ jobs:
           EXIT_CODE: ${{ steps.materialize.outputs.exit_code }}
         run: test "$EXIT_CODE" = "0"
 
-# Final second-stage trigger for committee, sizing, regime, horizon, and realized-outcome integration.
+# Conflict-aware final trigger for governed historical learning integration.
