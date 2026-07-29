@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
+import sqlite3
+from pathlib import Path
 
 import streamlit as st
 
+from api.config import ApiSettings
 from production_smoke_test import (
     capture_pre_restart_snapshot,
     create_encrypted_backup_now,
@@ -22,8 +26,70 @@ _CHECK_LABELS = {
     "encrypted_backup_healthy": "Encrypted backup is healthy",
 }
 
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(api[_-]?key|token|password|secret)\s*[:=]\s*[^\s,;]+"
+)
+
+
+def _sanitized_failure_detail(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    detail = value.strip()[:1000]
+    return _SECRET_ASSIGNMENT.sub(r"\1=[REDACTED]", detail)
+
+
+def _canonical_cycle_diagnostic(result: dict[str, object]) -> dict[str, object] | None:
+    heartbeat = result.get("heartbeat")
+    cycle_key = heartbeat.get("cycle_key") if isinstance(heartbeat, dict) else None
+    if not isinstance(cycle_key, str) or not cycle_key.strip():
+        return None
+
+    try:
+        settings = ApiSettings.from_env()
+        database = settings.alert_database or settings.snapshot_database.with_name("alerts.db")
+    except (OSError, TypeError, ValueError):
+        return None
+    database = Path(database)
+    if not database.is_file():
+        return None
+
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        try:
+            row = connection.execute(
+                """
+                SELECT status, attempts, next_attempt_at, error, updated_at
+                FROM scheduled_cycles
+                WHERE cycle_key = ?
+                """,
+                (cycle_key,),
+            ).fetchone()
+        finally:
+            connection.close()
+    except (OSError, sqlite3.Error):
+        return None
+    if row is None:
+        return None
+
+    return {
+        "cycle_key": cycle_key,
+        "status": row["status"],
+        "attempts": int(row["attempts"]),
+        "next_attempt_at": row["next_attempt_at"],
+        "updated_at": row["updated_at"],
+        "failure_detail": _sanitized_failure_detail(row["error"]),
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+
 
 def _render_result(result: dict[str, object]) -> None:
+    result = dict(result)
+    diagnostic = _canonical_cycle_diagnostic(result)
+    if diagnostic is not None:
+        result["canonical_cio_cycle"] = diagnostic
+
     passed = result.get("overall_status") == "PASS"
     if passed:
         st.success("All five production runtime checks passed.")
@@ -45,6 +111,14 @@ def _render_result(result: dict[str, object]) -> None:
         ]
     if rows:
         st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    if diagnostic is not None and diagnostic.get("status") == "failed":
+        detail = diagnostic.get("failure_detail") or "No persisted failure detail is available."
+        st.error(f"Canonical CIO cycle failed closed: {detail}")
+        st.caption(
+            "The failed cycle remains paper-only. The next scheduled retry is "
+            f"{diagnostic.get('next_attempt_at') or 'not recorded'}."
+        )
 
     with st.expander("Sanitized verification evidence", expanded=not passed):
         st.json(result)
