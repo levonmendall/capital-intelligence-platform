@@ -215,7 +215,7 @@ def managed_processes(
                 "-m",
                 "streamlit",
                 "run",
-                "secure_app.py",
+                "render_app.py",
                 "--server.address=0.0.0.0",
                 f"--server.port={port}",
                 "--server.headless=true",
