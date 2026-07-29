@@ -15,6 +15,7 @@ from pathlib import Path
 import premium_ui as _premium_ui
 
 from cio_pending_transactions_ui import render_pending_transaction_report
+from cio_report_history_ui import render_cio_report_archive
 from live_operating_console import (
     render_live_environment_market_table,
     render_live_market_status,
@@ -52,6 +53,7 @@ render_live_market_status(
 render_live_environment_market_table(
 render_live_portfolio_marks(
 render_operating_report_history(
+render_cio_report_archive(
 render_pending_transaction_report(
 render_paper_decision_controls(
 render_background_paper_execution_worker(
@@ -260,7 +262,9 @@ if _source.count(_history_anchor) != 1:
     raise RuntimeError("History operating report insertion point is unavailable")
 _source = _source.replace(
     _history_anchor,
-    _history_anchor + '    render_operating_report_history()\n',
+    _history_anchor
+    + '    render_operating_report_history()\n'
+    + '    render_cio_report_archive()\n',
     1,
 )
 
