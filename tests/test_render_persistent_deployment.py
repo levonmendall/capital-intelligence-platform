@@ -65,10 +65,12 @@ def test_render_environment_uses_persistent_state_and_internal_secrets(tmp_path)
     assert prepared["CAPITAL_INTELLIGENCE_ALLOWED_ORIGINS"] == (
         "https://capital-intelligence.onrender.com"
     )
-    assert "capital-intelligence.onrender.com" in prepared[
-        "CAPITAL_INTELLIGENCE_ALLOWED_HOSTS"
-    ]
-    assert "localhost" in prepared["CAPITAL_INTELLIGENCE_ALLOWED_HOSTS"]
+    allowed_hosts = set(prepared["CAPITAL_INTELLIGENCE_ALLOWED_HOSTS"].split(","))
+    assert allowed_hosts == {
+        "capital-intelligence.onrender.com",
+        "localhost",
+        "127.0.0.1",
+    }
     assert len(prepared["CAPITAL_INTELLIGENCE_METRICS_TOKEN"]) >= 24
     Fernet(prepared["CAPITAL_INTELLIGENCE_BACKUP_ENCRYPTION_KEY"].encode("ascii"))
     assert (tmp_path / ".metrics-token").stat().st_mode & 0o777 == 0o600
