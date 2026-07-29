@@ -97,6 +97,7 @@ class ScheduledCanonicalCIOWorker:
             return WorkerRunResult(
                 cycle_key=cycle_key,
                 status=(record.status.value if record else "not_claimed"),
+                detail=(record.error if record else None),
                 snapshot_identifier=(record.snapshot_identifier if record else None),
             )
         try:
