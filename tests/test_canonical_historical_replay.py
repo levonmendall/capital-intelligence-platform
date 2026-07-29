@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from historical_replay.canonical import (
-    CanonicalHistoricalReplayEngine,
-    HistoricalCanonicalContextBuilder,
+from historical_replay.canonical import HistoricalCanonicalContextBuilder
+from historical_replay.canonical_runtime import (
+    EfficientCanonicalHistoricalReplayEngine,
 )
 from historical_replay.models import HistoricalRecord
 from historical_replay.store import HistoricalStore
@@ -38,6 +38,16 @@ def _price_record(
     )
 
 
+class CountingStore(HistoricalStore):
+    def __init__(self, root):
+        super().__init__(root)
+        self.iteration_count = 0
+
+    def iter_records(self, *args, **kwargs):
+        self.iteration_count += 1
+        yield from super().iter_records(*args, **kwargs)
+
+
 def test_canonical_replay_invokes_real_cio_without_execution_authority(
     tmp_path,
 ):
@@ -48,7 +58,7 @@ def test_canonical_replay_invokes_real_cio_without_execution_authority(
         for index in range(123)
     )
 
-    report = CanonicalHistoricalReplayEngine(
+    report = EfficientCanonicalHistoricalReplayEngine(
         store,
         builder=HistoricalCanonicalContextBuilder(
             minimum_observations=21,
@@ -64,6 +74,9 @@ def test_canonical_replay_invokes_real_cio_without_execution_authority(
     assert report["canonical_cio_available"] is True
     assert report["canonical_cio_invoked_count"] == 1
     assert report["blocked_cutoff_count"] == 0
+    assert report["runtime_version"] == "single-pass-availability-cursor.v1"
+    assert report["archive_scan_count"] == 1
+    assert report["price_record_count"] == 123
     assert report["research_only"] is True
     assert report["execution_authorized"] is False
     assert report["paper_execution_authorized"] is False
@@ -87,7 +100,7 @@ def test_non_strict_bridge_is_visible_as_research_only(tmp_path):
         )
         for index in range(123)
     )
-    engine = CanonicalHistoricalReplayEngine(
+    engine = EfficientCanonicalHistoricalReplayEngine(
         store,
         builder=HistoricalCanonicalContextBuilder(
             minimum_observations=21,
@@ -109,3 +122,35 @@ def test_non_strict_bridge_is_visible_as_research_only(tmp_path):
     assert research["canonical_cio_invoked_count"] == 1
     assert strict["canonical_cio_invoked_count"] == 0
     assert strict["blocked_cutoff_count"] == 1
+
+
+def test_multi_cutoff_replay_scans_archive_once(tmp_path):
+    store = CountingStore(tmp_path)
+    start = date(2019, 9, 1)
+    store.append(
+        _price_record(start + timedelta(days=index), index)
+        for index in range(183)
+    )
+
+    report = EfficientCanonicalHistoricalReplayEngine(
+        store,
+        builder=HistoricalCanonicalContextBuilder(
+            minimum_observations=21,
+            maximum_candidates=5,
+        ),
+    ).run(
+        start=date(2020, 1, 1),
+        end=date(2020, 2, 29),
+        cadence="monthly",
+        strict_only=True,
+    )
+
+    assert store.iteration_count == 1
+    assert report["archive_scan_count"] == 1
+    assert report["decision_cutoff_count"] == 2
+    assert report["canonical_cio_invoked_count"] == 2
+    assert [
+        item["visible_record_count"] for item in report["decisions"]
+    ] == sorted(
+        item["visible_record_count"] for item in report["decisions"]
+    )
