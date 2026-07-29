@@ -14,6 +14,7 @@ from pathlib import Path
 
 import premium_ui as _premium_ui
 
+from cio_pending_transactions_ui import render_pending_transaction_report
 from navigation_ui import install as _install_navigation_ui
 from paper_trading_ui import render_paper_decision_controls
 from streamlit_paper_execution_worker import render_background_paper_execution_worker
@@ -40,6 +41,7 @@ except (RuntimeError, OSError):
 except (RuntimeError, OSError):
 except (RuntimeError, OSError):
 except (RuntimeError, OSError):
+render_pending_transaction_report(
 render_paper_decision_controls(
 render_background_paper_execution_worker(
 authenticated_principal
@@ -166,18 +168,23 @@ _premium_ui.allocation_bar = _safe_allocation_bar
 _source_path = Path(__file__).with_name("app_impl.py")
 _source = _source_path.read_text(encoding="utf-8")
 
-# Add the consent control at the exact canonical construction boundary. The
-# checked anchor makes deployment fail loudly instead of silently losing user
-# approval when the implementation source changes.
+# Add the pending CIO report and consent control at the exact canonical construction
+# boundary. The checked anchor makes deployment fail loudly instead of silently losing
+# either report visibility or user control when the implementation source changes.
 _approval_anchor = '    construction = _latest("portfolio_construction")\n'
 if _source.count(_approval_anchor) != 1:
     raise RuntimeError("paper decision approval insertion point is unavailable")
 _source = _source.replace(
     _approval_anchor,
     _approval_anchor
+    + '    _pending_cio_briefing = _latest("daily_cio_briefing")\n'
+    + '    render_pending_transaction_report(\n'
+    + '        construction=construction,\n'
+    + '        briefing=_pending_cio_briefing,\n'
+    + '    )\n'
     + '    render_paper_decision_controls(\n'
     + '        construction=construction,\n'
-    + '        briefing=_latest("daily_cio_briefing"),\n'
+    + '        briefing=_pending_cio_briefing,\n'
     + '        principal=globals().get("authenticated_principal"),\n'
     + '    )\n',
     1,
