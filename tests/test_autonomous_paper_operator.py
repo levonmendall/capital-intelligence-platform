@@ -21,6 +21,29 @@ class _Worker:
         return ()
 
 
+class _PublicCollection:
+    state = "available"
+
+    def to_dict(self):
+        return {
+            "state": "available",
+            "detail": "collection complete",
+            "exit_code": 0,
+            "required_sources_ready": True,
+            "source_count": 3,
+            "failed_source_count": 0,
+            "real_money_authorized": False,
+        }
+
+
+def _stub_public_collection(monkeypatch) -> None:
+    monkeypatch.setattr(
+        run_autonomous_paper_operator,
+        "collect_public_live_information_if_due",
+        lambda **_: _PublicCollection(),
+    )
+
+
 def _report(**kwargs):
     return {
         "report_state": "awaiting_cio_construction",
@@ -36,6 +59,7 @@ def test_operator_stays_operational_without_a_current_construction(
     monkeypatch,
     tmp_path,
 ) -> None:
+    _stub_public_collection(monkeypatch)
     settings = run_autonomous_paper_operator.ApiSettings(
         journal_database=tmp_path / "journal.db",
         portfolio_database=tmp_path / "portfolio.db",
@@ -72,6 +96,7 @@ def test_operator_stays_operational_without_a_current_construction(
     )
 
     assert payload["status"] == "operating"
+    assert payload["public_live_information"]["state"] == "available"
     assert payload["paper_execution"]["state"] == "idle"
     assert payload["paper_trading_launch_open"] is True
     assert payload["pending_transaction_report"]["transaction_count"] == 0
@@ -84,6 +109,7 @@ def test_operator_publishes_report_but_holds_execution_before_launch(
     monkeypatch,
     tmp_path,
 ) -> None:
+    _stub_public_collection(monkeypatch)
     settings = run_autonomous_paper_operator.ApiSettings(
         journal_database=tmp_path / "journal.db",
         portfolio_database=tmp_path / "portfolio.db",
