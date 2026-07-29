@@ -59,25 +59,3 @@ replace_one(
 if text.count(old) != 1:
     raise RuntimeError("phase1.py: expected one production-executor loop")
 path.write_text(text.replace(old, new))
-
-# Complete scenarios are enforced by the same canonical executor after phase 1
-# has inserted the state-continuity block.
-path = Path(".decision-upgrade/phase3.py")
-text = path.read_text()
-old = '''# Governed production must carry the complete common scenario set.
-replace_one(
-    "application/production_context.py",
-    "        if governed_context:\\n            publication_identifiers = qualified_identifiers + rejected_identifiers\\n",
-    "        if governed_context:\\n            if context.portfolio.scenario_set is None:\\n                raise RuntimeError(\\n                    \"governed production CIO context requires a complete portfolio scenario set\"\\n                )\\n            publication_identifiers = qualified_identifiers + rejected_identifiers\\n",
-)
-'''
-new = '''# Governed production must carry the complete common scenario set.
-replace_one(
-    "application/production_cio.py",
-    "        prior_contexts = ()\\n",
-    "        if context.portfolio.scenario_set is None:\\n            raise RuntimeError(\\n                \"production CIO context requires a complete portfolio scenario set\"\\n            )\\n        prior_contexts = ()\\n",
-)
-'''
-if text.count(old) != 1:
-    raise RuntimeError("phase3.py: expected one stale production-context target")
-path.write_text(text.replace(old, new))
