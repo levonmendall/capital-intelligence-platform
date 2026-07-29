@@ -1,4 +1,4 @@
-"""Persistent historical backfill loop for the always-on application host."""
+"""Persistent historical backfill and canonical replay loop."""
 
 from __future__ import annotations
 
@@ -9,24 +9,123 @@ import time
 from pathlib import Path
 
 from .backfill import coordinator_from_config, ten_year_window
+from .canonical import CanonicalHistoricalReplayEngine, HistoricalCanonicalContextBuilder
+from .store import HistoricalStore
+
+
+def _boolean(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def run_once() -> dict[str, object]:
     data_dir = Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database"))
-    root = Path(os.getenv("CAPITAL_INTELLIGENCE_HISTORICAL_DATA_DIR", str(data_dir / "historical_replay")))
-    config = os.getenv("CAPITAL_INTELLIGENCE_HISTORICAL_CONFIG", "config/historical_replay_free_sources.json")
+    root = Path(
+        os.getenv(
+            "CAPITAL_INTELLIGENCE_HISTORICAL_DATA_DIR",
+            str(data_dir / "historical_replay"),
+        )
+    )
+    config = os.getenv(
+        "CAPITAL_INTELLIGENCE_HISTORICAL_CONFIG",
+        "config/historical_replay_free_sources.json",
+    )
     user_agent = os.getenv("SEC_USER_AGENT", "").strip() or os.getenv(
         "CAPITAL_INTELLIGENCE_HISTORICAL_USER_AGENT",
         "Capital-Intelligence-Platform historical-research contact=repository-owner",
     )
-    max_records = int(os.getenv("CAPITAL_INTELLIGENCE_HISTORICAL_MAX_RECORDS_PER_SOURCE", "100000"))
+    max_records = int(
+        os.getenv(
+            "CAPITAL_INTELLIGENCE_HISTORICAL_MAX_RECORDS_PER_SOURCE",
+            "100000",
+        )
+    )
     start, end = ten_year_window()
-    coordinator = coordinator_from_config(config_path=config, data_root=root, user_agent=user_agent)
-    return coordinator.run(start=start, end=end, max_records_per_source=max_records).as_dict()
+    coordinator = coordinator_from_config(
+        config_path=config,
+        data_root=root,
+        user_agent=user_agent,
+    )
+    payload = coordinator.run(
+        start=start,
+        end=end,
+        max_records_per_source=max_records,
+    ).as_dict()
+
+    if _boolean(
+        "CAPITAL_INTELLIGENCE_CANONICAL_HISTORICAL_REPLAY_ENABLED",
+        True,
+    ):
+        try:
+            report = CanonicalHistoricalReplayEngine(
+                HistoricalStore(root),
+                builder=HistoricalCanonicalContextBuilder(
+                    minimum_observations=int(
+                        os.getenv(
+                            "CAPITAL_INTELLIGENCE_CANONICAL_REPLAY_MINIMUM_OBSERVATIONS",
+                            "63",
+                        )
+                    ),
+                    maximum_candidates=int(
+                        os.getenv(
+                            "CAPITAL_INTELLIGENCE_CANONICAL_REPLAY_MAXIMUM_CANDIDATES",
+                            "25",
+                        )
+                    ),
+                ),
+            ).run(
+                start=start,
+                end=end,
+                cadence=os.getenv(
+                    "CAPITAL_INTELLIGENCE_CANONICAL_REPLAY_CADENCE",
+                    "monthly",
+                ),
+                strict_only=_boolean(
+                    "CAPITAL_INTELLIGENCE_CANONICAL_REPLAY_STRICT_ONLY",
+                    False,
+                ),
+                initial_portfolio_value=float(
+                    os.getenv(
+                        "CAPITAL_INTELLIGENCE_CANONICAL_REPLAY_INITIAL_VALUE",
+                        "250000",
+                    )
+                ),
+            )
+            payload["canonical_replay"] = {
+                "state": (
+                    "available"
+                    if report["canonical_cio_invoked_count"] > 0
+                    else "blocked"
+                ),
+                "canonical_cio_invoked_count": report[
+                    "canonical_cio_invoked_count"
+                ],
+                "blocked_cutoff_count": report["blocked_cutoff_count"],
+                "decision_cutoff_count": report["decision_cutoff_count"],
+                "ending_portfolio_value": report["ending_portfolio_value"],
+                "strict_replay": report["strict_replay"],
+                "research_only": True,
+                "execution_authorized": False,
+                "real_money_authorized": False,
+            }
+        except Exception as error:
+            payload["canonical_replay"] = {
+                "state": "failed",
+                "error_type": type(error).__name__,
+                "error": str(error),
+                "research_only": True,
+                "execution_authorized": False,
+                "real_money_authorized": False,
+            }
+    return payload
 
 
 def run_loop() -> int:
-    interval = int(os.getenv("CAPITAL_INTELLIGENCE_HISTORICAL_INTERVAL_SECONDS", "86400"))
+    interval = int(
+        os.getenv("CAPITAL_INTELLIGENCE_HISTORICAL_INTERVAL_SECONDS", "86400")
+    )
     if interval < 3600:
         raise ValueError("historical interval must be at least one hour")
     stopping = False
@@ -39,9 +138,28 @@ def run_loop() -> int:
     signal.signal(signal.SIGINT, stop)
     while not stopping:
         try:
-            print(json.dumps({"event": "historical_backfill_completed", "report": run_once()}, sort_keys=True), flush=True)
+            print(
+                json.dumps(
+                    {
+                        "event": "historical_learning_completed",
+                        "report": run_once(),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
         except Exception as exc:
-            print(json.dumps({"event": "historical_backfill_failed", "error": str(exc), "real_money_authorized": False}, sort_keys=True), flush=True)
+            print(
+                json.dumps(
+                    {
+                        "event": "historical_learning_failed",
+                        "error": str(exc),
+                        "real_money_authorized": False,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
         deadline = time.monotonic() + interval
         while not stopping and time.monotonic() < deadline:
             time.sleep(min(30, max(0.1, deadline - time.monotonic())))
