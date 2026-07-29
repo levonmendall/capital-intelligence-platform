@@ -41,6 +41,7 @@ jobs:
           tar -xzf /tmp/provider-productionization.tar.gz -C .
           rm -rf .provider-productionization-release
           rm -f .github/workflows/apply-provider-productionization.yml
+          rm -f .github/workflows/provider-productionization.yml
 
       - name: Commit productionized provider stack
         shell: bash
