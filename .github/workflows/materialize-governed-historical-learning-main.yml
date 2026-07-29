@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - .github/workflows/materialize-governed-historical-learning-main.yml
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,17 +30,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          body="$(cat <<EOF
+          ## Materialization state
+
+          **State:** running
+
+          - Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          - Target branch: \`$TARGET_BRANCH\`
+          - Trigger commit: \`$GITHUB_SHA\`
+
+          The workflow is synchronizing the implementation branch, applying the governed historical-learning integration, and will replace this body with exact success or failure details.
+          EOF
+          )"
           gh issue edit "$STATUS_ISSUE" \
             --repo "$GITHUB_REPOSITORY" \
-            --body "## Materialization state
-
-**State:** running
-
-- Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-- Target branch: \`$TARGET_BRANCH\`
-- Trigger commit: \`$GITHUB_SHA\`
-
-The workflow is synchronizing the implementation branch, applying the governed historical-learning integration, and will replace this body with exact success or failure details."
+            --body "$body"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.TARGET_BRANCH }}
@@ -54,6 +61,10 @@ The workflow is synchronizing the implementation branch, applying the governed h
             echo "== Synchronize latest main =="
             git fetch origin main
             git merge --no-edit origin/main
+            if [[ ! -f tools/materialize_governed_historical_learning.py ]]; then
+              echo "Materializer is absent after synchronization; the target branch may already be materialized."
+              exit 0
+            fi
             echo "== Apply governed historical learning integration =="
             python tools/materialize_governed_historical_learning.py
             echo "== Remove branch-local materializer =="
@@ -64,8 +75,12 @@ The workflow is synchronizing the implementation branch, applying the governed h
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -A
             git diff --cached --check
-            git commit -m "Integrate governed historical learning into CIO decisions"
-            git push origin HEAD:$TARGET_BRANCH
+            if git diff --cached --quiet; then
+              echo "No source changes remained to commit."
+            else
+              git commit -m "Integrate governed historical learning into CIO decisions"
+              git push origin HEAD:$TARGET_BRANCH
+            fi
           } > materialization.log 2>&1
           status=$?
           cat materialization.log
@@ -84,29 +99,38 @@ The workflow is synchronizing the implementation branch, applying the governed h
 
           exit_code = os.environ.get("EXIT_CODE") or "unavailable"
           log_path = Path("materialization.log")
-          log = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else "No materialization log was produced."
+          log = (
+              log_path.read_text(encoding="utf-8", errors="replace")
+              if log_path.exists()
+              else "No materialization log was produced."
+          )
           log = log[-12000:]
           state = "completed" if exit_code == "0" else "failed"
           body = f"""## Materialization state
 
-**State:** {state}
+          **State:** {state}
 
-- Workflow run: {os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}
-- Target branch: `{os.environ['TARGET_BRANCH']}`
-- Trigger commit: `{os.environ['GITHUB_SHA']}`
-- Exit code: `{exit_code}`
+          - Workflow run: {os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}
+          - Target branch: `{os.environ['TARGET_BRANCH']}`
+          - Trigger commit: `{os.environ['GITHUB_SHA']}`
+          - Exit code: `{exit_code}`
 
-## Execution log
+          ## Execution log
 
-```text
-{log}
-```
-"""
+          ```text
+          {log}
+          ```
+          """
           subprocess.run(
               [
-                  "gh", "issue", "edit", os.environ["STATUS_ISSUE"],
-                  "--repo", os.environ["GITHUB_REPOSITORY"],
-                  "--body", body,
+                  "gh",
+                  "issue",
+                  "edit",
+                  os.environ["STATUS_ISSUE"],
+                  "--repo",
+                  os.environ["GITHUB_REPOSITORY"],
+                  "--body",
+                  body,
               ],
               check=True,
           )
@@ -115,5 +139,4 @@ The workflow is synchronizing the implementation branch, applying the governed h
         if: always()
         env:
           EXIT_CODE: ${{ steps.materialize.outputs.exit_code }}
-        run: |
-          test "$EXIT_CODE" = "0"
+        run: test "$EXIT_CODE" = "0"
