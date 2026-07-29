@@ -99,7 +99,7 @@ def test_worker_materializes_exact_trade_profiles_and_delegates(monkeypatch, tmp
 
     assert attempt.completed is True
     assert attempt.execution_identifier == "multi-asset-execution:construction:test-vti"
-    assert "--development-bypass-launch-gate" in captured
+    assert "--development-bypass-launch-gate" not in captured
     profiles_path = Path(captured[captured.index("--profiles") + 1])
     profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
     assert [item["symbol"] for item in profiles] == ["VTI"]
@@ -158,13 +158,9 @@ def test_worker_throttles_held_retries(monkeypatch, tmp_path) -> None:
     assert calls == 1
 
 
-def test_production_never_adds_development_bypass(monkeypatch, tmp_path) -> None:
+def test_production_uses_same_immediate_paper_only_path(monkeypatch, tmp_path) -> None:
     _configure(monkeypatch, tmp_path)
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_ENVIRONMENT", "production")
-    monkeypatch.setenv(
-        "CAPITAL_INTELLIGENCE_STREAMLIT_PAPER_EXECUTION_DEVELOPMENT_BYPASS",
-        "false",
-    )
     construction = _construction()
     now = datetime(2026, 7, 28, 19, 1, tzinfo=timezone.utc)
     _approve(tmp_path, construction, now)
@@ -172,8 +168,17 @@ def test_production_never_adds_development_bypass(monkeypatch, tmp_path) -> None
 
     def runner(arguments):
         captured.extend(arguments or ())
-        print(json.dumps({"status": "blocked", "error": "authority unavailable"}))
-        return 4
+        print(
+            json.dumps(
+                {
+                    "status": "completed",
+                    "execution_identifier": "multi-asset-execution:construction:test-vti",
+                    "launch_clearance_required": False,
+                    "real_money_authorized": False,
+                }
+            )
+        )
+        return 0
 
     attempt = attempt_approved_paper_execution(
         construction=construction,
@@ -182,5 +187,5 @@ def test_production_never_adds_development_bypass(monkeypatch, tmp_path) -> None
         runner=runner,
     )
 
-    assert attempt.state == "blocked"
+    assert attempt.state == "completed"
     assert "--development-bypass-launch-gate" not in captured

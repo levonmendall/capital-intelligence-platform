@@ -1,4 +1,4 @@
-"""Run governed paper execution across all classified liquid public markets."""
+"""Run immediate paper-only execution across classified liquid public markets."""
 
 from __future__ import annotations
 
@@ -13,11 +13,8 @@ from typing import Any, Mapping, Sequence
 from cio import CandidateAssetClass
 from governance import (
     AssetClassApprovalState,
-    SQLitePaperTestEntryGovernanceStore,
-    SQLitePaperTradingControlStore,
-    SQLitePaperTradingLaunchStore,
+    PaperTradingLaunchPolicy,
     TradingSessionModel,
-    require_combined_paper_execution_authorization,
 )
 from governance.eligible_universe import SQLiteCertifiedEligibleUniverseStore
 from portfolio import (
@@ -235,8 +232,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--development-bypass-launch-gate",
         action="store_true",
         help=(
-            "Explicit local-development bypass. Refused in staging or production "
-            "and never considered launch or entry evidence."
+            "Deprecated compatibility flag. Immediate paper testing no longer "
+            "requires launch clearance in any environment."
         ),
     )
     parser.add_argument("--portfolio-code", default="COMPOUNDING")
@@ -246,7 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    authorization = None
+    safety_policy = PaperTradingLaunchPolicy()
     try:
         construction_payload = _load(args.construction)
         if not isinstance(construction_payload, Mapping):
@@ -263,53 +260,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("--as-of must be timezone-aware")
 
-        environment = (
-            os.getenv("CAPITAL_INTELLIGENCE_ENVIRONMENT")
-            or os.getenv("CAPITAL_INTELLIGENCE_DEPLOYMENT_ENVIRONMENT")
-            or "development"
-        ).strip().lower()
-        if args.development_bypass_launch_gate:
-            if environment in {"staging", "production"}:
-                raise ValueError(
-                    "paper authority bypass is prohibited in staging and production"
-                )
-        else:
-            missing = [
-                name
-                for name, value in (
-                    ("--baseline-identifier", args.baseline_identifier),
-                    ("--process-version", args.process_version),
-                    ("--code-version", args.code_version),
-                )
-                if not value
-            ]
-            if missing:
-                raise ValueError(
-                    "paper execution requires exact authority versions: "
-                    + ", ".join(missing)
-                )
-            authorization = require_combined_paper_execution_authorization(
-                entry_store=SQLitePaperTestEntryGovernanceStore(
-                    args.paper_test_entry_database
-                ),
-                launch_store=SQLitePaperTradingLaunchStore(
-                    args.paper_launch_database
-                ),
-                control_store=SQLitePaperTradingControlStore(
-                    args.paper_control_database
-                ),
-                baseline_identifier=args.baseline_identifier,
-                process_version=args.process_version,
-                code_version=args.code_version,
-                as_of=as_of,
+        if (
+            construction.turnover
+            > safety_policy.maximum_single_batch_turnover + 1e-9
+        ):
+            raise ValueError(
+                "construction turnover exceeds the paper-test safety limit"
             )
-            if (
-                construction.turnover
-                > authorization.launch_report.maximum_single_batch_turnover + 1e-9
-            ):
-                raise ValueError(
-                    "construction turnover exceeds the active paper-launch circuit breaker"
-                )
 
         portfolio_store = SQLiteCanonicalPortfolioStore(args.portfolio_database)
         portfolio_store.verify_integrity()
@@ -318,18 +275,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError(
                 f"canonical portfolio {args.portfolio_code!r} is unavailable"
             )
-        if authorization is not None:
-            drawdown = max(
-                0.0,
-                1.0 - (portfolio.nav / portfolio.starting_capital),
-            )
-            if (
-                drawdown
-                > authorization.launch_report.maximum_drawdown_fraction + 1e-9
-            ):
-                raise ValueError(
-                    "paper portfolio drawdown circuit breaker is active"
-                )
+        drawdown = max(
+            0.0,
+            1.0 - (portfolio.nav / portfolio.starting_capital),
+        )
+        if drawdown > safety_policy.maximum_drawdown_fraction + 1e-9:
+            raise ValueError("paper portfolio drawdown safety limit is active")
 
         execution_store = SQLiteMultiAssetPaperExecutionStore(
             args.execution_database
@@ -359,9 +310,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {
                     "status": "blocked",
                     "error": str(error),
-                    "development_bypass_used": bool(
-                        args.development_bypass_launch_gate
-                    ),
+                    "development_bypass_used": False,
+                    "launch_clearance_required": False,
                     "real_money_authorized": False,
                 },
                 sort_keys=True,
@@ -370,33 +320,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 4
 
     payload = batch_to_dict(batch)
-    payload["paper_execution_authorization"] = (
-        None
-        if authorization is None
-        else {
-            "eligibility_package_identifier": (
-                authorization.entry_package.identifier
-            ),
-            "eligibility_package_fingerprint": (
-                authorization.entry_package.fingerprint
-            ),
-            "human_entry_decision_identifier": (
-                authorization.entry_decision.identifier
-            ),
-            "cohort_identifier": authorization.cohort_identifier,
-            "launch_report_identifier": authorization.launch_report.identifier,
-            "launch_evidence_identifier": (
-                authorization.launch_report.evidence_identifier
-            ),
-            "runtime_control_event_identifier": (
-                authorization.control_event_identifier
-            ),
-            "source_identifiers": list(authorization.source_identifiers),
-        }
-    )
-    payload["development_bypass_used"] = bool(
-        args.development_bypass_launch_gate
-    )
+    payload["paper_execution_authorization"] = None
+    payload["paper_execution_access"] = {
+        "mode": "immediate_paper_test",
+        "launch_clearance_required": False,
+        "immutable_baseline_required": False,
+        "burn_in_required": False,
+        "operating_exercises_required_for_entry": False,
+        "recovery_certification_required_for_entry": False,
+        "launch_report_required": False,
+        "eligibility_package_required": False,
+        "human_release_approval_required": False,
+        "runtime_activation_required": False,
+        "exact_user_consent_required_by_approved_bridge": True,
+        "paper_only": True,
+    }
+    payload["development_bypass_used"] = False
     payload["real_money_authorized"] = False
     print(json.dumps(payload, sort_keys=True))
     if args.require_complete and batch.status not in {

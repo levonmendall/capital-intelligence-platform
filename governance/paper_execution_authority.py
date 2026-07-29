@@ -1,6 +1,8 @@
-"""Combined authority required before any governed paper execution.
+"""Optional legacy certification for institution-style paper campaigns.
 
-Three independent conclusions are required and none may substitute for another:
+These conclusions are no longer prerequisites for ordinary product paper testing.
+They remain available when an operator voluntarily elects a formally certified
+campaign:
 
 * the latest human-controlled paper-test entry decision must approve the latest
   exact eligibility package for the named cohort;

@@ -1,9 +1,8 @@
 """Assess and persist controlled paper-product test readiness.
 
-The canonical path assembles evidence from append-only gate certifications,
-operational evidence, active multi-asset approvals, and an exact sustained
-paper-launch authorization. ``--manual-evidence`` remains an explicit
-compatibility mode and is never treated as the canonical authority.
+The canonical path assembles technical evidence from append-only gate
+certifications, operational evidence, and active multi-asset approvals. The report
+is diagnostic only and is not required before paper testing can begin.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
@@ -22,7 +20,6 @@ from governance import (
     ProductTestReadinessEvidenceAssembler,
     ProductTestReadinessEvaluator,
     SQLiteAssetClassApprovalStore,
-    SQLitePaperTradingLaunchStore,
     SQLiteProductTestReadinessStore,
     SQLiteReadinessEvidenceStore,
 )
@@ -110,7 +107,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     evidence_source = "manual_compatibility"
-    launch_identifier = None
     try:
         if args.manual_evidence:
             evidence = _manual_evidence(args.manual_evidence)
@@ -143,37 +139,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 code_version=args.code_version,
                 open_development_items=tuple(args.development_item),
             )
-            launch = None
-            if args.baseline_identifier and args.process_version:
-                launch = SQLitePaperTradingLaunchStore(
-                    args.paper_launch_database
-                ).latest_ready(
-                    baseline_identifier=args.baseline_identifier,
-                    process_version=args.process_version,
-                    code_version=args.code_version,
-                    as_of=assessed_at,
-                )
-            development_items = list(evidence.open_development_items)
-            evidence_identifiers = list(evidence.evidence_identifiers)
-            if launch is None:
-                development_items.append(
-                    "paper_launch_ready: active sustained launch authorization unavailable"
-                )
-            else:
-                launch_identifier = launch.identifier
-                evidence_identifiers.extend(
-                    (
-                        launch.identifier,
-                        launch.evidence_identifier,
-                        *launch.evidence_identifiers,
-                    )
-                )
-            evidence = replace(
-                evidence,
-                paper_launch_ready=launch is not None,
-                evidence_identifiers=tuple(dict.fromkeys(evidence_identifiers)),
-                open_development_items=tuple(dict.fromkeys(development_items)),
-            )
         report = ProductTestReadinessEvaluator().evaluate(evidence)
         store = SQLiteProductTestReadinessStore(args.database)
         sequence = store.append(report)
@@ -194,7 +159,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     output = report.to_dict()
     output["registry_sequence"] = sequence
     output["evidence_source"] = evidence_source
-    output["paper_launch_report_identifier"] = launch_identifier
+    output["paper_launch_report_identifier"] = None
+    output["launch_clearance_required"] = False
     output["development_remains_open"] = evidence.development_remains_open
     print(json.dumps(output, indent=2, sort_keys=True))
     if (

@@ -1,4 +1,4 @@
-"""Record and assess controlled paper-test launch-readiness evidence."""
+"""Record optional paper-campaign resilience evidence."""
 
 from __future__ import annotations
 

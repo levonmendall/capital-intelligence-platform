@@ -1,9 +1,8 @@
-"""Persisted evidence assembly for controlled paper-product test readiness.
+"""Persisted technical evidence assembly for paper-product testing.
 
-Readiness cannot be established by a caller-supplied collection of booleans.  The
-canonical path resolves immutable gate certifications, an operational snapshot,
-and active expanded-market approvals against one exact test baseline, investment
-process version, and code version.  Missing or mismatched authority fails closed.
+The assembler resolves current gate certifications, operational evidence, and active
+asset approvals. Baseline freeze and process-version matching are optional audit
+lineage rather than prerequisites for paper-test access.
 """
 
 from __future__ import annotations
@@ -617,16 +616,6 @@ class ProductTestReadinessEvidenceAssembler:
                     development_items.append(
                         f"{gate.value}: state={certification.state.value}"
                     )
-                if baseline is None or certification.baseline_identifier != baseline:
-                    valid = False
-                    development_items.append(
-                        f"{gate.value}: baseline mismatch"
-                    )
-                if process is None or certification.process_version != process:
-                    valid = False
-                    development_items.append(
-                        f"{gate.value}: process-version mismatch"
-                    )
                 if certification.code_version != code:
                     valid = False
                     development_items.append(
@@ -641,14 +630,9 @@ class ProductTestReadinessEvidenceAssembler:
                 paper_eligible = tuple(
                     approval for approval in approvals if approval.profile.paper_eligible
                 )
-                process_matching = tuple(
-                    approval
-                    for approval in paper_eligible
-                    if process is not None and approval.process_version == process
-                )
                 matching = tuple(
                     approval
-                    for approval in process_matching
+                    for approval in paper_eligible
                     if approval.code_version == code
                 )
                 if not approvals:
@@ -660,11 +644,6 @@ class ProductTestReadinessEvidenceAssembler:
                     valid = False
                     development_items.append(
                         f"{gate.value}: asset class is not paper eligible"
-                    )
-                elif not process_matching:
-                    valid = False
-                    development_items.append(
-                        f"{gate.value}: asset approval process mismatch"
                     )
                 elif not matching:
                     valid = False
@@ -698,12 +677,6 @@ class ProductTestReadinessEvidenceAssembler:
             if timestamp - operational.knowledge_cutoff > self.maximum_operational_snapshot_age:
                 operational_valid = False
                 development_items.append("operational readiness snapshot is stale")
-            if baseline is None or operational.baseline_identifier != baseline:
-                operational_valid = False
-                development_items.append("operational snapshot baseline mismatch")
-            if process is None or operational.process_version != process:
-                operational_valid = False
-                development_items.append("operational snapshot process mismatch")
             if operational.code_version != code:
                 operational_valid = False
                 development_items.append("operational snapshot code mismatch")

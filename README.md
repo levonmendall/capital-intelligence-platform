@@ -30,7 +30,7 @@ The binding product and engineering contract is [GOVERNING_SPECIFICATION.md](GOV
 | Product surfaces | Today, Environment, Portfolio, and History |
 | Interface | Signature command-system design with dark mode as the preset and light mode as an alternate |
 | Execution | Research and paper only; no broker submission or live-money authority |
-| Readiness | Core architecture is implemented; controlled paper testing still requires production data, launch-readiness evidence, resilience evidence, and formal governance approval |
+| Readiness | Core architecture is implemented; paper testing can begin immediately without launch clearance; each transaction still requires current data, eligibility, safety, consent, and reconciliation controls |
 
 ## What the platform is
 
@@ -226,7 +226,7 @@ The core institutional CIO architecture is implemented as software. The reposito
 - authentication, authorization, backups, restore verification, SLOs, incident evidence, and resilience controls; and
 - deterministic CI, CodeQL, dependency audit, and container security gates.
 
-The project is **not yet approved as a production investment manager or for live-money execution**. Controlled paper testing still requires one immutable baseline with:
+The project is **not approved for live-money execution**. Paper testing does not require launch clearance. The following remain technical operating objectives rather than pre-entry approvals:
 
 - reviewed production stage bindings and licensed provider credentials;
 - complete production-grade point-in-time market coverage for every approved asset class;
@@ -244,7 +244,7 @@ real_money_authorized = false
 performance_claims_permitted = false
 ```
 
-A running application, API, or worker alone does not prove paper-test readiness; the current cycle and all remaining evidence gates must pass.
+Paper execution is permitted without a separate launch-clearance sequence, but each transaction still fails closed on missing consent, data, eligibility, portfolio integrity, safety, or reconciliation evidence.
 
 ---
 
