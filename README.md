@@ -25,7 +25,7 @@ The binding product and engineering contract is [GOVERNING_SPECIFICATION.md](GOV
 | Initial paper capital | **$250,000 USD** |
 | Market scope | Required analysis across all supported liquid public-market families |
 | Allocation scope | Direct paper allocation only after instrument-level capability approval |
-| Decision authority | Five independent specialists plus one Chief Investment Officer |
+| Decision authority | Six independent specialists plus one Chief Investment Officer |
 | Portfolio sizing | Construction and funding logic; CIO confidence is not a sizing input |
 | Product surfaces | Today, Environment, Portfolio, and History |
 | Interface | Signature command-system design with dark mode as the preset and light mode as an alternate |
@@ -129,7 +129,7 @@ Complete capital-alternative comparison
         ↓
 Qualification and opportunity ranking
         ↓
-Five independent specialist analyses
+Six independent specialist analyses
         ↓
 CIO synthesis, dissent, veto, or abstention
         ↓
@@ -152,12 +152,13 @@ The active investment organization contains:
 
 1. Macro & Economic Strategist
 2. Market Strategist
-3. Fundamental & Valuation Analyst
-4. Portfolio & Risk Manager
-5. Evidence & Governance Officer
-6. Chief Investment Officer
+3. Cross-Asset Forecast & Scenario Specialist
+4. Fundamental & Valuation Analyst
+5. Portfolio & Risk Manager
+6. Evidence & Governance Officer
+7. Chief Investment Officer
 
-The first five complete independent first-pass analysis against the same evidence boundary. They do not see or average one another’s conclusions before submission.
+The first six complete independent first-pass analysis against the same evidence boundary. They do not see or average one another’s conclusions before submission.
 
 - Evidence & Governance may veto inadequate, stale, or irreproducible evidence.
 - Portfolio & Risk may block an infeasible implementation.
@@ -169,11 +170,11 @@ The first five complete independent first-pass analysis against the same evidenc
 The construction engine receives approved CIO intent and the actual canonical portfolio state. It:
 
 - applies exits and reductions before additions;
-- allocates positive intents in opportunity-rank order;
+- evaluates deterministic complete-portfolio candidates through beam search rather than accepting one greedy order;
 - uses cash above the required reserve first;
 - reduces only explicitly funding-eligible holdings when replacement edge is sufficient;
 - tests funding transactionally and restores unnecessary sales;
-- enforces position, sector, factor, correlation, liquidity, cash, turnover, cost, and currency constraints; and
+- applies one governed common-scenario set across every noncash holding and enforces position, sector, factor, correlation, liquidity, cash, turnover, cost, derivative-lifecycle, and currency constraints; and
 - emits non-executing paper trade proposals.
 
 CIO confidence measures evidence reliability. It is intentionally absent from the sizing algorithm.
@@ -199,7 +200,7 @@ Evaluation uses the frozen decision-time package and the original alternative se
 
 ## Forecasting boundary
 
-Forecasts are supporting evidence, not an independent decision authority.
+Forecast records are supporting evidence, not independent action authority. The Cross-Asset Forecast & Scenario Specialist independently evaluates governed distributions, calibration, path risk, and cross-asset transmission, but only the CIO may issue an investment action.
 
 A governed forecast preserves its target, horizon, knowledge cutoff, model and data versions, scenario probabilities, uncertainty, calibration method, historical accuracy, source lineage, limitations, and invalidation conditions.
 

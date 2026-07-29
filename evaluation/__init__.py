@@ -1,5 +1,11 @@
 """Point-in-time decision evaluation and validation contracts."""
 
+from evaluation.calibration import (
+    CalibrationDimension,
+    CalibrationMetric,
+    DecisionCalibrationSuite,
+    DecisionCalibrationSuiteBuilder,
+)
 from evaluation.decision_learning import (
     DecisionLearningEvaluator,
     DecisionLearningObservation,
@@ -64,9 +70,13 @@ from evaluation.walk_forward import (
 __all__ = [
     "AlternativeRealizedReturn",
     "CalibrationBucket",
+    "CalibrationDimension",
+    "CalibrationMetric",
     "CapitalAlternativeSnapshot",
     "ConfidenceCalibrationReport",
     "ConfidenceCalibrator",
+    "DecisionCalibrationSuite",
+    "DecisionCalibrationSuiteBuilder",
     "DecisionEvidenceSnapshot",
     "DecisionLearningEvaluator",
     "DecisionLearningObservation",
