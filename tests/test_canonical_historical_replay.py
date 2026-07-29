@@ -75,11 +75,11 @@ def test_canonical_replay_invokes_real_cio_without_execution_authority(
         strict_only=True,
     )
 
-    assert report["schema_version"] == "canonical-historical-replay.v2"
+    assert report["schema_version"] == "canonical-historical-replay.v3"
     assert report["canonical_cio_available"] is True
     assert report["canonical_cio_invoked_count"] == 1
     assert report["blocked_cutoff_count"] == 0
-    assert report["runtime_version"] == "single-pass-availability-cursor.v2"
+    assert report["runtime_version"] == "single-pass-availability-cursor.v3"
     assert (
         report["learning_context_schema_version"]
         == "governed-historical-learning.v1"
@@ -184,7 +184,7 @@ def test_non_strict_bridge_is_visible_as_research_only(tmp_path):
 
     assert research["strict_replay"] is False
     assert research["canonical_cio_invoked_count"] == 1
-    assert research["schema_version"] == "canonical-historical-replay.v2"
+    assert research["schema_version"] == "canonical-historical-replay.v3"
     assert strict["canonical_cio_invoked_count"] == 0
     assert strict["blocked_cutoff_count"] == 1
 
@@ -212,7 +212,7 @@ def test_multi_cutoff_replay_scans_archive_once(tmp_path):
 
     assert store.iteration_count == 1
     assert report["archive_scan_count"] == 1
-    assert report["runtime_version"] == "single-pass-availability-cursor.v2"
+    assert report["runtime_version"] == "single-pass-availability-cursor.v3"
     assert report["decision_cutoff_count"] == 2
     assert report["canonical_cio_invoked_count"] == 2
     visible_counts = [
