@@ -1,0 +1,268 @@
+name: Apply no-burn-in paper-test policy
+
+on:
+  push:
+    branches:
+      - policy/remove-paper-burn-in
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Remove elapsed burn-in gates
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, *, required: bool = True) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              if old not in text:
+                  if required:
+                      raise SystemExit(f"expected text not found in {path}: {old!r}")
+                  return
+              target.write_text(text.replace(old, new), encoding="utf-8")
+
+          # Launch policy authority: zero elapsed days and one current validated cycle.
+          replace(
+              "governance/paper_trading_launch.py",
+              '"""Govern sustained burn-in, launch authorization, and paper-only controls.\n\nA successful unit or release test is not enough to start the controlled paper\nportfolio.  This authority requires an exact baseline to prove sustained live\noperation, point-in-time data integrity, realistic execution calibration,\nreconciliation, recovery, replay, and halt-control exercises.  Nothing in this\nmodule authorizes real money, broker connectivity, or performance claims.\n"""',
+              '"""Govern launch readiness, authorization, and paper-only controls.\n\nA successful unit or release test is not enough to start the controlled paper\nportfolio. This authority requires one current validated operating cycle for an\nexact baseline plus point-in-time data integrity, realistic execution\ncalibration, reconciliation, recovery, replay, and halt-control exercises. It\ndoes not require an elapsed multi-day burn-in and does not authorize real money,\nbroker connectivity, or performance claims.\n"""',
+          )
+          replace(
+              "governance/paper_trading_launch.py",
+              '    version: str = "paper-trading-launch-policy.v1"\n    minimum_burn_in_days: int = 5\n    minimum_scheduled_cycles: int = 5',
+              '    version: str = "paper-trading-launch-policy.v2"\n    minimum_burn_in_days: int = 0\n    minimum_scheduled_cycles: int = 1',
+          )
+          replace(
+              "governance/paper_trading_launch.py",
+              '        for field_name in (\n            "minimum_burn_in_days",\n            "minimum_scheduled_cycles",',
+              '        object.__setattr__(\n            self,\n            "minimum_burn_in_days",\n            _count(self.minimum_burn_in_days, field_name="minimum_burn_in_days"),\n        )\n        for field_name in (\n            "minimum_scheduled_cycles",',
+          )
+          replace(
+              "governance/paper_trading_launch.py",
+              '        minimum("burn_in_days", evidence.burn_in_days, policy.minimum_burn_in_days)',
+              '        if policy.minimum_burn_in_days > 0:\n            minimum(\n                "burn_in_days",\n                evidence.burn_in_days,\n                policy.minimum_burn_in_days,\n            )',
+          )
+
+          # Campaign authority: operating-day records remain supported but are optional.
+          replace(
+              "operations/paper_test_campaign.py",
+              '"""Immutable burn-in and failure-campaign evidence for controlled paper testing.\n\nThe authority records real completed operating days and isolated failure exercises\nagainst one exact code/process/configuration baseline.  It can prove that a\nbaseline has accumulated the required evidence, but it cannot approve the\nbaseline, authorize real money, or manufacture elapsed operating days.\n"""',
+              '"""Immutable launch-readiness and failure-scenario evidence.\n\nThe authority records optional completed operating days and required isolated\nfailure exercises against one exact code/process/configuration baseline. It can\nprove that a baseline has accumulated the required evidence, but it cannot\napprove the baseline or authorize real money. Elapsed operating days are not a\nprerequisite for controlled paper testing.\n"""',
+          )
+          replace(
+              "operations/paper_test_campaign.py",
+              "    required_consecutive_days: int = 5",
+              "    required_consecutive_days: int = 0",
+          )
+          replace(
+              "operations/paper_test_campaign.py",
+              '            _positive_int(\n                self.required_consecutive_days,\n                field_name="required_consecutive_days",\n            ),',
+              '            _non_negative_int(\n                self.required_consecutive_days,\n                field_name="required_consecutive_days",\n            ),',
+          )
+          replace(
+              "operations/paper_test_campaign.py",
+              'raise ValueError("development must remain open during burn-in")',
+              'raise ValueError("development must remain open during launch-readiness testing")',
+          )
+          replace(
+              "operations/paper_test_campaign.py",
+              'value.get("required_consecutive_days", 5)',
+              'value.get("required_consecutive_days", 0)',
+          )
+          replace(
+              "operations/paper_test_campaign.py",
+              'raise ValueError("satisfied campaign lacks required elapsed days")',
+              'raise ValueError("satisfied campaign lacks required operating-day evidence")',
+          )
+          replace(
+              "operations/paper_test_campaign.py",
+              '    """Assess elapsed days and failure evidence for one exact baseline."""',
+              '    """Assess optional operating-day and required failure evidence."""',
+          )
+          replace(
+              "operations/paper_test_campaign.py",
+              '        if consecutive < baseline.required_consecutive_days:\n            blockers.append(\n                "multi-day burn-in has not accumulated the required consecutive real operating days"\n            )',
+              '        if (\n            baseline.required_consecutive_days > 0\n            and consecutive < baseline.required_consecutive_days\n        ):\n            blockers.append(\n                "optional operating-day evidence has not reached the configured requirement"\n            )',
+          )
+
+          replace(
+              "run_paper_test_campaign.py",
+              '"""Record and assess the controlled paper-test burn-in campaign."""',
+              '"""Record and assess controlled paper-test launch-readiness evidence."""',
+          )
+          replace(
+              "run_paper_trading_launch.py",
+              '"""Evaluate and persist sustained paper-trading launch evidence."""',
+              '"""Evaluate and persist current paper-trading launch evidence."""',
+          )
+
+          # Launch evidence and regression tests prove immediate eligibility.
+          replace(
+              "tests/test_paper_trading_launch.py",
+              '"""Acceptance tests for sustained operational paper-launch certification."""',
+              '"""Acceptance tests for immediate operational paper-launch certification."""',
+          )
+          replace(
+              "tests/test_paper_trading_launch.py",
+              '        "window_start": NOW - timedelta(days=5),',
+              '        "window_start": NOW,',
+          )
+          for old, new in (
+              ('        "scheduled_cycles": 5,', '        "scheduled_cycles": 1,'),
+              ('        "successful_cycles": 5,', '        "successful_cycles": 1,'),
+              ('        "point_in_time_cycles": 5,', '        "point_in_time_cycles": 1,'),
+              ('        "complete_universe_cycles": 5,', '        "complete_universe_cycles": 1,'),
+              ('            "burn-in:test",', '            "launch-cycle:test",'),
+              ('def test_complete_sustained_evidence_is_ready_but_paper_only() -> None:', 'def test_complete_immediate_evidence_is_ready_but_paper_only() -> None:'),
+          ):
+              replace("tests/test_paper_trading_launch.py", old, new)
+          replace(
+              "tests/test_paper_trading_launch.py",
+              '    assert policy.required_portfolio_count == 1',
+              '    assert policy.required_portfolio_count == 1\n    assert policy.minimum_burn_in_days == 0\n    assert policy.minimum_scheduled_cycles == 1',
+          )
+          replace(
+              "tests/test_paper_trading_launch.py",
+              '    assert report.state is PaperTradingLaunchState.READY\n    assert report.blockers == ()',
+              '    assert report.state is PaperTradingLaunchState.READY\n    assert report.blockers == ()\n    assert _evidence().burn_in_days == 0.0',
+              required=False,
+          )
+          replace(
+              "tests/test_paper_trading_launch.py",
+              '            window_start=NOW - timedelta(days=2),\n            portfolio_count=2,\n            starting_capital=249_999.0,\n            successful_cycles=4,',
+              '            window_start=NOW,\n            portfolio_count=2,\n            starting_capital=249_999.0,\n            successful_cycles=0,',
+          )
+          replace(
+              "tests/test_paper_trading_launch.py",
+              '        "burn_in_days",\n        "portfolio_count",',
+              '        "portfolio_count",',
+          )
+
+          replace(
+              "tests/test_paper_test_campaign.py",
+              '"""Acceptance tests for real elapsed burn-in and controlled failure evidence."""',
+              '"""Acceptance tests for immediate launch readiness and failure evidence."""',
+          )
+          replace(
+              "tests/test_paper_test_campaign.py",
+              '    required_days: int = 5,',
+              '    required_days: int = 0,',
+          )
+          old_test = '''def test_campaign_requires_all_real_consecutive_days_and_scenarios() -> None:\n    baseline = _baseline()\n    start = baseline.effective_date\n    days = tuple(_day(baseline, start + timedelta(days=index)) for index in range(5))\n    scenarios = tuple(_scenario(baseline, kind) for kind in REQUIRED_FAILURE_SCENARIOS)\n\n    report = PaperTestCampaignEvaluator().evaluate(\n        baseline=baseline,\n        days=days,\n        scenarios=scenarios,\n        evaluated_at=CREATED + timedelta(days=8),\n    )\n\n    assert report.state is PaperTestCampaignState.SATISFIED\n    assert report.consecutive_day_count == 5\n    assert report.credited_dates == tuple(item.operation_date for item in days)\n'''
+          new_test = '''def test_campaign_requires_failure_scenarios_without_elapsed_days() -> None:\n    baseline = _baseline()\n    scenarios = tuple(_scenario(baseline, kind) for kind in REQUIRED_FAILURE_SCENARIOS)\n\n    report = PaperTestCampaignEvaluator().evaluate(\n        baseline=baseline,\n        days=(),\n        scenarios=scenarios,\n        evaluated_at=CREATED + timedelta(days=8),\n    )\n\n    assert baseline.required_consecutive_days == 0\n    assert report.state is PaperTestCampaignState.SATISFIED\n    assert report.consecutive_day_count == 0\n    assert report.credited_dates == ()\n'''
+          replace("tests/test_paper_test_campaign.py", old_test, new_test)
+
+          # Example evidence can be generated and evaluated immediately.
+          replace(
+              "docs/examples/paper_trading_launch_evidence.example.json",
+              '  "window_start": "2026-07-29T21:00:00+00:00",',
+              '  "window_start": "2026-08-03T21:00:00+00:00",',
+          )
+          for old, new in (
+              ('  "scheduled_cycles": 5,', '  "scheduled_cycles": 1,'),
+              ('  "successful_cycles": 5,', '  "successful_cycles": 1,'),
+              ('  "point_in_time_cycles": 5,', '  "point_in_time_cycles": 1,'),
+              ('  "complete_universe_cycles": 5,', '  "complete_universe_cycles": 1,'),
+              ('    "replace-with-cycle-burn-in-report",', '    "replace-with-launch-cycle-report",'),
+          ):
+              replace("docs/examples/paper_trading_launch_evidence.example.json", old, new)
+
+          # Documentation and product status.
+          replace(
+              "docs/PAPER_TRADING_LAUNCH.md",
+              "## Minimum burn-in policy",
+              "## Immediate launch-readiness policy",
+          )
+          replace(
+              "docs/PAPER_TRADING_LAUNCH.md",
+              '- at least five calendar days and five scheduled CIO cycles;\n- every scheduled cycle successful;',
+              '- no mandatory elapsed-day burn-in;\n- at least one current scheduled CIO cycle, completed successfully;',
+          )
+          replace(
+              "docs/PAPER_TRADING_LAUNCH.md",
+              "- the five-day live burn-in and required exercises;",
+              "- the required launch-readiness cycle and operating exercises;",
+          )
+          replace(
+              "docs/PAPER_TRADING_LAUNCH.md",
+              "without sustained launch certification",
+              "without current launch certification",
+          )
+          replace(
+              "docs/CONTROLLED_PAPER_TEST_GOVERNANCE.md",
+              "- satisfied multi-day burn-in and failure-campaign report;",
+              "- satisfied launch-readiness and failure-scenario report;",
+          )
+          replace(
+              "docs/CONTROLLED_PAPER_TEST_GOVERNANCE.md",
+              "- real elapsed burn-in days;",
+              "- a completed launch-readiness cycle and required failure exercises;",
+          )
+          replace(
+              "docs/PAPER_TRADING_AUTHORITY_MODEL.md",
+              "sustained live cycles, provider health",
+              "a current validated cycle, provider health",
+          )
+          replace(
+              "README.md",
+              "controlled paper testing still requires production data, burn-in, resilience evidence, and formal governance approval",
+              "controlled paper testing still requires production data, launch-readiness evidence, resilience evidence, and formal governance approval",
+          )
+          replace(
+              "README.md",
+              "- successful multi-day operating burn-in;",
+              "- a successful current launch-readiness cycle;",
+          )
+          replace(
+              "README.md",
+              "A running application, API, worker, or successful single-day cycle does not prove paper-test readiness.",
+              "A running application, API, or worker alone does not prove paper-test readiness; the current cycle and all remaining evidence gates must pass.",
+          )
+
+          # Update known baseline examples without changing legacy record schemas.
+          for target in Path("docs").rglob("*.json"):
+              text = target.read_text(encoding="utf-8")
+              updated = text.replace('"required_consecutive_days": 5', '"required_consecutive_days": 0')
+              if updated != text:
+                  target.write_text(updated, encoding="utf-8")
+
+          # The workflow is a one-shot patch vehicle and must not remain in the product.
+          Path(".github/workflows/apply-no-burn-in-policy.yml").unlink()
+          PY
+
+      - name: Verify removed mandatory delay
+        shell: bash
+        run: |
+          python -m compileall -q governance operations run_paper_test_campaign.py run_paper_trading_launch.py tests
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          policy = json.loads(Path("config/paper_trading_launch_policy.json").read_text())
+          assert policy["minimum_burn_in_days"] == 0
+          assert policy["minimum_scheduled_cycles"] == 1
+          assert policy["version"] == "paper-trading-launch-policy.v2"
+          PY
+          ! git grep -n "at least five calendar days" -- . ':!docs/archive/**'
+          ! git grep -n "required_consecutive_days.*5" -- docs config governance operations tests ':!docs/archive/**'
+
+      - name: Commit policy update
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove mandatory paper-test burn-in"
+          git push origin HEAD:policy/remove-paper-burn-in
