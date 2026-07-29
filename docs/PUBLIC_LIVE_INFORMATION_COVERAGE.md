@@ -41,9 +41,9 @@ The public stack complements the existing FRED, SEC EDGAR, Coinbase, Kraken, and
 
 ## Required versus optional sources
 
-The required baseline contains stable, high-impact official sources that need no new credential, plus SEC access using the existing descriptive user agent. A required-source outage marks the public baseline as degraded, preserves the exact source failures in the uploaded evidence, and emits a GitHub Actions warning. It does not mark the application or listed-wrapper paper launch as failed.
+The required baseline contains stable, high-impact official sources that need no new credential, plus SEC access using the existing descriptive user agent. A required-source outage is persisted as degraded evidence and remains visible in the workflow and application reports. It cannot be treated as available evidence and cannot support a CIO decision that depends on it, but a temporary third-party outage does not mark the application or listed-wrapper paper launch as failed.
 
-Optional sources are still attempted every hour but do not stop the required baseline. They include free-key services and endpoints that need operating burn-in, including NASA FIRMS, EIA, WHO, IMF, openFDA, and the OFAC consolidated non-SDN export. Their failures remain visible in the report.
+Optional sources are still attempted every hour. They include free-key services and endpoints that need operating burn-in, including NASA FIRMS, EIA, WHO, IMF, openFDA, and the OFAC consolidated non-SDN export. Their failures remain visible in the report.
 
 ## Point-in-time behavior
 
@@ -85,14 +85,30 @@ Repeated syndicated copies do not count as independent evidence.
 
 ## Scheduled operation
 
-`.github/workflows/public-live-information.yml` runs hourly and on demand. It performs two passes:
+Public collection has two independent operating layers:
 
-1. a required public baseline whose availability state is recorded; and
-2. a full pass that also attempts optional and free-key sources.
+1. `.github/workflows/public-live-information.yml` runs at minute 17 of every hour and on demand. It is an independent availability and artifact-producing monitor.
+2. `run_autonomous_paper_operator.py` runs the same governed collector inside the application runtime before the due CIO cycle. It collects immediately when no persisted runtime state exists, then no more than once per configured interval. The default interval is 3,600 seconds.
 
-Temporary upstream outages produce a degraded warning rather than a failed application check. A collector implementation failure, invalid catalog, or other inability to produce trustworthy evidence still fails the workflow. Missing public evidence never becomes positive evidence: any CIO decision that depends on an unavailable source remains blocked or abstains under the normal point-in-time controls.
+The runtime layer writes into the same persistent application data volume used by Streamlit and the autonomous paper operator:
 
-The workflow uploads credential-safe reports and normalized records as a 14-day artifact. Production deployment should run the same CLI from a persistent scheduler and write the report paths to durable storage.
+```text
+database/public-live-information-report.json
+database/public-live-information-records.json
+database/public-live-information-runtime-state.json
+```
+
+A reboot therefore causes an immediate collection when no current runtime state exists, followed by the due CIO cycle and pending-transaction report. Subsequent operator passes reuse that collection until the one-hour window expires.
+
+To force a one-time collection while preserving the normal hourly cadence afterward:
+
+```bash
+python run_autonomous_paper_operator.py --once --force-public-collection
+```
+
+Temporary upstream outages produce degraded evidence rather than a failed application check. A collector implementation failure, invalid catalog, or other inability to produce trustworthy evidence remains a genuine runtime failure. Missing public evidence never becomes positive evidence: any CIO decision that depends on an unavailable source remains blocked or abstains under the normal point-in-time controls.
+
+The GitHub workflow uploads credential-safe reports and normalized records as a 14-day artifact. That artifact is observability evidence; the application runtime does not depend on copying a GitHub artifact into the Streamlit data volume.
 
 The latest persisted report is available through:
 
@@ -111,6 +127,10 @@ GET /v1/governance/data-readiness
 ```text
 CAPITAL_INTELLIGENCE_PUBLIC_LIVE_SOURCE_CATALOG=config/public_live_information_sources.json
 CAPITAL_INTELLIGENCE_PUBLIC_LIVE_REPORT=database/public-live-information-report.json
+CAPITAL_INTELLIGENCE_PUBLIC_LIVE_RECORDS=database/public-live-information-records.json
+CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_STATE=database/public-live-information-runtime-state.json
+CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED=true
+CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_INTERVAL_SECONDS=3600
 SEC_USER_AGENT=Capital Intelligence Platform <monitored-contact>
 ```
 

@@ -30,6 +30,7 @@ from paper_execution_runtime import (
     paper_execution_mode,
 )
 from portfolio.state import ensure_canonical_portfolio_store
+from public_live_collection_runtime import collect_public_live_information_if_due
 from run_scheduler import build_worker
 
 
@@ -41,8 +42,17 @@ def _payloads(settings: ApiSettings) -> tuple[dict[str, Any] | None, dict[str, A
     )
 
 
-def _run_pass(*, settings: ApiSettings, worker) -> dict[str, object]:
+def _run_pass(
+    *,
+    settings: ApiSettings,
+    worker,
+    force_public_collection: bool = False,
+) -> dict[str, object]:
     now = datetime.now(timezone.utc)
+    public_collection = collect_public_live_information_if_due(
+        now=now,
+        force=force_public_collection,
+    )
     cycle = worker.run_due(now=now)
     deliveries = worker.dispatch_pending()
     try:
@@ -84,13 +94,15 @@ def _run_pass(*, settings: ApiSettings, worker) -> dict[str, object]:
         generated_at=now,
         execution_state=attempt.state,
     )
+    operating_attempt = attempt.state in {"completed", "idle", "held", "paused"}
     return {
         "status": (
             "operating"
-            if attempt.state in {"completed", "idle", "held", "paused"}
+            if operating_attempt and public_collection.state != "failed"
             else "degraded"
         ),
         "evaluated_at": now.isoformat(),
+        "public_live_information": public_collection.to_dict(),
         "cycle": {
             "cycle_key": cycle.cycle_key,
             "status": cycle.status,
@@ -123,6 +135,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--loop", action="store_true")
     parser.add_argument("--poll-seconds", type=int)
+    parser.add_argument(
+        "--force-public-collection",
+        action="store_true",
+        help=(
+            "Collect public live information on the first operator pass even when "
+            "the persisted hourly window has not elapsed."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.once and args.loop:
         parser.error("--once and --loop are mutually exclusive")
@@ -162,10 +182,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--poll-seconds must be at least 5")
 
     run_once = args.once or not args.loop
+    force_public_collection = args.force_public_collection
     while True:
         heartbeat.write("starting", detail="autonomous paper operator pass started")
         try:
-            payload = _run_pass(settings=settings, worker=worker)
+            payload = _run_pass(
+                settings=settings,
+                worker=worker,
+                force_public_collection=force_public_collection,
+            )
         except (OSError, TypeError, ValueError, RuntimeError) as error:
             heartbeat.write("degraded", detail=str(error)[:1000])
             logger.exception("paper operator pass failed closed")
@@ -177,15 +202,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         else:
             state = str(payload["paper_execution"]["state"])
+            public_state = str(payload["public_live_information"]["state"])
             heartbeat.write(
                 "healthy" if payload["status"] == "operating" else "degraded",
                 cycle_key=str(payload["cycle"]["cycle_key"]),
                 detail=(
+                    f"public_collection={public_state}; "
                     f"cio_cycle={payload['cycle']['status']}; "
                     f"paper_execution={state}; mode={payload['execution_mode']}"
                 ),
             )
         print(json.dumps(payload, sort_keys=True))
+        force_public_collection = False
         if run_once:
             return 0
         time.sleep(poll_seconds)

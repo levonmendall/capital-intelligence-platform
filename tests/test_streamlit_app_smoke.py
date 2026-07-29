@@ -35,6 +35,12 @@ def test_all_four_streamlit_screens_render_in_clean_runtime(monkeypatch, tmp_pat
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL", "false")
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT", "false")
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE", "disabled")
+    # This smoke test validates deterministic rendering rather than external network
+    # availability. Dedicated runtime-collector tests cover the enabled collection path.
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED",
+        "false",
+    )
     monkeypatch.setenv(
         "CAPITAL_INTELLIGENCE_PAPER_TRADING_START_AT",
         "2999-01-01T00:00:00+00:00",
