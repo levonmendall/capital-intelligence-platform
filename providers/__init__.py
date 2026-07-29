@@ -44,6 +44,15 @@ from providers.crypto_venues import (
     build_kraken_spot_provider,
     load_crypto_venue_bindings,
 )
+from providers.databento import (
+    DatabentoBindingRegistry,
+    DatabentoInstrumentBinding,
+    DatabentoProvider,
+    DatabentoProviderError,
+    DatabentoRetrievalPolicy,
+    build_databento_provider,
+    load_databento_bindings,
+)
 from providers.fred import FREDRetrievalPolicy
 from providers.fred_cache import (
     FREDCache,
@@ -95,6 +104,12 @@ from providers.sec_edgar import (
     SECEdgarProvider,
     SECEdgarProviderError,
 )
+from providers.supplemental_quotes import (
+    SupplementalQuote,
+    SupplementalQuoteCrossCheck,
+    SupplementalQuoteError,
+    SupplementalQuoteProvider,
+)
 
 __all__ = [
     "CoinbaseExchangeProvider",
@@ -111,6 +126,11 @@ __all__ = [
     "CryptoVenueBinding",
     "CryptoVenueBindingRegistry",
     "CryptoVenueProviderError",
+    "DatabentoBindingRegistry",
+    "DatabentoInstrumentBinding",
+    "DatabentoProvider",
+    "DatabentoProviderError",
+    "DatabentoRetrievalPolicy",
     "FREDCache",
     "FREDCacheRecord",
     "FREDRetrievalPolicy",
@@ -145,6 +165,10 @@ __all__ = [
     "SECEdgarProvider",
     "SECEdgarProviderError",
     "SQLiteFreeProviderConnectionStore",
+    "SupplementalQuote",
+    "SupplementalQuoteCrossCheck",
+    "SupplementalQuoteError",
+    "SupplementalQuoteProvider",
     "TransportResponse",
     "build_coinbase_exchange_provider",
     "build_configured_candidate_screening_provider",
@@ -152,10 +176,12 @@ __all__ = [
     "build_configured_decision_information_provider",
     "build_configured_security_master_provider",
     "build_configured_universe_metrics_provider",
+    "build_databento_provider",
     "build_kraken_spot_provider",
     "fred_cache_key",
     "install_provider_environment_aliases",
     "load_crypto_venue_bindings",
+    "load_databento_bindings",
     "load_free_provider_catalog",
     "load_public_live_source_catalog",
     "normalize_provider_environment",
