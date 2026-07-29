@@ -1,6 +1,9 @@
 name: Align readiness tests with immediate paper access
 
 on:
+  push:
+    branches:
+      - policy/remove-paper-burn-in
   pull_request:
     branches:
       - main
@@ -10,7 +13,7 @@ permissions:
 
 jobs:
   align:
-    if: github.event.pull_request.head.ref == 'policy/remove-paper-burn-in' && github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check out policy branch
