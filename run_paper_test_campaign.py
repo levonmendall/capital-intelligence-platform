@@ -1,4 +1,4 @@
-"""Record and assess the controlled paper-test burn-in campaign."""
+"""Record and assess controlled paper-test launch-readiness evidence."""
 
 from __future__ import annotations
 

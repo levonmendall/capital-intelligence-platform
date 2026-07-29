@@ -40,7 +40,7 @@ The process bundle should include the governing specification, architecture, app
 - active investment-process freeze;
 - canonical product-test readiness report in `ready_for_controlled_paper_test` state;
 - exact paper-test campaign baseline;
-- satisfied multi-day burn-in and failure-campaign report;
+- satisfied launch-readiness and failure-scenario report;
 - passed isolated canonical recovery drill;
 - active exact production stage-binding approval; and
 - matching baseline, process, code, plan, binding, configuration, data-manifest, and evidence lineage.
@@ -121,7 +121,7 @@ This authority completes the repository-controlled approval mechanism. It does n
 - real credentials and approved data rights;
 - completed point-in-time backfills and certifications;
 - a reviewed production stage-binding document;
-- real elapsed burn-in days;
+- a completed launch-readiness cycle and required failure exercises;
 - completed failure exercises;
 - an actual encrypted backup and isolated restoration drill; and
 - named human signatories for the required governance roles.

@@ -1,9 +1,10 @@
-"""Immutable burn-in and failure-campaign evidence for controlled paper testing.
+"""Immutable launch-readiness and failure-scenario evidence.
 
-The authority records real completed operating days and isolated failure exercises
-against one exact code/process/configuration baseline.  It can prove that a
-baseline has accumulated the required evidence, but it cannot approve the
-baseline, authorize real money, or manufacture elapsed operating days.
+The authority records optional completed operating days and required isolated
+failure exercises against one exact code/process/configuration baseline. It can
+prove that a baseline has accumulated the required evidence, but it cannot
+approve the baseline or authorize real money. Elapsed operating days are not a
+prerequisite for controlled paper testing.
 """
 
 from __future__ import annotations
@@ -136,7 +137,7 @@ class PaperTestCampaignBaseline:
     stage_bindings_hash: str
     configuration_hash: str
     data_manifest_identifier: str
-    required_consecutive_days: int = 5
+    required_consecutive_days: int = 0
     required_failure_scenarios: tuple[FailureScenarioKind, ...] = (
         REQUIRED_FAILURE_SCENARIOS
     )
@@ -167,7 +168,7 @@ class PaperTestCampaignBaseline:
         object.__setattr__(
             self,
             "required_consecutive_days",
-            _positive_int(
+            _non_negative_int(
                 self.required_consecutive_days,
                 field_name="required_consecutive_days",
             ),
@@ -188,7 +189,7 @@ class PaperTestCampaignBaseline:
                 "controlled paper-test campaign must include every required failure scenario"
             )
         if self.development_open is not True:
-            raise ValueError("development must remain open during burn-in")
+            raise ValueError("development must remain open during launch-readiness testing")
         if self.schema_version != "paper-test-campaign-baseline.v1":
             raise ValueError("unsupported campaign baseline schema")
 
@@ -236,7 +237,7 @@ class PaperTestCampaignBaseline:
             configuration_hash=str(value["configuration_hash"]),
             data_manifest_identifier=str(value["data_manifest_identifier"]),
             required_consecutive_days=int(
-                value.get("required_consecutive_days", 5)
+                value.get("required_consecutive_days", 0)
             ),
             required_failure_scenarios=tuple(
                 FailureScenarioKind(str(item))
@@ -662,7 +663,7 @@ class PaperTestCampaignReport:
             if self.blockers or self.missing_scenarios or self.failed_scenarios:
                 raise ValueError("satisfied campaign cannot contain blockers")
             if self.consecutive_day_count < self.required_consecutive_days:
-                raise ValueError("satisfied campaign lacks required elapsed days")
+                raise ValueError("satisfied campaign lacks required operating-day evidence")
         if self.schema_version != "paper-test-campaign-report.v1":
             raise ValueError("unsupported campaign report schema")
 
@@ -1031,7 +1032,7 @@ class SQLitePaperTestCampaignStore:
 
 
 class PaperTestCampaignEvaluator:
-    """Assess elapsed days and failure evidence for one exact baseline."""
+    """Assess optional operating-day and required failure evidence."""
 
     def evaluate(
         self,
@@ -1085,9 +1086,12 @@ class PaperTestCampaignEvaluator:
             if item in latest_scenarios and latest_scenarios[item].passed
         )
         blockers: list[str] = []
-        if consecutive < baseline.required_consecutive_days:
+        if (
+            baseline.required_consecutive_days > 0
+            and consecutive < baseline.required_consecutive_days
+        ):
             blockers.append(
-                "multi-day burn-in has not accumulated the required consecutive real operating days"
+                "optional operating-day evidence has not reached the configured requirement"
             )
         if missing:
             blockers.append(

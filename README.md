@@ -30,7 +30,7 @@ The binding product and engineering contract is [GOVERNING_SPECIFICATION.md](GOV
 | Product surfaces | Today, Environment, Portfolio, and History |
 | Interface | Signature command-system design with dark mode as the preset and light mode as an alternate |
 | Execution | Research and paper only; no broker submission or live-money authority |
-| Readiness | Core architecture is implemented; controlled paper testing still requires production data, burn-in, resilience evidence, and formal governance approval |
+| Readiness | Core architecture is implemented; controlled paper testing still requires production data, launch-readiness evidence, resilience evidence, and formal governance approval |
 
 ## What the platform is
 
@@ -231,7 +231,7 @@ The project is **not yet approved as a production investment manager or for live
 - reviewed production stage bindings and licensed provider credentials;
 - complete production-grade point-in-time market coverage for every approved asset class;
 - verified backup and recovery coverage for every active authority;
-- successful multi-day operating burn-in;
+- a successful current launch-readiness cycle;
 - production-scale outage, corruption, takeover, recovery, and reconciliation exercises;
 - sufficient out-of-sample decisions across market regimes;
 - zero unresolved critical integrity or reconciliation failures; and
@@ -244,7 +244,7 @@ real_money_authorized = false
 performance_claims_permitted = false
 ```
 
-A running application, API, worker, or successful single-day cycle does not prove paper-test readiness.
+A running application, API, or worker alone does not prove paper-test readiness; the current cycle and all remaining evidence gates must pass.
 
 ---
 

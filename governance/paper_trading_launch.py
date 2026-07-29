@@ -1,10 +1,11 @@
-"""Govern sustained burn-in, launch authorization, and paper-only controls.
+"""Govern launch readiness, authorization, and paper-only controls.
 
 A successful unit or release test is not enough to start the controlled paper
-portfolio.  This authority requires an exact baseline to prove sustained live
-operation, point-in-time data integrity, realistic execution calibration,
-reconciliation, recovery, replay, and halt-control exercises.  Nothing in this
-module authorizes real money, broker connectivity, or performance claims.
+portfolio. This authority requires one current validated operating cycle for an
+exact baseline plus point-in-time data integrity, realistic execution
+calibration, reconciliation, recovery, replay, and halt-control exercises. It
+does not require an elapsed multi-day burn-in and does not authorize real money,
+broker connectivity, or performance claims.
 """
 
 from __future__ import annotations
@@ -104,9 +105,9 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
 class PaperTradingLaunchPolicy:
     """Versioned minimum acceptance policy for a controlled paper launch."""
 
-    version: str = "paper-trading-launch-policy.v1"
-    minimum_burn_in_days: int = 5
-    minimum_scheduled_cycles: int = 5
+    version: str = "paper-trading-launch-policy.v2"
+    minimum_burn_in_days: int = 0
+    minimum_scheduled_cycles: int = 1
     minimum_successful_cycle_ratio: float = 1.0
     minimum_point_in_time_cycle_ratio: float = 1.0
     minimum_complete_universe_cycle_ratio: float = 1.0
@@ -132,8 +133,12 @@ class PaperTradingLaunchPolicy:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "version", _text(self.version, field_name="version"))
-        for field_name in (
+        object.__setattr__(
+            self,
             "minimum_burn_in_days",
+            _count(self.minimum_burn_in_days, field_name="minimum_burn_in_days"),
+        )
+        for field_name in (
             "minimum_scheduled_cycles",
             "minimum_shadow_execution_scenarios",
             "minimum_backup_restore_exercises",
@@ -656,7 +661,12 @@ class PaperTradingLaunchEvaluator:
             if actual > allowed:
                 blockers.append(f"{name}: {actual} > allowed {allowed}")
 
-        minimum("burn_in_days", evidence.burn_in_days, policy.minimum_burn_in_days)
+        if policy.minimum_burn_in_days > 0:
+            minimum(
+                "burn_in_days",
+                evidence.burn_in_days,
+                policy.minimum_burn_in_days,
+            )
         minimum("scheduled_cycles", evidence.scheduled_cycles, policy.minimum_scheduled_cycles)
         minimum(
             "successful_cycle_ratio",

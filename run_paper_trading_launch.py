@@ -1,4 +1,4 @@
-"""Evaluate and persist sustained paper-trading launch evidence."""
+"""Evaluate and persist current paper-trading launch evidence."""
 
 from __future__ import annotations
 

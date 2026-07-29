@@ -24,12 +24,12 @@ Operational launch certification can be ready only when evidence confirms:
 - no live broker credentials; and
 - paper-only disclosures on every active user surface.
 
-## Minimum burn-in policy
+## Immediate launch-readiness policy
 
 `config/paper_trading_launch_policy.json` currently requires:
 
-- at least five calendar days and five scheduled CIO cycles;
-- every scheduled cycle successful;
+- no mandatory elapsed-day burn-in;
+- at least one current scheduled CIO cycle, completed successfully;
 - every cycle point-in-time valid and based on a complete published universe;
 - at least 99% successful checks across required live providers;
 - at least 12 shadow execution scenarios, all reconciled;
@@ -121,7 +121,7 @@ python run_test_readiness.py \
   --require-ready
 ```
 
-The product-readiness command cannot report the canonical baseline ready without sustained launch certification. Product readiness still does not grant human entry or activate the runtime switch.
+The product-readiness command cannot report the canonical baseline ready without current launch certification. Product readiness still does not grant human entry or activate the runtime switch.
 
 ## Execution enforcement
 
@@ -158,6 +158,6 @@ This implementation creates the final internal launch controls. It does not fabr
 - reviewed production bindings and credentials;
 - completed historical backfills and reconciliation;
 - execution-price and cost calibration against representative market conditions;
-- the five-day live burn-in and required exercises;
+- the required launch-readiness cycle and operating exercises;
 - a passing encrypted recovery drill; and
 - human approval of the exact eligibility package and named cohort.
