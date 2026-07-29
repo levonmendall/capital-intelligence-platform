@@ -63,6 +63,15 @@ def test_render_environment_uses_persistent_state_and_internal_secrets(tmp_path)
     assert prepared["CAPITAL_INTELLIGENCE_CIO_REPORT_DIRECTORY"] == str(
         tmp_path / "cio_reports"
     )
+    assert prepared["CAPITAL_INTELLIGENCE_HISTORICAL_DATA_DIR"] == str(
+        tmp_path / "historical_replay"
+    )
+    assert prepared["CAPITAL_INTELLIGENCE_HISTORICAL_CONFIG"] == (
+        "config/historical_replay_free_sources.json"
+    )
+    assert prepared["CAPITAL_INTELLIGENCE_HISTORICAL_INTERVAL_SECONDS"] == "86400"
+    assert prepared["CAPITAL_INTELLIGENCE_HISTORICAL_MAX_RECORDS_PER_SOURCE"] == "100000"
+    assert (tmp_path / "historical_replay").is_dir()
     assert prepared["CAPITAL_INTELLIGENCE_ALLOWED_ORIGINS"] == (
         "https://capital-intelligence.onrender.com"
     )
@@ -96,6 +105,7 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
     assert set(by_name) == {
         "api",
         "cio-paper-operator",
+        "historical-backfill",
         "encrypted-backup",
         "streamlit",
     }
@@ -118,6 +128,13 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
         "run_autonomous_paper_operator.py",
         "--loop",
     )
+    assert by_name["historical-backfill"].command == (
+        "python",
+        "run_historical_backfill.py",
+        "--loop",
+    )
+    assert by_name["historical-backfill"].critical is False
+    assert by_name["historical-backfill"].restart_delay_seconds == 300
     assert by_name["encrypted-backup"].command == (
         "python",
         "run_backup.py",
@@ -130,7 +147,7 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
     assert all(
         process.critical
         for process in processes
-        if process.name != "encrypted-backup"
+        if process.name not in {"historical-backfill", "encrypted-backup"}
     )
 
 

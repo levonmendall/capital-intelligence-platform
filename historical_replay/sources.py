@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import date
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .http import HttpClient
-from .models import SourceResult
+from .models import HistoricalRecord, SourceResult
 
 
 class HistoricalSource(ABC):
@@ -17,12 +17,37 @@ class HistoricalSource(ABC):
     def collect(self, start: date, end: date, *, max_records: int) -> SourceResult:
         raise NotImplementedError
 
+    def _degraded(
+        self,
+        records: Sequence[HistoricalRecord],
+        error: Exception,
+    ) -> SourceResult:
+        """Preserve valid partial evidence while reporting a credential-safe outage."""
+
+        warning = f"collection_error:{type(error).__name__}"
+        if records:
+            return SourceResult(
+                self.name,
+                "degraded",
+                tuple(records),
+                warnings=(warning,),
+            )
+        return SourceResult(
+            self.name,
+            "unavailable",
+            blockers=(warning,),
+        )
+
 
 def build_sources(config: Mapping[str, Any], *, user_agent: str) -> tuple[HistoricalSource, ...]:
     from .sources_market import CoinbaseSource, FredSource, StooqSource
     from .sources_public import (
-        CftcSource, FederalRegisterSource, GdeltSource, SecCompanyFactsSource,
-        TreasuryFiscalDataSource, WorldBankSource,
+        CftcSource,
+        FederalRegisterSource,
+        GdeltSource,
+        SecCompanyFactsSource,
+        TreasuryFiscalDataSource,
+        WorldBankSource,
     )
 
     client = HttpClient(user_agent=user_agent)

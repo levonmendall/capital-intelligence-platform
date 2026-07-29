@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from historical_replay.backfill import HistoricalBackfillCoordinator
 from historical_replay.models import HistoricalRecord, SourceResult
 from historical_replay.replay import ShadowReplayEngine, replay_dates
+from historical_replay.sources_market import CoinbaseSource
 from historical_replay.store import HistoricalStore
 
 
@@ -57,6 +60,30 @@ class FixtureSource:
         return SourceResult(self.name, "available", (record(start.isoformat(), 100),))
 
 
+class RaisingSource:
+    name = "raising"
+
+    def collect(self, start, end, *, max_records):
+        raise RuntimeError("provider unavailable")
+
+
+class FailingClient:
+    def get(self, *args, **kwargs):
+        raise TimeoutError("temporary outage")
+
+
+def test_source_outage_returns_credential_safe_unavailable_result():
+    result = CoinbaseSource(FailingClient(), ("BTC-USD",)).collect(
+        date(2020, 1, 1),
+        date(2020, 1, 2),
+        max_records=100,
+    )
+    assert result.state == "unavailable"
+    assert result.records == ()
+    assert result.blockers == ("collection_error:TimeoutError",)
+    assert "temporary outage" not in str(result)
+
+
 def test_coordinator_persists_report_and_checkpoint(tmp_path):
     store = HistoricalStore(tmp_path)
     report = HistoricalBackfillCoordinator(store=store, sources=(FixtureSource(),)).run(
@@ -65,6 +92,30 @@ def test_coordinator_persists_report_and_checkpoint(tmp_path):
     assert report.records_written == 1
     assert store.read_checkpoint("fixture")["completed_through"] == "2020-01-02"
     assert (tmp_path / "manifests" / "latest-backfill.json").exists()
+
+
+def test_coordinator_isolates_failed_source_and_continues(tmp_path):
+    store = HistoricalStore(tmp_path)
+    report = HistoricalBackfillCoordinator(
+        store=store,
+        sources=(RaisingSource(), FixtureSource()),
+    ).run(start=date(2020, 1, 1), end=date(2020, 1, 2))
+    assert report.state == "failed"
+    assert report.records_written == 1
+    assert [item.state for item in report.source_results] == ["failed", "available"]
+    assert report.source_results[0].blockers == ("collector_exception:RuntimeError",)
+
+
+def test_coordinator_rejects_nonpositive_source_limit(tmp_path):
+    with pytest.raises(ValueError, match="must be positive"):
+        HistoricalBackfillCoordinator(
+            store=HistoricalStore(tmp_path),
+            sources=(FixtureSource(),),
+        ).run(
+            start=date(2020, 1, 1),
+            end=date(2020, 1, 2),
+            max_records_per_source=0,
+        )
 
 
 def test_monthly_and_weekly_replay_dates_are_bounded():

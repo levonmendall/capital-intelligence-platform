@@ -2,15 +2,16 @@
 
 Render persistent disks attach to a single service instance. This supervisor therefore
 runs the authenticated Streamlit console, read-only API, autonomous CIO/paper operator,
-and encrypted backup loop as child processes that share one durable SQLite state root.
+historical backfill loop, and encrypted backup loop as child processes that share one
+durable SQLite and research-data state root.
 
 The supervisor is intentionally fail-closed:
 
 * initialization must succeed before any child starts;
 * the public web, API, and CIO operator are critical processes;
 * loss of a critical process terminates the service so Render restarts it;
-* the backup loop is restarted with bounded delay without taking the trading console
-  down during a transient backup error;
+* historical collection and backup loops are restarted with bounded delay without
+  taking the trading console down during a transient provider or backup error;
 * SIGTERM is forwarded to every child for an orderly deployment shutdown; and
 * no live-money authority is introduced.
 """
@@ -89,6 +90,7 @@ def prepare_render_environment(
     state_root.mkdir(parents=True, exist_ok=True)
     (state_root / "backups").mkdir(parents=True, exist_ok=True)
     (state_root / "cio_reports").mkdir(parents=True, exist_ok=True)
+    (state_root / "historical_replay").mkdir(parents=True, exist_ok=True)
 
     values.setdefault("CAPITAL_INTELLIGENCE_DATA_DIR", str(state_root))
     values.setdefault(
@@ -98,6 +100,22 @@ def prepare_render_environment(
     values.setdefault(
         "CAPITAL_INTELLIGENCE_CIO_REPORT_DIRECTORY",
         str(state_root / "cio_reports"),
+    )
+    values.setdefault(
+        "CAPITAL_INTELLIGENCE_HISTORICAL_DATA_DIR",
+        str(state_root / "historical_replay"),
+    )
+    values.setdefault(
+        "CAPITAL_INTELLIGENCE_HISTORICAL_CONFIG",
+        "config/historical_replay_free_sources.json",
+    )
+    values.setdefault(
+        "CAPITAL_INTELLIGENCE_HISTORICAL_INTERVAL_SECONDS",
+        "86400",
+    )
+    values.setdefault(
+        "CAPITAL_INTELLIGENCE_HISTORICAL_MAX_RECORDS_PER_SOURCE",
+        "100000",
     )
     values.setdefault(
         "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_REPORT",
@@ -201,6 +219,12 @@ def managed_processes(
         ManagedProcess(
             name="cio-paper-operator",
             command=(python, "run_autonomous_paper_operator.py", "--loop"),
+        ),
+        ManagedProcess(
+            name="historical-backfill",
+            command=(python, "run_historical_backfill.py", "--loop"),
+            critical=False,
+            restart_delay_seconds=300,
         ),
         ManagedProcess(
             name="encrypted-backup",
