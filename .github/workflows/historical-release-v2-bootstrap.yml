@@ -1,0 +1,59 @@
+name: Install Ten-Year Historical Replay
+
+on:
+  push:
+    branches:
+      - agent/ten-year-historical-replay
+    paths:
+      - ".github/workflows/historical-release-v2-bootstrap.yml"
+      - ".historical-release-v2/**"
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/ten-year-historical-replay
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Expand, verify, and validate release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .historical-release-v2/part*.b64 | base64 --decode > /tmp/historical-v2.tar.xz
+          echo "eba1ffa69d1d05d7cfcbc8118fa2953afee74a7e727563b04e63990436373a9e  /tmp/historical-v2.tar.xz" | sha256sum --check --strict
+          xz --test /tmp/historical-v2.tar.xz
+          tar -xJf /tmp/historical-v2.tar.xz
+          rm -rf historical_replay/__pycache__
+          find historical_replay -name '*.pyc' -delete
+          python -m pytest -q tests/test_historical_replay.py
+          python -m compileall -q historical_replay run_historical_backfill.py run_historical_shadow_replay.py
+
+      - name: Publish source files to branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .historical-release-v2
+          rm -f .github/workflows/historical-release-v2-bootstrap.yml
+          find historical_replay -name '__pycache__' -type d -prune -exec rm -rf {} +
+          find historical_replay -name '*.pyc' -delete
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add ten-year free-source historical backfill and replay"
+          git push origin HEAD:agent/ten-year-historical-replay
