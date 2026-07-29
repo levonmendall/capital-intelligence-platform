@@ -138,8 +138,6 @@ jobs:
             --report canonical-historical-replay.json
       - name: Capture credential-free completion metrics
         id: metrics
-        env:
-          GITHUB_OUTPUT_FILE: ${{ github.output }}
         run: |
           python - <<'PY'
           import json
