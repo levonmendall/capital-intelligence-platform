@@ -11,6 +11,7 @@ on:
       - "config/historical_replay_free_sources.json"
       - "tests/test_historical_replay.py"
       - "tests/test_canonical_historical_replay.py"
+      - "tests/test_historical_certification_workflow.py"
       - ".github/workflows/historical-backfill.yml"
   push:
     branches: [main]
@@ -28,12 +29,104 @@ on:
 permissions:
   contents: read
   statuses: write
+  issues: write
 
 concurrency:
   group: historical-backfill-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CERTIFICATION_ISSUE_NUMBER: "208"
+
 jobs:
+  announce:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Publish running certification state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          from datetime import datetime, timezone
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          sha = os.environ["TARGET_SHA"]
+          run_id = os.environ["GITHUB_RUN_ID"]
+          issue_number = os.environ["CERTIFICATION_ISSUE_NUMBER"]
+          run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
+          now = datetime.now(timezone.utc).isoformat()
+          body = f"""## Current certification state
+
+          **State:** running
+
+          - **Commit:** `{sha}`
+          - **Workflow run:** [#{run_id}]({run_url})
+          - **Started at:** `{now}`
+          - **Mode:** ten-year public-source backfill plus monthly Canonical CIO replay
+
+          The workflow is collecting the bounded archive and will replace this entry with exact credential-free counts when it completes.
+
+          ## Permanent safety boundary
+
+          - Research only: **true**
+          - Execution authorized: **false**
+          - Paper execution authorized: **false**
+          - Real money authorized: **false**
+          - Policy promotion authorized: **false**
+          - Performance claims authorized: **false**
+          """
+
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "Content-Type": "application/json",
+              "User-Agent": "capital-intelligence-canonical-replay",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          issue_request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/issues/{issue_number}",
+              data=json.dumps({"body": body}).encode("utf-8"),
+              method="PATCH",
+              headers=headers,
+          )
+          with urllib.request.urlopen(issue_request, timeout=30) as response:
+              if response.status != 200:
+                  raise RuntimeError(
+                      f"unexpected issue update response: {response.status}"
+                  )
+
+          status_payload = json.dumps(
+              {
+                  "state": "pending",
+                  "context": "historical-replay/canonical-cio",
+                  "description": "Ten-year backfill and Canonical CIO replay are running",
+                  "target_url": run_url,
+              }
+          ).encode("utf-8")
+          status_request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/statuses/{sha}",
+              data=status_payload,
+              method="POST",
+              headers=headers,
+          )
+          try:
+              with urllib.request.urlopen(status_request, timeout=30) as response:
+                  if response.status != 201:
+                      raise RuntimeError(
+                          f"unexpected pending-status response: {response.status}"
+                      )
+          except (urllib.error.HTTPError, urllib.error.URLError, RuntimeError) as error:
+              print(f"commit status publication warning: {error}")
+          PY
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -53,7 +146,8 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_historical_replay.py \
-            tests/test_canonical_historical_replay.py
+            tests/test_canonical_historical_replay.py \
+            tests/test_historical_certification_workflow.py
       - name: Compile historical replay commands
         run: |
           python -m compileall -q \
@@ -64,7 +158,7 @@ jobs:
 
   backfill:
     if: github.event_name != 'pull_request'
-    needs: validate
+    needs: [announce, validate]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     outputs:
@@ -73,6 +167,11 @@ jobs:
       canonical_invoked: ${{ steps.metrics.outputs.canonical_invoked }}
       blocked_cutoffs: ${{ steps.metrics.outputs.blocked_cutoffs }}
       total_cutoffs: ${{ steps.metrics.outputs.total_cutoffs }}
+      relevant_records: ${{ steps.metrics.outputs.relevant_records }}
+      price_records: ${{ steps.metrics.outputs.price_records }}
+      macro_records: ${{ steps.metrics.outputs.macro_records }}
+      archive_scans: ${{ steps.metrics.outputs.archive_scans }}
+      runtime_version: ${{ steps.metrics.outputs.runtime_version }}
     env:
       FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
       SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
@@ -82,42 +181,6 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - name: Publish running status
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          payload = json.dumps(
-              {
-                  "state": "pending",
-                  "context": "historical-replay/canonical-cio",
-                  "description": "Ten-year backfill and Canonical CIO replay are running",
-              }
-          ).encode("utf-8")
-          request = urllib.request.Request(
-              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['TARGET_SHA']}",
-              data=payload,
-              method="POST",
-              headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
-                  "Content-Type": "application/json",
-                  "User-Agent": "capital-intelligence-canonical-replay",
-                  "X-GitHub-Api-Version": "2022-11-28",
-              },
-          )
-          with urllib.request.urlopen(request, timeout=30) as response:
-              if response.status != 201:
-                  raise RuntimeError(
-                      f"unexpected pending-status response: {response.status}"
-                  )
-          PY
       - name: Install locked runtime dependencies
         run: python -m pip install --require-hashes -r requirements.lock
       - name: Backfill the governed ten-year public-source window
@@ -158,6 +221,11 @@ jobs:
               ),
               "blocked_cutoffs": int(canonical.get("blocked_cutoff_count", 0)),
               "total_cutoffs": int(canonical.get("decision_cutoff_count", 0)),
+              "relevant_records": int(canonical.get("relevant_record_count", 0)),
+              "price_records": int(canonical.get("price_record_count", 0)),
+              "macro_records": int(canonical.get("macro_record_count", 0)),
+              "archive_scans": int(canonical.get("archive_scan_count", 0)),
+              "runtime_version": str(canonical.get("runtime_version", "unknown")),
           }
           output = Path(os.environ["GITHUB_OUTPUT"])
           with output.open("a", encoding="utf-8") as stream:
@@ -177,63 +245,139 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-  publish-status:
+  publish-certification:
     if: always() && github.event_name != 'pull_request'
-    needs: [validate, backfill]
+    needs: [announce, validate, backfill]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       GH_TOKEN: ${{ github.token }}
       TARGET_SHA: ${{ github.sha }}
+      VALIDATION_RESULT: ${{ needs.validate.result }}
       BACKFILL_RESULT: ${{ needs.backfill.result }}
       RECORDS_WRITTEN: ${{ needs.backfill.outputs.records_written }}
       STRICT_RECORDS: ${{ needs.backfill.outputs.strict_records }}
       CANONICAL_INVOKED: ${{ needs.backfill.outputs.canonical_invoked }}
       BLOCKED_CUTOFFS: ${{ needs.backfill.outputs.blocked_cutoffs }}
       TOTAL_CUTOFFS: ${{ needs.backfill.outputs.total_cutoffs }}
+      RELEVANT_RECORDS: ${{ needs.backfill.outputs.relevant_records }}
+      PRICE_RECORDS: ${{ needs.backfill.outputs.price_records }}
+      MACRO_RECORDS: ${{ needs.backfill.outputs.macro_records }}
+      ARCHIVE_SCANS: ${{ needs.backfill.outputs.archive_scans }}
+      RUNTIME_VERSION: ${{ needs.backfill.outputs.runtime_version }}
     steps:
-      - name: Publish machine-verifiable canonical replay status
-        shell: bash
+      - name: Publish durable certification ledger
         run: |
           python - <<'PY'
           import json
           import os
+          import urllib.error
           import urllib.request
+          from datetime import datetime, timezone
 
-          result = os.environ["BACKFILL_RESULT"]
-          state = "success" if result == "success" else "failure"
-          if state == "success":
+          repository = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          sha = os.environ["TARGET_SHA"]
+          run_id = os.environ["GITHUB_RUN_ID"]
+          issue_number = os.environ["CERTIFICATION_ISSUE_NUMBER"]
+          run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
+          now = datetime.now(timezone.utc).isoformat()
+          validation = os.environ["VALIDATION_RESULT"]
+          backfill = os.environ["BACKFILL_RESULT"]
+          success = validation == "success" and backfill == "success"
+          state = "completed" if success else "failed"
+
+          def value(name: str) -> str:
+              return os.environ.get(name, "") or "unavailable"
+
+          body = f"""## Current certification state
+
+          **State:** {state}
+
+          - **Commit:** `{sha}`
+          - **Workflow run:** [#{run_id}]({run_url})
+          - **Completed at:** `{now}`
+          - **Validation result:** `{validation}`
+          - **Backfill/replay result:** `{backfill}`
+
+          ## Archive certification
+
+          - Records written: **{value('RECORDS_WRITTEN')}**
+          - Strict-replay records: **{value('STRICT_RECORDS')}**
+          - Relevant replay records: **{value('RELEVANT_RECORDS')}**
+          - Price records: **{value('PRICE_RECORDS')}**
+          - Macro records: **{value('MACRO_RECORDS')}**
+
+          ## Canonical CIO replay
+
+          - Canonical cutoffs invoked: **{value('CANONICAL_INVOKED')} / {value('TOTAL_CUTOFFS')}**
+          - Blocked cutoffs: **{value('BLOCKED_CUTOFFS')}**
+          - Archive scans: **{value('ARCHIVE_SCANS')}**
+          - Runtime version: `{value('RUNTIME_VERSION')}`
+
+          ## Permanent safety boundary
+
+          - Research only: **true**
+          - Execution authorized: **false**
+          - Paper execution authorized: **false**
+          - Real money authorized: **false**
+          - Policy promotion authorized: **false**
+          - Performance claims authorized: **false**
+
+          The complete compressed archive and reports are retained in the protected workflow artifact. Provider payloads, credentials, simulated returns, and security-sensitive details are not published here.
+          """
+
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "Content-Type": "application/json",
+              "User-Agent": "capital-intelligence-canonical-replay",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          issue_request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/issues/{issue_number}",
+              data=json.dumps({"body": body}).encode("utf-8"),
+              method="PATCH",
+              headers=headers,
+          )
+          with urllib.request.urlopen(issue_request, timeout=30) as response:
+              if response.status != 200:
+                  raise RuntimeError(
+                      f"unexpected issue update response: {response.status}"
+                  )
+
+          if success:
               description = (
-                  f"records={os.environ['RECORDS_WRITTEN']} "
-                  f"strict={os.environ['STRICT_RECORDS']} "
-                  f"canonical={os.environ['CANONICAL_INVOKED']}/"
-                  f"{os.environ['TOTAL_CUTOFFS']} "
-                  f"blocked={os.environ['BLOCKED_CUTOFFS']}"
+                  f"records={value('RECORDS_WRITTEN')} "
+                  f"strict={value('STRICT_RECORDS')} "
+                  f"canonical={value('CANONICAL_INVOKED')}/{value('TOTAL_CUTOFFS')} "
+                  f"blocked={value('BLOCKED_CUTOFFS')} scans={value('ARCHIVE_SCANS')}"
               )
           else:
-              description = f"Historical learning did not complete: {result}"
-          payload = json.dumps(
+              description = (
+                  f"Historical certification failed: validate={validation} "
+                  f"backfill={backfill}"
+              )
+          status_payload = json.dumps(
               {
-                  "state": state,
+                  "state": "success" if success else "failure",
                   "context": "historical-replay/canonical-cio",
                   "description": description[:140],
+                  "target_url": run_url,
               }
           ).encode("utf-8")
-          request = urllib.request.Request(
-              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['TARGET_SHA']}",
-              data=payload,
+          status_request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/statuses/{sha}",
+              data=status_payload,
               method="POST",
-              headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
-                  "Content-Type": "application/json",
-                  "User-Agent": "capital-intelligence-canonical-replay",
-                  "X-GitHub-Api-Version": "2022-11-28",
-              },
+              headers=headers,
           )
-          with urllib.request.urlopen(request, timeout=30) as response:
-              if response.status != 201:
-                  raise RuntimeError(
-                      f"unexpected final-status response: {response.status}"
-                  )
+          try:
+              with urllib.request.urlopen(status_request, timeout=30) as response:
+                  if response.status != 201:
+                      raise RuntimeError(
+                          f"unexpected final-status response: {response.status}"
+                      )
+          except (urllib.error.HTTPError, urllib.error.URLError, RuntimeError) as error:
+              print(f"commit status publication warning: {error}")
           PY
