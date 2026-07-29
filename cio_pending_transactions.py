@@ -18,6 +18,13 @@ from zoneinfo import ZoneInfo
 
 DEFAULT_PAPER_TRADING_START_AT = datetime(2026, 7, 29, 13, 30, tzinfo=timezone.utc)
 DEFAULT_REPORT_TIMEZONE = "America/Los_Angeles"
+_GOVERNED_NO_ACTION_STATUSES = frozenset(
+    {
+        "no_superior_opportunity",
+        "insufficient_evidence",
+        "implementation_blocked",
+    }
+)
 
 
 def _aware_timestamp(value: str, *, field_name: str) -> datetime:
@@ -146,6 +153,23 @@ def _transactions(construction: Mapping[str, Any] | None) -> list[dict[str, obje
     return rows
 
 
+def _governed_no_action_briefing(
+    briefing: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(briefing, Mapping):
+        return False
+    identifier = str(briefing.get("identifier", "")).strip()
+    as_of = str(briefing.get("as_of", "")).strip()
+    status = str(briefing.get("status", "")).strip().lower()
+    portfolio_decision = str(briefing.get("portfolio_decision", "")).strip()
+    return bool(
+        identifier
+        and as_of
+        and portfolio_decision
+        and status in _GOVERNED_NO_ACTION_STATUSES
+    )
+
+
 def _semantic_fingerprint(report: Mapping[str, Any]) -> str:
     excluded = {"generated_at", "report_fingerprint", "json_path", "markdown_path"}
     payload = {key: value for key, value in report.items() if key not in excluded}
@@ -192,6 +216,9 @@ def build_pending_transaction_report(
     elif isinstance(construction, Mapping):
         report_state = "no_transaction_recommended"
         summary = "The CIO construction currently recommends no portfolio transaction."
+    elif _governed_no_action_briefing(briefing):
+        report_state = "no_transaction_recommended"
+        summary = str(briefing.get("portfolio_decision", "")).strip()
     else:
         report_state = "awaiting_cio_construction"
         summary = "No complete canonical CIO construction is available yet."
