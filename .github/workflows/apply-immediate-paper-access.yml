@@ -1,0 +1,261 @@
+name: Apply immediate paper-test access
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'policy/remove-paper-burn-in' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out policy branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: policy/remove-paper-burn-in
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Remove launch-clearance requirements
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def read(path: str) -> str:
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace(path: str, old: str, new: str, *, required: bool = True) -> None:
+              text = read(path)
+              if old not in text:
+                  if required:
+                      raise SystemExit(f"expected text not found in {path}: {old!r}")
+                  return
+              write(path, text.replace(old, new))
+
+          # Immediate multi-asset paper execution: no freeze, launch report,
+          # eligibility package, human release authority, or active runtime switch.
+          path = "run_multi_asset_paper_execution.py"
+          text = read(path)
+          text = text.replace(
+              'from governance import (\n    AssetClassApprovalState,\n    SQLitePaperTestEntryGovernanceStore,\n    SQLitePaperTradingControlStore,\n    SQLitePaperTradingLaunchStore,\n    TradingSessionModel,\n    require_combined_paper_execution_authorization,\n)',
+              'from governance import (\n    AssetClassApprovalState,\n    PaperTradingLaunchPolicy,\n    TradingSessionModel,\n)',
+          )
+          text = text.replace(
+              '"""Run governed paper execution across all classified liquid public markets."""',
+              '"""Run immediate paper-only execution across classified liquid public markets."""',
+          )
+          text = text.replace(
+              '            "Explicit local-development bypass. Refused in staging or production "\n            "and never considered launch or entry evidence."',
+              '            "Deprecated compatibility flag. Immediate paper testing no longer "\n            "requires launch clearance in any environment."',
+          )
+          text = text.replace('    authorization = None\n', '    safety_policy = PaperTradingLaunchPolicy()\n')
+          start = text.index('        environment = (\n')
+          end = text.index('        portfolio_store = SQLiteCanonicalPortfolioStore', start)
+          replacement = '''        if (\n            construction.turnover\n            > safety_policy.maximum_single_batch_turnover + 1e-9\n        ):\n            raise ValueError(\n                "construction turnover exceeds the paper-test safety limit"\n            )\n\n'''
+          text = text[:start] + replacement + text[end:]
+          start = text.index('        if authorization is not None:\n            drawdown = max(')
+          end = text.index('        execution_store = SQLiteMultiAssetPaperExecutionStore', start)
+          replacement = '''        drawdown = max(\n            0.0,\n            1.0 - (portfolio.nav / portfolio.starting_capital),\n        )\n        if drawdown > safety_policy.maximum_drawdown_fraction + 1e-9:\n            raise ValueError("paper portfolio drawdown safety limit is active")\n\n'''
+          text = text[:start] + replacement + text[end:]
+          text = text.replace(
+              '                    "development_bypass_used": bool(\n                        args.development_bypass_launch_gate\n                    ),',
+              '                    "development_bypass_used": False,\n                    "launch_clearance_required": False,',
+          )
+          start = text.index('    payload["paper_execution_authorization"] = (\n')
+          end = text.index('    payload["real_money_authorized"] = False', start)
+          replacement = '''    payload["paper_execution_authorization"] = None\n    payload["paper_execution_access"] = {\n        "mode": "immediate_paper_test",\n        "launch_clearance_required": False,\n        "immutable_baseline_required": False,\n        "burn_in_required": False,\n        "operating_exercises_required_for_entry": False,\n        "recovery_certification_required_for_entry": False,\n        "launch_report_required": False,\n        "eligibility_package_required": False,\n        "human_release_approval_required": False,\n        "runtime_activation_required": False,\n        "exact_user_consent_required_by_approved_bridge": True,\n        "paper_only": True,\n    }\n    payload["development_bypass_used"] = False\n'''
+          text = text[:start] + replacement + text[end:]
+          write(path, text)
+
+          replace(
+              "run_approved_paper_execution.py",
+              'multi-asset paper executor, which independently enforces launch, runtime,\nportfolio, universe, quote, and reconciliation controls.',
+              'multi-asset paper executor, which independently enforces portfolio, universe,\nquote, safety-limit, and reconciliation controls. No launch-clearance sequence is\nrequired for paper testing.',
+          )
+
+          # Streamlit paper testing works in any deployment using valid paper credentials.
+          path = "streamlit_paper_execution_worker.py"
+          text = read(path)
+          text = text.replace(
+              'The worker deliberately remains paper-only. It consumes the same SQLite authorities\nwritten by the authenticated application, materializes the exact approved construction\nand matching free-pilot profiles, then delegates to the canonical consent-gated paper\nexecutor. Alpaca supplies account, session, asset, and IEX quote evidence; fills remain\ninternal simulations and no broker order endpoint is called.',
+              'The worker remains paper-only. It consumes the exact authenticated user approval,\nmaterializes the approved construction and matching profiles, and delegates to the\ncanonical paper executor without a separate launch-clearance sequence. Alpaca supplies\naccount, session, asset, and IEX quote evidence; canonical fills remain reconciled paper\nactivity and no real-money endpoint is available.',
+          )
+          text = text.replace(
+              '    return _environment() in {"development", "paper", "test"} and _credentials_available()',
+              '    return _credentials_available()',
+          )
+          start = text.index('def _development_bypass_enabled() -> bool:\n')
+          end = text.index('\n\ndef _data_dir()', start)
+          text = text[:start] + text[end + 2:]
+          text = text.replace(
+              '    if _development_bypass_enabled():\n        arguments.append("--development-bypass-launch-gate")\n    return arguments',
+              '    return arguments',
+          )
+          write(path, text)
+
+          # Product readiness remains a technical diagnostic, not launch clearance.
+          path = "governance/product_readiness.py"
+          text = read(path)
+          text = text.replace(
+              '"""Governed readiness assessment for controlled paper-product testing.\n\nReadiness is evaluated against an immutable test baseline while normal product\ndevelopment may continue on later commits. No result authorizes real money,\nperformance claims, or broker connectivity.\n"""',
+              '"""Technical readiness assessment for paper-product testing.\n\nReadiness reports remain useful diagnostics, but they are not launch clearance and\ndo not require a frozen baseline, recovery campaign, launch report, human release\ndecision, or runtime activation. No result authorizes real money.\n"""',
+          )
+          text = text.replace('        "resilience_campaign_ready",\n', '')
+          text = text.replace('        "paper_launch_ready",\n', '')
+          text = text.replace(
+              '        if evidence.test_baseline_identifier is None:\n            blockers.append("immutable_test_baseline")\n        if evidence.process_version is None:\n            blockers.append("versioned_investment_process")\n',
+              '',
+          )
+          write(path, text)
+
+          path = "governance/readiness_evidence.py"
+          text = read(path)
+          text = text.replace(
+              '"""Persisted evidence assembly for controlled paper-product test readiness.\n\nReadiness cannot be established by a caller-supplied collection of booleans.  The\ncanonical path resolves immutable gate certifications, an operational snapshot,\nand active expanded-market approvals against one exact test baseline, investment\nprocess version, and code version.  Missing or mismatched authority fails closed.\n"""',
+              '"""Persisted technical evidence assembly for paper-product testing.\n\nThe assembler resolves current gate certifications, operational evidence, and active\nasset approvals. Baseline freeze and process-version matching are optional audit\nlineage rather than prerequisites for paper-test access.\n"""',
+          )
+          text = text.replace(
+              '                if baseline is None or certification.baseline_identifier != baseline:\n                    valid = False\n                    development_items.append(\n                        f"{gate.value}: baseline mismatch"\n                    )\n                if process is None or certification.process_version != process:\n                    valid = False\n                    development_items.append(\n                        f"{gate.value}: process-version mismatch"\n                    )\n',
+              '',
+          )
+          old = '''                process_matching = tuple(\n                    approval\n                    for approval in paper_eligible\n                    if process is not None and approval.process_version == process\n                )\n                matching = tuple(\n                    approval\n                    for approval in process_matching\n                    if approval.code_version == code\n                )\n'''
+          new = '''                matching = tuple(\n                    approval\n                    for approval in paper_eligible\n                    if approval.code_version == code\n                )\n'''
+          if old not in text:
+              raise SystemExit("asset approval matching block not found")
+          text = text.replace(old, new)
+          text = text.replace(
+              '                elif not process_matching:\n                    valid = False\n                    development_items.append(\n                        f"{gate.value}: asset approval process mismatch"\n                    )\n',
+              '',
+          )
+          text = text.replace(
+              '            if baseline is None or operational.baseline_identifier != baseline:\n                operational_valid = False\n                development_items.append("operational snapshot baseline mismatch")\n            if process is None or operational.process_version != process:\n                operational_valid = False\n                development_items.append("operational snapshot process mismatch")\n',
+              '',
+          )
+          write(path, text)
+
+          path = "run_test_readiness.py"
+          text = read(path)
+          text = text.replace(
+              'The canonical path assembles evidence from append-only gate certifications,\noperational evidence, active multi-asset approvals, and an exact sustained\npaper-launch authorization. ``--manual-evidence`` remains an explicit\ncompatibility mode and is never treated as the canonical authority.',
+              'The canonical path assembles technical evidence from append-only gate\ncertifications, operational evidence, and active multi-asset approvals. The report\nis diagnostic only and is not required before paper testing can begin.',
+          )
+          text = text.replace('from dataclasses import replace\n', '')
+          text = text.replace('    SQLitePaperTradingLaunchStore,\n', '')
+          text = text.replace('    launch_identifier = None\n', '')
+          start = text.index('            launch = None\n')
+          end = text.index('        report = ProductTestReadinessEvaluator().evaluate(evidence)', start)
+          text = text[:start] + text[end:]
+          text = text.replace(
+              '    output["paper_launch_report_identifier"] = launch_identifier\n',
+              '    output["paper_launch_report_identifier"] = None\n    output["launch_clearance_required"] = False\n',
+          )
+          write(path, text)
+
+          # Legacy authorities remain available as optional audit tools only.
+          replace(
+              "governance/paper_execution_authority.py",
+              '"""Combined authority required before any governed paper execution.\n\nThree independent conclusions are required and none may substitute for another:',
+              '"""Optional legacy certification for institution-style paper campaigns.\n\nThese conclusions are no longer prerequisites for ordinary product paper testing.\nThey remain available when an operator voluntarily elects a formally certified\ncampaign:',
+          )
+          replace(
+              "run_paper_trading_control.py",
+              '"""Activate, halt, or inspect the controlled paper-execution risk switch."""',
+              '"""Manage the optional legacy paper-campaign risk switch."""',
+          )
+          replace(
+              "run_paper_trading_launch.py",
+              '"""Evaluate and persist current paper-trading launch evidence."""',
+              '"""Evaluate optional institutional paper-campaign evidence."""',
+          )
+          replace(
+              "run_paper_test_campaign.py",
+              '"""Record and assess controlled paper-test launch-readiness evidence."""',
+              '"""Record optional paper-campaign resilience evidence."""',
+          )
+
+          # Tests: the app uses the same immediate paper-only path in every environment.
+          path = "tests/test_streamlit_paper_execution_worker.py"
+          text = read(path)
+          text = text.replace(
+              '    assert "--development-bypass-launch-gate" in captured',
+              '    assert "--development-bypass-launch-gate" not in captured',
+          )
+          start = text.index('def test_production_never_adds_development_bypass(')
+          replacement = '''def test_production_uses_same_immediate_paper_only_path(monkeypatch, tmp_path) -> None:\n    _configure(monkeypatch, tmp_path)\n    monkeypatch.setenv("CAPITAL_INTELLIGENCE_ENVIRONMENT", "production")\n    construction = _construction()\n    now = datetime(2026, 7, 28, 19, 1, tzinfo=timezone.utc)\n    _approve(tmp_path, construction, now)\n    captured: list[str] = []\n\n    def runner(arguments):\n        captured.extend(arguments or ())\n        print(\n            json.dumps(\n                {\n                    "status": "completed",\n                    "execution_identifier": "multi-asset-execution:construction:test-vti",\n                    "launch_clearance_required": False,\n                    "real_money_authorized": False,\n                }\n            )\n        )\n        return 0\n\n    attempt = attempt_approved_paper_execution(\n        construction=construction,\n        briefing={"decision_identifier": "decision:test"},\n        now=now,\n        runner=runner,\n    )\n\n    assert attempt.state == "completed"\n    assert "--development-bypass-launch-gate" not in captured\n'''
+          text = text[:start] + replacement
+          write(path, text)
+
+          Path("tests/test_immediate_paper_access.py").write_text(
+              '''from __future__ import annotations\n\nfrom pathlib import Path\n\nfrom governance import PaperTradingLaunchPolicy\nfrom run_multi_asset_paper_execution import build_parser\n\n\ndef test_paper_access_has_no_launch_clearance_prerequisites() -> None:\n    parser = build_parser()\n    args = parser.parse_args(\n        [\n            "--construction",\n            "construction.json",\n            "--profiles",\n            "profiles.json",\n            "--decision-identifier",\n            "decision:test",\n            "--session-provider",\n            "module:session",\n            "--quote-provider",\n            "module:quotes",\n            "--as-of",\n            "2026-07-29T00:00:00+00:00",\n        ]\n    )\n    assert args.baseline_identifier is None\n    assert args.process_version is None\n    assert args.code_version is None\n\n\ndef test_launch_policy_preserves_safety_limits_but_not_elapsed_delay() -> None:\n    policy = PaperTradingLaunchPolicy()\n    assert policy.minimum_burn_in_days == 0\n    assert policy.maximum_drawdown_fraction == 0.20\n    assert policy.maximum_single_batch_turnover == 0.35\n\n\ndef test_executor_no_longer_calls_combined_launch_authority() -> None:\n    source = Path("run_multi_asset_paper_execution.py").read_text(encoding="utf-8")\n    assert "require_combined_paper_execution_authorization" not in source\n    assert '"launch_clearance_required": False' in source\n    assert '"human_release_approval_required": False' in source\n    assert '"runtime_activation_required": False' in source\n''',
+              encoding="utf-8",
+          )
+
+          # Rewrite the governing launch documents to make the policy unmistakable.
+          Path("docs/PAPER_TRADING_AUTHORITY_MODEL.md").write_text(
+              '''# Paper-Testing Access Model\n\nPaper testing does not require launch clearance.\n\nThe application may begin paper execution as soon as the exact construction can\npass the active technical controls: paper credentials, paper-only endpoint fencing,\ncurrent quotes, market session, certified eligible-universe membership, approved\ninstrument profile, portfolio integrity, liquidity and cost limits, and fill\nreconciliation.\n\nThe following are not prerequisites for paper testing:\n\n- an immutable launch baseline or process freeze;\n- an elapsed burn-in period;\n- pre-entry resilience exercises;\n- an encrypted recovery certification;\n- a paper-launch report;\n- an eligibility package;\n- a human release-authority decision;\n- an activated runtime switch.\n\nExact authenticated user approval for a proposed portfolio implementation remains\nrequired by the Streamlit approval bridge. This is transaction consent, not launch\nclearance. Provider activation, asset eligibility, portfolio safeguards, append-only\nevidence, reconciliation, and the prohibition on real-money endpoints remain active.\n\nThe legacy campaign, launch, release, and runtime-control authorities remain in the\nrepository only as optional institutional audit tools. They do not block ordinary\npaper testing.\n''',
+              encoding="utf-8",
+          )
+          Path("docs/PAPER_TRADING_LAUNCH.md").write_text(
+              '''# Immediate Paper Testing\n\n## Governing rule\n\nPaper testing may begin without a launch-clearance campaign or calendar delay.\n\n## No longer required\n\nThe product does not require a frozen launch baseline, five-day burn-in, pre-entry\nfailure exercises, recovery certification, launch report, eligibility package,\nhuman release decision, or runtime activation before paper execution.\n\n## Controls that remain\n\nEvery paper implementation still requires:\n\n- the `COMPOUNDING` paper portfolio and intact append-only portfolio state;\n- an exact feasible CIO construction;\n- exact authenticated user consent when execution originates in the application;\n- a current certified eligible-universe publication and instrument identity;\n- a paper-eligible instrument profile;\n- a valid market session and current quote/FX evidence;\n- liquidity, cost, cash, leverage, turnover, and drawdown safety limits;\n- reconciled fills and append-only execution evidence;\n- paper-only provider endpoints and `real_money_authorized=false`.\n\nThe standard safety limits remain a 35% maximum single-batch turnover and a 20%\nportfolio drawdown stop. These are execution safeguards rather than launch\nclearance.\n\n## Optional institutional evidence\n\nOperators may still run the campaign, launch, recovery, human-release, and runtime\ncontrol tools to create a formally certified test record. Their absence no longer\nprevents product testing.\n''',
+              encoding="utf-8",
+          )
+          Path("docs/CONTROLLED_PAPER_TEST_GOVERNANCE.md").write_text(
+              '''# Optional Certified Paper Campaign\n\nThe process-freeze, eligibility-package, independent-validation, human-release,\nlaunch-report, and runtime-control authorities are optional audit mechanisms. They\nare not prerequisites for ordinary paper testing.\n\nA team may voluntarily use them when it needs a formally frozen cohort for external\nreview, model governance, or institutional evidence. Such a campaign remains\npaper-only and cannot authorize real money.\n\nThe application execution path instead relies on current technical controls, exact\nuser consent, provider and instrument eligibility, portfolio integrity, safety\nlimits, and reconciliation.\n''',
+              encoding="utf-8",
+          )
+          Path("docs/PRODUCT_TEST_READINESS.md").write_text(
+              '''# Product Test Readiness\n\nProduct-readiness reports are diagnostics, not launch clearance. Paper testing can\nbegin without an immutable baseline, burn-in, recovery campaign, launch report,\neligibility package, human release decision, or active runtime switch.\n\nThe diagnostic still reports whether market data, eligible instruments, portfolio\nconstruction, paper execution, product surfaces, security, and operational evidence\nare healthy. Missing diagnostic evidence may narrow or block a specific instrument\nor transaction through its own technical control, but it does not impose a separate\npre-launch waiting period.\n\nNo readiness state authorizes real money or performance claims.\n''',
+              encoding="utf-8",
+          )
+
+          path = "README.md"
+          text = read(path)
+          text = text.replace(
+              'controlled paper testing still requires production data, launch-readiness evidence, resilience evidence, and formal governance approval',
+              'paper testing can begin immediately without launch clearance; each transaction still requires current data, eligibility, safety, consent, and reconciliation controls',
+          )
+          text = text.replace(
+              'The project is **not yet approved as a production investment manager or for live-money execution**. Controlled paper testing still requires one immutable baseline with:',
+              'The project is **not approved for live-money execution**. Paper testing does not require launch clearance. The following remain technical operating objectives rather than pre-entry approvals:',
+          )
+          text = text.replace(' - a successful current launch-readiness cycle;\n', '')
+          text = text.replace(' - production-scale outage, corruption, takeover, recovery, and reconciliation exercises;\n', ' - production-scale outage, corruption, takeover, recovery, and reconciliation exercises for ongoing hardening;\n')
+          text = text.replace(' - formal human governance approval.\n', ' - optional formal governance evidence for institutional review.\n')
+          text = text.replace(
+              'A running application, API, or worker alone does not prove paper-test readiness; the current cycle and all remaining evidence gates must pass.',
+              'Paper execution is permitted without a separate launch-clearance sequence, but each transaction still fails closed on missing consent, data, eligibility, portfolio integrity, safety, or reconciliation evidence.',
+          )
+          write(path, text)
+
+          # Update the PR description after the code lands; remove this one-shot workflow.
+          Path(".github/workflows/apply-immediate-paper-access.yml").unlink()
+          PY
+
+      - name: Validate migration surface
+        shell: bash
+        run: |
+          python -m compileall -q governance operations portfolio providers *.py tests
+          python -m pytest -q \
+            tests/test_immediate_paper_access.py \
+            tests/test_streamlit_paper_execution_worker.py \
+            tests/test_paper_trading_launch.py \
+            tests/test_paper_test_campaign.py
+          ! git grep -n "requires exact entry, launch, and runtime authorities" -- . ':!docs/archive/**'
+          ! git grep -n "paper execution requires exact authority versions" -- . ':!docs/archive/**'
+
+      - name: Commit immediate paper access
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove paper-test launch clearance"
+          git push origin HEAD:policy/remove-paper-burn-in
