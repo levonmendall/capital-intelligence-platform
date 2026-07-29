@@ -6,7 +6,6 @@ on:
       - main
 
 permissions:
-  actions: read
   contents: write
 
 jobs:
@@ -24,20 +23,23 @@ jobs:
 
       - name: Reconstruct reconciled source
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cp .github/workflows/apply-cio-corrections.yml /tmp/integration-workflow.yml
 
-          curl --fail --location --silent --show-error \
-            --header "Authorization: Bearer ${GH_TOKEN}" \
-            --header "Accept: application/vnd.github+json" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            --output /tmp/reconciliation.zip \
-            "https://api.github.com/repos/levonmendall/capital-intelligence-platform-/actions/artifacts/8733511745/zip"
-          unzip -q /tmp/reconciliation.zip -d /tmp/reconciliation-artifact
-          tar -xzf /tmp/reconciliation-artifact/reconciliation.tgz -C "${GITHUB_WORKSPACE}"
+          cat .automation/corrections.patch.part* > /tmp/corrections.patch.gz.b64
+          test "$(wc -c < /tmp/corrections.patch.gz.b64)" -eq 61792
+          echo 'fed53220bd01c40d47c6f1462d111fab2980fe5fc4162e60f870b99462b4025b  /tmp/corrections.patch.gz.b64' | sha256sum --check
+          base64 --decode /tmp/corrections.patch.gz.b64 > /tmp/corrections.patch.gz
+          echo '43ce27c6f24c45acf8e047d70f22792c4cb983329d1ffd501156457388933244  /tmp/corrections.patch.gz' | sha256sum --check
+          gzip --decompress --stdout /tmp/corrections.patch.gz > /tmp/corrections.patch
+          echo 'f5ac9adf4da7124fb10817b0b3abf594fe7d63722ad27b6d6016b1917e131862  /tmp/corrections.patch' | sha256sum --check
+
+          set +e
+          git apply --reject --whitespace=nowarn /tmp/corrections.patch
+          original_status=$?
+          set -e
+          test "${original_status}" -ne 0
           find . -type f -name '*.rej' -delete
 
           cat .automation/manual-reconciliation.part* > /tmp/manual-reconciliation.patch.gz.b64
@@ -48,9 +50,9 @@ jobs:
           gzip --decompress --stdout /tmp/manual-reconciliation.patch.gz > /tmp/manual-reconciliation.patch
           echo '92aec0c0b5973ee964533ec30cbe238846531fd2ff996acdd0f1d0e1515feb4e  /tmp/manual-reconciliation.patch' | sha256sum --check
           test "$(wc -c < /tmp/manual-reconciliation.patch)" -eq 129806
-
           git apply --check /tmp/manual-reconciliation.patch
           git apply --whitespace=nowarn /tmp/manual-reconciliation.patch
+
           cp /tmp/integration-workflow.yml .github/workflows/apply-cio-corrections.yml
           rm -rf .automation
           find . -type f -name '*.rej' -print -quit | grep -q . && exit 1 || true
