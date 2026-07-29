@@ -7,12 +7,16 @@ on:
     paths:
       - .github/workflows/apply-cio-corrections.yml
       - .automation/corrections.patch.gz.b64
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply-and-validate:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -20,6 +24,7 @@ jobs:
       - name: Check out correction branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: agent/harden-cio-operations-risk-sizing
           fetch-depth: 0
 
       - name: Reconstruct and apply correction patch
@@ -39,7 +44,7 @@ jobs:
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git commit -m 'Apply CIO corrections with reconciliation markers'
-            git push origin HEAD
+            git push origin HEAD:agent/harden-cio-operations-risk-sizing
             exit 1
           fi
 
@@ -100,4 +105,4 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           git commit -m 'Harden CIO operations and risk-adjusted allocation'
-          git push origin HEAD
+          git push origin HEAD:agent/harden-cio-operations-risk-sizing
