@@ -31,7 +31,7 @@ from cio.universe import UniverseAssessment
 class CIOSynthesisPolicy:
     """Versioned materiality, evidence, and abstention rules."""
 
-    version: str = "cio-synthesis.v5"
+    version: str = "cio-synthesis.v6"
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     minimum_net_expected_return: float = 0.05
@@ -164,6 +164,11 @@ class ChiefInvestmentOfficer:
                 else min(candidate.maximum_position_weight, profile.maximum_position_weight)
             )
         )
+        historical_learning = specialists.historical_learning
+        assessment_cap = round(
+            assessment_cap * historical_learning.position_size_multiplier,
+            8,
+        )
         supported_weight = self.robust_assessor.maximum_supported_weight(
             robustness_candidate,
             alternative_return=effective_alternative,
@@ -206,6 +211,8 @@ class ChiefInvestmentOfficer:
                 ),
             )
         )
+        if historical_learning.status.value != "not_applicable":
+            reason = f"{reason} {historical_learning.summary}"
         final_confidence = self._confidence(
             candidate,
             specialists=specialists,
@@ -236,6 +243,9 @@ class ChiefInvestmentOfficer:
             f"{robustness.robust_edge:.2%} and the stressed edge is "
             f"{robustness.stressed_edge:.2%}."
         )
+        opportunity_cost += (
+            " Historical-learning control: " + historical_learning.summary
+        )
         explanation = self._explanation(
             candidate,
             action=action,
@@ -245,6 +255,8 @@ class ChiefInvestmentOfficer:
             robustness=robustness,
             reconciliation=reconciliation,
         )
+        if historical_learning.status.value != "not_applicable":
+            explanation += " Historical learning: " + historical_learning.summary
         return CIODecision(
             identifier=(
                 f"cio-decision:{candidate.identifier}:{candidate.as_of.isoformat()}"
@@ -260,18 +272,30 @@ class ChiefInvestmentOfficer:
             funding_source=funding_source,
             thesis=thesis,
             rationale=reason,
-            supporting_evidence=candidate.supporting_evidence,
+            supporting_evidence=tuple(
+                dict.fromkeys(
+                    candidate.supporting_evidence
+                    + (historical_learning.summary,)
+                )
+            ),
             contradictory_evidence=candidate.contradictory_evidence,
             key_assumptions=candidate.critical_assumptions,
             catalysts=candidate.primary_catalysts,
-            risks=candidate.key_risks,
+            risks=tuple(
+                dict.fromkeys(candidate.key_risks + historical_learning.limitations)
+            ),
             invalidation_conditions=candidate.invalidation_conditions,
             portfolio_impact=portfolio_impact,
             opportunity_cost=opportunity_cost,
             dissent=dissent,
             evidence_vetoes=evidence_vetoes,
             implementation_blocks=implementation_blocks,
-            monitoring_indicators=candidate.monitoring_indicators,
+            monitoring_indicators=tuple(
+                dict.fromkeys(
+                    candidate.monitoring_indicators
+                    + ("historical_learning_calibration",)
+                )
+            ),
             review_at=candidate.review_at,
             explanation=explanation,
             policy_version=self.policy.version,
@@ -667,6 +691,10 @@ class ChiefInvestmentOfficer:
             calculated = min(calculated, 0.25)
         if specialists.implementation_blocks:
             calculated = min(calculated, 0.50)
+        calculated = min(
+            calculated,
+            specialists.historical_learning.confidence_ceiling,
+        )
         return round(max(0.0, min(1.0, calculated)), 6)
 
     @staticmethod

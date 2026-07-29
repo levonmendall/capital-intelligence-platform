@@ -9,6 +9,7 @@ from cio import (
     CandidateAssetClass,
     CandidateDecisionRecord,
     EvidenceDependency,
+    HistoricalLearningContext,
     IndependentSpecialistPacket,
     ScenarioAdjustment,
     SpecialistAnalysis,
@@ -479,6 +480,7 @@ class CandidateSpecialistContext:
     forecast: CrossAssetForecastSpecialistContext | None = None
     company: CompanyAnalysis | None = None
     asset_valuation: AssetValuationSpecialistContext | None = None
+    historical_learning: HistoricalLearningContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -538,6 +540,15 @@ class CandidateSpecialistContext:
         ):
             raise ValueError(
                 "asset valuation analysis cannot be newer than completion time"
+            )
+        if self.historical_learning is not None:
+            if not isinstance(self.historical_learning, HistoricalLearningContext):
+                raise TypeError(
+                    "historical_learning must be a HistoricalLearningContext or None"
+                )
+            self.historical_learning.validate_for(
+                self.candidate_identifier,
+                completed_at=self.analysis_completed_at,
             )
 
 
@@ -617,6 +628,7 @@ class IndependentSpecialistService:
         return IndependentSpecialistPacket(
             candidate_identifier=candidate.identifier,
             analyses=analyses,
+            historical_learning=context.historical_learning,
         )
 
     @staticmethod

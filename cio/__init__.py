@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from cio.historical_learning import (
+    HistoricalLearningContext,
+    HistoricalLearningResolver,
+    HistoricalLearningStatus,
+)
 from cio.committee import IndependentSpecialistPacket, SpecialistAnalysis
 from cio.models import (
     CIOAction,
@@ -88,6 +93,9 @@ __all__ = [
     "ChiefInvestmentOfficer",
     "EvidenceDependency",
     "EvidenceQuality",
+    "HistoricalLearningContext",
+    "HistoricalLearningResolver",
+    "HistoricalLearningStatus",
     "IndependentSpecialistPacket",
     "MaterialDissent",
     "PayoffDistributionPoint",
