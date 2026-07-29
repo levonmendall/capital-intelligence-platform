@@ -5,24 +5,23 @@ from datetime import datetime, timedelta, timezone
 import live_operating_console
 
 
-NOW = datetime(2026, 7, 29, 13, 30, tzinfo=timezone.utc)
-
-
 class _Client:
     def account(self):
         return {"status": "ACTIVE"}
 
     def clock(self):
-        return {"is_open": True, "timestamp": (NOW - timedelta(seconds=1)).isoformat()}
+        now = datetime.now(timezone.utc)
+        return {"is_open": True, "timestamp": (now - timedelta(seconds=1)).isoformat()}
 
     def latest_quotes(self, symbols):
+        now = datetime.now(timezone.utc)
         return {
             symbol: {
                 "bp": 99.9,
                 "ap": 100.1,
                 "bs": 500,
                 "as": 400,
-                "t": (NOW - timedelta(seconds=2)).isoformat(),
+                "t": (now - timedelta(seconds=2)).isoformat(),
             }
             for symbol in symbols
         }
@@ -38,15 +37,6 @@ def test_live_console_uses_all_provider_backed_pilot_symbols(monkeypatch) -> Non
         live_operating_console,
         "AlpacaPaperClient",
         lambda _settings: _Client(),
-    )
-    monkeypatch.setattr(
-        live_operating_console,
-        "datetime",
-        type(
-            "_DateTime",
-            (),
-            {"now": staticmethod(lambda _tz: NOW)},
-        ),
     )
     live_operating_console.load_live_market_console.clear()
 
