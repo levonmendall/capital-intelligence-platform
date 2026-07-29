@@ -139,8 +139,12 @@ Every live canonical specialist packet now carries a mandatory
 available by the specialist-completion timestamp and selects exact-symbol
 history when sufficient, otherwise governed asset-class comparables.
 
-Historical learning is deliberately one-way and subordinate to current
-evidence:
+Historical learning is matched by exact symbol when possible, then by asset
+class, with current macro regime, market regime, and decision horizon used as
+additional comparability gates. Updated replay manifests also carry
+next-cutoff realized returns so support frequency is not confused with actual
+outcome quality. Historical learning is deliberately one-way and subordinate
+to current evidence:
 
 - it may cap CIO confidence;
 - it may reduce the otherwise supported target position;

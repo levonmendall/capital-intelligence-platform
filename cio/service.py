@@ -511,6 +511,11 @@ class ChiefInvestmentOfficer:
             candidate.maximum_position_weight,
             profile.maximum_position_weight,
         )
+        feasible_cap = round(
+            feasible_cap
+            * specialists.historical_learning.position_size_multiplier,
+            8,
+        )
         if feasible_cap <= 0.0:
             return (
                 CIOAction.WATCH,

@@ -72,31 +72,39 @@ def _candidate(as_of: datetime) -> CandidateDecisionRecord:
 
 def _manifest(generated_at: datetime) -> dict[str, object]:
     decisions = []
-    for month in range(1, 7):
+    realized = (0.03, 0.02, -0.01, 0.04, -0.02, 0.01)
+    for month, outcome in enumerate(realized, start=1):
         decisions.append(
             {
                 "cutoff": f"2026-{month:02d}-28T23:59:59+00:00",
                 "state": "completed",
                 "canonical_cio_invoked": True,
+                "macro_regime": "mixed",
                 "decisions": [
                     {
                         "candidate_identifier": f"historical:2026-{month:02d}-28:SPY",
+                        "symbol": "SPY",
+                        "asset_class": "us_etf",
+                        "macro_regime": "mixed",
+                        "market_regime": "positive_trend",
+                        "decision_horizon_days": 365,
                         "action": "buy" if month < 5 else "watch",
                         "final_confidence": 0.80,
                         "recommended_position_weight": 0.10,
+                        "realized_return_to_next_cutoff": outcome,
                     }
                 ],
             }
         )
     return {
-        "schema_version": "canonical-historical-replay.v1",
+        "schema_version": "canonical-historical-replay.v2",
         "generated_at": generated_at.isoformat(),
         "strict_only": False,
         "decisions": decisions,
     }
 
 
-def test_resolver_attaches_restrictive_governed_context(tmp_path) -> None:
+def test_resolver_attaches_restrictive_outcome_and_regime_context(tmp_path) -> None:
     as_of = datetime(2026, 7, 29, 20, 0, tzinfo=UTC)
     manifest = tmp_path / "latest-canonical-replay.json"
     manifest.write_text(
@@ -113,6 +121,12 @@ def test_resolver_attaches_restrictive_governed_context(tmp_path) -> None:
     assert context.status is HistoricalLearningStatus.AVAILABLE
     assert context.sample_size == 6
     assert context.exact_symbol_sample_size == 6
+    assert context.regime_matched_sample_size == 6
+    assert context.horizon_matched_sample_size == 6
+    assert context.realized_sample_size == 6
+    assert context.historical_hit_rate == pytest.approx(4 / 6)
+    assert context.median_realized_return > 0.0
+    assert context.worst_realized_return == -0.02
     assert 0.0 < context.position_size_multiplier <= 1.0
     assert 0.0 < context.confidence_ceiling <= 1.0
     assert context.subordinate_to_current_evidence is True
@@ -152,11 +166,17 @@ def test_historical_learning_cannot_grant_positive_authority() -> None:
             source_manifest_identifier="manifest:1",
             sample_size=12,
             exact_symbol_sample_size=12,
+            regime_matched_sample_size=12,
+            horizon_matched_sample_size=12,
+            realized_sample_size=12,
             strict_replay=True,
             support_rate=1.0,
             abstention_rate=0.0,
+            historical_hit_rate=1.0,
             median_historical_confidence=0.9,
             median_historical_position_weight=0.1,
+            median_realized_return=0.02,
+            worst_realized_return=-0.05,
             position_size_multiplier=1.0,
             confidence_ceiling=1.0,
             summary="invalid authority test",
@@ -166,13 +186,20 @@ def test_historical_learning_cannot_grant_positive_authority() -> None:
         )
 
 
-def test_live_cycle_and_cio_apply_historical_controls() -> None:
+def test_live_cycle_committee_and_cio_apply_historical_controls() -> None:
     cycle_source = open("application/cio_cycle.py", encoding="utf-8").read()
+    specialist_source = open("committee/specialists.py", encoding="utf-8").read()
     cio_source = open("cio/service.py", encoding="utf-8").read()
     persistence_source = open("cio/persistence.py", encoding="utf-8").read()
+    replay_source = open("historical_replay/canonical.py", encoding="utf-8").read()
 
     assert "historical_learning_resolver.resolve" in cycle_source
     assert "historical_learning=historical_learning" in cycle_source
+    assert "self._historically_calibrate" in specialist_source
+    assert "learning.confidence_ceiling" in specialist_source
     assert "assessment_cap * historical_learning.position_size_multiplier" in cio_source
+    assert "specialists.historical_learning.position_size_multiplier" in cio_source
     assert "historical_learning.confidence_ceiling" in cio_source
     assert '"historical_learning": packet.historical_learning.as_dict()' in persistence_source
+    assert "realized_return_to_next_cutoff" in replay_source
+    assert '"market_regime": context.market.market_regime' in replay_source
