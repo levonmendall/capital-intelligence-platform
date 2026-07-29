@@ -17,7 +17,8 @@ def test_render_blueprint_defines_one_paid_disk_backed_operating_service() -> No
 
     assert source.count("  - type: web\n") == 1
     assert "runtime: docker" in source
-    assert "plan: starter" in source
+    assert "plan: standard" in source
+    assert "plan: starter" not in source
     assert "autoDeployTrigger: checksPass" in source
     assert "numInstances: 1" in source
     assert "dockerCommand: python run_render_service.py" in source

@@ -5,7 +5,7 @@ services:
   - type: web
     name: capital-intelligence-platform
     runtime: docker
-    plan: starter
+    plan: standard
     region: oregon
     branch: main
     autoDeployTrigger: checksPass

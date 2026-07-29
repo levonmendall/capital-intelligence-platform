@@ -27,7 +27,7 @@ The service starts through `run_render_service.py`. Loss of Streamlit, the API, 
 6. Enter the secret values requested during Blueprint creation.
 7. Apply the Blueprint and wait for the health check to pass.
 
-The Blueprint uses the paid `starter` instance because Render persistent disks are not available on a free web service. The service is intentionally fixed at one instance because a persistent disk cannot be attached to multiple instances and the canonical authorities are SQLite databases.
+The Blueprint uses the paid `standard` instance. The complete supervised runtime starts Streamlit, FastAPI, the autonomous CIO/paper operator, the historical backfill worker, and encrypted backups in one service; the prior 512 MB Starter allocation produced an out-of-memory termination with exit status 137. Standard is therefore the minimum approved production-paper operating tier for this topology. The service remains fixed at one instance because a persistent disk cannot be attached to multiple instances and the canonical authorities are SQLite databases.
 
 ## Required secret values
 
