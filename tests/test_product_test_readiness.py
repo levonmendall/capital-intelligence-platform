@@ -1,4 +1,4 @@
-"""Tests for controlled paper-test readiness while development remains open."""
+"""Tests for diagnostic paper-test readiness while development remains open."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ def _evidence(**overrides) -> ProductTestReadinessEvidence:
     values = {
         "identifier": "assessment:2026-07-27",
         "assessed_at": NOW,
-        "test_baseline_identifier": "test-baseline:multi-asset-alpha.1",
-        "process_version": "capital-intelligence-investment-process.v1-test",
+        "test_baseline_identifier": None,
+        "process_version": None,
         "code_version": "commit:test",
         "development_remains_open": True,
         "core_us_market_ready": True,
@@ -47,16 +47,15 @@ def _evidence(**overrides) -> ProductTestReadinessEvidence:
         "daily_operations_ready": True,
         "four_screen_product_ready": True,
         "security_suite_ready": True,
-        "resilience_campaign_ready": True,
+        "resilience_campaign_ready": False,
         "paper_only_disclosures_ready": True,
-        "paper_launch_ready": True,
+        "paper_launch_ready": False,
         "unresolved_critical_incidents": 0,
         "data_integrity_failures": 0,
         "reconciliation_failures": 0,
         "evidence_identifiers": (
             "ci:green",
             "data-certification:approved",
-            "paper-launch:approved",
         ),
         "open_development_items": ("continue next-version research on main",),
     }
@@ -64,22 +63,25 @@ def _evidence(**overrides) -> ProductTestReadinessEvidence:
     return ProductTestReadinessEvidence(**values)
 
 
-def test_ready_baseline_does_not_require_closing_development() -> None:
+def test_ready_diagnostics_do_not_require_launch_clearance() -> None:
     report = ProductTestReadinessEvaluator().evaluate(_evidence())
 
     assert report.state is ProductTestReadiness.READY_FOR_CONTROLLED_PAPER_TEST
+    assert report.baseline_identifier is None
+    assert report.process_version is None
     assert report.development_items == ("continue next-version research on main",)
     assert report.real_money_authorized is False
     assert report.performance_claims_permitted is False
 
 
-def test_missing_sustained_launch_authority_blocks_readiness() -> None:
+def test_missing_launch_and_resilience_campaign_do_not_block_diagnostic_readiness() -> None:
     report = ProductTestReadinessEvaluator().evaluate(
-        _evidence(paper_launch_ready=False)
+        _evidence(paper_launch_ready=False, resilience_campaign_ready=False)
     )
 
-    assert report.state is ProductTestReadiness.DEVELOPMENT_IN_PROGRESS
-    assert "paper_launch" in report.blockers
+    assert report.state is ProductTestReadiness.READY_FOR_CONTROLLED_PAPER_TEST
+    assert "paper_launch" not in report.blockers
+    assert "resilience_campaign" not in report.blockers
 
 
 def test_missing_market_and_data_authorities_remains_development_in_progress() -> None:
@@ -88,8 +90,6 @@ def test_missing_market_and_data_authorities_remains_development_in_progress() -
             crypto_market_ready=False,
             spot_fx_market_ready=False,
             certified_data_ready=False,
-            test_baseline_identifier=None,
-            process_version=None,
         )
     )
 
@@ -98,12 +98,12 @@ def test_missing_market_and_data_authorities_remains_development_in_progress() -
         "crypto_market",
         "spot_fx_market",
         "certified_data",
-        "immutable_test_baseline",
-        "versioned_investment_process",
     }
+    assert "immutable_test_baseline" not in report.blockers
+    assert "versioned_investment_process" not in report.blockers
 
 
-def test_closed_development_with_failed_gate_is_blocked() -> None:
+def test_closed_development_with_failed_technical_gate_is_blocked() -> None:
     report = ProductTestReadinessEvaluator().evaluate(
         _evidence(development_remains_open=False, paper_execution_ready=False)
     )
