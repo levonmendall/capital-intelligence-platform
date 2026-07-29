@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+from streamlit.testing.v1 import AppTest
 
+from portfolio.state import ensure_canonical_portfolio_store
 from run_render_service import managed_processes, prepare_render_environment
 
 
@@ -122,7 +124,11 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
     assert by_name["encrypted-backup"].restart_delay_seconds == 300
     assert "render_app.py" in by_name["streamlit"].command
     assert "--server.port=10000" in by_name["streamlit"].command
-    assert all(process.critical for process in processes if process.name != "encrypted-backup")
+    assert all(
+        process.critical
+        for process in processes
+        if process.name != "encrypted-backup"
+    )
 
 
 def test_render_interface_displays_release_and_persistent_state_identity() -> None:
@@ -132,6 +138,72 @@ def test_render_interface_displays_release_and_persistent_state_identity() -> No
     assert "CAPITAL_INTELLIGENCE_RELEASE" in source
     assert "RENDER_GIT_COMMIT" in source
     assert "CAPITAL_INTELLIGENCE_DATA_DIR" in source
+
+
+def test_render_entrypoint_renders_complete_authenticated_console(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE",
+        str(tmp_path / "canonical_portfolio.db"),
+    )
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_JOURNAL_DATABASE",
+        str(tmp_path / "institutional_journal.db"),
+    )
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_FULL_UNIVERSE_SCREENING_DATABASE",
+        str(tmp_path / "full_universe_screening.db"),
+    )
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_SNAPSHOT_DATABASE",
+        str(tmp_path / "daily_intelligence_snapshots.db"),
+    )
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_IDENTITY_DATABASE",
+        str(tmp_path / "identity.db"),
+    )
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_ALERT_DATABASE",
+        str(tmp_path / "alerts.db"),
+    )
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_AUTHENTICATION_REQUIRED", "false")
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL", "false")
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT", "false")
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE", "disabled")
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED",
+        "false",
+    )
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_PAPER_TRADING_START_AT",
+        "2999-01-01T00:00:00+00:00",
+    )
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE", "UTC")
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_SCHEDULER_HOUR", "23")
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS", "60")
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_RELEASE", "render-smoke-test")
+    monkeypatch.setenv(
+        "RENDER_EXTERNAL_HOSTNAME",
+        "capital-intelligence.onrender.com",
+    )
+    ensure_canonical_portfolio_store(tmp_path / "canonical_portfolio.db")
+
+    app = AppTest.from_file("render_app.py", default_timeout=30).run()
+
+    assert not app.exception
+    assert len(app.segmented_control) == 1
+    captions = [item.value for item in app.caption]
+    assert any("Persistent operating host" in value for value in captions)
+    assert any("render-smoke" in value for value in captions)
+    assert any(str(tmp_path) in value for value in captions)
+    for surface in ("Today", "Environment", "Portfolio", "History"):
+        app.segmented_control[0].set_value(surface)
+        app.run()
+        assert not app.exception, surface
+        assert app.segmented_control[0].value == surface
 
 
 def test_render_supervisor_source_avoids_shell_execution_and_live_money() -> None:
