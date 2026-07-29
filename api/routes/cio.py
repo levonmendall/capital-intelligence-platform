@@ -1,6 +1,5 @@
 """Read-only canonical CIO briefing, thesis, evaluation, and report routes."""
 
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,7 +8,10 @@ from api.config import ApiSettings
 from api.dependencies import get_resources, get_settings
 from api.repositories import ApiResources
 from api.schemas import CIOBriefingHistoryResponse, CIOBriefingResponse
-from cio_pending_transactions import build_pending_transaction_report
+from cio_pending_transactions import (
+    pending_transaction_report_history,
+    resolve_pending_transaction_report,
+)
 
 
 router = APIRouter(prefix="/v1/cio", tags=["canonical CIO"])
@@ -22,10 +24,7 @@ _EVIDENCE = "decision_evidence_snapshot"
 _CONSTRUCTION = "portfolio_construction"
 
 
-@router.get(
-    "/latest",
-    response_model=CIOBriefingResponse,
-)
+@router.get("/latest", response_model=CIOBriefingResponse)
 def latest(resources: ApiResources = Depends(get_resources)) -> CIOBriefingResponse:
     payload = resources.journal.latest_payload(_BRIEFING)
     if payload is None:
@@ -36,10 +35,7 @@ def latest(resources: ApiResources = Depends(get_resources)) -> CIOBriefingRespo
     return CIOBriefingResponse.model_validate(payload)
 
 
-@router.get(
-    "/history",
-    response_model=CIOBriefingHistoryResponse,
-)
+@router.get("/history", response_model=CIOBriefingHistoryResponse)
 def history(
     limit: int | None = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
@@ -74,11 +70,18 @@ def history(
 def pending_transactions_latest(
     resources: ApiResources = Depends(get_resources),
 ) -> dict[str, Any]:
-    return build_pending_transaction_report(
+    return resolve_pending_transaction_report(
         construction=resources.journal.latest_payload(_CONSTRUCTION),
         briefing=resources.journal.latest_payload(_BRIEFING),
-        generated_at=datetime.now(timezone.utc),
     )
+
+
+@router.get("/pending-transactions/history", response_model=dict[str, Any])
+def pending_transactions_history(
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    items = list(pending_transaction_report_history(limit=limit))
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/evaluations/latest", response_model=dict[str, Any])
