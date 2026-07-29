@@ -1,5 +1,6 @@
-"""Read-only canonical CIO briefing, thesis, and evaluation routes."""
+"""Read-only canonical CIO briefing, thesis, evaluation, and report routes."""
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +9,7 @@ from api.config import ApiSettings
 from api.dependencies import get_resources, get_settings
 from api.repositories import ApiResources
 from api.schemas import CIOBriefingHistoryResponse, CIOBriefingResponse
+from cio_pending_transactions import build_pending_transaction_report
 
 
 router = APIRouter(prefix="/v1/cio", tags=["canonical CIO"])
@@ -65,6 +67,17 @@ def history(
         limit=resolved_limit,
         offset=offset,
         total=resources.journal.count(_BRIEFING),
+    )
+
+
+@router.get("/pending-transactions/latest", response_model=dict[str, Any])
+def pending_transactions_latest(
+    resources: ApiResources = Depends(get_resources),
+) -> dict[str, Any]:
+    return build_pending_transaction_report(
+        construction=resources.journal.latest_payload(_CONSTRUCTION),
+        briefing=resources.journal.latest_payload(_BRIEFING),
+        generated_at=datetime.now(timezone.utc),
     )
 
 
