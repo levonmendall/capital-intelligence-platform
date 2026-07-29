@@ -23,6 +23,7 @@ from cio_pending_transactions import (
     paper_trading_start_at,
     publish_pending_transaction_report,
 )
+from delivery.service import WorkerRunResult
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
 from paper_execution_runtime import (
     PaperExecutionAttempt,
@@ -30,6 +31,7 @@ from paper_execution_runtime import (
     paper_execution_mode,
 )
 from portfolio.state import ensure_canonical_portfolio_store
+from production_context_publication_runtime import prepare_production_context_for_cycle
 from public_live_collection_runtime import collect_public_live_information_if_due
 from run_scheduler import build_worker
 
@@ -47,13 +49,39 @@ def _run_pass(
     settings: ApiSettings,
     worker,
     force_public_collection: bool = False,
+    context_preparer=None,
 ) -> dict[str, object]:
     now = datetime.now(timezone.utc)
     public_collection = collect_public_live_information_if_due(
         now=now,
         force=force_public_collection,
     )
-    cycle = worker.run_due(now=now)
+
+    context_publication = None
+    if context_preparer is not None:
+        scheduled_for = worker.scheduled_for(now)
+        if now >= scheduled_for:
+            context_publication = context_preparer(
+                settings=settings,
+                scheduled_for=scheduled_for,
+            )
+            if context_publication.ready:
+                cycle_now = datetime.now(timezone.utc)
+                cycle = worker.run_due(
+                    now=cycle_now,
+                    decision_as_of=context_publication.decision_as_of,
+                )
+            else:
+                cycle = WorkerRunResult(
+                    cycle_key=context_publication.cycle_key,
+                    status="failed",
+                    detail=context_publication.detail,
+                )
+        else:
+            cycle = worker.run_due(now=now)
+    else:
+        cycle = worker.run_due(now=now)
+
     deliveries = worker.dispatch_pending()
     try:
         construction, briefing = _payloads(settings)
@@ -95,14 +123,22 @@ def _run_pass(
         execution_state=attempt.state,
     )
     operating_attempt = attempt.state in {"completed", "idle", "held", "paused"}
+    context_ready = context_publication is None or context_publication.ready
     return {
         "status": (
             "operating"
-            if operating_attempt and public_collection.state != "failed"
+            if (
+                operating_attempt
+                and public_collection.state != "failed"
+                and context_ready
+            )
             else "degraded"
         ),
         "evaluated_at": now.isoformat(),
         "public_live_information": public_collection.to_dict(),
+        "production_context_publication": (
+            None if context_publication is None else context_publication.to_dict()
+        ),
         "cycle": {
             "cycle_key": cycle.cycle_key,
             "status": cycle.status,
@@ -190,6 +226,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 settings=settings,
                 worker=worker,
                 force_public_collection=force_public_collection,
+                context_preparer=prepare_production_context_for_cycle,
             )
         except (OSError, TypeError, ValueError, RuntimeError) as error:
             heartbeat.write("degraded", detail=str(error)[:1000])
@@ -203,11 +240,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             state = str(payload["paper_execution"]["state"])
             public_state = str(payload["public_live_information"]["state"])
+            context_payload = payload.get("production_context_publication")
+            context_state = (
+                "not_due"
+                if context_payload is None
+                else str(context_payload["state"])
+            )
             heartbeat.write(
                 "healthy" if payload["status"] == "operating" else "degraded",
                 cycle_key=str(payload["cycle"]["cycle_key"]),
                 detail=(
                     f"public_collection={public_state}; "
+                    f"production_context={context_state}; "
                     f"cio_cycle={payload['cycle']['status']}; "
                     f"paper_execution={state}; mode={payload['execution_mode']}"
                 ),

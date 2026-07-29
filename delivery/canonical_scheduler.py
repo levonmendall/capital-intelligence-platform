@@ -77,7 +77,12 @@ class ScheduledCanonicalCIOWorker:
         )
         return scheduled_local.astimezone(timezone.utc)
 
-    def run_due(self, *, now: datetime | None = None) -> WorkerRunResult:
+    def run_due(
+        self,
+        *,
+        now: datetime | None = None,
+        decision_as_of: datetime | None = None,
+    ) -> WorkerRunResult:
         timestamp = now or self._clock()
         if timestamp.tzinfo is None or timestamp.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
@@ -86,6 +91,18 @@ class ScheduledCanonicalCIOWorker:
         cycle_key = f"canonical-cio:{self.schedule_timezone}:{local_date}"
         if timestamp < scheduled_for:
             return WorkerRunResult(cycle_key=cycle_key, status="not_due")
+
+        decision_time = scheduled_for if decision_as_of is None else decision_as_of
+        if decision_time.tzinfo is None or decision_time.utcoffset() is None:
+            raise ValueError("decision_as_of must be timezone-aware")
+        decision_time = decision_time.astimezone(timezone.utc)
+        if decision_time > timestamp:
+            raise ValueError("decision_as_of cannot follow now")
+        if decision_time.astimezone(self.timezone).date().isoformat() != local_date:
+            raise ValueError("decision_as_of must remain inside the scheduled market date")
+        if decision_time < scheduled_for:
+            raise ValueError("decision_as_of cannot predate the scheduled boundary")
+
         claimed = self.cycle_store.begin_cycle(
             cycle_key,
             scheduled_for=scheduled_for,
@@ -101,7 +118,7 @@ class ScheduledCanonicalCIOWorker:
                 snapshot_identifier=(record.snapshot_identifier if record else None),
             )
         try:
-            result = self.executor.run(as_of=scheduled_for)
+            result = self.executor.run(as_of=decision_time)
             briefing = getattr(result, "briefing", None)
             snapshot_identifier = getattr(briefing, "identifier", None)
             if not isinstance(snapshot_identifier, str) or not snapshot_identifier.strip():
