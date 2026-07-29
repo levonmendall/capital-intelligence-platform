@@ -31,7 +31,13 @@ def _aware(value: object, *, name: str) -> datetime:
     return value
 
 
-def _number(value: object, *, name: str, minimum: float | None = None, maximum: float | None = None) -> float:
+def _number(
+    value: object,
+    *,
+    name: str,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{name} must be numeric")
     normalized = float(value)
@@ -53,8 +59,21 @@ class GovernedPortfolioScenario:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _text(self.name, name="name"))
-        object.__setattr__(self, "probability", _number(self.probability, name="probability", minimum=0.0, maximum=1.0))
-        object.__setattr__(self, "cash_return", _number(self.cash_return, name="cash_return", minimum=-1.0))
+        object.__setattr__(
+            self,
+            "probability",
+            _number(
+                self.probability,
+                name="probability",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "cash_return",
+            _number(self.cash_return, name="cash_return", minimum=-1.0),
+        )
         if not isinstance(self.asset_returns, tuple):
             raise TypeError("asset_returns must be a tuple")
         values = tuple(
@@ -92,12 +111,18 @@ class GovernedPortfolioScenarioSet:
         _aware(self.knowledge_cutoff, name="knowledge_cutoff")
         if self.knowledge_cutoff > self.as_of:
             raise ValueError("knowledge_cutoff cannot follow as_of")
-        if isinstance(self.horizon_days, bool) or not isinstance(self.horizon_days, int):
+        if isinstance(self.horizon_days, bool) or not isinstance(
+            self.horizon_days, int
+        ):
             raise TypeError("horizon_days must be an integer")
         if self.horizon_days < 1:
             raise ValueError("horizon_days must be positive")
-        if not isinstance(self.scenarios, tuple) or not all(isinstance(item, GovernedPortfolioScenario) for item in self.scenarios):
-            raise TypeError("scenarios must contain GovernedPortfolioScenario values")
+        if not isinstance(self.scenarios, tuple) or not all(
+            isinstance(item, GovernedPortfolioScenario) for item in self.scenarios
+        ):
+            raise TypeError(
+                "scenarios must contain GovernedPortfolioScenario values"
+            )
         if len(self.scenarios) < 3:
             raise ValueError("at least three common portfolio scenarios are required")
         names = tuple(item.name for item in self.scenarios)
@@ -123,24 +148,43 @@ class GovernedPortfolioScenarioSet:
     def symbols(self) -> frozenset[str]:
         return self.scenarios[0].symbols
 
-    def validate_coverage(self, symbols: tuple[str, ...] | frozenset[str] | set[str]) -> None:
-        expected = frozenset(_text(item, name="portfolio symbol").upper() for item in symbols)
-        if self.symbols != expected:
-            missing = sorted(expected - self.symbols)
-            extra = sorted(self.symbols - expected)
+    @staticmethod
+    def _requested_symbols(
+        symbols: tuple[str, ...] | frozenset[str] | set[str],
+    ) -> frozenset[str]:
+        return frozenset(
+            _text(item, name="portfolio symbol").upper() for item in symbols
+        )
+
+    def validate_coverage(
+        self,
+        symbols: tuple[str, ...] | frozenset[str] | set[str],
+    ) -> None:
+        expected = self._requested_symbols(symbols)
+        missing = sorted(expected - self.symbols)
+        if missing:
             raise ValueError(
-                "governed portfolio scenarios must exactly cover every non-cash asset; "
-                f"missing={missing} extra={extra}"
+                "governed portfolio scenarios must cover every requested non-cash "
+                f"asset; missing={missing}"
             )
 
-    def construction_scenarios(self, *, symbols: tuple[str, ...] | frozenset[str] | set[str]) -> tuple[PortfolioScenario, ...]:
-        self.validate_coverage(symbols)
+    def construction_scenarios(
+        self,
+        *,
+        symbols: tuple[str, ...] | frozenset[str] | set[str],
+    ) -> tuple[PortfolioScenario, ...]:
+        expected = self._requested_symbols(symbols)
+        self.validate_coverage(expected)
         return tuple(
             PortfolioScenario(
                 name=item.name,
                 probability=item.probability,
                 cash_return=item.cash_return,
-                asset_returns=item.asset_returns,
+                asset_returns=tuple(
+                    (symbol, value)
+                    for symbol, value in item.asset_returns
+                    if symbol in expected
+                ),
             )
             for item in self.scenarios
         )
