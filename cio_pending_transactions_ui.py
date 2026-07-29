@@ -1,4 +1,4 @@
-"""Streamlit presentation for the CIO pending-transaction report."""
+"""Streamlit presentation for the authoritative CIO pending-transaction report."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 import streamlit as st
 
-from cio_pending_transactions import build_pending_transaction_report
+from cio_pending_transactions import resolve_pending_transaction_report
 
 
 def _percentage(value: object) -> str:
@@ -20,18 +20,19 @@ def render_pending_transaction_report(
     construction: Mapping[str, Any] | None,
     briefing: Mapping[str, Any] | None,
 ) -> None:
-    report = build_pending_transaction_report(
+    report = resolve_pending_transaction_report(
         construction=construction,
         briefing=briefing,
     )
     st.subheader("CIO Pending Transaction Recommendations")
     st.caption(
-        f"Paper trading is scheduled for {report['paper_trading_start_label']}. "
-        "Recommendations shown here come from the exact canonical CIO construction."
+        f"Paper trading launch: {report['paper_trading_start_label']} · "
+        f"Execution state: {str(report.get('execution_state', 'unavailable')).replace('_', ' ').title()} · "
+        "Exact canonical CIO construction"
     )
 
     metrics = st.columns(4)
-    metrics[0].metric("Pending transactions", int(report["transaction_count"]))
+    metrics[0].metric("Transactions", int(report["transaction_count"]))
     metrics[1].metric("Target cash", _percentage(report.get("target_cash_weight")))
     metrics[2].metric("Turnover", _percentage(report.get("turnover")))
     metrics[3].metric(
@@ -69,9 +70,9 @@ def render_pending_transaction_report(
                 st.write(f"- {item}")
 
     st.caption(
-        "Paper-only report. Real-money authority remains disabled; all execution "
-        "eligibility, data freshness, liquidity, cost, portfolio, and reconciliation "
-        "controls remain active."
+        f"Report generated {report.get('generated_at', 'unavailable')} · "
+        f"Fingerprint {str(report.get('report_fingerprint', 'unavailable'))[:16]} · "
+        "Paper only; real-money authority disabled."
     )
 
 
