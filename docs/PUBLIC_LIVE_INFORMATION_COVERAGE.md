@@ -41,7 +41,7 @@ The public stack complements the existing FRED, SEC EDGAR, Coinbase, Kraken, and
 
 ## Required versus optional sources
 
-The required baseline contains stable, high-impact official sources that need no new credential, plus SEC access using the existing descriptive user agent. A required-source outage is persisted as degraded evidence and remains visible in the workflow and application reports. It cannot be treated as available evidence and cannot support a CIO decision that depends on it, but a temporary third-party outage does not falsely mark the complete application or listed-wrapper paper operator as failed.
+The required baseline contains stable, high-impact official sources that need no new credential, plus SEC access using the existing descriptive user agent. A required-source outage is persisted as degraded evidence and remains visible in the workflow and application reports. It cannot be treated as available evidence and cannot support a CIO decision that depends on it, but a temporary third-party outage does not mark the application or listed-wrapper paper launch as failed.
 
 Optional sources are still attempted every hour. They include free-key services and endpoints that need operating burn-in, including NASA FIRMS, EIA, WHO, IMF, openFDA, and the OFAC consolidated non-SDN export. Their failures remain visible in the report.
 
