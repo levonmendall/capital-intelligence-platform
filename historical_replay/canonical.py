@@ -580,13 +580,21 @@ class CanonicalHistoricalReplayEngine:
         self.builder = builder or HistoricalCanonicalContextBuilder()
 
     @staticmethod
-    def _decision_payload(decision: object) -> dict[str, Any]:
-        return {
+    def _decision_payload(
+        decision: object,
+        *,
+        candidate: CandidateDecisionRecord | None = None,
+        context: CandidateCycleContext | None = None,
+    ) -> dict[str, Any]:
+        payload = {
             "identifier": getattr(decision, "identifier"),
             "candidate_identifier": getattr(decision, "candidate_identifier"),
             "action": getattr(getattr(decision, "action"), "value"),
             "final_confidence": getattr(decision, "final_confidence"),
             "expected_return": getattr(decision, "expected_return"),
+            "decision_horizon_days": getattr(
+                decision, "decision_horizon_days"
+            ),
             "recommended_position_weight": getattr(
                 decision, "recommended_position_weight"
             ),
@@ -597,6 +605,66 @@ class CanonicalHistoricalReplayEngine:
             ),
             "explanation": getattr(decision, "explanation"),
         }
+        if candidate is not None:
+            payload.update(
+                {
+                    "symbol": candidate.instrument.symbol,
+                    "asset_class": candidate.instrument.asset_class.value,
+                    "model_versions": list(candidate.model_versions),
+                }
+            )
+        if context is not None:
+            payload.update(
+                {
+                    "macro_regime": context.macro.regime,
+                    "market_regime": context.market.market_regime,
+                }
+            )
+        return payload
+
+    @staticmethod
+    def _attach_realized_outcomes(
+        cutoffs: list[dict[str, Any]],
+    ) -> None:
+        for index, current in enumerate(cutoffs[:-1]):
+            if current.get("state") != "completed":
+                continue
+            next_completed = next(
+                (
+                    item
+                    for item in cutoffs[index + 1 :]
+                    if item.get("state") == "completed"
+                ),
+                None,
+            )
+            if next_completed is None:
+                continue
+            current_prices = dict(current.get("prices") or {})
+            next_prices = dict(next_completed.get("prices") or {})
+            current_at = datetime.fromisoformat(
+                str(current["cutoff"]).replace("Z", "+00:00")
+            )
+            next_at = datetime.fromisoformat(
+                str(next_completed["cutoff"]).replace("Z", "+00:00")
+            )
+            horizon_days = max(1, (next_at - current_at).days)
+            for decision in current.get("decisions", []):
+                if not isinstance(decision, dict):
+                    continue
+                symbol = str(decision.get("symbol") or "").upper()
+                current_price = current_prices.get(symbol)
+                next_price = next_prices.get(symbol)
+                if not isinstance(current_price, (int, float)) or not isinstance(
+                    next_price, (int, float)
+                ):
+                    continue
+                if float(current_price) <= 0.0:
+                    continue
+                decision["realized_return_to_next_cutoff"] = round(
+                    float(next_price) / float(current_price) - 1.0,
+                    8,
+                )
+                decision["realized_horizon_days"] = horizon_days
 
     def run(
         self,
@@ -639,8 +707,20 @@ class CanonicalHistoricalReplayEngine:
                     opportunity_context=opportunity,
                     specialist_contexts=contexts,
                     portfolio=portfolio,
-                    code_version="historical-canonical-replay.v1",
+                    code_version="historical-canonical-replay.v2",
                 )
+                candidate_map = {item.identifier: item for item in candidates}
+                context_map = {
+                    item.candidate_identifier: item for item in contexts
+                }
+                decision_payloads = [
+                    self._decision_payload(
+                        item,
+                        candidate=candidate_map.get(item.candidate_identifier),
+                        context=context_map.get(item.candidate_identifier),
+                    )
+                    for item in result.decisions
+                ]
                 state.apply_construction(result.construction)
                 state.previous_prices.update(prices)
                 construction = result.construction
@@ -650,9 +730,11 @@ class CanonicalHistoricalReplayEngine:
                     "canonical_cio_invoked": True,
                     "candidate_count": len(candidates),
                     "decision_count": len(result.decisions),
-                    "decisions": [
-                        self._decision_payload(item) for item in result.decisions
-                    ],
+                    "decisions": decision_payloads,
+                    "prices": dict(prices),
+                    "macro_regime": (
+                        contexts[0].macro.regime if contexts else "unavailable"
+                    ),
                     "construction": (
                         None if construction is None else {
                             "status": construction.status.value,
@@ -681,8 +763,9 @@ class CanonicalHistoricalReplayEngine:
                 }
                 blocked += 1
             decisions.append(payload)
+        self._attach_realized_outcomes(decisions)
         report = {
-            "schema_version": "canonical-historical-replay.v1",
+            "schema_version": "canonical-historical-replay.v2",
             "generated_at": iso_timestamp(datetime.now(tz=UTC)),
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from cio import (
     CandidateAssetClass,
     CandidateDecisionRecord,
     EvidenceDependency,
+    HistoricalLearningContext,
     IndependentSpecialistPacket,
     ScenarioAdjustment,
     SpecialistAnalysis,
@@ -479,6 +480,7 @@ class CandidateSpecialistContext:
     forecast: CrossAssetForecastSpecialistContext | None = None
     company: CompanyAnalysis | None = None
     asset_valuation: AssetValuationSpecialistContext | None = None
+    historical_learning: HistoricalLearningContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -538,6 +540,15 @@ class CandidateSpecialistContext:
         ):
             raise ValueError(
                 "asset valuation analysis cannot be newer than completion time"
+            )
+        if self.historical_learning is not None:
+            if not isinstance(self.historical_learning, HistoricalLearningContext):
+                raise TypeError(
+                    "historical_learning must be a HistoricalLearningContext or None"
+                )
+            self.historical_learning.validate_for(
+                self.candidate_identifier,
+                completed_at=self.analysis_completed_at,
             )
 
 
@@ -614,9 +625,15 @@ class IndependentSpecialistService:
             self._portfolio(candidate, context),
             self._evidence(candidate, context),
         )
+        if context.historical_learning is not None:
+            analyses = tuple(
+                self._historically_calibrate(item, context.historical_learning)
+                for item in analyses
+            )
         return IndependentSpecialistPacket(
             candidate_identifier=candidate.identifier,
             analyses=analyses,
+            historical_learning=context.historical_learning,
         )
 
     @staticmethod
@@ -625,6 +642,46 @@ class IndependentSpecialistService:
         offset: int,
     ) -> datetime:
         return context.analysis_completed_at + timedelta(microseconds=offset)
+
+    @staticmethod
+    def _historically_calibrate(
+        analysis: SpecialistAnalysis,
+        learning: HistoricalLearningContext,
+    ) -> SpecialistAnalysis:
+        supporting = analysis.supporting_evidence
+        if learning.status.value in {"available", "limited"}:
+            supporting = tuple(
+                dict.fromkeys(supporting + (learning.summary,))
+            )
+        contradictory = analysis.contradictory_evidence
+        if (
+            learning.realized_sample_size > 0
+            and learning.historical_hit_rate < 0.50
+        ):
+            contradictory = tuple(
+                dict.fromkeys(
+                    contradictory
+                    + (
+                        "Comparable historical outcomes were positive in fewer "
+                        "than half of measured next-cutoff periods.",
+                    )
+                )
+            )
+        return replace(
+            analysis,
+            confidence=min(analysis.confidence, learning.confidence_ceiling),
+            supporting_evidence=supporting,
+            contradictory_evidence=contradictory,
+            limitations=tuple(
+                dict.fromkeys(analysis.limitations + learning.limitations)
+            ),
+            evidence_origin_identifiers=tuple(
+                dict.fromkeys(
+                    analysis.evidence_origin_identifiers
+                    + learning.evidence_identifiers
+                )
+            ),
+        )
 
     def _macro(
         self,

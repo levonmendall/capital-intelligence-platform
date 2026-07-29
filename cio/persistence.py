@@ -346,6 +346,7 @@ def serialize_specialist_packet(
     return {
         "code_version": _code_version(code_version),
         "candidate_identifier": packet.candidate_identifier,
+        "historical_learning": packet.historical_learning.as_dict(),
         "support_ratio": packet.support_ratio,
         "directional_support_ratio": packet.directional_support_ratio,
         "coverage_ratio": packet.coverage_ratio,

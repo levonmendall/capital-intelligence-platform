@@ -131,3 +131,36 @@ performance_claims_authorized = false
 ```
 
 The replay cannot submit an Alpaca order, change the active paper portfolio, alter the production CIO policy, promote a challenger, or present incomplete research results as verified investment performance. Historical target weights are simulated inside the historical archive only.
+
+## Governed use in live committee and CIO decisions
+
+Every live canonical specialist packet now carries a mandatory
+`HistoricalLearningContext`. The resolver reads only a replay manifest that was
+available by the specialist-completion timestamp and selects exact-symbol
+history when sufficient, otherwise governed asset-class comparables.
+
+Historical learning is matched by exact symbol when possible, then by asset
+class, with current macro regime, market regime, and decision horizon used as
+additional comparability gates. Updated replay manifests also carry
+next-cutoff realized returns so support frequency is not confused with actual
+outcome quality. Historical learning is deliberately one-way and subordinate
+to current evidence:
+
+- it may cap CIO confidence;
+- it may reduce the otherwise supported target position;
+- it adds limitations, provenance, sample size, support and abstention rates to
+  the immutable specialist packet;
+- missing or limited history is explicit rather than silently ignored;
+- it cannot raise expected return, increase confidence, enlarge a position,
+  create a candidate, authorize execution, or promote policy.
+
+The historical replay itself receives a `not_applicable` context so it cannot
+consume a manifest generated from future replay results. Live decisions use the
+manifest under `CAPITAL_INTELLIGENCE_HISTORICAL_DATA_DIR`, while the resulting
+learning context is persisted with the specialist packet for later outcome and
+calibration review.
+
+Optional control:
+
+- `CAPITAL_INTELLIGENCE_HISTORICAL_LEARNING_MINIMUM_SAMPLE`, default `6`
+

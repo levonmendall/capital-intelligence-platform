@@ -10,6 +10,8 @@ from cio import (
     CIODecision,
     CandidateDecisionRecord,
     ChiefInvestmentOfficer,
+    HistoricalLearningContext,
+    HistoricalLearningResolver,
     IndependentSpecialistPacket,
     PriorDecisionContext,
 )
@@ -403,6 +405,7 @@ class CanonicalCIOCycle:
         construction_policy: PortfolioConstructionPolicy | None = None,
         briefing_builder: DailyCIOBriefingBuilder | None = None,
         journal: SQLiteCIOJournal | None = None,
+        historical_learning_resolver: HistoricalLearningResolver | None = None,
     ) -> None:
         self.opportunity_engine = opportunity_engine or OpportunityEngine()
         self.specialist_service = (
@@ -414,6 +417,9 @@ class CanonicalCIOCycle:
         )
         self.briefing_builder = briefing_builder or DailyCIOBriefingBuilder()
         self.journal = journal
+        self.historical_learning_resolver = (
+            historical_learning_resolver or HistoricalLearningResolver.from_environment()
+        )
 
     def run(
         self,
@@ -517,6 +523,22 @@ class CanonicalCIOCycle:
                 rank=ranked.rank,
                 portfolio=portfolio,
             )
+            if cycle_identifier.startswith("historical-canonical-cycle:"):
+                historical_learning = HistoricalLearningContext.not_applicable(
+                    candidate_identifier=candidate.identifier,
+                    as_of=base_context.analysis_completed_at,
+                    reason=(
+                        "Historical replay cannot consume a manifest generated from its "
+                        "own future results."
+                    ),
+                )
+            else:
+                historical_learning = self.historical_learning_resolver.resolve(
+                    candidate,
+                    as_of=base_context.analysis_completed_at,
+                    macro_regime=base_context.macro.regime,
+                    market_regime=base_context.market.market_regime,
+                )
             specialist_context = CandidateSpecialistContext(
                 candidate_identifier=candidate.identifier,
                 analysis_completed_at=base_context.analysis_completed_at,
@@ -526,6 +548,7 @@ class CanonicalCIOCycle:
                 forecast=base_context.forecast,
                 company=base_context.company,
                 asset_valuation=base_context.asset_valuation,
+                historical_learning=historical_learning,
             )
             packet = self.specialist_service.analyze(
                 candidate,

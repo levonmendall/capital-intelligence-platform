@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from statistics import median
 
+from cio.historical_learning import HistoricalLearningContext
 from cio.models import (
     CandidateDecisionRecord,
     EvidenceDependency,
@@ -195,6 +196,7 @@ class IndependentSpecialistPacket:
 
     candidate_identifier: str
     analyses: tuple[SpecialistAnalysis, ...]
+    historical_learning: HistoricalLearningContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -230,6 +232,24 @@ class IndependentSpecialistPacket:
             raise ValueError(
                 "all specialist analyses must reference the packet candidate"
             )
+        completed_at = max(item.completed_at for item in self.analyses)
+        historical_learning = self.historical_learning
+        if historical_learning is None:
+            historical_learning = HistoricalLearningContext.not_applicable(
+                candidate_identifier=self.candidate_identifier,
+                as_of=completed_at,
+                reason=(
+                    "Direct specialist-packet construction did not supply a governed "
+                    "historical-learning context."
+                ),
+            )
+        if not isinstance(historical_learning, HistoricalLearningContext):
+            raise TypeError("historical_learning must be a HistoricalLearningContext")
+        historical_learning.validate_for(
+            self.candidate_identifier,
+            completed_at=completed_at,
+        )
+        object.__setattr__(self, "historical_learning", historical_learning)
 
     def for_role(self, role: SpecialistRole) -> SpecialistAnalysis:
         if not isinstance(role, SpecialistRole):
