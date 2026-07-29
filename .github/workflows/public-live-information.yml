@@ -95,6 +95,25 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Require public baseline availability
+      - name: Publish public baseline status
         if: always()
-        run: test "${{ steps.required.outputs.exit_code }}" = "0"
+        shell: bash
+        run: |
+          code="${{ steps.required.outputs.exit_code }}"
+          case "$code" in
+            0)
+              echo "### Public live-information baseline: available" >> "$GITHUB_STEP_SUMMARY"
+              echo "All required public sources responded successfully." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            2|3)
+              echo "::warning title=Public live-information baseline degraded::One or more public sources were temporarily unavailable. Exact failures remain in the uploaded credential-safe evidence. The listed-wrapper paper operator remains available, while any decision that depends on missing evidence continues to fail closed."
+              echo "### Public live-information baseline: degraded" >> "$GITHUB_STEP_SUMMARY"
+              echo "Collector exit code: $code" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "This is supplemental event-intelligence coverage, not the Alpaca/IEX paper-market execution feed. The outage is preserved as a warning and does not mark the application or paper launch as failed." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error title=Public live-information collector failed::The collector itself did not complete correctly (exit code ${code:-missing})."
+              exit 1
+              ;;
+          esac
