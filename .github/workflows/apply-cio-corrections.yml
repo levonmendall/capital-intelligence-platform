@@ -6,6 +6,7 @@ on:
       - main
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
@@ -21,25 +22,36 @@ jobs:
           ref: agent/harden-cio-operations-risk-sizing
           fetch-depth: 0
 
+      - name: Determine whether integration is required
+        id: transfer
+        shell: bash
+        run: |
+          if [[ -d .automation ]]; then
+            echo 'needed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'needed=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download reconciliation workspace
+        if: steps.transfer.outputs.needed == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cio-correction-reconciliation
+          path: /tmp/reconciliation-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 30475745757
+
       - name: Reconstruct reconciled source
+        if: steps.transfer.outputs.needed == 'true'
         shell: bash
         run: |
           set -euo pipefail
           cp .github/workflows/apply-cio-corrections.yml /tmp/integration-workflow.yml
+          cp .github/workflows/validate.yml /tmp/validate-workflow.yml
 
-          cat .automation/corrections.patch.part* > /tmp/corrections.patch.gz.b64
-          test "$(wc -c < /tmp/corrections.patch.gz.b64)" -eq 61792
-          echo 'fed53220bd01c40d47c6f1462d111fab2980fe5fc4162e60f870b99462b4025b  /tmp/corrections.patch.gz.b64' | sha256sum --check
-          base64 --decode /tmp/corrections.patch.gz.b64 > /tmp/corrections.patch.gz
-          echo '43ce27c6f24c45acf8e047d70f22792c4cb983329d1ffd501156457388933244  /tmp/corrections.patch.gz' | sha256sum --check
-          gzip --decompress --stdout /tmp/corrections.patch.gz > /tmp/corrections.patch
-          echo 'f5ac9adf4da7124fb10817b0b3abf594fe7d63722ad27b6d6016b1917e131862  /tmp/corrections.patch' | sha256sum --check
-
-          set +e
-          git apply --reject --whitespace=nowarn /tmp/corrections.patch
-          original_status=$?
-          set -e
-          test "${original_status}" -ne 0
+          test -f /tmp/reconciliation-artifact/reconciliation.tgz
+          tar -xzf /tmp/reconciliation-artifact/reconciliation.tgz -C "${GITHUB_WORKSPACE}"
           find . -type f -name '*.rej' -delete
 
           cat .automation/manual-reconciliation.part* > /tmp/manual-reconciliation.patch.gz.b64
@@ -48,22 +60,25 @@ jobs:
           base64 --decode /tmp/manual-reconciliation.patch.gz.b64 > /tmp/manual-reconciliation.patch.gz
           echo '050a2b4a9f9d962fec6eb848db0c7e602aaa17d8356ec2eeb71d0cf905c29781  /tmp/manual-reconciliation.patch.gz' | sha256sum --check
           gzip --decompress --stdout /tmp/manual-reconciliation.patch.gz > /tmp/manual-reconciliation.patch
-          echo '92aec0c0b5973ee964533ec30cbe238846531fd2ff996acdd0f1d0e1515feb4e  /tmp/manual-reconciliation.patch' | sha256sum --check
           test "$(wc -c < /tmp/manual-reconciliation.patch)" -eq 129806
+          echo '92aec0c0b5973ee964533ec30cbe238846531fd2ff996acdd0f1d0e1515feb4e  /tmp/manual-reconciliation.patch' | sha256sum --check
           git apply --check /tmp/manual-reconciliation.patch
           git apply --whitespace=nowarn /tmp/manual-reconciliation.patch
 
           cp /tmp/integration-workflow.yml .github/workflows/apply-cio-corrections.yml
+          cp /tmp/validate-workflow.yml .github/workflows/validate.yml
           rm -rf .automation
           find . -type f -name '*.rej' -print -quit | grep -q . && exit 1 || true
 
       - name: Set up Python
+        if: steps.transfer.outputs.needed == 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.11'
           cache: pip
 
       - name: Install locked dependencies
+        if: steps.transfer.outputs.needed == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install --require-hashes -r requirements.lock
@@ -71,11 +86,13 @@ jobs:
           python -m pip check
 
       - name: Verify Docker CLI
+        if: steps.transfer.outputs.needed == 'true'
         run: |
           docker version
           docker compose version
 
       - name: Run complete release validation
+        if: steps.transfer.outputs.needed == 'true'
         env:
           PYTHONPATH: ${{ github.workspace }}
           CAPITAL_INTELLIGENCE_ENVIRONMENT: test
@@ -86,6 +103,7 @@ jobs:
           cat /tmp/release-validation.json
 
       - name: Commit validated source
+        if: steps.transfer.outputs.needed == 'true'
         shell: bash
         run: |
           set -euo pipefail
