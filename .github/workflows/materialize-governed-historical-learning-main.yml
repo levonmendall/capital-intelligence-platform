@@ -43,3 +43,5 @@ jobs:
           git diff --cached --check
           git commit -m "Integrate governed historical learning into CIO decisions"
           git push origin HEAD:agent/governed-historical-learning-input
+
+# Triggered after workflow registration.
