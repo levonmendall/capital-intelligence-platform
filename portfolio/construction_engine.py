@@ -14,6 +14,7 @@ from cio import CIOAction
 from math import exp, log1p
 from portfolio.construction_models import (
     ConstructionIntent,
+    ConstructionMode,
     ConstructionStatus,
     ConstraintCheck,
     PortfolioAsset,
@@ -24,6 +25,7 @@ from portfolio.construction_models import (
     TradeProposal,
     TradeSide,
 )
+from portfolio.derivative_lifecycle import DerivativeLifecycleAuthority
 
 
 _EPSILON = 1e-9
@@ -55,6 +57,7 @@ class PortfolioConstructionEngine:
         policy: PortfolioConstructionPolicy | None = None,
     ) -> None:
         self.policy = policy or PortfolioConstructionPolicy()
+        self.derivative_authority = DerivativeLifecycleAuthority()
 
     def construct(
         self,
@@ -87,15 +90,23 @@ class PortfolioConstructionEngine:
         reduction_target = dict(target)
         reduction_reasons = self._copy_lists(reasons)
         reduction_funding = self._copy_lists(funding_for)
-        self._apply_optimized_positive_allocations(
-            request=request,
-            target=target,
-            assets=assets,
-            intents=intents,
-            reasons=reasons,
-            funding_for=funding_for,
-            blocks=blocks,
+        emergency_residuals = self._requested_reduction_residuals(
+            request=request, target=target
         )
+        if request.mode is ConstructionMode.EMERGENCY_DE_RISKING and emergency_residuals:
+            blocks.append(
+                "positive allocations are prohibited while emergency reductions remain incomplete"
+            )
+        else:
+            self._apply_optimized_positive_allocations(
+                request=request,
+                target=target,
+                assets=assets,
+                intents=intents,
+                reasons=reasons,
+                funding_for=funding_for,
+                blocks=blocks,
+            )
 
         target = {
             symbol: round(weight, 8)
@@ -304,6 +315,11 @@ class PortfolioConstructionEngine:
             instrument_identifiers=instrument_identifiers,
             scenario_metrics_before=scenario_before,
             scenario_metrics_after=scenario_after,
+            mode=request.mode,
+            scenario_set_identifier=request.scenario_set_identifier,
+            residual_exposures=self._requested_reduction_residuals(
+                request=request, target=target
+            ),
         )
 
     @staticmethod
@@ -674,6 +690,18 @@ class PortfolioConstructionEngine:
         for intent in ordered:
             starting = target.get(intent.symbol, 0.0)
             requested = intent.requested_target_weight or 0.0
+            if intent.uses_derivatives:
+                lifecycle = self.derivative_authority.assess(
+                    intent.derivative_lifecycle,
+                    instrument_identifier=(intent.instrument_identifier or intent.symbol),
+                    as_of=request.as_of,
+                )
+                if not lifecycle.authorized:
+                    blocks.append(
+                        f"{intent.symbol} remains analysis-only: "
+                        + "; ".join(lifecycle.reasons)
+                    )
+                    continue
             acquisition_cost = (
                 intent.transaction_cost_bps + intent.slippage_bps
             ) / 10_000
@@ -994,7 +1022,7 @@ class PortfolioConstructionEngine:
             scenario_return = cash * scenario.cash_return
             comparison_return = comparison_cash * scenario.cash_return
             for symbol, asset in assets.items():
-                value = scenario.return_for(symbol, asset.expected_return)
+                value = scenario.return_for(symbol)
                 scenario_return += weights.get(symbol, 0.0) * value
                 comparison_return += comparison_weights.get(symbol, 0.0) * value
             returns.append((scenario.probability, scenario_return, comparison_return))
@@ -1048,6 +1076,23 @@ class PortfolioConstructionEngine:
             liquidity_adjusted_loss=worst - turnover_penalty - liquidity_penalty,
         )
 
+
+    @staticmethod
+    def _requested_reduction_residuals(
+        *,
+        request: PortfolioConstructionRequest,
+        target: dict[str, float],
+    ) -> tuple[tuple[str, float], ...]:
+        residuals: list[tuple[str, float]] = []
+        for intent in request.intents:
+            if intent.action not in {CIOAction.REDUCE, CIOAction.EXIT}:
+                continue
+            requested = intent.requested_target_weight or 0.0
+            actual = target.get(intent.symbol, 0.0)
+            if actual > requested + _EPSILON:
+                residuals.append((intent.symbol, round(actual - requested, 8)))
+        return tuple(sorted(residuals))
+
     def _is_feasible(
         self,
         *,
@@ -1060,9 +1105,19 @@ class PortfolioConstructionEngine:
         cash = self._cash_weight(target)
         if cash + _EPSILON < self.policy.minimum_cash_weight:
             return False
-        if self._turnover(request, target) > self.policy.maximum_turnover + _EPSILON:
+        turnover_limit = (
+            self.policy.emergency_maximum_turnover
+            if request.mode is ConstructionMode.EMERGENCY_DE_RISKING
+            else self.policy.maximum_turnover
+        )
+        cost_limit = (
+            self.policy.emergency_maximum_total_cost_return
+            if request.mode is ConstructionMode.EMERGENCY_DE_RISKING
+            else self.policy.maximum_total_cost_return
+        )
+        if self._turnover(request, target) > turnover_limit + _EPSILON:
             return False
-        if self._cost(request, target, assets) > self.policy.maximum_total_cost_return + _EPSILON:
+        if self._cost(request, target, assets) > cost_limit + _EPSILON:
             return False
         current = {
             item.symbol: item.current_weight for item in request.positions
@@ -1125,6 +1180,16 @@ class PortfolioConstructionEngine:
         turnover: float,
         cost: float,
     ) -> tuple[ConstraintCheck, ...]:
+        turnover_limit = (
+            self.policy.emergency_maximum_turnover
+            if request.mode is ConstructionMode.EMERGENCY_DE_RISKING
+            else self.policy.maximum_turnover
+        )
+        cost_limit = (
+            self.policy.emergency_maximum_total_cost_return
+            if request.mode is ConstructionMode.EMERGENCY_DE_RISKING
+            else self.policy.maximum_total_cost_return
+        )
         checks: list[ConstraintCheck] = [
             ConstraintCheck(
                 name="minimum_cash",
@@ -1138,22 +1203,22 @@ class PortfolioConstructionEngine:
             ),
             ConstraintCheck(
                 name="maximum_turnover",
-                satisfied=turnover <= self.policy.maximum_turnover + _EPSILON,
+                satisfied=turnover <= turnover_limit + _EPSILON,
                 value=turnover,
-                limit=self.policy.maximum_turnover,
+                limit=turnover_limit,
                 detail=(
                     f"turnover {turnover:.2%} must not exceed "
-                    f"{self.policy.maximum_turnover:.2%}"
+                    f"{turnover_limit:.2%}"
                 ),
             ),
             ConstraintCheck(
                 name="maximum_total_cost",
-                satisfied=cost <= self.policy.maximum_total_cost_return + _EPSILON,
+                satisfied=cost <= cost_limit + _EPSILON,
                 value=cost,
-                limit=self.policy.maximum_total_cost_return,
+                limit=cost_limit,
                 detail=(
                     f"estimated implementation cost {cost:.2%} must not exceed "
-                    f"{self.policy.maximum_total_cost_return:.2%}"
+                    f"{cost_limit:.2%}"
                 ),
             ),
         ]

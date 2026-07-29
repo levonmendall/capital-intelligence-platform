@@ -55,6 +55,12 @@ _LAZY_EXPORTS = {
     "UniverseDisposition": ("cio.universe", "UniverseDisposition"),
     "DecisionPolicyMatrix": ("cio.policy_matrix", "DecisionPolicyMatrix"),
     "DecisionPolicyProfile": ("cio.policy_matrix", "DecisionPolicyProfile"),
+    "ChampionChallengerRegistry": ("cio.policy_governance", "ChampionChallengerRegistry"),
+    "PolicyPerformanceEvidence": ("cio.policy_governance", "PolicyPerformanceEvidence"),
+    "PolicyPromotionDecision": ("cio.policy_governance", "PolicyPromotionDecision"),
+    "PolicyPromotionPolicy": ("cio.policy_governance", "PolicyPromotionPolicy"),
+    "PolicyVersionCandidate": ("cio.policy_governance", "PolicyVersionCandidate"),
+    "PolicyVersionStatus": ("cio.policy_governance", "PolicyVersionStatus"),
 }
 
 
@@ -72,6 +78,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "CIOAction",
+    "ChampionChallengerRegistry",
     "CIODecision",
     "CIOSynthesisPolicy",
     "CapitalAlternativeComparison",
@@ -84,6 +91,11 @@ __all__ = [
     "IndependentSpecialistPacket",
     "MaterialDissent",
     "PayoffDistributionPoint",
+    "PolicyPerformanceEvidence",
+    "PolicyPromotionDecision",
+    "PolicyPromotionPolicy",
+    "PolicyVersionCandidate",
+    "PolicyVersionStatus",
     "PriorDecisionContext",
     "RecommendationUniversePolicy",
     "ReturnReconciliation",

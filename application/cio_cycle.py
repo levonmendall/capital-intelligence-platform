@@ -34,6 +34,7 @@ from opportunity import (
 )
 from portfolio.construction_api import (
     ConstructionIntent,
+    ConstructionMode,
     ConstructionStatus,
     PortfolioAsset,
     PortfolioConstructionEngine,
@@ -43,8 +44,17 @@ from portfolio.construction_api import (
     PortfolioScenario,
     TradeSide,
 )
+from portfolio.derivative_lifecycle import DerivativeLifecycleProfile
+from portfolio.scenario_authority import (
+    GovernedPortfolioScenarioSet,
+    PortfolioScenarioAuthority,
+)
 from reporting.daily_cio import DailyCIOBriefing, DailyCIOBriefingBuilder
-from thesis import LivingThesis
+from thesis import (
+    LivingThesis,
+    StructuredThesisConditionScorer,
+    ThesisCondition,
+)
 
 
 _ACTIONABLE = {
@@ -98,6 +108,9 @@ class CandidateExposureProfile:
     sector: str
     factor_loadings: tuple[tuple[str, float], ...]
     correlation_bucket: str
+    thesis_conditions: tuple[ThesisCondition, ...] = ()
+    invalidation_conditions_structured: tuple[ThesisCondition, ...] = ()
+    derivative_lifecycle: DerivativeLifecycleProfile | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -115,6 +128,21 @@ class CandidateExposureProfile:
             "factor_loadings",
             _loading_tuple(self.factor_loadings),
         )
+        for field_name in (
+            "thesis_conditions",
+            "invalidation_conditions_structured",
+        ):
+            values = getattr(self, field_name)
+            if not isinstance(values, tuple) or not all(
+                isinstance(item, ThesisCondition) for item in values
+            ):
+                raise TypeError(f"{field_name} must contain ThesisCondition values")
+        if self.derivative_lifecycle is not None and not isinstance(
+            self.derivative_lifecycle, DerivativeLifecycleProfile
+        ):
+            raise TypeError(
+                "derivative_lifecycle must be DerivativeLifecycleProfile or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +157,7 @@ class CyclePortfolioState:
     positions: tuple[PortfolioAsset, ...]
     exposure_profiles: tuple[CandidateExposureProfile, ...]
     eligible_universe_publication_identifier: str | None = None
+    scenario_set: GovernedPortfolioScenarioSet | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -172,6 +201,11 @@ class CyclePortfolioState:
             - 1.0
         ) > 0.000001:
             raise ValueError("portfolio positions and cash must sum to 1.0")
+        if self.scenario_set is not None:
+            if not isinstance(self.scenario_set, GovernedPortfolioScenarioSet):
+                raise TypeError("scenario_set must be GovernedPortfolioScenarioSet or None")
+            if self.scenario_set.as_of > self.as_of:
+                raise ValueError("portfolio scenario set cannot be from the future")
         if self.eligible_universe_publication_identifier is not None:
             object.__setattr__(
                 self,
@@ -213,7 +247,22 @@ class CyclePortfolioState:
         identifier: str,
         intents: tuple[ConstructionIntent, ...],
         scenarios: tuple[PortfolioScenario, ...] = (),
+        mode: ConstructionMode = ConstructionMode.NORMAL,
     ) -> PortfolioConstructionRequest:
+        scenario_identifier = None
+        if not scenarios and self.scenario_set is not None:
+            symbols = tuple(
+                sorted(
+                    {item.symbol for item in self.positions}
+                    | {item.symbol for item in intents}
+                )
+            )
+            scenarios = PortfolioScenarioAuthority().authorize(
+                self.scenario_set,
+                as_of=self.as_of,
+                symbols=symbols,
+            )
+            scenario_identifier = self.scenario_set.identifier
         return PortfolioConstructionRequest(
             identifier=identifier,
             as_of=self.as_of,
@@ -226,6 +275,8 @@ class CyclePortfolioState:
                 self.eligible_universe_publication_identifier
             ),
             scenarios=scenarios,
+            mode=mode,
+            scenario_set_identifier=scenario_identifier,
         )
 
 
@@ -373,6 +424,7 @@ class CanonicalCIOCycle:
         specialist_contexts: tuple[CandidateCycleContext, ...],
         portfolio: CyclePortfolioState,
         prior_decision_contexts: tuple[PriorDecisionContext, ...] = (),
+        active_theses: tuple[LivingThesis, ...] = (),
         code_version: str | None = None,
     ) -> CanonicalCIOCycleResult:
         cycle_identifier = _required_text(identifier, field_name="identifier")
@@ -409,6 +461,10 @@ class CanonicalCIOCycle:
                 "prior_decision_contexts must contain PriorDecisionContext values"
             )
         prior_map = {item.candidate_identifier: item for item in prior_decision_contexts}
+        if not isinstance(active_theses, tuple) or not all(
+            isinstance(item, LivingThesis) for item in active_theses
+        ):
+            raise TypeError("active_theses must contain LivingThesis values")
         if len(prior_map) != len(prior_decision_contexts):
             raise ValueError("prior decision contexts must be unique by candidate")
         generated_ranking = self._ranking_inputs(candidates, portfolio)
@@ -516,6 +572,7 @@ class CanonicalCIOCycle:
             ranked_by_candidate=ranked_by_candidate,
             construction=construction,
             portfolio=portfolio,
+            active_theses=active_theses,
             code_version=code_version,
         )
         snapshots = self._capture_evaluation_snapshots(
@@ -581,9 +638,15 @@ class CanonicalCIOCycle:
                 profile = portfolio.profile(candidate.identifier)
                 profile_sector = profile.sector
                 profile_bucket = profile.correlation_bucket
+                thesis_conditions = profile.thesis_conditions
+                invalidation_conditions_structured = (
+                    profile.invalidation_conditions_structured
+                )
             except KeyError:
                 profile_sector = "unclassified"
                 profile_bucket = "unclassified"
+                thesis_conditions = ()
+                invalidation_conditions_structured = ()
             current = portfolio.current_weight(candidate.instrument.symbol)
             feasible_delta = max(
                 0.0,
@@ -606,10 +669,11 @@ class CanonicalCIOCycle:
                 bucket_weights.get(profile_bucket, 0.0),
             )
             diversification = max(0.0, min(1.0, 1.0 - concentration))
-            thesis = cls._text_clarity(
-                candidate.primary_catalysts + candidate.critical_assumptions
-            )
-            invalidation = cls._text_clarity(candidate.invalidation_conditions)
+            scorer = StructuredThesisConditionScorer()
+            thesis = scorer.score(thesis_conditions).score
+            invalidation = scorer.score(
+                invalidation_conditions_structured
+            ).score
             horizon_factor = min(
                 1.0, max(0.20, candidate.decision_horizon_days / 90.0)
             )
@@ -636,23 +700,6 @@ class CanonicalCIOCycle:
                 )
             )
         return tuple(values)
-
-    @staticmethod
-    def _text_clarity(items: tuple[str, ...]) -> float:
-        if not items:
-            return 0.0
-        tokens = (
-            "above", "below", "increase", "decrease", "decline", "rise",
-            "fall", "days", "month", "quarter", "%", "ratio", "spread",
-            "growth", "margin", "price", "yield", "volume", "earnings",
-        )
-        total = 0.0
-        for item in items:
-            text = item.strip().lower()
-            length = min(1.0, len(text.split()) / 10.0)
-            measurable = 1.0 if any(token in text for token in tokens) else 0.35
-            total += 0.45 * length + 0.55 * measurable
-        return round(max(0.0, min(1.0, total / len(items))), 8)
 
     def _capture_evaluation_snapshots(
         self,
@@ -845,104 +892,27 @@ class CanonicalCIOCycle:
                     factor_loadings=profile.factor_loadings,
                     correlation_bucket=profile.correlation_bucket,
                     priority_rank=priority_rank,
+                    derivative_lifecycle=profile.derivative_lifecycle,
                 )
             )
         if not intents:
             return None
-        scenarios = self._joint_portfolio_scenarios(
-            decisions=decisions,
-            ranked_by_candidate=ranked_by_candidate,
-            portfolio=portfolio,
+        mode = (
+            ConstructionMode.EMERGENCY_DE_RISKING
+            if any(
+                item.action in {CIOAction.REDUCE, CIOAction.EXIT}
+                and (item.evidence_vetoes or item.expected_return <= -0.05)
+                for item in decisions
+            )
+            else ConstructionMode.NORMAL
         )
         return self.construction_engine.construct(
             portfolio.request(
                 identifier=f"construction:{cycle_identifier}",
                 intents=tuple(intents),
-                scenarios=scenarios,
+                mode=mode,
             )
         )
-
-    @staticmethod
-    def _joint_portfolio_scenarios(
-        *,
-        decisions: tuple[CIODecision, ...],
-        ranked_by_candidate: dict[str, object],
-        portfolio: CyclePortfolioState,
-    ) -> tuple[PortfolioScenario, ...]:
-        """Translate reconciled candidate outcomes into common portfolio stresses."""
-
-        actionable = tuple(
-            item
-            for item in decisions
-            if item.return_reconciliation is not None
-            and item.action in _ACTIONABLE | {CIOAction.HOLD, CIOAction.NO_MATERIAL_CHANGE}
-        )
-        if not actionable:
-            return ()
-        labels = ("bear", "base", "bull")
-        probability_by_label: dict[str, list[float]] = {label: [] for label in labels}
-        returns_by_label: dict[str, dict[str, float]] = {label: {} for label in labels}
-        for decision in actionable:
-            ranked = ranked_by_candidate[decision.candidate_identifier]
-            candidate = ranked.candidate
-            distribution = {
-                item.label.lower(): item
-                for item in decision.return_reconciliation.outcomes
-            }
-            if not all(label in distribution for label in labels):
-                ordered = sorted(
-                    decision.return_reconciliation.outcomes,
-                    key=lambda item: item.total_return,
-                )
-                if len(ordered) < 3:
-                    continue
-                distribution = {
-                    "bear": ordered[0],
-                    "base": ordered[len(ordered) // 2],
-                    "bull": ordered[-1],
-                }
-            for label in labels:
-                point = distribution[label]
-                probability_by_label[label].append(point.probability)
-                returns_by_label[label][candidate.instrument.symbol] = (
-                    ConstructionIntent.annualized_return(
-                        point.total_return - candidate.implementation_cost_return,
-                        horizon_days=decision.decision_horizon_days,
-                    )
-                )
-        if not any(probability_by_label.values()):
-            return ()
-        raw_probabilities = {
-            label: (
-                sum(values) / len(values) if values else 0.0
-            )
-            for label, values in probability_by_label.items()
-        }
-        total = sum(raw_probabilities.values())
-        if total <= 0.0:
-            return ()
-        values: list[PortfolioScenario] = []
-        for label in labels:
-            probability = raw_probabilities[label] / total
-            if probability <= 0.0:
-                continue
-            asset_returns = {
-                item.symbol: item.expected_return for item in portfolio.positions
-            }
-            asset_returns.update(returns_by_label[label])
-            values.append(
-                PortfolioScenario(
-                    name=f"joint-{label}",
-                    probability=probability,
-                    cash_return=portfolio.cash_expected_return,
-                    asset_returns=tuple(sorted(asset_returns.items())),
-                )
-            )
-        # Correct floating-point drift on the final scenario.
-        if values:
-            running = sum(item.probability for item in values[:-1])
-            values[-1] = replace(values[-1], probability=1.0 - running)
-        return tuple(values)
 
     def _create_theses(
         self,
@@ -951,32 +921,42 @@ class CanonicalCIOCycle:
         ranked_by_candidate: dict[str, object],
         construction: PortfolioConstructionResult | None,
         portfolio: CyclePortfolioState,
+        active_theses: tuple[LivingThesis, ...],
         code_version: str | None,
     ) -> tuple[LivingThesis, ...]:
-        target_weights = (
-            {} if construction is None else dict(construction.target_weights)
-        )
+        target_weights = {} if construction is None else dict(construction.target_weights)
+        existing_by_asset = {item.asset: item for item in active_theses}
         theses: list[LivingThesis] = []
         for decision in decisions:
-            if decision.action not in _OWNERSHIP:
-                continue
             ranked = ranked_by_candidate[decision.candidate_identifier]
             candidate = ranked.candidate
-            current = portfolio.current_weight(candidate.instrument.symbol)
-            if decision.action in {CIOAction.BUY, CIOAction.INCREASE}:
-                if construction is None or construction.status is ConstructionStatus.BLOCKED:
+            symbol = candidate.instrument.symbol
+            current = portfolio.current_weight(symbol)
+            implemented = target_weights.get(symbol, current)
+            existing = existing_by_asset.get(symbol)
+            thesis: LivingThesis | None = None
+            if existing is None:
+                if decision.action in {CIOAction.BUY, CIOAction.INCREASE} and implemented > current + 0.000001:
+                    thesis = LivingThesis.from_decision(candidate, decision)
+            else:
+                if decision.action is CIOAction.EXIT and implemented > 0.000001:
                     continue
-                if target_weights.get(candidate.instrument.symbol, 0.0) <= current + 0.000001:
+                if decision.action is CIOAction.REDUCE and implemented >= current - 0.000001:
                     continue
-            elif decision.action is CIOAction.HOLD and current <= 0.0:
+                if decision.action in {
+                    CIOAction.BUY,
+                    CIOAction.INCREASE,
+                    CIOAction.HOLD,
+                    CIOAction.REDUCE,
+                    CIOAction.EXIT,
+                    CIOAction.NO_MATERIAL_CHANGE,
+                }:
+                    thesis = existing.continue_from_decision(candidate, decision)
+            if thesis is None:
                 continue
-            thesis = LivingThesis.from_decision(candidate, decision)
             theses.append(thesis)
             if self.journal is not None:
-                self.journal.append_thesis_snapshot(
-                    thesis,
-                    code_version=code_version,
-                )
+                self.journal.append_thesis_snapshot(thesis, code_version=code_version)
         return tuple(theses)
 
     def _journal_candidates_and_queue(

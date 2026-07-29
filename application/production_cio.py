@@ -341,12 +341,27 @@ class ProductionCanonicalCIOExecutor:
                     "production context manifest candidate order does not match "
                     "the persisted opportunity queue"
                 )
+        if context.portfolio.scenario_set is None:
+            raise RuntimeError(
+                "production CIO context requires a complete portfolio scenario set"
+            )
+        prior_contexts = ()
+        active_theses = ()
+        if self.cycle.journal is not None:
+            prior_contexts = self.cycle.journal.prior_decision_contexts(
+                candidates, as_of=decision_time
+            )
+            active_theses = self.cycle.journal.active_theses(
+                candidates, as_of=decision_time
+            )
         return self.cycle.run(
             identifier=context.identifier,
             candidates=candidates,
             opportunity_context=context.opportunity_context,
             specialist_contexts=context.specialist_contexts,
             portfolio=context.portfolio,
+            prior_decision_contexts=prior_contexts,
+            active_theses=active_theses,
             code_version=context.code_version,
         )
 

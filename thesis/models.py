@@ -102,6 +102,7 @@ class LivingThesis:
     performance_since_approval: float
     next_review_at: datetime
     review_count: int = 0
+    ownership_episode_identifier: str = ""
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -116,6 +117,12 @@ class LivingThesis:
                 field_name,
                 _required_text(getattr(self, field_name), field_name=field_name),
             )
+        episode = self.ownership_episode_identifier or self.identifier
+        object.__setattr__(
+            self,
+            "ownership_episode_identifier",
+            _required_text(episode, field_name="ownership_episode_identifier"),
+        )
         _aware(self.created_at, field_name="created_at")
         _aware(self.updated_at, field_name="updated_at")
         _aware(self.next_review_at, field_name="next_review_at")
@@ -197,8 +204,12 @@ class LivingThesis:
             raise ValueError(
                 "only approved ownership decisions can create an active thesis"
             )
+        episode = (
+            f"ownership:{candidate.instrument.instrument_id}:"
+            f"{decision.as_of.isoformat()}"
+        )
         return cls(
-            identifier=f"thesis:{decision.identifier}",
+            identifier=f"thesis:{episode}",
             decision_identifier=decision.identifier,
             candidate_identifier=candidate.identifier,
             asset=candidate.instrument.symbol,
@@ -218,6 +229,49 @@ class LivingThesis:
             evidence_identifiers=candidate.evidence_identifiers,
             performance_since_approval=0.0,
             next_review_at=decision.review_at,
+            ownership_episode_identifier=episode,
+        )
+
+    def continue_from_decision(
+        self,
+        candidate: CandidateDecisionRecord,
+        decision: CIODecision,
+    ) -> "LivingThesis":
+        if decision.candidate_identifier != candidate.identifier:
+            raise ValueError("decision and candidate identifiers do not match")
+        if decision.as_of <= self.updated_at:
+            raise ValueError("continued thesis decision must follow the current snapshot")
+        if decision.action is CIOAction.EXIT:
+            state = ThesisState.EXITED
+        elif decision.action is CIOAction.REDUCE:
+            state = ThesisState.REDUCED
+        elif decision.action in {CIOAction.HOLD, CIOAction.NO_MATERIAL_CHANGE}:
+            state = ThesisState.STABLE
+        elif decision.action in {CIOAction.BUY, CIOAction.INCREASE}:
+            state = ThesisState.ACTIVE
+        else:
+            state = self.state
+        return replace(
+            self,
+            decision_identifier=decision.identifier,
+            candidate_identifier=candidate.identifier,
+            updated_at=decision.as_of,
+            state=state,
+            expected_return=decision.expected_return,
+            expected_downside=(
+                candidate.expected_downside
+                if decision.return_reconciliation is None
+                else decision.return_reconciliation.expected_downside
+            ),
+            horizon_days=decision.decision_horizon_days,
+            assumptions=decision.key_assumptions,
+            catalysts=decision.catalysts,
+            invalidation_conditions=decision.invalidation_conditions,
+            monitoring_indicators=decision.monitoring_indicators,
+            current_confidence=decision.final_confidence,
+            evidence_identifiers=candidate.evidence_identifiers,
+            next_review_at=decision.review_at,
+            review_count=self.review_count + 1,
         )
 
     def apply(self, review: "ThesisReview") -> "LivingThesis":

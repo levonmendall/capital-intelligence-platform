@@ -21,7 +21,13 @@ from pathlib import Path
 from typing import Any
 
 from cio.committee import IndependentSpecialistPacket
-from cio.models import CIODecision, CandidateDecisionRecord
+from cio.models import (
+    CIOAction,
+    CIODecision,
+    CandidateDecisionRecord,
+    PriorDecisionContext,
+    ThesisState,
+)
 from opportunity import OpportunityQueue
 from thesis import LivingThesis, ThesisReview
 
@@ -564,6 +570,7 @@ def serialize_thesis_snapshot(
         "performance_since_approval": thesis.performance_since_approval,
         "next_review_at": thesis.next_review_at.isoformat(),
         "review_count": thesis.review_count,
+        "ownership_episode_identifier": thesis.ownership_episode_identifier,
     }
 
 
@@ -878,7 +885,7 @@ class SQLiteCIOJournal:
                 thesis,
                 code_version=code_version,
             ),
-            schema_version="living-thesis.v1",
+            schema_version="living-thesis.v2",
             event_identifier=(
                 f"event:{thesis.identifier}:snapshot:{thesis.review_count}"
             ),
@@ -975,6 +982,175 @@ class SQLiteCIOJournal:
                 tuple(parameters),
             ).fetchone()
         return None if row is None else self._event_from_row(row)
+
+
+    def prior_decision_contexts(
+        self,
+        candidates: tuple[CandidateDecisionRecord, ...],
+        *,
+        as_of: datetime,
+    ) -> tuple[PriorDecisionContext, ...]:
+        """Reconstruct state by instrument, not timestamp-specific candidate ID."""
+
+        decision_time = _aware(as_of, field_name="as_of")
+        if not self.verify_integrity():
+            raise CIOJournalIntegrityError("CIO journal integrity is unavailable")
+        limit = max(1, self.count())
+        candidate_events = self.events(
+            event_type=CIOJournalEventType.CANDIDATE_DECISION,
+            limit=limit,
+        )
+        decision_events = self.events(
+            event_type=CIOJournalEventType.CIO_DECISION,
+            limit=limit,
+        )
+        thesis_events = self.events(
+            event_type=CIOJournalEventType.THESIS_SNAPSHOT,
+            limit=limit,
+        )
+        results: list[PriorDecisionContext] = []
+        supportive = {
+            CIOAction.BUY,
+            CIOAction.INCREASE,
+            CIOAction.HOLD,
+            CIOAction.NO_MATERIAL_CHANGE,
+        }
+        opposing = {CIOAction.REDUCE, CIOAction.EXIT}
+        material = {CIOAction.BUY, CIOAction.INCREASE, CIOAction.REDUCE, CIOAction.EXIT}
+        for candidate in candidates:
+            historical_ids = {
+                event.aggregate_identifier
+                for event in candidate_events
+                if event.occurred_at < decision_time
+                and event.payload.get("instrument", {}).get("instrument_id")
+                == candidate.instrument.instrument_id
+            }
+            history = [
+                event
+                for event in decision_events
+                if event.occurred_at < decision_time
+                and event.aggregate_identifier in historical_ids
+            ]
+            if not history:
+                continue
+            history.sort(key=lambda item: item.sequence)
+            latest = history[-1]
+            payload = latest.payload
+            action = CIOAction(payload["action"])
+            supportive_cycles = 0
+            opposing_cycles = 0
+            for event in reversed(history):
+                item_action = CIOAction(event.payload["action"])
+                if item_action in supportive:
+                    if opposing_cycles:
+                        break
+                    supportive_cycles += 1
+                elif item_action in opposing:
+                    if supportive_cycles:
+                        break
+                    opposing_cycles += 1
+                else:
+                    break
+            last_change = next(
+                (
+                    event.occurred_at
+                    for event in reversed(history)
+                    if CIOAction(event.payload["action"]) in material
+                ),
+                None,
+            )
+            latest_thesis = next(
+                (
+                    event
+                    for event in reversed(thesis_events)
+                    if event.occurred_at < decision_time
+                    and event.payload.get("asset") == candidate.instrument.symbol
+                ),
+                None,
+            )
+            thesis_state = (
+                ThesisState.CANDIDATE
+                if latest_thesis is None
+                else ThesisState(latest_thesis.payload["state"])
+            )
+            results.append(
+                PriorDecisionContext(
+                    candidate_identifier=candidate.identifier,
+                    prior_decision_identifier=payload["identifier"],
+                    prior_action=action,
+                    prior_target_weight=payload.get("recommended_position_weight"),
+                    decided_at=latest.occurred_at,
+                    thesis_state=thesis_state,
+                    consecutive_supportive_cycles=supportive_cycles,
+                    consecutive_opposing_cycles=opposing_cycles,
+                    last_material_change_at=last_change,
+                    emergency_override=False,
+                )
+            )
+        return tuple(results)
+
+    def active_theses(
+        self,
+        candidates: tuple[CandidateDecisionRecord, ...],
+        *,
+        as_of: datetime,
+    ) -> tuple[LivingThesis, ...]:
+        decision_time = _aware(as_of, field_name="as_of")
+        symbols = {item.instrument.symbol for item in candidates}
+        limit = max(1, self.count())
+        events = self.events(
+            event_type=CIOJournalEventType.THESIS_SNAPSHOT,
+            limit=limit,
+        )
+        latest: dict[str, CIOJournalEvent] = {}
+        for event in events:
+            if event.occurred_at >= decision_time or event.payload.get("asset") not in symbols:
+                continue
+            episode = event.payload.get("ownership_episode_identifier") or event.payload["identifier"]
+            latest[episode] = event
+        active_states = {
+            ThesisState.ACTIVE,
+            ThesisState.STRENGTHENING,
+            ThesisState.STABLE,
+            ThesisState.WEAKENING,
+            ThesisState.REDUCED,
+        }
+        values: list[LivingThesis] = []
+        for event in latest.values():
+            payload = event.payload
+            state = ThesisState(payload["state"])
+            if state not in active_states:
+                continue
+            values.append(
+                LivingThesis(
+                    identifier=payload["identifier"],
+                    decision_identifier=payload["decision_identifier"],
+                    candidate_identifier=payload["candidate_identifier"],
+                    asset=payload["asset"],
+                    created_at=datetime.fromisoformat(payload["created_at"]),
+                    updated_at=datetime.fromisoformat(payload["updated_at"]),
+                    state=state,
+                    original_rationale=payload["original_rationale"],
+                    assumptions=tuple(payload["assumptions"]),
+                    expected_return=payload["expected_return"],
+                    expected_downside=payload["expected_downside"],
+                    horizon_days=payload["horizon_days"],
+                    catalysts=tuple(payload["catalysts"]),
+                    invalidation_conditions=tuple(payload["invalidation_conditions"]),
+                    monitoring_indicators=tuple(payload["monitoring_indicators"]),
+                    initial_confidence=payload["initial_confidence"],
+                    current_confidence=payload["current_confidence"],
+                    evidence_identifiers=tuple(payload["evidence_identifiers"]),
+                    performance_since_approval=payload["performance_since_approval"],
+                    next_review_at=datetime.fromisoformat(payload["next_review_at"]),
+                    review_count=payload.get("review_count", 0),
+                    ownership_episode_identifier=(
+                        payload.get("ownership_episode_identifier")
+                        or payload["identifier"]
+                    ),
+                )
+            )
+        return tuple(sorted(values, key=lambda item: item.asset))
 
     def count(self) -> int:
         with self._connect() as connection:

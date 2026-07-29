@@ -6,10 +6,24 @@ from thesis.models import (
     ThesisReview,
     ThesisReviewProposal,
 )
+from thesis.conditions import (
+    MissingDataBehavior,
+    StructuredThesisConditionScorer,
+    StructuredThesisQuality,
+    ThesisCondition,
+    ThesisConditionConsequence,
+    ThesisConditionOperator,
+)
 from thesis.service import ThesisMonitor, ThesisMonitoringPolicy
 
 __all__ = [
     "LivingThesis",
+    "MissingDataBehavior",
+    "StructuredThesisConditionScorer",
+    "StructuredThesisQuality",
+    "ThesisCondition",
+    "ThesisConditionConsequence",
+    "ThesisConditionOperator",
     "ThesisEvidenceUpdate",
     "ThesisMonitor",
     "ThesisMonitoringPolicy",

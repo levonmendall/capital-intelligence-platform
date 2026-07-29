@@ -925,6 +925,7 @@ class PointInTimeDecisionEvaluation:
     outcome_evidence: tuple[str, ...]
     forecast_brier_score: float = 0.0
     scenario_log_score: float = 0.0
+    scenario_crps: float = 0.0
     decision_confidence_brier_score: float = 0.0
     sizing_efficiency: float = 0.0
     timing_efficiency: float = 0.0
@@ -995,6 +996,7 @@ class PointInTimeDecisionEvaluation:
             )
         for field_name in (
             "scenario_log_score",
+            "scenario_crps",
             "sizing_efficiency",
             "timing_efficiency",
             "abstention_value",
@@ -1066,6 +1068,7 @@ class PointInTimeDecisionEvaluation:
             "confidence_brier_score": self.confidence_brier_score,
             "forecast_brier_score": self.forecast_brier_score,
             "scenario_log_score": self.scenario_log_score,
+            "scenario_crps": self.scenario_crps,
             "decision_confidence_brier_score": self.decision_confidence_brier_score,
             "sizing_efficiency": self.sizing_efficiency,
             "timing_efficiency": self.timing_efficiency,
@@ -1240,6 +1243,7 @@ class PointInTimeDecisionEvaluator:
         decision_target = 1.0 if decision_correct else 0.0
         decision_brier = (snapshot.final_confidence - decision_target) ** 2
         scenario_log_score = 0.0
+        scenario_crps = 0.0
         if snapshot.reconciled_outcomes:
             realized_candidate = realized.decision_to_horizon_return
             closest = min(
@@ -1247,6 +1251,18 @@ class PointInTimeDecisionEvaluator:
                 key=lambda item: abs(item.total_return - realized_candidate),
             )
             scenario_log_score = -log(max(closest.probability, 1e-12))
+            first_moment = sum(
+                item.probability * abs(item.total_return - realized_candidate)
+                for item in snapshot.reconciled_outcomes
+            )
+            pairwise = sum(
+                left.probability
+                * right.probability
+                * abs(left.total_return - right.total_return)
+                for left in snapshot.reconciled_outcomes
+                for right in snapshot.reconciled_outcomes
+            )
+            scenario_crps = first_moment - 0.5 * pairwise
         brier = forecast_brier
         outcome_evidence = (
             f"candidate decision-to-horizon return={realized.decision_to_horizon_return:.6f}",
@@ -1295,6 +1311,7 @@ class PointInTimeDecisionEvaluator:
             confidence_brier_score=brier,
             forecast_brier_score=forecast_brier,
             scenario_log_score=scenario_log_score,
+            scenario_crps=scenario_crps,
             decision_confidence_brier_score=decision_brier,
             sizing_efficiency=attribution.sizing,
             timing_efficiency=attribution.timing,
@@ -1420,14 +1437,21 @@ class ConfidenceCalibrator:
             index = min(int(snapshot.final_confidence / width), int(1.0 / width) - 1)
             success = (
                 1.0
-                if evaluation.outcome is EvaluationOutcome.VALUE_ADDED
+                if evaluation.outcome
+                in {
+                    EvaluationOutcome.VALUE_ADDED,
+                    EvaluationOutcome.MATCHED_ALTERNATIVE,
+                    EvaluationOutcome.CORRECT_ABSTENTION,
+                    EvaluationOutcome.AVOIDED_LOSS,
+                    EvaluationOutcome.INSUFFICIENT_EVIDENCE_CONFIRMED,
+                }
                 else 0.0
             )
             grouped.setdefault(index, []).append(
                 (
                     snapshot.final_confidence,
                     success,
-                    evaluation.confidence_brier_score,
+                    evaluation.decision_confidence_brier_score,
                 )
             )
         buckets: list[CalibrationBucket] = []

@@ -8,6 +8,7 @@ from enum import Enum
 from math import exp, isfinite, log1p
 
 from cio import CIOAction, CIODecision, CandidateDecisionRecord
+from portfolio.derivative_lifecycle import DerivativeLifecycleProfile
 
 
 class ConstructionStatus(str, Enum):
@@ -15,6 +16,11 @@ class ConstructionStatus(str, Enum):
     PARTIAL = "partial"
     BLOCKED = "blocked"
     NO_ACTION = "no_action"
+
+
+class ConstructionMode(str, Enum):
+    NORMAL = "normal"
+    EMERGENCY_DE_RISKING = "emergency_de_risking"
 
 
 class TradeSide(str, Enum):
@@ -114,13 +120,15 @@ class ExposureLimit:
 
 @dataclass(frozen=True, slots=True)
 class PortfolioConstructionPolicy:
-    version: str = "portfolio-construction.v3"
+    version: str = "portfolio-construction.v4"
     minimum_cash_weight: float = 0.02
     maximum_position_weight: float = 0.10
     default_maximum_sector_weight: float = 0.25
     default_maximum_correlation_bucket_weight: float = 0.25
     maximum_turnover: float = 0.20
     maximum_total_cost_return: float = 0.005
+    emergency_maximum_turnover: float = 1.0
+    emergency_maximum_total_cost_return: float = 0.03
     minimum_replacement_edge: float = 0.01
     minimum_expected_return_improvement: float = 0.0001
     minimum_geometric_return_improvement: float = 0.0
@@ -148,6 +156,8 @@ class PortfolioConstructionPolicy:
             "default_maximum_correlation_bucket_weight",
             "maximum_turnover",
             "maximum_total_cost_return",
+            "emergency_maximum_turnover",
+            "emergency_maximum_total_cost_return",
             "minimum_replacement_edge",
             "minimum_expected_return_improvement",
             "minimum_geometric_return_improvement",
@@ -257,6 +267,8 @@ class PortfolioAsset:
     minimum_weight: float = 0.0
     funding_eligible: bool = False
     instrument_identifier: str | None = None
+    uses_derivatives: bool = False
+    derivative_lifecycle: DerivativeLifecycleProfile | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("symbol", "sector", "correlation_bucket"):
@@ -321,6 +333,16 @@ class PortfolioAsset:
                 field_name="instrument_identifier",
             ),
         )
+        if not isinstance(self.uses_derivatives, bool):
+            raise TypeError("uses_derivatives must be a bool")
+        if self.derivative_lifecycle is not None and not isinstance(
+            self.derivative_lifecycle, DerivativeLifecycleProfile
+        ):
+            raise TypeError(
+                "derivative_lifecycle must be DerivativeLifecycleProfile or None"
+            )
+        if not self.uses_derivatives and self.derivative_lifecycle is not None:
+            raise ValueError("non-derivative assets cannot carry derivative lifecycle data")
 
     @property
     def total_cost_bps(self) -> float:
@@ -344,6 +366,8 @@ class ConstructionIntent:
     slippage_bps: float
     priority_rank: int
     instrument_identifier: str | None = None
+    uses_derivatives: bool = False
+    derivative_lifecycle: DerivativeLifecycleProfile | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -433,6 +457,16 @@ class ConstructionIntent:
                 field_name="instrument_identifier",
             ),
         )
+        if not isinstance(self.uses_derivatives, bool):
+            raise TypeError("uses_derivatives must be a bool")
+        if self.derivative_lifecycle is not None and not isinstance(
+            self.derivative_lifecycle, DerivativeLifecycleProfile
+        ):
+            raise TypeError(
+                "derivative_lifecycle must be DerivativeLifecycleProfile or None"
+            )
+        if not self.uses_derivatives and self.derivative_lifecycle is not None:
+            raise ValueError("non-derivative assets cannot carry derivative lifecycle data")
         sized_actions = {
             CIOAction.BUY,
             CIOAction.INCREASE,
@@ -461,6 +495,7 @@ class ConstructionIntent:
         factor_loadings: tuple[tuple[str, float], ...],
         correlation_bucket: str,
         priority_rank: int,
+        derivative_lifecycle: DerivativeLifecycleProfile | None = None,
     ) -> "ConstructionIntent":
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be CandidateDecisionRecord")
@@ -491,6 +526,8 @@ class ConstructionIntent:
             slippage_bps=candidate.slippage_bps,
             priority_rank=priority_rank,
             instrument_identifier=candidate.instrument.instrument_id,
+            uses_derivatives=candidate.instrument.uses_derivatives,
+            derivative_lifecycle=derivative_lifecycle,
         )
 
     @staticmethod
@@ -531,9 +568,12 @@ class PortfolioScenario:
             raise ValueError("scenario asset returns must be unique")
         object.__setattr__(self, "asset_returns", normalized)
 
-    def return_for(self, symbol: str, fallback: float) -> float:
+    def return_for(self, symbol: str) -> float:
         resolved = symbol.strip().upper()
-        return next((value for name, value in self.asset_returns if name == resolved), fallback)
+        value = next((item for name, item in self.asset_returns if name == resolved), None)
+        if value is None:
+            raise KeyError(f"scenario {self.name} is missing {resolved}")
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -575,6 +615,8 @@ class PortfolioConstructionRequest:
     intents: tuple[ConstructionIntent, ...]
     eligible_universe_publication_identifier: str | None = None
     scenarios: tuple[PortfolioScenario, ...] = ()
+    mode: ConstructionMode = ConstructionMode.NORMAL
+    scenario_set_identifier: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -644,6 +686,23 @@ class PortfolioConstructionRequest:
             names = tuple(item.name for item in self.scenarios)
             if len(names) != len(set(names)):
                 raise ValueError("portfolio scenario names must be unique")
+            expected_symbols = set(symbols) | set(intent_symbols)
+            for scenario in self.scenarios:
+                observed = {symbol for symbol, _ in scenario.asset_returns}
+                if observed != expected_symbols:
+                    missing = sorted(expected_symbols - observed)
+                    extra = sorted(observed - expected_symbols)
+                    raise ValueError(
+                        "portfolio scenarios must exactly cover every position and intent; "
+                        f"missing={missing} extra={extra}"
+                    )
+        if not isinstance(self.mode, ConstructionMode):
+            raise TypeError("mode must be ConstructionMode")
+        object.__setattr__(
+            self,
+            "scenario_set_identifier",
+            _optional_text(self.scenario_set_identifier, field_name="scenario_set_identifier"),
+        )
         object.__setattr__(
             self,
             "eligible_universe_publication_identifier",
@@ -762,6 +821,9 @@ class PortfolioConstructionResult:
     instrument_identifiers: tuple[tuple[str, str], ...] = ()
     scenario_metrics_before: PortfolioScenarioMetrics | None = None
     scenario_metrics_after: PortfolioScenarioMetrics | None = None
+    mode: ConstructionMode = ConstructionMode.NORMAL
+    scenario_set_identifier: str | None = None
+    residual_exposures: tuple[tuple[str, float], ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("request_identifier", "policy_version"):
@@ -773,6 +835,23 @@ class PortfolioConstructionResult:
         _aware(self.as_of, field_name="as_of")
         if not isinstance(self.status, ConstructionStatus):
             raise TypeError("status must be a ConstructionStatus")
+        if not isinstance(self.mode, ConstructionMode):
+            raise TypeError("mode must be ConstructionMode")
+        object.__setattr__(
+            self,
+            "scenario_set_identifier",
+            _optional_text(self.scenario_set_identifier, field_name="scenario_set_identifier"),
+        )
+        if not isinstance(self.residual_exposures, tuple):
+            raise TypeError("residual_exposures must be a tuple")
+        residuals = tuple(
+            (
+                _required_text(symbol, field_name="residual symbol").upper(),
+                _finite(weight, field_name=f"residual exposure:{symbol}", minimum=0.0, maximum=1.0),
+            )
+            for symbol, weight in self.residual_exposures
+        )
+        object.__setattr__(self, "residual_exposures", residuals)
         object.__setattr__(
             self,
             "target_cash_weight",
@@ -893,6 +972,7 @@ class PortfolioConstructionResult:
 
 __all__ = [
     "ConstructionIntent",
+    "ConstructionMode",
     "ConstructionStatus",
     "ConstraintCheck",
     "ExposureLimit",
