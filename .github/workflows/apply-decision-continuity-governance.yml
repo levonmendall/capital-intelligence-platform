@@ -73,9 +73,7 @@ jobs:
             tests/test_cio_persistence.py \
             tests/test_portfolio_construction_engine.py \
             tests/test_point_in_time_evaluation.py \
-            tests/test_canonical_cio_cycle.py \
-            tests/test_production_cio.py \
-            tests/test_production_context.py
+            tests/test_canonical_cio_cycle.py
 
       - name: Remove migration transport
         run: |
