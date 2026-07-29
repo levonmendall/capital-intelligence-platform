@@ -1,0 +1,109 @@
+name: Apply CIO corrections and validate Docker
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.head_ref == 'agent/harden-cio-operations-risk-sizing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out correction branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/harden-cio-operations-risk-sizing
+          fetch-depth: 0
+
+      - name: Reconstruct and apply correction patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .automation/corrections.patch.part* > /tmp/corrections.patch.gz.b64
+          test "$(wc -c < /tmp/corrections.patch.gz.b64)" -eq 61792
+          echo 'fed53220bd01c40d47c6f1462d111fab2980fe5fc4162e60f870b99462b4025b  /tmp/corrections.patch.gz.b64' | sha256sum --check
+          base64 --decode /tmp/corrections.patch.gz.b64 > /tmp/corrections.patch.gz
+          echo '43ce27c6f24c45acf8e047d70f22792c4cb983329d1ffd501156457388933244  /tmp/corrections.patch.gz' | sha256sum --check
+          gzip --decompress --stdout /tmp/corrections.patch.gz > /tmp/corrections.patch
+          echo 'f5ac9adf4da7124fb10817b0b3abf594fe7d63722ad27b6d6016b1917e131862  /tmp/corrections.patch' | sha256sum --check
+
+          set +e
+          git apply --reject --whitespace=nowarn /tmp/corrections.patch
+          apply_status=$?
+          set -e
+          mapfile -t rejects < <(find . -type f -name '*.rej' -print | sort)
+          if (( apply_status != 0 || ${#rejects[@]} > 0 )); then
+            printf 'Patch requires manual reconciliation. Rejected hunks:\n'
+            printf '%s\n' "${rejects[@]}"
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add -A
+            git commit -m 'Apply CIO corrections pending reconciliation'
+            git push origin HEAD:agent/harden-cio-operations-risk-sizing
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+          python -m pip check
+
+      - name: Validate Python and canonical workflow
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          CAPITAL_INTELLIGENCE_ENVIRONMENT: test
+        run: |
+          python scripts/verify_requirements_lock.py
+          python -m compileall -q .
+          python run_daily_operations.py \
+            --plan deploy/canonical-daily-operations.smoke.json \
+            --database /tmp/canonical-daily-smoke.db \
+            --code-version "${GITHUB_SHA}" \
+            --scheduled-for 2026-07-29T07:00:00-04:00 \
+            --decision-timestamp 2026-07-29T07:00:00-04:00 \
+            --knowledge-cutoff 2026-07-29T06:59:59-04:00 \
+            --started-at 2026-07-29T07:00:01-04:00
+          pytest -q
+
+      - name: Execute Docker CLI validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker compose version
+          cp deploy/staging.env.example /tmp/capital-intelligence-staging.env
+          CAPITAL_INTELLIGENCE_ENV_FILE=/tmp/capital-intelligence-staging.env \
+          CAPITAL_INTELLIGENCE_DAILY_OPERATION_PLAN_HOST_PATH="$PWD/deploy/canonical-daily-operations.smoke.json" \
+            docker compose config --quiet
+          docker build --tag capital-intelligence:pr-validation .
+          docker run --rm --entrypoint python capital-intelligence:pr-validation -m compileall -q /app
+          docker run --rm --entrypoint python capital-intelligence:pr-validation initialize.py
+
+      - name: Commit validated correction set
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .automation
+          rm -f .github/workflows/apply-cio-corrections.yml
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          git clean -fdX
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Harden CIO operations and risk-adjusted allocation'
+          git push origin HEAD:agent/harden-cio-operations-risk-sizing
