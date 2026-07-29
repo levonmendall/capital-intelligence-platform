@@ -152,7 +152,7 @@ def test_future_manifest_is_rejected(tmp_path) -> None:
     )
 
     assert context.status is HistoricalLearningStatus.UNAVAILABLE
-    assert context.position_size_multiplier == 0.50
+    assert context.position_size_multiplier == 1.0
     assert "after the decision timestamp" in context.summary
 
 

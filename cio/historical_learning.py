@@ -331,7 +331,7 @@ class HistoricalLearningContext:
             median_historical_position_weight=0.0,
             median_realized_return=0.0,
             worst_realized_return=0.0,
-            position_size_multiplier=0.50,
+            position_size_multiplier=1.0,
             confidence_ceiling=0.65,
             summary=reason,
             limitations=(reason,),
