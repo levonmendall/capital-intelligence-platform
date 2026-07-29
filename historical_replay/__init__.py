@@ -10,6 +10,7 @@ from .canonical import (
     HistoricalCanonicalContextBuilder,
     ReplayPortfolioState,
 )
+from .canonical_runtime import EfficientCanonicalHistoricalReplayEngine
 from .models import BackfillReport, HistoricalRecord, SourceResult
 from .replay import ShadowDecision, ShadowReplayEngine, replay_dates
 from .store import HistoricalStore
@@ -17,6 +18,7 @@ from .store import HistoricalStore
 __all__ = [
     "BackfillReport",
     "CanonicalHistoricalReplayEngine",
+    "EfficientCanonicalHistoricalReplayEngine",
     "HistoricalBackfillCoordinator",
     "HistoricalCanonicalContextBuilder",
     "HistoricalRecord",

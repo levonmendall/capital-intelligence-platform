@@ -9,9 +9,9 @@ from datetime import date
 from pathlib import Path
 
 from historical_replay.backfill import ten_year_window
-from historical_replay.canonical import (
-    CanonicalHistoricalReplayEngine,
-    HistoricalCanonicalContextBuilder,
+from historical_replay.canonical import HistoricalCanonicalContextBuilder
+from historical_replay.canonical_runtime import (
+    EfficientCanonicalHistoricalReplayEngine,
 )
 from historical_replay.store import HistoricalStore
 
@@ -51,7 +51,7 @@ def main() -> int:
     end = date.fromisoformat(args.end) if args.end else default_end
     if start > end:
         raise ValueError("start must not be after end")
-    engine = CanonicalHistoricalReplayEngine(
+    engine = EfficientCanonicalHistoricalReplayEngine(
         HistoricalStore(args.data_root),
         builder=HistoricalCanonicalContextBuilder(
             minimum_observations=args.minimum_observations,
