@@ -7,10 +7,16 @@ from pathlib import Path
 
 import streamlit as st
 
-# Importing the authenticated entrypoint renders the complete application. Keeping the
-# wrapper separate avoids changing local and Docker Compose entrypoint contracts.
-import secure_app  # noqa: F401,E402
 
+# Execute the authenticated entrypoint from source on every Streamlit rerun. A normal
+# import would remain cached and could prevent navigation, authentication, or refreshed
+# operating data from rendering after the first session pass.
+secure_source_path = Path(__file__).with_name("secure_app.py")
+secure_source = secure_source_path.read_text(encoding="utf-8")
+exec(
+    compile(secure_source, str(secure_source_path), "exec"),
+    {"__name__": "__main__", "__file__": str(secure_source_path)},
+)
 
 release = (
     os.getenv("CAPITAL_INTELLIGENCE_RELEASE")
