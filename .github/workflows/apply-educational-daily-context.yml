@@ -1,0 +1,92 @@
+name: Apply educational daily context
+
+on:
+  push:
+    branches:
+      - agent/informative-daily-context
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/informative-daily-context
+          fetch-depth: 0
+
+      - name: Wire educational summaries into Today and Environment
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app.py")
+          source = path.read_text(encoding="utf-8")
+
+          import_anchor = "from cio_report_history_ui import render_cio_report_archive\n"
+          import_replacement = import_anchor + "from educational_market_briefing_ui import (\n    render_environment_economic_brief,\n    render_today_market_brief,\n)\n"
+          if source.count(import_anchor) != 1:
+              raise RuntimeError("educational briefing import insertion point is unavailable")
+          source = source.replace(import_anchor, import_replacement, 1)
+
+          contract_anchor = "render_background_paper_execution_worker(\nauthenticated_principal\n"
+          contract_replacement = (
+              "render_background_paper_execution_worker(\n"
+              "render_today_market_brief(\n"
+              "render_environment_economic_brief(\n"
+              "authenticated_principal\n"
+          )
+          if source.count(contract_anchor) != 1:
+              raise RuntimeError("educational briefing contract insertion point is unavailable")
+          source = source.replace(contract_anchor, contract_replacement, 1)
+
+          insertion_anchor = """for _old_detail, _new_detail in _decision_change_replacements:
+              if _source.count(_old_detail) != 1:
+                  raise RuntimeError("decision-change collapse insertion point is unavailable")
+              _source = _source.replace(_old_detail, _new_detail, 1)
+
+          """
+          insertion = insertion_anchor + """# Add concise educational context before each surface explains its process.
+          _educational_briefing_insertions = (
+              (
+                  '    with st.expander("How the Today surface works"):\\n',
+                  '    render_today_market_brief()\\n\\n'
+                  '    with st.expander("How the Today surface works"):\\n',
+              ),
+              (
+                  '    with st.expander("How the Environment surface works"):\\n',
+                  '    render_environment_economic_brief()\\n\\n'
+                  '    with st.expander("How the Environment surface works"):\\n',
+              ),
+          )
+          for _brief_anchor, _brief_replacement in _educational_briefing_insertions:
+              if _source.count(_brief_anchor) != 1:
+                  raise RuntimeError("educational briefing insertion point is unavailable")
+              _source = _source.replace(_brief_anchor, _brief_replacement, 1)
+
+          """
+          if source.count(insertion_anchor) != 1:
+              raise RuntimeError("educational briefing source transformation point is unavailable")
+          source = source.replace(insertion_anchor, insertion, 1)
+          path.write_text(source, encoding="utf-8")
+          PY
+
+      - name: Validate focused presentation behavior
+        run: |
+          python -m py_compile app.py educational_market_briefing_ui.py
+          python -m pytest -q \
+            tests/test_educational_market_briefing.py \
+            tests/test_surface_information_hierarchy.py \
+            tests/test_streamlit_surfaces.py
+
+      - name: Remove temporary workflow and push
+        run: |
+          rm .github/workflows/apply-educational-daily-context.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py educational_market_briefing_ui.py tests/test_educational_market_briefing.py .github/workflows/apply-educational-daily-context.yml
+          git commit -m "Add informative daily market and economic context"
+          git push origin HEAD:agent/informative-daily-context
