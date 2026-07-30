@@ -7,6 +7,7 @@ import pytest
 
 from cio import (
     CIOAction,
+    CandidateAssetClass,
     ChiefInvestmentOfficer,
     DecisionPolicyMatrix,
     EvidenceDependency,
@@ -77,7 +78,8 @@ def test_cio_uses_true_best_alternative_and_records_handoff() -> None:
     )
 
     assert decision.best_alternative_identifier == "candidate:materially-better"
-    assert decision.effective_opportunity_cost == pytest.approx(0.50)
+    assert decision.effective_opportunity_cost == pytest.approx(0.4755)
+    assert decision.effective_opportunity_cost < 0.50
     assert "candidate:materially-better" in decision.opportunity_cost
     assert decision.action is not CIOAction.BUY
 
@@ -235,13 +237,62 @@ def test_hysteresis_defers_first_buy_but_emergency_reduction_bypasses() -> None:
     assert not reduced.hysteresis_applied
 
 
+def test_wrapper_economic_exposure_uses_stricter_policy_profile() -> None:
+    wrapper = _candidate("IBIT")
+    wrapper = replace(
+        wrapper,
+        instrument=replace(
+            wrapper.instrument,
+            asset_class=CandidateAssetClass.US_ETF,
+            economic_exposure_class=CandidateAssetClass.CRYPTO,
+            replication_method="us-listed-economic-exposure-wrapper",
+        ),
+    )
+    ordinary_etf = replace(
+        _candidate("VTI"),
+        instrument=replace(
+            _candidate("VTI").instrument,
+            asset_class=CandidateAssetClass.US_ETF,
+            economic_exposure_class=CandidateAssetClass.US_EQUITY,
+            replication_method="us-listed-economic-exposure-wrapper",
+        ),
+    )
+
+    matrix = DecisionPolicyMatrix()
+    wrapper_profile = matrix.resolve(wrapper)
+    ordinary_profile = matrix.resolve(ordinary_etf)
+
+    assert "speculative-intermediate" in wrapper_profile.identifier
+    assert wrapper_profile.minimum_opportunity_edge > ordinary_profile.minimum_opportunity_edge
+    assert wrapper_profile.minimum_probability_of_success > ordinary_profile.minimum_probability_of_success
+    assert wrapper_profile.maximum_position_weight < ordinary_profile.maximum_position_weight
+
+
+def test_persisted_wrapper_without_exposure_metadata_is_still_classified() -> None:
+    persisted = _candidate("VIXY")
+    persisted = replace(
+        persisted,
+        instrument=replace(
+            persisted.instrument,
+            asset_class=CandidateAssetClass.US_ETF,
+            economic_exposure_class=CandidateAssetClass.US_ETF,
+            replication_method="us-listed-economic-exposure-wrapper",
+        ),
+    )
+
+    profile = DecisionPolicyMatrix().resolve(persisted)
+
+    assert "speculative-intermediate" in profile.identifier
+    assert profile.maximum_position_weight == pytest.approx(0.05)
+
+
 def test_asset_class_and_horizon_matrix_is_stricter_for_tactical_crypto() -> None:
     equity = _candidate("EQUITY", horizon_days=180)
     crypto = replace(
         _candidate("CRYPTO", horizon_days=20),
         instrument=replace(
             _candidate("CRYPTO", horizon_days=20).instrument,
-            asset_class=__import__("cio").CandidateAssetClass.CRYPTO,
+            asset_class=CandidateAssetClass.CRYPTO,
         ),
     )
     matrix = DecisionPolicyMatrix()

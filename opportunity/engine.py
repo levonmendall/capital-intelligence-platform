@@ -42,6 +42,8 @@ class OpportunityQualificationPolicy:
     maximum_expected_downside: float = -0.35
     maximum_implementation_cost_return: float = 0.02
     opportunity_cost_tolerance: float = 0.005
+    alternative_uncertainty_penalty: float = 0.02
+    alternative_liquidity_penalty: float = 0.01
 
     expected_return_weight: float = 0.21
     probability_weight: float = 0.10
@@ -77,6 +79,10 @@ class OpportunityQualificationPolicy:
             )
         if self.opportunity_cost_tolerance < 0.0:
             raise ValueError("opportunity_cost_tolerance cannot be negative")
+        if self.alternative_uncertainty_penalty < 0.0:
+            raise ValueError("alternative_uncertainty_penalty cannot be negative")
+        if self.alternative_liquidity_penalty < 0.0:
+            raise ValueError("alternative_liquidity_penalty cannot be negative")
         weights = self.weights
         if abs(sum(weights.values()) - 1.0) > 0.000001:
             raise ValueError("opportunity ranking weights must sum to 1.0")
@@ -256,10 +262,14 @@ class OpportunityEngine:
         )
         if not comparable_alternatives:
             raise ValueError("candidate has no other available capital alternative")
+        cash_alternatives = tuple(
+            item for item in context.alternatives if item.kind is AlternativeKind.CASH
+        )
+        cash_anchor = max(item.net_expected_return for item in cash_alternatives)
         baseline_alternative = max(
             baseline_alternatives,
             key=lambda item: (
-                item.net_expected_return,
+                self._alternative_comparable_return(item, cash_anchor=cash_anchor),
                 item.evidence_quality,
                 item.liquidity_score,
                 item.identifier,
@@ -268,13 +278,20 @@ class OpportunityEngine:
         best_alternative = max(
             comparable_alternatives,
             key=lambda item: (
-                item.net_expected_return,
+                self._alternative_comparable_return(item, cash_anchor=cash_anchor),
                 item.evidence_quality,
                 item.liquidity_score,
                 item.identifier,
             ),
         )
-        effective_opportunity_cost = best_alternative.net_expected_return
+        baseline_opportunity_cost = self._alternative_comparable_return(
+            baseline_alternative,
+            cash_anchor=cash_anchor,
+        )
+        effective_opportunity_cost = self._alternative_comparable_return(
+            best_alternative,
+            cash_anchor=cash_anchor,
+        )
         opportunity_edge = round(
             candidate.net_expected_return - effective_opportunity_cost,
             8,
@@ -310,7 +327,7 @@ class OpportunityEngine:
         if (
             abs(
                 candidate.opportunity_cost_return
-                - baseline_alternative.net_expected_return
+                - baseline_opportunity_cost
             )
             > self.policy.opportunity_cost_tolerance
         ):
@@ -373,7 +390,7 @@ class OpportunityEngine:
                     best_alternative_identifier=best_alternative.identifier,
                     best_alternative_kind=best_alternative.kind,
                     baseline_alternative_identifier=baseline_alternative.identifier,
-                    baseline_opportunity_cost=baseline_alternative.net_expected_return,
+                    baseline_opportunity_cost=baseline_opportunity_cost,
                     resolved_policy_profile=profile.identifier,
                     reasons=(
                         "current holdings receive mandatory specialist and CIO review even when they fail acquisition thresholds",
@@ -396,7 +413,7 @@ class OpportunityEngine:
                     best_alternative_identifier=best_alternative.identifier,
                     best_alternative_kind=best_alternative.kind,
                     baseline_alternative_identifier=baseline_alternative.identifier,
-                    baseline_opportunity_cost=baseline_alternative.net_expected_return,
+                    baseline_opportunity_cost=baseline_opportunity_cost,
                     resolved_policy_profile=profile.identifier,
                     reasons=tuple(dict.fromkeys(reasons)),
                 ),
@@ -421,6 +438,37 @@ class OpportunityEngine:
             robustness,
         )
 
+
+    def _alternative_comparable_return(
+        self,
+        alternative,
+        *,
+        cash_anchor: float,
+    ) -> float:
+        """Return a conservative annualized use-of-capital estimate.
+
+        Cash remains the observable anchor. Non-cash alternatives are shrunk
+        toward cash according to evidence quality and liquidity, then charged
+        explicit uncertainty and liquidity stress penalties. The candidate is
+        subsequently compared at its own horizon by the robustness assessor.
+        """
+
+        if alternative.kind is AlternativeKind.CASH:
+            return alternative.net_expected_return
+        reliability = max(
+            0.10,
+            min(1.0, (alternative.evidence_quality * alternative.liquidity_score) ** 0.5),
+        )
+        adjusted = cash_anchor + reliability * (
+            alternative.net_expected_return - cash_anchor
+        )
+        uncertainty_penalty = self.policy.alternative_uncertainty_penalty * (
+            1.0 - alternative.evidence_quality
+        )
+        liquidity_penalty = self.policy.alternative_liquidity_penalty * (
+            1.0 - alternative.liquidity_score
+        )
+        return round(adjusted - uncertainty_penalty - liquidity_penalty, 8)
 
     def _profile_minimum(self, field_name: str, profile_value: float) -> float:
         """Use the matrix by default while preserving explicit stricter overrides."""
