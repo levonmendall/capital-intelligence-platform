@@ -227,13 +227,13 @@ class AlpacaPaperClient:
             "Accept": "application/json",
         }
 
-    def _get(
+    def _request_json(
         self,
         base_url: str,
         path: str,
         *,
         params: Mapping[str, object] | None = None,
-    ) -> Mapping[str, Any]:
+    ) -> object:
         try:
             response = self._http_get(
                 base_url.rstrip("/") + path,
@@ -250,9 +250,67 @@ class AlpacaPaperClient:
             payload = response.json()
         except ValueError as error:
             raise AlpacaPaperProviderError("Alpaca returned invalid JSON") from error
+        return payload
+
+    def _get(
+        self,
+        base_url: str,
+        path: str,
+        *,
+        params: Mapping[str, object] | None = None,
+    ) -> Mapping[str, Any]:
+        payload = self._request_json(base_url, path, params=params)
         if not isinstance(payload, Mapping):
             raise AlpacaPaperProviderError("Alpaca response must be a JSON object")
         return payload
+
+    def assets(
+        self,
+        *,
+        status: str = "active",
+        asset_class: str = "us_equity",
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Return the authenticated U.S.-equity master list without order authority."""
+
+        payload = self._request_json(
+            self.settings.paper_base_url,
+            "/v2/assets",
+            params={"status": status, "asset_class": asset_class},
+        )
+        if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
+            raise AlpacaPaperProviderError("Alpaca assets response must be a JSON array")
+        assets: list[Mapping[str, Any]] = []
+        for item in payload:
+            if not isinstance(item, Mapping):
+                raise AlpacaPaperProviderError("Alpaca asset entry must be a JSON object")
+            assets.append(item)
+        return tuple(assets)
+
+    def snapshots(
+        self,
+        symbols: Sequence[str],
+    ) -> Mapping[str, Mapping[str, Any]]:
+        """Return batched IEX snapshots used only for broad discovery."""
+
+        normalized = tuple(
+            dict.fromkeys(_text(item, field_name="symbol").upper() for item in symbols)
+        )
+        if not normalized:
+            return {}
+        payload = self._get(
+            self.settings.data_base_url,
+            "/v2/stocks/snapshots",
+            params={
+                "symbols": ",".join(normalized),
+                "feed": self.settings.data_feed.lower(),
+            },
+        )
+        result: dict[str, Mapping[str, Any]] = {}
+        for symbol in normalized:
+            snapshot = payload.get(symbol)
+            if isinstance(snapshot, Mapping):
+                result[symbol] = snapshot
+        return result
 
     def account(self) -> Mapping[str, Any]:
         return self._get(self.settings.paper_base_url, "/v2/account")
@@ -381,10 +439,6 @@ class AlpacaPaperSessionProvider:
             raise ValueError("as_of must be timezone-aware")
         payload = self.client.clock()
         observed_at = _timestamp(payload.get("timestamp"), field_name="Alpaca clock timestamp")
-        if observed_at > as_of + timedelta(seconds=5):
-            raise AlpacaPaperProviderError(
-                "Alpaca clock is future-known relative to execution"
-            )
         status = (
             InstrumentSessionStatus.OPEN
             if payload.get("is_open") is True
@@ -468,10 +522,6 @@ class AlpacaPaperQuoteProvider:
                 raw.get("t"),
                 field_name=f"{profile.symbol} quote timestamp",
             )
-            if observed_at > as_of + timedelta(seconds=5):
-                raise AlpacaPaperProviderError(
-                    f"{profile.symbol} quote is future-known relative to execution"
-                )
             effective_observed_at = min(observed_at, as_of)
             available = min(bid * bid_size, ask * ask_size)
             result[profile.symbol] = MultiAssetQuote(

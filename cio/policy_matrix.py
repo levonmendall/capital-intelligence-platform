@@ -81,9 +81,9 @@ class DecisionPolicyProfile:
 
 
 class DecisionPolicyMatrix:
-    """Resolve the strictest controls across wrapper, exposure, and horizon."""
+    """Resolve coherent controls across execution form, economic exposure, and horizon."""
 
-    version = "decision-policy-matrix.v2"
+    version = "decision-policy-matrix.v3"
 
     _STANDARD = DecisionPolicyProfile(
         identifier="standard-intermediate",
@@ -128,14 +128,47 @@ class DecisionPolicyMatrix:
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be a CandidateDecisionRecord")
 
+        if (
+            candidate.instrument.asset_class is CandidateAssetClass.US_EQUITY
+            and candidate.instrument.replication_method
+            == "direct-common-equity-exploratory"
+        ):
+            return self._apply_horizon(
+                self._exploratory_equity_profile(),
+                candidate.decision_horizon_days,
+            )
         execution = self._profile_for(candidate.instrument.asset_class)
         exposure_class = self._economic_exposure_class(candidate)
         exposure = self._profile_for(exposure_class)
-        profile = self._stricter(execution, exposure)
+        if (
+            candidate.instrument.asset_class is CandidateAssetClass.US_ETF
+            and exposure_class is not CandidateAssetClass.US_ETF
+        ):
+            # The underlying exposure governs return, probability, downside and
+            # persistence. The listed wrapper contributes the tighter position
+            # ceiling, while liquidity and execution controls remain separate.
+            profile = replace(
+                exposure,
+                identifier=(
+                    f"economic-exposure[{exposure.identifier}]"
+                    f"+wrapper-position[{execution.identifier}]"
+                ),
+                maximum_position_weight=min(
+                    execution.maximum_position_weight,
+                    exposure.maximum_position_weight,
+                ),
+            )
+        else:
+            profile = self._stricter(execution, exposure)
         if candidate.instrument.uses_derivatives:
-            profile = self._stricter(
-                profile,
-                self._profile_for(CandidateAssetClass.OPTION),
+            derivative = self._profile_for(CandidateAssetClass.OPTION)
+            profile = replace(
+                derivative,
+                identifier=f"derivative-overlay[{derivative.identifier}+{profile.identifier}]",
+                maximum_position_weight=min(
+                    profile.maximum_position_weight,
+                    derivative.maximum_position_weight,
+                ),
             )
         return self._apply_horizon(profile, candidate.decision_horizon_days)
 
@@ -156,6 +189,29 @@ class DecisionPolicyMatrix:
                 candidate.instrument.asset_class,
             )
         return explicit or candidate.instrument.asset_class
+
+    @classmethod
+    def _exploratory_equity_profile(cls) -> DecisionPolicyProfile:
+        """Permit a risk-capped paper probe while reserving full standards for scale."""
+
+        return replace(
+            cls._STANDARD,
+            identifier="direct-common-equity-exploratory",
+            minimum_net_expected_return=0.04,
+            minimum_opportunity_edge=0.0025,
+            minimum_probability_of_success=0.52,
+            maximum_expected_downside=-0.55,
+            maximum_position_weight=0.01,
+            minimum_robust_edge=0.001,
+            maximum_probability_of_loss=0.48,
+            minimum_worst_case_portfolio_return=-0.01,
+            entry_persistence_cycles=1,
+            increase_persistence_cycles=2,
+            reduce_persistence_cycles=2,
+            cooldown_days=3,
+            forecast_durability_floor=0.45,
+            annualization_cap=0.60,
+        )
 
     @classmethod
     def _profile_for(

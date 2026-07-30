@@ -1,4 +1,4 @@
-# Free listed-wrapper paper pilot
+# Free U.S.-listed paper pilot
 
 ## Purpose
 
@@ -11,8 +11,10 @@ The pilot:
 - uses the sole `COMPOUNDING` portfolio;
 - starts from the existing $250,000 paper capital;
 - uses an Alpaca paper account and the free IEX feed;
-- invests only through a versioned allowlist of unlevered U.S.-listed securities;
-- represents the major economic asset classes through liquid listed wrappers;
+- retains a versioned strategic allowlist of unlevered U.S.-listed wrappers for the major economic asset classes;
+- adds a daily dynamic lane of active, tradable, fractionable U.S. operating companies identified through the Alpaca and SEC master lists;
+- screens broad company price, liquidity, relative-strength, volatility, drawdown, and public SEC fundamental evidence before CIO review;
+- limits every newly discovered company to a 1% exploratory allocation until later cycles justify scaling;
 - requires the exact CIO decision, exact construction, and exact automatic or manual paper authorization;
 - uses the existing certified-universe, quote-age, session, portfolio-integrity, fill, reconciliation, and notification controls;
 - keeps canonical portfolio implementation on the internal append-only paper executor; and
@@ -40,7 +42,7 @@ The allowlist covers:
 
 These are economic exposures, not direct authority for every underlying instrument. For example, the managed-futures sleeve uses a listed fund rather than an exchange futures contract, and the option-strategy sleeve uses a listed fund rather than direct option orders.
 
-Direct futures, options, individual bonds, spot FX, direct crypto tokens, non-U.S. listings, leveraged funds, inverse funds, and private assets remain prohibited in the listed-wrapper portfolio pilot.
+Direct U.S. common stocks may enter through governed daily discovery. Direct futures, options, individual bonds, spot FX, direct crypto tokens, non-U.S. listings, leveraged funds, inverse funds, and private assets remain prohibited in the paper portfolio pilot.
 
 ## Required external setup
 
@@ -58,7 +60,7 @@ CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE=automatic
 
 Never commit the key or secret. Both the quote adapter and broker-order adapter reject Alpaca's live brokerage endpoint.
 
-## Start the listed-wrapper pilot
+## Start the U.S.-listed pilot
 
 ### 1. Validate the live free-provider configuration
 
@@ -108,7 +110,7 @@ The runner:
 
 1. requires an approved paper environment;
 2. verifies the live Alpaca paper account and IEX quotes;
-3. rejects any symbol outside the allowlist;
+3. rejects any symbol outside the exact persisted daily eligible universe;
 4. enforces at least 20% cash;
 5. limits one batch to 10% turnover;
 6. enforces per-instrument, crypto-proxy, and volatility-proxy limits;
@@ -151,7 +153,9 @@ This round trip validates transport and reconciliation. It is not a portfolio re
 | --- | ---: |
 | Minimum cash | 20% |
 | Maximum batch turnover | 10% |
-| Maximum ordinary instrument | 45% |
+| Maximum strategic wrapper | 45% |
+| Maximum new company exploratory position | 1% |
+| Maximum scaled individual company position | 5% |
 | Maximum crypto proxy | 5% |
 | Maximum volatility proxy | 2% |
 | Maximum quote age while market is open | 5 minutes |
@@ -163,6 +167,6 @@ This round trip validates transport and reconciliation. It is not a portfolio re
 
 ## What this changes—and what it does not
 
-This makes autonomous controlled free-provider paper testing and Alpaca broker transport verification operationally possible. It does not mark the institutional all-market readiness report as passed. It does not certify direct derivatives, individual global bonds, direct international listings, or institutional execution quality.
+This makes autonomous controlled free-provider paper testing, broad U.S.-company opportunity discovery, and Alpaca broker transport verification operationally possible. It does not mark the institutional all-market readiness report as passed. It does not certify direct derivatives, individual global bonds, direct international listings, or institutional execution quality.
 
 The canonical portfolio remains the product's sole state authority. Broker verification evidence may support readiness only when the exact provider activation, account environment, request IDs, order snapshots, fill activities, event hashes, and reconciliation conclusion are preserved.

@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from math import isfinite
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 from zoneinfo import ZoneInfo
 
 from api.config import ApiSettings
@@ -22,8 +22,17 @@ from application.eligible_universe import (
     SQLiteCertifiedEligibleUniverseStore,
 )
 from cio.persistence import serialize_candidate_decision, serialize_opportunity_queue
+from evaluation.opportunity_outcomes import SQLiteOpportunityOutcomeStore
 from opportunity import AlternativeKind, AlternativeUse, OpportunityEngine, OpportunitySetContext
-from operations.free_paper_pilot import DEFAULT_UNIVERSE_PATH, load_free_paper_pilot_universe
+from operations.equity_discovery import (
+    EquityDiscoveryResult,
+    discover_us_equities,
+)
+from operations.free_paper_pilot import (
+    DEFAULT_UNIVERSE_PATH,
+    load_free_paper_pilot_universe,
+    write_active_paper_universe,
+)
 from portfolio.state import SQLiteCanonicalPortfolioStore
 from production_paper_evidence import (
     EvidenceProbe,
@@ -55,7 +64,9 @@ from production_context_publication_runtime import (
     _state_path,
 )
 
-STATE_SCHEMA = "production-context-publication-state.v2"
+STATE_SCHEMA = "production-context-publication-state.v3"
+
+EquityDiscoveryProbe = Callable[..., EquityDiscoveryResult]
 
 
 def _blocked(
@@ -145,7 +156,7 @@ def _reuse(
         eligible_universe_identifier=eligible_identifier,
         screening_publication_identifier=publication_identifier,
         context_identifier=context_identifier,
-        instrument_count=instrument_count,
+        instrument_count=int(state.get("instrument_count", instrument_count)),
         candidate_count=publication.candidate_count,
         exclusion_count=publication.excluded_count,
     )
@@ -230,16 +241,18 @@ def prepare_governed_production_context_for_cycle(
     readiness_probe: ReadinessProbe | None = None,
     cash_probe: CashProbe | None = None,
     evidence_probe: EvidenceProbe | None = None,
+    equity_discovery_probe: EquityDiscoveryProbe | None = None,
     clock: Clock | None = None,
 ) -> ProductionContextPublicationResult:
-    """Publish complete listed-wrapper candidate and holding evidence for one cycle."""
+    """Publish cross-asset wrappers plus dynamically discovered company equities."""
 
     scheduled = _aware(scheduled_for, field_name="scheduled_for")
     cycle_key = _cycle_key(
         scheduled_for=scheduled,
         timezone_name=settings.scheduler_timezone,
     )
-    universe = load_free_paper_pilot_universe(universe_path)
+    base_universe = load_free_paper_pilot_universe(universe_path)
+    universe = base_universe
     reused = _reuse(
         settings=settings,
         cycle_key=cycle_key,
@@ -250,7 +263,7 @@ def prepare_governed_production_context_for_cycle(
         return reused
 
     try:
-        readiness = (readiness_probe or _default_readiness_probe)(universe)
+        readiness = (readiness_probe or _default_readiness_probe)(base_universe)
     except Exception as error:
         return _blocked(
             cycle_key=cycle_key,
@@ -269,13 +282,13 @@ def prepare_governed_production_context_for_cycle(
         tuple(item)
         for item in _report_value(readiness, "quote_timestamps", ())
     )
-    expected_symbols = tuple(sorted(item.symbol for item in universe.instruments))
+    expected_symbols = tuple(sorted(item.symbol for item in base_universe.instruments))
     quote_symbols = tuple(sorted(str(item[0]).upper() for item in quote_timestamps))
     if (
         not configuration_ready
         or tuple(sorted(validated_symbols)) != expected_symbols
         or quote_symbols != expected_symbols
-        or len(quote_timestamps) != len(universe.instruments)
+        or len(quote_timestamps) != len(base_universe.instruments)
     ):
         blockers = tuple(
             str(item) for item in _report_value(readiness, "blockers", ())
@@ -321,7 +334,8 @@ def prepare_governed_production_context_for_cycle(
             instrument_count=len(universe.instruments),
         )
     now = _aware((clock or (lambda: datetime.now(tz=scheduled.tzinfo)))(), field_name="clock")
-    if any(timestamp > now + timedelta(seconds=5) for timestamp in quote_datetimes):
+    maximum_future_skew = timedelta(seconds=60 if clock is None else 0)
+    if any(timestamp > now + maximum_future_skew for timestamp in quote_datetimes):
         return _blocked(
             cycle_key=cycle_key,
             scheduled_for=scheduled,
@@ -349,6 +363,88 @@ def prepare_governed_production_context_for_cycle(
             instrument_count=len(universe.instruments),
         )
 
+    stamp = _stamp(decision_as_of)
+    eligible_identifier = f"eligible-universe:paper-pilot:{stamp}"
+    screening_cycle_identifier = f"screening:paper-pilot:{stamp}"
+    screening_publication_identifier = f"publication:paper-pilot:{stamp}"
+    context_identifier = f"production-context:paper-pilot:{stamp}"
+    opportunity_identifier = f"opportunity:paper-pilot:{stamp}"
+
+    eligible_store = SQLiteCertifiedEligibleUniverseStore(
+        settings.portfolio_database.with_name("eligible_universe.db")
+    )
+    screening_store = SQLiteFullUniverseScreeningStore(
+        settings.full_universe_screening_database
+    )
+    context_store = SQLiteProductionContextStore(
+        settings.portfolio_database.with_name("production_context.db")
+    )
+    portfolio_store = SQLiteCanonicalPortfolioStore(settings.portfolio_database)
+    try:
+        tentative, already_persisted = _tentative_portfolio(
+            store=portfolio_store,
+            decision_as_of=decision_as_of,
+            context_identifier=context_identifier,
+        )
+    except Exception as error:
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail=f"Canonical portfolio preparation failed: {type(error).__name__}: {error}",
+            instrument_count=len(base_universe.instruments),
+        )
+
+    outcome_store = SQLiteOpportunityOutcomeStore(
+        settings.portfolio_database.with_name("opportunity_outcomes.db")
+    )
+    try:
+        tracked_symbols = outcome_store.unresolved_symbols(as_of=decision_as_of)
+    except (OSError, TypeError, ValueError):
+        tracked_symbols = ()
+
+    discovery: EquityDiscoveryResult | None = None
+    base_symbols = set(base_universe.symbol_map)
+    held_symbols = tuple(position.symbol for position in tentative.positions)
+    dynamic_holdings = tuple(symbol for symbol in held_symbols if symbol not in base_symbols)
+    try:
+        discovery = (equity_discovery_probe or discover_us_equities)(
+            as_of=decision_as_of,
+            held_symbols=held_symbols,
+            tracked_symbols=tracked_symbols,
+            excluded_symbols=tuple(base_symbols),
+        )
+        discovered = discovery.instruments_for_holdings(held_symbols)
+        universe = replace(
+            base_universe,
+            identifier=f"{base_universe.identifier}+{discovery.identifier}",
+            objective=(
+                base_universe.objective
+                + " Daily broad U.S.-company discovery competes for exploratory capital."
+            ),
+            instruments=tuple((*base_universe.instruments, *discovered)),
+            limitations=tuple(
+                dict.fromkeys(
+                    (*base_universe.limitations,
+                     "Individual equities enter through broad SEC/Alpaca discovery and begin with a 1% exploratory cap.")
+                )
+            ),
+        )
+    except Exception as error:
+        if dynamic_holdings:
+            return _blocked(
+                cycle_key=cycle_key,
+                scheduled_for=scheduled,
+                decision_as_of=decision_as_of,
+                detail=(
+                    "Broad-equity discovery failed while company holdings require review: "
+                    f"{type(error).__name__}: {error}"
+                ),
+                instrument_count=len(base_universe.instruments),
+            )
+        discovery = None
+        universe = base_universe
+
     cash_expected_return = round(max(-1.0, min(1.0, cash_value / 100.0)), 8)
     try:
         evidence_payload = collect_paper_evidence(
@@ -365,32 +461,73 @@ def prepare_governed_production_context_for_cycle(
             instrument_count=len(universe.instruments),
         )
 
+    completed_at = _aware(
+        (clock or (lambda: datetime.now(tz=scheduled.tzinfo)))(),
+        field_name="clock",
+    )
+    if completed_at < decision_as_of:
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail="The evidence collection clock moved backward.",
+            instrument_count=len(universe.instruments),
+        )
+    decision_as_of = completed_at
+    if (
+        decision_as_of.astimezone(ZoneInfo(settings.scheduler_timezone)).date()
+        != scheduled.astimezone(ZoneInfo(settings.scheduler_timezone)).date()
+    ):
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail="The governed evidence collection crossed the scheduled market date.",
+            instrument_count=len(universe.instruments),
+        )
+
     stamp = _stamp(decision_as_of)
     eligible_identifier = f"eligible-universe:paper-pilot:{stamp}"
     screening_cycle_identifier = f"screening:paper-pilot:{stamp}"
     screening_publication_identifier = f"publication:paper-pilot:{stamp}"
     context_identifier = f"production-context:paper-pilot:{stamp}"
     opportunity_identifier = f"opportunity:paper-pilot:{stamp}"
-    catalog_identifier = f"catalog:{universe.identifier}"
-    master_snapshot_identifier = f"alpaca-paper-assets:{stamp}"
-
-    eligible_store = SQLiteCertifiedEligibleUniverseStore(
-        settings.portfolio_database.with_name("eligible_universe.db")
-    )
-    screening_store = SQLiteFullUniverseScreeningStore(
-        settings.full_universe_screening_database
-    )
-    context_store = SQLiteProductionContextStore(
-        settings.portfolio_database.with_name("production_context.db")
-    )
-    portfolio_store = SQLiteCanonicalPortfolioStore(settings.portfolio_database)
-
     try:
         tentative, already_persisted = _tentative_portfolio(
             store=portfolio_store,
             decision_as_of=decision_as_of,
             context_identifier=context_identifier,
         )
+    except Exception as error:
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail=f"Canonical portfolio finalization failed: {type(error).__name__}: {error}",
+            instrument_count=len(universe.instruments),
+        )
+
+    outcome_resolution_count = 0
+    if discovery is not None:
+        try:
+            outcome_resolution_count = outcome_store.resolve_due(
+                observed_at=decision_as_of,
+                observed_prices={
+                    symbol: (price, source)
+                    for symbol, price, source in discovery.observed_prices
+                },
+            )
+        except (OSError, TypeError, ValueError):
+            outcome_resolution_count = 0
+
+    catalog_identifier = f"catalog:{universe.identifier}"
+    master_snapshot_identifier = (
+        f"alpaca-paper-assets:{stamp}"
+        if discovery is None
+        else discovery.security_master_snapshot_identifier
+    )
+
+    try:
         preliminary = build_paper_evidence(
             universe=universe,
             decision_as_of=decision_as_of,
@@ -441,19 +578,27 @@ def prepare_governed_production_context_for_cycle(
         eligible_instrument_identifiers=tuple(
             item.instrument_identifier for item in universe.instruments
         ),
-        source_versions=(
-            ("free_paper_pilot_universe", universe.identifier),
+        source_versions=tuple(
             (
-                "alpaca_paper_account",
-                str(_report_value(readiness, "account_status", "ACTIVE")).upper(),
-            ),
-            ("alpaca_iex_quote_date", latest_quote_date),
-            ("alpaca_iex_historical_bars", "v2-stocks-bars"),
-            ("fred_macro", "DGS10,T10Y2Y,VIXCLS,DFF"),
+                ("free_paper_pilot_universe", base_universe.identifier),
+                (
+                    "alpaca_paper_account",
+                    str(_report_value(readiness, "account_status", "ACTIVE")).upper(),
+                ),
+                ("alpaca_iex_quote_date", latest_quote_date),
+                ("alpaca_iex_historical_bars", "v2-stocks-bars"),
+                ("fred_macro", "DGS10,T10Y2Y,VIXCLS,DFF"),
+            )
+            + (() if discovery is None else (
+                ("broad_us_equity_discovery", discovery.identifier),
+                ("sec_company_master", discovery.security_master_snapshot_identifier),
+            ))
         ),
         model_versions=(
             ("eligible_universe_policy", universe.schema_version),
-            ("candidate_admission", "listed-wrapper-evidence.v1"),
+            ("wrapper_candidate_admission", "listed-wrapper-evidence.v1"),
+            ("company_candidate_admission", "sec-company-equity-evidence.v1"),
+            ("equity_discovery", "disabled" if discovery is None else discovery.policy_version),
         ),
         instrument_approval_identifiers=tuple(
             (
@@ -464,6 +609,20 @@ def prepare_governed_production_context_for_cycle(
         ),
     )
     eligible_store.append(eligible)
+    try:
+        write_active_paper_universe(
+            universe,
+            eligible_universe_publication_identifier=eligible_identifier,
+            destination=settings.portfolio_database.with_name("active-paper-universe.json"),
+        )
+    except (OSError, TypeError, ValueError) as error:
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail=f"Active paper execution universe could not be persisted: {error}",
+            instrument_count=len(universe.instruments),
+        )
 
     cash_weight = round(marked.cash_amount / marked.nav, 8)
     holding_by_symbol = {
@@ -515,6 +674,15 @@ def prepare_governed_production_context_for_cycle(
         build_result.candidates,
         opportunity_context,
     )
+    try:
+        outcome_store.append_screening_decisions(
+            queue=queue,
+            candidates=build_result.candidates,
+            cash_annual_return=cash_expected_return,
+        )
+        outcome_summary = outcome_store.summary()
+    except (OSError, TypeError, ValueError):
+        outcome_summary = None
     candidate_by_instrument = {
         item.instrument.instrument_id: item for item in build_result.candidates
     }
@@ -588,7 +756,7 @@ def prepare_governed_production_context_for_cycle(
         "as_of": decision_as_of.isoformat(),
         "knowledge_cutoff": decision_as_of.isoformat(),
         "metrics_provider": "ALPACA_PAPER_IEX_HISTORICAL_AND_QUOTES",
-        "candidate_provider": "GOVERNED_LISTED_WRAPPER_EVIDENCE_V1",
+        "candidate_provider": "GOVERNED_WRAPPER_AND_COMPANY_EVIDENCE_V1",
         "catalog_identifier": catalog_identifier,
         "security_master_snapshot_identifier": master_snapshot_identifier,
         "universe_snapshot_identifier": eligible_identifier,
@@ -673,6 +841,30 @@ def prepare_governed_production_context_for_cycle(
         "exclusion_count": len(exclusion_results),
         "qualified_candidate_count": len(qualified_identifiers),
         "holding_evidence_count": len(build_result.holding_evidence),
+        "instrument_count": len(universe.instruments),
+        "opportunity_outcomes": (
+            {"state": "unavailable", "resolved_this_cycle": outcome_resolution_count}
+            if outcome_summary is None
+            else {
+                "state": "available",
+                "recorded_decisions": outcome_summary.recorded_decisions,
+                "resolved_outcomes": outcome_summary.resolved_outcomes,
+                "missed_opportunities": outcome_summary.missed_opportunities,
+                "avoided_losses": outcome_summary.avoided_losses,
+                "resolved_this_cycle": outcome_resolution_count,
+            }
+        ),
+        "equity_discovery": (
+            {"state": "unavailable", "selected_count": 0}
+            if discovery is None
+            else {
+                "state": "available",
+                "identifier": discovery.identifier,
+                "screened_asset_count": discovery.screened_asset_count,
+                "snapshot_covered_count": discovery.snapshot_covered_count,
+                "selected_count": len(discovery.selected),
+            }
+        ),
         "paper_only": True,
         "real_money_authorized": False,
     }
@@ -684,9 +876,9 @@ def prepare_governed_production_context_for_cycle(
         scheduled_for=scheduled,
         decision_as_of=decision_as_of,
         detail=(
-            "Certified the approved listed-wrapper universe, published complete "
-            "candidate and exclusion screening, marked the canonical portfolio, and "
-            "persisted exact candidate and holding evidence for CIO comparison."
+            "Certified strategic cross-asset wrappers and the daily broad U.S.-company "
+            "discovery lane, published complete candidate and exclusion screening, "
+            "marked the canonical portfolio, and persisted company-specific evidence."
         ),
         eligible_universe_identifier=eligible_identifier,
         screening_publication_identifier=screening_publication_identifier,

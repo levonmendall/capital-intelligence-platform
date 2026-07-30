@@ -242,6 +242,33 @@ def test_next_day_cycle_certifies_every_holding_and_routes_holding_review(tmp_pa
 
 
 
+
+def test_live_publication_uses_collection_completion_as_decision_timestamp(tmp_path) -> None:
+    settings = _settings(tmp_path)
+    scheduled_for = datetime(2026, 7, 29, 11, 0, tzinfo=timezone.utc)
+    collection_started = datetime(2026, 7, 29, 20, 45, tzinfo=timezone.utc)
+    collection_completed = collection_started + timedelta(minutes=2)
+    _bootstrap_cash_portfolio(
+        settings,
+        as_of=datetime(2026, 7, 29, 20, 0, tzinfo=timezone.utc),
+    )
+    payload = _evidence(collection_completed)
+    times = iter((collection_started, collection_completed))
+
+    result = prepare_production_context_for_cycle(
+        settings=settings,
+        scheduled_for=scheduled_for,
+        readiness_probe=lambda _universe: _readiness(collection_started),
+        cash_probe=lambda: SimpleNamespace(date="2026-07-28", value=4.25),
+        evidence_probe=lambda _universe, _as_of: payload,
+        clock=lambda: next(times),
+    )
+
+    assert result.ready
+    assert result.decision_as_of == collection_completed
+    context = _provider(settings, tmp_path).load_context(as_of=collection_completed)
+    assert context.portfolio.as_of == collection_completed
+
 def test_future_macro_observation_blocks_publication(tmp_path) -> None:
     settings = _settings(tmp_path)
     scheduled_for = datetime(2026, 7, 29, 11, 0, tzinfo=timezone.utc)

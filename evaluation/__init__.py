@@ -20,6 +20,10 @@ from evaluation.decision_quality import (
     DecisionQualityReview,
     ProcessVerdict,
 )
+from evaluation.opportunity_outcomes import (
+    OpportunityOutcomeSummary,
+    SQLiteOpportunityOutcomeStore,
+)
 from evaluation.paper_operation import (
     PaperOperationEvidenceEvaluator,
     PaperOperationEvidenceIntegrityError,

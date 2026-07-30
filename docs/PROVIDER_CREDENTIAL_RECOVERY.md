@@ -41,7 +41,7 @@ Do not change the brokerage endpoint to a live endpoint. Real-money authority re
 A recovered deployment must show all of the following:
 
 - Paper account status is available rather than `Unavailable`.
-- Live quote coverage is populated for the governed 15-instrument wrapper universe.
+- Live quote coverage is populated for the governed strategic wrapper set; the daily company-discovery lane additionally requires authenticated Alpaca asset/snapshot access and SEC company evidence.
 - The Environment screen contains a live market table and economic readings.
 - A canonical environment brief exists.
 - Today contains a governed CIO briefing with a decision identifier.

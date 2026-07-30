@@ -60,7 +60,7 @@ services:
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE
         value: America/Los_Angeles
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_HOUR
-        value: "5"
+        value: "7"
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS
         value: "60"
       - key: CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED
