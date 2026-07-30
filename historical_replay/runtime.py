@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .backfill import coordinator_from_config, ten_year_window
 from .canonical import HistoricalCanonicalContextBuilder
-from .canonical_runtime import EfficientCanonicalHistoricalReplayEngine
+from .canonical_runtime_v5 import MacroCompleteCanonicalHistoricalReplayEngine
 from .store import HistoricalStore
 
 
@@ -60,7 +60,7 @@ def run_once() -> dict[str, object]:
         True,
     ):
         try:
-            report = EfficientCanonicalHistoricalReplayEngine(
+            report = MacroCompleteCanonicalHistoricalReplayEngine(
                 HistoricalStore(root),
                 builder=HistoricalCanonicalContextBuilder(
                     minimum_observations=int(
@@ -94,12 +94,9 @@ def run_once() -> dict[str, object]:
                     )
                 ),
             )
+            certification_ready = report.get("certification_ready") is True
             payload["canonical_replay"] = {
-                "state": (
-                    "available"
-                    if report["canonical_cio_invoked_count"] > 0
-                    else "blocked"
-                ),
+                "state": "available" if certification_ready else "blocked",
                 "runtime_version": report.get("runtime_version"),
                 "archive_scan_count": report.get("archive_scan_count"),
                 "relevant_record_count": report.get("relevant_record_count"),
@@ -110,6 +107,17 @@ def run_once() -> dict[str, object]:
                 "decision_cutoff_count": report["decision_cutoff_count"],
                 "ending_portfolio_value": report["ending_portfolio_value"],
                 "strict_replay": report["strict_replay"],
+                "macro_coverage_satisfied": report.get(
+                    "macro_coverage_satisfied"
+                )
+                is True,
+                "certification_ready": certification_ready,
+                "calibration_eligible_observation_count": int(
+                    report.get("calibration_eligible_observation_count", 0) or 0
+                ),
+                "learning_manifest": str(
+                    root / "manifests" / "latest-canonical-learning.json"
+                ),
                 "research_only": True,
                 "execution_authorized": False,
                 "real_money_authorized": False,
