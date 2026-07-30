@@ -1,12 +1,12 @@
-FROM python:3.11-slim-trixie AS base
+FROM python:3.11-alpine3.23 AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/app
 
-RUN groupadd --gid 10001 capital && \
-    useradd --uid 10001 --gid capital --create-home --shell /usr/sbin/nologin capital
+RUN addgroup -g 10001 -S capital && \
+    adduser -u 10001 -S -D -G capital -h /home/capital -s /sbin/nologin capital
 
 WORKDIR /app
 COPY requirements.lock ./
