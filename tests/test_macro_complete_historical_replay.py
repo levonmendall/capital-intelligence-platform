@@ -111,7 +111,7 @@ def test_fred_initial_release_collection_isolates_series_failure() -> None:
     assert len(result.records) == 1
     assert result.records[0].dataset == "series.fedfunds"
     assert result.records[0].strict_replay_eligible is True
-    assert result.records[0].available_at == "2020-01-02"
+    assert result.records[0].available_at == "2020-01-02T00:00:00Z"
     assert "series_failed_count:1" in result.warnings
     assert all(call["output_type"] == 4 for call in client.calls)
     assert all("realtime_start" not in call for call in client.calls)
