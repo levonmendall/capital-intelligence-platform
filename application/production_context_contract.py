@@ -237,12 +237,25 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                     context.eligible_universe_publication_identifier
                 ),
             )
+        prior_decision_contexts = ()
+        active_theses = ()
+        if self.cycle.journal is not None:
+            prior_decision_contexts = self.cycle.journal.prior_decision_contexts(
+                candidates,
+                as_of=context.opportunity_context.as_of,
+            )
+            active_theses = self.cycle.journal.active_theses(
+                candidates,
+                as_of=context.opportunity_context.as_of,
+            )
         return self.cycle.run(
             identifier=context.identifier,
             candidates=candidates,
             opportunity_context=context.opportunity_context,
             specialist_contexts=context.specialist_contexts,
             portfolio=portfolio,
+            prior_decision_contexts=prior_decision_contexts,
+            active_theses=active_theses,
             code_version=context.code_version,
         )
 

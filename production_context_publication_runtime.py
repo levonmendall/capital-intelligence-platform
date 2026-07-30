@@ -285,7 +285,7 @@ def _reuse_if_complete(
     )
 
 
-def prepare_production_context_for_cycle(
+def _prepare_exclusion_only_production_context_for_cycle(
     *,
     settings: ApiSettings,
     scheduled_for: datetime,
@@ -636,6 +636,33 @@ def prepare_production_context_for_cycle(
         instrument_count=len(universe.instruments),
         candidate_count=0,
         exclusion_count=len(universe.instruments),
+    )
+
+
+def prepare_production_context_for_cycle(
+    *,
+    settings: ApiSettings,
+    scheduled_for: datetime,
+    universe_path: str | Path = DEFAULT_UNIVERSE_PATH,
+    readiness_probe: ReadinessProbe | None = None,
+    cash_probe: CashProbe | None = None,
+    evidence_probe=None,
+    clock: Clock | None = None,
+) -> ProductionContextPublicationResult:
+    """Publish decision-complete candidate and holding evidence for the paper cycle."""
+
+    from production_context_publication_governed import (
+        prepare_governed_production_context_for_cycle,
+    )
+
+    return prepare_governed_production_context_for_cycle(
+        settings=settings,
+        scheduled_for=scheduled_for,
+        universe_path=universe_path,
+        readiness_probe=readiness_probe,
+        cash_probe=cash_probe,
+        evidence_probe=evidence_probe,
+        clock=clock,
     )
 
 

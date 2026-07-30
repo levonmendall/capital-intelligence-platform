@@ -28,7 +28,13 @@ from application.production_cio import (
     ProductionContextManifest,
 )
 from cio import CandidateAssetClass, EvidenceQuality
-from committee.specialists import MacroSpecialistContext, MarketSpecialistContext
+from committee.specialists import (
+    AssetValuationSpecialistContext,
+    CrossAssetForecastSpecialistContext,
+    ForecastScenarioAssessment,
+    MacroSpecialistContext,
+    MarketSpecialistContext,
+)
 from company import (
     CompanyAnalysis,
     CompanyFactor,
@@ -253,6 +259,8 @@ class ProductionCandidateEvidence:
     fundamental_evidence_identifiers: tuple[str, ...]
     fundamental_model_version: str
     lineage: GovernedEvidenceLineage
+    forecast: CrossAssetForecastSpecialistContext | None = None
+    asset_valuation: AssetValuationSpecialistContext | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("identifier", "candidate_identifier"):
@@ -316,6 +324,20 @@ class ProductionCandidateEvidence:
         if not isinstance(self.lineage, GovernedEvidenceLineage):
             raise TypeError("lineage must be GovernedEvidenceLineage")
         self.lineage.require_usable(knowledge_cutoff=self.knowledge_cutoff)
+        if self.forecast is not None:
+            if not isinstance(self.forecast, CrossAssetForecastSpecialistContext):
+                raise TypeError(
+                    "forecast must be CrossAssetForecastSpecialistContext or None"
+                )
+            if self.forecast.as_of != self.as_of:
+                raise ValueError("forecast evidence must share candidate as_of")
+        if self.asset_valuation is not None:
+            if not isinstance(self.asset_valuation, AssetValuationSpecialistContext):
+                raise TypeError(
+                    "asset_valuation must be AssetValuationSpecialistContext or None"
+                )
+            if self.asset_valuation.as_of != self.as_of:
+                raise ValueError("asset valuation evidence must share candidate as_of")
 
 
 @dataclass(frozen=True, slots=True)
@@ -875,6 +897,14 @@ class RepositoryProductionCanonicalCIOContextProvider:
                     f"equity candidate {candidate_identifier} is missing governed "
                     "fundamental and valuation analysis"
                 )
+            if governed.company is None and governed.asset_valuation is None:
+                raise ProductionContextError(
+                    f"candidate {candidate_identifier} is missing independent valuation evidence"
+                )
+            if governed.forecast is None:
+                raise ProductionContextError(
+                    f"candidate {candidate_identifier} is missing governed forecast translation"
+                )
 
         portfolio_snapshot = self._portfolio_snapshot(decision_time)
         holding_context = {
@@ -919,7 +949,11 @@ class RepositoryProductionCanonicalCIOContextProvider:
                 ),
                 macro=candidate_evidence[candidate_identifier].macro,
                 market=candidate_evidence[candidate_identifier].market,
+                forecast=candidate_evidence[candidate_identifier].forecast,
                 company=candidate_evidence[candidate_identifier].company,
+                asset_valuation=(
+                    candidate_evidence[candidate_identifier].asset_valuation
+                ),
             )
             for candidate_identifier in qualified_ids
         )
@@ -1256,6 +1290,143 @@ def _market_from_dict(payload: Mapping[str, Any]) -> MarketSpecialistContext:
     )
 
 
+
+def _forecast_to_dict(
+    value: CrossAssetForecastSpecialistContext,
+) -> dict[str, Any]:
+    return {
+        "as_of": value.as_of.isoformat(),
+        "forecast_horizon_days": value.forecast_horizon_days,
+        "scenarios": [
+            {
+                "label": item.label,
+                "probability": item.probability,
+                "candidate_return_impact": item.candidate_return_impact,
+                "expected_path_drawdown": item.expected_path_drawdown,
+                "rationale": item.rationale,
+                "evidence_identifiers": list(item.evidence_identifiers),
+            }
+            for item in value.scenarios
+        ],
+        "aggregate_confidence": value.aggregate_confidence,
+        "calibration_score": value.calibration_score,
+        "model_agreement": value.model_agreement,
+        "forecast_stability": value.forecast_stability,
+        "path_drawdown_probability": value.path_drawdown_probability,
+        "cross_asset_signals": list(value.cross_asset_signals),
+        "contradictory_evidence": list(value.contradictory_evidence),
+        "limitations": list(value.limitations),
+        "change_conditions": list(value.change_conditions),
+        "model_versions": list(value.model_versions),
+        "evidence_identifiers": list(value.evidence_identifiers),
+        "evidence_dependencies": [
+            {
+                "identifier": item.identifier,
+                "parent_identifiers": list(item.parent_identifiers),
+            }
+            for item in value.evidence_dependencies
+        ],
+    }
+
+
+def _forecast_from_dict(
+    payload: Mapping[str, Any],
+) -> CrossAssetForecastSpecialistContext:
+    from cio import EvidenceDependency
+
+    return CrossAssetForecastSpecialistContext(
+        as_of=datetime.fromisoformat(str(payload["as_of"])),
+        forecast_horizon_days=int(payload["forecast_horizon_days"]),
+        scenarios=tuple(
+            ForecastScenarioAssessment(
+                label=str(item["label"]),
+                probability=float(item["probability"]),
+                candidate_return_impact=float(item["candidate_return_impact"]),
+                expected_path_drawdown=float(item["expected_path_drawdown"]),
+                rationale=str(item["rationale"]),
+                evidence_identifiers=tuple(
+                    str(value) for value in item["evidence_identifiers"]
+                ),
+            )
+            for item in payload["scenarios"]
+        ),
+        aggregate_confidence=float(payload["aggregate_confidence"]),
+        calibration_score=float(payload["calibration_score"]),
+        model_agreement=float(payload["model_agreement"]),
+        forecast_stability=float(payload["forecast_stability"]),
+        path_drawdown_probability=float(payload["path_drawdown_probability"]),
+        cross_asset_signals=tuple(
+            str(item) for item in payload["cross_asset_signals"]
+        ),
+        contradictory_evidence=tuple(
+            str(item) for item in payload.get("contradictory_evidence", ())
+        ),
+        limitations=tuple(str(item) for item in payload["limitations"]),
+        change_conditions=tuple(
+            str(item) for item in payload["change_conditions"]
+        ),
+        model_versions=tuple(str(item) for item in payload["model_versions"]),
+        evidence_identifiers=tuple(
+            str(item) for item in payload["evidence_identifiers"]
+        ),
+        evidence_dependencies=tuple(
+            EvidenceDependency(
+                identifier=str(item["identifier"]),
+                parent_identifiers=tuple(
+                    str(value) for value in item["parent_identifiers"]
+                ),
+            )
+            for item in payload.get("evidence_dependencies", ())
+        ),
+    )
+
+
+def _asset_valuation_to_dict(
+    value: AssetValuationSpecialistContext,
+) -> dict[str, Any]:
+    return {
+        "as_of": value.as_of.isoformat(),
+        "asset_class": value.asset_class.value,
+        "expected_return_impact": value.expected_return_impact,
+        "confidence": value.confidence,
+        "valuation_evidence": list(value.valuation_evidence),
+        "contradictory_evidence": list(value.contradictory_evidence),
+        "critical_assumptions": list(value.critical_assumptions),
+        "risks": list(value.risks),
+        "limitations": list(value.limitations),
+        "change_conditions": list(value.change_conditions),
+        "evidence_identifiers": list(value.evidence_identifiers),
+    }
+
+
+def _asset_valuation_from_dict(
+    payload: Mapping[str, Any],
+) -> AssetValuationSpecialistContext:
+    return AssetValuationSpecialistContext(
+        as_of=datetime.fromisoformat(str(payload["as_of"])),
+        asset_class=CandidateAssetClass(str(payload["asset_class"])),
+        expected_return_impact=float(payload["expected_return_impact"]),
+        confidence=float(payload["confidence"]),
+        valuation_evidence=tuple(
+            str(item) for item in payload["valuation_evidence"]
+        ),
+        contradictory_evidence=tuple(
+            str(item) for item in payload.get("contradictory_evidence", ())
+        ),
+        critical_assumptions=tuple(
+            str(item) for item in payload["critical_assumptions"]
+        ),
+        risks=tuple(str(item) for item in payload["risks"]),
+        limitations=tuple(str(item) for item in payload["limitations"]),
+        change_conditions=tuple(
+            str(item) for item in payload["change_conditions"]
+        ),
+        evidence_identifiers=tuple(
+            str(item) for item in payload["evidence_identifiers"]
+        ),
+    )
+
+
 def _quality_to_dict(value: EvidenceQuality) -> dict[str, float]:
     return {
         "reliability": value.reliability,
@@ -1544,6 +1715,14 @@ def _candidate_to_dict(
         "company": (
             None if value.company is None else _company_to_dict(value.company)
         ),
+        "forecast": (
+            None if value.forecast is None else _forecast_to_dict(value.forecast)
+        ),
+        "asset_valuation": (
+            None
+            if value.asset_valuation is None
+            else _asset_valuation_to_dict(value.asset_valuation)
+        ),
         "exposure_profile": _profile_to_dict(value.exposure_profile),
         "fundamental_evidence_identifiers": list(
             value.fundamental_evidence_identifiers
@@ -1557,6 +1736,8 @@ def _candidate_from_dict(
     payload: Mapping[str, Any],
 ) -> ProductionCandidateEvidence:
     company_payload = payload.get("company")
+    forecast_payload = payload.get("forecast")
+    asset_valuation_payload = payload.get("asset_valuation")
     return ProductionCandidateEvidence(
         identifier=str(payload["identifier"]),
         candidate_identifier=str(payload["candidate_identifier"]),
@@ -1586,6 +1767,16 @@ def _candidate_from_dict(
             payload["fundamental_model_version"]
         ),
         lineage=_lineage_from_dict(dict(payload["lineage"])),
+        forecast=(
+            None
+            if forecast_payload is None
+            else _forecast_from_dict(dict(forecast_payload))
+        ),
+        asset_valuation=(
+            None
+            if asset_valuation_payload is None
+            else _asset_valuation_from_dict(dict(asset_valuation_payload))
+        ),
     )
 
 

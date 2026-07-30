@@ -432,7 +432,7 @@ class RepositoryProductionCanonicalCIOContextProvider:
             replace(
                 context,
                 asset_valuation=(
-                    None
+                    context.asset_valuation
                     if context.candidate_identifier not in packet_by_candidate
                     else _asset_valuation_context(
                         packet_by_candidate[context.candidate_identifier]
