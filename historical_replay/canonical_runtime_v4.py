@@ -217,6 +217,7 @@ class HorizonAlignedCanonicalHistoricalReplayEngine(
     @staticmethod
     def _learning_input_report(report: dict[str, Any]) -> dict[str, Any]:
         cutoffs: list[dict[str, Any]] = []
+        bounded_count = 0
         for raw_cutoff in report.get("decisions", []):
             if not isinstance(raw_cutoff, dict):
                 continue
@@ -233,7 +234,17 @@ class HorizonAlignedCanonicalHistoricalReplayEngine(
                 observation.pop("realized_return_to_next_cutoff", None)
                 value = observation.get("realized_decision_value_at_horizon")
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    observation["realized_return_to_next_cutoff"] = float(value)
+                    raw_value = float(value)
+                    # A missed-opportunity regret can be below -100% when the avoided
+                    # asset more than doubles. The raw value remains in the protected
+                    # replay, while the live calibration contract is bounded to the
+                    # return domain accepted by HistoricalLearningContext.
+                    bounded_value = max(-1.0, raw_value)
+                    was_bounded = bounded_value != raw_value
+                    bounded_count += was_bounded
+                    observation["calibration_return_at_horizon"] = bounded_value
+                    observation["calibration_return_was_bounded"] = was_bounded
+                    observation["realized_return_to_next_cutoff"] = bounded_value
                 observations.append(observation)
             cutoff["decisions"] = observations
             cutoff["learning_observation_count"] = len(observations)
@@ -267,6 +278,7 @@ class HorizonAlignedCanonicalHistoricalReplayEngine(
                 report.get("governance_only_observation_count", 0) or 0
             ),
             "realized_outcome_count": horizon_count,
+            "bounded_calibration_outcome_count": bounded_count,
             "outcome_alignment": "decision_horizon",
         }
 
@@ -344,10 +356,14 @@ class HorizonAlignedCanonicalHistoricalReplayEngine(
                 ),
             }
         )
+        learning_report = self._learning_input_report(report)
+        report["bounded_calibration_outcome_count"] = int(
+            learning_report.get("bounded_calibration_outcome_count", 0) or 0
+        )
         self.store.write_manifest("latest-canonical-replay", report)
         self.store.write_manifest(
             "latest-canonical-learning",
-            self._learning_input_report(report),
+            learning_report,
         )
         return report
 
