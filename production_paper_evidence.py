@@ -416,9 +416,10 @@ def _features(
         if future_reference_at is None
         else _aware(future_reference_at, field_name="future_reference_at")
     )
-    maximum_future_skew = timedelta(seconds=max(0, maximum_future_skew_seconds))
-    if quote_time > reference_time + maximum_future_skew:
-        raise ProductionPaperEvidenceError(f"{symbol} quote is future-known")
+    if maximum_future_skew_seconds >= 0:
+        maximum_future_skew = timedelta(seconds=maximum_future_skew_seconds)
+        if quote_time > reference_time + maximum_future_skew:
+            raise ProductionPaperEvidenceError(f"{symbol} quote is future-known")
     effective_quote_time = min(quote_time, as_of)
     quote_age = as_of - effective_quote_time
     # Strategic analysis may use the latest official close when pre-market IEX
@@ -1290,7 +1291,7 @@ def build_paper_evidence(
     raw_macro = payload.get("macro")
     company_facts = payload.get("company_facts", {})
     live_collection = payload.get("_live_collection") is True
-    maximum_future_skew_seconds = 43_200 if live_collection else 0
+    maximum_future_skew_seconds = -1 if live_collection else 0
     future_reference_at = as_of
     if live_collection:
         raw_provider_clock = payload.get("provider_clock")

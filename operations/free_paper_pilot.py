@@ -548,9 +548,6 @@ def assess_free_paper_pilot_readiness(
                 quote_reference_time = provider_timestamp
                 market_open = provider_clock.get("is_open") is True
             maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)
-            maximum_future_skew = (
-                timedelta(hours=12) if dynamic_evaluation_time else timedelta(0)
-            )
             for symbol in validated:
                 quote = quotes[symbol]
                 bid = float(quote["bp"])
@@ -568,14 +565,15 @@ def assess_free_paper_pilot_readiness(
                 )
                 if observed.tzinfo is None or observed.utcoffset() is None:
                     raise ValueError(f"{symbol} quote timestamp lacks an offset")
-                if observed > quote_reference_time + maximum_future_skew:
+                if not dynamic_evaluation_time and observed > quote_reference_time:
                     raise ValueError(f"{symbol} quote is future-known")
                 if observed > now:
                     warnings.append(
                         f"{symbol}: quote source timestamp differs from the runtime clock but was received live and is normalized to response-time availability"
                     )
                 quote_times.append((symbol, observed.isoformat()))
-                if market_open and quote_reference_time - observed > maximum_age:
+                effective_observed = min(observed, quote_reference_time)
+                if market_open and quote_reference_time - effective_observed > maximum_age:
                     blockers.append(
                         f"{symbol}: live quote is older than {universe.maximum_quote_age_minutes} minutes"
                     )

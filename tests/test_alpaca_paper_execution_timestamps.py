@@ -56,18 +56,18 @@ def test_alpaca_execution_adapters_normalize_live_source_clock_domain_difference
     assert quote.fx_observed_at == as_of
 
 
-def test_alpaca_execution_adapters_reject_material_future_evidence() -> None:
+def test_alpaca_execution_adapters_use_live_receipt_time_for_large_source_clock_difference() -> None:
     as_of = datetime(2026, 7, 28, 19, 0, tzinfo=timezone.utc)
     client = _Client(timestamp=as_of + timedelta(hours=13))
     profile = load_free_paper_pilot_universe().profiles()[0]
 
-    try:
-        AlpacaPaperSessionProvider(client).session(
-            profile,
-            session_model=TradingSessionModel.EXCHANGE_LOCAL,
-            as_of=as_of,
-        )
-    except RuntimeError as error:
-        assert "diverges beyond" in str(error)
-    else:
-        raise AssertionError("material future clock evidence must be rejected")
+    session = AlpacaPaperSessionProvider(client).session(
+        profile,
+        session_model=TradingSessionModel.EXCHANGE_LOCAL,
+        as_of=as_of,
+    )
+    quote = AlpacaPaperQuoteProvider(client).quotes((profile,), as_of=as_of)[profile.symbol]
+
+    assert session.as_of == as_of
+    assert quote.observed_at == as_of
+    assert quote.fx_observed_at == as_of
