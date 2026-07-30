@@ -6,6 +6,8 @@ from pathlib import Path
 from educational_market_briefing_ui import (
     build_economic_event_items,
     build_today_items,
+    daily_briefing_date,
+    economic_investment_implications,
     economic_portfolio_lens,
     economic_snapshot_summary,
 )
@@ -95,7 +97,9 @@ def test_today_digest_prefers_recent_governed_events_and_removes_noise() -> None
         "Global supply disruption develops",
     ]
     assert all("OFAC sanctions listing" not in item.title for item in items)
-    assert "Rates, bond prices" in items[0].portfolio_lens
+    assert "Interest-rate expectations" in items[0].portfolio_lens
+    assert "Treasuries" in items[0].affected_investments
+    assert "central-bank guidance" in items[0].what_to_watch
 
 
 def test_environment_event_digest_keeps_economic_channels_only() -> None:
@@ -123,6 +127,7 @@ def test_environment_event_digest_keeps_economic_channels_only() -> None:
 
     assert len(items) == 1
     assert items[0].title == "Inflation release updates the policy debate"
+    assert "growth equities" in items[0].affected_investments
 
 
 def test_economic_context_explains_readings_and_portfolio_channels() -> None:
@@ -136,19 +141,42 @@ def test_economic_context_explains_readings_and_portfolio_channels() -> None:
 
     summary = economic_snapshot_summary(readings)
     lens = economic_portfolio_lens(readings)
+    implications = economic_investment_implications(readings)
 
     assert "unemployment 4.2%" in summary
     assert "10-year Treasury 4.40%" in summary
-    assert "cash and short-duration bonds" in lens
-    assert "cyclical earnings" in lens
+    assert "Cash and short-duration bonds" in lens
+    assert "growth-stock valuations" in lens
+    assert [title for title, _ in implications] == [
+        "Rates, cash and bonds",
+        "Equities and credit",
+        "Growth and consumer sensitivity",
+    ]
 
 
-def test_app_wires_briefs_into_today_and_environment_before_process_detail() -> None:
+def test_app_places_briefs_immediately_at_surface_entry() -> None:
     source = Path("app.py").read_text(encoding="utf-8")
 
     assert "render_today_market_brief" in source
     assert "render_environment_economic_brief" in source
     assert "educational briefing insertion point is unavailable" in source
+    today_anchor = '"def _render_today() -> None:\\n"'
+    environment_anchor = '"def _render_environment() -> None:\\n"'
+    assert today_anchor in source
+    assert environment_anchor in source
+    assert source.index(today_anchor) < source.index(
+        "# Refresh the active operating surface"
+    )
+    assert 'render_today_market_brief()\\n\\n' in source
+    assert 'render_environment_economic_brief()\\n\\n' in source
+
+
+def test_daily_briefing_operating_date_rolls_at_five_pacific() -> None:
+    before = datetime(2026, 7, 30, 11, 59, tzinfo=timezone.utc)
+    after = datetime(2026, 7, 30, 12, 1, tzinfo=timezone.utc)
+
+    assert daily_briefing_date(before) == "2026-07-29"
+    assert daily_briefing_date(after) == "2026-07-30"
 
 
 def test_briefing_copy_is_informative_educational_and_non_executing() -> None:
@@ -156,7 +184,10 @@ def test_briefing_copy_is_informative_educational_and_non_executing() -> None:
 
     assert "What's happening today" in source
     assert "Economic context today" in source
-    assert "How it can affect portfolios" in source
+    assert "What happened:" in source
+    assert "Investment impact:" in source
+    assert "Most affected:" in source
+    assert "Watch next:" in source
+    assert "rolls at 5:00 AM Pacific" in source
     assert "Educational context only" in source
-    assert "does not alter " in source
-    assert "the CIO conclusion or authorize a paper trade" in source
+    assert "does not alter the CIO conclusion or authorize a paper trade" in source

@@ -79,7 +79,7 @@ from core.portfolio import (
 _premium_ui = importlib.reload(_premium_ui)
 _install_navigation_ui(_premium_ui)
 
-# The two newest presentation helpers are enhancement-only. Supplying no-op
+# The newest presentation helpers are enhancement-only. Supplying no-op
 # compatibility shims keeps the four core surfaces available if a process is
 # briefly running the preceding presentation contract.
 if not hasattr(_premium_ui, "activity_rail"):
@@ -330,17 +330,19 @@ for _old_detail, _new_detail in _decision_change_replacements:
         "decision-change collapse insertion point is unavailable",
     )
 
-# Add concise educational context before each surface explains its process.
+# Put the daily educational brief immediately below the hero on the two
+# information surfaces. The original function anchor remains in the replacement so
+# the live-fragment decorator can still be installed later in this entrypoint.
 _educational_briefing_insertions = (
     (
-        '    with st.expander("How the Today surface works"):\n',
-        '    render_today_market_brief()\n\n'
-        '    with st.expander("How the Today surface works"):\n',
+        "def _render_today() -> None:\n",
+        "def _render_today() -> None:\n"
+        "    render_today_market_brief()\n\n",
     ),
     (
-        '    with st.expander("How the Environment surface works"):\n',
-        '    render_environment_economic_brief()\n\n'
-        '    with st.expander("How the Environment surface works"):\n',
+        "def _render_environment() -> None:\n",
+        "def _render_environment() -> None:\n"
+        "    render_environment_economic_brief()\n\n",
     ),
 )
 for _brief_anchor, _brief_replacement in _educational_briefing_insertions:
