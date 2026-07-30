@@ -1,0 +1,38 @@
+name: Materialize Narrow Evidence Classification
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out review branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply narrow evidence classification
+        run: python tools/materialize_narrow_evidence_classification.py
+
+      - name: Remove temporary materializer
+        run: |
+          rm tools/materialize_narrow_evidence_classification.py
+          rm .github/workflows/materialize-narrow-evidence-classification.yml
+
+      - name: Commit corrected classification
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Distinguish evidence gaps from economic rejection"
+          git push origin HEAD:agent/complete-paper-readiness-review
