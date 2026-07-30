@@ -22,6 +22,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          for part in tools/cio_decision_quality_patch/part*.b64; do wc -c "${part}"; done
           cat tools/cio_decision_quality_patch/part*.b64 > /tmp/cio-decision-quality.b64
           wc -c /tmp/cio-decision-quality.b64
           sha256sum /tmp/cio-decision-quality.b64
