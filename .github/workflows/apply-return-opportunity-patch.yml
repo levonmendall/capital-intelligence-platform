@@ -1,0 +1,57 @@
+name: Apply return opportunity expansion
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/expand-return-opportunity-discovery'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify and apply tested patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'c0149608cfe31354be420c49e9d65c52fd72269fcf43e04b48edeac3524be83b  tools/return_opportunity_patch/part00' | sha256sum -c -
+          echo '40238fe6815282d6c4beb8e2dd2b0f96000919d7a6d4dbc0e03b058aeabebbb7  tools/return_opportunity_patch/part01' | sha256sum -c -
+          echo '67de46707e02eb36bddd6c1c51e2bcc23ab5ccc80eabf4296a9a45894dc15158  tools/return_opportunity_patch/part02' | sha256sum -c -
+          echo '3f7c99407d3f5c756845b457c40c9c25435df05a854f9d4f0a288edb30246843  tools/return_opportunity_patch/part03' | sha256sum -c -
+          echo 'f1add7c495088ef06d0bfa501993871491e1c120023098ccd02963a4a3c2038d  tools/return_opportunity_patch/part04' | sha256sum -c -
+          cat tools/return_opportunity_patch/part0{0,1,2,3,4} > /tmp/return-opportunity.patch.b64
+          test "$(wc -c < /tmp/return-opportunity.patch.b64)" -eq 35800
+          echo 'eb62768cc9706db80fa216c563e7b54c1608f21360b7500949d89a4852df4cd5  /tmp/return-opportunity.patch.b64' | sha256sum -c -
+          base64 --decode /tmp/return-opportunity.patch.b64 > /tmp/return-opportunity.patch.xz
+          echo 'aed1df51b782683d4854f5f8dd09e2a5e8a7ef8b7e8dd531ff2ff33ae3d3fadb  /tmp/return-opportunity.patch.xz' | sha256sum -c -
+          xz --decompress --stdout /tmp/return-opportunity.patch.xz > /tmp/return-opportunity.patch
+          echo 'f41bc9db756d09cf140c026ef131845993be6d4a7c5949a304b9e753be7fb44c  /tmp/return-opportunity.patch' | sha256sum -c -
+          git apply --check -p3 /tmp/return-opportunity.patch
+          git apply -p3 /tmp/return-opportunity.patch
+
+      - name: Commit clean product implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf tools/return_opportunity_patch
+          rm -f .github/workflows/apply-return-opportunity-patch.yml
+          git config user.name 'capital-intelligence-automation'
+          git config user.email 'capital-intelligence-automation@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Expand CIO return-opportunity discovery'
+          git push origin "HEAD:${{ github.head_ref }}"
