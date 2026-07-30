@@ -22,6 +22,12 @@ The listed-wrapper publisher now:
 
 `INSUFFICIENT_EVIDENCE` and `IMPLEMENTATION_BLOCKED` remain safe governed outcomes, but they do not prove that the CIO completed a comparative investment decision. Missing evidence for a prospective instrument creates an explicit exclusion. Missing evidence for a current holding blocks the complete cycle.
 
+## Morning operating schedule
+
+The persistent Render operator is configured to run the daily canonical CIO cycle at **5:00 AM America/Los_Angeles**. Public live information refreshes at least every 30 minutes, and the scheduler polls every 60 seconds. A restart after the scheduled boundary catches up the same market-date cycle instead of skipping it.
+
+The completed cycle writes the CIO briefing, portfolio construction or governed no-action conclusion, pending paper-transaction report, portfolio state, and history records used by the Today, Environment, Portfolio, and History screens. The interface may truthfully show a buy, sell, hold, or no-trade recommendation; it must never fabricate a transaction merely to make the application appear active.
+
 ## Pilot policy authority
 
 The scheduled CIO construction and paper executor use the same pilot limits:
