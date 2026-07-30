@@ -27,6 +27,24 @@ def _optional(value: str | None) -> str | None:
     return None if value is None or not value.strip() else value.strip()
 
 
+def _scheduler_times(value: str | None) -> tuple[str, ...]:
+    if value is None or not value.strip():
+        return ()
+    result: list[str] = []
+    for raw in value.split(","):
+        item = raw.strip()
+        parts = item.split(":")
+        if len(parts) != 2:
+            raise ValueError("CAPITAL_INTELLIGENCE_SCHEDULER_TIMES must use HH:MM values")
+        hour, minute = (int(part) for part in parts)
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            raise ValueError("CAPITAL_INTELLIGENCE_SCHEDULER_TIMES contains an invalid time")
+        canonical = f"{hour:02d}:{minute:02d}"
+        if canonical not in result:
+            result.append(canonical)
+    return tuple(sorted(result))
+
+
 @dataclass(frozen=True, slots=True)
 class ApiSettings:
     """Versioned runtime settings with secure production defaults."""
@@ -53,7 +71,14 @@ class ApiSettings:
     bootstrap_admin_name: str = "Platform Administrator"
     scheduler_timezone: str = "America/New_York"
     scheduler_hour: int = 7
+    scheduler_times: tuple[str, ...] = ()
     scheduler_poll_seconds: int = 60
+    scheduler_scan_seconds: int = 300
+    scheduler_event_cooldown_minutes: int = 30
+    scheduler_after_close_time: str = "13:15"
+    scheduler_benchmark_move_threshold: float = 0.01
+    scheduler_instrument_move_threshold: float = 0.03
+    scheduler_company_move_threshold: float = 0.05
     scheduler_retry_minutes: int = 15
     scheduler_lease_minutes: int = 30
     alert_maximum_attempts: int = 4
@@ -91,15 +116,9 @@ class ApiSettings:
             value = getattr(self, field_name)
             if not isinstance(value, Path):
                 raise TypeError(f"{field_name} must be a pathlib.Path")
-        if self.alert_database is not None and not isinstance(
-            self.alert_database,
-            Path,
-        ):
+        if self.alert_database is not None and not isinstance(self.alert_database, Path):
             raise TypeError("alert_database must be a pathlib.Path or None")
-        if self.replay_directory is not None and not isinstance(
-            self.replay_directory,
-            Path,
-        ):
+        if self.replay_directory is not None and not isinstance(self.replay_directory, Path):
             raise TypeError("replay_directory must be a pathlib.Path or None")
         if self.canonical_cycle_context_provider is not None:
             provider = self.canonical_cycle_context_provider.strip()
@@ -107,11 +126,7 @@ class ApiSettings:
                 raise ValueError(
                     "canonical_cycle_context_provider must use module:function form"
                 )
-            object.__setattr__(
-                self,
-                "canonical_cycle_context_provider",
-                provider,
-            )
+            object.__setattr__(self, "canonical_cycle_context_provider", provider)
         if not 1 <= self.access_token_minutes <= 1440:
             raise ValueError("access_token_minutes must be between 1 and 1440")
         if not 1 <= self.refresh_token_days <= 365:
@@ -130,8 +145,37 @@ class ApiSettings:
             raise ValueError("scheduler_timezone cannot be empty")
         if not 0 <= self.scheduler_hour <= 23:
             raise ValueError("scheduler_hour must be between 0 and 23")
+        times = self.scheduler_times or (f"{self.scheduler_hour:02d}:00",)
+        canonical_times = _scheduler_times(",".join(times))
+        if not canonical_times:
+            raise ValueError("scheduler_times cannot be empty")
+        object.__setattr__(self, "scheduler_times", canonical_times)
+        object.__setattr__(self, "scheduler_hour", int(canonical_times[0].split(":", 1)[0]))
+        _scheduler_times(self.scheduler_after_close_time)
         if not 1 <= self.scheduler_poll_seconds <= 3600:
             raise ValueError("scheduler_poll_seconds must be between 1 and 3600")
+        if not 60 <= self.scheduler_scan_seconds <= 3600:
+            raise ValueError("scheduler_scan_seconds must be between 60 and 3600")
+        if not 1 <= self.scheduler_event_cooldown_minutes <= 1440:
+            raise ValueError(
+                "scheduler_event_cooldown_minutes must be between 1 and 1440"
+            )
+        for field_name in (
+            "scheduler_benchmark_move_threshold",
+            "scheduler_instrument_move_threshold",
+            "scheduler_company_move_threshold",
+        ):
+            value = float(getattr(self, field_name))
+            if not 0.0 < value <= 1.0:
+                raise ValueError(f"{field_name} must be between zero and one")
+        if not (
+            self.scheduler_benchmark_move_threshold
+            <= self.scheduler_instrument_move_threshold
+            <= self.scheduler_company_move_threshold
+        ):
+            raise ValueError(
+                "scheduler move thresholds must increase from benchmark to instrument to company"
+            )
         if not 1 <= self.scheduler_retry_minutes <= 1440:
             raise ValueError("scheduler_retry_minutes must be between 1 and 1440")
         if not 1 <= self.scheduler_lease_minutes <= 1440:
@@ -185,30 +229,25 @@ class ApiSettings:
         """Load settings without mutating process environment."""
 
         values = os.environ if environ is None else environ
-        data_dir = Path(
-            values.get("CAPITAL_INTELLIGENCE_DATA_DIR", "database")
-        ).expanduser()
+        data_dir = Path(values.get("CAPITAL_INTELLIGENCE_DATA_DIR", "database")).expanduser()
         replay_value = values.get("CAPITAL_INTELLIGENCE_REPLAY_DIRECTORY")
         replay_directory = (
             None
             if replay_value is not None and not replay_value.strip()
-            else _path(
-                replay_value,
-                default=data_dir / "decision_replays",
-            )
+            else _path(replay_value, default=data_dir / "decision_replays")
         )
         origins = tuple(
             item.strip()
-            for item in values.get(
-                "CAPITAL_INTELLIGENCE_ALLOWED_ORIGINS",
-                "",
-            ).split(",")
+            for item in values.get("CAPITAL_INTELLIGENCE_ALLOWED_ORIGINS", "").split(",")
             if item.strip()
         )
         production = values.get(
-            "CAPITAL_INTELLIGENCE_ENVIRONMENT",
-            "development",
+            "CAPITAL_INTELLIGENCE_ENVIRONMENT", "development"
         ).strip().lower() == "production"
+        scheduler_hour = int(values.get("CAPITAL_INTELLIGENCE_SCHEDULER_HOUR", "7"))
+        scheduler_times = _scheduler_times(
+            values.get("CAPITAL_INTELLIGENCE_SCHEDULER_TIMES")
+        )
         return cls(
             snapshot_database=_path(
                 values.get("CAPITAL_INTELLIGENCE_SNAPSHOT_DATABASE"),
@@ -235,9 +274,7 @@ class ApiSettings:
                 default=data_dir / "institutional_journal.db",
             ),
             full_universe_screening_database=_path(
-                values.get(
-                    "CAPITAL_INTELLIGENCE_FULL_UNIVERSE_SCREENING_DATABASE"
-                ),
+                values.get("CAPITAL_INTELLIGENCE_FULL_UNIVERSE_SCREENING_DATABASE"),
                 default=data_dir / "full_universe_screening.db",
             ),
             environment_database=_path(
@@ -249,15 +286,11 @@ class ApiSettings:
                 default=data_dir / "forecast_evidence.db",
             ),
             readiness_evidence_database=_path(
-                values.get(
-                    "CAPITAL_INTELLIGENCE_PRODUCT_READINESS_EVIDENCE_DATABASE"
-                ),
+                values.get("CAPITAL_INTELLIGENCE_PRODUCT_READINESS_EVIDENCE_DATABASE"),
                 default=data_dir / "product_readiness_evidence.db",
             ),
             product_test_readiness_database=_path(
-                values.get(
-                    "CAPITAL_INTELLIGENCE_PRODUCT_TEST_READINESS_DATABASE"
-                ),
+                values.get("CAPITAL_INTELLIGENCE_PRODUCT_TEST_READINESS_DATABASE"),
                 default=data_dir / "product_test_readiness.db",
             ),
             canonical_cycle_context_provider=_optional(
@@ -291,11 +324,36 @@ class ApiSettings:
                 "CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE",
                 "America/New_York",
             ),
-            scheduler_hour=int(
-                values.get("CAPITAL_INTELLIGENCE_SCHEDULER_HOUR", "7")
-            ),
+            scheduler_hour=scheduler_hour,
+            scheduler_times=scheduler_times,
             scheduler_poll_seconds=int(
                 values.get("CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS", "60")
+            ),
+            scheduler_scan_seconds=int(
+                values.get("CAPITAL_INTELLIGENCE_SCHEDULER_SCAN_SECONDS", "300")
+            ),
+            scheduler_event_cooldown_minutes=int(
+                values.get(
+                    "CAPITAL_INTELLIGENCE_SCHEDULER_EVENT_COOLDOWN_MINUTES", "30"
+                )
+            ),
+            scheduler_after_close_time=values.get(
+                "CAPITAL_INTELLIGENCE_SCHEDULER_AFTER_CLOSE_TIME", "13:15"
+            ),
+            scheduler_benchmark_move_threshold=float(
+                values.get(
+                    "CAPITAL_INTELLIGENCE_SCHEDULER_BENCHMARK_MOVE_THRESHOLD", "0.01"
+                )
+            ),
+            scheduler_instrument_move_threshold=float(
+                values.get(
+                    "CAPITAL_INTELLIGENCE_SCHEDULER_INSTRUMENT_MOVE_THRESHOLD", "0.03"
+                )
+            ),
+            scheduler_company_move_threshold=float(
+                values.get(
+                    "CAPITAL_INTELLIGENCE_SCHEDULER_COMPANY_MOVE_THRESHOLD", "0.05"
+                )
             ),
             scheduler_retry_minutes=int(
                 values.get("CAPITAL_INTELLIGENCE_SCHEDULER_RETRY_MINUTES", "15")
@@ -311,18 +369,13 @@ class ApiSettings:
             ),
             smtp_host=_optional(values.get("CAPITAL_INTELLIGENCE_SMTP_HOST")),
             smtp_port=int(values.get("CAPITAL_INTELLIGENCE_SMTP_PORT", "587")),
-            smtp_username=_optional(
-                values.get("CAPITAL_INTELLIGENCE_SMTP_USERNAME")
-            ),
-            smtp_password=_optional(
-                values.get("CAPITAL_INTELLIGENCE_SMTP_PASSWORD")
-            ),
+            smtp_username=_optional(values.get("CAPITAL_INTELLIGENCE_SMTP_USERNAME")),
+            smtp_password=_optional(values.get("CAPITAL_INTELLIGENCE_SMTP_PASSWORD")),
             smtp_from_address=_optional(
                 values.get("CAPITAL_INTELLIGENCE_SMTP_FROM_ADDRESS")
             ),
             smtp_use_tls=_boolean(
-                values.get("CAPITAL_INTELLIGENCE_SMTP_USE_TLS"),
-                default=True,
+                values.get("CAPITAL_INTELLIGENCE_SMTP_USE_TLS"), default=True
             ),
             require_journal=_boolean(
                 values.get("CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL")
@@ -331,9 +384,7 @@ class ApiSettings:
                 values.get("CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER")
             ),
             require_canonical_environment=_boolean(
-                values.get(
-                    "CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT"
-                ),
+                values.get("CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT"),
                 default=production,
             ),
             allowed_origins=origins,
@@ -350,12 +401,10 @@ class ApiSettings:
                 values.get("CAPITAL_INTELLIGENCE_CONVICTION_MAX_LOOKBACK", "30")
             ),
             application_name=values.get(
-                "CAPITAL_INTELLIGENCE_API_NAME",
-                "Capital Intelligence API",
+                "CAPITAL_INTELLIGENCE_API_NAME", "Capital Intelligence API"
             ),
             application_version=values.get(
-                "CAPITAL_INTELLIGENCE_API_VERSION",
-                "1.4.0",
+                "CAPITAL_INTELLIGENCE_API_VERSION", "1.4.0"
             ),
         )
 
