@@ -9,6 +9,9 @@ on:
       - "operations/free_paper_pilot.py"
       - "config/free_paper_pilot_universe.json"
       - "run_free_paper_pilot_readiness.py"
+      - "operations/cio_material_reassessment.py"
+      - "operations/cio_reassessment.py"
+      - "run_autonomous_paper_operator.py"
   push:
     branches:
       - main
@@ -18,6 +21,9 @@ on:
       - "operations/free_paper_pilot.py"
       - "config/free_paper_pilot_universe.json"
       - "run_free_paper_pilot_readiness.py"
+      - "operations/cio_material_reassessment.py"
+      - "operations/cio_reassessment.py"
+      - "run_autonomous_paper_operator.py"
 
 permissions:
   contents: read
