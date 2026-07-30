@@ -186,6 +186,8 @@ class FredSource(HistoricalSource):
                     partial_series.append(series)
                 else:
                     failed_series.append(series)
+            elif not series_record_count:
+                failed_series.append(series)
 
         if (failed_series or partial_series) and not records:
             return SourceResult(
