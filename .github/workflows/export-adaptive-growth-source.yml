@@ -1,0 +1,26 @@
+name: Export adaptive growth source
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove git metadata
+        run: rm -rf .git
+      - name: Archive source
+        run: tar -czf /tmp/adaptive-growth-source.tar.gz .
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: adaptive-growth-source
+          path: /tmp/adaptive-growth-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
