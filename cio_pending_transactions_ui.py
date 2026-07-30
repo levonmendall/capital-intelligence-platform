@@ -24,11 +24,11 @@ def render_pending_transaction_report(
         construction=construction,
         briefing=briefing,
     )
-    st.subheader("CIO Pending Transaction Recommendations")
+    st.subheader("Paper implementation status")
     st.caption(
-        f"Paper trading launch: {report['paper_trading_start_label']} · "
-        f"Execution state: {str(report.get('execution_state', 'unavailable')).replace('_', ' ').title()} · "
-        "Exact canonical CIO construction"
+        "How the latest CIO conclusion translates into governed paper implementation · "
+        f"Launch: {report['paper_trading_start_label']} · "
+        f"Execution: {str(report.get('execution_state', 'unavailable')).replace('_', ' ').title()}"
     )
 
     no_transaction = report.get("report_state") == "no_transaction_recommended"

@@ -87,27 +87,9 @@ _original_signal_panel = _premium_ui.signal_panel
 
 
 def _render_navigation_with_admin_control(options):
-    """Keep four primary tabs while exposing Render operations on mobile."""
+    """Keep the four primary tabs free of administrator operations."""
 
-    result = _original_render_navigation(options)
-    principal = globals().get("authenticated_principal")
-    is_render_host = bool(os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip())
-    if (
-        is_render_host
-        and principal is not None
-        and getattr(principal, "is_administrator", False)
-    ):
-        if _premium_ui.st.button(
-            "Production smoke test",
-            key="open-production-smoke-test-main",
-            help=(
-                "Verify Render persistence, the CIO operator, provider evidence, "
-                "governed paper outcomes, and encrypted backups."
-            ),
-        ):
-            _premium_ui.st.session_state["production_smoke_test_open"] = True
-    return result
-
+    return _original_render_navigation(options)
 
 def _compatible_metric_grid(metrics, *, variant: str = "today") -> None:
     try:
@@ -134,7 +116,7 @@ def _compatible_signal_panel(
 
 
 def _safe_render_sidebar() -> None:
-    """Render sidebar HTML without Markdown code-block indentation."""
+    """Render the brand and administrator operations in the sidebar."""
 
     with _premium_ui.st.sidebar:
         _premium_ui.st.markdown(
@@ -147,7 +129,25 @@ def _safe_render_sidebar() -> None:
             unsafe_allow_html=True,
         )
         _premium_ui.st.caption("Four distinct surfaces. One governed portfolio.")
-
+        principal = globals().get("authenticated_principal")
+        is_render_host = bool(os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip())
+        if (
+            is_render_host
+            and principal is not None
+            and getattr(principal, "is_administrator", False)
+        ):
+            _premium_ui.st.divider()
+            _premium_ui.st.caption("Administrator operations")
+            if _premium_ui.st.button(
+                "Production smoke test",
+                key="open-production-smoke-test-main",
+                help=(
+                    "Verify persistence, the CIO operator, provider evidence, governed "
+                    "paper outcomes, and encrypted backups."
+                ),
+                use_container_width=True,
+            ):
+                _premium_ui.st.session_state["production_smoke_test_open"] = True
 
 def _safe_render_app_header(active_page: str) -> None:
     """Render the surface hero as HTML rather than an indented code block."""
@@ -224,19 +224,19 @@ for _render_name in (
         1,
     )
 
-# Today is the immediate operating summary: live provider/session state and the exact
-# pending CIO implementation are displayed before the narrative decision surface.
-_today_anchor = (
-    'def _render_today() -> None:\n'
-    '    briefing = _latest("daily_cio_briefing")\n'
-    '    theses = _latest_theses()\n'
-)
-if _source.count(_today_anchor) != 1:
-    raise RuntimeError("Today live operating insertion point is unavailable")
+# Provider and operational detail is injected only after each surface has presented
+# its plain-language synopsis. Checked markers make deployment fail loudly if the
+# information hierarchy changes without updating these integrations.
+_today_operating_marker = "    # LIVE_TODAY_OPERATING_CONTEXT\n"
+if _source.count(_today_operating_marker) != 1:
+    raise RuntimeError("Today operating context insertion point is unavailable")
 _source = _source.replace(
-    _today_anchor,
-    _today_anchor
-    + '    _today_construction = _latest("portfolio_construction")\n'
+    _today_operating_marker,
+    '    page_header(\n'
+    + '        "Operating context",\n'
+    + '        "Live provider status and paper implementation supporting the CIO briefing.",\n'
+    + '        "03",\n'
+    + '    )\n'
     + '    render_live_market_status()\n'
     + '    render_pending_transaction_report(\n'
     + '        construction=_today_construction,\n'
@@ -245,56 +245,61 @@ _source = _source.replace(
     1,
 )
 
-# Environment combines the governed regime record, live macro evidence, and the
-# complete provider-backed cross-asset wrapper monitor.
-_environment_anchor = '    dashboard_data = load_dashboard_data()\n'
-if _source.count(_environment_anchor) != 1:
-    raise RuntimeError("Environment live market insertion point is unavailable")
+_environment_market_marker = "    # LIVE_ENVIRONMENT_MARKET_TABLE\n"
+if _source.count(_environment_market_marker) != 1:
+    raise RuntimeError("Environment market table insertion point is unavailable")
 _source = _source.replace(
-    _environment_anchor,
-    '    render_live_environment_market_table()\n' + _environment_anchor,
+    _environment_market_marker,
+    '    page_header(\n'
+    + '        "Cross-asset market detail",\n'
+    + '        "Current provider-backed evidence across the governed wrapper universe.",\n'
+    + '        "02",\n'
+    + '    )\n'
+    + '    render_live_environment_market_table()\n',
     1,
 )
 
-# Add the pending CIO report and consent control at the exact canonical construction
-# boundary. The checked anchor makes deployment fail loudly instead of silently losing
-# either report visibility or user control when the implementation source changes.
-_approval_anchor = '    construction = _latest("portfolio_construction")\n'
-if _source.count(_approval_anchor) != 1:
-    raise RuntimeError("paper decision approval insertion point is unavailable")
+_portfolio_controls_marker = "    # PAPER_DECISION_CONTROLS\n"
+if _source.count(_portfolio_controls_marker) != 1:
+    raise RuntimeError("Portfolio paper control insertion point is unavailable")
 _source = _source.replace(
-    _approval_anchor,
-    _approval_anchor
-    + '    _pending_cio_briefing = _latest("daily_cio_briefing")\n'
-    + '    render_pending_transaction_report(\n'
+    _portfolio_controls_marker,
+    '    render_pending_transaction_report(\n'
     + '        construction=construction,\n'
-    + '        briefing=_pending_cio_briefing,\n'
+    + '        briefing=briefing,\n'
     + '    )\n'
     + '    render_paper_decision_controls(\n'
     + '        construction=construction,\n'
-    + '        briefing=_pending_cio_briefing,\n'
+    + '        briefing=briefing,\n'
     + '        principal=globals().get("authenticated_principal"),\n'
     + '    )\n',
     1,
 )
 
-_portfolio_mark_anchor = '    allocation_bar(cash=mandate["cash"], nav=mandate["nav"])\n'
-if _source.count(_portfolio_mark_anchor) != 1:
+_portfolio_marks_marker = "    # LIVE_PORTFOLIO_MARKS\n"
+if _source.count(_portfolio_marks_marker) != 1:
     raise RuntimeError("Portfolio live mark insertion point is unavailable")
 _source = _source.replace(
-    _portfolio_mark_anchor,
-    _portfolio_mark_anchor + '    render_live_portfolio_marks(mandate)\n',
+    _portfolio_marks_marker,
+    '    render_live_portfolio_marks(mandate)\n',
     1,
 )
 
-_history_anchor = '    trades = get_trade_history(limit=250)\n'
-if _source.count(_history_anchor) != 1:
+_history_operating_marker = "    # OPERATING_REPORT_HISTORY\n"
+if _source.count(_history_operating_marker) != 1:
     raise RuntimeError("History operating report insertion point is unavailable")
 _source = _source.replace(
-    _history_anchor,
-    _history_anchor
-    + '    render_operating_report_history()\n'
-    + '    render_cio_report_archive()\n',
+    _history_operating_marker,
+    '    render_operating_report_history()\n',
+    1,
+)
+
+_history_archive_marker = "    # CIO_REPORT_ARCHIVE\n"
+if _source.count(_history_archive_marker) != 1:
+    raise RuntimeError("History CIO archive insertion point is unavailable")
+_source = _source.replace(
+    _history_archive_marker,
+    '    render_cio_report_archive()\n',
     1,
 )
 
