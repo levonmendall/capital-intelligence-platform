@@ -25,6 +25,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Repair communication patch markers
+        run: python scripts/repair_communication_patch.py
+
       - name: Apply information hierarchy corrections
         run: python scripts/expose_daily_cio_briefing.py
 
