@@ -10,6 +10,7 @@
         "BAMLH0A0HYM2", "DTWEXBGS", "DCOILWTICO"
       ]
     },
+    "cboe_vix": {"enabled": true},
     "coinbase": {
       "enabled": true,
       "products": ["BTC-USD", "ETH-USD", "SOL-USD"]
