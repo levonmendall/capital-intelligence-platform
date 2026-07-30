@@ -371,16 +371,17 @@ This schema gives the CIO comparable inputs and makes every decision auditable a
 
 # 13. Layer 5 — Independent Specialist Analysis
 
-The Investment Committee contains six participants:
+The Investment Committee contains seven participants:
 
 1. Macro & Economic Strategist
 2. Market Strategist
-3. Fundamental & Valuation Analyst
-4. Portfolio & Risk Manager
-5. Evidence & Governance Officer
-6. Chief Investment Officer
+3. Cross-Asset Forecast & Scenario Specialist
+4. Fundamental & Valuation Analyst
+5. Portfolio & Risk Manager
+6. Evidence & Governance Officer
+7. Chief Investment Officer
 
-The first five perform independent analysis. The Chief Investment Officer chairs the process and issues the final decision. There is no separate investor-goals member. The platform applies one investment objective across all portfolios.
+The first six perform independent analysis. The Chief Investment Officer chairs the process and issues the final decision. There is no separate investor-goals member. The platform applies one investment objective across all portfolios.
 
 ---
 
@@ -401,6 +402,14 @@ Mission: determine what market behavior, positioning, and liquidity imply about 
 Evaluate trend, momentum, relative strength, breadth, leadership, volume, volatility, positioning, short interest, flows, liquidity, and cross-asset confirmation. Output market regime, technical condition, positioning, liquidity, entry conditions, and market risks.
 
 Primary question: **What are price, positioning, participation, and liquidity communicating?**
+
+## Cross-Asset Forecast & Scenario Specialist
+
+Mission: determine how independently governed forecasts and cross-asset scenarios change the candidate's return distribution, path risk, and timing.
+
+Evaluate forecast horizon, scenario probabilities, model agreement, historical calibration, forecast stability, cross-asset confirmation, path drawdown, contradictory signals, and conditions that would invalidate the forecast translation. Historical evidence remains subordinate to current point-in-time evidence and may only make live conclusions more conservative.
+
+Primary question: **How do calibrated cross-asset scenarios change the candidate's expected return, downside path, and probability of outperforming the best alternative?**
 
 ## Fundamental & Valuation Analyst
 

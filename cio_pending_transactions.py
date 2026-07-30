@@ -25,6 +25,7 @@ _GOVERNED_NO_ACTION_STATUSES = frozenset(
         "implementation_blocked",
     }
 )
+_COMPARATIVE_NO_ACTION_STATUSES = frozenset({"no_superior_opportunity"})
 
 
 def _aware_timestamp(value: str, *, field_name: str) -> datetime:
@@ -195,6 +196,16 @@ def build_pending_transaction_report(
         raise ValueError("generated_at must be timezone-aware")
     timestamp = timestamp.astimezone(timezone.utc)
     launch_at = paper_trading_start_at()
+    briefing_status = (
+        str(briefing.get("status", "")).strip().lower()
+        if isinstance(briefing, Mapping)
+        else ""
+    )
+    governed_no_action = _governed_no_action_briefing(briefing)
+    comparative_no_action = bool(
+        governed_no_action
+        and briefing_status in _COMPARATIVE_NO_ACTION_STATUSES
+    )
     transactions = _transactions(construction)
     blocks = (
         [str(item) for item in _sequence(construction.get("blocks"))]
@@ -242,6 +253,9 @@ def build_pending_transaction_report(
         "generated_at": timestamp.isoformat(),
         "portfolio_code": "COMPOUNDING",
         "report_state": report_state,
+        "cio_briefing_status": briefing_status or None,
+        "safe_abstention_recorded": governed_no_action,
+        "comparative_cio_decision_complete": comparative_no_action,
         "summary": summary,
         "paper_trading_start_at": launch_at.isoformat(),
         "paper_trading_start_label": paper_trading_launch_label(),

@@ -175,7 +175,14 @@ class ChiefInvestmentOfficer:
             maximum_weight=assessment_cap,
             policy_profile=profile,
         )
-        assessment_weight = supported_weight or assessment_cap
+        assessment_weight = (
+            supported_weight
+            if supported_weight > 0.0
+            else min(
+                self.robust_assessor.policy.minimum_reference_weight,
+                assessment_cap,
+            )
+        )
         robustness = self.robust_assessor.assess(
             robustness_candidate,
             alternative_return=effective_alternative,

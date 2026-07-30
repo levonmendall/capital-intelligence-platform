@@ -227,6 +227,53 @@ class DailyCIOBriefingBuilder:
                 for rejected in queue.rejected
                 for reason in rejected.reasons
             )
+            evidence_limited_terms = (
+                "insufficient evidence",
+                "evidence quality",
+                "stale data",
+                "data is stale",
+                "missing",
+                "incomplete",
+                "analytical coverage",
+                "coverage is below",
+                "unavailable",
+                "uncertified",
+                "unapproved",
+            )
+            evidence_incomplete = not queue.rejected or any(
+                term in reason.lower()
+                for reason in rejection_reasons
+                for term in evidence_limited_terms
+            )
+            if evidence_incomplete:
+                return DailyCIOBriefing(
+                    identifier=f"daily-cio:{as_of.isoformat()}",
+                    as_of=as_of,
+                    status=DailyCIOStatus.INSUFFICIENT_EVIDENCE,
+                    what_changed=(
+                        "The governed review did not produce a complete candidate evidence set."
+                    ),
+                    why_it_matters=(
+                        "The CIO cannot conclude that cash or current holdings are superior when one or more eligible instruments were not supported by decision-complete evidence."
+                    ),
+                    opportunity_or_risk=(
+                        "No portfolio action is authorized until comparative candidate evidence is complete."
+                    ),
+                    portfolio_decision="No portfolio action is permitted.",
+                    confidence=None,
+                    evidence_that_changes_conclusion=(
+                        rejection_reasons
+                        or (
+                            "Produce certified candidate evidence for the complete governed review set",
+                        )
+                    ),
+                    material_developments=(
+                        "The comparative opportunity set is incomplete",
+                    ),
+                    thesis_identifiers=tuple(
+                        item.identifier for item in theses
+                    ),
+                )
             return DailyCIOBriefing(
                 identifier=f"daily-cio:{as_of.isoformat()}",
                 as_of=as_of,
@@ -242,14 +289,9 @@ class DailyCIOBriefingBuilder:
                 ),
                 portfolio_decision="No portfolio action is required.",
                 confidence=None,
-                evidence_that_changes_conclusion=(
-                    rejection_reasons
-                    or (
-                        "A candidate must clear the return, evidence, liquidity, cost, downside, and opportunity thresholds",
-                    )
-                ),
+                evidence_that_changes_conclusion=rejection_reasons,
                 material_developments=(
-                    "The governed review queue is empty",
+                    "The governed review queue contains no qualified opportunity",
                 ),
                 thesis_identifiers=tuple(
                     item.identifier for item in theses
