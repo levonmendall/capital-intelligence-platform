@@ -90,6 +90,15 @@ def test_operational_detail_follows_surface_synopses() -> None:
     assert "Production smoke test" not in navigation
 
 
+def test_decision_change_details_are_collapsed_by_default() -> None:
+    entrypoint = Path("app.py").read_text(encoding="utf-8")
+    assert 'with st.expander("What could change the state"):' in entrypoint
+    assert 'with st.expander("What could change the decision"):' in entrypoint
+    assert 'with st.expander("What could change the assessment"):' in entrypoint
+    assert "decision-change collapse insertion point is unavailable" in entrypoint
+    assert "Long qualification and review-condition lists remain available" in entrypoint
+
+
 def test_mobile_hero_is_compact_and_direct() -> None:
     source = Path("premium_ui.py").read_text(encoding="utf-8")
     assert "Today's capital briefing" in source

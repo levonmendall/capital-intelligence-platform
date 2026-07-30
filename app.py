@@ -91,6 +91,7 @@ def _render_navigation_with_admin_control(options):
 
     return _original_render_navigation(options)
 
+
 def _compatible_metric_grid(metrics, *, variant: str = "today") -> None:
     try:
         _original_metric_grid(metrics, variant=variant)
@@ -149,6 +150,7 @@ def _safe_render_sidebar() -> None:
             ):
                 _premium_ui.st.session_state["production_smoke_test_open"] = True
 
+
 def _safe_render_app_header(active_page: str) -> None:
     """Render the surface hero as HTML rather than an indented code block."""
 
@@ -206,6 +208,111 @@ _premium_ui.allocation_bar = _safe_allocation_bar
 
 _source_path = Path(__file__).with_name("app_impl.py")
 _source = _source_path.read_text(encoding="utf-8")
+
+# Long qualification and review-condition lists remain available, but they should
+# not dominate the Today or Environment synopsis. Replace the always-open cards
+# with collapsed expanders while preserving the exact governed evidence text.
+_decision_change_replacements = (
+    (
+        '''        with right:
+            text_card(
+                "What could change the state",
+                (
+                    "A completed evidence comparison, independent review, CIO synthesis, "
+                    "and feasible construction are required before capital can change."
+                ),
+            )
+''',
+        '''        with right:
+            with st.expander("What could change the state"):
+                st.write(
+                    "A completed evidence comparison, independent review, CIO synthesis, "
+                    "and feasible construction are required before capital can change."
+                )
+''',
+    ),
+    (
+        '''        text_card(
+            "What could change the decision",
+            _joined_items(
+                briefing.get("evidence_that_changes_conclusion", []),
+                "No additional decision-change conditions were recorded.",
+            ),
+        )
+''',
+        '''        with st.expander("What could change the decision"):
+            st.write(
+                _joined_items(
+                    briefing.get("evidence_that_changes_conclusion", []),
+                    "No additional decision-change conditions were recorded.",
+                )
+            )
+''',
+    ),
+    (
+        '''    policy_rate = "Unavailable" if readings is None else f"{readings.federal_funds_rate:.2f}%"
+
+''',
+        '''    policy_rate = "Unavailable" if readings is None else f"{readings.federal_funds_rate:.2f}%"
+    assessment_change_conditions = _joined_items(
+        latest_briefing.get("evidence_that_changes_conclusion", [])
+        if isinstance(latest_briefing, dict)
+        else [],
+        "A material change in growth, inflation, policy, liquidity, or cross-asset evidence would trigger review.",
+    )
+
+''',
+    ),
+    (
+        '''        with right:
+            text_card(
+                "Portfolio implication",
+                _plain_text(
+                    environment.get("portfolio_impact"),
+                    _plain_text(
+                        latest_briefing.get("why_it_matters") if isinstance(latest_briefing, dict) else None,
+                        "The environment record does not independently authorize a portfolio change.",
+                    ),
+                ),
+            )
+    elif live_market.get("status") in {"connected", "partial"} and readings is not None:
+''',
+        '''        with right:
+            text_card(
+                "Portfolio implication",
+                _plain_text(
+                    environment.get("portfolio_impact"),
+                    _plain_text(
+                        latest_briefing.get("why_it_matters") if isinstance(latest_briefing, dict) else None,
+                        "The environment record does not independently authorize a portfolio change.",
+                    ),
+                ),
+            )
+        with st.expander("What could change the assessment"):
+            st.write(assessment_change_conditions)
+    elif live_market.get("status") in {"connected", "partial"} and readings is not None:
+''',
+    ),
+    (
+        '''        text_card(
+            "What could change the assessment",
+            _joined_items(
+                latest_briefing.get("evidence_that_changes_conclusion", [])
+                if isinstance(latest_briefing, dict)
+                else [],
+                "A material change in growth, inflation, policy, liquidity, or cross-asset evidence would trigger review.",
+            ),
+        )
+''',
+        '''        with st.expander("What could change the assessment"):
+            st.write(assessment_change_conditions)
+''',
+    ),
+)
+for _old_detail, _new_detail in _decision_change_replacements:
+    if _source.count(_old_detail) != 1:
+        raise RuntimeError("decision-change collapse insertion point is unavailable")
+    _source = _source.replace(_old_detail, _new_detail, 1)
 
 # Refresh the active operating surface without requiring navigation or a browser
 # reload. Each fragment re-queries the canonical stores and provider-backed views.
