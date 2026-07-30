@@ -1,8 +1,9 @@
 """Free Alpaca paper-market adapters for the controlled listed-wrapper pilot.
 
-The adapters expose account, asset, clock, and IEX quote evidence only. They do
-not submit orders and cannot authorize real-money activity. The canonical paper
-executor remains the sole fill and portfolio-state authority.
+The adapters expose account, asset, clock, IEX quote, and authenticated IEX
+historical-bar evidence only. They do not submit orders and cannot authorize
+real-money activity. The canonical paper executor remains the sole fill and
+portfolio-state authority.
 """
 
 from __future__ import annotations
@@ -287,6 +288,72 @@ class AlpacaPaperClient:
                 raise AlpacaPaperProviderError(f"Alpaca quote is unavailable for {symbol}")
             result[symbol] = quote
         return result
+
+    def historical_bars(
+        self,
+        symbols: Sequence[str],
+        *,
+        start: datetime,
+        end: datetime,
+        timeframe: str = "1Day",
+        limit: int = 10_000,
+    ) -> Mapping[str, tuple[Mapping[str, Any], ...]]:
+        """Return paginated authenticated IEX bars without order authority."""
+
+        normalized = tuple(
+            dict.fromkeys(_text(item, field_name="symbol").upper() for item in symbols)
+        )
+        if not normalized:
+            return {}
+        for field_name, value in (("start", start), ("end", end)):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"{field_name} must be timezone-aware")
+        if start >= end:
+            raise ValueError("historical bar start must predate end")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10_000:
+            raise ValueError("historical bar limit must be between 1 and 10000")
+        result: dict[str, list[Mapping[str, Any]]] = {symbol: [] for symbol in normalized}
+        page_token: str | None = None
+        for _page in range(100):
+            params: dict[str, object] = {
+                "symbols": ",".join(normalized),
+                "timeframe": _text(timeframe, field_name="timeframe"),
+                "start": start.astimezone(timezone.utc).isoformat(),
+                "end": end.astimezone(timezone.utc).isoformat(),
+                "limit": limit,
+                "adjustment": "all",
+                "feed": self.settings.data_feed.lower(),
+                "sort": "asc",
+            }
+            if page_token is not None:
+                params["page_token"] = page_token
+            payload = self._get(
+                self.settings.data_base_url,
+                "/v2/stocks/bars",
+                params=params,
+            )
+            bars = payload.get("bars")
+            if not isinstance(bars, Mapping):
+                raise AlpacaPaperProviderError("Alpaca historical-bars response is missing bars")
+            for symbol in normalized:
+                values = bars.get(symbol, ())
+                if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+                    raise AlpacaPaperProviderError(
+                        f"Alpaca historical bars are invalid for {symbol}"
+                    )
+                for item in values:
+                    if not isinstance(item, Mapping):
+                        raise AlpacaPaperProviderError(
+                            f"Alpaca historical bar is invalid for {symbol}"
+                        )
+                    result[symbol].append(item)
+            raw_token = payload.get("next_page_token")
+            if raw_token is None or not str(raw_token).strip():
+                break
+            page_token = str(raw_token).strip()
+        else:
+            raise AlpacaPaperProviderError("Alpaca historical bars exceeded pagination limit")
+        return {symbol: tuple(values) for symbol, values in result.items()}
 
 
 class AlpacaPaperSessionProvider:
