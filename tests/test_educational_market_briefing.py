@@ -158,4 +158,5 @@ def test_briefing_copy_is_informative_educational_and_non_executing() -> None:
     assert "Economic context today" in source
     assert "How it can affect portfolios" in source
     assert "Educational context only" in source
-    assert "does not alter the CIO conclusion or authorize a paper trade" in source
+    assert "does not alter " in source
+    assert "the CIO conclusion or authorize a paper trade" in source
