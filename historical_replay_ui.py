@@ -18,6 +18,7 @@ SUPPORTED_SCHEMA_VERSIONS = frozenset(
         "canonical-historical-replay.v2",
         "canonical-historical-replay.v3",
         "canonical-historical-replay.v4",
+        "canonical-historical-replay.v5",
     }
 )
 
@@ -79,9 +80,17 @@ def canonical_replay_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
     invoked = int(payload.get("canonical_cio_invoked_count", 0) or 0)
     blocked = int(payload.get("blocked_cutoff_count", 0) or 0)
     total = int(payload.get("decision_cutoff_count", len(rows)) or 0)
-    state = "Available" if invoked > 0 else "Blocked"
-    if invoked > 0 and blocked > 0:
+    schema_version = str(payload.get("schema_version") or "")
+    macro_coverage = payload.get("macro_coverage_satisfied") is True
+    certification_ready = payload.get("certification_ready") is True
+    if invoked <= 0:
+        state = "Blocked"
+    elif schema_version == "canonical-historical-replay.v5" and not certification_ready:
+        state = "Certification blocked"
+    elif blocked > 0:
         state = "Partially available"
+    else:
+        state = "Available"
     qualification_count = int(
         payload.get(
             "qualification_observation_count",
@@ -150,6 +159,7 @@ def canonical_replay_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
         or 0
     )
+    missing_macro = payload.get("missing_macro_datasets")
     return {
         "state": state,
         "schema_version": payload.get("schema_version"),
@@ -171,6 +181,25 @@ def canonical_replay_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
         "outcome_alignment": payload.get("outcome_alignment") or "legacy_next_cutoff",
         "avoided_losses": avoided_count,
         "missed_opportunities": missed_count,
+        "macro_coverage_satisfied": macro_coverage,
+        "certification_ready": certification_ready,
+        "present_macro_dataset_count": int(
+            payload.get("present_macro_dataset_count", 0) or 0
+        ),
+        "required_macro_dataset_count": int(
+            payload.get("required_macro_dataset_count", 0) or 0
+        ),
+        "macro_incomplete_cutoffs": int(
+            payload.get("macro_incomplete_cutoff_count", 0) or 0
+        ),
+        "macro_excluded_observations": int(
+            payload.get("macro_excluded_observation_count", 0) or 0
+        ),
+        "missing_macro_datasets": (
+            [str(item) for item in missing_macro]
+            if isinstance(missing_macro, list)
+            else []
+        ),
         "research_only": payload.get("research_only") is True,
         "execution_authorized": payload.get("execution_authorized") is True,
         "paper_execution_authorized": payload.get("paper_execution_authorized") is True,
@@ -220,6 +249,14 @@ def canonical_replay_cutoff_rows(payload: Mapping[str, Any]) -> list[dict[str, A
         learning_count = int(
             item.get("learning_observation_count", len(observations)) or 0
         )
+        macro_flag = item.get("macro_coverage_complete")
+        macro_state = (
+            "Complete"
+            if macro_flag is True
+            else "Incomplete"
+            if macro_flag is False
+            else "Legacy / not certified"
+        )
         rows.append(
             {
                 "Cutoff": item.get("cutoff"),
@@ -229,6 +266,7 @@ def canonical_replay_cutoff_rows(payload: Mapping[str, Any]) -> list[dict[str, A
                 "Canonical cycle": (
                     "Invoked" if item.get("canonical_cio_invoked") is True else "Blocked"
                 ),
+                "Macro evidence": macro_state,
                 "Candidates": int(item.get("candidate_count", 0) or 0),
                 "CIO decisions": int(item.get("decision_count", 0) or 0),
                 "Pre-CIO outcomes": qualification_count,
@@ -278,6 +316,23 @@ def render_canonical_historical_replay() -> None:
         "Missed opportunities", summary["missed_opportunities"]
     )
 
+    macro_columns = st.columns(4)
+    macro_columns[0].metric(
+        "Macro coverage",
+        "Complete" if summary["macro_coverage_satisfied"] else "Incomplete",
+    )
+    macro_columns[1].metric(
+        "Required macro series",
+        f"{summary['present_macro_dataset_count']} / {summary['required_macro_dataset_count']}",
+    )
+    macro_columns[2].metric(
+        "Macro-excluded observations", summary["macro_excluded_observations"]
+    )
+    macro_columns[3].metric(
+        "Live calibration",
+        "Certified" if summary["certification_ready"] else "Blocked",
+    )
+
     period = " · ".join(
         str(value)
         for value in (
@@ -313,17 +368,28 @@ def render_canonical_historical_replay() -> None:
         )
         return
 
+    if not summary["certification_ready"]:
+        missing = ", ".join(summary["missing_macro_datasets"])
+        st.warning(
+            "This replay remains available for audit, but it is not permitted to calibrate "
+            "live committee confidence or CIO sizing because point-in-time macro coverage "
+            "is incomplete."
+            + (f" Missing: {missing}." if missing else "")
+        )
+
     st.info(
         "This is governed research evidence, not an execution surface or verified "
         "performance claim. CIO decisions and pre-CIO qualification outcomes are "
-        "reported separately. Only calibration-eligible observations with outcomes "
-        "aligned to the original decision horizon may affect live confidence or size."
+        "reported separately. Only macro-complete, calibration-eligible observations "
+        "with outcomes aligned to the original decision horizon may affect live "
+        "confidence or size."
     )
     st.caption(
         f"CIO decision observations: {summary['cio_decision_observations']} · "
         f"Pre-CIO qualification observations: {summary['qualification_observations']} · "
         f"Calibration eligible: {summary['calibration_eligible_observations']} · "
         f"Governance only: {summary['governance_only_observations']} · "
+        f"Macro-incomplete cutoffs: {summary['macro_incomplete_cutoffs']} · "
         f"Outcome alignment: {str(summary['outcome_alignment']).replace('_', ' ')}"
     )
 
