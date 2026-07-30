@@ -81,6 +81,7 @@ def test_operational_detail_follows_surface_synopses() -> None:
     ):
         assert marker in entrypoint
     assert "Administrator operations" in entrypoint
+    assert "paper decision approval insertion point is unavailable" in entrypoint
     navigation = entrypoint[
         entrypoint.index("def _render_navigation_with_admin_control") :
     ]
