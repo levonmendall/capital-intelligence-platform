@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - agent/complete-render-operating-surfaces
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.event_name == 'push' || github.head_ref == 'agent/complete-render-operating-surfaces'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
