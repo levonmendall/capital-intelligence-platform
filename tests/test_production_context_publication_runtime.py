@@ -99,7 +99,7 @@ def _evidence(decision_time: datetime):
             "DGS10": {"date": "2026-07-28", "value": 4.25},
             "T10Y2Y": {"date": "2026-07-28", "value": 0.35},
             "VIXCLS": {"date": "2026-07-28", "value": 16.0},
-            "FEDFUNDS": {"date": "2026-07-28", "value": 4.25},
+            "DFF": {"date": "2026-07-28", "value": 4.25},
         },
     }
 
@@ -149,6 +149,15 @@ def test_publisher_creates_candidates_and_executable_cio_construction(tmp_path) 
     assert result.decision_as_of == decision_time
     assert result.candidate_count == 15
     assert result.exclusion_count == 0
+    context = _provider(settings, tmp_path).load_context(as_of=decision_time)
+    assert any(
+        item.startswith("alpaca-iex-bars:VTI:")
+        for item in context.manifest.evidence_identifiers
+    )
+    assert any(
+        item.startswith("alpaca-iex-quote:VTI:")
+        for item in context.manifest.evidence_identifiers
+    )
 
     cycle = _executor(settings, tmp_path).run(as_of=decision_time)
 
@@ -230,6 +239,31 @@ def test_next_day_cycle_certifies_every_holding_and_routes_holding_review(tmp_pa
         item.candidate.instrument.symbol == "VTI"
         for item in second_cycle.opportunity_queue.holding_reviews
     )
+
+
+
+def test_future_macro_observation_blocks_publication(tmp_path) -> None:
+    settings = _settings(tmp_path)
+    scheduled_for = datetime(2026, 7, 29, 11, 0, tzinfo=timezone.utc)
+    decision_time = datetime(2026, 7, 29, 20, 45, tzinfo=timezone.utc)
+    _bootstrap_cash_portfolio(
+        settings,
+        as_of=datetime(2026, 7, 29, 20, 0, tzinfo=timezone.utc),
+    )
+    payload = _evidence(decision_time)
+    payload["macro"]["DGS10"]["date"] = "2026-07-30"
+
+    result = prepare_production_context_for_cycle(
+        settings=settings,
+        scheduled_for=scheduled_for,
+        readiness_probe=lambda _universe: _readiness(decision_time),
+        cash_probe=lambda: SimpleNamespace(date="2026-07-28", value=4.25),
+        evidence_probe=lambda _universe, _as_of: payload,
+        clock=lambda: decision_time,
+    )
+
+    assert result.state == "blocked"
+    assert "future-known" in result.detail
 
 
 def test_completed_publication_is_reused_without_new_provider_calls(tmp_path) -> None:

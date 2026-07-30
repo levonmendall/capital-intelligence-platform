@@ -449,7 +449,7 @@ def prepare_governed_production_context_for_cycle(
             ),
             ("alpaca_iex_quote_date", latest_quote_date),
             ("alpaca_iex_historical_bars", "v2-stocks-bars"),
-            ("fred_macro", "DGS10,T10Y2Y,VIXCLS,FEDFUNDS"),
+            ("fred_macro", "DGS10,T10Y2Y,VIXCLS,DFF"),
         ),
         model_versions=(
             ("eligible_universe_policy", universe.schema_version),

@@ -9,6 +9,8 @@ holding is mandatory.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import isfinite, log10, sqrt
@@ -44,7 +46,7 @@ from providers.fred import FREDProvider
 EvidenceProbe = Callable[[FreePaperPilotUniverse, datetime], Mapping[str, object]]
 
 _MINIMUM_BARS = 252
-_HISTORY_DAYS = 365 * 5 + 10
+_HISTORY_DAYS = 365 * 10 + 20
 _MODEL_VERSION = "listed-wrapper-evidence.v1"
 _FORECAST_VERSION = "listed-wrapper-macro-distribution-forecast.v1"
 _VALUATION_VERSION = "listed-wrapper-distribution-valuation.v1"
@@ -85,6 +87,17 @@ def _timestamp(value: object, *, field_name: str) -> datetime:
     return _aware(parsed, field_name=field_name)
 
 
+def _evidence_digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _default_probe(
     universe: FreePaperPilotUniverse,
     decision_as_of: datetime,
@@ -102,7 +115,7 @@ def _default_probe(
     fred = FREDProvider()
     macro = {
         series: fred.get_latest_value(series)
-        for series in ("DGS10", "T10Y2Y", "VIXCLS", "FEDFUNDS")
+        for series in ("DGS10", "T10Y2Y", "VIXCLS", "DFF")
     }
     return {"bars": bars, "quotes": quotes, "macro": macro}
 
@@ -248,20 +261,27 @@ def _features(
     *,
     as_of: datetime,
     cash_expected_return: float,
+    maximum_quote_age_minutes: int,
 ) -> ListedWrapperFeatures:
     rows = _bar_rows(symbol, raw_bars, as_of=as_of)
     closes = [float(item["c"]) for item in rows]
     volumes = [float(item["v"]) for item in rows]
+    if not isinstance(quote, Mapping):
+        raise ProductionPaperEvidenceError(f"current quote is unavailable for {symbol}")
+    quote_time = _timestamp(quote.get("t"), field_name=f"{symbol} quote timestamp")
+    if quote_time > as_of + timedelta(seconds=5):
+        raise ProductionPaperEvidenceError(f"{symbol} quote is future-known")
+    quote_age = as_of - quote_time
+    if quote_age > timedelta(minutes=maximum_quote_age_minutes):
+        raise ProductionPaperEvidenceError(
+            f"{symbol} quote exceeds the {maximum_quote_age_minutes}-minute evidence limit"
+        )
+    bid = quote.get("bp")
+    ask = quote.get("ap")
     quote_price: float | None = None
-    if isinstance(quote, Mapping):
-        quote_time = _timestamp(quote.get("t"), field_name=f"{symbol} quote timestamp")
-        if quote_time > as_of + timedelta(seconds=5):
-            raise ProductionPaperEvidenceError(f"{symbol} quote is future-known")
-        bid = quote.get("bp")
-        ask = quote.get("ap")
-        if isinstance(bid, (int, float)) and isinstance(ask, (int, float)):
-            if float(bid) > 0.0 and float(ask) >= float(bid):
-                quote_price = (float(bid) + float(ask)) / 2.0
+    if isinstance(bid, (int, float)) and isinstance(ask, (int, float)):
+        if float(bid) > 0.0 and float(ask) >= float(bid):
+            quote_price = (float(bid) + float(ask)) / 2.0
     current_price = closes[-1] if quote_price is None else quote_price
     daily = [
         closes[index] / closes[index - 1] - 1.0
@@ -291,15 +311,31 @@ def _features(
         closes[index] * volumes[index]
         for index in range(max(0, len(closes) - 20), len(closes))
     ) / min(20, len(closes))
-    evidence = tuple(
-        f"alpaca-iex-bar:{symbol}:{item['t'].isoformat()}"
-        for item in rows[-12:]
+    bar_material = [
+        {
+            "t": item["t"].isoformat(),
+            "c": round(float(item["c"]), 12),
+            "v": round(float(item["v"]), 4),
+        }
+        for item in rows
+    ]
+    quote_material = {
+        "t": quote_time.isoformat(),
+        "bp": None if bid is None else float(bid),
+        "ap": None if ask is None else float(ask),
+    }
+    evidence = (
+        (
+            f"alpaca-iex-bars:{symbol}:{rows[0]['t'].isoformat()}:"
+            f"{rows[-1]['t'].isoformat()}:{len(rows)}:{_evidence_digest(bar_material)}"
+        ),
+        f"alpaca-iex-quote:{symbol}:{quote_time.isoformat()}:{_evidence_digest(quote_material)}",
     )
     return ListedWrapperFeatures(
         symbol=symbol,
         as_of=as_of,
         current_price=round(current_price, 8),
-        latest_observed_at=rows[-1]["t"],
+        latest_observed_at=max(rows[-1]["t"], quote_time),
         one_month_return=_period_return(closes, 21),
         three_month_return=_period_return(closes, 63),
         six_month_return=_period_return(closes, 126),
@@ -331,8 +367,22 @@ def _macro_value(raw: object, series: str) -> tuple[str, float]:
 def _macro_context(raw: object, *, as_of: datetime) -> tuple[MacroSpecialistContext, dict[str, float], tuple[str, ...]]:
     values: dict[str, float] = {}
     identifiers: list[str] = []
-    for series in ("DGS10", "T10Y2Y", "VIXCLS", "FEDFUNDS"):
+    for series in ("DGS10", "T10Y2Y", "VIXCLS", "DFF"):
         date, number = _macro_value(raw, series)
+        try:
+            observation_date = datetime.fromisoformat(date).date()
+        except ValueError as error:
+            raise ProductionPaperEvidenceError(
+                f"FRED {series} observation date is invalid"
+            ) from error
+        if observation_date > as_of.date():
+            raise ProductionPaperEvidenceError(
+                f"FRED {series} observation is future-known"
+            )
+        if (as_of.date() - observation_date).days > 10:
+            raise ProductionPaperEvidenceError(
+                f"FRED {series} observation is stale"
+            )
         values[series] = number
         identifiers.append(f"fred:{series}:{date}")
     curve = values["T10Y2Y"]
@@ -634,7 +684,12 @@ def _candidate_and_evidence(
         evidence_identifiers=evidence_ids,
         source_versions=(
             (f"ALPACA_IEX:{instrument.symbol}", features.latest_observed_at.isoformat()),
-            ("FRED_MACRO", as_of.date().isoformat()),
+            (
+                "FRED_MACRO",
+                hashlib.sha256(
+                    "|".join(macro_identifiers).encode("utf-8")
+                ).hexdigest(),
+            ),
         ),
         model_versions=(
             ("candidate", _MODEL_VERSION),
@@ -697,7 +752,12 @@ def _holding_evidence(
         evidence_identifiers=evidence_ids,
         source_versions=(
             (f"ALPACA_IEX:{position.symbol}", features.latest_observed_at.isoformat()),
-            ("FRED_MACRO", as_of.date().isoformat()),
+            (
+                "FRED_MACRO",
+                hashlib.sha256(
+                    "|".join(macro_identifiers).encode("utf-8")
+                ).hexdigest(),
+            ),
         ),
         model_versions=(("holding_expected_return", _MODEL_VERSION),),
     )
@@ -770,6 +830,7 @@ def build_paper_evidence(
                 quotes.get(instrument.symbol),
                 as_of=as_of,
                 cash_expected_return=cash_expected_return,
+                maximum_quote_age_minutes=universe.maximum_quote_age_minutes,
             )
         except (ProductionPaperEvidenceError, TypeError, ValueError) as error:
             if instrument.symbol in current_weights:
