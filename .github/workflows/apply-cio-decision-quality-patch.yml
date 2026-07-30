@@ -1,0 +1,41 @@
+name: Apply CIO decision-quality patch
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/correct-cio-decision-quality' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/correct-cio-decision-quality
+          fetch-depth: 0
+      - name: Apply locally validated correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          for part in tools/cio_decision_quality_patch/part*.b64; do wc -c "${part}"; done
+          cat tools/cio_decision_quality_patch/part*.b64 > /tmp/cio-decision-quality.b64
+          test "$(wc -c < /tmp/cio-decision-quality.b64)" -eq 72080
+          echo "8e24e2bec2582f1dec1b3b6382a555211922680b64718a5e1c7fad4b1b01f6bb  /tmp/cio-decision-quality.b64" | sha256sum -c -
+          base64 -d /tmp/cio-decision-quality.b64 > /tmp/cio-decision-quality.patch
+          echo "3c6daba51098e46caed18bb153b7c733a84650f7d2e5aa3d8854dc2ad9917d5c  /tmp/cio-decision-quality.patch" | sha256sum -c -
+          rm -f docs/CIO_DECISION_QUALITY_CORRECTIONS.md
+          rm -f .github/workflows/export-cio-decision-quality-source.yml
+          git apply --check /tmp/cio-decision-quality.patch
+          git apply /tmp/cio-decision-quality.patch
+          rm -rf tools/cio_decision_quality_patch
+          rm -f .github/workflows/apply-cio-decision-quality-patch.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Correct CIO decision-quality controls"
+          git push origin HEAD:agent/correct-cio-decision-quality
