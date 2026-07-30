@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from statistics import median
 
 from cio.historical_learning import HistoricalLearningContext
@@ -49,6 +50,15 @@ def _text_tuple(
     return normalized
 
 
+class EvidenceVetoCategory(str, Enum):
+    """Governed consequence class for an evidence veto."""
+
+    OPERATIONAL_UNAVAILABLE = "operational_unavailable"
+    MATERIAL_UNCERTAINTY = "material_uncertainty"
+    THESIS_CONTRADICTION = "thesis_contradiction"
+    INTEGRITY_EMERGENCY = "integrity_emergency"
+
+
 @dataclass(frozen=True, slots=True)
 class SpecialistAnalysis:
     """One specialist's independent first-pass assessment of a candidate."""
@@ -68,6 +78,7 @@ class SpecialistAnalysis:
     limitations: tuple[str, ...]
     change_conditions: tuple[str, ...]
     veto_reasons: tuple[str, ...] = ()
+    veto_categories: tuple[EvidenceVetoCategory, ...] = ()
     implementation_blocks: tuple[str, ...] = ()
     recommended_position_weight: float | None = None
     funding_source: str | None = None
@@ -134,6 +145,23 @@ class SpecialistAnalysis:
                     minimum=minimum,
                 ),
             )
+        categories = self.veto_categories
+        if not isinstance(categories, tuple) or not all(
+            isinstance(item, EvidenceVetoCategory) for item in categories
+        ):
+            raise TypeError(
+                "veto_categories must contain EvidenceVetoCategory values"
+            )
+        if self.veto_reasons and not categories:
+            categories = tuple(
+                EvidenceVetoCategory.MATERIAL_UNCERTAINTY
+                for _ in self.veto_reasons
+            )
+        if len(categories) != len(self.veto_reasons):
+            raise ValueError(
+                "veto_categories must align one-for-one with veto_reasons"
+            )
+        object.__setattr__(self, "veto_categories", categories)
         if not isinstance(self.scenario_adjustments, tuple) or not all(
             isinstance(item, ScenarioAdjustment) for item in self.scenario_adjustments
         ):
@@ -259,6 +287,27 @@ class IndependentSpecialistPacket:
     @property
     def evidence_vetoes(self) -> tuple[str, ...]:
         return self.for_role(SpecialistRole.EVIDENCE_GOVERNANCE).veto_reasons
+
+    @property
+    def evidence_veto_categories(self) -> tuple[EvidenceVetoCategory, ...]:
+        return self.for_role(
+            SpecialistRole.EVIDENCE_GOVERNANCE
+        ).veto_categories
+
+    @property
+    def has_emergency_evidence_veto(self) -> bool:
+        emergency = {
+            EvidenceVetoCategory.THESIS_CONTRADICTION,
+            EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+        }
+        return any(item in emergency for item in self.evidence_veto_categories)
+
+    @property
+    def has_operational_only_evidence_veto(self) -> bool:
+        categories = self.evidence_veto_categories
+        return bool(categories) and set(categories) == {
+            EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE
+        }
 
     @property
     def implementation_blocks(self) -> tuple[str, ...]:

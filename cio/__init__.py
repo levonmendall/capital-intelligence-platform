@@ -14,7 +14,11 @@ from cio.historical_learning import (
     HistoricalLearningStatus,
 )
 from cio.governed_historical_learning import HistoricalLearningResolver
-from cio.committee import IndependentSpecialistPacket, SpecialistAnalysis
+from cio.committee import (
+    EvidenceVetoCategory,
+    IndependentSpecialistPacket,
+    SpecialistAnalysis,
+)
 from cio.models import (
     CIOAction,
     CIODecision,
@@ -93,6 +97,7 @@ __all__ = [
     "ChiefInvestmentOfficer",
     "EvidenceDependency",
     "EvidenceQuality",
+    "EvidenceVetoCategory",
     "HistoricalLearningContext",
     "HistoricalLearningResolver",
     "HistoricalLearningStatus",

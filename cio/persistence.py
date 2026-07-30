@@ -355,6 +355,9 @@ def serialize_specialist_packet(
         "abstaining_roles": [item.role.value for item in packet.abstentions],
         "median_confidence": packet.median_confidence,
         "evidence_vetoes": list(packet.evidence_vetoes),
+        "evidence_veto_categories": [
+            item.value for item in packet.evidence_veto_categories
+        ],
         "implementation_blocks": list(packet.implementation_blocks),
         "strongest_dissent": (
             None
@@ -382,6 +385,9 @@ def serialize_specialist_packet(
                 "limitations": list(item.limitations),
                 "change_conditions": list(item.change_conditions),
                 "veto_reasons": list(item.veto_reasons),
+                "veto_categories": [
+                    category.value for category in item.veto_categories
+                ],
                 "implementation_blocks": list(item.implementation_blocks),
                 "recommended_position_weight": (
                     item.recommended_position_weight
