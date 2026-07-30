@@ -105,7 +105,7 @@ class HistoricalLearningResolver(_BaseHistoricalLearningResolver):
                 ),
             )
 
-        context = super().resolve(
+        qualification_context = super().resolve(
             candidate,
             as_of=as_of,
             macro_regime=macro_regime,
@@ -114,8 +114,68 @@ class HistoricalLearningResolver(_BaseHistoricalLearningResolver):
         excluded = int(payload.get("governance_only_observation_count", 0) or 0)
         bounded = int(payload.get("bounded_calibration_outcome_count", 0) or 0)
         macro_excluded = int(payload.get("macro_excluded_observation_count", 0) or 0)
+        qualification_observations = int(
+            payload.get("qualification_observation_count", 0) or 0
+        )
+        cio_decision_observations = int(
+            payload.get("cio_decision_observation_count", 0) or 0
+        )
         limitations: list[str] = []
-        identifiers: list[str] = []
+        identifiers: list[str] = [
+            f"historical-learning:qualification-observations:{qualification_observations}",
+            f"historical-learning:cio-decision-observations:{cio_decision_observations}",
+        ]
+        context = qualification_context
+        if cio_decision_observations > 0:
+            cio_context = _BaseHistoricalLearningResolver(
+                self.manifest_path,
+                minimum_sample_size=self.minimum_sample_size,
+                decision_stages=("cio_synthesis",),
+            ).resolve(
+                candidate,
+                as_of=as_of,
+                macro_regime=macro_regime,
+                market_regime=market_regime,
+            )
+            if cio_context.status.value in {"available", "limited"}:
+                context = cio_context
+                identifiers.append(
+                    "historical-learning:cio-controls:completed-decision-outcomes"
+                )
+            else:
+                context = replace(
+                    qualification_context,
+                    position_size_multiplier=1.0,
+                    confidence_ceiling=1.0,
+                )
+                limitations.append(
+                    "Completed CIO observations exist, but no comparable CIO decision "
+                    "sample met the live calibration gate; CIO confidence and sizing "
+                    "remain unmodified."
+                )
+        else:
+            context = replace(
+                qualification_context,
+                position_size_multiplier=1.0,
+                confidence_ceiling=1.0,
+            )
+            limitations.append(
+                "Pre-CIO qualification outcomes remain available for admission and "
+                "abstention review, but they cannot calibrate CIO confidence or position "
+                "size until completed CIO decision outcomes exist."
+            )
+            identifiers.append(
+                "historical-learning:cio-confidence-sizing-disabled:no-decision-outcomes"
+            )
+        if qualification_observations > 0:
+            limitations.append(
+                f"{qualification_observations} pre-CIO qualification observations are "
+                "reported separately and excluded from CIO action, confidence, and "
+                "position-size calibration."
+            )
+            identifiers.append(
+                "historical-learning:qualification-channel:excluded-from-cio-controls"
+            )
         if excluded > 0:
             limitations.append(
                 f"{excluded} capability-policy-only historical observations were retained "
@@ -140,12 +200,10 @@ class HistoricalLearningResolver(_BaseHistoricalLearningResolver):
             identifiers.append(
                 f"historical-learning:bounded-calibration-outcomes:{bounded}"
             )
-        if not limitations:
-            return context
         note = " ".join(limitations)
         return replace(
             context,
-            summary=f"{context.summary} {note}",
+            summary=(context.summary if not note else f"{context.summary} {note}"),
             limitations=tuple(
                 dict.fromkeys(context.limitations + tuple(limitations))
             ),

@@ -1,9 +1,10 @@
-"""Asset-class and horizon-specific decision policy profiles.
+"""Asset-class, exposure, and horizon-specific decision policy profiles.
 
 The matrix centralizes the candidate-specific hurdles used by qualification,
-robustness, CIO synthesis, persistence, and final sizing.  It intentionally
-returns immutable resolved profiles so every decision can persist the exact
-policy applied at the point-in-time boundary.
+robustness, CIO synthesis, persistence, and final sizing. Execution wrappers do
+not dilute the risk classification of the economic exposure they represent: the
+resolved profile always combines the wrapper and exposure profiles using the
+stricter requirement for every control.
 """
 
 from __future__ import annotations
@@ -80,9 +81,9 @@ class DecisionPolicyProfile:
 
 
 class DecisionPolicyMatrix:
-    """Resolve stricter controls for nonlinear, speculative, and short-horizon risk."""
+    """Resolve the strictest controls across wrapper, exposure, and horizon."""
 
-    version = "decision-policy-matrix.v1"
+    version = "decision-policy-matrix.v2"
 
     _STANDARD = DecisionPolicyProfile(
         identifier="standard-intermediate",
@@ -102,18 +103,72 @@ class DecisionPolicyMatrix:
         annualization_cap=0.60,
     )
 
+    # Current production uses U.S.-listed wrappers. The publisher now supplies
+    # economic_exposure_class, but this map preserves correct governance for
+    # already-persisted v1 candidate records created before that correction.
+    _CURRENT_WRAPPER_EXPOSURES = {
+        "VTI": CandidateAssetClass.US_EQUITY,
+        "VXUS": CandidateAssetClass.INTERNATIONAL_EQUITY,
+        "GOVT": CandidateAssetClass.FIXED_INCOME,
+        "LQD": CandidateAssetClass.FIXED_INCOME,
+        "HYG": CandidateAssetClass.FIXED_INCOME,
+        "SGOV": CandidateAssetClass.CASH_EQUIVALENT,
+        "DBC": CandidateAssetClass.COMMODITY,
+        "GLD": CandidateAssetClass.COMMODITY,
+        "UUP": CandidateAssetClass.FX,
+        "IBIT": CandidateAssetClass.CRYPTO,
+        "VNQ": CandidateAssetClass.REAL_ESTATE,
+        "DBMF": CandidateAssetClass.ALTERNATIVE,
+        "WTPI": CandidateAssetClass.OPTION,
+        "VIXY": CandidateAssetClass.VOLATILITY,
+        "BTAL": CandidateAssetClass.ALTERNATIVE,
+    }
+
     def resolve(self, candidate: CandidateDecisionRecord) -> DecisionPolicyProfile:
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be a CandidateDecisionRecord")
 
-        asset_class = candidate.instrument.asset_class
+        execution = self._profile_for(candidate.instrument.asset_class)
+        exposure_class = self._economic_exposure_class(candidate)
+        exposure = self._profile_for(exposure_class)
+        profile = self._stricter(execution, exposure)
+        if candidate.instrument.uses_derivatives:
+            profile = self._stricter(
+                profile,
+                self._profile_for(CandidateAssetClass.OPTION),
+            )
+        return self._apply_horizon(profile, candidate.decision_horizon_days)
+
+    @classmethod
+    def _economic_exposure_class(
+        cls,
+        candidate: CandidateDecisionRecord,
+    ) -> CandidateAssetClass:
+        explicit = candidate.instrument.economic_exposure_class
+        if explicit is not None and explicit is not candidate.instrument.asset_class:
+            return explicit
+        if (
+            candidate.instrument.replication_method
+            == "us-listed-economic-exposure-wrapper"
+        ):
+            return cls._CURRENT_WRAPPER_EXPOSURES.get(
+                candidate.instrument.symbol,
+                candidate.instrument.asset_class,
+            )
+        return explicit or candidate.instrument.asset_class
+
+    @classmethod
+    def _profile_for(
+        cls,
+        asset_class: CandidateAssetClass,
+    ) -> DecisionPolicyProfile:
         if asset_class in {
             CandidateAssetClass.US_ETF,
             CandidateAssetClass.FIXED_INCOME,
             CandidateAssetClass.CASH_EQUIVALENT,
         }:
-            profile = replace(
-                self._STANDARD,
+            return replace(
+                cls._STANDARD,
                 identifier="diversified-liquid-intermediate",
                 minimum_net_expected_return=0.04,
                 minimum_opportunity_edge=0.008,
@@ -124,13 +179,13 @@ class DecisionPolicyMatrix:
                 maximum_probability_of_loss=0.43,
                 minimum_worst_case_portfolio_return=-0.045,
             )
-        elif asset_class in {
+        if asset_class in {
             CandidateAssetClass.CRYPTO,
             CandidateAssetClass.VOLATILITY,
             CandidateAssetClass.ALTERNATIVE,
         }:
-            profile = replace(
-                self._STANDARD,
+            return replace(
+                cls._STANDARD,
                 identifier="speculative-intermediate",
                 minimum_net_expected_return=0.10,
                 minimum_opportunity_edge=0.03,
@@ -145,12 +200,12 @@ class DecisionPolicyMatrix:
                 forecast_durability_floor=0.65,
                 annualization_cap=0.40,
             )
-        elif asset_class in {
+        if asset_class in {
             CandidateAssetClass.OPTION,
             CandidateAssetClass.FUTURE,
-        } or candidate.instrument.uses_derivatives:
-            profile = replace(
-                self._STANDARD,
+        }:
+            return replace(
+                cls._STANDARD,
                 identifier="nonlinear-derivative-intermediate",
                 minimum_net_expected_return=0.12,
                 minimum_opportunity_edge=0.04,
@@ -165,12 +220,77 @@ class DecisionPolicyMatrix:
                 forecast_durability_floor=0.70,
                 annualization_cap=0.35,
             )
-        else:
-            profile = self._STANDARD
+        return cls._STANDARD
 
-        horizon = candidate.decision_horizon_days
+    @staticmethod
+    def _stricter(
+        left: DecisionPolicyProfile,
+        right: DecisionPolicyProfile,
+    ) -> DecisionPolicyProfile:
+        if left == right:
+            return left
+        identifiers = tuple(dict.fromkeys((left.identifier, right.identifier)))
+        return DecisionPolicyProfile(
+            identifier="strictest[" + "+".join(identifiers) + "]",
+            minimum_net_expected_return=max(
+                left.minimum_net_expected_return,
+                right.minimum_net_expected_return,
+            ),
+            minimum_opportunity_edge=max(
+                left.minimum_opportunity_edge,
+                right.minimum_opportunity_edge,
+            ),
+            minimum_probability_of_success=max(
+                left.minimum_probability_of_success,
+                right.minimum_probability_of_success,
+            ),
+            maximum_expected_downside=max(
+                left.maximum_expected_downside,
+                right.maximum_expected_downside,
+            ),
+            maximum_position_weight=min(
+                left.maximum_position_weight,
+                right.maximum_position_weight,
+            ),
+            minimum_robust_edge=max(
+                left.minimum_robust_edge,
+                right.minimum_robust_edge,
+            ),
+            maximum_probability_of_loss=min(
+                left.maximum_probability_of_loss,
+                right.maximum_probability_of_loss,
+            ),
+            minimum_worst_case_portfolio_return=max(
+                left.minimum_worst_case_portfolio_return,
+                right.minimum_worst_case_portfolio_return,
+            ),
+            entry_persistence_cycles=max(
+                left.entry_persistence_cycles,
+                right.entry_persistence_cycles,
+            ),
+            increase_persistence_cycles=max(
+                left.increase_persistence_cycles,
+                right.increase_persistence_cycles,
+            ),
+            reduce_persistence_cycles=max(
+                left.reduce_persistence_cycles,
+                right.reduce_persistence_cycles,
+            ),
+            cooldown_days=max(left.cooldown_days, right.cooldown_days),
+            forecast_durability_floor=max(
+                left.forecast_durability_floor,
+                right.forecast_durability_floor,
+            ),
+            annualization_cap=min(left.annualization_cap, right.annualization_cap),
+        )
+
+    @staticmethod
+    def _apply_horizon(
+        profile: DecisionPolicyProfile,
+        horizon: int,
+    ) -> DecisionPolicyProfile:
         if horizon <= 30:
-            profile = replace(
+            return replace(
                 profile,
                 identifier=f"{profile.identifier}-tactical",
                 minimum_net_expected_return=profile.minimum_net_expected_return * 1.25,
@@ -184,8 +304,8 @@ class DecisionPolicyMatrix:
                 forecast_durability_floor=max(profile.forecast_durability_floor, 0.70),
                 annualization_cap=min(profile.annualization_cap, 0.35),
             )
-        elif horizon > 365:
-            profile = replace(
+        if horizon > 365:
+            return replace(
                 profile,
                 identifier=f"{profile.identifier}-strategic",
                 minimum_net_expected_return=profile.minimum_net_expected_return * 0.85,

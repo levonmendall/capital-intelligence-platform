@@ -419,11 +419,24 @@ class HistoricalLearningResolver:
         manifest_path: str | Path,
         *,
         minimum_sample_size: int = 6,
+        decision_stages: tuple[str, ...] | None = None,
     ) -> None:
         if minimum_sample_size < 1:
             raise ValueError("minimum_sample_size must be positive")
+        if decision_stages is not None:
+            if not isinstance(decision_stages, tuple) or not decision_stages:
+                raise TypeError("decision_stages must be a non-empty tuple or None")
+            normalized_stages = tuple(
+                _required_text(item, field_name="decision_stages").lower()
+                for item in decision_stages
+            )
+            if len(normalized_stages) != len(set(normalized_stages)):
+                raise ValueError("decision_stages cannot contain duplicates")
+        else:
+            normalized_stages = None
         self.manifest_path = Path(manifest_path)
         self.minimum_sample_size = minimum_sample_size
+        self.decision_stages = normalized_stages
 
     @classmethod
     def from_environment(cls) -> "HistoricalLearningResolver":
@@ -498,6 +511,12 @@ class HistoricalLearningResolver:
                 if not isinstance(raw_item, dict):
                     continue
                 item = dict(raw_item)
+                decision_stage = str(item.get("decision_stage") or "").strip().lower()
+                if (
+                    self.decision_stages is not None
+                    and decision_stage not in self.decision_stages
+                ):
+                    continue
                 item.setdefault("macro_regime", cutoff.get("macro_regime"))
                 all_decisions.append(item)
         symbol = candidate.instrument.symbol.upper()
