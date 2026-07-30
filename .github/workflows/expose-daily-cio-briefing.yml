@@ -1,23 +1,20 @@
-name: Expose daily CIO briefing
+name: Communicate all operating surfaces
 
 on:
   push:
     branches:
       - agent/expose-daily-cio-briefing
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.event_name == 'push' || github.head_ref == 'agent/expose-daily-cio-briefing'
+    if: github.event_name == 'push' && github.event.head_commit.message == 'Apply all-surface communication patch'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Check out briefing branch
+      - name: Check out communication branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: agent/expose-daily-cio-briefing
@@ -28,7 +25,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Apply communication corrections
+      - name: Apply information hierarchy corrections
         run: python scripts/expose_daily_cio_briefing.py
 
       - name: Verify changed Python compiles
@@ -36,14 +33,15 @@ jobs:
           python -m py_compile \
             app.py \
             app_impl.py \
+            premium_ui.py \
             cio_pending_transactions_ui.py \
-            tests/test_cio_briefing_visibility.py
+            tests/test_surface_information_hierarchy.py
 
       - name: Run focused regression tests
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
           pytest -q \
-            tests/test_cio_briefing_visibility.py \
+            tests/test_surface_information_hierarchy.py \
             tests/test_operating_completeness_fixes.py
 
       - name: Commit product changes
@@ -52,5 +50,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m 'Expose daily CIO briefing'
+          git commit -m 'Communicate intelligence across all surfaces'
           git push origin HEAD:agent/expose-daily-cio-briefing
