@@ -11,6 +11,10 @@ replacements = (
         '            "Live market and macro evidence is available",\n',
         '            "Live environment evidence is available",\n',
     ),
+    (
+        '            "No separate regime label has been synthesized from those readings."\n',
+        '            "Regime: Not separately classified. No synthetic label is inferred from those readings."\n',
+    ),
 )
 for old, new in replacements:
     if text.count(old) != 1:
