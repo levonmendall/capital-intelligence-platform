@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -75,6 +76,7 @@ class FreePaperPilotInstrument:
     currency: str
     instrument_type: str
     maximum_weight: float
+    issuer_cik: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -101,6 +103,11 @@ class FreePaperPilotInstrument:
             raise ValueError("free paper pilot instruments must be U.S.-listed and USD-denominated")
         if self.instrument_type not in {"common_stock", "preferred_stock", "fund"}:
             raise ValueError("free paper pilot permits listed stocks and funds only")
+        if self.issuer_cik is not None:
+            normalized_cik = str(self.issuer_cik).strip()
+            if not normalized_cik.isdigit():
+                raise ValueError("issuer_cik must contain only digits")
+            object.__setattr__(self, "issuer_cik", normalized_cik.zfill(10))
         object.__setattr__(
             self,
             "maximum_weight",
@@ -280,14 +287,11 @@ class FreePaperPilotReadinessReport:
         return payload
 
 
-def load_free_paper_pilot_universe(
-    path: str | Path = DEFAULT_UNIVERSE_PATH,
+def _free_paper_pilot_universe_from_payload(
+    payload: Mapping[str, Any],
 ) -> FreePaperPilotUniverse:
-    source = Path(path).expanduser()
-    try:
-        payload = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError(f"cannot load free paper pilot universe {str(source)!r}") from error
+    """Build a governed paper universe directly from a validated mapping."""
+
     if not isinstance(payload, Mapping):
         raise ValueError("free paper pilot universe must be a JSON object")
     if payload.get("schema_version") != "free-paper-pilot-universe.v1":
@@ -309,6 +313,7 @@ def load_free_paper_pilot_universe(
             currency=str(item["currency"]),
             instrument_type=str(item["instrument_type"]),
             maximum_weight=float(item["maximum_weight"]),
+            issuer_cik=(None if item.get("issuer_cik") in {None, ""} else str(item["issuer_cik"])),
         )
         for item in raw_instruments
         if isinstance(item, Mapping)
@@ -342,6 +347,121 @@ def load_free_paper_pilot_universe(
         limitations=tuple(str(item) for item in payload["limitations"]),
         schema_version=str(payload["schema_version"]),
     )
+
+
+def load_free_paper_pilot_universe(
+    path: str | Path = DEFAULT_UNIVERSE_PATH,
+) -> FreePaperPilotUniverse:
+    source = Path(path).expanduser()
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot load free paper pilot universe {str(source)!r}") from error
+    return _free_paper_pilot_universe_from_payload(payload)
+
+
+def free_paper_pilot_universe_payload(
+    universe: FreePaperPilotUniverse,
+) -> dict[str, Any]:
+    """Serialize a governed static or dynamically discovered paper universe."""
+
+    if not isinstance(universe, FreePaperPilotUniverse):
+        raise TypeError("universe must be FreePaperPilotUniverse")
+    return {
+        "schema_version": universe.schema_version,
+        "identifier": universe.identifier,
+        "objective": universe.objective,
+        "portfolio_code": universe.portfolio_code,
+        "reporting_currency": universe.reporting_currency,
+        "quote_provider": universe.quote_provider,
+        "execution_mode": universe.execution_mode,
+        "minimum_cash_weight": universe.minimum_cash_weight,
+        "maximum_batch_turnover": universe.maximum_batch_turnover,
+        "maximum_single_instrument_weight": universe.maximum_single_instrument_weight,
+        "maximum_crypto_proxy_weight": universe.maximum_crypto_proxy_weight,
+        "maximum_volatility_proxy_weight": universe.maximum_volatility_proxy_weight,
+        "maximum_quote_age_minutes": universe.maximum_quote_age_minutes,
+        "required_exposure_classes": list(universe.required_exposure_classes),
+        "instruments": [
+            {
+                "symbol": item.symbol,
+                "instrument_identifier": item.instrument_identifier,
+                "name": item.name,
+                "execution_asset_class": item.execution_asset_class.value,
+                "economic_exposure": item.economic_exposure,
+                "venue": item.venue,
+                "country_code": item.country_code,
+                "currency": item.currency,
+                "instrument_type": item.instrument_type,
+                "maximum_weight": item.maximum_weight,
+                "issuer_cik": item.issuer_cik,
+            }
+            for item in universe.instruments
+        ],
+        "direct_instrument_classes_prohibited": list(
+            universe.direct_instrument_classes_prohibited
+        ),
+        "limitations": list(universe.limitations),
+    }
+
+
+def active_paper_universe_path() -> Path:
+    configured = os.getenv("CAPITAL_INTELLIGENCE_ACTIVE_PAPER_UNIVERSE", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    data_dir = Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")).expanduser()
+    return data_dir / "active-paper-universe.json"
+
+
+def write_active_paper_universe(
+    universe: FreePaperPilotUniverse,
+    *,
+    eligible_universe_publication_identifier: str,
+    destination: str | Path | None = None,
+) -> Path:
+    path = Path(destination).expanduser() if destination is not None else active_paper_universe_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "eligible_universe_publication_identifier": _text(
+            eligible_universe_publication_identifier,
+            field_name="eligible_universe_publication_identifier",
+        ),
+        "universe": free_paper_pilot_universe_payload(universe),
+    }
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+    return path
+
+
+def load_execution_paper_universe(
+    construction: Mapping[str, Any],
+    *,
+    fallback_path: str | Path = DEFAULT_UNIVERSE_PATH,
+    active_path: str | Path | None = None,
+) -> FreePaperPilotUniverse:
+    """Resolve the exact daily universe used by an executable construction."""
+
+    publication_identifier = str(
+        construction.get("eligible_universe_publication_identifier", "")
+    ).strip()
+    path = Path(active_path).expanduser() if active_path is not None else active_paper_universe_path()
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                isinstance(payload, Mapping)
+                and str(payload.get("eligible_universe_publication_identifier", "")).strip()
+                == publication_identifier
+                and isinstance(payload.get("universe"), Mapping)
+            ):
+                return _free_paper_pilot_universe_from_payload(payload["universe"])
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return load_free_paper_pilot_universe(fallback_path)
 
 
 def assess_free_paper_pilot_readiness(
@@ -531,7 +651,11 @@ __all__ = [
     "FreePaperPilotUniverse",
     "assess_free_paper_pilot_readiness",
     "default_alpaca_client",
+    "active_paper_universe_path",
+    "free_paper_pilot_universe_payload",
+    "load_execution_paper_universe",
     "load_free_paper_pilot_universe",
     "validate_pilot_construction",
+    "write_active_paper_universe",
     "write_pilot_profiles",
 ]

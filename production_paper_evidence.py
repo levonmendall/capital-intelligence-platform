@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from math import isfinite, log10, sqrt
 from statistics import median, pstdev
@@ -31,6 +31,15 @@ from cio import (
     EvidenceDependency,
     EvidenceQuality,
 )
+from company import (
+    CompanyAnalysisEngine,
+    CompanyCandidateBuilder,
+    CompanyFactNormalizer,
+    CompanyMarketSnapshot,
+    CompanyRegimeContext,
+)
+from company.models import CompanyFactor
+from data import FilingQuery
 from committee.specialists import (
     AssetValuationSpecialistContext,
     CrossAssetForecastSpecialistContext,
@@ -42,6 +51,7 @@ from operations.free_paper_pilot import FreePaperPilotInstrument, FreePaperPilot
 from portfolio.state import CanonicalPortfolioSnapshot
 from providers.alpaca_paper import create_alpaca_paper_client
 from providers.fred import FREDProvider
+from providers.sec_edgar import SECEdgarProvider
 
 EvidenceProbe = Callable[[FreePaperPilotUniverse, datetime], Mapping[str, object]]
 
@@ -50,6 +60,7 @@ _HISTORY_DAYS = 365 * 10 + 20
 _MODEL_VERSION = "listed-wrapper-evidence.v1"
 _FORECAST_VERSION = "listed-wrapper-macro-distribution-forecast.v1"
 _VALUATION_VERSION = "listed-wrapper-distribution-valuation.v1"
+_COMPANY_EVIDENCE_VERSION = "sec-company-equity-evidence.v1"
 
 
 class ProductionPaperEvidenceError(RuntimeError):
@@ -117,7 +128,31 @@ def _default_probe(
         series: fred.get_latest_value(series)
         for series in ("DGS10", "T10Y2Y", "VIXCLS", "DFF")
     }
-    return {"bars": bars, "quotes": quotes, "macro": macro}
+    company_facts: dict[str, object] = {}
+    stock_instruments = tuple(
+        item for item in universe.instruments
+        if item.execution_asset_class is CandidateAssetClass.US_EQUITY
+        and item.instrument_type == "common_stock"
+    )
+    if stock_instruments:
+        sec = SECEdgarProvider()
+        for instrument in stock_instruments:
+            if instrument.issuer_cik is None:
+                continue
+            company_facts[instrument.symbol] = sec.fetch_company_facts(
+                FilingQuery(
+                    cik=instrument.issuer_cik,
+                    as_of=as_of,
+                    forms=("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"),
+                    limit=10_000,
+                )
+            )
+    return {
+        "bars": bars,
+        "quotes": quotes,
+        "macro": macro,
+        "company_facts": company_facts,
+    }
 
 
 def collect_paper_evidence(
@@ -143,7 +178,7 @@ def collect_paper_evidence(
 
 
 @dataclass(frozen=True, slots=True)
-class ListedWrapperFeatures:
+class ListedSecurityFeatures:
     symbol: str
     as_of: datetime
     current_price: float
@@ -160,6 +195,7 @@ class ListedWrapperFeatures:
     rolling_success_rate: float
     bar_count: int
     evidence_identifiers: tuple[str, ...]
+    moving_average_200: float = 0.0
 
     @property
     def momentum(self) -> float:
@@ -175,6 +211,9 @@ class ListedWrapperFeatures:
     @property
     def liquidity_score(self) -> float:
         return _clip(log10(max(self.average_daily_dollar_volume, 1.0)) / 9.0, 0.0, 1.0)
+
+
+ListedWrapperFeatures = ListedSecurityFeatures
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,12 +266,12 @@ _EXPOSURE_ASSET_CLASSES: dict[str, CandidateAssetClass] = {
 }
 
 
-def _history_depth(features: ListedWrapperFeatures) -> float:
+def _history_depth(features: ListedSecurityFeatures) -> float:
     return _clip(features.bar_count / 2520.0, 0.10, 1.0)
 
 
 def _scenario_probabilities(
-    features: ListedWrapperFeatures,
+    features: ListedSecurityFeatures,
     *,
     cash_expected_return: float,
     base_return: float,
@@ -266,7 +305,7 @@ def _scenario_probabilities(
 
 
 def _evidence_quality(
-    features: ListedWrapperFeatures,
+    features: ListedSecurityFeatures,
     *,
     data_age_hours: float,
 ) -> EvidenceQuality:
@@ -283,7 +322,7 @@ def _evidence_quality(
     )
 
 
-def _cost_assumptions(features: ListedWrapperFeatures) -> tuple[float, float]:
+def _cost_assumptions(features: ListedSecurityFeatures) -> tuple[float, float]:
     illiquidity = 1.0 - features.liquidity_score
     volatility = min(1.0, max(0.0, features.annualized_volatility))
     transaction = round(2.0 + 8.0 * illiquidity, 4)
@@ -292,7 +331,7 @@ def _cost_assumptions(features: ListedWrapperFeatures) -> tuple[float, float]:
 
 
 def _forecast_quality(
-    features: ListedWrapperFeatures,
+    features: ListedSecurityFeatures,
     *,
     distribution_anchor: float,
 ) -> tuple[float, float, float, float]:
@@ -359,7 +398,7 @@ def _features(
     as_of: datetime,
     cash_expected_return: float,
     maximum_quote_age_minutes: int,
-) -> ListedWrapperFeatures:
+) -> ListedSecurityFeatures:
     rows = _bar_rows(symbol, raw_bars, as_of=as_of)
     closes = [float(item["c"]) for item in rows]
     volumes = [float(item["v"]) for item in rows]
@@ -369,14 +408,14 @@ def _features(
     if quote_time > as_of + timedelta(seconds=5):
         raise ProductionPaperEvidenceError(f"{symbol} quote is future-known")
     quote_age = as_of - quote_time
-    if quote_age > timedelta(minutes=maximum_quote_age_minutes):
-        raise ProductionPaperEvidenceError(
-            f"{symbol} quote exceeds the {maximum_quote_age_minutes}-minute evidence limit"
-        )
+    # Strategic analysis may use the latest official close when pre-market IEX
+    # top-of-book evidence is older than the execution freshness limit. The
+    # paper executor independently requires a current positive non-crossed quote.
+    quote_is_current = quote_age <= timedelta(minutes=maximum_quote_age_minutes)
     bid = quote.get("bp")
     ask = quote.get("ap")
     quote_price: float | None = None
-    if isinstance(bid, (int, float)) and isinstance(ask, (int, float)):
+    if quote_is_current and isinstance(bid, (int, float)) and isinstance(ask, (int, float)):
         if float(bid) > 0.0 and float(ask) >= float(bid):
             quote_price = (float(bid) + float(ask)) / 2.0
     current_price = closes[-1] if quote_price is None else quote_price
@@ -428,11 +467,11 @@ def _features(
         ),
         f"alpaca-iex-quote:{symbol}:{quote_time.isoformat()}:{_evidence_digest(quote_material)}",
     )
-    return ListedWrapperFeatures(
+    return ListedSecurityFeatures(
         symbol=symbol,
         as_of=as_of,
         current_price=round(current_price, 8),
-        latest_observed_at=max(rows[-1]["t"], quote_time),
+        latest_observed_at=(max(rows[-1]["t"], quote_time) if quote_is_current else rows[-1]["t"]),
         one_month_return=_period_return(closes, 21),
         three_month_return=_period_return(closes, 63),
         six_month_return=_period_return(closes, 126),
@@ -440,6 +479,7 @@ def _features(
         annualized_volatility=round(annualized_volatility, 8),
         maximum_drawdown=round(maximum_drawdown, 8),
         average_daily_dollar_volume=round(max(0.0, adv), 8),
+        moving_average_200=round(sum(closes[-200:]) / min(200, len(closes)), 8),
         long_run_annual_return=_clip(long_run, -0.60, 1.50),
         rolling_annual_median=_clip(rolling_median, -0.60, 1.50),
         rolling_success_rate=_clip(success, 0.0, 1.0),
@@ -560,7 +600,7 @@ def _exposure_macro_impact(exposure: str, macro: MacroSpecialistContext) -> floa
 
 def _candidate_and_evidence(
     instrument: FreePaperPilotInstrument,
-    features: ListedWrapperFeatures,
+    features: ListedSecurityFeatures,
     *,
     universe: FreePaperPilotUniverse,
     as_of: datetime,
@@ -866,9 +906,295 @@ def _candidate_and_evidence(
     return candidate, governed
 
 
+
+def _company_candidate_and_evidence(
+    instrument: FreePaperPilotInstrument,
+    features: ListedSecurityFeatures,
+    *,
+    company_facts: object,
+    benchmark: ListedSecurityFeatures,
+    as_of: datetime,
+    cash_expected_return: float,
+    macro: MacroSpecialistContext,
+    macro_values: Mapping[str, float],
+    macro_identifiers: tuple[str, ...],
+    current_weight: float,
+) -> tuple[CandidateDecisionRecord, ProductionCandidateEvidence]:
+    if instrument.issuer_cik is None:
+        raise ProductionPaperEvidenceError(
+            f"SEC issuer identity is unavailable for {instrument.symbol}"
+        )
+    if not isinstance(company_facts, tuple):
+        raise ProductionPaperEvidenceError(
+            f"SEC company facts are unavailable for {instrument.symbol}"
+        )
+    try:
+        history = CompanyFactNormalizer(minimum_annual_periods=2).normalize(
+            company_facts,
+            as_of=as_of,
+        )
+    except (TypeError, ValueError) as error:
+        raise ProductionPaperEvidenceError(
+            f"SEC company facts cannot be normalized for {instrument.symbol}: {error}"
+        ) from error
+    shares = history.latest.diluted_shares
+    if shares is None or shares <= 0.0:
+        raise ProductionPaperEvidenceError(
+            f"diluted shares are unavailable for {instrument.symbol}"
+        )
+    market = CompanyMarketSnapshot(
+        as_of=as_of,
+        current_price=features.current_price,
+        market_cap=features.current_price * shares,
+        shares_outstanding=shares,
+        dividend_per_share=0.0,
+        six_month_return=features.six_month_return,
+        twelve_month_return=features.twelve_month_return,
+        benchmark_twelve_month_return=benchmark.twelve_month_return,
+        annualized_volatility=features.annualized_volatility,
+        maximum_drawdown=features.maximum_drawdown,
+        moving_average_200=features.moving_average_200,
+        average_daily_dollar_volume=features.average_daily_dollar_volume,
+        data_age_hours=max(
+            0.0,
+            (as_of - features.latest_observed_at).total_seconds() / 3600.0,
+        ),
+        evidence_identifiers=features.evidence_identifiers,
+    )
+    curve = float(macro_values.get("T10Y2Y", 0.0))
+    vix = float(macro_values.get("VIXCLS", 20.0))
+    policy_rate = float(macro_values.get("DFF", 4.0))
+    ten_year = float(macro_values.get("DGS10", 4.0))
+    regime = CompanyRegimeContext(
+        as_of=as_of,
+        growth_support=_clip(0.35 * (curve / 2.0) - 0.20 * ((policy_rate - 3.0) / 3.0)),
+        liquidity_support=_clip((4.0 - policy_rate) / 3.0),
+        credit_support=_clip(0.5 * (curve / 2.0) + 0.5 * ((5.0 - ten_year) / 3.0)),
+        market_risk_support=_clip((25.0 - vix) / 15.0),
+        industry_cyclicality=0.50,
+        duration_sensitivity=0.50,
+        evidence_identifiers=macro_identifiers,
+    )
+    analysis = CompanyAnalysisEngine().analyze(
+        symbol=instrument.symbol,
+        history=history,
+        market=market,
+        regime=regime,
+    )
+    transaction_cost_bps, slippage_bps = _cost_assumptions(features)
+    maximum = max(current_weight, instrument.maximum_weight)
+    candidate = CompanyCandidateBuilder().build(
+        analysis,
+        instrument_id=instrument.instrument_identifier,
+        venue=instrument.venue,
+        security_master_snapshot_identifier=(
+            f"sec-alpaca-company-master:{as_of.strftime('%Y%m%dT%H%M%S%fZ')}"
+        ),
+        security_master_record_identifiers=(
+            f"sec-company:{instrument.issuer_cik}:{instrument.symbol}",
+            f"alpaca-paper-asset:{instrument.symbol}",
+        ),
+        opportunity_cost_return=cash_expected_return,
+        maximum_position_weight=maximum,
+        current_portfolio_weight=current_weight,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+    )
+    # Scenario probabilities are evidence-derived for the production lane rather
+    # than inherited from the generic company-analysis prior.
+    base_probability, bull_probability, bear_probability = _scenario_probabilities(
+        features,
+        cash_expected_return=cash_expected_return,
+        base_return=candidate.base_case_return,
+    )
+    success = _clip(
+        0.45
+        + 0.20 * analysis.overall_score
+        + 0.15 * analysis.confidence
+        + 0.20 * features.rolling_success_rate,
+        0.05,
+        0.95,
+    )
+    instrument_contract = replace(
+        candidate.instrument,
+        name=instrument.name,
+        instrument_type="common_stock",
+        economic_exposure_class=CandidateAssetClass.US_EQUITY,
+        replication_method=(
+            "direct-common-equity-scaled"
+            if current_weight > 0.0
+            else "direct-common-equity-exploratory"
+        ),
+    )
+    candidate = replace(
+        candidate,
+        schema_version="paper-company-equity-candidate.v1",
+        instrument=instrument_contract,
+        base_case_probability=base_probability,
+        bull_case_probability=bull_probability,
+        bear_case_probability=bear_probability,
+        probability_of_success=success,
+        maximum_position_weight=maximum,
+        expected_portfolio_contribution=round(
+            candidate.base_case_return * maximum,
+            8,
+        ),
+        model_versions=tuple(
+            dict.fromkeys((*candidate.model_versions, _COMPANY_EVIDENCE_VERSION))
+        ),
+    )
+    market_context = MarketSpecialistContext(
+        as_of=as_of,
+        market_regime=(
+            "company_relative_strength"
+            if features.twelve_month_return >= benchmark.twelve_month_return
+            else "company_relative_weakness"
+        ),
+        expected_return_impact=_clip(
+            0.06 * (features.twelve_month_return - benchmark.twelve_month_return)
+            + 0.04 * features.momentum,
+            -0.08,
+            0.08,
+        ),
+        confidence=min(0.80, analysis.evidence_quality.score),
+        trend=_clip(features.twelve_month_return),
+        momentum=_clip(features.momentum),
+        breadth=0.0,
+        liquidity=_clip(features.liquidity_score * 2.0 - 1.0),
+        positioning=0.0,
+        evidence=(
+            f"Company twelve-month return={features.twelve_month_return:.2%}",
+            f"VTI twelve-month return={benchmark.twelve_month_return:.2%}",
+            f"Company relative strength={features.twelve_month_return - benchmark.twelve_month_return:.2%}",
+            "Cross-sectional discovery ranked the full SEC/Alpaca eligible company set",
+            "Independent positioning data is unavailable in the free-data pilot",
+        ),
+        risks=(
+            f"Realized annualized volatility={features.annualized_volatility:.2%}",
+            f"Maximum historical drawdown={features.maximum_drawdown:.2%}",
+            "IEX is a limited feed and company facts are periodic rather than continuous",
+        ),
+        entry_conditions=(
+            "The company remains in the daily broad-equity discovery set",
+            "Execution receives a current positive non-crossed quote",
+        ),
+        evidence_identifiers=tuple(
+            dict.fromkeys((*features.evidence_identifiers, *analysis.evidence_identifiers))
+        ),
+    )
+    aggregate_confidence, calibration_score, model_agreement, forecast_stability = (
+        _forecast_quality(features, distribution_anchor=candidate.base_case_return)
+    )
+    forecast = CrossAssetForecastSpecialistContext(
+        as_of=as_of,
+        forecast_horizon_days=365,
+        scenarios=(
+            ForecastScenarioAssessment(
+                label="company base case",
+                probability=base_probability,
+                candidate_return_impact=_exposure_macro_impact("us_equity", macro),
+                expected_path_drawdown=min(0.0, features.maximum_drawdown * 0.50),
+                rationale="Normalized SEC fundamentals, market trend, and current macro regime",
+                evidence_identifiers=analysis.evidence_identifiers,
+            ),
+            ForecastScenarioAssessment(
+                label="company upside case",
+                probability=bull_probability,
+                candidate_return_impact=max(0.0, candidate.bull_case_return - candidate.base_case_return),
+                expected_path_drawdown=min(0.0, features.maximum_drawdown * 0.25),
+                rationale="Fundamental improvement and persistent relative strength",
+                evidence_identifiers=features.evidence_identifiers,
+            ),
+            ForecastScenarioAssessment(
+                label="company downside case",
+                probability=bear_probability,
+                candidate_return_impact=min(-0.01, candidate.bear_case_return - candidate.base_case_return),
+                expected_path_drawdown=min(-0.01, candidate.bear_case_return),
+                rationale="Fundamental disappointment, volatility, or relative-strength reversal",
+                evidence_identifiers=tuple(
+                    dict.fromkeys((*features.evidence_identifiers, *macro_identifiers))
+                ),
+            ),
+        ),
+        aggregate_confidence=min(aggregate_confidence, analysis.confidence),
+        calibration_score=calibration_score,
+        model_agreement=model_agreement,
+        forecast_stability=forecast_stability,
+        path_drawdown_probability=_clip(features.annualized_volatility, 0.0, 1.0),
+        cross_asset_signals=(
+            f"Macro regime={macro.regime}",
+            f"VTI-relative strength={features.twelve_month_return - benchmark.twelve_month_return:+.2%}",
+        ),
+        contradictory_evidence=tuple(candidate.contradictory_evidence),
+        limitations=(
+            "Company forecasts remain versioned hypotheses rather than performance guarantees",
+            "Free IEX and public SEC evidence do not include analyst estimate revisions",
+        ),
+        change_conditions=(
+            "Refresh after new SEC filings, a relative-strength reversal, or a material macro change",
+        ),
+        model_versions=(_FORECAST_VERSION, analysis.analysis_version),
+        evidence_identifiers=tuple(
+            dict.fromkeys((*candidate.evidence_identifiers, *macro_identifiers))
+        ),
+    )
+    evidence_ids = tuple(
+        dict.fromkeys((*candidate.evidence_identifiers, *analysis.evidence_identifiers, *macro_identifiers))
+    )
+    lineage = GovernedEvidenceLineage(
+        certification_identifier=(
+            f"certification:paper-company-equity:{instrument.symbol}:"
+            f"{as_of.strftime('%Y%m%dT%H%M%S%fZ')}"
+        ),
+        certification_state=EvidenceCertificationState.APPROVED,
+        certification_expires_at=as_of + timedelta(days=2),
+        fresh_until=as_of + timedelta(days=1),
+        evidence_identifiers=evidence_ids,
+        source_versions=(
+            (f"ALPACA_IEX:{instrument.symbol}", features.latest_observed_at.isoformat()),
+            (f"SEC_COMPANY_FACTS:{instrument.issuer_cik}", history.latest.available_at.isoformat()),
+            ("FRED_MACRO", hashlib.sha256("|".join(macro_identifiers).encode("utf-8")).hexdigest()),
+        ),
+        model_versions=(
+            ("company_normalization", history.normalization_version),
+            ("company_analysis", analysis.analysis_version),
+            ("company_candidate", _COMPANY_EVIDENCE_VERSION),
+            ("forecast", _FORECAST_VERSION),
+        ),
+    )
+    governed = ProductionCandidateEvidence(
+        identifier=f"candidate-evidence:{candidate.identifier}",
+        candidate_identifier=candidate.identifier,
+        symbol=instrument.symbol,
+        as_of=as_of,
+        knowledge_cutoff=as_of,
+        analysis_completed_at=as_of,
+        macro=macro,
+        market=market_context,
+        company=analysis,
+        exposure_profile=CandidateExposureProfile(
+            candidate_identifier=candidate.identifier,
+            sector="us_equity_company",
+            factor_loadings=(
+                ("quality", analysis.factor(CompanyFactor.QUALITY).score),
+                ("growth", analysis.factor(CompanyFactor.GROWTH).score),
+                ("momentum", analysis.factor(CompanyFactor.MOMENTUM).score),
+                ("market_beta", 1.0),
+            ),
+            correlation_bucket="single_name_equity",
+        ),
+        fundamental_evidence_identifiers=analysis.evidence_identifiers,
+        fundamental_model_version=analysis.analysis_version,
+        lineage=lineage,
+        forecast=forecast,
+        asset_valuation=None,
+    )
+    return candidate, governed
+
+
 def _holding_evidence(
     position,
-    features: ListedWrapperFeatures,
+    features: ListedSecurityFeatures,
     instrument: FreePaperPilotInstrument,
     *,
     as_of: datetime,
@@ -949,9 +1275,12 @@ def build_paper_evidence(
     bars = payload.get("bars")
     quotes = payload.get("quotes")
     raw_macro = payload.get("macro")
+    company_facts = payload.get("company_facts", {})
     if not isinstance(bars, Mapping) or not isinstance(quotes, Mapping):
         raise ProductionPaperEvidenceError("bars and quotes must be mappings")
-    macro, _macro_values, macro_ids = _macro_context(raw_macro, as_of=as_of)
+    if not isinstance(company_facts, Mapping):
+        raise ProductionPaperEvidenceError("company_facts must be a mapping")
+    macro, macro_values, macro_ids = _macro_context(raw_macro, as_of=as_of)
     instrument_by_symbol = {item.symbol: item for item in universe.instruments}
     unknown_holdings = sorted(
         {item.symbol for item in portfolio.positions} - set(instrument_by_symbol)
@@ -967,7 +1296,7 @@ def build_paper_evidence(
         item.symbol: round(item.market_value / nav, 8)
         for item in portfolio.positions
     }
-    features_by_symbol: dict[str, ListedWrapperFeatures] = {}
+    features_by_symbol: dict[str, ListedSecurityFeatures] = {}
     exclusions: list[tuple[str, tuple[str, ...]]] = []
     for instrument in universe.instruments:
         try:
@@ -992,34 +1321,104 @@ def build_paper_evidence(
             )
     candidates: list[CandidateDecisionRecord] = []
     candidate_evidence: list[ProductionCandidateEvidence] = []
+    candidate_by_symbol: dict[str, CandidateDecisionRecord] = {}
+    benchmark = features_by_symbol.get("VTI")
+    if benchmark is None:
+        raise ProductionPaperEvidenceError("VTI benchmark evidence is mandatory")
     for instrument in universe.instruments:
         features = features_by_symbol.get(instrument.symbol)
         if features is None:
             continue
-        candidate, governed = _candidate_and_evidence(
-            instrument,
-            features,
-            universe=universe,
-            as_of=as_of,
-            cash_expected_return=cash_expected_return,
-            macro=macro,
-            macro_identifiers=macro_ids,
-            current_weight=current_weights.get(instrument.symbol, 0.0),
-        )
+        try:
+            if (
+                instrument.execution_asset_class is CandidateAssetClass.US_EQUITY
+                and instrument.instrument_type == "common_stock"
+            ):
+                candidate, governed = _company_candidate_and_evidence(
+                    instrument,
+                    features,
+                    company_facts=company_facts.get(instrument.symbol),
+                    benchmark=benchmark,
+                    as_of=as_of,
+                    cash_expected_return=cash_expected_return,
+                    macro=macro,
+                    macro_values=macro_values,
+                    macro_identifiers=macro_ids,
+                    current_weight=current_weights.get(instrument.symbol, 0.0),
+                )
+            else:
+                candidate, governed = _candidate_and_evidence(
+                    instrument,
+                    features,
+                    universe=universe,
+                    as_of=as_of,
+                    cash_expected_return=cash_expected_return,
+                    macro=macro,
+                    macro_identifiers=macro_ids,
+                    current_weight=current_weights.get(instrument.symbol, 0.0),
+                )
+        except (ProductionPaperEvidenceError, TypeError, ValueError) as error:
+            if instrument.symbol in current_weights:
+                raise ProductionPaperEvidenceError(
+                    f"mandatory holding evidence failed for {instrument.symbol}: {error}"
+                ) from error
+            exclusions.append(
+                (
+                    instrument.instrument_identifier,
+                    (f"Certified company evidence is incomplete: {error}",),
+                )
+            )
+            continue
         candidates.append(candidate)
         candidate_evidence.append(governed)
-    holding_evidence = tuple(
-        _holding_evidence(
-            position,
-            features_by_symbol[position.symbol],
-            instrument_by_symbol[position.symbol],
-            as_of=as_of,
-            cash_expected_return=cash_expected_return,
-            macro=macro,
-            macro_identifiers=macro_ids,
-        )
-        for position in portfolio.positions
-    )
+        candidate_by_symbol[instrument.symbol] = candidate
+    holding_values: list[ProductionHoldingEvidence] = []
+    for position in portfolio.positions:
+        instrument = instrument_by_symbol[position.symbol]
+        features = features_by_symbol[position.symbol]
+        company_candidate = candidate_by_symbol.get(position.symbol)
+        if (
+            instrument.execution_asset_class is CandidateAssetClass.US_EQUITY
+            and company_candidate is not None
+        ):
+            governed = next(
+                item for item in candidate_evidence
+                if item.candidate_identifier == company_candidate.identifier
+            )
+            transaction_cost_bps, slippage_bps = _cost_assumptions(features)
+            holding_values.append(
+                ProductionHoldingEvidence(
+                    identifier=f"holding-evidence:{position.symbol}:{as_of.strftime('%Y%m%dT%H%M%S%fZ')}",
+                    symbol=position.symbol,
+                    as_of=as_of,
+                    knowledge_cutoff=as_of,
+                    expected_return=company_candidate.net_expected_return,
+                    evidence_quality=company_candidate.evidence_quality.score,
+                    liquidity_score=company_candidate.liquidity_score,
+                    sector=governed.exposure_profile.sector,
+                    factor_loadings=governed.exposure_profile.factor_loadings,
+                    correlation_bucket=governed.exposure_profile.correlation_bucket,
+                    average_daily_dollar_volume=features.average_daily_dollar_volume,
+                    transaction_cost_bps=transaction_cost_bps,
+                    slippage_bps=slippage_bps,
+                    minimum_weight=0.0,
+                    funding_eligible=True,
+                    lineage=governed.lineage,
+                )
+            )
+        else:
+            holding_values.append(
+                _holding_evidence(
+                    position,
+                    features,
+                    instrument,
+                    as_of=as_of,
+                    cash_expected_return=cash_expected_return,
+                    macro=macro,
+                    macro_identifiers=macro_ids,
+                )
+            )
+    holding_evidence = tuple(holding_values)
     return PaperEvidenceBuildResult(
         candidates=tuple(candidates),
         candidate_evidence=tuple(candidate_evidence),
@@ -1031,7 +1430,7 @@ def build_paper_evidence(
 
 __all__ = [
     "EvidenceProbe",
-    "ListedWrapperFeatures",
+    "ListedSecurityFeatures",
     "PaperEvidenceBuildResult",
     "ProductionPaperEvidenceError",
     "build_paper_evidence",

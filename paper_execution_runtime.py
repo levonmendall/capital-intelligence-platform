@@ -28,7 +28,7 @@ from governance.paper_decision_approval import (
 )
 from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
-    load_free_paper_pilot_universe,
+    load_execution_paper_universe,
     validate_pilot_construction,
 )
 from run_approved_paper_execution import main as run_approved_paper_execution
@@ -258,7 +258,10 @@ def _materialize_execution_inputs(
             str(DEFAULT_UNIVERSE_PATH),
         )
     ).expanduser()
-    universe = load_free_paper_pilot_universe(universe_path)
+    universe = load_execution_paper_universe(
+        construction,
+        fallback_path=universe_path,
+    )
     validate_pilot_construction(construction, universe=universe)
     symbols = _trade_symbols(construction)
     profile_map = {item["symbol"]: item for item in universe.profiles_payload()}
@@ -443,7 +446,10 @@ def attempt_paper_execution(
     try:
         validate_pilot_construction(
             construction,
-            universe=load_free_paper_pilot_universe(universe_path),
+            universe=load_execution_paper_universe(
+                construction,
+                fallback_path=universe_path,
+            ),
         )
     except (OSError, TypeError, ValueError) as error:
         return PaperExecutionAttempt(
