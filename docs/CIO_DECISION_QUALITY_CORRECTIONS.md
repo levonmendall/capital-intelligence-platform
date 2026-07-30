@@ -23,3 +23,5 @@ Cash, current holdings, and competing candidates are compared through a conserva
 ## Safety boundary
 
 These corrections do not authorize brokerage submission, real-money activity, policy promotion, or performance claims. Final allocation remains subject to evidence vetoes, CIO synthesis, robust sizing, portfolio construction, and paper-execution governance.
+
+Repository release validation remains mandatory before this decision-quality version may be merged or deployed.
