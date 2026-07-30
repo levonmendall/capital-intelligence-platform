@@ -1,11 +1,19 @@
 name: Export agent repository
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/enable-direct-global-market-paper
+      - main
     paths:
       - .github/workflows/export-agent-repo.yml
+      - operations/**
+      - providers/**
+      - cio/**
+      - config/**
+      - tests/**
+      - docs/**
+      - '*.py'
+      - render.yaml
 
 permissions:
   contents: read
