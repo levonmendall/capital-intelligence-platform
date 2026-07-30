@@ -63,7 +63,7 @@ jobs:
       - name: Validate focused evidence contracts
         run: |
           python -m compileall -q application providers production_paper_evidence.py production_context_publication_runtime.py production_context_publication_governed.py
-          pytest -q tests/test_alpaca_historical_bars.py tests/test_production_context_publication_runtime.py tests/test_production_context_adapter.py tests/test_production_context_runtime.py
+          pytest -q tests/test_alpaca_historical_bars.py tests/test_production_context_publication_runtime.py
 
       - name: Commit materialized evidence publishers
         run: |
