@@ -40,6 +40,7 @@ class HistoricalSource(ABC):
 
 
 def build_sources(config: Mapping[str, Any], *, user_agent: str) -> tuple[HistoricalSource, ...]:
+    from .sources_cboe import CboeVixSource
     from .sources_fred import FredSource
     from .sources_market import CoinbaseSource, StooqSource
     from .sources_public import (
@@ -56,6 +57,8 @@ def build_sources(config: Mapping[str, Any], *, user_agent: str) -> tuple[Histor
     sources: list[HistoricalSource] = []
     if enabled.get("fred", {}).get("enabled", True):
         sources.append(FredSource(client, enabled.get("fred", {}).get("series", [])))
+    if enabled.get("cboe_vix", {}).get("enabled", True):
+        sources.append(CboeVixSource(client))
     if enabled.get("coinbase", {}).get("enabled", True):
         sources.append(CoinbaseSource(client, enabled.get("coinbase", {}).get("products", [])))
     if enabled.get("stooq", {}).get("enabled", True):
