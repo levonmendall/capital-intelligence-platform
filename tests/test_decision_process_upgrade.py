@@ -10,11 +10,17 @@ from cio import (
     ChiefInvestmentOfficer,
     DecisionPolicyMatrix,
     EvidenceDependency,
+    EvidenceVetoCategory,
     PriorDecisionContext,
     ScenarioAdjustment,
     SpecialistPosition,
     SpecialistRole,
     ThesisState,
+)
+from application.cio_cycle import (
+    CandidateExposureProfile,
+    CanonicalCIOCycle,
+    CyclePortfolioState,
 )
 from cio.reconciliation import SpecialistReturnReconciler
 from evaluation import EvaluationOutcome, PointInTimeDecisionEvaluator
@@ -26,6 +32,7 @@ from opportunity import (
 )
 from portfolio.construction_api import (
     PortfolioConstructionEngine,
+    PortfolioConstructionPolicy,
     PortfolioScenario,
 )
 from tests.test_decision_quality_reconciliation import (
@@ -350,3 +357,108 @@ def test_multi_start_portfolio_search_selects_superior_candidate() -> None:
     ).construct(request)
 
     assert {item.symbol for item in result.trades} == {"HIGH"}
+
+
+@pytest.mark.parametrize(
+    ("category", "expected_action", "expected_hysteresis"),
+    (
+        (
+            EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE,
+            CIOAction.HOLD,
+            False,
+        ),
+        (
+            EvidenceVetoCategory.MATERIAL_UNCERTAINTY,
+            CIOAction.HOLD,
+            True,
+        ),
+        (
+            EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+            CIOAction.REDUCE,
+            False,
+        ),
+    ),
+)
+def test_evidence_veto_severity_controls_holding_consequence(
+    category: EvidenceVetoCategory,
+    expected_action: CIOAction,
+    expected_hysteresis: bool,
+) -> None:
+    holding = _candidate("VETO", current_weight=0.05)
+    qualification = OpportunityEngine().qualify(holding, _context())
+    packet = _packet(holding, duplicate_origins=False)
+    analyses = tuple(
+        replace(
+            item,
+            position=SpecialistPosition.OPPOSED,
+            veto_reasons=("governed evidence condition",),
+            veto_categories=(category,),
+        )
+        if item.role is SpecialistRole.EVIDENCE_GOVERNANCE
+        else item
+        for item in packet.analyses
+    )
+    prior = PriorDecisionContext(
+        candidate_identifier=holding.identifier,
+        prior_decision_identifier="decision:veto-prior",
+        prior_action=CIOAction.HOLD,
+        prior_target_weight=0.05,
+        decided_at=holding.as_of,
+        thesis_state=ThesisState.ACTIVE,
+        consecutive_opposing_cycles=0,
+    )
+
+    decision = ChiefInvestmentOfficer().synthesize(
+        holding,
+        qualification.universe,
+        replace(packet, analyses=analyses),
+        capital_comparison=qualification.capital_comparison,
+        prior_context=prior,
+    )
+
+    assert decision.action is expected_action
+    assert decision.hysteresis_applied is expected_hysteresis
+    if category is EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE:
+        assert decision.recommended_position_weight is None
+        assert "operational evidence outage" in decision.rationale
+
+
+def test_ranking_respects_versioned_construction_cash_reserve() -> None:
+    candidate = _candidate("RESERVE")
+    cycle = CanonicalCIOCycle(
+        construction_policy=PortfolioConstructionPolicy(minimum_cash_weight=0.05)
+    )
+    portfolio = CyclePortfolioState(
+        identifier="portfolio:reserve-test",
+        as_of=candidate.as_of,
+        portfolio_value=250_000.0,
+        cash_weight=0.08,
+        cash_expected_return=0.04,
+        positions=(_asset("CORE", 0.92, funding_eligible=False),),
+        exposure_profiles=(
+            CandidateExposureProfile(
+                candidate_identifier=candidate.identifier,
+                sector="technology",
+                factor_loadings=(("market", 1.0),),
+                correlation_bucket="growth",
+            ),
+        ),
+    )
+
+    ranking = cycle._ranking_inputs(
+        (candidate,),
+        portfolio,
+        minimum_cash_weight=cycle.construction_engine.policy.minimum_cash_weight,
+    )[0]
+    from portfolio.construction_api import ConstructionIntent
+
+    annualized = ConstructionIntent.annualized_return(
+        candidate.net_expected_return,
+        horizon_days=candidate.decision_horizon_days,
+    )
+    expected = (
+        (annualized - portfolio.cash_expected_return) * 0.03
+        - candidate.implementation_cost_return * 0.03
+    )
+
+    assert ranking.marginal_portfolio_contribution == pytest.approx(expected)

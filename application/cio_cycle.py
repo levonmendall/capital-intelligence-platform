@@ -473,7 +473,13 @@ class CanonicalCIOCycle:
             raise TypeError("active_theses must contain LivingThesis values")
         if len(prior_map) != len(prior_decision_contexts):
             raise ValueError("prior decision contexts must be unique by candidate")
-        generated_ranking = self._ranking_inputs(candidates, portfolio)
+        generated_ranking = self._ranking_inputs(
+            candidates,
+            portfolio,
+            minimum_cash_weight=(
+                self.construction_engine.policy.minimum_cash_weight
+            ),
+        )
         supplied_ranking = {
             item.candidate_identifier: item
             for item in opportunity_context.ranking_inputs
@@ -644,6 +650,8 @@ class CanonicalCIOCycle:
         cls,
         candidates: tuple[CandidateDecisionRecord, ...],
         portfolio: CyclePortfolioState,
+        *,
+        minimum_cash_weight: float = 0.02,
     ) -> tuple[OpportunityRankingInput, ...]:
         sector_weights: dict[str, float] = {}
         bucket_weights: dict[str, float] = {}
@@ -675,7 +683,7 @@ class CanonicalCIOCycle:
                 0.0,
                 min(
                     candidate.maximum_position_weight - current,
-                    max(0.0, portfolio.cash_weight - 0.02),
+                    max(0.0, portfolio.cash_weight - minimum_cash_weight),
                 ),
             )
             annualized = ConstructionIntent.annualized_return(

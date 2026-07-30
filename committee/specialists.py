@@ -9,6 +9,7 @@ from cio import (
     CandidateAssetClass,
     CandidateDecisionRecord,
     EvidenceDependency,
+    EvidenceVetoCategory,
     HistoricalLearningContext,
     IndependentSpecialistPacket,
     ScenarioAdjustment,
@@ -1152,25 +1153,50 @@ class IndependentSpecialistService:
     ) -> SpecialistAnalysis:
         quality = candidate.evidence_quality
         vetoes: list[str] = []
+        veto_categories: list[EvidenceVetoCategory] = []
+
+        def add_veto(reason: str, category: EvidenceVetoCategory) -> None:
+            vetoes.append(reason)
+            veto_categories.append(category)
+
         if (
             candidate.instrument.asset_class is CandidateAssetClass.US_EQUITY
             and context.company is None
         ):
-            vetoes.append(
-                "point-in-time normalized company analysis is missing for a U.S. equity"
+            add_veto(
+                "point-in-time normalized company analysis is missing for a U.S. equity",
+                EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE,
             )
         if quality.score < self.policy.minimum_evidence_score:
-            vetoes.append("aggregate evidence quality is below governance threshold")
+            add_veto(
+                "aggregate evidence quality is below governance threshold",
+                EvidenceVetoCategory.MATERIAL_UNCERTAINTY,
+            )
         if quality.ceiling < self.policy.minimum_evidence_dimension:
-            vetoes.append("at least one evidence dimension is below governance threshold")
+            add_veto(
+                "at least one evidence dimension is below governance threshold",
+                EvidenceVetoCategory.MATERIAL_UNCERTAINTY,
+            )
         if candidate.instrument.data_age_hours > self.policy.maximum_market_data_age_hours:
-            vetoes.append("market evidence is stale")
+            add_veto(
+                "market evidence is stale",
+                EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE,
+            )
         if not candidate.evidence_identifiers:
-            vetoes.append("evidence identifiers are missing")
+            add_veto(
+                "evidence identifiers are missing",
+                EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+            )
         if not candidate.model_versions:
-            vetoes.append("model versions are missing")
+            add_veto(
+                "model versions are missing",
+                EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+            )
         if candidate.review_at <= candidate.as_of:
-            vetoes.append("review timing is not reproducible")
+            add_veto(
+                "review timing is not reproducible",
+                EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+            )
         position = (
             SpecialistPosition.OPPOSED
             if vetoes
@@ -1215,6 +1241,7 @@ class IndependentSpecialistService:
                 "Recalculate after material data revisions",
             ),
             veto_reasons=tuple(vetoes),
+            veto_categories=tuple(veto_categories),
             evidence_origin_identifiers=candidate.evidence_identifiers,
         )
 

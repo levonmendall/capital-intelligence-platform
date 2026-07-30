@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from cio.committee import IndependentSpecialistPacket
+from cio.committee import EvidenceVetoCategory, IndependentSpecialistPacket
 from cio.models import (
     CIOAction,
     CIODecision,
@@ -212,7 +212,7 @@ class ChiefInvestmentOfficer:
                 prior_context=prior_context,
                 profile=profile,
                 emergency=(
-                    bool(specialists.evidence_vetoes)
+                    specialists.has_emergency_evidence_veto
                     or reconciliation.expected_return <= self.policy.exit_threshold
                     or reconciliation.expected_downside < profile.maximum_expected_downside
                 ),
@@ -338,27 +338,43 @@ class ChiefInvestmentOfficer:
             < self.policy.minimum_evidence_dimension
         )
         if evidence_deficient:
+            detail = (
+                "; ".join(specialists.evidence_vetoes)
+                if specialists.evidence_vetoes
+                else "evidence quality or one required evidence dimension is below policy threshold"
+            )
             if current_weight > 0.0:
+                if specialists.has_operational_only_evidence_veto:
+                    return (
+                        CIOAction.HOLD,
+                        None,
+                        "New or increased exposure is prohibited, but the existing holding is preserved while an operational evidence outage is repaired: "
+                        + detail,
+                    )
                 target = self._conservative_reduction_target(
                     current_weight=current_weight,
                     proposed_weight=portfolio.recommended_position_weight,
                 )
-                detail = (
-                    "; ".join(specialists.evidence_vetoes)
-                    if specialists.evidence_vetoes
-                    else "evidence quality or one required evidence dimension is below policy threshold"
-                )
+                categories = set(specialists.evidence_veto_categories)
+                if categories.intersection(
+                    {
+                        EvidenceVetoCategory.THESIS_CONTRADICTION,
+                        EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+                    }
+                ):
+                    classification = (
+                        "a thesis contradiction or evidence-integrity emergency"
+                    )
+                else:
+                    classification = "material evidence uncertainty"
                 return (
                     CIOAction.REDUCE,
                     target,
-                    "New or increased exposure is prohibited and the existing holding is reduced because its full ownership case is no longer supported: "
+                    "New or increased exposure is prohibited and the existing holding is reduced because "
+                    + classification
+                    + " no longer supports its full ownership case: "
                     + detail,
                 )
-            detail = (
-                "; ".join(specialists.evidence_vetoes)
-                if specialists.evidence_vetoes
-                else "Evidence quality or one required evidence dimension is below policy threshold."
-            )
             return CIOAction.INSUFFICIENT_EVIDENCE, None, detail
 
         expected_return = reconciliation.expected_return
