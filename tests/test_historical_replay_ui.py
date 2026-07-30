@@ -12,10 +12,10 @@ from historical_replay_ui import (
 )
 
 
-def _payload(*, schema_version: str = "canonical-historical-replay.v3") -> dict[str, object]:
+def _payload(*, schema_version: str = "canonical-historical-replay.v4") -> dict[str, object]:
     return {
         "schema_version": schema_version,
-        "runtime_version": "single-pass-availability-cursor.v3",
+        "runtime_version": "single-pass-availability-cursor.v4",
         "generated_at": "2026-07-29T19:00:00Z",
         "start_date": "2016-07-29",
         "end_date": "2026-07-29",
@@ -29,9 +29,12 @@ def _payload(*, schema_version: str = "canonical-historical-replay.v3") -> dict[
         "learning_observation_count": 295,
         "cio_decision_observation_count": 0,
         "qualification_observation_count": 295,
-        "realized_outcome_count": 292,
-        "avoided_loss_count": 138,
-        "missed_opportunity_count": 154,
+        "calibration_eligible_observation_count": 192,
+        "governance_only_observation_count": 103,
+        "realized_outcome_count": 160,
+        "outcome_alignment": "decision_horizon",
+        "avoided_loss_count": 75,
+        "missed_opportunity_count": 85,
         "execution_authorized": False,
         "paper_execution_authorized": False,
         "real_money_authorized": False,
@@ -51,12 +54,14 @@ def _payload(*, schema_version: str = "canonical-historical-replay.v3") -> dict[
                         "action": "insufficient_evidence",
                         "decision_stage": "pre_cio_qualification",
                         "canonical_cio_decision": False,
+                        "calibration_eligible": False,
                         "realized_outcome": "avoided_loss",
                     },
                     {
                         "action": "no_superior_opportunity",
                         "decision_stage": "pre_cio_qualification",
                         "canonical_cio_decision": False,
+                        "calibration_eligible": True,
                         "realized_outcome": "missed_opportunity",
                     },
                 ],
@@ -80,7 +85,7 @@ def test_manifest_path_uses_persistent_historical_root(tmp_path):
     )
 
 
-def test_load_and_summarize_canonical_replay_manifest_v3(tmp_path):
+def test_load_and_summarize_canonical_replay_manifest_v4(tmp_path):
     path = tmp_path / "latest-canonical-replay.json"
     path.write_text(json.dumps(_payload()), encoding="utf-8")
 
@@ -89,16 +94,19 @@ def test_load_and_summarize_canonical_replay_manifest_v3(tmp_path):
     summary = canonical_replay_summary(payload)
 
     assert summary["state"] == "Partially available"
-    assert summary["schema_version"] == "canonical-historical-replay.v3"
-    assert summary["runtime_version"] == "single-pass-availability-cursor.v3"
+    assert summary["schema_version"] == "canonical-historical-replay.v4"
+    assert summary["runtime_version"] == "single-pass-availability-cursor.v4"
     assert summary["invoked_cutoffs"] == 100
     assert summary["blocked_cutoffs"] == 20
     assert summary["learning_observations"] == 295
     assert summary["cio_decision_observations"] == 0
     assert summary["qualification_observations"] == 295
-    assert summary["realized_outcomes"] == 292
-    assert summary["avoided_losses"] == 138
-    assert summary["missed_opportunities"] == 154
+    assert summary["calibration_eligible_observations"] == 192
+    assert summary["governance_only_observations"] == 103
+    assert summary["realized_outcomes"] == 160
+    assert summary["outcome_alignment"] == "decision_horizon"
+    assert summary["avoided_losses"] == 75
+    assert summary["missed_opportunities"] == 85
     assert summary["research_only"] is True
     assert summary["execution_authorized"] is False
     assert summary["real_money_authorized"] is False
@@ -106,6 +114,7 @@ def test_load_and_summarize_canonical_replay_manifest_v3(tmp_path):
 
 
 def test_supported_replay_schemas_remain_readable(tmp_path):
+    assert "canonical-historical-replay.v4" in SUPPORTED_SCHEMA_VERSIONS
     for schema_version in sorted(SUPPORTED_SCHEMA_VERSIONS):
         path = tmp_path / f"{schema_version}.json"
         path.write_text(
@@ -115,7 +124,7 @@ def test_supported_replay_schemas_remain_readable(tmp_path):
         assert load_canonical_replay_manifest(path) is not None
 
 
-def test_cutoff_rows_distinguish_cio_and_pre_cio_observations():
+def test_cutoff_rows_distinguish_cio_calibration_and_governance_observations():
     rows = canonical_replay_cutoff_rows(_payload())
 
     assert len(rows) == 1
@@ -124,6 +133,7 @@ def test_cutoff_rows_distinguish_cio_and_pre_cio_observations():
     assert row["CIO decisions"] == 0
     assert row["Pre-CIO outcomes"] == 2
     assert row["Learning observations"] == 2
+    assert row["Governance only"] == 1
     assert row["Avoided losses"] == 1
     assert row["Missed opportunities"] == 1
     assert "Insufficient Evidence × 1" in row["Actions / outcomes"]
