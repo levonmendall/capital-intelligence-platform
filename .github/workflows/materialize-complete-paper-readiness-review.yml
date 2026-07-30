@@ -7,6 +7,10 @@ on:
     paths:
       - tools/materialize_complete_paper_readiness_review.py
       - .github/workflows/materialize-complete-paper-readiness-review.yml
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -25,6 +29,7 @@ jobs:
       - name: Check out review branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Set up Python
