@@ -186,6 +186,34 @@ def test_stale_premarket_quote_does_not_block_strategic_analysis() -> None:
     assert features.latest_observed_at <= AS_OF
 
 
+
+def test_live_quote_clock_skew_is_normalized_only_when_explicitly_allowed() -> None:
+    future_quote = {"t": (AS_OF + timedelta(seconds=30)).isoformat(), "bp": 78.0, "ap": 78.1}
+    try:
+        _features(
+            "AAA",
+            _bars("AAA", growth=1.0015),
+            future_quote,
+            as_of=AS_OF,
+            cash_expected_return=0.04,
+            maximum_quote_age_minutes=5,
+        )
+    except Exception as error:
+        assert "future-known" in str(error)
+    else:
+        raise AssertionError("explicit point-in-time evidence must reject future quotes")
+
+    features = _features(
+        "AAA",
+        _bars("AAA", growth=1.0015),
+        future_quote,
+        as_of=AS_OF,
+        cash_expected_return=0.04,
+        maximum_quote_age_minutes=5,
+        maximum_future_skew_seconds=60,
+    )
+    assert features.latest_observed_at <= AS_OF
+
 def test_company_equity_receives_exploratory_policy_and_company_evidence() -> None:
     macro, values, identifiers = _macro_context(
         {

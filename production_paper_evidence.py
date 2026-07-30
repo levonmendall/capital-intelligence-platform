@@ -174,7 +174,9 @@ def collect_paper_evidence(
             raise ProductionPaperEvidenceError(
                 f"paper evidence payload is missing {field_name}"
             )
-    return payload
+    normalized = dict(payload)
+    normalized["_live_collection"] = probe is None
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,6 +400,7 @@ def _features(
     as_of: datetime,
     cash_expected_return: float,
     maximum_quote_age_minutes: int,
+    maximum_future_skew_seconds: int = 0,
 ) -> ListedSecurityFeatures:
     rows = _bar_rows(symbol, raw_bars, as_of=as_of)
     closes = [float(item["c"]) for item in rows]
@@ -405,9 +408,11 @@ def _features(
     if not isinstance(quote, Mapping):
         raise ProductionPaperEvidenceError(f"current quote is unavailable for {symbol}")
     quote_time = _timestamp(quote.get("t"), field_name=f"{symbol} quote timestamp")
-    if quote_time > as_of + timedelta(seconds=5):
+    maximum_future_skew = timedelta(seconds=max(0, maximum_future_skew_seconds))
+    if quote_time > as_of + maximum_future_skew:
         raise ProductionPaperEvidenceError(f"{symbol} quote is future-known")
-    quote_age = as_of - quote_time
+    effective_quote_time = min(quote_time, as_of)
+    quote_age = as_of - effective_quote_time
     # Strategic analysis may use the latest official close when pre-market IEX
     # top-of-book evidence is older than the execution freshness limit. The
     # paper executor independently requires a current positive non-crossed quote.
@@ -471,7 +476,7 @@ def _features(
         symbol=symbol,
         as_of=as_of,
         current_price=round(current_price, 8),
-        latest_observed_at=(max(rows[-1]["t"], quote_time) if quote_is_current else rows[-1]["t"]),
+        latest_observed_at=(max(rows[-1]["t"], effective_quote_time) if quote_is_current else rows[-1]["t"]),
         one_month_return=_period_return(closes, 21),
         three_month_return=_period_return(closes, 63),
         six_month_return=_period_return(closes, 126),
@@ -1276,6 +1281,9 @@ def build_paper_evidence(
     quotes = payload.get("quotes")
     raw_macro = payload.get("macro")
     company_facts = payload.get("company_facts", {})
+    maximum_future_skew_seconds = (
+        60 if payload.get("_live_collection") is True else 0
+    )
     if not isinstance(bars, Mapping) or not isinstance(quotes, Mapping):
         raise ProductionPaperEvidenceError("bars and quotes must be mappings")
     if not isinstance(company_facts, Mapping):
@@ -1307,6 +1315,7 @@ def build_paper_evidence(
                 as_of=as_of,
                 cash_expected_return=cash_expected_return,
                 maximum_quote_age_minutes=universe.maximum_quote_age_minutes,
+                maximum_future_skew_seconds=maximum_future_skew_seconds,
             )
         except (ProductionPaperEvidenceError, TypeError, ValueError) as error:
             if instrument.symbol in current_weights:

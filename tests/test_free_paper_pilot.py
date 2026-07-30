@@ -50,7 +50,7 @@ def _http_get(url: str, **kwargs: Any) -> _Response:
         return _Response(
             {
                 "is_open": True,
-                "timestamp": (NOW - timedelta(seconds=2)).isoformat(),
+                "timestamp": (NOW - timedelta(seconds=30)).isoformat(),
             }
         )
     if "/v2/assets/" in url:
@@ -386,5 +386,5 @@ def test_live_readiness_allows_only_bounded_provider_clock_skew() -> None:
     report = assess_free_paper_pilot_readiness(universe=universe, client=client)
 
     assert report.configuration_ready
-    assert any("5-second provider clock tolerance" in warning for warning in report.warnings)
+    assert any("60-second provider clock tolerance" in warning for warning in report.warnings)
 

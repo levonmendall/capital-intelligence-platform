@@ -334,7 +334,8 @@ def prepare_governed_production_context_for_cycle(
             instrument_count=len(universe.instruments),
         )
     now = _aware((clock or (lambda: datetime.now(tz=scheduled.tzinfo)))(), field_name="clock")
-    if any(timestamp > now + timedelta(seconds=5) for timestamp in quote_datetimes):
+    maximum_future_skew = timedelta(seconds=60 if clock is None else 0)
+    if any(timestamp > now + maximum_future_skew for timestamp in quote_datetimes):
         return _blocked(
             cycle_key=cycle_key,
             scheduled_for=scheduled,
@@ -445,18 +446,6 @@ def prepare_governed_production_context_for_cycle(
         universe = base_universe
 
     cash_expected_return = round(max(-1.0, min(1.0, cash_value / 100.0)), 8)
-    outcome_resolution_count = 0
-    if discovery is not None:
-        try:
-            outcome_resolution_count = outcome_store.resolve_due(
-                observed_at=decision_as_of,
-                observed_prices={
-                    symbol: (price, source)
-                    for symbol, price, source in discovery.observed_prices
-                },
-            )
-        except (OSError, TypeError, ValueError):
-            outcome_resolution_count = 0
     try:
         evidence_payload = collect_paper_evidence(
             universe,
@@ -471,6 +460,65 @@ def prepare_governed_production_context_for_cycle(
             detail=f"Listed-wrapper evidence collection failed: {type(error).__name__}: {error}",
             instrument_count=len(universe.instruments),
         )
+
+    completed_at = _aware(
+        (clock or (lambda: datetime.now(tz=scheduled.tzinfo)))(),
+        field_name="clock",
+    )
+    if completed_at < decision_as_of:
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail="The evidence collection clock moved backward.",
+            instrument_count=len(universe.instruments),
+        )
+    decision_as_of = completed_at
+    if (
+        decision_as_of.astimezone(ZoneInfo(settings.scheduler_timezone)).date()
+        != scheduled.astimezone(ZoneInfo(settings.scheduler_timezone)).date()
+    ):
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail="The governed evidence collection crossed the scheduled market date.",
+            instrument_count=len(universe.instruments),
+        )
+
+    stamp = _stamp(decision_as_of)
+    eligible_identifier = f"eligible-universe:paper-pilot:{stamp}"
+    screening_cycle_identifier = f"screening:paper-pilot:{stamp}"
+    screening_publication_identifier = f"publication:paper-pilot:{stamp}"
+    context_identifier = f"production-context:paper-pilot:{stamp}"
+    opportunity_identifier = f"opportunity:paper-pilot:{stamp}"
+    try:
+        tentative, already_persisted = _tentative_portfolio(
+            store=portfolio_store,
+            decision_as_of=decision_as_of,
+            context_identifier=context_identifier,
+        )
+    except Exception as error:
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail=f"Canonical portfolio finalization failed: {type(error).__name__}: {error}",
+            instrument_count=len(universe.instruments),
+        )
+
+    outcome_resolution_count = 0
+    if discovery is not None:
+        try:
+            outcome_resolution_count = outcome_store.resolve_due(
+                observed_at=decision_as_of,
+                observed_prices={
+                    symbol: (price, source)
+                    for symbol, price, source in discovery.observed_prices
+                },
+            )
+        except (OSError, TypeError, ValueError):
+            outcome_resolution_count = 0
 
     catalog_identifier = f"catalog:{universe.identifier}"
     master_snapshot_identifier = (

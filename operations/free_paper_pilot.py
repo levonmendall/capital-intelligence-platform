@@ -530,7 +530,7 @@ def assess_free_paper_pilot_readiness(
                 now = datetime.now(timezone.utc)
             maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)
             maximum_future_skew = (
-                timedelta(seconds=5) if dynamic_evaluation_time else timedelta(0)
+                timedelta(seconds=60) if dynamic_evaluation_time else timedelta(0)
             )
             for symbol in validated:
                 quote = quotes[symbol]
@@ -553,7 +553,7 @@ def assess_free_paper_pilot_readiness(
                     raise ValueError(f"{symbol} quote is future-known")
                 if observed > now:
                     warnings.append(
-                        f"{symbol}: quote timestamp is within the 5-second provider clock tolerance"
+                        f"{symbol}: quote timestamp is within the 60-second provider clock tolerance"
                     )
                 quote_times.append((symbol, observed.isoformat()))
                 if market_open and now - observed > maximum_age:
