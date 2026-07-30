@@ -439,10 +439,13 @@ def evaluate_runtime_smoke_test(
         and alpaca.get("status") == "connected"
         and str(alpaca.get("account_status", "")).upper() == "ACTIVE"
         and int(alpaca.get("quote_count", 0) or 0) > 0
+        and int(alpaca.get("quote_count", 0) or 0)
+        == int(alpaca.get("expected_quote_count", 0) or 0)
         and isinstance(fred, Mapping)
         and fred.get("status") == "connected"
         and public_state
         and public_state.get("state") in _VALID_PUBLIC_STATES
+        and public_state.get("required_sources_ready") is True
         and public_age is not None
         and -5 <= public_age <= maximum_public_state_age_seconds
     )
@@ -451,6 +454,7 @@ def evaluate_runtime_smoke_test(
     explicit_no_action = bool(
         cio_report
         and cio_report.get("report_state") == "no_transaction_recommended"
+        and cio_report.get("comparative_cio_decision_complete") is True
         and int(cio_report.get("transaction_count", 0) or 0) == 0
     )
     completed_execution = bool(

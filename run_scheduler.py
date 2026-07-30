@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import logging
+import os
 import time
 from dataclasses import replace
 from datetime import timedelta
@@ -24,6 +25,11 @@ from delivery import (
     ScheduledCanonicalCIOWorker,
 )
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
+from operations.free_paper_pilot import (
+    DEFAULT_UNIVERSE_PATH,
+    load_free_paper_pilot_universe,
+)
+from portfolio.construction_api import PortfolioConstructionPolicy
 from screening import SQLiteFullUniverseScreeningStore
 from security import SQLiteIdentityStore
 
@@ -49,6 +55,27 @@ def _context_provider(
     return factory()
 
 
+def _paper_pilot_construction_policy() -> PortfolioConstructionPolicy:
+    """Use one policy boundary for CIO construction and paper execution."""
+
+    universe_path = os.getenv(
+        "CAPITAL_INTELLIGENCE_FREE_PAPER_PILOT_UNIVERSE",
+        str(DEFAULT_UNIVERSE_PATH),
+    )
+    universe = load_free_paper_pilot_universe(universe_path)
+    base = PortfolioConstructionPolicy()
+    return replace(
+        base,
+        version=f"{base.version}+{universe.identifier}",
+        minimum_cash_weight=universe.minimum_cash_weight,
+        maximum_position_weight=min(
+            base.maximum_position_weight,
+            universe.maximum_single_instrument_weight,
+        ),
+        maximum_turnover=universe.maximum_batch_turnover,
+    )
+
+
 def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
     """Build the only active scheduled investment-decision authority."""
 
@@ -63,7 +90,10 @@ def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
         settings=settings,
     )
     executor = ProductionCanonicalCIOExecutor(
-        cycle=CanonicalCIOCycle(journal=journal),
+        cycle=CanonicalCIOCycle(
+            journal=journal,
+            construction_policy=_paper_pilot_construction_policy(),
+        ),
         screening_store=screening_store,
         context_provider=provider,
     )

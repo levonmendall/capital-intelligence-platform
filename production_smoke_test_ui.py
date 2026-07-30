@@ -22,7 +22,7 @@ _CHECK_LABELS = {
     "persistent_state_survived_restart": "Persistent state survived restart",
     "operator_heartbeat_and_cio_cycle_current": "Heartbeat and CIO cycle are current",
     "provider_market_observations_current": "Provider observations are current",
-    "governed_paper_outcome_recorded": "Governed paper outcome is recorded",
+    "governed_paper_outcome_recorded": "Comparative CIO outcome or completed paper execution is recorded",
     "encrypted_backup_healthy": "Encrypted backup is healthy",
 }
 
@@ -92,7 +92,7 @@ def _render_result(result: dict[str, object]) -> None:
 
     passed = result.get("overall_status") == "PASS"
     if passed:
-        st.success("All five production runtime checks passed.")
+        st.success("All five production runtime and decision-readiness checks passed.")
     else:
         st.warning(
             "The verification is not yet a full pass. Review the failed checks below; "
