@@ -91,8 +91,6 @@ def _manifest(generated_at: datetime) -> dict[str, object]:
                         "action": "buy" if month < 5 else "watch",
                         "final_confidence": 0.80,
                         "recommended_position_weight": 0.10,
-                        # Compatibility field in the sidecar carries the bounded,
-                        # decision-horizon-aligned value consumed by the base resolver.
                         "realized_return_to_next_cutoff": outcome,
                     }
                 ],
@@ -100,11 +98,19 @@ def _manifest(generated_at: datetime) -> dict[str, object]:
         )
     return {
         "schema_version": "canonical-historical-learning-input.v1",
-        "source_replay_schema_version": "canonical-historical-replay.v4",
-        "source_runtime_version": "single-pass-availability-cursor.v4",
+        "source_replay_schema_version": "canonical-historical-replay.v5",
+        "source_runtime_version": "single-pass-availability-cursor.v5",
         "outcome_alignment": "decision_horizon",
         "generated_at": generated_at.isoformat(),
         "strict_only": False,
+        "macro_coverage_satisfied": True,
+        "certification_ready": True,
+        "required_macro_datasets": [
+            "series.fedfunds",
+            "series.t10y2y",
+            "series.vixcls",
+        ],
+        "macro_excluded_observation_count": 0,
         "governance_only_observation_count": 0,
         "bounded_calibration_outcome_count": 0,
         "decisions": decisions,
@@ -215,3 +221,5 @@ def test_live_cycle_committee_and_cio_apply_historical_controls() -> None:
     assert '"market_regime": context.market.market_regime' in replay_source
     assert "latest-canonical-learning.json" in safe_resolver_source
     assert 'payload.get("outcome_alignment") != "decision_horizon"' in safe_resolver_source
+    assert 'payload.get("macro_coverage_satisfied") is not True' in safe_resolver_source
+    assert 'payload.get("certification_ready") is not True' in safe_resolver_source
