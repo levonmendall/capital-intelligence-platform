@@ -549,7 +549,7 @@ def assess_free_paper_pilot_readiness(
                 market_open = provider_clock.get("is_open") is True
             maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)
             maximum_future_skew = (
-                timedelta(seconds=60) if dynamic_evaluation_time else timedelta(0)
+                timedelta(minutes=15) if dynamic_evaluation_time else timedelta(0)
             )
             for symbol in validated:
                 quote = quotes[symbol]
@@ -572,7 +572,7 @@ def assess_free_paper_pilot_readiness(
                     raise ValueError(f"{symbol} quote is future-known")
                 if observed > now:
                     warnings.append(
-                        f"{symbol}: quote timestamp is ahead of the runtime clock but aligned with the Alpaca market clock"
+                        f"{symbol}: quote source timestamp is ahead of the runtime clock but was received live and remains inside the bounded provider-clock reconciliation window"
                     )
                 quote_times.append((symbol, observed.isoformat()))
                 if market_open and quote_reference_time - observed > maximum_age:

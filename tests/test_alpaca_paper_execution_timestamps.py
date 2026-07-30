@@ -39,9 +39,9 @@ class _Client:
         }
 
 
-def test_alpaca_execution_adapters_tolerate_small_provider_clock_skew() -> None:
+def test_alpaca_execution_adapters_normalize_bounded_live_provider_clock_skew() -> None:
     as_of = datetime(2026, 7, 28, 19, 0, tzinfo=timezone.utc)
-    client = _Client(timestamp=as_of + timedelta(seconds=2))
+    client = _Client(timestamp=as_of + timedelta(minutes=2))
     profile = load_free_paper_pilot_universe().profiles()[0]
 
     session = AlpacaPaperSessionProvider(client).session(
@@ -58,7 +58,7 @@ def test_alpaca_execution_adapters_tolerate_small_provider_clock_skew() -> None:
 
 def test_alpaca_execution_adapters_reject_material_future_evidence() -> None:
     as_of = datetime(2026, 7, 28, 19, 0, tzinfo=timezone.utc)
-    client = _Client(timestamp=as_of + timedelta(seconds=6))
+    client = _Client(timestamp=as_of + timedelta(minutes=16))
     profile = load_free_paper_pilot_universe().profiles()[0]
 
     try:

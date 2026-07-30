@@ -403,7 +403,7 @@ def test_live_readiness_uses_provider_clock_for_bounded_source_skew() -> None:
 
     assert report.configuration_ready
     assert any(
-        "aligned with the Alpaca market clock" in warning
+        "bounded provider-clock reconciliation window" in warning
         for warning in report.warnings
     )
 
