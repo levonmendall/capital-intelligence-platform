@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from cio.historical_learning import (
@@ -46,7 +47,7 @@ class HistoricalLearningResolver(_BaseHistoricalLearningResolver):
         self,
         candidate: CandidateDecisionRecord,
         *,
-        as_of,
+        as_of: datetime,
         macro_regime: str,
         market_regime: str,
     ) -> HistoricalLearningContext:
@@ -86,20 +87,37 @@ class HistoricalLearningResolver(_BaseHistoricalLearningResolver):
             market_regime=market_regime,
         )
         excluded = int(payload.get("governance_only_observation_count", 0) or 0)
-        if excluded <= 0:
+        bounded = int(payload.get("bounded_calibration_outcome_count", 0) or 0)
+        limitations: list[str] = []
+        identifiers: list[str] = []
+        if excluded > 0:
+            limitations.append(
+                f"{excluded} capability-policy-only historical observations were retained "
+                "for governance review but excluded from forecast, confidence, and position-size calibration."
+            )
+            identifiers.append(
+                f"historical-learning:governance-only-excluded:{excluded}"
+            )
+        if bounded > 0:
+            limitations.append(
+                f"{bounded} extreme decision-relative regret observations were preserved "
+                "at full value in the research archive but bounded at -100% in the live calibration input."
+            )
+            identifiers.append(
+                f"historical-learning:bounded-calibration-outcomes:{bounded}"
+            )
+        if not limitations:
             return context
-        limitation = (
-            f"{excluded} capability-policy-only historical observations were retained "
-            "for governance review but excluded from forecast, confidence, and position-size calibration."
-        )
+        note = " ".join(limitations)
         return replace(
             context,
-            summary=f"{context.summary} {limitation}",
-            limitations=tuple(dict.fromkeys(context.limitations + (limitation,))),
+            summary=f"{context.summary} {note}",
+            limitations=tuple(
+                dict.fromkeys(context.limitations + tuple(limitations))
+            ),
             evidence_identifiers=tuple(
                 dict.fromkeys(
-                    context.evidence_identifiers
-                    + (f"historical-learning:governance-only-excluded:{excluded}",)
+                    context.evidence_identifiers + tuple(identifiers)
                 )
             ),
         )
