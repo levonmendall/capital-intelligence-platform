@@ -17,6 +17,7 @@ SUPPORTED_SCHEMA_VERSIONS = frozenset(
         "canonical-historical-replay.v1",
         "canonical-historical-replay.v2",
         "canonical-historical-replay.v3",
+        "canonical-historical-replay.v4",
     }
 )
 
@@ -105,11 +106,28 @@ def canonical_replay_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
     learning_count = int(
         payload.get("learning_observation_count", len(observations)) or 0
     )
+    governance_only = int(
+        payload.get(
+            "governance_only_observation_count",
+            sum(item.get("calibration_eligible") is False for item in observations),
+        )
+        or 0
+    )
+    calibration_eligible = int(
+        payload.get(
+            "calibration_eligible_observation_count",
+            max(0, learning_count - governance_only),
+        )
+        or 0
+    )
     realized_count = int(
         payload.get(
             "realized_outcome_count",
             sum(
-                isinstance(item.get("realized_return_to_next_cutoff"), (int, float))
+                isinstance(
+                    item.get("realized_decision_value_at_horizon"),
+                    (int, float),
+                )
                 for item in observations
             ),
         )
@@ -147,7 +165,10 @@ def canonical_replay_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
         "learning_observations": learning_count,
         "cio_decision_observations": cio_count,
         "qualification_observations": qualification_count,
+        "calibration_eligible_observations": calibration_eligible,
+        "governance_only_observations": governance_only,
         "realized_outcomes": realized_count,
+        "outcome_alignment": payload.get("outcome_alignment") or "legacy_next_cutoff",
         "avoided_losses": avoided_count,
         "missed_opportunities": missed_count,
         "research_only": payload.get("research_only") is True,
@@ -172,7 +193,7 @@ def canonical_replay_cutoff_rows(payload: Mapping[str, Any]) -> list[dict[str, A
         raw_observations = item.get("decisions")
         observations = raw_observations if isinstance(raw_observations, list) else []
         action_counts: dict[str, int] = {}
-        avoided = missed = 0
+        avoided = missed = governance_only = 0
         for observation in observations:
             if not isinstance(observation, Mapping):
                 continue
@@ -180,6 +201,7 @@ def canonical_replay_cutoff_rows(payload: Mapping[str, Any]) -> list[dict[str, A
             action_counts[action] = action_counts.get(action, 0) + 1
             avoided += observation.get("realized_outcome") == "avoided_loss"
             missed += observation.get("realized_outcome") == "missed_opportunity"
+            governance_only += observation.get("calibration_eligible") is False
         actions = ", ".join(
             f"{name.replace('_', ' ').title()} × {count}"
             for name, count in sorted(action_counts.items())
@@ -211,6 +233,7 @@ def canonical_replay_cutoff_rows(payload: Mapping[str, Any]) -> list[dict[str, A
                 "CIO decisions": int(item.get("decision_count", 0) or 0),
                 "Pre-CIO outcomes": qualification_count,
                 "Learning observations": learning_count,
+                "Governance only": governance_only,
                 "Actions / outcomes": actions or "None",
                 "Avoided losses": avoided,
                 "Missed opportunities": missed,
@@ -249,7 +272,7 @@ def render_canonical_historical_replay() -> None:
     learning_columns[0].metric(
         "Learning observations", summary["learning_observations"]
     )
-    learning_columns[1].metric("Realized outcomes", summary["realized_outcomes"])
+    learning_columns[1].metric("Horizon outcomes", summary["realized_outcomes"])
     learning_columns[2].metric("Avoided losses", summary["avoided_losses"])
     learning_columns[3].metric(
         "Missed opportunities", summary["missed_opportunities"]
@@ -293,12 +316,15 @@ def render_canonical_historical_replay() -> None:
     st.info(
         "This is governed research evidence, not an execution surface or verified "
         "performance claim. CIO decisions and pre-CIO qualification outcomes are "
-        "reported separately. Historical evidence may reduce confidence or size, but "
-        "never creates a trade or changes the active paper portfolio."
+        "reported separately. Only calibration-eligible observations with outcomes "
+        "aligned to the original decision horizon may affect live confidence or size."
     )
     st.caption(
         f"CIO decision observations: {summary['cio_decision_observations']} · "
-        f"Pre-CIO qualification observations: {summary['qualification_observations']}"
+        f"Pre-CIO qualification observations: {summary['qualification_observations']} · "
+        f"Calibration eligible: {summary['calibration_eligible_observations']} · "
+        f"Governance only: {summary['governance_only_observations']} · "
+        f"Outcome alignment: {str(summary['outcome_alignment']).replace('_', ' ')}"
     )
 
     rows = canonical_replay_cutoff_rows(payload)
