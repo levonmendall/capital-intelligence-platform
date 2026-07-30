@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -13,8 +14,8 @@ from cio import (
     HistoricalLearningStatus,
 )
 from historical_replay.canonical import HistoricalCanonicalContextBuilder
-from historical_replay.canonical_runtime import (
-    EfficientCanonicalHistoricalReplayEngine,
+from historical_replay.canonical_runtime_v4 import (
+    HorizonAlignedCanonicalHistoricalReplayEngine,
 )
 from historical_replay.models import HistoricalRecord
 from historical_replay.store import HistoricalStore
@@ -95,7 +96,7 @@ def _live_candidate(as_of: datetime) -> CandidateDecisionRecord:
     )
 
 
-def test_pre_cio_rejections_become_governed_learning_observations(tmp_path) -> None:
+def test_pre_cio_rejections_remain_distinct_and_calibration_scoped(tmp_path) -> None:
     store = HistoricalStore(tmp_path)
     start = date(2019, 9, 1)
     store.append(
@@ -103,7 +104,7 @@ def test_pre_cio_rejections_become_governed_learning_observations(tmp_path) -> N
         for index in range(183)
     )
 
-    report = EfficientCanonicalHistoricalReplayEngine(
+    report = HorizonAlignedCanonicalHistoricalReplayEngine(
         store,
         builder=HistoricalCanonicalContextBuilder(
             minimum_observations=21,
@@ -116,81 +117,146 @@ def test_pre_cio_rejections_become_governed_learning_observations(tmp_path) -> N
         strict_only=True,
     )
 
-    assert report["schema_version"] == "canonical-historical-replay.v3"
-    assert report["runtime_version"] == "single-pass-availability-cursor.v3"
+    assert report["schema_version"] == "canonical-historical-replay.v4"
+    assert report["runtime_version"] == "single-pass-availability-cursor.v4"
     assert report["learning_observation_count"] >= 2
     assert report["qualification_observation_count"] >= 2
-    assert report["realized_outcome_count"] >= 1
+    assert report["next_cutoff_outcome_count"] >= 1
+    assert report["realized_outcome_count"] == 0
     assert report["cio_decision_observation_count"] == 0
+    assert report["outcome_alignment"] == "decision_horizon"
 
-    first = report["decisions"][0]
-    assert first["decision_count"] == 0
-    assert first["qualification_rejection_count"] >= 1
-    observation = first["qualification_observations"][0]
+    observation = report["decisions"][0]["qualification_observations"][0]
     assert observation["decision_stage"] == "pre_cio_qualification"
     assert observation["canonical_cio_decision"] is False
-    assert observation["action"] in {
-        "insufficient_evidence",
-        "no_superior_opportunity",
+    assert observation["learning_scope"] in {
+        "governance_only",
+        "decision_calibration",
     }
+    assert isinstance(observation["calibration_eligible"], bool)
     assert observation["qualification_reasons"]
-    assert observation["realized_outcome"] == "missed_opportunity"
+    assert observation["next_cutoff_outcome"] == "missed_opportunity"
     assert observation["underlying_return_to_next_cutoff"] > 0.0
     assert observation["realized_return_to_next_cutoff"] < 0.0
+    assert "realized_return_at_decision_horizon" not in observation
+    assert (tmp_path / "manifests" / "latest-canonical-learning.json").exists()
 
 
-def test_realized_outcomes_value_abstention_and_support_correctly() -> None:
-    cutoffs = [
-        {
-            "cutoff": "2020-01-31T23:59:59+00:00",
-            "state": "completed",
-            "prices": {"BTC-USD": 100.0, "ETH-USD": 100.0},
-            "decisions": [
-                {"symbol": "BTC-USD", "action": "no_superior_opportunity"},
-                {"symbol": "ETH-USD", "action": "buy"},
-            ],
-        },
-        {
-            "cutoff": "2020-02-29T23:59:59+00:00",
-            "state": "completed",
-            "prices": {"BTC-USD": 110.0, "ETH-USD": 110.0},
-            "decisions": [],
-        },
-    ]
+def test_outcomes_are_measured_at_stated_decision_horizon() -> None:
+    start = datetime(2020, 1, 31, 23, 59, 59, tzinfo=UTC)
+    cutoffs = []
+    for month in range(14):
+        cutoff_at = start + timedelta(days=31 * month)
+        cutoffs.append(
+            {
+                "cutoff": cutoff_at.isoformat(),
+                "state": "completed",
+                "prices": {"BTC-USD": 100.0 + 10.0 * month},
+                "decisions": (
+                    [
+                        {
+                            "symbol": "BTC-USD",
+                            "action": "no_superior_opportunity",
+                            "decision_horizon_days": 365,
+                        }
+                    ]
+                    if month == 0
+                    else []
+                ),
+            }
+        )
 
-    EfficientCanonicalHistoricalReplayEngine._attach_realized_outcomes(cutoffs)
+    HorizonAlignedCanonicalHistoricalReplayEngine._attach_realized_outcomes(cutoffs)
 
-    abstention, support = cutoffs[0]["decisions"]
-    assert abstention["underlying_return_to_next_cutoff"] == pytest.approx(0.10)
-    assert abstention["realized_return_to_next_cutoff"] == pytest.approx(-0.10)
-    assert abstention["realized_outcome"] == "missed_opportunity"
-    assert support["underlying_return_to_next_cutoff"] == pytest.approx(0.10)
-    assert support["realized_return_to_next_cutoff"] == pytest.approx(0.10)
-    assert support["realized_outcome"] == "supported_gain"
+    observation = cutoffs[0]["decisions"][0]
+    assert observation["next_cutoff_horizon_days"] == 31
+    assert observation["underlying_return_to_next_cutoff"] == pytest.approx(0.10)
+    assert observation["realized_return_to_next_cutoff"] == pytest.approx(-0.10)
+    assert observation["next_cutoff_outcome"] == "missed_opportunity"
+    assert observation["realized_horizon_target_days"] == 365
+    assert observation["realized_horizon_days"] >= 365
+    assert observation["underlying_return_at_decision_horizon"] > 1.0
+    assert observation["realized_return_at_decision_horizon"] < -1.0
+    assert observation["realized_outcome"] == "missed_opportunity"
 
 
-def test_live_resolver_consumes_pre_cio_no_action_history(tmp_path) -> None:
-    store = HistoricalStore(tmp_path)
-    start = date(2019, 9, 1)
-    store.append(
-        _price_record(start + timedelta(days=index), index)
-        for index in range(183)
+def test_learning_input_excludes_policy_only_and_remaps_horizon_value() -> None:
+    report = {
+        "schema_version": "canonical-historical-replay.v4",
+        "runtime_version": "single-pass-availability-cursor.v4",
+        "generated_at": "2026-07-29T00:00:00Z",
+        "strict_only": True,
+        "governance_only_observation_count": 1,
+        "decisions": [
+            {
+                "state": "completed",
+                "decisions": [
+                    {
+                        "candidate_identifier": "governance-only",
+                        "calibration_eligible": False,
+                        "realized_return_to_next_cutoff": 0.25,
+                    },
+                    {
+                        "candidate_identifier": "eligible",
+                        "calibration_eligible": True,
+                        "realized_return_to_next_cutoff": 0.10,
+                        "realized_decision_value_at_horizon": -0.20,
+                    },
+                ],
+            }
+        ],
+    }
+
+    learning = HorizonAlignedCanonicalHistoricalReplayEngine._learning_input_report(
+        report
     )
-    report = EfficientCanonicalHistoricalReplayEngine(
-        store,
-        builder=HistoricalCanonicalContextBuilder(minimum_observations=21),
-    ).run(
-        start=date(2020, 1, 1),
-        end=date(2020, 2, 29),
-        strict_only=True,
-    )
-    generated_at = datetime.fromisoformat(
-        report["generated_at"].replace("Z", "+00:00")
-    )
+
+    assert learning["schema_version"] == "canonical-historical-learning-input.v1"
+    assert learning["outcome_alignment"] == "decision_horizon"
+    assert learning["learning_observation_count"] == 1
+    assert learning["governance_only_observation_count"] == 1
+    observations = learning["decisions"][0]["decisions"]
+    assert [item["candidate_identifier"] for item in observations] == ["eligible"]
+    assert observations[0]["realized_return_to_next_cutoff"] == pytest.approx(-0.20)
+
+
+def test_live_resolver_uses_safe_sidecar_and_reports_governance_exclusions(
+    tmp_path,
+) -> None:
+    generated_at = datetime(2026, 7, 29, 12, tzinfo=UTC)
+    payload = {
+        "schema_version": "canonical-historical-learning-input.v1",
+        "generated_at": generated_at.isoformat(),
+        "strict_only": True,
+        "outcome_alignment": "decision_horizon",
+        "governance_only_observation_count": 4,
+        "decisions": [
+            {
+                "state": "completed",
+                "macro_regime": "risk_on",
+                "decisions": [
+                    {
+                        "candidate_identifier": "historical:btc",
+                        "symbol": "BTC-USD",
+                        "asset_class": "crypto",
+                        "decision_horizon_days": 365,
+                        "macro_regime": "risk_on",
+                        "market_regime": "positive_trend",
+                        "action": "no_superior_opportunity",
+                        "final_confidence": 0.60,
+                        "recommended_position_weight": None,
+                        "realized_return_to_next_cutoff": -0.20,
+                    }
+                ],
+            }
+        ],
+    }
+    path = tmp_path / "latest-canonical-learning.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
     as_of = generated_at + timedelta(seconds=1)
 
     context = HistoricalLearningResolver(
-        tmp_path / "manifests" / "latest-canonical-replay.json",
+        path,
         minimum_sample_size=1,
     ).resolve(
         _live_candidate(as_of),
@@ -203,10 +269,11 @@ def test_live_resolver_consumes_pre_cio_no_action_history(tmp_path) -> None:
         HistoricalLearningStatus.AVAILABLE,
         HistoricalLearningStatus.LIMITED,
     }
-    assert context.sample_size >= 1
+    assert context.sample_size == 1
     assert context.abstention_rate == 1.0
-    assert context.realized_sample_size >= 1
+    assert context.realized_sample_size == 1
     assert context.historical_hit_rate == 0.0
+    assert "4 capability-policy-only" in context.summary
     assert context.position_size_multiplier <= 1.0
     assert context.confidence_ceiling <= 1.0
     assert context.may_increase_position_size is False

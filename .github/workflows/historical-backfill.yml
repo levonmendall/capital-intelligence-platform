@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - "historical_replay/**"
+      - "cio/governed_historical_learning.py"
+      - "cio/historical_learning.py"
+      - "cio/__init__.py"
+      - "historical_replay_ui.py"
       - "run_historical_backfill.py"
       - "run_historical_shadow_replay.py"
       - "run_canonical_historical_replay.py"
@@ -12,12 +16,18 @@ on:
       - "tests/test_historical_replay.py"
       - "tests/test_canonical_historical_replay.py"
       - "tests/test_canonical_no_action_learning.py"
+      - "tests/test_horizon_aligned_historical_learning.py"
+      - "tests/test_historical_replay_ui.py"
       - "tests/test_historical_certification_workflow.py"
       - ".github/workflows/historical-backfill.yml"
   push:
     branches: [main]
     paths:
       - "historical_replay/**"
+      - "cio/governed_historical_learning.py"
+      - "cio/historical_learning.py"
+      - "cio/__init__.py"
+      - "historical_replay_ui.py"
       - "run_historical_backfill.py"
       - "run_canonical_historical_replay.py"
       - "config/historical_replay_free_sources.json"
@@ -108,11 +118,15 @@ jobs:
             tests/test_historical_replay.py \
             tests/test_canonical_historical_replay.py \
             tests/test_canonical_no_action_learning.py \
+            tests/test_horizon_aligned_historical_learning.py \
+            tests/test_historical_replay_ui.py \
             tests/test_historical_certification_workflow.py
       - name: Compile historical replay commands
         run: |
           python -m compileall -q \
             historical_replay \
+            cio/governed_historical_learning.py \
+            historical_replay_ui.py \
             run_historical_backfill.py \
             run_historical_shadow_replay.py \
             run_canonical_historical_replay.py
@@ -136,9 +150,14 @@ jobs:
       learning_observations: ${{ steps.metrics.outputs.learning_observations }}
       cio_decision_observations: ${{ steps.metrics.outputs.cio_decision_observations }}
       qualification_observations: ${{ steps.metrics.outputs.qualification_observations }}
+      calibration_eligible_observations: ${{ steps.metrics.outputs.calibration_eligible_observations }}
+      governance_only_observations: ${{ steps.metrics.outputs.governance_only_observations }}
       realized_outcomes: ${{ steps.metrics.outputs.realized_outcomes }}
+      next_cutoff_outcomes: ${{ steps.metrics.outputs.next_cutoff_outcomes }}
+      bounded_calibration_outcomes: ${{ steps.metrics.outputs.bounded_calibration_outcomes }}
       avoided_losses: ${{ steps.metrics.outputs.avoided_losses }}
       missed_opportunities: ${{ steps.metrics.outputs.missed_opportunities }}
+      outcome_alignment: ${{ steps.metrics.outputs.outcome_alignment }}
     env:
       FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
       SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
@@ -190,9 +209,14 @@ jobs:
               "learning_observations": int(canonical.get("learning_observation_count", 0)),
               "cio_decision_observations": int(canonical.get("cio_decision_observation_count", 0)),
               "qualification_observations": int(canonical.get("qualification_observation_count", 0)),
+              "calibration_eligible_observations": int(canonical.get("calibration_eligible_observation_count", 0)),
+              "governance_only_observations": int(canonical.get("governance_only_observation_count", 0)),
               "realized_outcomes": int(canonical.get("realized_outcome_count", 0)),
+              "next_cutoff_outcomes": int(canonical.get("next_cutoff_outcome_count", 0)),
+              "bounded_calibration_outcomes": int(canonical.get("bounded_calibration_outcome_count", 0)),
               "avoided_losses": int(canonical.get("avoided_loss_count", 0)),
               "missed_opportunities": int(canonical.get("missed_opportunity_count", 0)),
+              "outcome_alignment": str(canonical.get("outcome_alignment", "unknown")),
           }
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
               for name, value in values.items():
@@ -233,9 +257,14 @@ jobs:
       LEARNING_OBSERVATIONS: ${{ needs.backfill.outputs.learning_observations }}
       CIO_DECISION_OBSERVATIONS: ${{ needs.backfill.outputs.cio_decision_observations }}
       QUALIFICATION_OBSERVATIONS: ${{ needs.backfill.outputs.qualification_observations }}
+      CALIBRATION_ELIGIBLE_OBSERVATIONS: ${{ needs.backfill.outputs.calibration_eligible_observations }}
+      GOVERNANCE_ONLY_OBSERVATIONS: ${{ needs.backfill.outputs.governance_only_observations }}
       REALIZED_OUTCOMES: ${{ needs.backfill.outputs.realized_outcomes }}
+      NEXT_CUTOFF_OUTCOMES: ${{ needs.backfill.outputs.next_cutoff_outcomes }}
+      BOUNDED_CALIBRATION_OUTCOMES: ${{ needs.backfill.outputs.bounded_calibration_outcomes }}
       AVOIDED_LOSSES: ${{ needs.backfill.outputs.avoided_losses }}
       MISSED_OPPORTUNITIES: ${{ needs.backfill.outputs.missed_opportunities }}
+      OUTCOME_ALIGNMENT: ${{ needs.backfill.outputs.outcome_alignment }}
     steps:
       - name: Publish durable certification ledger
         shell: bash
@@ -246,7 +275,7 @@ jobs:
           if [[ "${VALIDATION_RESULT}" == "success" && "${BACKFILL_RESULT}" == "success" ]]; then
             STATE="completed"
             STATUS_STATE="success"
-            DESCRIPTION="obs=${LEARNING_OBSERVATIONS} realized=${REALIZED_OUTCOMES} canonical=${CANONICAL_INVOKED}/${TOTAL_CUTOFFS} blocked=${BLOCKED_CUTOFFS}"
+            DESCRIPTION="eligible=${CALIBRATION_ELIGIBLE_OBSERVATIONS} horizon=${REALIZED_OUTCOMES} governance=${GOVERNANCE_ONLY_OBSERVATIONS} canonical=${CANONICAL_INVOKED}/${TOTAL_CUTOFFS}"
           else
             STATE="failed"
             STATUS_STATE="failure"
@@ -284,14 +313,19 @@ jobs:
 
           ## Governed historical learning
 
-          - Total learning observations: **$(value "${LEARNING_OBSERVATIONS}")**
+          - Total governed observations: **$(value "${LEARNING_OBSERVATIONS}")**
           - CIO decision observations: **$(value "${CIO_DECISION_OBSERVATIONS}")**
           - Pre-CIO qualification observations: **$(value "${QUALIFICATION_OBSERVATIONS}")**
-          - Observations with realized outcomes: **$(value "${REALIZED_OUTCOMES}")**
-          - Avoided losses: **$(value "${AVOIDED_LOSSES}")**
-          - Missed opportunities: **$(value "${MISSED_OPPORTUNITIES}")**
+          - Calibration-eligible observations: **$(value "${CALIBRATION_ELIGIBLE_OBSERVATIONS}")**
+          - Governance-only observations excluded from live calibration: **$(value "${GOVERNANCE_ONLY_OBSERVATIONS}")**
+          - Decision-horizon outcomes: **$(value "${REALIZED_OUTCOMES}")**
+          - Next-cutoff monitoring outcomes: **$(value "${NEXT_CUTOFF_OUTCOMES}")**
+          - Bounded live-calibration outcomes: **$(value "${BOUNDED_CALIBRATION_OUTCOMES}")**
+          - Outcome alignment: \`$(value "${OUTCOME_ALIGNMENT}")\`
+          - Avoided losses at the decision horizon: **$(value "${AVOIDED_LOSSES}")**
+          - Missed opportunities at the decision horizon: **$(value "${MISSED_OPPORTUNITIES}")**
 
-          Pre-CIO qualification outcomes remain explicitly distinct from CIO decisions. Raw underlying returns and decision-relative outcome values are both retained in the protected evidence artifact.
+          Pre-CIO qualification outcomes remain distinct from CIO decisions. Capability-policy-only observations remain available for governance review but cannot affect forecast, confidence, or sizing calibration. Full raw outcomes remain in the protected replay artifact; the live calibration sidecar contains only eligible, decision-horizon-aligned evidence.
 
           ## Permanent safety boundary
 

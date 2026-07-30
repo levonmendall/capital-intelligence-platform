@@ -91,22 +91,29 @@ def _manifest(generated_at: datetime) -> dict[str, object]:
                         "action": "buy" if month < 5 else "watch",
                         "final_confidence": 0.80,
                         "recommended_position_weight": 0.10,
+                        # Compatibility field in the sidecar carries the bounded,
+                        # decision-horizon-aligned value consumed by the base resolver.
                         "realized_return_to_next_cutoff": outcome,
                     }
                 ],
             }
         )
     return {
-        "schema_version": "canonical-historical-replay.v2",
+        "schema_version": "canonical-historical-learning-input.v1",
+        "source_replay_schema_version": "canonical-historical-replay.v4",
+        "source_runtime_version": "single-pass-availability-cursor.v4",
+        "outcome_alignment": "decision_horizon",
         "generated_at": generated_at.isoformat(),
         "strict_only": False,
+        "governance_only_observation_count": 0,
+        "bounded_calibration_outcome_count": 0,
         "decisions": decisions,
     }
 
 
 def test_resolver_attaches_restrictive_outcome_and_regime_context(tmp_path) -> None:
     as_of = datetime(2026, 7, 29, 20, 0, tzinfo=UTC)
-    manifest = tmp_path / "latest-canonical-replay.json"
+    manifest = tmp_path / "latest-canonical-learning.json"
     manifest.write_text(
         json.dumps(_manifest(as_of - timedelta(hours=1))),
         encoding="utf-8",
@@ -139,7 +146,7 @@ def test_resolver_attaches_restrictive_outcome_and_regime_context(tmp_path) -> N
 
 def test_future_manifest_is_rejected(tmp_path) -> None:
     as_of = datetime(2026, 7, 29, 20, 0, tzinfo=UTC)
-    manifest = tmp_path / "latest-canonical-replay.json"
+    manifest = tmp_path / "latest-canonical-learning.json"
     manifest.write_text(
         json.dumps(_manifest(as_of + timedelta(seconds=1))),
         encoding="utf-8",
@@ -192,6 +199,9 @@ def test_live_cycle_committee_and_cio_apply_historical_controls() -> None:
     cio_source = open("cio/service.py", encoding="utf-8").read()
     persistence_source = open("cio/persistence.py", encoding="utf-8").read()
     replay_source = open("historical_replay/canonical.py", encoding="utf-8").read()
+    safe_resolver_source = open(
+        "cio/governed_historical_learning.py", encoding="utf-8"
+    ).read()
 
     assert "historical_learning_resolver.resolve" in cycle_source
     assert "historical_learning=historical_learning" in cycle_source
@@ -203,3 +213,5 @@ def test_live_cycle_committee_and_cio_apply_historical_controls() -> None:
     assert '"historical_learning": packet.historical_learning.as_dict()' in persistence_source
     assert "realized_return_to_next_cutoff" in replay_source
     assert '"market_regime": context.market.market_regime' in replay_source
+    assert "latest-canonical-learning.json" in safe_resolver_source
+    assert 'payload.get("outcome_alignment") != "decision_horizon"' in safe_resolver_source
