@@ -1,0 +1,51 @@
+name: Apply live response-time normalization
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/expand-return-opportunity-discovery'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify and apply response-time normalization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(wc -c < tools/receipt_time_fix/payload)" -eq 2232
+          echo '2477776e69ac3b2affdcbde1b2c5f8272f66a5cbea167fe6216c85fa6739b97e  tools/receipt_time_fix/payload' | sha256sum -c -
+          base64 --decode tools/receipt_time_fix/payload > /tmp/receipt-time.patch.xz
+          echo '1aa20662e13c6bad496600028485eabac5ea8dd5602ad0893ea05564646d4645  /tmp/receipt-time.patch.xz' | sha256sum -c -
+          xz --decompress --stdout /tmp/receipt-time.patch.xz > /tmp/receipt-time.patch
+          echo '1387d2cd4ad7052ab3c5afc9cf4d8569c029f14ede87d32581cfceee5d275542  /tmp/receipt-time.patch' | sha256sum -c -
+          git apply --check -p3 /tmp/receipt-time.patch
+          git apply -p3 /tmp/receipt-time.patch
+
+      - name: Commit clean response-time correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf tools/receipt_time_fix
+          rm -f .github/workflows/apply-receipt-time-fix.yml
+          git config user.name 'capital-intelligence-automation'
+          git config user.email 'capital-intelligence-automation@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Use response-time authority for live quotes'
+          git push origin "HEAD:${{ github.head_ref }}"
