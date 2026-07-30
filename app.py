@@ -17,7 +17,7 @@ import premium_ui as _premium_ui
 
 from cio_pending_transactions_ui import render_pending_transaction_report
 from cio_report_history_ui import render_cio_report_archive
-from operating_intelligence_ui import (
+from concise_operating_intelligence_ui import (
     render_environment_economic_brief,
     render_history_decision_accountability,
     render_information_freshness,
