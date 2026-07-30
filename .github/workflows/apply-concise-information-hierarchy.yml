@@ -1,0 +1,48 @@
+name: Apply concise information hierarchy
+
+on:
+  push:
+    branches:
+      - agent/concise-information-hierarchy
+    paths:
+      - .github/workflows/apply-concise-information-hierarchy.yml
+      - concise_operating_intelligence_ui.py
+      - tests/test_concise_operating_intelligence_ui.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/concise-information-hierarchy
+          fetch-depth: 0
+      - name: Switch active presenter
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app.py")
+          source = path.read_text(encoding="utf-8")
+          old = "from operating_intelligence_ui import ("
+          new = "from concise_operating_intelligence_ui import ("
+          if old in source:
+              source = source.replace(old, new, 1)
+              path.write_text(source, encoding="utf-8")
+          elif new not in source:
+              raise SystemExit("active operating intelligence import was not found")
+          PY
+      - name: Commit generated integration
+        run: |
+          if git diff --quiet -- app.py; then
+            exit 0
+          fi
+          git config user.name "capital-intelligence-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add app.py
+          git commit -m "Use concise operating information hierarchy"
+          git push origin HEAD:agent/concise-information-hierarchy
