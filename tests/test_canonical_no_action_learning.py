@@ -229,6 +229,14 @@ def test_live_resolver_uses_safe_sidecar_and_reports_governance_exclusions(
         "generated_at": generated_at.isoformat(),
         "strict_only": True,
         "outcome_alignment": "decision_horizon",
+        "macro_coverage_satisfied": True,
+        "certification_ready": True,
+        "required_macro_datasets": [
+            "series.fedfunds",
+            "series.t10y2y",
+            "series.vixcls",
+        ],
+        "macro_excluded_observation_count": 0,
         "governance_only_observation_count": 4,
         "decisions": [
             {
