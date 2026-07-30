@@ -58,15 +58,15 @@ services:
       - key: CAPITAL_INTELLIGENCE_AUTONOMOUS_PAPER_AUTHORIZATION_HOURS
         value: "24"
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE
-        value: America/New_York
+        value: America/Los_Angeles
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_HOUR
-        value: "7"
+        value: "5"
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS
         value: "60"
       - key: CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED
         value: "true"
       - key: CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_INTERVAL_SECONDS
-        value: "3600"
+        value: "1800"
       - key: CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_CODE
         value: COMPOUNDING
       - key: APCA_API_BASE_URL
