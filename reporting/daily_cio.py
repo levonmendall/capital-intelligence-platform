@@ -228,12 +228,14 @@ class DailyCIOBriefingBuilder:
                 for reason in rejected.reasons
             )
             evidence_limited_terms = (
-                "evidence",
-                "data",
-                "stale",
+                "insufficient evidence",
+                "evidence quality",
+                "stale data",
+                "data is stale",
                 "missing",
                 "incomplete",
-                "coverage",
+                "analytical coverage",
+                "coverage is below",
                 "unavailable",
                 "uncertified",
                 "unapproved",
