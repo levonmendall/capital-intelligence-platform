@@ -57,7 +57,7 @@ def build_sources(config: Mapping[str, Any], *, user_agent: str) -> tuple[Histor
     sources: list[HistoricalSource] = []
     if enabled.get("fred", {}).get("enabled", True):
         sources.append(FredSource(client, enabled.get("fred", {}).get("series", [])))
-    if enabled.get("cboe_vix", {}).get("enabled", True):
+    if enabled.get("cboe_vix", {}).get("enabled", False):
         sources.append(CboeVixSource(client))
     if enabled.get("coinbase", {}).get("enabled", True):
         sources.append(CoinbaseSource(client, enabled.get("coinbase", {}).get("products", [])))
