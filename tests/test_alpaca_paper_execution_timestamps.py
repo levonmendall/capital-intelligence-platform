@@ -39,9 +39,9 @@ class _Client:
         }
 
 
-def test_alpaca_execution_adapters_normalize_bounded_live_provider_clock_skew() -> None:
+def test_alpaca_execution_adapters_normalize_live_source_clock_domain_difference() -> None:
     as_of = datetime(2026, 7, 28, 19, 0, tzinfo=timezone.utc)
-    client = _Client(timestamp=as_of + timedelta(minutes=2))
+    client = _Client(timestamp=as_of + timedelta(hours=4))
     profile = load_free_paper_pilot_universe().profiles()[0]
 
     session = AlpacaPaperSessionProvider(client).session(
@@ -58,7 +58,7 @@ def test_alpaca_execution_adapters_normalize_bounded_live_provider_clock_skew() 
 
 def test_alpaca_execution_adapters_reject_material_future_evidence() -> None:
     as_of = datetime(2026, 7, 28, 19, 0, tzinfo=timezone.utc)
-    client = _Client(timestamp=as_of + timedelta(minutes=16))
+    client = _Client(timestamp=as_of + timedelta(hours=13))
     profile = load_free_paper_pilot_universe().profiles()[0]
 
     try:
@@ -68,6 +68,6 @@ def test_alpaca_execution_adapters_reject_material_future_evidence() -> None:
             as_of=as_of,
         )
     except RuntimeError as error:
-        assert "future-known" in str(error)
+        assert "diverges beyond" in str(error)
     else:
         raise AssertionError("material future clock evidence must be rejected")

@@ -374,7 +374,7 @@ def test_live_readiness_uses_provider_clock_for_bounded_source_skew() -> None:
             )
         if url.endswith("/v2/stocks/quotes/latest"):
             symbols = str(kwargs["params"]["symbols"]).split(",")
-            observed = (datetime.now(timezone.utc) + timedelta(seconds=90)).isoformat()
+            observed = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
             return _Response(
                 {
                     "quotes": {
@@ -403,7 +403,7 @@ def test_live_readiness_uses_provider_clock_for_bounded_source_skew() -> None:
 
     assert report.configuration_ready
     assert any(
-        "bounded provider-clock reconciliation window" in warning
+        "normalized to response-time availability" in warning
         for warning in report.warnings
     )
 

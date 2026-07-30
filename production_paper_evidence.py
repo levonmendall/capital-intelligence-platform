@@ -1290,7 +1290,7 @@ def build_paper_evidence(
     raw_macro = payload.get("macro")
     company_facts = payload.get("company_facts", {})
     live_collection = payload.get("_live_collection") is True
-    maximum_future_skew_seconds = 900 if live_collection else 0
+    maximum_future_skew_seconds = 43_200 if live_collection else 0
     future_reference_at = as_of
     if live_collection:
         raw_provider_clock = payload.get("provider_clock")

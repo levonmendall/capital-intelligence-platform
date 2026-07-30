@@ -439,9 +439,9 @@ class AlpacaPaperSessionProvider:
             raise ValueError("as_of must be timezone-aware")
         payload = self.client.clock()
         observed_at = _timestamp(payload.get("timestamp"), field_name="Alpaca clock timestamp")
-        if observed_at > as_of + timedelta(minutes=15):
+        if observed_at > as_of + timedelta(hours=12):
             raise AlpacaPaperProviderError(
-                "Alpaca clock is future-known beyond the bounded live provider reconciliation window"
+                "Alpaca clock source timestamp diverges beyond the bounded live receipt-time reconciliation window"
             )
         status = (
             InstrumentSessionStatus.OPEN
@@ -526,9 +526,9 @@ class AlpacaPaperQuoteProvider:
                 raw.get("t"),
                 field_name=f"{profile.symbol} quote timestamp",
             )
-            if observed_at > as_of + timedelta(minutes=15):
+            if observed_at > as_of + timedelta(hours=12):
                 raise AlpacaPaperProviderError(
-                    f"{profile.symbol} quote is future-known beyond the bounded live provider reconciliation window"
+                    f"{profile.symbol} quote source timestamp diverges beyond the bounded live receipt-time reconciliation window"
                 )
             effective_observed_at = min(observed_at, as_of)
             available = min(bid * bid_size, ask * ask_size)
