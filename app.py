@@ -17,9 +17,12 @@ import premium_ui as _premium_ui
 
 from cio_pending_transactions_ui import render_pending_transaction_report
 from cio_report_history_ui import render_cio_report_archive
-from educational_market_briefing_ui import (
+from operating_intelligence_ui import (
     render_environment_economic_brief,
+    render_history_decision_accountability,
+    render_information_freshness,
     render_today_market_brief,
+    render_today_opportunity_scan,
 )
 from live_operating_console import (
     render_live_environment_market_table,
@@ -64,6 +67,9 @@ render_paper_decision_controls(
 render_background_paper_execution_worker(
 render_today_market_brief(
 render_environment_economic_brief(
+render_today_opportunity_scan(
+render_history_decision_accountability(
+render_information_freshness(
 authenticated_principal
 from core.portfolio import (
     get_mandate_details,
@@ -330,26 +336,49 @@ for _old_detail, _new_detail in _decision_change_replacements:
         "decision-change collapse insertion point is unavailable",
     )
 
-# Put the daily educational brief immediately below the hero on the two
-# information surfaces. The original function anchor remains in the replacement so
-# the live-fragment decorator can still be installed later in this entrypoint.
-_educational_briefing_insertions = (
+# Place connected educational and operating intelligence immediately after each
+# surface loads its canonical records. The hero renders before the selected surface.
+_operating_intelligence_insertions = (
     (
-        "def _render_today() -> None:\n",
-        "def _render_today() -> None:\n"
-        "    render_today_market_brief()\n\n",
+        '    _today_construction = _latest("portfolio_construction")\n\n',
+        '    _today_construction = _latest("portfolio_construction")\n'
+        '    render_today_market_brief(briefing=briefing)\n'
+        '    render_information_freshness(briefing=briefing, surface="today")\n'
+        '    render_today_opportunity_scan(briefing=briefing)\n\n',
     ),
     (
-        "def _render_environment() -> None:\n",
-        "def _render_environment() -> None:\n"
-        "    render_environment_economic_brief()\n\n",
+        '    latest_briefing = _latest("daily_cio_briefing")\n\n',
+        '    latest_briefing = _latest("daily_cio_briefing")\n'
+        '    render_environment_economic_brief(briefing=latest_briefing)\n'
+        '    render_information_freshness(\n'
+        '        briefing=latest_briefing, surface="environment"\n'
+        '    )\n\n',
+    ),
+    (
+        '    briefing = _latest("daily_cio_briefing")\n'
+        '    mandate = get_mandate_details(CANONICAL_PORTFOLIO_CODE)\n',
+        '    briefing = _latest("daily_cio_briefing")\n'
+        '    render_information_freshness(briefing=briefing, surface="portfolio")\n'
+        '    mandate = get_mandate_details(CANONICAL_PORTFOLIO_CODE)\n',
+    ),
+    (
+        '    trades = get_trade_history(limit=250)\n\n',
+        '    trades = get_trade_history(limit=250)\n'
+        '    render_information_freshness(\n'
+        '        briefing=(briefings[0] if briefings else None), surface="history"\n'
+        '    )\n\n',
+    ),
+    (
+        '    with st.expander("How the History surface works"):\n',
+        '    render_history_decision_accountability()\n\n'
+        '    with st.expander("How the History surface works"):\n',
     ),
 )
-for _brief_anchor, _brief_replacement in _educational_briefing_insertions:
+for _intelligence_anchor, _intelligence_replacement in _operating_intelligence_insertions:
     _replace_source_once(
-        _brief_anchor,
-        _brief_replacement,
-        "educational briefing insertion point is unavailable",
+        _intelligence_anchor,
+        _intelligence_replacement,
+        "operating intelligence insertion point is unavailable",
     )
 
 # Refresh the active operating surface without requiring navigation or a browser
