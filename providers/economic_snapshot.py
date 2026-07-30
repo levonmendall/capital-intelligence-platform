@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from intelligence.models import MarketSnapshot
 from intelligence.provider import load_sample_snapshot
@@ -22,6 +23,8 @@ class EconomicReadings:
     ten_year_yield: float
     two_year_yield: float
     federal_funds_rate: float
+    evaluated_at: datetime | None = None
+    observation_dates: tuple[tuple[str, str], ...] = ()
 
     @property
     def yield_curve_spread(self) -> float:
@@ -66,26 +69,22 @@ def build_live_snapshot(
 
     fred = provider or FREDProvider()
 
-    unemployment = fred.get_latest_value(
-        SERIES["unemployment"]
-    ).value
+    unemployment_observation = fred.get_latest_value(SERIES["unemployment"])
+    unemployment = unemployment_observation.value
 
     inflation_observations = fred.get_observations(
         SERIES["inflation"],
         limit=14,
     )
 
-    ten_year = fred.get_latest_value(
-        SERIES["ten_year"]
-    ).value
+    ten_year_observation = fred.get_latest_value(SERIES["ten_year"])
+    ten_year = ten_year_observation.value
 
-    two_year = fred.get_latest_value(
-        SERIES["two_year"]
-    ).value
+    two_year_observation = fred.get_latest_value(SERIES["two_year"])
+    two_year = two_year_observation.value
 
-    fed_funds = fred.get_latest_value(
-        SERIES["fed_funds"]
-    ).value
+    fed_funds_observation = fred.get_latest_value(SERIES["fed_funds"])
+    fed_funds = fed_funds_observation.value
 
     latest_cpi = inflation_observations[0].value
     year_ago_cpi = inflation_observations[-1].value
@@ -130,6 +129,14 @@ def build_live_snapshot(
         ten_year_yield=ten_year,
         two_year_yield=two_year,
         federal_funds_rate=fed_funds,
+        evaluated_at=datetime.now(timezone.utc),
+        observation_dates=(
+            (SERIES["unemployment"], unemployment_observation.date),
+            (SERIES["inflation"], inflation_observations[0].date),
+            (SERIES["ten_year"], ten_year_observation.date),
+            (SERIES["two_year"], two_year_observation.date),
+            (SERIES["fed_funds"], fed_funds_observation.date),
+        ),
     )
 
     return snapshot, readings

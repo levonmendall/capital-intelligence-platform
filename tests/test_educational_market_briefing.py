@@ -6,11 +6,11 @@ from pathlib import Path
 from educational_market_briefing_ui import (
     build_economic_event_items,
     build_today_items,
-    daily_briefing_date,
     economic_investment_implications,
     economic_portfolio_lens,
     economic_snapshot_summary,
 )
+from operating_intelligence_ui import operating_date
 from providers.economic_snapshot import EconomicReadings
 
 
@@ -154,33 +154,31 @@ def test_economic_context_explains_readings_and_portfolio_channels() -> None:
     ]
 
 
-def test_app_places_briefs_immediately_at_surface_entry() -> None:
+def test_app_places_connected_intelligence_at_surface_entry() -> None:
     source = Path("app.py").read_text(encoding="utf-8")
 
     assert "render_today_market_brief" in source
     assert "render_environment_economic_brief" in source
-    assert "educational briefing insertion point is unavailable" in source
-    today_anchor = '"def _render_today() -> None:\\n"'
-    environment_anchor = '"def _render_environment() -> None:\\n"'
-    assert today_anchor in source
-    assert environment_anchor in source
-    assert source.index(today_anchor) < source.index(
-        "# Refresh the active operating surface"
-    )
-    assert 'render_today_market_brief()\\n\\n' in source
-    assert 'render_environment_economic_brief()\\n\\n' in source
+    assert "render_today_opportunity_scan" in source
+    assert "render_history_decision_accountability" in source
+    assert "render_information_freshness" in source
+    assert "operating intelligence insertion point is unavailable" in source
+    assert 'render_today_market_brief(briefing=briefing)\\n' in source
+    assert 'render_environment_economic_brief(briefing=latest_briefing)\\n' in source
 
 
-def test_daily_briefing_operating_date_rolls_at_five_pacific() -> None:
-    before = datetime(2026, 7, 30, 11, 59, tzinfo=timezone.utc)
-    after = datetime(2026, 7, 30, 12, 1, tzinfo=timezone.utc)
+def test_daily_briefing_operating_date_rolls_at_seven_pacific(monkeypatch) -> None:
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE", "America/Los_Angeles")
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_SCHEDULER_HOUR", "7")
+    before = datetime(2026, 7, 30, 13, 59, tzinfo=timezone.utc)
+    after = datetime(2026, 7, 30, 14, 1, tzinfo=timezone.utc)
 
-    assert daily_briefing_date(before) == "2026-07-29"
-    assert daily_briefing_date(after) == "2026-07-30"
+    assert operating_date(before).isoformat() == "2026-07-29"
+    assert operating_date(after).isoformat() == "2026-07-30"
 
 
 def test_briefing_copy_is_informative_educational_and_non_executing() -> None:
-    source = Path("educational_market_briefing_ui.py").read_text(encoding="utf-8")
+    source = Path("operating_intelligence_ui.py").read_text(encoding="utf-8")
 
     assert "What's happening today" in source
     assert "Economic context today" in source
@@ -188,6 +186,6 @@ def test_briefing_copy_is_informative_educational_and_non_executing() -> None:
     assert "Investment impact:" in source
     assert "Most affected:" in source
     assert "Watch next:" in source
-    assert "rolls at 5:00 AM Pacific" in source
+    assert "rolls at {_schedule_label()}" in source
     assert "Educational context only" in source
-    assert "does not alter the CIO conclusion or authorize a paper trade" in source
+    assert "headlines cannot alter the CIO conclusion or authorize a paper trade" in source
