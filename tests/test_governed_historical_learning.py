@@ -89,6 +89,9 @@ def _manifest(generated_at: datetime) -> dict[str, object]:
                         "market_regime": "positive_trend",
                         "decision_horizon_days": 365,
                         "action": "buy" if month < 5 else "watch",
+                        "observation_type": "opportunity_qualification",
+                        "decision_stage": "pre_cio_qualification",
+                        "canonical_cio_decision": False,
                         "final_confidence": 0.80,
                         "recommended_position_weight": 0.10,
                         "realized_return_to_next_cutoff": outcome,
@@ -113,6 +116,8 @@ def _manifest(generated_at: datetime) -> dict[str, object]:
         "macro_excluded_observation_count": 0,
         "governance_only_observation_count": 0,
         "bounded_calibration_outcome_count": 0,
+        "qualification_observation_count": 6,
+        "cio_decision_observation_count": 0,
         "decisions": decisions,
     }
 
@@ -140,14 +145,57 @@ def test_resolver_attaches_restrictive_outcome_and_regime_context(tmp_path) -> N
     assert context.historical_hit_rate == pytest.approx(4 / 6)
     assert context.median_realized_return > 0.0
     assert context.worst_realized_return == -0.02
-    assert 0.0 < context.position_size_multiplier <= 1.0
-    assert 0.0 < context.confidence_ceiling <= 1.0
+    assert context.position_size_multiplier == 1.0
+    assert context.confidence_ceiling == 1.0
+    assert any(
+        "cannot calibrate CIO confidence or position size" in item
+        for item in context.limitations
+    )
+    assert "historical-learning:qualification-observations:6" in context.evidence_identifiers
+    assert "historical-learning:cio-decision-observations:0" in context.evidence_identifiers
+    assert (
+        "historical-learning:qualification-channel:excluded-from-cio-controls"
+        in context.evidence_identifiers
+    )
     assert context.subordinate_to_current_evidence is True
     assert context.may_increase_expected_return is False
     assert context.may_increase_confidence is False
     assert context.may_increase_position_size is False
     assert context.execution_authorized is False
     assert context.policy_promotion_authorized is False
+
+
+def test_completed_cio_observations_retain_conservative_sizing_authority(tmp_path) -> None:
+    as_of = datetime(2026, 7, 29, 20, 0, tzinfo=UTC)
+    payload = _manifest(as_of - timedelta(hours=1))
+    payload["cio_decision_observation_count"] = 6
+    payload["qualification_observation_count"] = 0
+    for cutoff in payload["decisions"]:
+        for observation in cutoff["decisions"]:
+            observation["observation_type"] = "cio_decision"
+            observation["decision_stage"] = "cio_synthesis"
+            observation["canonical_cio_decision"] = True
+    manifest = tmp_path / "latest-canonical-learning.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    context = HistoricalLearningResolver(manifest).resolve(
+        _candidate(as_of),
+        as_of=as_of,
+        macro_regime="mixed",
+        market_regime="positive_trend",
+    )
+
+    assert context.sample_size == 6
+    assert context.position_size_multiplier < 1.0
+    assert context.confidence_ceiling < 1.0
+    assert (
+        "historical-learning:cio-controls:completed-decision-outcomes"
+        in context.evidence_identifiers
+    )
+    assert not any(
+        "cannot calibrate CIO confidence or position size" in item
+        for item in context.limitations
+    )
 
 
 def test_future_manifest_is_rejected(tmp_path) -> None:

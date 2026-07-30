@@ -213,9 +213,15 @@ def test_context_recalculates_opportunity_cost_against_current_holding() -> None
 
     qualification = OpportunityEngine().qualify(candidate, context)
 
-    assert qualification.effective_opportunity_cost == pytest.approx(0.079)
+    expected = OpportunityEngine()._alternative_comparable_return(
+        context.alternatives[1],
+        cash_anchor=context.alternatives[0].net_expected_return,
+    )
+    assert qualification.effective_opportunity_cost == pytest.approx(expected)
+    assert qualification.effective_opportunity_cost < 0.079
+    assert qualification.effective_opportunity_cost > context.alternatives[0].net_expected_return
     assert qualification.opportunity_edge == pytest.approx(
-        candidate.net_expected_return - 0.079
+        candidate.net_expected_return - expected
     )
     assert qualification.qualified
 

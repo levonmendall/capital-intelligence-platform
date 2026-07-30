@@ -208,6 +208,103 @@ _EXPOSURE_METADATA: dict[str, tuple[str, str, float]] = {
     "market_neutral_alternatives": ("market_neutral", "alternative", -0.1),
 }
 
+_EXPOSURE_ASSET_CLASSES: dict[str, CandidateAssetClass] = {
+    "us_equity": CandidateAssetClass.US_EQUITY,
+    "international_equity": CandidateAssetClass.INTERNATIONAL_EQUITY,
+    "government_bonds": CandidateAssetClass.FIXED_INCOME,
+    "investment_grade_credit": CandidateAssetClass.FIXED_INCOME,
+    "high_yield_credit": CandidateAssetClass.FIXED_INCOME,
+    "cash_treasury": CandidateAssetClass.CASH_EQUIVALENT,
+    "broad_commodities": CandidateAssetClass.COMMODITY,
+    "gold": CandidateAssetClass.COMMODITY,
+    "foreign_exchange": CandidateAssetClass.FX,
+    "crypto": CandidateAssetClass.CRYPTO,
+    "real_estate": CandidateAssetClass.REAL_ESTATE,
+    "managed_futures": CandidateAssetClass.ALTERNATIVE,
+    "option_strategies": CandidateAssetClass.OPTION,
+    "volatility": CandidateAssetClass.VOLATILITY,
+    "market_neutral_alternatives": CandidateAssetClass.ALTERNATIVE,
+}
+
+
+def _history_depth(features: ListedWrapperFeatures) -> float:
+    return _clip(features.bar_count / 2520.0, 0.10, 1.0)
+
+
+def _scenario_probabilities(
+    features: ListedWrapperFeatures,
+    *,
+    cash_expected_return: float,
+    base_return: float,
+) -> tuple[float, float, float]:
+    momentum = features.momentum
+    success_edge = features.rolling_success_rate - 0.50
+    return_edge = base_return - cash_expected_return
+    volatility = min(1.0, max(0.0, features.annualized_volatility))
+    bull = _clip(
+        0.20
+        + 0.20 * max(0.0, success_edge)
+        + 0.10 * max(0.0, momentum)
+        + 0.05 * max(0.0, return_edge),
+        0.10,
+        0.40,
+    )
+    bear = _clip(
+        0.20
+        + 0.20 * max(0.0, -success_edge)
+        + 0.12 * max(0.0, -momentum)
+        + 0.08 * volatility,
+        0.10,
+        0.45,
+    )
+    if bull + bear > 0.70:
+        scale = 0.70 / (bull + bear)
+        bull = round(bull * scale, 8)
+        bear = round(bear * scale, 8)
+    base = round(1.0 - bull - bear, 8)
+    return base, bull, bear
+
+
+def _evidence_quality(
+    features: ListedWrapperFeatures,
+    *,
+    data_age_hours: float,
+) -> EvidenceQuality:
+    depth = _history_depth(features)
+    freshness = _clip(1.0 - data_age_hours / 48.0, 0.55, 0.96)
+    liquidity = features.liquidity_score
+    return EvidenceQuality(
+        reliability=_clip(0.64 + 0.20 * depth + 0.05 * liquidity, 0.64, 0.89),
+        freshness=freshness,
+        relevance=_clip(0.72 + 0.12 * depth, 0.72, 0.86),
+        independence=_clip(0.50 + 0.08 * depth, 0.50, 0.58),
+        completeness=_clip(0.58 + 0.28 * depth, 0.58, 0.86),
+        point_in_time_integrity=0.90,
+    )
+
+
+def _cost_assumptions(features: ListedWrapperFeatures) -> tuple[float, float]:
+    illiquidity = 1.0 - features.liquidity_score
+    volatility = min(1.0, max(0.0, features.annualized_volatility))
+    transaction = round(2.0 + 8.0 * illiquidity, 4)
+    slippage = round(2.0 + 12.0 * illiquidity + 10.0 * volatility, 4)
+    return transaction, slippage
+
+
+def _forecast_quality(
+    features: ListedWrapperFeatures,
+    *,
+    distribution_anchor: float,
+) -> tuple[float, float, float, float]:
+    depth = _history_depth(features)
+    volatility = min(1.0, max(0.0, features.annualized_volatility))
+    anchor_gap = min(1.0, abs(features.momentum - distribution_anchor))
+    calibration = _clip(0.42 + 0.30 * depth - 0.08 * volatility, 0.35, 0.72)
+    agreement = _clip(0.45 + 0.24 * (1.0 - anchor_gap), 0.40, 0.69)
+    stability = _clip(0.40 + 0.28 * depth + 0.18 * (1.0 - volatility), 0.40, 0.75)
+    aggregate = _clip((calibration + agreement + stability) / 3.0, 0.35, 0.72)
+    return aggregate, calibration, agreement, stability
+
 
 def _metadata(instrument: FreePaperPilotInstrument) -> tuple[str, str, float]:
     return _EXPOSURE_METADATA.get(
@@ -385,36 +482,69 @@ def _macro_context(raw: object, *, as_of: datetime) -> tuple[MacroSpecialistCont
             )
         values[series] = number
         identifiers.append(f"fred:{series}:{date}")
+    ten_year = values["DGS10"]
     curve = values["T10Y2Y"]
     vix = values["VIXCLS"]
+    policy_rate = values["DFF"]
+    restrictive_rates = policy_rate >= 4.50 or ten_year >= 4.75
+    easing_support = policy_rate <= 3.00 and curve >= 0.0
     if vix >= 30.0 or curve <= -0.50:
         regime = "risk_off"
         impact = -0.025
         tailwinds = ("Defensive exposures may benefit from elevated systemic stress",)
         headwinds = ("Risk assets face an inverted curve or elevated volatility",)
-    elif vix <= 20.0 and curve >= 0.0:
+    elif restrictive_rates and vix > 20.0:
+        regime = "restrictive_mixed"
+        impact = -0.010
+        tailwinds = ("Cash and short-duration carry remain comparatively supported",)
+        headwinds = (
+            "The policy rate or long yield is restrictive while volatility is elevated",
+        )
+    elif vix <= 20.0 and curve >= 0.0 and not restrictive_rates:
         regime = "constructive_growth"
         impact = 0.015
         tailwinds = ("Contained volatility and a non-inverted curve support risk taking",)
+        headwinds = ()
+    elif easing_support:
+        regime = "easing_constructive"
+        impact = 0.010
+        tailwinds = ("Lower policy rates and a non-inverted curve support financial conditions",)
         headwinds = ()
     else:
         regime = "mixed"
         impact = 0.0
         tailwinds = ()
-        headwinds = ("Curve, policy-rate, and volatility signals are mixed",)
+        headwinds = (
+            "Long yields, curve shape, policy rates, and volatility signals are mixed",
+        )
+    if policy_rate >= 5.0:
+        impact -= 0.005
+    if ten_year >= 5.0:
+        impact -= 0.005
+    if easing_support and vix <= 25.0:
+        impact += 0.005
+    impact = _clip(impact, -0.04, 0.03)
     return (
         MacroSpecialistContext(
             as_of=as_of,
             regime=regime,
             expected_return_impact=impact,
-            confidence=0.78,
+            confidence=_clip(
+                0.62
+                + 0.04 * (curve >= 0.0)
+                + 0.04 * (vix <= 25.0)
+                + 0.04 * (policy_rate < 5.0)
+                + 0.04 * (ten_year < 5.0),
+                0.55,
+                0.78,
+            ),
             tailwinds=tailwinds,
             headwinds=headwinds,
             systemic_risks=(
                 "Current macro relationships can change after policy or growth shocks",
             ),
             scenarios=(
-                "Reclassify when curve inversion or VIX regime changes materially",
+                "Reclassify when long yields, curve shape, policy rates, or VIX change materially",
             ),
             evidence_identifiers=tuple(identifiers),
         ),
@@ -468,14 +598,15 @@ def _candidate_and_evidence(
         0.95,
     )
     data_age = max(0.0, (as_of - features.latest_observed_at).total_seconds() / 3600.0)
-    completeness = _clip(0.70 + min(features.bar_count, 756) / 7560.0, 0.70, 0.80)
-    quality = EvidenceQuality(
-        reliability=0.84,
-        freshness=0.90 if data_age <= 24.0 else 0.72,
-        relevance=0.88,
-        independence=0.62,
-        completeness=completeness,
-        point_in_time_integrity=0.90,
+    quality = _evidence_quality(features, data_age_hours=data_age)
+    base_probability, bull_probability, bear_probability = _scenario_probabilities(
+        features,
+        cash_expected_return=cash_expected_return,
+        base_return=base_return,
+    )
+    transaction_cost_bps, slippage_bps = _cost_assumptions(features)
+    aggregate_confidence, calibration_score, model_agreement, forecast_stability = (
+        _forecast_quality(features, distribution_anchor=distribution_anchor)
     )
     current = max(0.0, current_weight)
     maximum = max(current, min(instrument.maximum_weight, 0.10))
@@ -501,9 +632,16 @@ def _candidate_and_evidence(
                 f"alpaca-paper-asset:{instrument.symbol}",
             ),
             instrument_type=instrument.instrument_type,
-            economic_exposure_class=instrument.execution_asset_class,
+            economic_exposure_class=_EXPOSURE_ASSET_CLASSES.get(
+                instrument.economic_exposure,
+                instrument.execution_asset_class,
+            ),
             leverage_multiplier=1.0,
-            uses_derivatives=False,
+            uses_derivatives=instrument.economic_exposure in {
+                "managed_futures",
+                "option_strategies",
+                "volatility",
+            },
             replication_method="us-listed-economic-exposure-wrapper",
         ),
         current_price=features.current_price,
@@ -511,9 +649,9 @@ def _candidate_and_evidence(
         base_case_return=base_return,
         bull_case_return=bull_return,
         bear_case_return=bear_return,
-        base_case_probability=0.55,
-        bull_case_probability=0.25,
-        bear_case_probability=0.20,
+        base_case_probability=base_probability,
+        bull_case_probability=bull_probability,
+        bear_case_probability=bear_probability,
         estimated_fair_value=max(0.0, features.current_price * (1.0 + base_return)),
         expected_upside=max(0.0, bull_return),
         expected_downside=min(0.0, bear_return),
@@ -541,8 +679,8 @@ def _candidate_and_evidence(
         ),
         evidence_quality=quality,
         liquidity_score=features.liquidity_score,
-        transaction_cost_bps=5.0,
-        slippage_bps=5.0,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
         opportunity_cost_return=cash_expected_return,
         expected_portfolio_contribution=base_return * maximum,
         current_portfolio_weight=current,
@@ -573,20 +711,23 @@ def _candidate_and_evidence(
         as_of=as_of,
         market_regime="positive_trend" if features.momentum >= 0.0 else "negative_trend",
         expected_return_impact=market_impact,
-        confidence=min(0.88, quality.score),
+        confidence=min(0.68, quality.score),
         trend=_clip(features.twelve_month_return, -1.0, 1.0),
         momentum=_clip(features.momentum, -1.0, 1.0),
-        breadth=_clip(features.three_month_return, -1.0, 1.0),
+        breadth=0.0,
         liquidity=_clip(features.liquidity_score * 2.0 - 1.0, -1.0, 1.0),
         positioning=0.0,
         evidence=(
             f"One-month return={features.one_month_return:.2%}",
             f"Six-month return={features.six_month_return:.2%}",
             f"Twelve-month return={features.twelve_month_return:.2%}",
+            "Cross-sectional market breadth is unavailable in the free IEX pilot",
+            "Independent positioning data is unavailable in the free-data pilot",
         ),
         risks=(
             f"Realized annualized volatility={features.annualized_volatility:.2%}",
             "IEX is a limited free-data feed rather than consolidated full-market evidence",
+            "Breadth and positioning are unavailable rather than neutral",
         ),
         entry_conditions=(
             "The latest quote remains current and non-crossed at execution",
@@ -600,7 +741,7 @@ def _candidate_and_evidence(
         scenarios=(
             ForecastScenarioAssessment(
                 label="base macro-distribution case",
-                probability=0.55,
+                probability=base_probability,
                 candidate_return_impact=macro_impact,
                 expected_path_drawdown=min(0.0, features.maximum_drawdown * 0.50),
                 rationale="Current macro regime translated through disclosed exposure sensitivity",
@@ -608,7 +749,7 @@ def _candidate_and_evidence(
             ),
             ForecastScenarioAssessment(
                 label="bull distribution case",
-                probability=0.25,
+                probability=bull_probability,
                 candidate_return_impact=max(0.0, min(0.04, features.annualized_volatility * 0.15)),
                 expected_path_drawdown=min(0.0, features.maximum_drawdown * 0.25),
                 rationale="Supportive tail of the independently measured rolling return distribution",
@@ -616,17 +757,17 @@ def _candidate_and_evidence(
             ),
             ForecastScenarioAssessment(
                 label="bear distribution case",
-                probability=0.20,
+                probability=bear_probability,
                 candidate_return_impact=min(-0.01, -features.annualized_volatility * 0.20),
                 expected_path_drawdown=min(-0.01, bear_return),
                 rationale="Adverse volatility and drawdown path from current point-in-time evidence",
                 evidence_identifiers=market_ids,
             ),
         ),
-        aggregate_confidence=0.64,
-        calibration_score=0.60,
-        model_agreement=0.58,
-        forecast_stability=0.58,
+        aggregate_confidence=aggregate_confidence,
+        calibration_score=calibration_score,
+        model_agreement=model_agreement,
+        forecast_stability=forecast_stability,
         path_drawdown_probability=_clip(features.annualized_volatility, 0.0, 1.0),
         cross_asset_signals=(
             f"Macro regime={macro.regime}",
@@ -638,7 +779,7 @@ def _candidate_and_evidence(
             else ()
         ),
         limitations=(
-            "The free-data forecast is a transparent distribution and macro translation, not a guarantee",
+            "The free-data forecast uses evidence-derived, versioned pilot priors rather than calibrated institutional probabilities",
             "Shared market observations are dependency-disclosed and do not count as independent sources",
         ),
         change_conditions=(
@@ -653,7 +794,7 @@ def _candidate_and_evidence(
         as_of=as_of,
         asset_class=instrument.execution_asset_class,
         expected_return_impact=valuation_impact,
-        confidence=0.62,
+        confidence=_clip(0.42 + 0.25 * _history_depth(features), 0.42, 0.67),
         valuation_evidence=(
             f"Rolling one-year median return={valuation_anchor:.2%}",
             f"Long-run annualized return={features.long_run_annual_return:.2%}",
@@ -669,7 +810,7 @@ def _candidate_and_evidence(
             "Historical return anchors can be distorted by structural breaks and changing carry",
         ),
         limitations=(
-            "This is an independent disclosed distribution cross-check, not intrinsic-value certainty",
+            "This is an evidence-derived distribution prior and not intrinsic-value certainty",
         ),
         change_conditions=(
             "Revalue when the rolling annual distribution or tracking structure changes materially",
@@ -767,7 +908,13 @@ def _holding_evidence(
         as_of=as_of,
         knowledge_cutoff=as_of,
         expected_return=expected_return,
-        evidence_quality=0.76,
+        evidence_quality=_evidence_quality(
+            features,
+            data_age_hours=max(
+                0.0,
+                (as_of - features.latest_observed_at).total_seconds() / 3600.0,
+            ),
+        ).score,
         liquidity_score=features.liquidity_score,
         sector=sector,
         factor_loadings=(
@@ -776,8 +923,8 @@ def _holding_evidence(
         ),
         correlation_bucket=bucket,
         average_daily_dollar_volume=features.average_daily_dollar_volume,
-        transaction_cost_bps=5.0,
-        slippage_bps=5.0,
+        transaction_cost_bps=_cost_assumptions(features)[0],
+        slippage_bps=_cost_assumptions(features)[1],
         minimum_weight=0.0,
         funding_eligible=True,
         lineage=lineage,
