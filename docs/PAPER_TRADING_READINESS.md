@@ -16,6 +16,8 @@ The active free-data publisher currently excludes instruments that lack certifie
 
 Before the first autonomous position is opened, a recurring publisher must also certify holding evidence for every resulting position. The production context already requires exact holding coverage and will fail closed when that evidence is absent.
 
+These requirements are release gates, not optional warnings.
+
 ## Pilot policy authority
 
 The scheduled CIO construction and paper executor use the same pilot limits:
