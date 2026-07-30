@@ -46,9 +46,9 @@ services:
       - key: CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL
         value: "false"
       - key: CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER
-        value: "false"
+        value: "true"
       - key: CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT
-        value: "false"
+        value: "true"
       - key: CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE
         value: automatic
       - key: CAPITAL_INTELLIGENCE_PAPER_REPORT_TIMEZONE
