@@ -6,6 +6,10 @@ from dataclasses import dataclass
 
 from intelligence.models import MarketSnapshot
 from intelligence.provider import load_sample_snapshot
+from provider_configuration import (
+    fred_credential_readiness,
+    safe_provider_error,
+)
 from providers.fred import FREDProvider, FREDProviderError
 
 
@@ -132,17 +136,18 @@ def build_live_snapshot(
 
 
 def load_dashboard_data() -> EconomicDashboardData:
-    """Return live economic data or a safe sample fallback."""
+    """Return live economic data or a truthfully labelled safe fallback."""
 
-    provider = FREDProvider()
-
-    if not provider.configured:
+    readiness = fred_credential_readiness()
+    if not readiness.configured:
         return EconomicDashboardData(
             snapshot=load_sample_snapshot(),
             readings=None,
             data_source="Sample data",
-            status="FRED API key not configured",
+            status=readiness.detail,
         )
+
+    provider = FREDProvider()
 
     try:
         snapshot, readings = build_live_snapshot(provider)
@@ -159,7 +164,7 @@ def load_dashboard_data() -> EconomicDashboardData:
             snapshot=load_sample_snapshot(),
             readings=None,
             data_source="Sample fallback",
-            status=f"FRED unavailable: {error}",
+            status=safe_provider_error("fred", error),
         )
 
 
