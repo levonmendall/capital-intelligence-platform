@@ -1,0 +1,42 @@
+name: Materialize Paper Evidence Path Summary
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-paper-evidence-path-summary
+  cancel-in-progress: false
+
+jobs:
+  summarize:
+    if: github.head_ref == 'agent/complete-paper-evidence-publishers'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out review branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/complete-paper-evidence-publishers
+          fetch-depth: 0
+
+      - name: Build concise component summary
+        run: python tools/summarize_paper_evidence_paths.py
+
+      - name: Remove temporary summary tooling
+        run: |
+          rm tools/summarize_paper_evidence_paths.py
+          rm .github/workflows/materialize-paper-evidence-path-summary.yml
+
+      - name: Commit summary
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Summarize governed paper evidence paths"
+          git push origin HEAD:agent/complete-paper-evidence-publishers
