@@ -1,0 +1,513 @@
+name: Materialize CIO decision policy consistency
+
+on:
+  push:
+    branches:
+      - agent/cio-decision-policy-consistency
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/cio-decision-policy-consistency
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply isolated decision-policy corrections
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement anchor, found {count}: {old[:80]!r}")
+              target.write_text(text.replace(old, new, 1))
+
+          # Typed evidence-veto severity, backward compatible for older packets.
+          replace_once(
+              "cio/committee.py",
+              "from datetime import datetime\nfrom statistics import median\n",
+              "from datetime import datetime\nfrom enum import Enum\nfrom statistics import median\n",
+          )
+          replace_once(
+              "cio/committee.py",
+              "@dataclass(frozen=True, slots=True)\nclass SpecialistAnalysis:\n",
+              '''class EvidenceVetoCategory(str, Enum):
+              """Governed consequence class for an evidence veto."""
+
+              OPERATIONAL_UNAVAILABLE = "operational_unavailable"
+              MATERIAL_UNCERTAINTY = "material_uncertainty"
+              THESIS_CONTRADICTION = "thesis_contradiction"
+              INTEGRITY_EMERGENCY = "integrity_emergency"
+
+
+          @dataclass(frozen=True, slots=True)
+          class SpecialistAnalysis:
+          ''',
+          )
+          replace_once(
+              "cio/committee.py",
+              "    veto_reasons: tuple[str, ...] = ()\n    implementation_blocks: tuple[str, ...] = ()\n",
+              "    veto_reasons: tuple[str, ...] = ()\n    veto_categories: tuple[EvidenceVetoCategory, ...] = ()\n    implementation_blocks: tuple[str, ...] = ()\n",
+          )
+          replace_once(
+              "cio/committee.py",
+              '''        if not isinstance(self.scenario_adjustments, tuple) or not all(
+              isinstance(item, ScenarioAdjustment) for item in self.scenario_adjustments
+          ):
+          ''',
+              '''        categories = self.veto_categories
+          if not isinstance(categories, tuple) or not all(
+              isinstance(item, EvidenceVetoCategory) for item in categories
+          ):
+              raise TypeError(
+                  "veto_categories must contain EvidenceVetoCategory values"
+              )
+          if self.veto_reasons and not categories:
+              categories = tuple(
+                  EvidenceVetoCategory.MATERIAL_UNCERTAINTY
+                  for _ in self.veto_reasons
+              )
+          if len(categories) != len(self.veto_reasons):
+              raise ValueError(
+                  "veto_categories must align one-for-one with veto_reasons"
+              )
+          object.__setattr__(self, "veto_categories", categories)
+          if not isinstance(self.scenario_adjustments, tuple) or not all(
+              isinstance(item, ScenarioAdjustment) for item in self.scenario_adjustments
+          ):
+          ''',
+          )
+          replace_once(
+              "cio/committee.py",
+              '''    @property
+          def implementation_blocks(self) -> tuple[str, ...]:
+              return self.for_role(SpecialistRole.PORTFOLIO_RISK).implementation_blocks
+          ''',
+              '''    @property
+          def evidence_veto_categories(self) -> tuple[EvidenceVetoCategory, ...]:
+              return self.for_role(
+                  SpecialistRole.EVIDENCE_GOVERNANCE
+              ).veto_categories
+
+              @property
+          def has_emergency_evidence_veto(self) -> bool:
+              emergency = {
+                  EvidenceVetoCategory.THESIS_CONTRADICTION,
+                  EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+              }
+              return any(item in emergency for item in self.evidence_veto_categories)
+
+              @property
+          def has_operational_only_evidence_veto(self) -> bool:
+              categories = self.evidence_veto_categories
+              return bool(categories) and set(categories) == {
+                  EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE
+              }
+
+              @property
+          def implementation_blocks(self) -> tuple[str, ...]:
+              return self.for_role(SpecialistRole.PORTFOLIO_RISK).implementation_blocks
+          ''',
+          )
+
+          replace_once(
+              "cio/__init__.py",
+              "from cio.committee import IndependentSpecialistPacket, SpecialistAnalysis\n",
+              "from cio.committee import (\n    EvidenceVetoCategory,\n    IndependentSpecialistPacket,\n    SpecialistAnalysis,\n)\n",
+          )
+          replace_once(
+              "cio/__init__.py",
+              '    "EvidenceQuality",\n',
+              '    "EvidenceQuality",\n    "EvidenceVetoCategory",\n',
+          )
+
+          replace_once(
+              "committee/specialists.py",
+              "    EvidenceDependency,\n",
+              "    EvidenceDependency,\n    EvidenceVetoCategory,\n",
+          )
+          specialists_path = Path("committee/specialists.py")
+          specialists = specialists_path.read_text()
+          start = specialists.index("    def _evidence(\n")
+          end = specialists.index("\n\n__all__ = [", start)
+          new_evidence = '''    def _evidence(
+              self,
+              candidate: CandidateDecisionRecord,
+              context: CandidateSpecialistContext,
+          ) -> SpecialistAnalysis:
+              quality = candidate.evidence_quality
+              vetoes: list[str] = []
+              veto_categories: list[EvidenceVetoCategory] = []
+
+              def add_veto(reason: str, category: EvidenceVetoCategory) -> None:
+                  vetoes.append(reason)
+                  veto_categories.append(category)
+
+              if (
+                  candidate.instrument.asset_class is CandidateAssetClass.US_EQUITY
+                  and context.company is None
+              ):
+                  add_veto(
+                      "point-in-time normalized company analysis is missing for a U.S. equity",
+                      EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE,
+                  )
+              if quality.score < self.policy.minimum_evidence_score:
+                  add_veto(
+                      "aggregate evidence quality is below governance threshold",
+                      EvidenceVetoCategory.MATERIAL_UNCERTAINTY,
+                  )
+              if quality.ceiling < self.policy.minimum_evidence_dimension:
+                  add_veto(
+                      "at least one evidence dimension is below governance threshold",
+                      EvidenceVetoCategory.MATERIAL_UNCERTAINTY,
+                  )
+              if candidate.instrument.data_age_hours > self.policy.maximum_market_data_age_hours:
+                  add_veto(
+                      "market evidence is stale",
+                      EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE,
+                  )
+              if not candidate.evidence_identifiers:
+                  add_veto(
+                      "evidence identifiers are missing",
+                      EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+                  )
+              if not candidate.model_versions:
+                  add_veto(
+                      "model versions are missing",
+                      EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+                  )
+              if candidate.review_at <= candidate.as_of:
+                  add_veto(
+                      "review timing is not reproducible",
+                      EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+                  )
+              position = (
+                  SpecialistPosition.OPPOSED
+                  if vetoes
+                  else SpecialistPosition.SUPPORTIVE
+              )
+              evidence = (
+                  f"reliability={quality.reliability:.3f}",
+                  f"freshness={quality.freshness:.3f}",
+                  f"relevance={quality.relevance:.3f}",
+                  f"independence={quality.independence:.3f}",
+                  f"completeness={quality.completeness:.3f}",
+                  f"point-in-time integrity={quality.point_in_time_integrity:.3f}",
+              )
+              return SpecialistAnalysis(
+                  candidate_identifier=candidate.identifier,
+                  role=SpecialistRole.EVIDENCE_GOVERNANCE,
+                  completed_at=self._completed(context, 6),
+                  independent_first_pass=True,
+                  position=position,
+                  conclusion=(
+                      "The candidate evidence is reproducible and satisfies governance requirements."
+                      if not vetoes
+                      else "The candidate evidence does not satisfy governance requirements."
+                  ),
+                  expected_return_impact=0.0,
+                  confidence=quality.ceiling,
+                  supporting_evidence=evidence,
+                  contradictory_evidence=candidate.contradictory_evidence,
+                  critical_assumptions=(
+                      "Evidence identifiers and model versions resolve to immutable records",
+                  ),
+                  risks=tuple(vetoes)
+                  or (
+                      "Evidence may be revised after the decision timestamp",
+                  ),
+                  limitations=(
+                      "Evidence confidence is capped by the weakest disclosed dimension",
+                  ),
+                  change_conditions=(
+                      "Refresh stale evidence",
+                      "Resolve source conflicts or missing coverage",
+                      "Recalculate after material data revisions",
+                  ),
+                  veto_reasons=tuple(vetoes),
+                  veto_categories=tuple(veto_categories),
+                  evidence_origin_identifiers=candidate.evidence_identifiers,
+              )
+          '''
+          specialists_path.write_text(specialists[:start] + new_evidence + specialists[end:])
+
+          replace_once(
+              "cio/service.py",
+              "from cio.committee import IndependentSpecialistPacket\n",
+              "from cio.committee import EvidenceVetoCategory, IndependentSpecialistPacket\n",
+          )
+          replace_once(
+              "cio/service.py",
+              "                    bool(specialists.evidence_vetoes)\n",
+              "                    specialists.has_emergency_evidence_veto\n",
+          )
+          service_path = Path("cio/service.py")
+          service = service_path.read_text()
+          start = service.index("        evidence_deficient = bool(specialists.evidence_vetoes) or (")
+          end = service.index("\n        expected_return = reconciliation.expected_return", start)
+          evidence_block = '''        evidence_deficient = bool(specialists.evidence_vetoes) or (
+              candidate.evidence_quality.score < self.policy.minimum_evidence_score
+              or candidate.evidence_quality.ceiling
+              < self.policy.minimum_evidence_dimension
+          )
+          if evidence_deficient:
+              detail = (
+                  "; ".join(specialists.evidence_vetoes)
+                  if specialists.evidence_vetoes
+                  else "evidence quality or one required evidence dimension is below policy threshold"
+              )
+              if current_weight > 0.0:
+                  if specialists.has_operational_only_evidence_veto:
+                      return (
+                          CIOAction.HOLD,
+                          None,
+                          "New or increased exposure is prohibited, but the existing holding is preserved while an operational evidence outage is repaired: "
+                          + detail,
+                      )
+                  target = self._conservative_reduction_target(
+                      current_weight=current_weight,
+                      proposed_weight=portfolio.recommended_position_weight,
+                  )
+                  categories = set(specialists.evidence_veto_categories)
+                  if categories.intersection(
+                      {
+                          EvidenceVetoCategory.THESIS_CONTRADICTION,
+                          EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+                      }
+                  ):
+                      classification = (
+                          "a thesis contradiction or evidence-integrity emergency"
+                      )
+                  else:
+                      classification = "material evidence uncertainty"
+                  return (
+                      CIOAction.REDUCE,
+                      target,
+                      "New or increased exposure is prohibited and the existing holding is reduced because "
+                      + classification
+                      + " no longer supports its full ownership case: "
+                      + detail,
+                  )
+              return CIOAction.INSUFFICIENT_EVIDENCE, None, detail
+          '''
+          service_path.write_text(service[:start] + evidence_block + service[end:])
+
+          replace_once(
+              "cio/persistence.py",
+              '        "evidence_vetoes": list(packet.evidence_vetoes),\n',
+              '        "evidence_vetoes": list(packet.evidence_vetoes),\n        "evidence_veto_categories": [\n            item.value for item in packet.evidence_veto_categories\n        ],\n',
+          )
+          replace_once(
+              "cio/persistence.py",
+              '                "veto_reasons": list(item.veto_reasons),\n',
+              '                "veto_reasons": list(item.veto_reasons),\n                "veto_categories": [\n                    category.value for category in item.veto_categories\n                ],\n',
+          )
+
+          replace_once(
+              "application/cio_cycle.py",
+              "        generated_ranking = self._ranking_inputs(candidates, portfolio)\n",
+              "        generated_ranking = self._ranking_inputs(\n            candidates,\n            portfolio,\n            minimum_cash_weight=(\n                self.construction_engine.policy.minimum_cash_weight\n            ),\n        )\n",
+          )
+          replace_once(
+              "application/cio_cycle.py",
+              '''    def _ranking_inputs(
+              cls,
+              candidates: tuple[CandidateDecisionRecord, ...],
+              portfolio: CyclePortfolioState,
+          ) -> tuple[OpportunityRankingInput, ...]:
+          ''',
+              '''    def _ranking_inputs(
+              cls,
+              candidates: tuple[CandidateDecisionRecord, ...],
+              portfolio: CyclePortfolioState,
+              *,
+              minimum_cash_weight: float = 0.02,
+          ) -> tuple[OpportunityRankingInput, ...]:
+          ''',
+          )
+          replace_once(
+              "application/cio_cycle.py",
+              "                    max(0.0, portfolio.cash_weight - 0.02),\n",
+              "                    max(0.0, portfolio.cash_weight - minimum_cash_weight),\n",
+          )
+
+          tests_path = Path("tests/test_decision_process_upgrade.py")
+          tests = tests_path.read_text()
+          tests = tests.replace(
+              "    EvidenceDependency,\n",
+              "    EvidenceDependency,\n    EvidenceVetoCategory,\n",
+              1,
+          )
+          tests = tests.replace(
+              "from cio.reconciliation import SpecialistReturnReconciler\n",
+              "from application.cio_cycle import (\n    CandidateExposureProfile,\n    CanonicalCIOCycle,\n    CyclePortfolioState,\n)\nfrom cio.reconciliation import SpecialistReturnReconciler\n",
+              1,
+          )
+          tests = tests.replace(
+              "    PortfolioConstructionEngine,\n",
+              "    PortfolioConstructionEngine,\n    PortfolioConstructionPolicy,\n",
+              1,
+          )
+          tests += '''
+
+          @pytest.mark.parametrize(
+              ("category", "expected_action", "expected_hysteresis"),
+              (
+                  (
+                      EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE,
+                      CIOAction.HOLD,
+                      False,
+                  ),
+                  (
+                      EvidenceVetoCategory.MATERIAL_UNCERTAINTY,
+                      CIOAction.HOLD,
+                      True,
+                  ),
+                  (
+                      EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+                      CIOAction.REDUCE,
+                      False,
+                  ),
+              ),
+          )
+          def test_evidence_veto_severity_controls_holding_consequence(
+              category: EvidenceVetoCategory,
+              expected_action: CIOAction,
+              expected_hysteresis: bool,
+          ) -> None:
+              holding = _candidate("VETO", current_weight=0.05)
+              qualification = OpportunityEngine().qualify(holding, _context())
+              packet = _packet(holding, duplicate_origins=False)
+              analyses = tuple(
+                  replace(
+                      item,
+                      position=SpecialistPosition.OPPOSED,
+                      veto_reasons=("governed evidence condition",),
+                      veto_categories=(category,),
+                  )
+                  if item.role is SpecialistRole.EVIDENCE_GOVERNANCE
+                  else item
+                  for item in packet.analyses
+              )
+              prior = PriorDecisionContext(
+                  candidate_identifier=holding.identifier,
+                  prior_decision_identifier="decision:veto-prior",
+                  prior_action=CIOAction.HOLD,
+                  prior_target_weight=0.05,
+                  decided_at=holding.as_of,
+                  thesis_state=ThesisState.ACTIVE,
+                  consecutive_opposing_cycles=0,
+              )
+
+              decision = ChiefInvestmentOfficer().synthesize(
+                  holding,
+                  qualification.universe,
+                  replace(packet, analyses=analyses),
+                  capital_comparison=qualification.capital_comparison,
+                  prior_context=prior,
+              )
+
+              assert decision.action is expected_action
+              assert decision.hysteresis_applied is expected_hysteresis
+              if category is EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE:
+                  assert decision.recommended_position_weight is None
+                  assert "operational evidence outage" in decision.rationale
+
+
+          def test_ranking_respects_versioned_construction_cash_reserve() -> None:
+              candidate = _candidate("RESERVE")
+              policy = PortfolioConstructionPolicy(minimum_cash_weight=0.05)
+              cycle = CanonicalCIOCycle(construction_policy=policy)
+              portfolio = CyclePortfolioState(
+                  identifier="portfolio:reserve-test",
+                  as_of=candidate.as_of,
+                  portfolio_value=250_000.0,
+                  cash_weight=0.08,
+                  cash_expected_return=0.04,
+                  positions=(_asset("CORE", 0.92, funding_eligible=False),),
+                  exposure_profiles=(
+                      CandidateExposureProfile(
+                          candidate_identifier=candidate.identifier,
+                          sector="technology",
+                          factor_loadings=(("market", 1.0),),
+                          correlation_bucket="growth",
+                      ),
+                  ),
+              )
+
+              ranking = cycle._ranking_inputs(
+                  (candidate,),
+                  portfolio,
+                  minimum_cash_weight=cycle.construction_engine.policy.minimum_cash_weight,
+              )[0]
+              annualized = __import__(
+                  "portfolio.construction_api", fromlist=["ConstructionIntent"]
+              ).ConstructionIntent.annualized_return(
+                  candidate.net_expected_return,
+                  horizon_days=candidate.decision_horizon_days,
+              )
+              expected = (
+                  (annualized - portfolio.cash_expected_return) * 0.03
+                  - candidate.implementation_cost_return * 0.03
+              )
+
+              assert ranking.marginal_portfolio_contribution == pytest.approx(expected)
+          '''
+          tests_path.write_text(tests)
+
+          Path("docs/CIO_DECISION_POLICY_CORRECTIONS.md").write_text('''# CIO Decision Policy Corrections
+
+          This change intentionally excludes the governed candidate and holding evidence publishers, production-context adapters, and decision-memory restoration owned by PR #226.
+
+          ## Implemented
+
+          - Evidence vetoes now carry a governed consequence category.
+          - A pure operational evidence outage freezes increases but does not force an immediate holding sale.
+          - Material uncertainty can reduce a holding only through normal persistence and cooldown controls.
+          - A thesis contradiction or evidence-integrity emergency may bypass hysteresis for immediate de-risking.
+          - Specialist-packet persistence records the category beside every veto reason.
+          - Opportunity ranking uses the active versioned construction minimum-cash policy instead of a separate hard-coded reserve.
+
+          ## Existing controls retained rather than duplicated
+
+          - Joint portfolio scenario construction and multi-start allocation selection.
+          - Dependency-aware evidence-origin reconciliation and confidence limits.
+          - Champion-challenger policy promotion and rollback governance.
+          - Candidate and holding evidence publication and prior-decision/thesis restoration in PR #226.
+
+          ## Future empirical work
+
+          Policy thresholds should remain frozen during the initial paper test, then be evaluated through the existing champion-challenger governance using calibration, drawdown, turnover, missed-opportunity, and regime-coverage evidence. No automatic policy promotion is authorized.
+          ''')
+          PY
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate focused decision policies
+        run: |
+          python -m py_compile cio/committee.py cio/service.py cio/persistence.py committee/specialists.py application/cio_cycle.py
+          PYTHONPATH=. python -m pytest -q tests/test_decision_process_upgrade.py tests/test_cio_persistence.py
+
+      - name: Commit materialized changes
+        shell: bash
+        run: |
+          rm .github/workflows/materialize-cio-decision-policy-consistency.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cio/committee.py cio/__init__.py committee/specialists.py cio/service.py cio/persistence.py application/cio_cycle.py tests/test_decision_process_upgrade.py docs/CIO_DECISION_POLICY_CORRECTIONS.md .github/workflows/materialize-cio-decision-policy-consistency.yml
+          git commit -m "Differentiate CIO evidence veto consequences"
+          git push origin HEAD:agent/cio-decision-policy-consistency
