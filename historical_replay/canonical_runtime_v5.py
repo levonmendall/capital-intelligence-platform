@@ -10,16 +10,12 @@ complete.
 
 from __future__ import annotations
 
-import gzip
-import json
 from bisect import bisect_right
 from copy import deepcopy
 from datetime import date, datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from .canonical_runtime_v4 import HorizonAlignedCanonicalHistoricalReplayEngine
-from .models import HistoricalRecord
 
 UTC = timezone.utc
 REQUIRED_MACRO_DATASETS = (
@@ -49,19 +45,14 @@ class MacroCompleteCanonicalHistoricalReplayEngine(
     def _macro_availability(self) -> dict[str, tuple[datetime, ...]]:
         coverage: dict[str, tuple[datetime, ...]] = {}
         for dataset in REQUIRED_MACRO_DATASETS:
-            dataset_root = self.store.records_root / "fred" / dataset
-            available: list[datetime] = []
-            for path in sorted(dataset_root.glob("year=*/records.jsonl.gz")):
-                with gzip.open(path, "rt", encoding="utf-8") as stream:
-                    for line in stream:
-                        if not line.strip():
-                            continue
-                        payload = json.loads(line)
-                        record = HistoricalRecord(**payload)
-                        if not record.strict_replay_eligible:
-                            continue
-                        available.append(record.available_datetime)
-            coverage[dataset] = tuple(sorted(set(available)))
+            available = {
+                record.available_datetime
+                for record in self.store.iter_records(
+                    dataset=dataset,
+                    strict_only=True,
+                )
+            }
+            coverage[dataset] = tuple(sorted(available))
         return coverage
 
     @staticmethod
