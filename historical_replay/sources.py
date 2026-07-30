@@ -40,7 +40,8 @@ class HistoricalSource(ABC):
 
 
 def build_sources(config: Mapping[str, Any], *, user_agent: str) -> tuple[HistoricalSource, ...]:
-    from .sources_market import CoinbaseSource, FredSource, StooqSource
+    from .sources_fred import FredSource
+    from .sources_market import CoinbaseSource, StooqSource
     from .sources_public import (
         CftcSource,
         FederalRegisterSource,
