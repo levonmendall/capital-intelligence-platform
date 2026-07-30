@@ -17,6 +17,10 @@ import premium_ui as _premium_ui
 
 from cio_pending_transactions_ui import render_pending_transaction_report
 from cio_report_history_ui import render_cio_report_archive
+from educational_market_briefing_ui import (
+    render_environment_economic_brief,
+    render_today_market_brief,
+)
 from live_operating_console import (
     render_live_environment_market_table,
     render_live_market_status,
@@ -58,6 +62,8 @@ render_cio_report_archive(
 render_pending_transaction_report(
 render_paper_decision_controls(
 render_background_paper_execution_worker(
+render_today_market_brief(
+render_environment_economic_brief(
 authenticated_principal
 from core.portfolio import (
     get_mandate_details,
@@ -209,6 +215,14 @@ _premium_ui.allocation_bar = _safe_allocation_bar
 _source_path = Path(__file__).with_name("app_impl.py")
 _source = _source_path.read_text(encoding="utf-8")
 
+
+def _replace_source_once(old: str, new: str, error_message: str) -> None:
+    global _source
+    if _source.count(old) != 1:
+        raise RuntimeError(error_message)
+    _source = _source.replace(old, new, 1)
+
+
 # Long qualification and review-condition lists remain available, but they should
 # not dominate the Today or Environment synopsis. Replace the always-open cards
 # with collapsed expanders while preserving the exact governed evidence text.
@@ -310,9 +324,31 @@ _decision_change_replacements = (
     ),
 )
 for _old_detail, _new_detail in _decision_change_replacements:
-    if _source.count(_old_detail) != 1:
-        raise RuntimeError("decision-change collapse insertion point is unavailable")
-    _source = _source.replace(_old_detail, _new_detail, 1)
+    _replace_source_once(
+        _old_detail,
+        _new_detail,
+        "decision-change collapse insertion point is unavailable",
+    )
+
+# Add concise educational context before each surface explains its process.
+_educational_briefing_insertions = (
+    (
+        '    with st.expander("How the Today surface works"):\n',
+        '    render_today_market_brief()\n\n'
+        '    with st.expander("How the Today surface works"):\n',
+    ),
+    (
+        '    with st.expander("How the Environment surface works"):\n',
+        '    render_environment_economic_brief()\n\n'
+        '    with st.expander("How the Environment surface works"):\n',
+    ),
+)
+for _brief_anchor, _brief_replacement in _educational_briefing_insertions:
+    _replace_source_once(
+        _brief_anchor,
+        _brief_replacement,
+        "educational briefing insertion point is unavailable",
+    )
 
 # Refresh the active operating surface without requiring navigation or a browser
 # reload. Each fragment re-queries the canonical stores and provider-backed views.
@@ -323,21 +359,17 @@ for _render_name in (
     "_render_history",
 ):
     _render_anchor = f"def {_render_name}() -> None:\n"
-    if _source.count(_render_anchor) != 1:
-        raise RuntimeError(f"live refresh insertion point unavailable for {_render_name}")
-    _source = _source.replace(
+    _replace_source_once(
         _render_anchor,
         '@st.fragment(run_every="30s")\n' + _render_anchor,
-        1,
+        f"live refresh insertion point unavailable for {_render_name}",
     )
 
 # Provider and operational detail is injected only after each surface has presented
 # its plain-language synopsis. Checked markers make deployment fail loudly if the
 # information hierarchy changes without updating these integrations.
 _today_operating_marker = "    # LIVE_TODAY_OPERATING_CONTEXT\n"
-if _source.count(_today_operating_marker) != 1:
-    raise RuntimeError("Today operating context insertion point is unavailable")
-_source = _source.replace(
+_replace_source_once(
     _today_operating_marker,
     '    page_header(\n'
     + '        "Operating context",\n'
@@ -349,13 +381,11 @@ _source = _source.replace(
     + '        construction=_today_construction,\n'
     + '        briefing=briefing,\n'
     + '    )\n',
-    1,
+    "Today operating context insertion point is unavailable",
 )
 
 _environment_market_marker = "    # LIVE_ENVIRONMENT_MARKET_TABLE\n"
-if _source.count(_environment_market_marker) != 1:
-    raise RuntimeError("Environment market table insertion point is unavailable")
-_source = _source.replace(
+_replace_source_once(
     _environment_market_marker,
     '    page_header(\n'
     + '        "Cross-asset market detail",\n'
@@ -363,13 +393,11 @@ _source = _source.replace(
     + '        "02",\n'
     + '    )\n'
     + '    render_live_environment_market_table()\n',
-    1,
+    "Environment market table insertion point is unavailable",
 )
 
 _portfolio_controls_marker = "    # PAPER_DECISION_CONTROLS\n"
-if _source.count(_portfolio_controls_marker) != 1:
-    raise RuntimeError("paper decision approval insertion point is unavailable")
-_source = _source.replace(
+_replace_source_once(
     _portfolio_controls_marker,
     '    render_pending_transaction_report(\n'
     + '        construction=construction,\n'
@@ -380,49 +408,41 @@ _source = _source.replace(
     + '        briefing=briefing,\n'
     + '        principal=globals().get("authenticated_principal"),\n'
     + '    )\n',
-    1,
+    "paper decision approval insertion point is unavailable",
 )
 
 _portfolio_marks_marker = "    # LIVE_PORTFOLIO_MARKS\n"
-if _source.count(_portfolio_marks_marker) != 1:
-    raise RuntimeError("Portfolio live mark insertion point is unavailable")
-_source = _source.replace(
+_replace_source_once(
     _portfolio_marks_marker,
     '    render_live_portfolio_marks(mandate)\n',
-    1,
+    "Portfolio live mark insertion point is unavailable",
 )
 
 _history_operating_marker = "    # OPERATING_REPORT_HISTORY\n"
-if _source.count(_history_operating_marker) != 1:
-    raise RuntimeError("History operating report insertion point is unavailable")
-_source = _source.replace(
+_replace_source_once(
     _history_operating_marker,
     '    render_operating_report_history()\n',
-    1,
+    "History operating report insertion point is unavailable",
 )
 
 _history_archive_marker = "    # CIO_REPORT_ARCHIVE\n"
-if _source.count(_history_archive_marker) != 1:
-    raise RuntimeError("History CIO archive insertion point is unavailable")
-_source = _source.replace(
+_replace_source_once(
     _history_archive_marker,
     '    render_cio_report_archive()\n',
-    1,
+    "History CIO archive insertion point is unavailable",
 )
 
 # Keep the execution worker alive on every Streamlit surface. It consumes only an
 # already-authenticated exact approval and is idempotent at the construction hash.
 _worker_anchor = "render_sidebar()\n"
-if _source.count(_worker_anchor) != 1:
-    raise RuntimeError("paper execution worker insertion point is unavailable")
-_source = _source.replace(
+_replace_source_once(
     _worker_anchor,
     _worker_anchor
     + 'render_background_paper_execution_worker(\n'
     + '    construction=_latest("portfolio_construction"),\n'
     + '    briefing=_latest("daily_cio_briefing"),\n'
     + ')\n',
-    1,
+    "paper execution worker insertion point is unavailable",
 )
 
 # ``secure_app.py`` executes this entrypoint with session-authorized portfolio
