@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   apply:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'Apply all-surface communication patch'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
