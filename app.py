@@ -261,7 +261,7 @@ _source = _source.replace(
 
 _portfolio_controls_marker = "    # PAPER_DECISION_CONTROLS\n"
 if _source.count(_portfolio_controls_marker) != 1:
-    raise RuntimeError("Portfolio paper control insertion point is unavailable")
+    raise RuntimeError("paper decision approval insertion point is unavailable")
 _source = _source.replace(
     _portfolio_controls_marker,
     '    render_pending_transaction_report(\n'
