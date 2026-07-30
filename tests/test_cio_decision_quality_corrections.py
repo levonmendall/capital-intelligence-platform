@@ -123,3 +123,6 @@ def test_macro_regime_uses_long_yield_and_policy_rate_not_only_curve_and_vix() -
     assert restrictive.expected_return_impact < ordinary.expected_return_impact
     assert "long yields" in restrictive.scenarios[0].lower()
     assert "policy rates" in restrictive.scenarios[0].lower()
+
+
+# This module is part of the exact-head release validation boundary for PR #235.
