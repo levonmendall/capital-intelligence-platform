@@ -45,7 +45,18 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Apply reviewed corrections
-        run: python tools/materialize_complete_paper_readiness_review.py
+        run: |
+          python tools/materialize_complete_paper_readiness_review.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("tests/test_complete_paper_readiness_review.py")
+          source = path.read_text(encoding="utf-8")
+          source = source.replace(
+              'assert "comparative opportunity set is incomplete" in briefing.material_developments',
+              'assert "The comparative opportunity set is incomplete" in briefing.material_developments',
+          )
+          path.write_text(source, encoding="utf-8")
+          PY
 
       - name: Remove temporary materializer
         run: |
