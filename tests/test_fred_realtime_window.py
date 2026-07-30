@@ -58,6 +58,11 @@ class ChunkedFredClient:
         )
 
 
+class EmptyFredClient:
+    def get(self, _url, *, params):
+        return JsonResponse({"observations": []})
+
+
 def test_fred_initial_release_collection_uses_explicit_realtime_window() -> None:
     client = PartialFredClient()
     result = FredSource(
@@ -105,6 +110,22 @@ def test_fred_realtime_window_is_chunked_for_long_backfills() -> None:
         left = date.fromisoformat(str(call["realtime_start"]))
         right = date.fromisoformat(str(call["realtime_end"]))
         assert (right - left).days <= 365
+
+
+def test_empty_requested_series_fails_closed() -> None:
+    result = FredSource(
+        EmptyFredClient(),
+        ("FEDFUNDS",),
+        api_key="a" * 32,
+    ).collect(
+        date(2020, 1, 1),
+        date(2020, 1, 31),
+        max_records=100,
+    )
+
+    assert result.state == "unavailable"
+    assert result.records == ()
+    assert result.blockers == ("series_collection_failed_count:1",)
 
 
 def test_source_factory_uses_realtime_safe_fred_adapter() -> None:
