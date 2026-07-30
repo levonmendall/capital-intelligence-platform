@@ -147,11 +147,13 @@ def _default_probe(
                     limit=10_000,
                 )
             )
+    provider_clock = client.clock()
     return {
         "bars": bars,
         "quotes": quotes,
         "macro": macro,
         "company_facts": company_facts,
+        "provider_clock": provider_clock,
     }
 
 
@@ -401,6 +403,7 @@ def _features(
     cash_expected_return: float,
     maximum_quote_age_minutes: int,
     maximum_future_skew_seconds: int = 0,
+    future_reference_at: datetime | None = None,
 ) -> ListedSecurityFeatures:
     rows = _bar_rows(symbol, raw_bars, as_of=as_of)
     closes = [float(item["c"]) for item in rows]
@@ -408,8 +411,13 @@ def _features(
     if not isinstance(quote, Mapping):
         raise ProductionPaperEvidenceError(f"current quote is unavailable for {symbol}")
     quote_time = _timestamp(quote.get("t"), field_name=f"{symbol} quote timestamp")
+    reference_time = (
+        as_of
+        if future_reference_at is None
+        else _aware(future_reference_at, field_name="future_reference_at")
+    )
     maximum_future_skew = timedelta(seconds=max(0, maximum_future_skew_seconds))
-    if quote_time > as_of + maximum_future_skew:
+    if quote_time > reference_time + maximum_future_skew:
         raise ProductionPaperEvidenceError(f"{symbol} quote is future-known")
     effective_quote_time = min(quote_time, as_of)
     quote_age = as_of - effective_quote_time
@@ -1281,9 +1289,23 @@ def build_paper_evidence(
     quotes = payload.get("quotes")
     raw_macro = payload.get("macro")
     company_facts = payload.get("company_facts", {})
-    maximum_future_skew_seconds = (
-        60 if payload.get("_live_collection") is True else 0
-    )
+    live_collection = payload.get("_live_collection") is True
+    maximum_future_skew_seconds = 60 if live_collection else 0
+    future_reference_at = as_of
+    if live_collection:
+        raw_provider_clock = payload.get("provider_clock")
+        if not isinstance(raw_provider_clock, Mapping):
+            raise ProductionPaperEvidenceError(
+                "live paper evidence payload is missing the Alpaca market clock"
+            )
+        future_reference_at = _timestamp(
+            raw_provider_clock.get("timestamp"),
+            field_name="Alpaca market clock timestamp",
+        )
+        if abs((future_reference_at - as_of).total_seconds()) > 900:
+            raise ProductionPaperEvidenceError(
+                "Alpaca market clock differs from the collection-complete decision timestamp by more than 15 minutes"
+            )
     if not isinstance(bars, Mapping) or not isinstance(quotes, Mapping):
         raise ProductionPaperEvidenceError("bars and quotes must be mappings")
     if not isinstance(company_facts, Mapping):
@@ -1316,6 +1338,7 @@ def build_paper_evidence(
                 cash_expected_return=cash_expected_return,
                 maximum_quote_age_minutes=universe.maximum_quote_age_minutes,
                 maximum_future_skew_seconds=maximum_future_skew_seconds,
+                future_reference_at=future_reference_at,
             )
         except (ProductionPaperEvidenceError, TypeError, ValueError) as error:
             if instrument.symbol in current_weights:

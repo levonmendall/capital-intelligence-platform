@@ -524,10 +524,29 @@ def assess_free_paper_pilot_readiness(
     if len(validated) == len(universe.instruments):
         try:
             quotes = client.latest_quotes(validated)
+            quote_reference_time = now
             if dynamic_evaluation_time:
-                # Live readiness is evaluated after the provider response arrives.
-                # Explicit point-in-time evaluations remain strict and immutable.
+                # Live provider timestamps are validated against Alpaca's own
+                # post-collection market clock rather than the hosted runner's
+                # potentially lagging wall clock. Explicit point-in-time
+                # evaluations remain strict and immutable.
                 now = datetime.now(timezone.utc)
+                provider_clock = client.clock()
+                provider_timestamp = datetime.fromisoformat(
+                    str(provider_clock["timestamp"]).replace("Z", "+00:00")
+                )
+                if (
+                    provider_timestamp.tzinfo is None
+                    or provider_timestamp.utcoffset() is None
+                ):
+                    raise ValueError("Alpaca market clock timestamp lacks an offset")
+                provider_timestamp = provider_timestamp.astimezone(timezone.utc)
+                if abs((provider_timestamp - now).total_seconds()) > 900:
+                    raise ValueError(
+                        "Alpaca market clock differs from the runtime clock by more than 15 minutes"
+                    )
+                quote_reference_time = provider_timestamp
+                market_open = provider_clock.get("is_open") is True
             maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)
             maximum_future_skew = (
                 timedelta(seconds=60) if dynamic_evaluation_time else timedelta(0)
@@ -549,14 +568,14 @@ def assess_free_paper_pilot_readiness(
                 )
                 if observed.tzinfo is None or observed.utcoffset() is None:
                     raise ValueError(f"{symbol} quote timestamp lacks an offset")
-                if observed > now + maximum_future_skew:
+                if observed > quote_reference_time + maximum_future_skew:
                     raise ValueError(f"{symbol} quote is future-known")
                 if observed > now:
                     warnings.append(
-                        f"{symbol}: quote timestamp is within the 60-second provider clock tolerance"
+                        f"{symbol}: quote timestamp is ahead of the runtime clock but aligned with the Alpaca market clock"
                     )
                 quote_times.append((symbol, observed.isoformat()))
-                if market_open and now - observed > maximum_age:
+                if market_open and quote_reference_time - observed > maximum_age:
                     blockers.append(
                         f"{symbol}: live quote is older than {universe.maximum_quote_age_minutes} minutes"
                     )

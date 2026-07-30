@@ -274,6 +274,13 @@ def test_authenticated_pair_selection_uses_matching_credentials(monkeypatch) -> 
 
 def test_live_readiness_uses_post_response_time_for_quote_cutoff() -> None:
     def current_quote_http_get(url: str, **kwargs: Any) -> _Response:
+        if url.endswith("/v2/clock"):
+            return _Response(
+                {
+                    "is_open": True,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
         if url.endswith("/v2/stocks/quotes/latest"):
             symbols = str(kwargs["params"]["symbols"]).split(",")
             observed = datetime.now(timezone.utc).isoformat()
@@ -354,11 +361,20 @@ def test_closed_market_zero_top_of_book_holds_execution_without_blocking_configu
     assert len(report.quote_timestamps) == 15
     assert any("closed-market IEX top of book" in warning for warning in report.warnings)
 
-def test_live_readiness_allows_only_bounded_provider_clock_skew() -> None:
+def test_live_readiness_uses_provider_clock_for_bounded_source_skew() -> None:
     def skewed_quote_http_get(url: str, **kwargs: Any) -> _Response:
+        if url.endswith("/v2/clock"):
+            return _Response(
+                {
+                    "is_open": True,
+                    "timestamp": (
+                        datetime.now(timezone.utc) + timedelta(seconds=120)
+                    ).isoformat(),
+                }
+            )
         if url.endswith("/v2/stocks/quotes/latest"):
             symbols = str(kwargs["params"]["symbols"]).split(",")
-            observed = (datetime.now(timezone.utc) + timedelta(seconds=2)).isoformat()
+            observed = (datetime.now(timezone.utc) + timedelta(seconds=90)).isoformat()
             return _Response(
                 {
                     "quotes": {
@@ -386,5 +402,8 @@ def test_live_readiness_allows_only_bounded_provider_clock_skew() -> None:
     report = assess_free_paper_pilot_readiness(universe=universe, client=client)
 
     assert report.configuration_ready
-    assert any("60-second provider clock tolerance" in warning for warning in report.warnings)
+    assert any(
+        "aligned with the Alpaca market clock" in warning
+        for warning in report.warnings
+    )
 
