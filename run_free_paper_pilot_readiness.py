@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
@@ -17,9 +17,11 @@ from operations.free_paper_pilot import (
 )
 
 
-def _evaluated_at(value: str | None) -> datetime:
+def _evaluated_at(value: str | None) -> datetime | None:
+    """Return an explicit point-in-time cutoff or preserve live evaluation mode."""
+
     if value is None:
-        return datetime.now(timezone.utc)
+        return None
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("--evaluated-at must include a UTC offset")
