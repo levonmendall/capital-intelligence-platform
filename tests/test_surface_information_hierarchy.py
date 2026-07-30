@@ -3,17 +3,41 @@ from pathlib import Path
 
 def _function_block(source: str, name: str, next_name: str | None) -> str:
     start = source.index(f"def {name}() -> None:")
-    end = len(source) if next_name is None else source.index(f"def {next_name}() -> None:", start)
+    end = (
+        len(source)
+        if next_name is None
+        else source.index(f"def {next_name}() -> None:", start)
+    )
     return source[start:end]
 
 
 def test_every_surface_leads_with_a_plain_language_synopsis() -> None:
     source = Path("app_impl.py").read_text(encoding="utf-8")
     expectations = (
-        ("_render_today", "_render_environment", "Today's CIO briefing", "How the Today surface works"),
-        ("_render_environment", "_render_portfolio", "Environment synopsis", "How the Environment surface works"),
-        ("_render_portfolio", "_render_history", "Portfolio synopsis", "How the Portfolio surface works"),
-        ("_render_history", None, "History synopsis", "How the History surface works"),
+        (
+            "_render_today",
+            "_render_environment",
+            "Today's CIO briefing",
+            "How the Today surface works",
+        ),
+        (
+            "_render_environment",
+            "_render_portfolio",
+            "Environment synopsis",
+            "How the Environment surface works",
+        ),
+        (
+            "_render_portfolio",
+            "_render_history",
+            "Portfolio synopsis",
+            "How the Portfolio surface works",
+        ),
+        (
+            "_render_history",
+            None,
+            "History synopsis",
+            "How the History surface works",
+        ),
     )
     for name, next_name, synopsis, process_label in expectations:
         block = _function_block(source, name, next_name)
@@ -57,7 +81,9 @@ def test_operational_detail_follows_surface_synopses() -> None:
     ):
         assert marker in entrypoint
     assert "Administrator operations" in entrypoint
-    navigation = entrypoint[entrypoint.index("def _render_navigation_with_admin_control") :]
+    navigation = entrypoint[
+        entrypoint.index("def _render_navigation_with_admin_control") :
+    ]
     navigation = navigation[: navigation.index("def _compatible_metric_grid")]
     assert "Production smoke test" not in navigation
 
