@@ -28,8 +28,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Apply exact source corrections
-        run: python scripts/apply_operating_completeness_fix.py
+      - name: Repair and apply exact source corrections
+        run: |
+          python scripts/repair_operating_patch.py
+          python scripts/apply_operating_completeness_fix.py
 
       - name: Verify changed Python compiles
         run: |
