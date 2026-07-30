@@ -7,6 +7,7 @@ that state explicitly and continues displaying the last governed canonical recor
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -20,6 +21,10 @@ from operations.free_paper_pilot import (
     load_free_paper_pilot_universe,
 )
 from paper_execution_runtime import artifact_directory
+from provider_configuration import (
+    alpaca_credential_readiness,
+    safe_provider_error,
+)
 from providers.alpaca_paper import (
     AlpacaPaperClient,
     AlpacaPaperProviderError,
@@ -63,7 +68,36 @@ def _format_percent(value: object) -> str:
 
 
 def _sequence(value: object) -> list[Any]:
-    return list(value) if isinstance(value, Sequence) and not isinstance(value, (str, bytes)) else []
+    return (
+        list(value)
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+        else []
+    )
+
+
+def _unavailable_snapshot(
+    *,
+    evaluated_at: datetime,
+    detail: str,
+    expected_quote_count: int,
+    configuration_state: str,
+) -> dict[str, object]:
+    return {
+        "status": "unavailable",
+        "detail": detail,
+        "configuration_state": configuration_state,
+        "evaluated_at": evaluated_at.isoformat(),
+        "account_status": "Unavailable",
+        "market_open": None,
+        "clock_at": None,
+        "quote_count": 0,
+        "expected_quote_count": expected_quote_count,
+        "latest_quote_at": None,
+        "rows": [],
+        "source": "Alpaca paper account + IEX",
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
 
 
 @st.cache_data(ttl=20, show_spinner=False)
@@ -71,28 +105,40 @@ def load_live_market_console() -> dict[str, object]:
     evaluated_at = datetime.now(timezone.utc)
     try:
         universe = load_free_paper_pilot_universe(DEFAULT_UNIVERSE_PATH)
+    except (OSError, TypeError, ValueError) as error:
+        return _unavailable_snapshot(
+            evaluated_at=evaluated_at,
+            detail=(
+                "The governed paper universe could not be loaded. Review the deployed "
+                "universe artifact and service logs."
+            ),
+            expected_quote_count=15,
+            configuration_state="universe_unavailable",
+        )
+
+    instruments = tuple(universe.instruments)
+    readiness = alpaca_credential_readiness()
+    if not readiness.configured:
+        return _unavailable_snapshot(
+            evaluated_at=evaluated_at,
+            detail=readiness.detail,
+            expected_quote_count=len(instruments),
+            configuration_state=readiness.state,
+        )
+
+    try:
         settings = AlpacaPaperSettings.from_env()
         client = AlpacaPaperClient(settings)
         account = client.account()
         clock = client.clock()
-        instruments = tuple(universe.instruments)
         quotes = client.latest_quotes([item.symbol for item in instruments])
     except (OSError, TypeError, ValueError, AlpacaPaperProviderError) as error:
-        return {
-            "status": "unavailable",
-            "detail": str(error),
-            "evaluated_at": evaluated_at.isoformat(),
-            "account_status": "Unavailable",
-            "market_open": None,
-            "clock_at": None,
-            "quote_count": 0,
-            "expected_quote_count": 15,
-            "latest_quote_at": None,
-            "rows": [],
-            "source": "Alpaca paper account + IEX",
-            "paper_only": True,
-            "real_money_authorized": False,
-        }
+        return _unavailable_snapshot(
+            evaluated_at=evaluated_at,
+            detail=safe_provider_error("alpaca", error),
+            expected_quote_count=len(instruments),
+            configuration_state="invalid",
+        )
 
     rows: list[dict[str, object]] = []
     latest_quote_at: datetime | None = None
@@ -141,20 +187,32 @@ def load_live_market_console() -> dict[str, object]:
                 "quote_age_seconds": quote_age_seconds,
                 "current": bool(
                     quote_age_seconds is not None
-                    and quote_age_seconds <= universe.maximum_quote_age_minutes * 60
+                    and quote_age_seconds
+                    <= universe.maximum_quote_age_minutes * 60
                 ),
             }
         )
 
+    usable_quote_count = sum(1 for row in rows if row.get("mid") is not None)
+    status = "connected" if usable_quote_count == len(instruments) else "partial"
+    detail = (
+        "Current provider-backed paper-market evidence is available."
+        if status == "connected"
+        else (
+            f"Only {usable_quote_count} of {len(instruments)} governed instruments "
+            "have usable top-of-book evidence."
+        )
+    )
     clock_at = _timestamp(clock.get("timestamp"))
     return {
-        "status": "connected",
-        "detail": "Current provider-backed paper-market evidence is available.",
+        "status": status,
+        "detail": detail,
+        "configuration_state": "configured",
         "evaluated_at": evaluated_at.isoformat(),
         "account_status": str(account.get("status", "Unavailable")),
         "market_open": clock.get("is_open") is True,
         "clock_at": None if clock_at is None else clock_at.isoformat(),
-        "quote_count": len(rows),
+        "quote_count": usable_quote_count,
         "expected_quote_count": len(instruments),
         "latest_quote_at": (
             None if latest_quote_at is None else latest_quote_at.isoformat()
@@ -168,25 +226,44 @@ def load_live_market_console() -> dict[str, object]:
 
 def render_live_market_status() -> None:
     snapshot = load_live_market_console()
+    if not os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip():
+        st.info(
+            "Presentation preview: the persistent CIO scheduler, canonical journal, "
+            "paper operator, historical replay, and encrypted backups run on the "
+            "Render operating deployment."
+        )
     st.caption(
         "Live operating data · refreshes every 30 seconds · "
         f"evaluated {_format_timestamp(snapshot.get('evaluated_at'))}"
     )
     columns = st.columns(4)
-    columns[0].metric("Paper account", str(snapshot.get("account_status", "Unavailable")))
+    columns[0].metric(
+        "Paper account",
+        str(snapshot.get("account_status", "Unavailable")),
+    )
     market_open = snapshot.get("market_open")
     columns[1].metric(
         "U.S. session",
-        "Open" if market_open is True else "Closed" if market_open is False else "Unavailable",
+        "Open"
+        if market_open is True
+        else "Closed"
+        if market_open is False
+        else "Unavailable",
     )
     columns[2].metric(
         "Live quote coverage",
         f"{snapshot.get('quote_count', 0)}/{snapshot.get('expected_quote_count', 0)}",
     )
-    columns[3].metric("Latest quote", _format_timestamp(snapshot.get("latest_quote_at")))
-    if snapshot.get("status") != "connected":
-        st.warning(
-            "Live Alpaca/IEX data is unavailable in this runtime. "
+    columns[3].metric(
+        "Latest quote",
+        _format_timestamp(snapshot.get("latest_quote_at")),
+    )
+    status = snapshot.get("status")
+    if status == "partial":
+        st.warning(str(snapshot.get("detail", "Partial live provider coverage.")))
+    elif status != "connected":
+        st.error(
+            "Live Alpaca/IEX evidence is unavailable. "
             f"{snapshot.get('detail', '')}"
         )
 
@@ -200,7 +277,7 @@ def render_live_environment_market_table() -> None:
     )
     rows = snapshot.get("rows")
     if not isinstance(rows, list) or not rows:
-        st.warning(
+        st.error(
             "No live market table is available. "
             f"{snapshot.get('detail', '')}"
         )
@@ -238,11 +315,15 @@ def render_live_environment_market_table() -> None:
             frame[column] = frame[column].map(_format_money)
     if "Spread (bps)" in frame.columns:
         frame["Spread (bps)"] = frame["Spread (bps)"].map(
-            lambda value: "—" if _number(value) is None else f"{float(value):.2f}"
+            lambda value: "—"
+            if _number(value) is None
+            else f"{float(value):.2f}"
         )
     if "Age (sec)" in frame.columns:
         frame["Age (sec)"] = frame["Age (sec)"].map(
-            lambda value: "—" if _number(value) is None else f"{float(value):.0f}"
+            lambda value: "—"
+            if _number(value) is None
+            else f"{float(value):.0f}"
         )
     if "Quote time" in frame.columns:
         frame["Quote time"] = frame["Quote time"].map(_format_timestamp)
@@ -251,13 +332,17 @@ def render_live_environment_market_table() -> None:
         f"Source: {snapshot.get('source')} · Session clock: "
         f"{_format_timestamp(snapshot.get('clock_at'))}"
     )
+    if snapshot.get("status") == "partial":
+        st.warning(str(snapshot.get("detail", "Partial live provider coverage.")))
 
 
 def render_live_portfolio_marks(mandate: Mapping[str, Any]) -> None:
     st.markdown("#### Live indicative portfolio mark")
     snapshot = load_live_market_console()
     holdings = [
-        item for item in _sequence(mandate.get("holdings")) if isinstance(item, Mapping)
+        item
+        for item in _sequence(mandate.get("holdings"))
+        if isinstance(item, Mapping)
     ]
     cash = _number(mandate.get("cash")) or 0.0
     canonical_nav = _number(mandate.get("nav")) or cash
@@ -280,7 +365,9 @@ def render_live_portfolio_marks(mandate: Mapping[str, Any]) -> None:
         quantity = _number(holding.get("quantity"))
         canonical_price = _number(holding.get("current_price"))
         quote = quote_map.get(symbol, {})
-        live_mid = _number(quote.get("mid")) if isinstance(quote, Mapping) else None
+        live_mid = (
+            _number(quote.get("mid")) if isinstance(quote, Mapping) else None
+        )
         if quantity is None or live_mid is None:
             complete = False
             live_value = None
@@ -301,7 +388,9 @@ def render_live_portfolio_marks(mandate: Mapping[str, Any]) -> None:
                     if live_value is None or canonical_value is None
                     else live_value - canonical_value
                 ),
-                "Quote time": quote.get("quote_at") if isinstance(quote, Mapping) else None,
+                "Quote time": (
+                    quote.get("quote_at") if isinstance(quote, Mapping) else None
+                ),
             }
         )
     indicative_nav = cash + live_holdings_value if complete else None
@@ -310,11 +399,18 @@ def render_live_portfolio_marks(mandate: Mapping[str, Any]) -> None:
     metrics[1].metric("Indicative live NAV", _format_money(indicative_nav))
     metrics[2].metric(
         "Live mark difference",
-        _format_money(None if indicative_nav is None else indicative_nav - canonical_nav),
+        _format_money(
+            None if indicative_nav is None else indicative_nav - canonical_nav
+        ),
     )
+    market_open = snapshot.get("market_open")
     metrics[3].metric(
         "Market session",
-        "Open" if snapshot.get("market_open") is True else "Closed",
+        "Open"
+        if market_open is True
+        else "Closed"
+        if market_open is False
+        else "Unavailable",
     )
     frame = pd.DataFrame(rows)
     for column in (
@@ -356,10 +452,26 @@ def render_operating_report_history() -> None:
         st.info("The first CIO pending-transactions report has not been generated yet.")
     else:
         metrics = st.columns(4)
-        metrics[0].metric("Report state", str(report.get("report_state", "Unavailable")).replace("_", " ").title())
-        metrics[1].metric("Transactions", int(report.get("transaction_count", 0)))
-        metrics[2].metric("Launch state", str(report.get("launch_state", "Unavailable")).title())
-        metrics[3].metric("Execution", str(report.get("execution_state", "Unavailable")).replace("_", " ").title())
+        metrics[0].metric(
+            "Report state",
+            str(report.get("report_state", "Unavailable"))
+            .replace("_", " ")
+            .title(),
+        )
+        metrics[1].metric(
+            "Transactions",
+            int(report.get("transaction_count", 0)),
+        )
+        metrics[2].metric(
+            "Launch state",
+            str(report.get("launch_state", "Unavailable")).title(),
+        )
+        metrics[3].metric(
+            "Execution",
+            str(report.get("execution_state", "Unavailable"))
+            .replace("_", " ")
+            .title(),
+        )
         st.caption(
             f"Generated {_format_timestamp(report.get('generated_at'))} · "
             f"Decision {report.get('decision_identifier') or 'unavailable'}"
@@ -390,7 +502,9 @@ def render_operating_report_history() -> None:
                 "Attempted": _format_timestamp(payload.get("attempted_at")),
                 "State": str(payload.get("state", "unavailable")).title(),
                 "Detail": str(payload.get("detail", "")),
-                "Execution ID": str(payload.get("execution_identifier") or ""),
+                "Execution ID": str(
+                    payload.get("execution_identifier") or ""
+                ),
                 "Paper only": payload.get("real_money_authorized") is False,
             }
         )
