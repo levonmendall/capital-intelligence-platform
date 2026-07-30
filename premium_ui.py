@@ -39,10 +39,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="Today",
         slug="today",
         kicker="Decision pulse",
-        title="What deserves attention",
+        title="Today's capital briefing",
         copy=(
-            "A quiet, portfolio-level view of the few developments that may "
-            "matter now. Everything else remains in the background."
+            "What changed, why it matters to the portfolio, and what the CIO "
+            "recommends now."
         ),
         core_label="CIO\nPulse",
         accent="#56e0ff",
@@ -55,10 +55,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="Environment",
         slug="environment",
         kicker="Market atmosphere",
-        title="Conditions shaping capital",
+        title="Today's market environment",
         copy=(
-            "Growth, inflation, liquidity, policy and cross-asset evidence are "
-            "resolved into a simple field of portfolio relevance."
+            "Current growth, inflation, policy, liquidity and cross-asset evidence, "
+            "with the portfolio implication stated plainly."
         ),
         core_label="Signal\nField",
         accent="#52e3a4",
@@ -71,10 +71,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="Portfolio",
         slug="portfolio",
         kicker="Capital architecture",
-        title="How the portfolio is positioned",
+        title="Current portfolio position",
         copy=(
-            "Sizing, funding, concentration and implementation are translated "
-            "into one understandable map of deployed and available capital."
+            "Where capital sits, why it is positioned there, and what portfolio "
+            "action is pending or deliberately absent."
         ),
         core_label="Capital\nMap",
         accent="#9b7cff",
@@ -87,10 +87,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="History",
         slug="history",
         kicker="Institutional memory",
-        title="What the system decided and learned",
+        title="Decisions, actions and learning",
         copy=(
-            "Every conclusion, thesis, paper action and observed outcome remains "
-            "connected in a calm, inspectable decision trail."
+            "The latest CIO conclusion, what happened next, and what the governed "
+            "record has learned over time."
         ),
         core_label="Audit\nTrail",
         accent="#7f9dff",
@@ -307,8 +307,16 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
             [data-testid="stRadio"] div[role="radiogroup"]{display:grid;grid-template-columns:1fr 1fr}
             [data-testid="stRadio"] div[role="radiogroup"] label{min-width:0;flex:none}
             [data-testid="stToggle"]{min-height:3rem}
-            .hero-card{padding:1.2rem 1rem;min-height:auto}
-            .hero-title{font-size:2rem}
+            .hero-shell{margin-bottom:.55rem}
+            .hero-card{padding:.9rem 1rem;min-height:auto}
+            .hero-title{font-size:1.55rem;line-height:1.08}
+            .hero-copy{font-size:.82rem;line-height:1.45;margin:.55rem 0 0}
+            .hero-kicker{font-size:.56rem;margin-bottom:.5rem}
+            .hero-meta{margin-top:.65rem;gap:.3rem}
+            .signal-chip{font-size:.62rem;padding:.3rem .5rem}
+            .hero-meta .signal-chip:nth-child(2),
+            .hero-meta .signal-chip:nth-child(3),
+            .hero-meta .signal-chip:nth-child(4){display:none}
             .surface-story,.story-history{grid-template-columns:1fr}
             .story-lead{grid-column:auto}.story-portfolio .story-step{clip-path:none}
             .metric-grid{grid-template-columns:1fr 1fr;gap:.55rem}
