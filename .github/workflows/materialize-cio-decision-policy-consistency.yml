@@ -1,9 +1,9 @@
 name: Materialize CIO decision policy consistency
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/cio-decision-policy-consistency
+      - main
 
 permissions:
   contents: write
