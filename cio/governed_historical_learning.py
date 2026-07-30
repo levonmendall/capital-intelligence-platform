@@ -2,8 +2,9 @@
 
 The replay manifest shown in History contains every governed observation, including
 capability-policy-only abstentions. Live forecast, confidence, and sizing calibration
-consume a separate manifest that excludes those policy-only observations and maps
-realized results to the original decision horizon.
+consume a separate manifest that excludes those policy-only observations, maps
+realized results to the original decision horizon, and certifies complete point-in-time
+macro coverage.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from cio.models import CandidateDecisionRecord
 
 
 class HistoricalLearningResolver(_BaseHistoricalLearningResolver):
-    """Resolve only horizon-aligned, calibration-eligible historical evidence."""
+    """Resolve only macro-complete, horizon-aligned calibration evidence."""
 
     @classmethod
     def from_environment(cls) -> "HistoricalLearningResolver":
@@ -79,6 +80,30 @@ class HistoricalLearningResolver(_BaseHistoricalLearningResolver):
                     "not aligned to the original decision horizon."
                 ),
             )
+        if payload.get("macro_coverage_satisfied") is not True:
+            missing = payload.get("required_macro_datasets")
+            detail = (
+                ", ".join(str(item) for item in missing)
+                if isinstance(missing, list) and missing
+                else "required policy-rate, yield-curve, and volatility series"
+            )
+            return HistoricalLearningContext.unavailable(
+                candidate_identifier=candidate.identifier,
+                as_of=as_of,
+                reason=(
+                    "Historical learning was excluded because complete point-in-time "
+                    f"macro coverage was not certified for {detail}."
+                ),
+            )
+        if payload.get("certification_ready") is not True:
+            return HistoricalLearningContext.unavailable(
+                candidate_identifier=candidate.identifier,
+                as_of=as_of,
+                reason=(
+                    "Historical learning was excluded because its canonical replay "
+                    "certification is not complete."
+                ),
+            )
 
         context = super().resolve(
             candidate,
@@ -88,6 +113,7 @@ class HistoricalLearningResolver(_BaseHistoricalLearningResolver):
         )
         excluded = int(payload.get("governance_only_observation_count", 0) or 0)
         bounded = int(payload.get("bounded_calibration_outcome_count", 0) or 0)
+        macro_excluded = int(payload.get("macro_excluded_observation_count", 0) or 0)
         limitations: list[str] = []
         identifiers: list[str] = []
         if excluded > 0:
@@ -97,6 +123,14 @@ class HistoricalLearningResolver(_BaseHistoricalLearningResolver):
             )
             identifiers.append(
                 f"historical-learning:governance-only-excluded:{excluded}"
+            )
+        if macro_excluded > 0:
+            limitations.append(
+                f"{macro_excluded} historical observations from macro-incomplete cutoffs "
+                "were retained for audit but excluded from live calibration."
+            )
+            identifiers.append(
+                f"historical-learning:macro-incomplete-excluded:{macro_excluded}"
             )
         if bounded > 0:
             limitations.append(

@@ -12,13 +12,17 @@ from historical_replay_ui import (
 )
 
 
-def _payload(*, schema_version: str = "canonical-historical-replay.v4") -> dict[str, object]:
+def _payload(
+    *,
+    schema_version: str = "canonical-historical-replay.v5",
+    certification_ready: bool = True,
+) -> dict[str, object]:
     return {
         "schema_version": schema_version,
-        "runtime_version": "single-pass-availability-cursor.v4",
-        "generated_at": "2026-07-29T19:00:00Z",
-        "start_date": "2016-07-29",
-        "end_date": "2026-07-29",
+        "runtime_version": "single-pass-availability-cursor.v5",
+        "generated_at": "2026-07-30T00:00:00Z",
+        "start_date": "2016-07-30",
+        "end_date": "2026-07-30",
         "cadence": "monthly",
         "strict_replay": False,
         "research_only": True,
@@ -35,6 +39,13 @@ def _payload(*, schema_version: str = "canonical-historical-replay.v4") -> dict[
         "outcome_alignment": "decision_horizon",
         "avoided_loss_count": 75,
         "missed_opportunity_count": 85,
+        "macro_coverage_satisfied": certification_ready,
+        "certification_ready": certification_ready,
+        "required_macro_dataset_count": 3,
+        "present_macro_dataset_count": 3 if certification_ready else 2,
+        "macro_incomplete_cutoff_count": 0 if certification_ready else 5,
+        "macro_excluded_observation_count": 0 if certification_ready else 12,
+        "missing_macro_datasets": [] if certification_ready else ["series.vixcls"],
         "execution_authorized": False,
         "paper_execution_authorized": False,
         "real_money_authorized": False,
@@ -45,6 +56,7 @@ def _payload(*, schema_version: str = "canonical-historical-replay.v4") -> dict[
                 "cutoff": "2020-01-31T23:59:59Z",
                 "state": "completed",
                 "canonical_cio_invoked": True,
+                "macro_coverage_complete": certification_ready,
                 "candidate_count": 2,
                 "decision_count": 0,
                 "qualification_rejection_count": 2,
@@ -85,7 +97,7 @@ def test_manifest_path_uses_persistent_historical_root(tmp_path):
     )
 
 
-def test_load_and_summarize_canonical_replay_manifest_v4(tmp_path):
+def test_load_and_summarize_macro_complete_v5_manifest(tmp_path):
     path = tmp_path / "latest-canonical-replay.json"
     path.write_text(json.dumps(_payload()), encoding="utf-8")
 
@@ -94,8 +106,8 @@ def test_load_and_summarize_canonical_replay_manifest_v4(tmp_path):
     summary = canonical_replay_summary(payload)
 
     assert summary["state"] == "Partially available"
-    assert summary["schema_version"] == "canonical-historical-replay.v4"
-    assert summary["runtime_version"] == "single-pass-availability-cursor.v4"
+    assert summary["schema_version"] == "canonical-historical-replay.v5"
+    assert summary["runtime_version"] == "single-pass-availability-cursor.v5"
     assert summary["invoked_cutoffs"] == 100
     assert summary["blocked_cutoffs"] == 20
     assert summary["learning_observations"] == 295
@@ -105,16 +117,31 @@ def test_load_and_summarize_canonical_replay_manifest_v4(tmp_path):
     assert summary["governance_only_observations"] == 103
     assert summary["realized_outcomes"] == 160
     assert summary["outcome_alignment"] == "decision_horizon"
-    assert summary["avoided_losses"] == 75
-    assert summary["missed_opportunities"] == 85
+    assert summary["macro_coverage_satisfied"] is True
+    assert summary["certification_ready"] is True
+    assert summary["present_macro_dataset_count"] == 3
+    assert summary["required_macro_dataset_count"] == 3
+    assert summary["macro_incomplete_cutoffs"] == 0
+    assert summary["macro_excluded_observations"] == 0
     assert summary["research_only"] is True
     assert summary["execution_authorized"] is False
     assert summary["real_money_authorized"] is False
     assert summary["performance_claims_authorized"] is False
 
 
+def test_macro_incomplete_v5_manifest_is_visibly_blocked() -> None:
+    summary = canonical_replay_summary(_payload(certification_ready=False))
+
+    assert summary["state"] == "Certification blocked"
+    assert summary["macro_coverage_satisfied"] is False
+    assert summary["certification_ready"] is False
+    assert summary["missing_macro_datasets"] == ["series.vixcls"]
+    assert summary["macro_incomplete_cutoffs"] == 5
+    assert summary["macro_excluded_observations"] == 12
+
+
 def test_supported_replay_schemas_remain_readable(tmp_path):
-    assert "canonical-historical-replay.v4" in SUPPORTED_SCHEMA_VERSIONS
+    assert "canonical-historical-replay.v5" in SUPPORTED_SCHEMA_VERSIONS
     for schema_version in sorted(SUPPORTED_SCHEMA_VERSIONS):
         path = tmp_path / f"{schema_version}.json"
         path.write_text(
@@ -124,12 +151,13 @@ def test_supported_replay_schemas_remain_readable(tmp_path):
         assert load_canonical_replay_manifest(path) is not None
 
 
-def test_cutoff_rows_distinguish_cio_calibration_and_governance_observations():
+def test_cutoff_rows_distinguish_macro_and_governed_observations():
     rows = canonical_replay_cutoff_rows(_payload())
 
     assert len(rows) == 1
     row = rows[0]
     assert row["Canonical cycle"] == "Invoked"
+    assert row["Macro evidence"] == "Complete"
     assert row["CIO decisions"] == 0
     assert row["Pre-CIO outcomes"] == 2
     assert row["Learning observations"] == 2

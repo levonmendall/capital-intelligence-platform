@@ -61,6 +61,14 @@ def test_live_resolver_discloses_bounded_regret_and_policy_exclusions(tmp_path) 
         "generated_at": generated_at.isoformat(),
         "strict_only": True,
         "outcome_alignment": "decision_horizon",
+        "macro_coverage_satisfied": True,
+        "certification_ready": True,
+        "required_macro_datasets": [
+            "series.fedfunds",
+            "series.t10y2y",
+            "series.vixcls",
+        ],
+        "macro_excluded_observation_count": 0,
         "governance_only_observation_count": 4,
         "bounded_calibration_outcome_count": 2,
         "decisions": [
@@ -101,7 +109,49 @@ def test_live_resolver_discloses_bounded_regret_and_policy_exclusions(tmp_path) 
     assert "4 capability-policy-only" in context.summary
     assert "2 extreme decision-relative regret" in context.summary
     assert any("bounded at -100%" in item for item in context.limitations)
-    assert any("governance-only-excluded:4" in item for item in context.evidence_identifiers)
-    assert any("bounded-calibration-outcomes:2" in item for item in context.evidence_identifiers)
+    assert any(
+        "governance-only-excluded:4" in item
+        for item in context.evidence_identifiers
+    )
+    assert any(
+        "bounded-calibration-outcomes:2" in item
+        for item in context.evidence_identifiers
+    )
     assert context.execution_authorized is False
     assert context.policy_promotion_authorized is False
+
+
+def test_live_resolver_rejects_macro_incomplete_sidecar(tmp_path) -> None:
+    generated_at = datetime(2026, 7, 29, 12, tzinfo=UTC)
+    path = tmp_path / "latest-canonical-learning.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "canonical-historical-learning-input.v1",
+                "generated_at": generated_at.isoformat(),
+                "strict_only": True,
+                "outcome_alignment": "decision_horizon",
+                "macro_coverage_satisfied": False,
+                "certification_ready": False,
+                "required_macro_datasets": [
+                    "series.fedfunds",
+                    "series.t10y2y",
+                    "series.vixcls",
+                ],
+                "decisions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    as_of = generated_at + timedelta(seconds=1)
+
+    context = HistoricalLearningResolver(path, minimum_sample_size=1).resolve(
+        _live_candidate(as_of),
+        as_of=as_of,
+        macro_regime="risk_on",
+        market_regime="positive_trend",
+    )
+
+    assert context.status.value == "unavailable"
+    assert context.position_size_multiplier == 1.0
+    assert "macro coverage was not certified" in context.summary
