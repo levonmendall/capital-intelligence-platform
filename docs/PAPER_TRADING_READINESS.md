@@ -40,3 +40,5 @@ Ten years do not cover every market regime, security-master change, instrument h
 The product is ready for controlled runtime and paper-governance testing. It becomes ready for meaningful unattended paper trading only after real candidate evidence generation and recurring holding-evidence publication are deployed and the stricter production smoke test passes on that release.
 
 Until those evidence publishers are active, the system remains fail-closed and cannot produce a decision-complete autonomous construction from the current free-data production path.
+
+Passing these readiness gates demonstrates process and operational readiness; it does not establish future investment performance.
