@@ -4,13 +4,16 @@ on:
   push:
     branches:
       - agent/expose-daily-cio-briefing
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.event.head_commit.message != 'Expose daily CIO briefing'
+    if: github.event_name == 'push' || github.head_ref == 'agent/expose-daily-cio-briefing'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
