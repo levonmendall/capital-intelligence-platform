@@ -1,0 +1,38 @@
+name: Materialize Smoke Fixture Contract
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out review branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply smoke fixture contract
+        run: python tools/materialize_smoke_fixture_contract.py
+
+      - name: Remove temporary materializer
+        run: |
+          rm tools/materialize_smoke_fixture_contract.py
+          rm .github/workflows/materialize-smoke-fixture-contract.yml
+
+      - name: Commit corrected smoke fixture
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Update smoke fixture for comparative readiness"
+          git push origin HEAD:agent/complete-paper-readiness-review
