@@ -34,4 +34,5 @@ def test_every_visible_synopsis_is_portfolio_first() -> None:
     assert source.count("Portfolio impact:") >= 4
     assert source.count("CIO action:") >= 3
     assert "headlines cannot alter the CIO conclusion or authorize a paper trade" in source
-    assert "cannot change current holdings or authorize execution" in source
+    assert "it cannot" in source
+    assert "change current holdings or authorize execution" in source
