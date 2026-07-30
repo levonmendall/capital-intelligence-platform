@@ -284,6 +284,29 @@ def canonical_replay_cutoff_rows(payload: Mapping[str, Any]) -> list[dict[str, A
     return rows
 
 
+def historical_macro_certification_detail(summary: Mapping[str, Any]) -> str:
+    present = int(summary.get("present_macro_dataset_count", 0) or 0)
+    required = int(summary.get("required_macro_dataset_count", 0) or 0)
+    incomplete_cutoffs = int(summary.get("macro_incomplete_cutoffs", 0) or 0)
+    total_cutoffs = int(summary.get("total_cutoffs", 0) or 0)
+    missing = [str(item) for item in summary.get("missing_macro_datasets", [])]
+    if summary.get("certification_ready") is True:
+        return "Historical macro coverage is complete and live calibration is certified."
+    if required > 0 and present >= required and incomplete_cutoffs > 0:
+        return (
+            f"All {required} required macro series are present in the archive, but "
+            f"point-in-time values were unavailable at {incomplete_cutoffs} of "
+            f"{total_cutoffs} decision cutoffs. Those cutoffs and their observations "
+            "remain excluded from live calibration."
+        )
+    if missing:
+        return "Historical macro coverage is incomplete. Missing: " + ", ".join(missing) + "."
+    return (
+        "Historical macro coverage does not yet satisfy the point-in-time "
+        "certification rules required for live calibration."
+    )
+
+
 def render_canonical_historical_replay() -> None:
     """Render sanitized canonical replay status inside the History surface."""
 
@@ -369,13 +392,7 @@ def render_canonical_historical_replay() -> None:
         return
 
     if not summary["certification_ready"]:
-        missing = ", ".join(summary["missing_macro_datasets"])
-        st.warning(
-            "This replay remains available for audit, but it is not permitted to calibrate "
-            "live committee confidence or CIO sizing because point-in-time macro coverage "
-            "is incomplete."
-            + (f" Missing: {missing}." if missing else "")
-        )
+        st.warning(historical_macro_certification_detail(summary))
 
     st.info(
         "This is governed research evidence, not an execution surface or verified "
@@ -419,6 +436,7 @@ __all__ = [
     "canonical_replay_cutoff_rows",
     "canonical_replay_manifest_path",
     "canonical_replay_summary",
+    "historical_macro_certification_detail",
     "load_canonical_replay_manifest",
     "render_canonical_historical_replay",
 ]

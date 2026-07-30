@@ -171,6 +171,18 @@ def _governed_no_action_briefing(
     )
 
 
+def _briefing_decision_identifier(
+    briefing: Mapping[str, Any] | None,
+) -> str:
+    if not isinstance(briefing, Mapping):
+        return ""
+    for field_name in ("decision_identifier", "identifier", "cycle_identifier"):
+        value = str(briefing.get(field_name, "")).strip()
+        if value:
+            return value
+    return ""
+
+
 def _semantic_fingerprint(report: Mapping[str, Any]) -> str:
     excluded = {"generated_at", "report_fingerprint", "json_path", "markdown_path"}
     payload = {key: value for key, value in report.items() if key not in excluded}
@@ -261,11 +273,7 @@ def build_pending_transaction_report(
         "paper_trading_start_label": paper_trading_launch_label(),
         "launch_state": launch_state,
         "execution_state": resolved_execution_state,
-        "decision_identifier": (
-            str(briefing.get("decision_identifier", "")).strip()
-            if isinstance(briefing, Mapping)
-            else ""
-        ),
+        "decision_identifier": _briefing_decision_identifier(briefing),
         "decision_as_of": (
             str(briefing.get("as_of", "")).strip()
             if isinstance(briefing, Mapping)
@@ -444,11 +452,7 @@ def resolve_pending_transaction_report(
     generated_at: datetime | None = None,
 ) -> dict[str, Any]:
     persisted = load_pending_transaction_report()
-    decision_identifier = (
-        str(briefing.get("decision_identifier", "")).strip()
-        if isinstance(briefing, Mapping)
-        else ""
-    )
+    decision_identifier = _briefing_decision_identifier(briefing)
     construction_identifier = (
         str(construction.get("request_identifier", "")).strip()
         if isinstance(construction, Mapping)

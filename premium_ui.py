@@ -252,7 +252,7 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         .metric-portfolio .metric-node{border-left:3px solid rgba(var(--surface-rgb),.55);border-radius:14px 24px 24px 14px}
         .metric-history .metric-node{min-height:6.4rem;background:rgba(8,13,24,.7);border-style:dashed}
         .metric-seq{font-size:.61rem;font-weight:850;letter-spacing:.12em;color:var(--surface-accent);opacity:.88}
-        .metric-value{font-size:1.5rem;line-height:1.15;font-weight:760;letter-spacing:-.04em;color:var(--ink);margin:.7rem 0 .25rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .metric-value{font-size:1.5rem;line-height:1.15;font-weight:760;letter-spacing:-.04em;color:var(--ink);margin:.7rem 0 .25rem;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
         .metric-label{font-size:.76rem;color:var(--muted);font-weight:650}
         .metric-note{font-size:.66rem;color:#718299;margin-top:.32rem}
         .signal-panel{position:relative;overflow:hidden;border-radius:24px;padding:1.25rem 1.3rem;background:linear-gradient(135deg,rgba(var(--surface-rgb),.085),rgba(var(--surface-rgb-2),.08) 52%,rgba(var(--surface-rgb),.045));border:1px solid rgba(var(--surface-rgb),.28);box-shadow:0 18px 42px var(--shadow);margin:.3rem 0 1rem}
@@ -290,6 +290,7 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         .activity-title{font-size:.84rem;font-weight:730;color:var(--ink);margin:.38rem 0 .2rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .activity-meta{font-size:.68rem;line-height:1.4;color:var(--muted)}
         [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 16px 38px var(--shadow);background:var(--panel-solid)}
+        [data-testid="stMetricValue"]{white-space:normal!important;overflow-wrap:anywhere;word-break:break-word;line-height:1.08}
         [data-testid="stExpander"]{border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--panel)}
         [data-testid="stExpander"] summary,[data-testid="stExpander"] p,[data-testid="stExpander"] code{color:var(--ink)}
         [data-testid="stAlert"]{border-radius:18px;border-color:var(--line);background:var(--alert);color:var(--ink)}
@@ -312,7 +313,9 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
             .story-lead{grid-column:auto}.story-portfolio .story-step{clip-path:none}
             .metric-grid{grid-template-columns:1fr 1fr;gap:.55rem}
             .metric-node{min-height:6.5rem;padding:.85rem}
-            .metric-value{font-size:1.25rem}
+            .metric-value{font-size:1.1rem}
+            .activity-title{white-space:normal;overflow:visible;text-overflow:clip}
+            [data-testid="stMetricValue"]{font-size:1.45rem!important}
             .capital-orbit{grid-template-columns:1fr;text-align:center}
             .capital-ring{margin:auto}.capital-ledger{text-align:left}
             .activity-rail{grid-template-columns:1fr}.activity-rail:before{display:none}

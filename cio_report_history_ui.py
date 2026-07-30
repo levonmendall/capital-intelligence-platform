@@ -40,6 +40,11 @@ def render_cio_report_archive() -> None:
         key="cio-report-archive-selection",
     )
     report = reports[int(selected)]
+    no_transaction = report.get("report_state") == "no_transaction_recommended"
+    decision_reference = str(report.get("decision_identifier") or "").strip()
+    if not decision_reference:
+        fingerprint = str(report.get("report_fingerprint") or "").strip()
+        decision_reference = f"report:{fingerprint[:16]}" if fingerprint else "Unavailable"
 
     st.caption(
         f"Report {int(selected) + 1} of {len(reports)} · "
@@ -54,14 +59,29 @@ def render_cio_report_archive() -> None:
         int(report.get("transaction_count", 0)),
     )
     metrics[1].metric(
-        "Target cash",
-        _percent(report.get("target_cash_weight")),
+        "Target allocation",
+        (
+            "Unchanged"
+            if no_transaction and report.get("target_cash_weight") is None
+            else _percent(report.get("target_cash_weight"))
+        ),
     )
     metrics = st.columns(2)
-    metrics[0].metric("Turnover", _percent(report.get("turnover")))
+    metrics[0].metric(
+        "Turnover",
+        (
+            "0.00%"
+            if no_transaction and report.get("turnover") is None
+            else _percent(report.get("turnover"))
+        ),
+    )
     metrics[1].metric(
         "Expected improvement",
-        _percent(report.get("expected_return_improvement")),
+        (
+            "Not applicable"
+            if no_transaction and report.get("expected_return_improvement") is None
+            else _percent(report.get("expected_return_improvement"))
+        ),
     )
 
     st.markdown("##### Decision lineage")
@@ -69,11 +89,11 @@ def render_cio_report_archive() -> None:
         f"Generated: {report.get('generated_at') or 'Unavailable'}"
     )
     st.write(
-        f"Decision: {report.get('decision_identifier') or 'Unavailable'}"
+        f"Decision reference: {decision_reference}"
     )
     st.write(
         "Construction: "
-        f"{report.get('construction_identifier') or 'Unavailable'}"
+        f"{report.get('construction_identifier') or ('Not required' if no_transaction else 'Unavailable')}"
     )
 
     transactions = report.get("transactions")

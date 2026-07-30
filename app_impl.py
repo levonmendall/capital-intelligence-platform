@@ -35,6 +35,7 @@ from premium_ui import (
     text_card,
 )
 from providers.economic_snapshot import load_dashboard_data
+from live_operating_console import load_live_market_console
 
 
 PRIMARY_SURFACES = ["Today", "Environment", "Portfolio", "History"]
@@ -97,6 +98,16 @@ def _diagnostic_environment() -> dict[str, Any] | None:
         return None
 
 
+def _briefing_identifier(briefing: dict[str, Any] | None) -> str:
+    if not isinstance(briefing, dict):
+        return "Unavailable"
+    for field_name in ("decision_identifier", "identifier", "cycle_identifier"):
+        value = str(briefing.get(field_name, "")).strip()
+        if value:
+            return value
+    return "Unavailable"
+
+
 def _render_today() -> None:
     briefing = _latest("daily_cio_briefing")
     theses = _latest_theses()
@@ -153,8 +164,12 @@ def _render_today() -> None:
                 ("CIO state", status, "Governed conclusion"),
                 (
                     "Confidence",
-                    "—" if confidence is None else f"{float(confidence):.0%}",
-                    "Evidence-weighted",
+                    "Not scored" if confidence is None else f"{float(confidence):.0%}",
+                    (
+                        "No-candidate conclusion"
+                        if confidence is None
+                        else "Evidence-weighted"
+                    ),
                 ),
                 (
                     "Implementation",
@@ -208,7 +223,7 @@ def _render_today() -> None:
         with st.expander("Decision audit reference"):
             st.write(
                 "Decision: "
-                f"{briefing.get('decision_identifier') or 'No action decision'}"
+                f"{_briefing_identifier(briefing)}"
             )
             st.write(
                 "Candidate: "
@@ -267,6 +282,9 @@ def _render_environment() -> None:
     )
     payload = _diagnostic_environment()
     environment = None if payload is None else payload.get("environment")
+    dashboard_data = load_dashboard_data()
+    readings = dashboard_data.readings
+    live_market = load_live_market_console()
     if isinstance(environment, dict):
         signal_panel(
             "Market field // active",
@@ -287,7 +305,7 @@ def _render_environment() -> None:
                 ),
                 (
                     "Evidence confidence",
-                    "—" if confidence is None else f"{float(confidence):.0%}",
+                    "Not scored" if confidence is None else f"{float(confidence):.0%}",
                     "Certified inputs",
                 ),
                 (
@@ -311,14 +329,73 @@ def _render_environment() -> None:
         if environment.get("review_conditions"):
             with st.expander("Environment review conditions"):
                 st.markdown(bullet_lines(environment["review_conditions"]))
+    elif (
+        live_market.get("status") in {"connected", "partial"}
+        and readings is not None
+    ):
+        quote_count = int(live_market.get("quote_count", 0) or 0)
+        expected_quote_count = int(
+            live_market.get("expected_quote_count", 0) or 0
+        )
+        coverage_state = (
+            "Provider complete"
+            if live_market.get("status") == "connected"
+            else "Provider partial"
+        )
+        latest_briefing = _latest("daily_cio_briefing")
+        signal_panel(
+            "Market field // provider backed",
+            "Live environment evidence is available",
+            (
+                "Alpaca/IEX cross-asset quotes and FRED macro readings are current "
+                "on this operating host. This evidence feeds the CIO process without "
+                "being presented as a separate regime recommendation."
+            ),
+            variant="environment",
+        )
+        metric_grid(
+            (
+                (
+                    "Regime",
+                    "Not separately classified",
+                    "No synthetic label",
+                ),
+                (
+                    "Evidence confidence",
+                    coverage_state,
+                    "Current provider inputs",
+                ),
+                (
+                    "Data status",
+                    f"{quote_count}/{expected_quote_count} quotes + macro",
+                    "Live production coverage",
+                ),
+                (
+                    "Portfolio effect",
+                    "Included in CIO",
+                    "Not independently actionable",
+                ),
+            ),
+            variant="environment",
+        )
+        callout_card(
+            "Portfolio transmission",
+            (
+                str(latest_briefing.get("portfolio_decision"))
+                if isinstance(latest_briefing, dict)
+                and latest_briefing.get("portfolio_decision")
+                else (
+                    "Current provider evidence is available to the governed CIO "
+                    "process; it does not independently authorize a portfolio change."
+                )
+            ),
+        )
     else:
+        detail = str(live_market.get("detail") or dashboard_data.status)
         signal_panel(
             "Market field // limited",
-            "Canonical environment brief unavailable",
-            (
-                "Diagnostic readings remain visible, but no portfolio conclusion "
-                "is inferred from incomplete environment evidence."
-            ),
+            "Operating environment evidence is incomplete",
+            detail,
             variant="environment",
         )
 
@@ -327,8 +404,6 @@ def _render_environment() -> None:
         "Live macro readings feeding the broader opportunity engine.",
         "02",
     )
-    dashboard_data = load_dashboard_data()
-    readings = dashboard_data.readings
     if readings is None:
         st.warning("Live economic readings are unavailable.")
         st.caption(str(dashboard_data.status))
@@ -634,7 +709,7 @@ def _render_history() -> None:
                         "Status": item.get("status"),
                         "Decision": item.get("portfolio_decision"),
                         "Confidence": item.get("confidence"),
-                        "Decision ID": item.get("decision_identifier"),
+                        "Decision ID": _briefing_identifier(item),
                     }
                     for item in briefings
                 )

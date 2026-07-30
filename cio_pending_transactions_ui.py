@@ -31,13 +31,32 @@ def render_pending_transaction_report(
         "Exact canonical CIO construction"
     )
 
+    no_transaction = report.get("report_state") == "no_transaction_recommended"
     metrics = st.columns(4)
     metrics[0].metric("Transactions", int(report["transaction_count"]))
-    metrics[1].metric("Target cash", _percentage(report.get("target_cash_weight")))
-    metrics[2].metric("Turnover", _percentage(report.get("turnover")))
+    metrics[1].metric(
+        "Target allocation",
+        (
+            "Unchanged"
+            if no_transaction and report.get("target_cash_weight") is None
+            else _percentage(report.get("target_cash_weight"))
+        ),
+    )
+    metrics[2].metric(
+        "Turnover",
+        (
+            "0.00%"
+            if no_transaction and report.get("turnover") is None
+            else _percentage(report.get("turnover"))
+        ),
+    )
     metrics[3].metric(
         "Expected improvement",
-        _percentage(report.get("expected_return_improvement")),
+        (
+            "Not applicable"
+            if no_transaction and report.get("expected_return_improvement") is None
+            else _percentage(report.get("expected_return_improvement"))
+        ),
     )
 
     transactions = report.get("transactions")
