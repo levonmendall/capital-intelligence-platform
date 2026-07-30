@@ -126,6 +126,7 @@ def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
         identity_store=identity_store,
         schedule_timezone=settings.scheduler_timezone,
         schedule_hour=settings.scheduler_hour,
+        schedule_times=settings.scheduler_times,
         cycle_retry_delay=timedelta(minutes=settings.scheduler_retry_minutes),
         cycle_lease=timedelta(minutes=settings.scheduler_lease_minutes),
     )
