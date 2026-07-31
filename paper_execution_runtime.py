@@ -145,6 +145,26 @@ def artifact_directory() -> Path:
     return path
 
 
+def read_paper_execution_status(
+    construction: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Read the persisted status for an exact construction without creating state."""
+
+    if not isinstance(construction, Mapping):
+        return None
+    try:
+        construction_hash = canonical_construction_sha256(construction)
+    except (TypeError, ValueError):
+        return None
+    configured = os.getenv("CAPITAL_INTELLIGENCE_PAPER_EXECUTION_ARTIFACT_DIR")
+    root = (
+        Path(configured).expanduser()
+        if configured
+        else _data_dir() / "paper_execution_artifacts"
+    )
+    return _load_status(root / f"{construction_hash}.status.json")
+
+
 def _retry_seconds() -> int:
     raw = os.getenv("CAPITAL_INTELLIGENCE_PAPER_EXECUTION_RETRY_SECONDS", "60")
     try:
@@ -636,4 +656,5 @@ __all__ = [
     "attempt_paper_execution",
     "paper_execution_enabled",
     "paper_execution_mode",
+    "read_paper_execution_status",
 ]
