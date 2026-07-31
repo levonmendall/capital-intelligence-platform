@@ -113,7 +113,9 @@ def test_selects_priced_call_and_put_from_completed_session():
     }
     assert all(call[1]["auth"] == ("secret", "") for call in post.calls)
     assert all(
-        call[1]["data"]["stype_out"] == "raw_symbol"
+        call[1]["data"]["stype_in"] == "raw_symbol"
+        and call[1]["data"]["map_symbols"] == "true"
+        and "stype_out" not in call[1]["data"]
         for call in post.calls
         if call[1]["data"]["schema"] == "ohlcv-1d"
     )
