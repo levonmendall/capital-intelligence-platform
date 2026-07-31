@@ -74,7 +74,7 @@ jobs:
           echo "0d600b7f2502f4da6e42b90f146f8642c051440206615a040155f10a8c721757  /tmp/comprehensive-market-discovery.tar.gz" | sha256sum --check --strict
           tar --extract --gzip --file /tmp/comprehensive-market-discovery.tar.gz --directory .
 
-      - name: Repair dual lineage patch and apply implementation
+      - name: Repair compatibility anchors and apply implementation
         shell: bash
         run: |
           set -euo pipefail
@@ -90,9 +90,7 @@ jobs:
           index = matches[0]
           start = index - 7
           end = index + 2
-          expected_start = "    content = replace_once("
-          expected_end = "    )"
-          if lines[start] != expected_start or lines[end - 1] != expected_end:
+          if lines[start] != "    content = replace_once(" or lines[end - 1] != "    )":
               raise RuntimeError("lineage patch block shape is unexpected")
           replacement = [
               "    source_lineage = '''            (f\"ALPACA_IEX:{instrument.symbol}\", features.latest_observed_at.isoformat()),'''",
@@ -113,6 +111,17 @@ jobs:
           path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
           python tools/apply_comprehensive_market_discovery.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("production_context_publication_governed.py")
+          content = path.read_text(encoding="utf-8")
+          old = "conclusion is prohibited until U.S.-equity and six-lane global discovery complete: "
+          new = "conclusion is prohibited until broad U.S.-equity discovery completes and six-lane global discovery completes: "
+          if content.count(old) != 1:
+              raise RuntimeError(f"discovery compatibility phrase count is {content.count(old)}")
+          path.write_text(content.replace(old, new), encoding="utf-8")
+          PY
 
       - name: Remove one-use transport
         shell: bash
