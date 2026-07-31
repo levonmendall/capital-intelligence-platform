@@ -37,6 +37,9 @@ def test_reusable_lens_preserves_event_to_portfolio_hierarchy() -> None:
     source = Path("premium_ui.py").read_text(encoding="utf-8")
 
     assert "def investment_lens_card(" in source
+    assert "def _compact_headline(" in source
+    assert "Headlines first · expand below for context" in source
+    assert "lens-icon" in source
     for label in (
         "What changed",
         "Why investors care",
@@ -45,6 +48,14 @@ def test_reusable_lens_preserves_event_to_portfolio_hierarchy() -> None:
         "What to watch next",
     ):
         assert label in source
+
+
+def test_long_decision_context_is_compact_and_expandable() -> None:
+    source = Path("premium_ui.py").read_text(encoding="utf-8")
+
+    assert "def _status_headline(" in source
+    assert "A stronger, liquid, risk-adjusted opportunity" in source
+    assert 'with st.expander(f"Explore {label.lower()}", expanded=False)' in source
 
 
 def test_history_research_is_compact_and_governance_first() -> None:

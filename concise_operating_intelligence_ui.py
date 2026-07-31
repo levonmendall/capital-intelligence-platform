@@ -49,12 +49,12 @@ def _decision_reference(briefing: Mapping[str, Any] | None) -> str:
 def _event_headline(items: Sequence[object]) -> str:
     if not items:
         return "No new development cleared the relevance threshold today."
-    titles = [_truncate(getattr(item, "title", ""), 72) for item in items[:2]]
-    headline = "; ".join(title for title in titles if title)
-    suffix = "" if len(items) <= 2 else f"; plus {len(items) - 2} additional development"
-    if len(items) > 3:
-        suffix += "s"
-    return _truncate(headline + suffix, 190)
+    primary = _truncate(getattr(items[0], "title", "Market development"), 108)
+    remaining = len(items) - 1
+    if remaining <= 0:
+        return primary
+    suffix = "development" if remaining == 1 else "developments"
+    return f"{primary} · {remaining} other portfolio-relevant {suffix}."
 
 
 def _event_portfolio_fallback(items: Sequence[object]) -> str:
@@ -71,14 +71,20 @@ def _event_portfolio_fallback(items: Sequence[object]) -> str:
 
 
 def _event_watchlist(items: Sequence[object]) -> str:
-    watches = [
-        _truncate(getattr(item, "what_to_watch", ""), 96)
-        for item in items[:3]
-        if _clean(getattr(item, "what_to_watch", ""))
-    ]
+    watches: list[str] = []
+    seen: set[str] = set()
+    for item in items[:4]:
+        watch = _truncate(getattr(item, "what_to_watch", ""), 96)
+        key = _clean(watch).casefold().strip(" .…")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        watches.append(watch)
+        if len(watches) == 2:
+            break
     if not watches:
-        return "Watch for confirmation in rates, earnings expectations, liquidity, and cross-asset price action."
-    return _truncate(" • ".join(watches), 220)
+        return "Watch rates, earnings expectations, liquidity, and cross-asset confirmation."
+    return _truncate(" • ".join(watches), 176)
 
 
 def _daily_investor_lesson(items: Sequence[object]) -> str:
@@ -111,6 +117,39 @@ def _economic_investor_lesson(readings: object) -> str:
         f"Growth affects earnings, inflation affects purchasing power and margins, and policy rates affect "
         f"discount rates and financing costs. The 10-year minus 2-year curve is {curve} ({spread:+.2f} pp)."
     )
+
+
+def _economic_headline(readings: object) -> str:
+    if readings is None:
+        return "The latest economic picture is incomplete, so no standalone conclusion is warranted."
+    return (
+        f"Inflation {float(getattr(readings, 'inflation_rate', 0.0)):.2f}% · "
+        f"unemployment {float(getattr(readings, 'unemployment_rate', 0.0)):.1f}% · "
+        f"policy rate {float(getattr(readings, 'federal_funds_rate', 0.0)):.2f}% · "
+        f"10Y−2Y {float(getattr(readings, 'yield_curve_spread', 0.0)):+.2f} pp."
+    )
+
+
+def _render_lens_context(
+    *,
+    what_changed: object,
+    why_investors_care: object,
+    portfolio_effect: object,
+    cio_response: object,
+    watch_next: object,
+) -> None:
+    sections = (
+        ("What changed", what_changed),
+        ("Why investors care", why_investors_care),
+        ("Portfolio effect", portfolio_effect),
+        ("CIO response", cio_response),
+        ("What to watch next", watch_next),
+    )
+    for index, (label, value) in enumerate(sections):
+        st.markdown(f"**{label}**")
+        st.write(_clean(value) or "No additional detail is available.")
+        if index != len(sections) - 1:
+            st.divider()
 
 
 def _render_event_detail(
@@ -169,17 +208,29 @@ def render_today_market_brief(
         "The few daily developments that matter, explained through their investment and portfolio effect.",
         "NOW",
     )
+    event_headline = _event_headline(items)
+    investor_lesson = _daily_investor_lesson(items)
+    watchlist = _event_watchlist(items)
     ui.investment_lens_card(
         title="Daily investment synopsis",
-        what_changed=_event_headline(items),
-        why_investors_care=_daily_investor_lesson(items),
+        what_changed=event_headline,
+        why_investors_care=investor_lesson,
         portfolio_effect=portfolio_impact,
         cio_response=action,
-        watch_next=_event_watchlist(items),
+        watch_next=watchlist,
         variant="today",
     )
     # Portfolio impact: visible in the synopsis. CIO action: visible in the synopsis.
-    with st.expander("Read today's developments and sources"):
+    with st.expander("Explore today's investment context", expanded=False):
+        _render_lens_context(
+            what_changed=event_headline,
+            why_investors_care=investor_lesson,
+            portfolio_effect=portfolio_impact,
+            cio_response=action,
+            watch_next=watchlist,
+        )
+        st.divider()
+        st.markdown("#### Developments and original sources")
         _render_event_detail(items, records, briefing)
         st.caption(f"Portfolio impact: {portfolio_impact} · CIO action: {action}")
     st.caption(
@@ -226,17 +277,27 @@ def render_environment_economic_brief(
             ),
             variant="environment",
         )
+    economic_lesson = _economic_investor_lesson(readings)
+    watchlist = _event_watchlist(items)
     ui.investment_lens_card(
         title="Economic synopsis",
-        what_changed=economic_picture,
-        why_investors_care=_economic_investor_lesson(readings),
+        what_changed=_economic_headline(readings),
+        why_investors_care=economic_lesson,
         portfolio_effect=portfolio_impact,
         cio_response=action,
-        watch_next=_event_watchlist(items),
+        watch_next=watchlist,
         variant="environment",
     )
     # Portfolio impact: visible in the synopsis. CIO action: visible in the synopsis.
-    with st.expander("Read economic detail, developments, and sources"):
+    with st.expander("Explore the economic investment context", expanded=False):
+        _render_lens_context(
+            what_changed=economic_picture,
+            why_investors_care=economic_lesson,
+            portfolio_effect=portfolio_impact,
+            cio_response=action,
+            watch_next=watchlist,
+        )
+        st.divider()
         st.markdown("#### How the economy reaches investments")
         for title, explanation in base.economic_investment_implications(dashboard.readings):
             st.markdown(f"**{title}**")
