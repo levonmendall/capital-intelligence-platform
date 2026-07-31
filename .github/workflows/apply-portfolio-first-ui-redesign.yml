@@ -1,0 +1,68 @@
+name: Apply portfolio-first UI redesign
+
+on:
+  push:
+    branches:
+      - agent/portfolio-first-ui-redesign
+    paths:
+      - .github/agent_payload/portfolio-first-ui.tar.gz.b64
+      - .github/workflows/apply-portfolio-first-ui-redesign.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: portfolio-first-ui-redesign
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out redesign branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/portfolio-first-ui-redesign
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply reviewed interface files
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=.github/agent_payload/portfolio-first-ui.tar.gz.b64
+          test -s "$payload"
+          base64 --decode "$payload" > /tmp/portfolio-first-ui.tar.gz
+          gzip --test /tmp/portfolio-first-ui.tar.gz
+          tar --extract --gzip --file /tmp/portfolio-first-ui.tar.gz --directory .
+          rm -f "$payload" .github/workflows/apply-portfolio-first-ui-redesign.yml
+
+      - name: Validate interface implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q \
+            app.py \
+            premium_ui.py \
+            concise_operating_intelligence_ui.py \
+            navigation_ui.py \
+            cio_report_history_ui.py \
+            live_operating_console.py \
+            historical_replay_ui.py
+          python -m pip install --disable-pip-version-check --quiet pytest
+          pytest -q \
+            tests/test_portfolio_education_ui.py \
+            tests/test_concise_operating_intelligence_ui.py \
+            tests/test_surface_information_hierarchy.py \
+            tests/test_premium_streamlit_interface.py \
+            tests/test_live_streamlit_navigation.py
+
+      - name: Commit redesign
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Refine portfolio-first investment education interface'
+          git push origin HEAD:agent/portfolio-first-ui-redesign
