@@ -34,7 +34,7 @@ def test_discovery_failure_cannot_be_reported_as_no_opportunity() -> None:
         encoding="utf-8"
     )
     assert "Complete opportunity search is unavailable" in source
-    assert "a no-superior-opportunity conclusion is prohibited" in source
+    assert "conclusion is prohibited until broad U.S.-equity discovery completes" in source
 
 
 def test_cio_uses_ensemble_and_progressive_lanes() -> None:
