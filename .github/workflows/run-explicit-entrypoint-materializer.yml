@@ -1,0 +1,84 @@
+name: Run explicit entrypoint materializer
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: github.head_ref == 'fix/explicit-streamlit-entrypoints'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/explicit-streamlit-entrypoints
+          fetch-depth: 0
+      - name: Apply corrected materializer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          python - <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+
+          workflow = Path('.github/workflows/materialize-explicit-streamlit-entrypoints.yml')
+          text = workflow.read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY"
+          start = text.index(start_marker) + len(start_marker)
+          end = text.index(end_marker, start)
+          script = dedent(text[start:end])
+          lines = script.splitlines(keepends=True)
+          block_start = next(
+              index
+              for index, line in enumerate(lines)
+              if line.startswith("page_config = '''st.set_page_config")
+              and index > 200
+          )
+          block_end = next(
+              index
+              for index in range(block_start + 1, len(lines))
+              if line_starts := lines[index].startswith("start = source.find('def _authorized_source()")
+          )
+          replacement = [
+              "page_config_start = source.find('st.set_page_config(\\n')\n",
+              "if page_config_start >= 0:\n",
+              "    next_section = source.find('\\n\\n@st.cache_resource', page_config_start)\n",
+              "    if next_section < 0:\n",
+              "        raise SystemExit('secure_app page configuration boundary mismatch')\n",
+              "    source = source[:page_config_start] + source[next_section + 2:]\n",
+          ]
+          corrected = ''.join(lines[:block_start] + replacement + lines[block_end:])
+          exec(compile(corrected, '<explicit-entrypoint-materializer>', 'exec'), {'__name__': '__main__'})
+          for filename in (
+              '.github/workflows/materialize-explicit-streamlit-entrypoints.yml',
+              '.github/workflows/repair-explicit-streamlit-materializer.yml',
+              '.github/workflows/run-explicit-entrypoint-materializer.yml',
+              '.explicit-streamlit-entrypoints-applied',
+          ):
+              Path(filename).unlink(missing_ok=True)
+          PY
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install -r requirements-dev.txt
+      - name: Compile entrypoints
+        run: python -m compileall -q app.py app_impl.py secure_app.py render_app.py tests/test_explicit_streamlit_entrypoints.py
+      - name: Run complete repository suite
+        run: python -m pytest -q --maxfail=10
+      - name: Commit validated entrypoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f database/worker-heartbeat.json
+          git add -A
+          git commit -m "Replace nested Streamlit source execution"
+          git push origin HEAD:fix/explicit-streamlit-entrypoints
