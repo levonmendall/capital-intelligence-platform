@@ -215,163 +215,52 @@ def _replace_source_once(old: str, new: str, error_message: str) -> None:
     _source = _source.replace(old, new, 1)
 
 
-# Long qualification and review-condition lists remain available, but they should
-# not dominate the Today or Environment synopsis. Replace the always-open cards
-# with collapsed expanders while preserving the exact governed evidence text.
-_decision_change_replacements = (
-    (
-        '''        with right:
-            text_card(
-                "What could change the state",
-                (
-                    "A completed evidence comparison, independent review, CIO synthesis, "
-                    "and feasible construction are required before capital can change."
-                ),
-            )
-''',
-        '''        with right:
-            with st.expander("What could change the state"):
-                st.write(
-                    "A completed evidence comparison, independent review, CIO synthesis, "
-                    "and feasible construction are required before capital can change."
-                )
-''',
-    ),
-    (
-        '''        text_card(
-            "What could change the decision",
-            _joined_items(
-                briefing.get("evidence_that_changes_conclusion", []),
-                "No additional decision-change conditions were recorded.",
-            ),
-        )
-''',
-        '''        with st.expander("What could change the decision"):
-            st.write(
-                _joined_items(
-                    briefing.get("evidence_that_changes_conclusion", []),
-                    "No additional decision-change conditions were recorded.",
-                )
-            )
-''',
-    ),
-    (
-        '''    policy_rate = "Unavailable" if readings is None else f"{readings.federal_funds_rate:.2f}%"
-
-''',
-        '''    policy_rate = "Unavailable" if readings is None else f"{readings.federal_funds_rate:.2f}%"
-    assessment_change_conditions = _joined_items(
-        latest_briefing.get("evidence_that_changes_conclusion", [])
-        if isinstance(latest_briefing, dict)
-        else [],
-        "A material change in growth, inflation, policy, liquidity, or cross-asset evidence would trigger review.",
-    )
-
-''',
-    ),
-    (
-        '''        with right:
-            text_card(
-                "Portfolio implication",
-                _plain_text(
-                    environment.get("portfolio_impact"),
-                    _plain_text(
-                        latest_briefing.get("why_it_matters") if isinstance(latest_briefing, dict) else None,
-                        "The environment record does not independently authorize a portfolio change.",
-                    ),
-                ),
-            )
-    elif live_market.get("status") in {"connected", "partial"} and readings is not None:
-''',
-        '''        with right:
-            text_card(
-                "Portfolio implication",
-                _plain_text(
-                    environment.get("portfolio_impact"),
-                    _plain_text(
-                        latest_briefing.get("why_it_matters") if isinstance(latest_briefing, dict) else None,
-                        "The environment record does not independently authorize a portfolio change.",
-                    ),
-                ),
-            )
-        with st.expander("What could change the assessment"):
-            st.write(assessment_change_conditions)
-    elif live_market.get("status") in {"connected", "partial"} and readings is not None:
-''',
-    ),
-    (
-        '''        text_card(
-            "What could change the assessment",
-            _joined_items(
-                latest_briefing.get("evidence_that_changes_conclusion", [])
-                if isinstance(latest_briefing, dict)
-                else [],
-                "A material change in growth, inflation, policy, liquidity, or cross-asset evidence would trigger review.",
-            ),
-        )
-''',
-        '''        with st.expander("What could change the assessment"):
-            st.write(assessment_change_conditions)
-''',
-    ),
-)
-for _old_detail, _new_detail in _decision_change_replacements:
-    _replace_source_once(
-        _old_detail,
-        _new_detail,
-        "decision-change collapse insertion point is unavailable",
-    )
-
-# Place connected educational and operating intelligence immediately after each
-# surface loads its canonical records. The hero renders before the selected surface.
+# Connected educational and operating intelligence is injected through explicit
+# markers owned by each surface. This keeps the presentation modular and avoids
+# brittle replacements of complete visual blocks.
 _operating_intelligence_insertions = (
     (
-        '    _today_construction = _latest("portfolio_construction")\n\n',
-        '    _today_construction = _latest("portfolio_construction")\n'
+        "    # TODAY_MARKET_BRIEF\n",
         '    render_today_market_brief(briefing=briefing)\n'
-        '    render_information_freshness(briefing=briefing, surface="today")\n'
-        '\n',
+        '    render_information_freshness(briefing=briefing, surface="today")\n',
     ),
     (
-        '    page_header(\n'
-        '        "Current capital position",\n',
-        '    render_today_opportunity_scan(briefing=briefing)\n\n'
-        '    page_header(\n'
-        '        "Current capital position",\n',
+        "    # TODAY_OPPORTUNITY_SCAN\n",
+        '    render_today_opportunity_scan(briefing=briefing)\n',
     ),
     (
-        '    latest_briefing = _latest("daily_cio_briefing")\n\n',
-        '    latest_briefing = _latest("daily_cio_briefing")\n'
+        "    # ENVIRONMENT_ECONOMIC_BRIEF\n",
         '    render_environment_economic_brief(briefing=latest_briefing)\n'
         '    render_information_freshness(\n'
         '        briefing=latest_briefing, surface="environment"\n'
-        '    )\n\n',
+        '    )\n',
     ),
     (
-        '    briefing = _latest("daily_cio_briefing")\n'
-        '    mandate = get_mandate_details(CANONICAL_PORTFOLIO_CODE)\n',
-        '    briefing = _latest("daily_cio_briefing")\n'
-        '    render_information_freshness(briefing=briefing, surface="portfolio")\n'
-        '    mandate = get_mandate_details(CANONICAL_PORTFOLIO_CODE)\n',
-    ),
-    (
-        '    with st.expander("How the History surface works"):\n',
-        '    callout_card(\n'
-        '        "Decision accountability",\n'
-        '        "Learning informs, not overrides.",\n'
-        '        ("Later outcomes may inform governed process review and continuous "\n'
-        '         "improvement, but they cannot authorize execution or override live "\n'
-        '         "decision controls."),\n'
-        '    )\n\n'
-        '    with st.expander("How the History surface works"):\n',
+        "    # PORTFOLIO_INFORMATION_FRESHNESS\n",
+        '    render_information_freshness(briefing=briefing, surface="portfolio")\n',
     ),
 )
-for _intelligence_anchor, _intelligence_replacement in _operating_intelligence_insertions:
+for _intelligence_marker, _intelligence_replacement in _operating_intelligence_insertions:
     _replace_source_once(
-        _intelligence_anchor,
+        _intelligence_marker,
         _intelligence_replacement,
         "operating intelligence insertion point is unavailable",
     )
+
+# History keeps its concise accountability boundary immediately before the
+# process explanation. It remains evidence for governance, never trade authority.
+_replace_source_once(
+    '    with st.expander("How the History surface works"):\n',
+    '    callout_card(\n'
+    '        "Decision accountability",\n'
+    '        "Learning informs, not overrides.",\n'
+    '        ("Later outcomes may inform governed process review and continuous "\n'
+    '         "improvement, but they cannot authorize execution or override live "\n'
+    '         "decision controls."),\n'
+    '    )\n\n'
+    '    with st.expander("How the History surface works"):\n',
+    "history accountability insertion point is unavailable",
+)
 
 # Refresh the active operating surface without requiring navigation or a browser
 # reload. Each fragment re-queries the canonical stores and provider-backed views.
@@ -394,50 +283,44 @@ for _render_name in (
 _today_operating_marker = "    # LIVE_TODAY_OPERATING_CONTEXT\n"
 _replace_source_once(
     _today_operating_marker,
-    '    page_header(\n'
-    + '        "Operating context",\n'
-    + '        "Live provider status and paper implementation supporting the CIO briefing.",\n'
-    + '        "03",\n'
-    + '    )\n'
-    + '    render_live_market_status()\n'
-    + '    render_pending_transaction_report(\n'
-    + '        construction=_today_construction,\n'
-    + '        briefing=briefing,\n'
-    + '    )\n',
+    '    with st.expander("Live operating context", expanded=False):\n'
+    + '        render_live_market_status()\n'
+    + '        render_pending_transaction_report(\n'
+    + '            construction=_today_construction,\n'
+    + '            briefing=briefing,\n'
+    + '        )\n',
     "Today operating context insertion point is unavailable",
 )
 
 _environment_market_marker = "    # LIVE_ENVIRONMENT_MARKET_TABLE\n"
 _replace_source_once(
     _environment_market_marker,
-    '    page_header(\n'
-    + '        "Cross-asset market detail",\n'
-    + '        "Current provider-backed evidence across the governed wrapper universe.",\n'
-    + '        "02",\n'
-    + '    )\n'
-    + '    render_live_environment_market_table()\n',
+    '    with st.expander("Cross-asset market detail", expanded=False):\n'
+    + '        render_live_environment_market_table()\n',
     "Environment market table insertion point is unavailable",
 )
 
 _portfolio_controls_marker = "    # PAPER_DECISION_CONTROLS\n"
 _replace_source_once(
     _portfolio_controls_marker,
-    '    render_pending_transaction_report(\n'
-    + '        construction=construction,\n'
-    + '        briefing=briefing,\n'
-    + '    )\n'
-    + '    render_paper_decision_controls(\n'
-    + '        construction=construction,\n'
-    + '        briefing=briefing,\n'
-    + '        principal=globals().get("authenticated_principal"),\n'
-    + '    )\n',
+    '    with st.expander("Paper implementation and controls", expanded=False):\n'
+    + '        render_pending_transaction_report(\n'
+    + '            construction=construction,\n'
+    + '            briefing=briefing,\n'
+    + '        )\n'
+    + '        render_paper_decision_controls(\n'
+    + '            construction=construction,\n'
+    + '            briefing=briefing,\n'
+    + '            principal=globals().get("authenticated_principal"),\n'
+    + '        )\n',
     "paper decision approval insertion point is unavailable",
 )
 
 _portfolio_marks_marker = "    # LIVE_PORTFOLIO_MARKS\n"
 _replace_source_once(
     _portfolio_marks_marker,
-    '    render_live_portfolio_marks(mandate)\n',
+    '    with st.expander("Live portfolio marks", expanded=False):\n'
+    + '        render_live_portfolio_marks(mandate)\n',
     "Portfolio live mark insertion point is unavailable",
 )
 
