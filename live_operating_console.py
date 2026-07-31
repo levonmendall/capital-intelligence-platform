@@ -15,6 +15,8 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 import streamlit as st
 
+import premium_ui as ui
+
 from cio_pending_transactions import pending_report_paths
 from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
@@ -445,36 +447,43 @@ def _load_json(path: Path) -> dict[str, Any] | None:
 
 
 def render_operating_report_history() -> None:
-    st.markdown("#### Operating reports")
+    ui.page_header(
+        "Operating reports",
+        "The current portfolio-level report, launch state, and paper-execution status.",
+        "OPS",
+    )
     json_path, markdown_path = pending_report_paths()
     report = _load_json(json_path)
     if report is None:
         st.info("The first CIO pending-transactions report has not been generated yet.")
     else:
-        metrics = st.columns(4)
-        metrics[0].metric(
-            "Report state",
+        report_state = (
             str(report.get("report_state", "Unavailable"))
             .replace("_", " ")
-            .title(),
+            .title()
         )
-        metrics[1].metric(
-            "Transactions",
-            int(report.get("transaction_count", 0)),
-        )
-        metrics[2].metric(
-            "Launch state",
-            str(report.get("launch_state", "Unavailable")).title(),
-        )
-        metrics[3].metric(
-            "Execution",
+        launch_state = str(report.get("launch_state", "Unavailable")).title()
+        execution_state = (
             str(report.get("execution_state", "Unavailable"))
             .replace("_", " ")
-            .title(),
+            .title()
         )
-        st.caption(
-            f"Generated {_format_timestamp(report.get('generated_at'))} · "
-            f"Decision {report.get('decision_identifier') or 'unavailable'}"
+        ui.metric_grid(
+            (
+                ("Report state", report_state, "Portfolio recommendation"),
+                ("Transactions", int(report.get("transaction_count", 0)), "Paper actions"),
+                ("Launch state", launch_state, "Operating availability"),
+                ("Execution", execution_state, "Current worker state"),
+            ),
+            variant="history",
+        )
+        ui.callout_card(
+            "Current report",
+            str(report.get("summary") or report_state),
+            (
+                f"Generated {_format_timestamp(report.get('generated_at'))} · "
+                f"Decision reference {report.get('decision_identifier') or 'not applicable'}"
+            ),
         )
         transactions = report.get("transactions")
         if isinstance(transactions, list) and transactions:
@@ -502,15 +511,13 @@ def render_operating_report_history() -> None:
                 "Attempted": _format_timestamp(payload.get("attempted_at")),
                 "State": str(payload.get("state", "unavailable")).title(),
                 "Detail": str(payload.get("detail", "")),
-                "Execution ID": str(
-                    payload.get("execution_identifier") or ""
-                ),
+                "Execution ID": str(payload.get("execution_identifier") or ""),
                 "Paper only": payload.get("real_money_authorized") is False,
             }
         )
     if statuses:
-        st.markdown("#### Paper execution attempts")
-        st.dataframe(statuses, use_container_width=True, hide_index=True)
+        with st.expander("Paper execution attempts", expanded=False):
+            st.dataframe(statuses, use_container_width=True, hide_index=True)
 
 
 __all__ = [

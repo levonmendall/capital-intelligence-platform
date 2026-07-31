@@ -22,7 +22,7 @@ _NAVIGATION_CSS = """
 
 [data-testid="stSegmentedControl"] {
     width: 100% !important;
-    margin: 0 0 1.05rem !important;
+    margin: 0 0 .75rem !important;
 }
 
 [data-testid="stSegmentedControl"] > div,
@@ -34,16 +34,16 @@ _NAVIGATION_CSS = """
     display: grid !important;
     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
     gap: 0 !important;
-    padding: .32rem !important;
+    padding: .22rem !important;
     overflow: hidden !important;
-    border: 1px solid rgba(86, 224, 255, .34) !important;
-    border-radius: 1.35rem !important;
+    border: 1px solid rgba(138, 157, 188, .18) !important;
+    border-radius: 1.05rem !important;
     background:
         linear-gradient(180deg, rgba(13, 19, 32, .96), rgba(7, 11, 19, .96)) !important;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, .045),
-        0 0 0 1px rgba(91, 124, 255, .08),
-        0 18px 46px rgba(0, 0, 0, .30) !important;
+        0 0 0 1px rgba(91, 124, 255, .045),
+        0 12px 32px rgba(0, 0, 0, .24) !important;
     backdrop-filter: blur(22px) !important;
 }
 
@@ -51,15 +51,15 @@ _NAVIGATION_CSS = """
     position: relative !important;
     width: 100% !important;
     min-width: 0 !important;
-    min-height: 3.15rem !important;
-    padding: .72rem .35rem !important;
+    min-height: 2.75rem !important;
+    padding: .56rem .28rem !important;
     border: 0 !important;
-    border-radius: 1rem !important;
+    border-radius: .82rem !important;
     background: transparent !important;
     color: #9aa9bf !important;
     box-shadow: none !important;
     font-size: clamp(.68rem, 2.8vw, .94rem) !important;
-    font-weight: 620 !important;
+    font-weight: 650 !important;
     letter-spacing: -.015em !important;
     white-space: nowrap !important;
     transition:
@@ -88,11 +88,10 @@ _NAVIGATION_CSS = """
     color: #ffffff !important;
     font-weight: 760 !important;
     background:
-        radial-gradient(circle at 50% 115%, rgba(86, 224, 255, .30), transparent 58%),
-        linear-gradient(135deg, rgba(86, 224, 255, .15), rgba(91, 124, 255, .20)) !important;
+        linear-gradient(135deg, rgba(86, 224, 255, .11), rgba(91, 124, 255, .14)) !important;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, .08),
-        0 0 28px rgba(86, 224, 255, .10) !important;
+        0 8px 22px rgba(86, 224, 255, .08) !important;
 }
 
 [data-testid="stSegmentedControl"] button[aria-checked="true"]::before,
@@ -101,7 +100,7 @@ _NAVIGATION_CSS = """
     position: absolute;
     left: 16%;
     right: 16%;
-    bottom: .18rem;
+    bottom: .1rem;
     height: 2px;
     border-radius: 999px;
     background: #56e0ff;
@@ -111,14 +110,14 @@ _NAVIGATION_CSS = """
 @media (max-width: 760px) {
     [data-testid="stSegmentedControl"] div[role="radiogroup"] {
         grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-        padding: .26rem !important;
-        border-radius: 1.15rem !important;
+        padding: .18rem !important;
+        border-radius: .95rem !important;
     }
 
     [data-testid="stSegmentedControl"] button {
-        min-height: 2.9rem !important;
-        padding: .62rem .12rem !important;
-        border-radius: .88rem !important;
+        min-height: 2.62rem !important;
+        padding: .48rem .08rem !important;
+        border-radius: .72rem !important;
     }
 }
 

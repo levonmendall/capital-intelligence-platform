@@ -344,7 +344,14 @@ _operating_intelligence_insertions = (
         '    _today_construction = _latest("portfolio_construction")\n'
         '    render_today_market_brief(briefing=briefing)\n'
         '    render_information_freshness(briefing=briefing, surface="today")\n'
-        '    render_today_opportunity_scan(briefing=briefing)\n\n',
+        '\n',
+    ),
+    (
+        '    page_header(\n'
+        '        "Current capital position",\n',
+        '    render_today_opportunity_scan(briefing=briefing)\n\n'
+        '    page_header(\n'
+        '        "Current capital position",\n',
     ),
     (
         '    latest_briefing = _latest("daily_cio_briefing")\n\n',
