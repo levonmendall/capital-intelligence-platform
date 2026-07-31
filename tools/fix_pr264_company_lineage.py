@@ -14,6 +14,7 @@ source.write_text(content.replace(old, new, 1), encoding="utf-8")
 for path in (
     Path("tools/fix_pr264_company_lineage.py"),
     Path(".github/workflows/fix-pr264-company-lineage.yml"),
+    Path(".github/workflows/fix-pr264-company-lineage-pr.yml"),
     Path(".pr264-company-lineage-trigger"),
 ):
     path.unlink(missing_ok=True)
