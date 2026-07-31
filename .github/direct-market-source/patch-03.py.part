@@ -152,3 +152,21 @@ anchor = "      - 'operations/free_paper_pilot.py'\n"
 if anchor in source and "operations/direct_global_markets.py" not in source:
     source = source.replace(anchor, anchor + "      - 'operations/direct_global_markets.py'\n      - 'config/direct_global_market_universe.json'\n", 1)
 path.write_text(source, encoding="utf-8")
+
+path = Path("tests/test_production_context_publication_runtime.py")
+source = path.read_text(encoding="utf-8")
+function_start = source.index(
+    "def test_publisher_creates_candidates_and_executable_cio_construction"
+)
+function_end = source.index("\n\ndef ", function_start)
+segment = source[function_start:function_end]
+segment = replace_once(
+    segment,
+    "    assert result.exclusion_count == 0\n",
+    "    # The injected fixture supplies only the original 15 listed candidates;\n"
+    "    # all 14 direct markets are therefore truthfully recorded as exclusions.\n"
+    "    assert result.exclusion_count == 14\n",
+    "direct-market fixture exclusion count",
+)
+source = source[:function_start] + segment + source[function_end:]
+path.write_text(source, encoding="utf-8")
