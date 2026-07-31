@@ -1,0 +1,127 @@
+stMetricValue"]{white-space:normal!important;overflow-wrap:anywhere;word-break:break-word;line-height:1.08}
+         [data-testid="stExpander"]{border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--panel)}
+@@ -328,6 +340,11 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
+             .capital-ring{margin:auto}.capital-ledger{text-align:left}
+             .activity-rail{grid-template-columns:1fr}.activity-rail:before{display:none}
+             .activity-item:before{display:none}
++            .lens-grid{grid-template-columns:1fr}
++            .lens-item{border-right:0;border-bottom:1px solid var(--line);min-height:auto;padding:.82rem .9rem}
++            .lens-item:nth-last-child(-n+2){border-bottom:1px solid var(--line)}
++            .lens-item:last-child{border-bottom:0}
++            .lens-watch{grid-column:auto}
+         }
+     """
+     st.markdown(f"<style>{palette}{css}</style>", unsafe_allow_html=True)
+@@ -501,6 +518,49 @@ def signal_panel(
+     )
+ 
+ 
++def investment_lens_card(
++    *,
++    title: str,
++    what_changed: object,
++    why_investors_care: object,
++    portfolio_effect: object,
++    cio_response: object,
++    watch_next: object | None = None,
++    variant: str = "today",
++) -> None:
++    """Render a concise educational chain from event to portfolio response."""
++
++    profile = surface_profile(variant.title())
++    items = (
++        ("What changed", what_changed),
++        ("Why investors care", why_investors_care),
++        ("Portfolio effect", portfolio_effect),
++        ("CIO response", cio_response),
++    )
++    cards = []
++    for label, value in items:
++        text = "No additional detail is available." if value in (None, "") else str(value)
++        cards.append(
++            '<div class="lens-item">'
++            f'<div class="lens-label">{escape(label)}</div>'
++            f'<p class="lens-copy">{escape(text)}</p></div>'
++        )
++    if watch_next not in (None, ""):
++        cards.append(
++            '<div class="lens-item lens-watch">'
++            '<div class="lens-label">What to watch next</div>'
++            f'<p class="lens-copy">{escape(str(watch_next))}</p></div>'
++        )
++    st.markdown(
++        f'<div class="investment-lens lens-{profile.slug}">'
++        '<div class="lens-head">'
++        f'<div class="lens-kicker">{escape(profile.kicker)} // portfolio lens</div>'
++        f'<div class="lens-title">{escape(title)}</div></div>'
++        f'<div class="lens-grid">{"".join(cards)}</div></div>',
++        unsafe_allow_html=True,
++    )
++
++
+ def text_card(title: str, body: object) -> None:
+     text = "No additional detail is available." if body in (None, "") else str(body)
+     st.markdown(
+diff --git a/tests/test_portfolio_education_ui.py b/tests/test_portfolio_education_ui.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b705506c1c29f2b4d97c2404d4ea334c7d4d1941
+--- /dev/null
++++ b/tests/test_portfolio_education_ui.py
+@@ -0,0 +1,57 @@
++"""Presentation contracts for portfolio-first market and economic education."""
++
++from pathlib import Path
++
++
++def test_today_explains_daily_events_through_an_investment_lens() -> None:
++    source = Path("concise_operating_intelligence_ui.py").read_text(encoding="utf-8")
++
++    for phrase in (
++        "Investment world today",
++        "Daily investment synopsis",
++        "Why investors care",
++        "Portfolio connection",
++        "What to watch next",
++        "expected return, risk, or liquidity",
++    ):
++        assert phrase in source
++
++
++def test_environment_connects_economic_data_to_the_portfolio() -> None:
++    source = Path("concise_operating_intelligence_ui.py").read_text(encoding="utf-8")
++
++    for phrase in (
++        "Economy and investing",
++        "Economic synopsis",
++        "Inflation",
++        "Unemployment",
++        "Federal funds",
++        "10Y − 2Y",
++        "company earnings",
++        "discount rates and financing costs",
++    ):
++        assert phrase in source
++
++
++def test_reusable_lens_preserves_event_to_portfolio_hierarchy() -> None:
++    source = Path("premium_ui.py").read_text(encoding="utf-8")
++
++    assert "def investment_lens_card(" in source
++    for label in (
++        "What changed",
++        "Why investors care",
++        "Portfolio effect",
++        "CIO response",
++        "What to watch next",
++    ):
++        assert label in source
++
++
++def test_history_research_is_compact_and_governance_first() -> None:
++    source = Path("historical_replay_ui.py").read_text(encoding="utf-8")
++
++    assert 'ui.page_header(' in source
++    assert 'ui.metric_grid(' in source
++    assert '"Governance boundary"' in source
++    assert "cannot authorize execution or override the live CIO process" in source
++    assert 'with st.expander("Replay cutoff detail", expanded=False)' in source
