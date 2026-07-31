@@ -40,7 +40,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          source_commit='cfb62834787d734d70655ed5ca3d4b5a04c43395'
+          source_commit='5c6243688d3fa9b9f318e7b1a0e9c6a6ff3c816c'
           git cat-file -e "${source_commit}^{commit}"
 
           mkdir -p operations config tests docs
