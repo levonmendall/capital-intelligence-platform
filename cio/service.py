@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from cio.committee import EvidenceVetoCategory, IndependentSpecialistPacket
+from cio.growth_ensemble import (
+    AdaptiveRobustGrowthEnsemble,
+    GrowthEnsembleAssessment,
+    GrowthStage,
+)
 from cio.models import (
     CIOAction,
     CIODecision,
@@ -31,7 +36,7 @@ from cio.universe import UniverseAssessment
 class CIOSynthesisPolicy:
     """Versioned materiality, evidence, and abstention rules."""
 
-    version: str = "cio-synthesis.v6"
+    version: str = "cio-synthesis.v7-growth"
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     minimum_net_expected_return: float = 0.05
@@ -93,11 +98,13 @@ class ChiefInvestmentOfficer:
         robustness_policy: RobustDecisionPolicy | None = None,
         reconciliation_policy: SpecialistReconciliationPolicy | None = None,
         policy_matrix: DecisionPolicyMatrix | None = None,
+        growth_ensemble: AdaptiveRobustGrowthEnsemble | None = None,
     ) -> None:
         self.policy = policy or CIOSynthesisPolicy()
         self.robust_assessor = RobustCandidateAssessor(robustness_policy)
         self.reconciler = SpecialistReturnReconciler(reconciliation_policy)
         self.policy_matrix = policy_matrix or DecisionPolicyMatrix()
+        self.growth_ensemble = growth_ensemble or AdaptiveRobustGrowthEnsemble()
 
     def synthesize(
         self,
@@ -107,6 +114,7 @@ class ChiefInvestmentOfficer:
         *,
         capital_comparison: CapitalAlternativeComparison | None = None,
         prior_context: PriorDecisionContext | None = None,
+        analysis_lane: str = "acquisition",
     ) -> CIODecision:
         if not isinstance(candidate, CandidateDecisionRecord):
             raise TypeError("candidate must be a CandidateDecisionRecord")
@@ -165,15 +173,18 @@ class ChiefInvestmentOfficer:
             )
         )
         historical_learning = specialists.historical_learning
-        assessment_cap = round(
-            assessment_cap * historical_learning.position_size_multiplier,
-            8,
-        )
+        # Historical calibration is applied once to the final feasible cap.
+        assessment_cap = round(assessment_cap, 8)
+        progressive_lane = str(analysis_lane).lower() in {
+            "participation",
+            "exploration",
+        }
         supported_weight = self.robust_assessor.maximum_supported_weight(
             robustness_candidate,
             alternative_return=effective_alternative,
             maximum_weight=assessment_cap,
             policy_profile=profile,
+            allow_soft_failures=progressive_lane,
         )
         assessment_weight = (
             supported_weight
@@ -189,6 +200,13 @@ class ChiefInvestmentOfficer:
             position_weight=assessment_weight,
             policy_profile=profile,
         )
+        ensemble = self.growth_ensemble.assess(
+            candidate,
+            specialists,
+            robustness,
+            profile,
+            analysis_lane=analysis_lane,
+        )
         dissent = specialists.strongest_dissent()
         evidence_vetoes = specialists.evidence_vetoes
         implementation_blocks = specialists.implementation_blocks
@@ -202,6 +220,8 @@ class ChiefInvestmentOfficer:
             reconciliation=reconciliation,
             effective_alternative=effective_alternative,
             profile=profile,
+            analysis_lane=analysis_lane,
+            ensemble=ensemble,
         )
         action, position_weight, reason, hysteresis_applied, persistence_cycles = (
             self._apply_hysteresis(
@@ -218,6 +238,7 @@ class ChiefInvestmentOfficer:
                 ),
             )
         )
+        reason = f"{reason} Growth ensemble: {ensemble.explanation}"
         if historical_learning.status.value != "not_applicable":
             reason = f"{reason} {historical_learning.summary}"
         final_confidence = self._confidence(
@@ -329,6 +350,8 @@ class ChiefInvestmentOfficer:
         reconciliation: ReturnReconciliation,
         effective_alternative: float,
         profile: DecisionPolicyProfile,
+        analysis_lane: str,
+        ensemble: GrowthEnsembleAssessment,
     ) -> tuple[CIOAction, float | None, str]:
         current_weight = candidate.current_portfolio_weight
         portfolio = specialists.portfolio_recommendation
@@ -453,7 +476,13 @@ class ChiefInvestmentOfficer:
             if analysis.confidence
             >= self.policy.maximum_unresolved_dissent_confidence
         )
-        if high_confidence_opposition:
+        progressive_lane = str(analysis_lane).lower() in {
+            "participation",
+            "exploration",
+        }
+        if high_confidence_opposition and (
+            not progressive_lane or len(high_confidence_opposition) >= 2
+        ):
             roles = ", ".join(item.role.value for item in high_confidence_opposition)
             return (
                 CIOAction.WATCH,
@@ -463,7 +492,8 @@ class ChiefInvestmentOfficer:
             )
 
         if (
-            robustness.effective_probability_of_success
+            not progressive_lane
+            and robustness.effective_probability_of_success
             < profile.minimum_probability_of_success
         ):
             if current_weight > 0.0:
@@ -478,7 +508,8 @@ class ChiefInvestmentOfficer:
                 "The reconciled probability of outperforming the best alternative is below policy.",
             )
         if (
-            robustness.evidence_adjusted_return
+            not progressive_lane
+            and robustness.evidence_adjusted_return
             < profile.minimum_net_expected_return
         ):
             if current_weight > 0.0:
@@ -500,7 +531,7 @@ class ChiefInvestmentOfficer:
                 None,
                 "The reconciled downside exceeds the acquisition limit.",
             )
-        if opportunity_edge < profile.minimum_opportunity_edge:
+        if not progressive_lane and opportunity_edge < profile.minimum_opportunity_edge:
             if current_weight > 0.0:
                 return (
                     CIOAction.HOLD,
@@ -536,7 +567,7 @@ class ChiefInvestmentOfficer:
         )
         feasible_cap = round(
             feasible_cap
-            * specialists.historical_learning.position_size_multiplier,
+            * specialists.historical_learning.effective_position_multiplier,
             8,
         )
         if feasible_cap <= 0.0:
@@ -545,11 +576,21 @@ class ChiefInvestmentOfficer:
                 None,
                 "The portfolio analysis did not identify a positive feasible allocation.",
             )
+        if progressive_lane and ensemble.stage is GrowthStage.OBSERVE:
+            return (
+                CIOAction.WATCH,
+                None,
+                "Independent return engines do not yet support even an exploratory allocation.",
+            )
         robust_cap = self.robust_assessor.maximum_supported_weight(
             robustness_candidate,
             alternative_return=effective_alternative,
-            maximum_weight=feasible_cap,
+            maximum_weight=min(
+                feasible_cap,
+                ensemble.maximum_target_weight or feasible_cap,
+            ),
             policy_profile=profile,
+            allow_soft_failures=progressive_lane,
         )
         if robust_cap <= 0.0:
             reason = (
@@ -568,6 +609,7 @@ class ChiefInvestmentOfficer:
             robustness=robustness,
             reconciliation=reconciliation,
             profile=profile,
+            ensemble=ensemble,
         )
         if target <= 0.0:
             return (
@@ -678,6 +720,7 @@ class ChiefInvestmentOfficer:
         robustness: RobustCandidateAssessment,
         reconciliation: ReturnReconciliation,
         profile: DecisionPolicyProfile,
+        ensemble: GrowthEnsembleAssessment,
     ) -> float:
         evidence_scale = min(1.0, robustness.evidence_reliability / 0.85)
         probability_scale = min(
@@ -690,8 +733,21 @@ class ChiefInvestmentOfficer:
             max(0.0, robustness.robust_edge)
             / max(profile.minimum_opportunity_edge * 2.0, 0.02),
         )
-        scale = min(evidence_scale, probability_scale, edge_scale)
-        return round(max(0.0, robust_cap * scale), 8)
+        blended = (
+            evidence_scale * 0.35
+            + probability_scale * 0.25
+            + edge_scale * 0.20
+            + ensemble.target_multiplier * 0.20
+        )
+        target = robust_cap * max(0.15, min(1.0, blended))
+        if ensemble.stage is not GrowthStage.OBSERVE:
+            target = max(
+                target,
+                min(robust_cap, ensemble.minimum_target_weight),
+            )
+        if ensemble.maximum_target_weight > 0.0:
+            target = min(target, ensemble.maximum_target_weight)
+        return round(max(0.0, target), 8)
 
     def _confidence(
         self,
