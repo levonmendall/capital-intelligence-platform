@@ -108,6 +108,12 @@ def test_selects_priced_call_and_put_from_completed_session():
 
     assert {item.definition.option_right for item in selected} == {"call", "put"}
     assert {item.definition.instrument_id for item in selected} == {101, 102, 103, 104}
+    assert {item.bar.raw_symbol for item in selected} == {
+        "SPY   260918C00620000",
+        "SPY   260918P00620000",
+        "SPY   261218C00625000",
+        "SPY   261218P00625000",
+    }
     assert len(selected) == 4
     assert all(item.bar.close == 12.5 for item in selected)
     assert all(item.definition.session_date.isoformat() == "2026-07-30" for item in selected)
