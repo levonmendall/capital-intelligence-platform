@@ -16,7 +16,9 @@ from operations import (
     BackupError,
     OperationalSettings,
     SQLiteBackupManager,
+    WorkerHeartbeatStore,
     build_canonical_backup_registry,
+    component_heartbeat_path,
     configure_logging,
 )
 
@@ -217,6 +219,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--initial-delay-seconds must be between 0 and 3600")
 
     operational = OperationalSettings.from_env()
+    heartbeat = WorkerHeartbeatStore(
+        component_heartbeat_path(
+            Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")),
+            "encrypted-backup",
+        )
+    )
     configure_logging(operational)
     logger = logging.getLogger("capital_intelligence.backup")
 
@@ -264,15 +272,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         time.sleep(args.initial_delay_seconds)
 
     while True:
+        heartbeat.write("starting", detail="encrypted canonical backup started")
         try:
             manager = build_manager()
             result = manager.create_backup()
         except (OSError, TypeError, ValueError) as error:
+            heartbeat.write("failed", detail=str(error)[:1000])
             logger.exception("canonical backup configuration failed")
             if not args.loop:
                 print(json.dumps(_configuration_error(error), indent=2, sort_keys=True))
                 return 4
         except BackupError:
+            heartbeat.write("failed", detail="canonical encrypted backup failed")
             logger.exception("canonical backup failed")
             if not args.loop:
                 print(
@@ -289,6 +300,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 1
         else:
+            heartbeat.write(
+                "healthy",
+                cycle_key=str(result.manifest.get("created_at") or result.archive.name),
+                detail=f"encrypted backup completed: {result.archive.name}",
+            )
             logger.info(
                 "canonical backup completed",
                 extra={

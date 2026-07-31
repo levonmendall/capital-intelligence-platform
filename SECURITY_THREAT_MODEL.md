@@ -37,3 +37,11 @@
 ## PR1 security invariant
 
 Anonymous access can observe only approved read models. It cannot mutate alert state, identity, preferences, approvals, execution, backups, smoke tests, or administrative/operational state even if a client calls private endpoints directly.
+
+## Readiness information disclosure
+
+`/health` remains minimal liveness. `/ready` exposes only sanitized component
+states and the deployed SHA needed for release verification. Full operational,
+paper-test, dependency, and composite evidence under `/v1/readiness/status` is
+administrator-only. None of these endpoints grants execution or investment
+authority.

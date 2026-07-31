@@ -8,6 +8,9 @@ import signal
 import time
 from pathlib import Path
 
+from operations.heartbeat import WorkerHeartbeatStore
+from operations.composite_readiness import component_heartbeat_path
+
 from .backfill import coordinator_from_config, ten_year_window
 from .canonical import HistoricalCanonicalContextBuilder
 from .canonical_runtime_v5 import MacroCompleteCanonicalHistoricalReplayEngine
@@ -141,6 +144,10 @@ def run_loop() -> int:
     if interval < 3600:
         raise ValueError("historical interval must be at least one hour")
     stopping = False
+    state_root = Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database"))
+    heartbeat = WorkerHeartbeatStore(
+        component_heartbeat_path(state_root, "historical-backfill")
+    )
 
     def stop(*_: object) -> None:
         nonlocal stopping
@@ -149,18 +156,25 @@ def run_loop() -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     while not stopping:
+        heartbeat.write("starting", detail="historical backfill pass started")
         try:
+            report = run_once()
+            heartbeat.write(
+                "healthy",
+                detail=f"historical backfill completed with state={report.get('state')}",
+            )
             print(
                 json.dumps(
                     {
                         "event": "historical_learning_completed",
-                        "report": run_once(),
+                        "report": report,
                     },
                     sort_keys=True,
                 ),
                 flush=True,
             )
         except Exception as exc:
+            heartbeat.write("degraded", detail=str(exc)[:1000])
             print(
                 json.dumps(
                     {
@@ -175,4 +189,5 @@ def run_loop() -> int:
         deadline = time.monotonic() + interval
         while not stopping and time.monotonic() < deadline:
             time.sleep(min(30, max(0.1, deadline - time.monotonic())))
+    heartbeat.write("stopped", detail="historical backfill loop stopped")
     return 0

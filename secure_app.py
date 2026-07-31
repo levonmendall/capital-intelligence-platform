@@ -98,10 +98,24 @@ def _principal():
     return None
 
 
-def _login_screen() -> None:
+def _public_deployment_identity(
+    deployment: DeploymentContext | None,
+) -> None:
+    """Publish only the non-sensitive exact release on the signed-out surface."""
+
+    if deployment is None:
+        return
+    release = deployment.release.strip() or "unknown"
+    st.caption(f"Deployed Git SHA: `{release}`")
+
+
+def _login_screen(
+    deployment: DeploymentContext | None = None,
+) -> None:
     service = authentication_service()
     st.title("Capital Intelligence Platform")
     st.caption("Sign in to authorized portfolios and CIO decision history.")
+    _public_deployment_identity(deployment)
     if service.store.count_users() == 0:
         st.error(
             "No user accounts are configured. Set "
@@ -325,7 +339,7 @@ def create_streamlit_application(
     )
     principal = _principal()
     if principal is None:
-        _login_screen()
+        _login_screen(deployment)
         return
 
     _render_identity_controls(principal)

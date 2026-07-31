@@ -26,6 +26,8 @@ class ReadinessComponentResponse(StrictModel):
 class ReadinessResponse(StrictModel):
     ready: bool
     components: dict[str, ReadinessComponentResponse]
+    deployed_git_sha: str | None = None
+    schema_version: str = "capital-intelligence-api-readiness.v2"
 
 
 class LoginRequest(StrictModel):

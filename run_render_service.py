@@ -31,6 +31,8 @@ from types import FrameType
 from typing import Mapping, MutableMapping, Sequence
 
 from cryptography.fernet import Fernet
+from operations.composite_readiness import component_heartbeat_path
+from operations.heartbeat import WorkerHeartbeatStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +249,10 @@ def managed_processes(
                 "--browser.gatherUsageStats=false",
             ),
         ),
+        ManagedProcess(
+            name="composite-readiness-watchdog",
+            command=(python, "run_composite_readiness_watchdog.py"),
+        ),
     )
 
 
@@ -307,6 +313,11 @@ def run_supervisor(
     )
 
     specs = managed_processes(port=port)
+    state_root = Path(values["CAPITAL_INTELLIGENCE_DATA_DIR"])
+    liveness_heartbeats = {
+        name: WorkerHeartbeatStore(component_heartbeat_path(state_root, name))
+        for name in ("api", "streamlit")
+    }
     children: dict[str, subprocess.Popen] = {}
     restart_after: dict[str, float] = {}
     stopping = False
@@ -325,6 +336,11 @@ def run_supervisor(
     try:
         for spec in specs:
             children[spec.name] = _start(spec, environment=values)
+            if spec.name in liveness_heartbeats:
+                liveness_heartbeats[spec.name].write(
+                    "starting",
+                    detail=f"{spec.name} child process started",
+                )
 
         while not stopping:
             now = time.monotonic()
@@ -338,6 +354,11 @@ def run_supervisor(
                     continue
                 return_code = process.poll()
                 if return_code is None:
+                    if spec.name in liveness_heartbeats:
+                        liveness_heartbeats[spec.name].write(
+                            "healthy",
+                            detail=f"{spec.name} child process is running",
+                        )
                     continue
                 _log(
                     "child_exited",
@@ -346,6 +367,11 @@ def run_supervisor(
                     critical=spec.critical,
                 )
                 children.pop(spec.name, None)
+                if spec.name in liveness_heartbeats:
+                    liveness_heartbeats[spec.name].write(
+                        "failed",
+                        detail=f"{spec.name} child exited with code {return_code}",
+                    )
                 if spec.critical:
                     exit_code = return_code if return_code else 1
                     stopping = True

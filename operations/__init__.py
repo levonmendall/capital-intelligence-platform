@@ -44,6 +44,12 @@ from operations.daily_leases import (
     current_stage_fencing_context,
 )
 from operations.heartbeat import WorkerHeartbeat, WorkerHeartbeatStore
+from operations.composite_readiness import (
+    CompositeReadinessPolicy,
+    CompositeReadinessReport,
+    assess_composite_readiness,
+    component_heartbeat_path,
+)
 from operations.incidents import (
     OperationalIncidentError,
     OperationalIncidentEvent,
@@ -166,6 +172,8 @@ __all__ = [
     "CanonicalDailyStageRunner",
     "CanonicalRecoveryDrill",
     "CommandStageRunner",
+    "CompositeReadinessPolicy",
+    "CompositeReadinessReport",
     "DailyOperationError",
     "DailyOperationEventType",
     "DailyOperationIntegrityError",
@@ -243,6 +251,8 @@ __all__ = [
     "ThesisSLOObservation",
     "WorkerHeartbeat",
     "WorkerHeartbeatStore",
+    "assess_composite_readiness",
+    "component_heartbeat_path",
     "assert_current_stage_fence",
     "build_canonical_backup_registry",
     "build_operational_slo_service",

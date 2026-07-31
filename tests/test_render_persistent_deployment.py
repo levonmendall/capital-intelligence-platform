@@ -109,6 +109,7 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
         "historical-backfill",
         "encrypted-backup",
         "streamlit",
+        "composite-readiness-watchdog",
     }
     assert by_name["api"].command == (
         "python",
@@ -145,6 +146,10 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
     assert by_name["encrypted-backup"].restart_delay_seconds == 300
     assert "render_app.py" in by_name["streamlit"].command
     assert "--server.port=10000" in by_name["streamlit"].command
+    assert by_name["composite-readiness-watchdog"].command == (
+        "python",
+        "run_composite_readiness_watchdog.py",
+    )
     assert all(
         process.critical
         for process in processes
@@ -158,6 +163,36 @@ def test_render_interface_displays_release_and_persistent_state_identity() -> No
     context = deployment_context_from_environment()
     assert context.release
     assert isinstance(context.state_root, Path)
+
+
+def test_signed_out_render_surface_publishes_exact_release_identity(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from secure_app import authentication_service, runtime_settings
+
+    release = "a" * 40
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_IDENTITY_DATABASE",
+        str(tmp_path / "identity.db"),
+    )
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_AUTHENTICATION_REQUIRED", "true")
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_RELEASE", release)
+
+    authentication_service.clear()
+    runtime_settings.clear()
+    try:
+        app = AppTest.from_file("render_app.py", default_timeout=30).run()
+    finally:
+        authentication_service.clear()
+        runtime_settings.clear()
+
+    assert not app.exception
+    assert "Capital Intelligence Platform" in [item.value for item in app.title]
+    captions = [item.value for item in app.caption]
+    assert f"Deployed Git SHA: `{release}`" in captions
+    assert not any(str(tmp_path) in value for value in captions)
 
 
 def test_render_entrypoint_renders_complete_authenticated_console(

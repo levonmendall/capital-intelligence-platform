@@ -16,6 +16,7 @@ from api.dependencies import (
     get_operational_settings,
     get_resources,
     get_settings,
+    require_roles,
 )
 from api.readiness_status import ReadinessStatusRepository
 from api.repositories import (
@@ -31,9 +32,53 @@ from api.schemas import (
 )
 from delivery import SQLiteAlertStore
 from operations import OperationalSettings
+from operations.composite_readiness import (
+    CompositeReadinessPolicy,
+    assess_composite_readiness,
+)
 from security import AuthenticationService
+from security import UserRole
 
 router = APIRouter(tags=["operations"])
+
+
+def _composite_report(
+    *,
+    settings: ApiSettings,
+    operations: OperationalSettings,
+) -> dict[str, object]:
+    persisted = ReadinessStatusRepository(
+        readiness_evidence_path=settings.readiness_evidence_database,
+        product_test_readiness_path=settings.product_test_readiness_database,
+    )
+    operational = persisted.latest_operational()
+    reconciliation_ready = bool(operational.get("ready")) and int(
+        dict(operational.get("blockers") or {}).get("reconciliation_failures", 1)
+    ) == 0
+    report = assess_composite_readiness(
+        state_root=settings.portfolio_database.parent,
+        deployed_git_sha=operations.release,
+        reconciliation_ready=reconciliation_ready,
+        policy=CompositeReadinessPolicy(
+            component_maximum_age_seconds={
+                "api": operations.worker_max_age_seconds,
+                "streamlit": operations.worker_max_age_seconds,
+                "cio-paper-operator": operations.worker_max_age_seconds,
+                "historical-backfill": 48 * 3600,
+                "encrypted-backup": max(3600, operations.backup_interval_hours * 7200),
+            },
+            data_maximum_age_seconds=max(
+                operations.worker_max_age_seconds,
+                int(operations.slo_provider_maximum_age_hours * 3600),
+            ),
+            backup_maximum_age_seconds=max(
+                3600,
+                operations.backup_interval_hours * 7200,
+            ),
+            require_exact_git_sha=operations.environment == "production",
+        ),
+    )
+    return report.to_dict()
 
 
 def _database_component(
@@ -227,12 +272,38 @@ def ready(
         settings=settings,
         operations=operations,
     )
-    ready_state = all(
+    dependency_ready = all(
         item.ready for item in components.values() if item.required
+    )
+    composite = None
+    if operations.environment == "production":
+        composite = _composite_report(settings=settings, operations=operations)
+        for name, payload in dict(composite["components"]).items():
+            components[f"production_{name}"] = ReadinessComponentResponse(
+                required=bool(payload["required"]),
+                ready=bool(payload["ready"]),
+                detail=str(payload["detail"]),
+            )
+    ready_state = dependency_ready and (
+        composite is None or bool(composite["ready"])
     )
     if not ready_state:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return ReadinessResponse(ready=ready_state, components=components)
+    public_components = {
+        name: ReadinessComponentResponse(
+            required=component.required,
+            ready=component.ready,
+            detail="ready" if component.ready else "blocked",
+        )
+        for name, component in components.items()
+    }
+    return ReadinessResponse(
+        ready=ready_state,
+        components=public_components,
+        deployed_git_sha=(
+            None if composite is None else str(composite["deployed_git_sha"])
+        ),
+    )
 
 
 @router.get("/v1/readiness/status")
@@ -243,6 +314,7 @@ def readiness_status(
     alert_store: SQLiteAlertStore = Depends(get_alert_store),
     settings: ApiSettings = Depends(get_settings),
     operations: OperationalSettings = Depends(get_operational_settings),
+    _administrator=Depends(require_roles(UserRole.ADMINISTRATOR)),
 ) -> dict[str, object]:
     components = _dependency_components(
         request=request,
@@ -261,6 +333,7 @@ def readiness_status(
     )
     operational = persisted.latest_operational()
     paper_test = persisted.latest_paper_test()
+    composite = _composite_report(settings=settings, operations=operations)
     return {
         "system_health": {
             "state": "healthy",
@@ -282,6 +355,7 @@ def readiness_status(
         },
         "operational_readiness": operational,
         "paper_test_readiness": paper_test,
+        "production_composite_readiness": composite,
         "statuses_are_independent": True,
         "api_health_implies_paper_test_readiness": False,
         "real_money_authorized": False,

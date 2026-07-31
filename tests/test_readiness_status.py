@@ -77,7 +77,7 @@ def test_persisted_operational_and_paper_test_readiness_are_independent(
     assert paper_test["performance_claims_permitted"] is False
 
 
-def test_aggregate_api_reports_four_statuses_without_inference(tmp_path: Path) -> None:
+def test_detailed_readiness_is_private_when_authentication_is_disabled(tmp_path: Path) -> None:
     operational_path = tmp_path / "operational.db"
     paper_path = tmp_path / "paper.db"
     _operational_store(operational_path)
@@ -102,21 +102,7 @@ def test_aggregate_api_reports_four_statuses_without_inference(tmp_path: Path) -
 
     response = client.get("/v1/readiness/status")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert set(payload) >= {
-        "system_health",
-        "dependency_readiness",
-        "operational_readiness",
-        "paper_test_readiness",
-    }
-    assert payload["system_health"]["ready"] is True
-    assert payload["operational_readiness"]["ready"] is True
-    assert payload["paper_test_readiness"]["ready"] is False
-    assert payload["api_health_implies_paper_test_readiness"] is False
-    assert payload["statuses_are_independent"] is True
-    assert payload["real_money_authorized"] is False
-    assert payload["performance_claims_permitted"] is False
+    assert response.status_code == 403
 
 
 def test_dependency_readiness_excludes_retired_components(tmp_path: Path) -> None:

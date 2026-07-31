@@ -7,6 +7,8 @@
 | UI source marker drift | Runtime exception if replacement count differs | Normal imports/factory; architectural import test | PR3 |
 | API/operator/backfill/backup dead while Streamlit lives | Render health remains green | Composite readiness with per-component heartbeats | PR4 |
 | Unknown/mixed deployed SHA | Sidebar may show `unknown` | Production readiness fails and reports full SHA | PR4 |
+| Composite gate never becomes ready | Critical watchdog exits after startup grace and sustained failed probes | Inspect private readiness, repair the named dependency, and restart without bypassing execution gates | PR4 |
+| Composite gate regresses | Sustained failed probes terminate the supervisor and trigger Render restart | Preserve heartbeat/readiness evidence and repair the blocker | PR4 |
 | Topology command drift | Source-text tests/documentation | One manifest/CLI plus container/integration tests | PR5 |
 | Archive selected by mtime | Reproduced in the full suite: pending transaction history returned `held` before later `completed` after 196 earlier tests passed | Embedded UTC time + stable identifier tie-breaker | PR6 |
 | Scheduler duplicate after restart | Partial lease/idempotency controls | Durable lease, cycle key, restart replay tests | PR7 |

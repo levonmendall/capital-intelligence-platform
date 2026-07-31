@@ -45,9 +45,20 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Files/state:** supervisor, API readiness, operational settings/heartbeat store, operator/backfill/backup/UI heartbeat writers, `render.yaml`, tests; new append/update-safe operational heartbeat state.
 - **Acceptance:** reports API/operator/backfill/backup/UI, data freshness, reconciliation, backup age, disk/DB integrity, and full Git SHA; required failure returns non-ready.
 - **Tests:** stale/missing heartbeat, bad SHA, stale data, unreconciled state, old backup, component death.
-- **Deployment/migration:** Render health path moves to composite public-minimal endpoint; detailed diagnostics private.
+- **Deployment/migration:** the single-port Streamlit liveness probe is bridged to composite readiness by a critical supervised watchdog; detailed diagnostics are private.
 - **Rollback:** restore Streamlit probe only temporarily while pausing auto execution.
 - **Authority change:** operational gating only; no investment or real-money authority.
+- **Implementation record:** production `/ready` combines API dependencies
+  with component heartbeats for API, Streamlit, the CIO paper operator,
+  historical backfill, and encrypted backup; explicit data-freshness,
+  reconciliation, backup-age, and exact-40-character Git-SHA gates are also
+  required. Detailed readiness is administrator-only and public component
+  details are sanitized. A critical watchdog gives startup grace and then
+  makes sustained composite failure terminate the supervised Render service.
+  New persistent state is limited to atomic JSON files under
+  `database/component-heartbeats/`; no investment schema changes. Focused
+  readiness, API, Render, backup, historical, and operator tests pass **35/35**,
+  with an additional API/privacy gate passing **30/30**.
 
 ## PR5 — Canonical deployment topology and documentation
 
