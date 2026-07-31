@@ -22,7 +22,30 @@ _NAVIGATION_CSS = """
 
 [data-testid="stSegmentedControl"] {
     width: 100% !important;
-    margin: 0 0 .75rem !important;
+    margin: 0 !important;
+}
+
+.nav-brand-mark {
+    width: 2.4rem;
+    height: 2.4rem;
+    display: grid;
+    place-items: center;
+    border-radius: .78rem;
+    border: 1px solid rgba(86, 224, 255, .24);
+    background: linear-gradient(145deg, rgba(86, 224, 255, .10), rgba(91, 124, 255, .07));
+    color: #56e0ff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 0 20px rgba(86,224,255,.08);
+    margin-top: .08rem;
+}
+
+.nav-brand-mark svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 [data-testid="stSegmentedControl"] > div,
@@ -34,16 +57,13 @@ _NAVIGATION_CSS = """
     display: grid !important;
     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
     gap: 0 !important;
-    padding: .22rem !important;
+    padding: .08rem !important;
     overflow: hidden !important;
-    border: 1px solid rgba(138, 157, 188, .18) !important;
-    border-radius: 1.05rem !important;
-    background:
-        linear-gradient(180deg, rgba(13, 19, 32, .96), rgba(7, 11, 19, .96)) !important;
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, .045),
-        0 0 0 1px rgba(91, 124, 255, .045),
-        0 12px 32px rgba(0, 0, 0, .24) !important;
+    border: 0 !important;
+    border-bottom: 1px solid rgba(138, 157, 188, .14) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
     backdrop-filter: blur(22px) !important;
 }
 
@@ -51,10 +71,10 @@ _NAVIGATION_CSS = """
     position: relative !important;
     width: 100% !important;
     min-width: 0 !important;
-    min-height: 2.75rem !important;
-    padding: .56rem .28rem !important;
+    min-height: 2.4rem !important;
+    padding: .48rem .16rem !important;
     border: 0 !important;
-    border-radius: .82rem !important;
+    border-radius: .55rem !important;
     background: transparent !important;
     color: #9aa9bf !important;
     box-shadow: none !important;
@@ -87,11 +107,8 @@ _NAVIGATION_CSS = """
 [data-testid="stSegmentedControl"] button[aria-pressed="true"] {
     color: #ffffff !important;
     font-weight: 760 !important;
-    background:
-        linear-gradient(135deg, rgba(86, 224, 255, .11), rgba(91, 124, 255, .14)) !important;
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, .08),
-        0 8px 22px rgba(86, 224, 255, .08) !important;
+    background: rgba(var(--surface-rgb), .045) !important;
+    box-shadow: none !important;
 }
 
 [data-testid="stSegmentedControl"] button[aria-checked="true"]::before,
@@ -103,8 +120,8 @@ _NAVIGATION_CSS = """
     bottom: .1rem;
     height: 2px;
     border-radius: 999px;
-    background: #56e0ff;
-    box-shadow: 0 0 12px rgba(86, 224, 255, .85);
+    background: var(--surface-accent);
+    box-shadow: 0 0 12px rgba(var(--surface-rgb), .85);
 }
 
 @media (max-width: 760px) {
@@ -115,9 +132,9 @@ _NAVIGATION_CSS = """
     }
 
     [data-testid="stSegmentedControl"] button {
-        min-height: 2.62rem !important;
-        padding: .48rem .08rem !important;
-        border-radius: .72rem !important;
+        min-height: 2.32rem !important;
+        padding: .43rem .04rem !important;
+        border-radius: .48rem !important;
     }
 }
 
@@ -151,20 +168,27 @@ def install(premium_ui: Any) -> None:
         if not choices:
             raise ValueError("primary navigation requires at least one surface")
 
-        st.markdown(
-            '<div class="command-label">Capital Intelligence // Command Deck</div>',
-            unsafe_allow_html=True,
-        )
-        selected = st.segmented_control(
-            "Primary screens",
-            choices,
-            selection_mode="single",
-            default=choices[0],
-            required=True,
-            label_visibility="collapsed",
-            width="stretch",
-            key="primary_surface_navigation_v2",
-        )
+        brand, navigation = st.columns((0.42, 5.58), gap="small", vertical_alignment="center")
+        with brand:
+            st.markdown(
+                '<div class="nav-brand-mark">'
+                '<svg viewBox="0 0 24 24" aria-hidden="true">'
+                '<path d="m12 3 7 4v10l-7 4-7-4V7z"/>'
+                '<path d="m8.5 9 3.5-2 3.5 2v6L12 17l-3.5-2z"/>'
+                '</svg></div>',
+                unsafe_allow_html=True,
+            )
+        with navigation:
+            selected = st.segmented_control(
+                "Primary screens",
+                choices,
+                selection_mode="single",
+                default=choices[0],
+                required=True,
+                label_visibility="collapsed",
+                width="stretch",
+                key="primary_surface_navigation_v2",
+            )
         return str(selected or choices[0]), True
 
     premium_ui.apply_global_style = apply_global_style

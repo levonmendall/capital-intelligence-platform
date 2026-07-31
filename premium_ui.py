@@ -40,10 +40,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="Today",
         slug="today",
         kicker="Decision pulse",
-        title="What deserves attention",
+        title="Today",
         copy=(
-            "A quiet, portfolio-level view of the few developments that may "
-            "matter now. Everything else remains in the background."
+            "Daily market events, economic developments, and what they mean "
+            "for the governed portfolio."
         ),
         core_label="CIO\nPulse",
         accent="#56e0ff",
@@ -56,10 +56,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="Environment",
         slug="environment",
         kicker="Market atmosphere",
-        title="Conditions shaping capital",
+        title="Environment",
         copy=(
-            "Growth, inflation, liquidity, policy and cross-asset evidence are "
-            "resolved into a simple field of portfolio relevance."
+            "Economic and cross-asset conditions, explained through their "
+            "investment and portfolio impact."
         ),
         core_label="Signal\nField",
         accent="#52e3a4",
@@ -72,10 +72,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="Portfolio",
         slug="portfolio",
         kicker="Capital architecture",
-        title="How the portfolio is positioned",
+        title="Portfolio",
         copy=(
-            "Sizing, funding, concentration and implementation are translated "
-            "into one understandable map of deployed and available capital."
+            "Where capital sits, why it is positioned there, and what could "
+            "change the current posture."
         ),
         core_label="Capital\nMap",
         accent="#9b7cff",
@@ -88,10 +88,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="History",
         slug="history",
         kicker="Institutional memory",
-        title="What the system decided and learned",
+        title="History",
         copy=(
-            "Every conclusion, thesis, paper action and observed outcome remains "
-            "connected in a calm, inspectable decision trail."
+            "Governed record of decisions, outcomes, theses, execution, and "
+            "learning."
         ),
         core_label="Audit\nTrail",
         accent="#7f9dff",
@@ -348,6 +348,111 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
             .lens-item:last-child{border-bottom:0}
             .lens-watch{grid-column:auto}
         }
+
+        /* Compact mobile operating-console system. Legacy hero selectors remain
+           above for deployment/source compatibility, but these final rules define
+           the approved production presentation. */
+        .block-container{max-width:1040px;padding-top:.45rem;padding-bottom:2.5rem}
+        .command-label{display:none}
+        .compact-surface-head{margin:.55rem 0 1rem;padding:.1rem .1rem .45rem}
+        .compact-surface-row{display:flex;align-items:flex-start;gap:.85rem}
+        .surface-head-icon,.section-icon,.status-icon,.metric-icon,.activity-icon{
+            flex:0 0 auto;display:grid;place-items:center;color:var(--surface-accent);
+            border:1px solid rgba(var(--surface-rgb),.28);
+            background:radial-gradient(circle at 35% 25%,rgba(var(--surface-rgb),.18),rgba(var(--surface-rgb-2),.07) 70%);
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 0 24px rgba(var(--surface-rgb),.09)
+        }
+        .surface-head-icon{width:2.25rem;height:2.25rem;border-radius:.78rem;margin-top:.12rem}
+        .surface-head-icon svg,.section-icon svg,.status-icon svg,.metric-icon svg,.activity-icon svg{width:1.16rem;height:1.16rem;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+        .surface-eyebrow{font-size:.61rem;font-weight:850;letter-spacing:.18em;text-transform:uppercase;color:var(--surface-accent);margin-bottom:.28rem}
+        .compact-surface-head h1{font-size:1.82rem;line-height:1.05;letter-spacing:-.045em;margin:0;color:#fbfdff;font-weight:730}
+        .compact-surface-head p{font-size:.84rem;line-height:1.45;color:#91a0b6;margin:.36rem 0 0;max-width:34rem}
+        .surface-head-meta{display:flex;align-items:center;gap:.45rem;margin-top:.65rem;font-size:.63rem;color:#6f8098}
+        .surface-head-meta .live-dot{width:.38rem;height:.38rem;border-radius:50%;background:var(--surface-accent);box-shadow:0 0 10px rgba(var(--surface-rgb),.7)}
+        .hero-shell{display:none}
+        .section-header{display:flex;align-items:flex-start;gap:.72rem;margin:1.35rem 0 .68rem}
+        .section-icon{width:2rem;height:2rem;border-radius:.72rem;margin-top:.02rem}
+        .section-index{display:none}
+        .section-header h3{font-size:1.12rem;line-height:1.15;letter-spacing:-.025em;margin:0;color:#f8fbff}
+        .section-header p{font-size:.73rem;line-height:1.4;color:#78889e;margin:.18rem 0 0;max-width:44rem}
+        .status-list{overflow:hidden;border:1px solid rgba(138,157,188,.18);border-radius:1rem;background:linear-gradient(145deg,rgba(15,22,37,.94),rgba(7,12,22,.94));box-shadow:0 16px 38px rgba(0,0,0,.28);margin:.3rem 0 .85rem}
+        .status-row{display:grid;grid-template-columns:2.6rem 1fr;gap:.72rem;align-items:center;padding:.78rem .82rem;border-bottom:1px solid rgba(138,157,188,.12)}
+        .status-row:last-child{border-bottom:0}
+        .status-icon{width:2.35rem;height:2.35rem;border-radius:50%}
+        .status-label{font-size:.62rem;color:var(--surface-accent);margin-bottom:.15rem}
+        .status-value{font-size:.93rem;line-height:1.24;color:#f7fbff;font-weight:630;letter-spacing:-.015em}
+        .status-note{font-size:.67rem;line-height:1.35;color:#78899f;margin-top:.16rem}
+        .metric-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:.48rem;margin:.3rem 0 .8rem}
+        .metric-node{min-height:6.15rem;border-radius:.82rem;padding:.72rem .72rem .66rem;background:linear-gradient(145deg,rgba(15,22,37,.94),rgba(7,12,22,.94));border:1px solid rgba(138,157,188,.17);box-shadow:0 10px 26px rgba(0,0,0,.24)}
+        .metric-node:after{height:1px;opacity:.4}
+        .metric-top{display:flex;align-items:center;gap:.48rem}
+        .metric-icon{width:1.72rem;height:1.72rem;border-radius:.56rem}
+        .metric-icon svg{width:.92rem;height:.92rem}
+        .metric-seq{font-size:.57rem;line-height:1.2;letter-spacing:.06em;color:#7e8ea5;text-transform:none}
+        .metric-value{font-size:1.05rem;line-height:1.16;font-weight:650;letter-spacing:-.025em;margin:.58rem 0 .18rem;overflow-wrap:anywhere}
+        .metric-label{font-size:.61rem;color:#91a0b6;font-weight:520}
+        .metric-note{font-size:.58rem;line-height:1.32;color:#66778e;margin-top:.22rem}
+        .metric-history .metric-node{min-height:5.85rem;border-style:solid}
+        .signal-panel{border-radius:1rem;padding:.9rem .95rem;background:linear-gradient(135deg,rgba(var(--surface-rgb),.085),rgba(11,17,29,.94) 62%);border:1px solid rgba(var(--surface-rgb),.28);box-shadow:0 12px 30px rgba(0,0,0,.26);margin:.25rem 0 .8rem}
+        .signal-state{font-size:.58rem;letter-spacing:.11em}
+        .signal-panel h2{font-size:1.12rem;line-height:1.23;margin:.45rem 0 .28rem;font-weight:650}
+        .signal-panel p{font-size:.76rem;line-height:1.45;color:#8b9ab0}
+        .section-card{border-radius:.95rem;padding:.88rem .92rem .82rem;background:linear-gradient(145deg,rgba(14,21,35,.94),rgba(7,12,22,.94));box-shadow:0 10px 28px rgba(0,0,0,.23)}
+        .section-title{display:flex;align-items:center;gap:.5rem;font-size:.82rem;margin-bottom:.36rem}
+        .section-title .inline-icon{display:grid;place-items:center;width:1.55rem;height:1.55rem;border-radius:.5rem;color:var(--surface-accent);background:rgba(var(--surface-rgb),.08);border:1px solid rgba(var(--surface-rgb),.18)}
+        .section-title .inline-icon svg{width:.86rem;height:.86rem;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+        .section-copy{font-size:.75rem;line-height:1.5;color:#8d9bb0}
+        .callout-card{position:relative;overflow:hidden;border-radius:.95rem;padding:.92rem 4.6rem .88rem .94rem;background:linear-gradient(135deg,rgba(var(--surface-rgb-2),.095),rgba(10,16,28,.96));border:1px solid rgba(var(--surface-rgb-2),.3);box-shadow:0 12px 30px rgba(0,0,0,.24)}
+        .callout-card:after{display:none}
+        .callout-symbol{position:absolute;width:3.4rem;height:3.4rem;right:.8rem;top:50%;transform:translateY(-50%);display:grid;place-items:center;border-radius:1rem;border:1px solid rgba(var(--surface-rgb),.35);color:var(--surface-accent);background:radial-gradient(circle,rgba(var(--surface-rgb),.15),transparent 70%);box-shadow:0 0 24px rgba(var(--surface-rgb),.12)}
+        .callout-symbol svg{width:1.7rem;height:1.7rem;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+        .callout-title{font-size:.58rem;letter-spacing:.13em;color:var(--surface-accent)}
+        .callout-copy{font-size:.86rem;line-height:1.42;font-weight:600}
+        .minor-note{font-size:.64rem;line-height:1.4;margin-top:.48rem;padding-top:.46rem}
+        .activity-rail{grid-template-columns:repeat(2,minmax(0,1fr));gap:.48rem;margin:.25rem 0 .75rem;padding:0}
+        .activity-rail:before,.activity-item:before{display:none}
+        .activity-item{min-height:6.4rem;border-radius:.86rem;padding:.75rem;background:linear-gradient(145deg,rgba(14,21,35,.94),rgba(7,12,22,.94));border:1px solid rgba(var(--surface-rgb),.22);box-shadow:0 10px 26px rgba(0,0,0,.22)}
+        .activity-head{display:flex;align-items:center;gap:.45rem}
+        .activity-icon{width:1.72rem;height:1.72rem;border-radius:.56rem}
+        .activity-icon svg{width:.9rem;height:.9rem}
+        .activity-kind{font-size:.56rem;letter-spacing:.11em}
+        .activity-title{font-size:.78rem;line-height:1.35;margin:.58rem 0 .2rem;white-space:normal}
+        .activity-meta{font-size:.61rem}
+        .investment-lens{border-radius:1rem;margin:.25rem 0 .8rem;box-shadow:0 12px 32px rgba(0,0,0,.26)}
+        .lens-head{padding:.78rem .86rem .65rem}
+        .lens-kicker{font-size:.55rem;letter-spacing:.11em}
+        .lens-title{font-size:.96rem;margin:.24rem 0 0}
+        .lens-item{padding:.72rem .78rem;min-height:5.8rem}
+        .lens-label{font-size:.55rem;letter-spacing:.1em}
+        .lens-copy{font-size:.73rem;line-height:1.45;color:#aebbd0}
+        .capital-orbit{grid-template-columns:6.7rem 1fr;gap:.9rem;border-radius:1rem;padding:.85rem;box-shadow:0 12px 30px rgba(0,0,0,.24)}
+        .capital-ring{width:6rem;height:6rem}.capital-ring-value{font-size:1rem}
+        .capital-copy h4{font-size:.9rem}.capital-copy p{font-size:.7rem}
+        .capital-ledger div{padding:.52rem .58rem}.capital-ledger strong{font-size:.78rem}
+        [data-testid="stExpander"]{border-radius:.85rem;background:rgba(10,16,28,.88)}
+        [data-testid="stDataFrame"]{border-radius:.85rem;box-shadow:0 10px 28px rgba(0,0,0,.24)}
+        [data-testid="stAlert"]{border-radius:.85rem;font-size:.75rem}
+        div[data-baseweb="tab-list"]{border-radius:.8rem;padding:.14rem;gap:.15rem}
+        button[data-baseweb="tab"]{font-size:.72rem;padding:.42rem .58rem}
+        @media(max-width:760px){
+            .block-container{padding:.4rem .72rem 2.2rem}
+            .compact-surface-head{margin-top:.35rem}
+            .compact-surface-head h1{font-size:1.62rem}
+            .compact-surface-head p{font-size:.78rem}
+            .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.42rem}
+            .metric-node{min-height:5.8rem;padding:.65rem}
+            .metric-value{font-size:.94rem}
+            .lens-grid{grid-template-columns:1fr}
+            .lens-item{min-height:auto;border-right:0;border-bottom:1px solid var(--line)}
+            .lens-item:last-child{border-bottom:0}
+            .capital-orbit{grid-template-columns:1fr;text-align:center}
+            .capital-ledger{text-align:left}
+        }
+        @media(max-width:390px){
+            .block-container{padding-left:.58rem;padding-right:.58rem}
+            .status-row{padding:.7rem .72rem}
+            .activity-item{min-height:6.8rem}
+        }
     """
     st.markdown(f"<style>{palette}{css}</style>", unsafe_allow_html=True)
 
@@ -423,32 +528,69 @@ def _hero_visual(profile: SurfaceProfile) -> str:
     )
 
 
-def render_app_header(active_page: str) -> None:
-    profile = surface_profile(active_page)
-    stamp = datetime.now(timezone.utc).strftime("%b %d, %Y · %H:%M UTC")
-    st.markdown(
-        f"""
-        <style>
-            :root{{--surface-accent:{profile.accent};--surface-rgb:{profile.accent_rgb};
-            --surface-accent-2:{profile.accent_secondary};--surface-rgb-2:{profile.accent_secondary_rgb};}}
-        </style>
-        <div class="surface-marker surface-{profile.slug}"></div>
-        <div class="hero-shell"><div class="hero-card"><div class="hero-grid"><div>
-            <div class="hero-kicker">Capital Intelligence Operating System // {escape(profile.kicker)}</div>
-            <h1 class="hero-title">{escape(profile.title)}</h1>
-            <p class="hero-copy">{escape(profile.copy)}</p>
-            <div class="hero-meta">
-                <span class="signal-chip live">Monitoring all governed markets</span>
-                <span class="signal-chip">{escape(profile.name)} surface</span>
-                <span class="signal-chip">COMPOUNDING</span>
-                <span class="signal-chip">USD base</span>
-                <span class="signal-chip">{escape(stamp)}</span>
-            </div>
-        </div>{_hero_visual(profile)}</div></div></div>
-        """,
-        unsafe_allow_html=True,
+
+def _icon_name(label: object) -> str:
+    text = str(label or "").lower()
+    mapping = (
+        (("history", "record", "archive", "report"), "archive"),
+        (("execution", "trade", "transaction"), "pulse"),
+        (("decision", "cio", "action"), "decision"),
+        (("outcome", "evaluation"), "outcome"),
+        (("thesis", "learning", "research"), "book"),
+        (("environment", "economic", "inflation", "macro"), "environment"),
+        (("portfolio", "capital", "nav", "cash", "allocation"), "portfolio"),
+        (("coverage", "market", "opportunity", "scan"), "network"),
+        (("blocked", "lock", "certification"), "lock"),
+        (("time", "generated", "latest", "briefing"), "clock"),
+    )
+    for needles, name in mapping:
+        if any(needle in text for needle in needles):
+            return name
+    return "signal"
+
+
+def _icon_svg(name: str) -> str:
+    paths = {
+        "archive": '<path d="M5 4h14v4H5z"/><path d="M7 8v12h10V8"/><path d="M9 12h6"/>',
+        "decision": '<circle cx="12" cy="12" r="8"/><path d="m9 12 2 2 4-5"/>',
+        "outcome": '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.4"/>',
+        "book": '<path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H11v17H7.5A3.5 3.5 0 0 0 4 22z"/><path d="M20 5.5A3.5 3.5 0 0 0 16.5 2H13v17h3.5A3.5 3.5 0 0 1 20 22z"/>',
+        "pulse": '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
+        "environment": '<path d="M3 12h18"/><path d="M6 8v8M10 5v14M14 7v10M18 4v16"/>',
+        "portfolio": '<path d="M4 19V9l8-5 8 5v10"/><path d="M8 19v-6h8v6"/>',
+        "network": '<circle cx="5" cy="12" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="12" cy="19" r="2"/><path d="m6.5 10.5 4-4M13.5 6.5l4 4M17.5 13.5l-4 4M10.5 17.5l-4-4"/>',
+        "lock": '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+        "clock": '<circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/>',
+        "shield": '<path d="M12 3 19 6v5c0 4.7-2.8 8-7 10-4.2-2-7-5.3-7-10V6z"/><path d="m9 12 2 2 4-5"/>',
+        "signal": '<path d="M5 18h2M9 14h2M13 10h2M17 6h2"/>',
+    }
+    return f'<svg viewBox="0 0 24 24" aria-hidden="true">{paths.get(name, paths["signal"])}</svg>'
+
+
+def compact_header_markup(profile: SurfaceProfile, stamp: str) -> str:
+    return (
+        f'<div class="surface-marker surface-{profile.slug}"></div>'
+        '<div class="compact-surface-head">'
+        '<div class="compact-surface-row">'
+        f'<div class="surface-head-icon">{_icon_svg(_icon_name(profile.name))}</div>'
+        '<div>'
+        f'<div class="surface-eyebrow">{escape(profile.kicker)}</div>'
+        f'<h1>{escape(profile.name)}</h1>'
+        f'<p>{escape(profile.copy)}</p>'
+        '<div class="surface-head-meta"><span class="live-dot"></span>'
+        f'<span>Governed portfolio · updated {escape(stamp)}</span></div>'
+        '</div></div></div>'
     )
 
+def render_app_header(active_page: str) -> None:
+    profile = surface_profile(active_page)
+    stamp = datetime.now(timezone.utc).strftime("%b %d · %H:%M UTC")
+    markup = (
+        f'<style>:root{{--surface-accent:{profile.accent};--surface-rgb:{profile.accent_rgb};'
+        f'--surface-accent-2:{profile.accent_secondary};--surface-rgb-2:{profile.accent_secondary_rgb};}}</style>'
+        + compact_header_markup(profile, stamp)
+    )
+    st.markdown(markup, unsafe_allow_html=True)
 
 def surface_story(
     active_page: str,
@@ -475,12 +617,13 @@ def surface_story(
 
 
 def page_header(title: str, description: str, index: str = "01") -> None:
+    del index
+    icon = _icon_svg(_icon_name(title))
     st.markdown(
-        f'<div class="section-header"><div class="section-index">{escape(index)}</div>'
+        f'<div class="section-header"><div class="section-icon">{icon}</div>'
         f'<div><h3>{escape(title)}</h3><p>{escape(description)}</p></div></div>',
         unsafe_allow_html=True,
     )
-
 
 def metric_grid(
     metrics: Sequence[tuple[str, object, str | None]],
@@ -488,22 +631,48 @@ def metric_grid(
     variant: str = "today",
 ) -> None:
     profile = surface_profile(variant.title())
+    if profile.slug == "history" and any(
+        str(label).strip().lower() == "report state" for label, _, _ in metrics
+    ):
+        status_list(metrics, variant=variant)
+        return
     cards: list[str] = []
     for sequence, (label, value, note) in enumerate(metrics, start=1):
-        note_html = (
-            "" if not note else f'<div class="metric-note">{escape(str(note))}</div>'
-        )
+        note_html = "" if not note else f'<div class="metric-note">{escape(str(note))}</div>'
         cards.append(
             '<div class="metric-node">'
-            f'<div class="metric-seq">{escape(profile.node_label.upper())} {sequence:02d}</div>'
+            '<div class="metric-top">'
+            f'<div class="metric-icon">{_icon_svg(_icon_name(label))}</div>'
+            f'<div class="metric-seq">{escape(str(label))}</div></div>'
             f'<div class="metric-value">{escape(str(value))}</div>'
-            f'<div class="metric-label">{escape(label)}</div>{note_html}</div>'
+            f'<div class="metric-label">{escape(profile.node_label)} {sequence:02d}</div>{note_html}</div>'
         )
     st.markdown(
         f'<div class="metric-grid metric-{profile.slug}">{"".join(cards)}</div>',
         unsafe_allow_html=True,
     )
 
+
+def status_list(
+    items: Sequence[tuple[str, object, str | None]],
+    *,
+    variant: str = "history",
+) -> None:
+    profile = surface_profile(variant.title())
+    rows: list[str] = []
+    for label, value, note in items:
+        note_html = "" if not note else f'<div class="status-note">{escape(str(note))}</div>'
+        rows.append(
+            '<div class="status-row">'
+            f'<div class="status-icon">{_icon_svg(_icon_name(label))}</div>'
+            '<div>'
+            f'<div class="status-label">{escape(str(label))}</div>'
+            f'<div class="status-value">{escape(str(value))}</div>{note_html}</div></div>'
+        )
+    st.markdown(
+        f'<div class="status-list status-{profile.slug}">{"".join(rows)}</div>',
+        unsafe_allow_html=True,
+    )
 
 def signal_panel(
     state: str,
@@ -519,7 +688,6 @@ def signal_panel(
         f'<h2>{escape(str(title))}</h2><p>{escape(str(body))}</p></div>',
         unsafe_allow_html=True,
     )
-
 
 def investment_lens_card(
     *,
@@ -567,18 +735,19 @@ def investment_lens_card(
 def text_card(title: str, body: object) -> None:
     text = "No additional detail is available." if body in (None, "") else str(body)
     st.markdown(
-        f'<div class="section-card"><div class="section-title">{escape(title)}</div>'
+        '<div class="section-card">'
+        f'<div class="section-title"><span class="inline-icon">{_icon_svg(_icon_name(title))}</span>{escape(title)}</div>'
         f'<p class="section-copy">{escape(text)}</p></div>',
         unsafe_allow_html=True,
     )
-
 
 def callout_card(title: str, body: object, note: str | None = None) -> None:
     text = "No additional detail is available." if body in (None, "") else str(body)
     note_html = "" if not note else f'<div class="minor-note">{escape(note)}</div>'
     st.markdown(
         f'<div class="callout-card"><div class="callout-title">{escape(title)}</div>'
-        f'<p class="callout-copy">{escape(text)}</p>{note_html}</div>',
+        f'<p class="callout-copy">{escape(text)}</p>{note_html}'
+        f'<div class="callout-symbol">{_icon_svg("shield")}</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -611,7 +780,9 @@ def activity_rail(items: Sequence[tuple[str, object, object]]) -> None:
     for kind, title, meta in items[:4]:
         cards.append(
             '<div class="activity-item">'
-            f'<div class="activity-kind">{escape(str(kind))}</div>'
+            '<div class="activity-head">'
+            f'<div class="activity-icon">{_icon_svg(_icon_name(kind))}</div>'
+            f'<div class="activity-kind">{escape(str(kind))}</div></div>'
             f'<div class="activity-title">{escape(str(title))}</div>'
             f'<div class="activity-meta">{escape(str(meta))}</div></div>'
         )
@@ -619,7 +790,6 @@ def activity_rail(items: Sequence[tuple[str, object, object]]) -> None:
         f'<div class="activity-rail">{"".join(cards)}</div>',
         unsafe_allow_html=True,
     )
-
 
 def bullet_lines(items: Iterable[object]) -> str:
     cleaned = [str(item).strip() for item in items if str(item).strip()]
@@ -634,6 +804,7 @@ def display_frame(frame: pd.DataFrame) -> None:
     st.dataframe(frame, use_container_width=True, hide_index=True)
 
 _CURRENT_INTERFACE_COMPATIBILITY = (
+    "Capital Intelligence Operating System",
     "A governed investment-intelligence system",
     "Today's capital briefing",
     "Today's market environment",

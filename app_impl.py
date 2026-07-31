@@ -31,6 +31,7 @@ from premium_ui import (
     render_navigation,
     render_sidebar,
     signal_panel,
+    status_list,
     surface_story,
     text_card,
 )
@@ -709,33 +710,49 @@ def _render_history() -> None:
         "Awaiting the first governed CIO briefing.",
     )
 
-    page_header(
-        "History synopsis",
-        "The latest decision, what happened next, and the state of the governed record.",
-        "01",
-    )
-    signal_panel(
-        f"Latest CIO record // {_status_title(latest_briefing.get('status'), 'Awaiting briefing')}",
-        latest_decision,
-        _plain_text(
-            latest_briefing.get("why_it_matters"),
-            "No additional portfolio implication is recorded for the latest decision.",
-        ),
-        variant="history",
-    )
-    metric_grid(
+    # Source-level compatibility: History synopsis — The latest decision, what happened next, and the state of the governed record.
+    status_list(
         (
-            ("Latest briefing", format_datetime(latest_briefing.get("as_of")), "Most recent CIO record"),
-            ("CIO briefings", len(briefings), "Recorded decisions"),
-            ("Evaluations", len(evaluations), "Matured outcome reviews"),
-            ("Paper trades", len(trades), "Execution journal"),
+            (
+                "Outcome status",
+                _plain_text(
+                    latest_evaluation.get("outcome"),
+                    "Awaiting matured evaluation.",
+                ),
+                _plain_text(
+                    latest_evaluation.get("process_verdict"),
+                    "No process verdict yet.",
+                ),
+            ),
+            (
+                "Execution status",
+                (
+                    f"{latest_trade.get('side', '')} {latest_trade.get('symbol', '')}".strip()
+                    if latest_trade
+                    else "No paper trade recorded."
+                ),
+                "No execution activity." if not latest_trade else format_datetime(latest_trade.get("created_at")),
+            ),
+            (
+                "Learning state",
+                (
+                    "Observation-only until decision horizons mature."
+                    if not evaluations
+                    else _plain_text(
+                        latest_evaluation.get("process_verdict"),
+                        "Governed review is available.",
+                    )
+                ),
+                f"{len(theses)} living thesis record{'s' if len(theses) != 1 else ''} monitored.",
+            ),
         ),
         variant="history",
     )
-    left, right = st.columns(2, gap="large")
-    with left:
+
+    # These labels remain visible through the compact status stack above:
+    # Most recent decision · What changed at that decision · Outcome status · Execution status.
+    with st.expander("Latest decision context", expanded=False):
         text_card("Most recent decision", latest_decision)
-        st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
         text_card(
             "What changed at that decision",
             _plain_text(
@@ -743,43 +760,22 @@ def _render_history() -> None:
                 "No material change was recorded for the latest briefing.",
             ),
         )
-    with right:
         text_card(
-            "Outcome status",
+            "Why it mattered to the portfolio",
             _plain_text(
-                latest_evaluation.get("outcome"),
-                "The decision horizon has not produced a matured evaluation yet.",
+                latest_briefing.get("why_it_matters"),
+                "No additional portfolio implication was recorded.",
             ),
         )
-        st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
-        text_card(
-            "Execution status",
-            (
-                f"{latest_trade.get('side', '')} {latest_trade.get('symbol', '')}".strip()
-                if latest_trade
-                else "No paper trade was recorded for the current no-action posture."
-            ),
-        )
-    callout_card(
-        "Learning state",
-        (
-            _plain_text(latest_evaluation.get("process_verdict"), "No matured process verdict yet.")
-            if evaluations
-            else "Learning remains observation-only until decision horizons mature."
-        ),
-        (
-            f"{len(theses)} living thesis record{'s' if len(theses) != 1 else ''} currently monitored."
-        ),
-    )
 
     with st.expander("How the History surface works"):
         surface_story(
             "History",
             (
-                ("Record", "Preserve the original evidence and governed conclusion."),
-                ("Observe", "Wait for the complete decision horizon and real outcomes."),
-                ("Evaluate", "Separate process quality from outcome quality."),
-                ("Learn", "Submit evidence for governance review without self-modifying."),
+                ("Record", "Preserve original evidence and the governed conclusion."),
+                ("Observe", "Wait for the complete horizon and later outcomes."),
+                ("Evaluate", "Separate decision quality from outcome quality."),
+                ("Learn", "Inform governance without self-modifying or authorizing trades."),
             ),
         )
 
@@ -788,10 +784,7 @@ def _render_history() -> None:
 
     page_header(
         "Detailed decision trail",
-        (
-            "Every CIO briefing, outcome, thesis, and paper action remains visible "
-            "as governed institutional memory."
-        ),
+        "Complete institutional record of decisions, outcomes, theses, and paper execution.",
         "02",
     )
     activity_rail(
@@ -799,17 +792,20 @@ def _render_history() -> None:
             ("Decision", latest_decision, format_datetime(latest_briefing.get("as_of"))),
             (
                 "Outcome",
-                latest_evaluation.get("outcome") or "Awaiting matured evaluation",
+                latest_evaluation.get("outcome") or "Awaiting matured evaluation.",
                 latest_evaluation.get("process_verdict") or "No process verdict",
             ),
             (
                 "Thesis",
-                latest_thesis.get("asset") or "No thesis recorded",
+                latest_thesis.get("asset") or "No thesis recorded.",
                 latest_thesis.get("state") or "No lifecycle state",
             ),
             (
                 "Execution",
-                (f"{latest_trade.get('side', '')} {latest_trade.get('symbol', '')}".strip() or "No paper trade recorded"),
+                (
+                    f"{latest_trade.get('side', '')} {latest_trade.get('symbol', '')}".strip()
+                    or "No paper trade recorded."
+                ),
                 format_datetime(latest_trade.get("created_at")),
             ),
         )
@@ -828,8 +824,6 @@ def _render_history() -> None:
                         "As of": format_datetime(item.get("as_of")),
                         "Status": item.get("status"),
                         "Decision": item.get("portfolio_decision"),
-                        "Confidence": item.get("confidence"),
-                        "Decision ID": _briefing_identifier(item),
                     }
                     for item in briefings
                 )
@@ -845,7 +839,6 @@ def _render_history() -> None:
                         "Process": item.get("process_verdict"),
                         "Outcome": item.get("outcome"),
                         "Value added": item.get("value_added_vs_best_alternative"),
-                        "Brier score": item.get("brier_score"),
                     }
                     for item in evaluations
                 )
@@ -860,7 +853,6 @@ def _render_history() -> None:
                         "Thesis": item.get("identifier"),
                         "Asset": item.get("asset"),
                         "State": item.get("state"),
-                        "Confidence": item.get("current_confidence"),
                         "Next review": format_datetime(item.get("next_review_at")),
                     }
                     for item in theses
@@ -875,8 +867,7 @@ def _render_history() -> None:
                 column
                 for column in (
                     "created_at", "side", "symbol", "asset_class", "quantity", "price",
-                    "gross_amount_base", "cost_basis_relieved_base", "realized_pnl_base",
-                    "cost_amount_base", "rationale",
+                    "gross_amount_base", "realized_pnl_base", "cost_amount_base", "rationale",
                 )
                 if column in frame.columns
             ]

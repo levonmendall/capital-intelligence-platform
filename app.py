@@ -164,32 +164,18 @@ def _safe_render_sidebar() -> None:
 
 
 def _safe_render_app_header(active_page: str) -> None:
-    """Render the surface hero as HTML rather than an indented code block."""
+    """Render the compact surface identity without Markdown indentation."""
 
     profile = _premium_ui.surface_profile(active_page)
-    stamp = datetime.now(timezone.utc).strftime("%b %d, %Y · %H:%M UTC")
+    stamp = datetime.now(timezone.utc).strftime("%b %d · %H:%M UTC")
     markup = (
         f'<style>:root{{--surface-accent:{profile.accent};'
         f'--surface-rgb:{profile.accent_rgb};'
         f'--surface-accent-2:{profile.accent_secondary};'
         f'--surface-rgb-2:{profile.accent_secondary_rgb};}}</style>'
-        f'<div class="surface-marker surface-{profile.slug}"></div>'
-        '<div class="hero-shell"><div class="hero-card"><div class="hero-grid"><div>'
-        f'<div class="hero-kicker">Capital Intelligence Operating System // {escape(profile.kicker)}</div>'
-        f'<h1 class="hero-title">{escape(profile.title)}</h1>'
-        f'<p class="hero-copy">{escape(profile.copy)}</p>'
-        '<div class="hero-meta">'
-        '<span class="signal-chip live">Monitoring all governed markets</span>'
-        f'<span class="signal-chip">{escape(profile.name)} surface</span>'
-        '<span class="signal-chip">COMPOUNDING</span>'
-        '<span class="signal-chip">USD base</span>'
-        f'<span class="signal-chip">{escape(stamp)}</span>'
-        '</div></div>'
-        f'{_premium_ui._hero_visual(profile)}'
-        '</div></div></div>'
+        + _premium_ui.compact_header_markup(profile, stamp)
     )
     _premium_ui.st.markdown(markup, unsafe_allow_html=True)
-
 
 def _safe_allocation_bar(*, cash: float, nav: float) -> None:
     """Render the capital deployment card without Markdown indentation."""
@@ -369,15 +355,14 @@ _operating_intelligence_insertions = (
         '    mandate = get_mandate_details(CANONICAL_PORTFOLIO_CODE)\n',
     ),
     (
-        '    trades = get_trade_history(limit=250)\n\n',
-        '    trades = get_trade_history(limit=250)\n'
-        '    render_information_freshness(\n'
-        '        briefing=(briefings[0] if briefings else None), surface="history"\n'
-        '    )\n\n',
-    ),
-    (
         '    with st.expander("How the History surface works"):\n',
-        '    render_history_decision_accountability()\n\n'
+        '    callout_card(\n'
+        '        "Decision accountability",\n'
+        '        "Learning informs, not overrides.",\n'
+        '        ("Later outcomes may inform governed process review and continuous "\n'
+        '         "improvement, but they cannot authorize execution or override live "\n'
+        '         "decision controls."),\n'
+        '    )\n\n'
         '    with st.expander("How the History surface works"):\n',
     ),
 )
