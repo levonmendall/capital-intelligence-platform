@@ -1,0 +1,18 @@
+{
+  "schema_version": "capital-intelligence-streamlit-layout.v1",
+  "primary_surface_count": 4,
+  "maximum_horizontal_overflow_pixels": 1,
+  "minimum_mobile_navigation_height_pixels": 42,
+  "required_public_text": "Public read-only viewer",
+  "prohibited_public_controls": [
+    "Production smoke test",
+    "Sign out",
+    "Save alert preferences",
+    "Approve for paper execution",
+    "Pause this paper implementation"
+  ],
+  "viewports": {
+    "desktop": {"width": 1440, "height": 1000},
+    "iphone": {"width": 390, "height": 844}
+  }
+}

@@ -20,7 +20,7 @@ _NAVIGATION_CSS = """
     background-color: #05070d !important;
 }
 
-[data-testid="stSegmentedControl"] {
+[data-testid="stButtonGroup"] {
     width: 100% !important;
     margin: 0 !important;
 }
@@ -48,12 +48,12 @@ _NAVIGATION_CSS = """
     stroke-linejoin: round;
 }
 
-[data-testid="stSegmentedControl"] > div,
-[data-testid="stSegmentedControl"] div[role="radiogroup"] {
+[data-testid="stButtonGroup"] > div,
+[data-testid="stButtonGroup"] div[role="radiogroup"] {
     width: 100% !important;
 }
 
-[data-testid="stSegmentedControl"] div[role="radiogroup"] {
+[data-testid="stButtonGroup"] div[role="radiogroup"] {
     display: grid !important;
     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
     gap: 0 !important;
@@ -67,7 +67,7 @@ _NAVIGATION_CSS = """
     backdrop-filter: blur(22px) !important;
 }
 
-[data-testid="stSegmentedControl"] button {
+[data-testid="stButtonGroup"] button {
     position: relative !important;
     width: 100% !important;
     min-width: 0 !important;
@@ -88,7 +88,7 @@ _NAVIGATION_CSS = """
         box-shadow 160ms ease !important;
 }
 
-[data-testid="stSegmentedControl"] button:not(:last-child)::after {
+[data-testid="stButtonGroup"] button:not(:last-child)::after {
     content: "";
     position: absolute;
     top: 22%;
@@ -98,21 +98,21 @@ _NAVIGATION_CSS = """
     background: rgba(138, 157, 188, .13);
 }
 
-[data-testid="stSegmentedControl"] button:hover {
+[data-testid="stButtonGroup"] button:hover {
     color: #eef8ff !important;
     background: rgba(86, 224, 255, .045) !important;
 }
 
-[data-testid="stSegmentedControl"] button[aria-checked="true"],
-[data-testid="stSegmentedControl"] button[aria-pressed="true"] {
+[data-testid="stButtonGroup"] button[aria-checked="true"],
+[data-testid="stButtonGroup"] button[aria-pressed="true"] {
     color: #ffffff !important;
     font-weight: 760 !important;
     background: rgba(var(--surface-rgb), .045) !important;
     box-shadow: none !important;
 }
 
-[data-testid="stSegmentedControl"] button[aria-checked="true"]::before,
-[data-testid="stSegmentedControl"] button[aria-pressed="true"]::before {
+[data-testid="stButtonGroup"] button[aria-checked="true"]::before,
+[data-testid="stButtonGroup"] button[aria-pressed="true"]::before {
     content: "";
     position: absolute;
     left: 16%;
@@ -124,22 +124,28 @@ _NAVIGATION_CSS = """
     box-shadow: 0 0 12px rgba(var(--surface-rgb), .85);
 }
 
+@media (min-width: 761px) {
+    .block-container {
+        padding-top: 4rem !important;
+    }
+}
+
 @media (max-width: 760px) {
-    [data-testid="stSegmentedControl"] div[role="radiogroup"] {
+    [data-testid="stButtonGroup"] div[role="radiogroup"] {
         grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
         padding: .18rem !important;
         border-radius: .95rem !important;
     }
 
-    [data-testid="stSegmentedControl"] button {
-        min-height: 2.32rem !important;
+    [data-testid="stButtonGroup"] button {
+        min-height: 2.75rem !important;
         padding: .43rem .04rem !important;
         border-radius: .48rem !important;
     }
 }
 
 @media (max-width: 390px) {
-    [data-testid="stSegmentedControl"] button {
+    [data-testid="stButtonGroup"] button {
         font-size: .64rem !important;
         letter-spacing: -.025em !important;
     }

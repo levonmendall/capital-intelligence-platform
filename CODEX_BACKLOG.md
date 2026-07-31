@@ -133,6 +133,20 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Deployment/migration:** new CI gate only.
 - **Rollback:** make visual gate advisory only for a documented tooling incident, never remove authorization tests.
 - **Authority change:** none.
+- **Implementation record:** CI now installs Playwright Chromium, starts a real
+  Streamlit server, and tests desktop `1440×1000` plus current compact-iPhone
+  `390×844` viewports. It traverses all four screens, checks the anonymous
+  viewer/private-control boundary on every screen, measures horizontal
+  overflow and mobile navigation target height against the versioned
+  `streamlit-layout-v1` baseline, and uploads full-page screenshots plus layout
+  JSON. Mobile navigation targets are raised to at least 42 px. The ordinary
+  local suite passes **18** related tests and skips the **2** opt-in browser
+  cases. This workspace could not download Chromium because its proxy returned
+  a truncated zero-byte archive; therefore the real-browser GitHub Actions gate
+  remains mandatory before merge. No production state or authority changes.
+  Rollback may revert the CSS/baseline and make only the visual comparison
+  advisory for a documented browser-tool outage; authorization interaction
+  checks must remain required.
 
 ## PR9 — Golden end-to-end and chaos scenarios
 
