@@ -384,6 +384,36 @@ class DatabentoOptionsProvider:
             if values
         }
 
+    def latest_daily_bars(
+        self,
+        raw_symbols: Sequence[str],
+        *,
+        as_of: datetime,
+        history_days: int = 45,
+    ) -> tuple[date, Mapping[str, tuple[DatabentoOptionBar, ...]]]:
+        """Return the newest completed-session bars, retrying exchange holidays."""
+
+        timestamp = _aware(as_of, field_name="as_of")
+        failures: list[str] = []
+        for session_date in _candidate_sessions(timestamp):
+            try:
+                bars = self.daily_bars(
+                    raw_symbols,
+                    as_of=timestamp,
+                    session_date=session_date,
+                    history_days=history_days,
+                )
+            except DatabentoOptionsError as error:
+                failures.append(str(error))
+                continue
+            if bars:
+                return session_date, bars
+            failures.append(f"no priced bars through {session_date.isoformat()}")
+        detail = failures[-1] if failures else "no completed session was available"
+        raise DatabentoOptionsError(
+            f"Databento OPRA daily bars are unavailable: {detail}"
+        )
+
     def select_contracts(
         self,
         underlying: str,

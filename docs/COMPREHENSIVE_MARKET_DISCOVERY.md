@@ -36,6 +36,6 @@ Portfolio-level class, currency, liquidity, turnover, cash, drawdown, concentrat
 
 ## Providers and failure behavior
 
-EODHD directories supply broad global-security, FX, crypto, and bond catalogs. Yahoo chart and option-chain endpoints provide public paper-research evidence where configured. Dated futures use explicit exchange contract symbols and can be upgraded to Databento-native evidence without changing the discovery contract. Provider-native observations retain source identifiers and timestamps.
+EODHD directories supply broad global-security, FX, crypto, and bond catalogs. Yahoo chart endpoints provide public underlying-history evidence. Defined-risk options use authenticated Databento `OPRA.PILLAR` definitions and daily OHLCV from the latest completed session, avoiding any claim of unlicensed live OPRA access. Dated futures use explicit exchange contract symbols and can be upgraded to Databento-native evidence without changing the discovery contract. Provider-native observations retain source identifiers and timestamps.
 
 A missing lane cannot be silently treated as “no opportunity.” Complete discovery fails closed for that CIO publication, while the application remains available and explains which lane lacked certifiable evidence. Real-money authority remains disabled.
