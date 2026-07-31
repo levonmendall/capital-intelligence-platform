@@ -1,4 +1,4 @@
-name: Align ARGO historical-learning contracts
+name: Complete ARGO validation contract alignment
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: align-argo-historical-contracts
+  group: complete-argo-validation-contracts
   cancel-in-progress: false
 
 jobs:
@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Align historical-learning source contract
+      - name: Align growth-model validation contracts
         shell: bash
         run: |
           set -euo pipefail
@@ -36,17 +36,93 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('tests/test_governed_historical_learning.py')
-          text = path.read_text(encoding='utf-8')
-          old = '''    assert "assessment_cap * historical_learning.position_size_multiplier" in cio_source\n    assert "specialists.historical_learning.position_size_multiplier" in cio_source\n'''
-          new = '''    assert "Historical calibration is applied once to the final feasible cap." in cio_source\n    assert "specialists.historical_learning.effective_position_multiplier" in cio_source\n'''
-          if text.count(old) != 1:
-              raise SystemExit('expected exactly one stale historical sizing contract')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          def replace_once(path: Path, old: str, new: str, label: str) -> None:
+              text = path.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise SystemExit(f'{label}: expected exactly one replacement point, found {text.count(old)}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          historical = Path('tests/test_governed_historical_learning.py')
+          replace_once(
+              historical,
+              '''    assert "assessment_cap * historical_learning.position_size_multiplier" in cio_source\n    assert "specialists.historical_learning.position_size_multiplier" in cio_source\n''',
+              '''    assert "Historical calibration is applied once to the final feasible cap." in cio_source\n    assert "specialists.historical_learning.effective_position_multiplier" in cio_source\n''',
+              'historical-learning contract',
+          )
+
+          opportunity = Path('tests/test_opportunity_engine.py')
+          text = opportunity.read_text(encoding='utf-8')
+          import_old = '''from opportunity import (\n    AlternativeKind,\n'''
+          import_new = '''from opportunity import (\n    AnalysisLane,\n    AlternativeKind,\n'''
+          if text.count(import_old) != 1:
+              raise SystemExit('opportunity import: expected exactly one insertion point')
+          text = text.replace(import_old, import_new, 1)
+          weak_old = '''    assert any("expected return" in reason for reason in reasons)\n    assert any("evidence" in reason for reason in reasons)\n    assert any("liquidity" in reason for reason in reasons)\n'''
+          weak_new = '''    assert any("evidence" in reason for reason in reasons)\n    assert any("liquidity" in reason for reason in reasons)\n    assert any("downside" in reason for reason in reasons)\n'''
+          if text.count(weak_old) != 1:
+              raise SystemExit('weak candidate contract: expected exactly one replacement point')
+          text = text.replace(weak_old, weak_new, 1)
+          hurdle_old = '''@pytest.mark.parametrize(\n    ("policy", "reason_fragment"),\n    (\n        (\n            OpportunityQualificationPolicy(minimum_net_expected_return=0.50),\n            "absolute return threshold",\n        ),\n        (\n            OpportunityQualificationPolicy(minimum_opportunity_edge=0.20),\n            "opportunity edge",\n        ),\n        (\n            OpportunityQualificationPolicy(maximum_expected_downside=-0.10),\n            "downside",\n        ),\n    ),\n)\ndef test_each_declared_qualification_hurdle_has_screening_authority(\n    policy: OpportunityQualificationPolicy,\n    reason_fragment: str,\n) -> None:\n    qualification = OpportunityEngine(\n        qualification_policy=policy\n    ).qualify(_candidate("ACME"), _context())\n\n    assert not qualification.qualified\n    assert any(reason_fragment in reason for reason in qualification.reasons)\n'''
+          hurdle_new = '''@pytest.mark.parametrize(\n    ("policy", "reason_fragment"),\n    (\n        (\n            OpportunityQualificationPolicy(minimum_net_expected_return=0.50),\n            "full-conviction threshold",\n        ),\n        (\n            OpportunityQualificationPolicy(minimum_opportunity_edge=0.20),\n            "opportunity edge",\n        ),\n    ),\n)\ndef test_soft_return_hurdles_route_safe_candidates_to_progressive_lanes(\n    policy: OpportunityQualificationPolicy,\n    reason_fragment: str,\n) -> None:\n    qualification = OpportunityEngine(\n        qualification_policy=policy\n    ).qualify(_candidate("ACME"), _context())\n\n    assert qualification.qualified\n    assert qualification.analysis_lane in {\n        AnalysisLane.PARTICIPATION,\n        AnalysisLane.EXPLORATION,\n    }\n    assert any(reason_fragment in reason for reason in qualification.reasons)\n\n\ndef test_downside_hurdle_retains_hard_screening_authority() -> None:\n    qualification = OpportunityEngine(\n        qualification_policy=OpportunityQualificationPolicy(\n            maximum_expected_downside=-0.10\n        )\n    ).qualify(_candidate("ACME"), _context())\n\n    assert not qualification.qualified\n    assert any("downside" in reason for reason in qualification.reasons)\n'''
+          if text.count(hurdle_old) != 1:
+              raise SystemExit('qualification hurdle contract: expected exactly one replacement point')
+          opportunity.write_text(text.replace(hurdle_old, hurdle_new, 1), encoding='utf-8')
+
+          runtime = Path('production_context_publication_runtime.py')
+          text = runtime.read_text(encoding='utf-8')
+          signature_old = '''    evidence_probe=None,\n    clock: Clock | None = None,\n'''
+          signature_new = '''    evidence_probe=None,\n    equity_discovery_probe=None,\n    clock: Clock | None = None,\n'''
+          if text.count(signature_old) != 1:
+              raise SystemExit('publication wrapper signature: expected exactly one insertion point')
+          text = text.replace(signature_old, signature_new, 1)
+          forward_old = '''        evidence_probe=evidence_probe,\n        clock=clock,\n'''
+          forward_new = '''        evidence_probe=evidence_probe,\n        equity_discovery_probe=equity_discovery_probe,\n        clock=clock,\n'''
+          if text.count(forward_old) != 1:
+              raise SystemExit('publication wrapper forwarding: expected exactly one insertion point')
+          runtime.write_text(text.replace(forward_old, forward_new, 1), encoding='utf-8')
+
+          publication_tests = Path('tests/test_production_context_publication_runtime.py')
+          text = publication_tests.read_text(encoding='utf-8')
+          import_old = '''from operations.free_paper_pilot import load_free_paper_pilot_universe\n'''
+          import_new = '''from operations.equity_discovery import EquityDiscoveryResult\nfrom operations.free_paper_pilot import load_free_paper_pilot_universe\n'''
+          if text.count(import_old) != 1:
+              raise SystemExit('publication test import: expected exactly one insertion point')
+          text = text.replace(import_old, import_new, 1)
+          helper_anchor = '''\ndef _provider(settings: ApiSettings, tmp_path):\n'''
+          helper = '''\ndef _equity_discovery_probe(*, as_of: datetime, **_kwargs) -> EquityDiscoveryResult:\n    return EquityDiscoveryResult(\n        identifier=f"equity-discovery:test:{as_of.isoformat()}",\n        as_of=as_of,\n        policy_version="broad-us-equity-discovery.v1",\n        screened_asset_count=100,\n        snapshot_covered_count=100,\n        deep_shortlist_count=0,\n        selected=(),\n        observed_prices=(),\n        exclusions=(),\n        security_master_snapshot_identifier="sec-company-master:test",\n    )\n\n\ndef _provider(settings: ApiSettings, tmp_path):\n'''
+          if text.count(helper_anchor) != 1:
+              raise SystemExit('publication test helper: expected exactly one insertion point')
+          text = text.replace(helper_anchor, helper, 1)
+          lines = text.splitlines(keepends=True)
+          updated: list[str] = []
+          inside_call = False
+          for line in lines:
+              if 'prepare_production_context_for_cycle(' in line:
+                  inside_call = True
+              updated.append(line)
+              if inside_call and line.lstrip().startswith('evidence_probe='):
+                  indent = line[: len(line) - len(line.lstrip())]
+                  probe = 'should_not_run' if 'should_not_run' in line else '_equity_discovery_probe'
+                  updated.append(f'{indent}equity_discovery_probe={probe},\n')
+              if inside_call and line.strip() == ')':
+                  inside_call = False
+          text = ''.join(updated)
+          expected_calls = text.count('prepare_production_context_for_cycle(')
+          actual_probes = text.count('equity_discovery_probe=')
+          if actual_probes != expected_calls:
+              raise SystemExit(
+                  f'publication test probes: expected {expected_calls}, found {actual_probes}'
+              )
+          publication_tests.write_text(text, encoding='utf-8')
           PY
 
           rm -f .github/workflows/fix-argo-historical-contracts.yml
-          python -m compileall -q tests/test_governed_historical_learning.py
+          python -m compileall -q \
+            opportunity/engine.py \
+            production_context_publication_runtime.py \
+            tests/test_governed_historical_learning.py \
+            tests/test_opportunity_engine.py \
+            tests/test_production_context_publication_runtime.py
           git add -A
 
       - name: Install test dependencies
@@ -56,7 +132,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Run complete repository test suite
-        run: python -m pytest -q --maxfail=5
+        run: python -m pytest -q --maxfail=10
 
       - name: Commit aligned contracts
         shell: bash
@@ -66,5 +142,5 @@ jobs:
             echo 'No contract correction was staged.' >&2
             exit 1
           fi
-          git commit -m 'Align historical learning contract with final-cap calibration'
+          git commit -m 'Complete ARGO validation contract alignment'
           git push origin HEAD:agent/adaptive-robust-growth-ensemble
