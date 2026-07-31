@@ -1,0 +1,91 @@
+{
+  "schema_version": "capital-intelligence-golden-scenarios.v1",
+  "invariant": "A canonical cycle either appends one CIO-authorized, reconciled paper state or appends no portfolio change.",
+  "scenarios": [
+    {
+      "identifier": "cio-buy-through-construction",
+      "category": "decision",
+      "test_node_id": "tests/test_canonical_cio_cycle.py::test_successful_etf_cycle_reaches_cio_construction_thesis_and_briefing"
+    },
+    {
+      "identifier": "cio-no-superior-opportunity",
+      "category": "decision",
+      "test_node_id": "tests/test_canonical_cio_cycle.py::test_empty_qualified_queue_produces_no_superior_opportunity"
+    },
+    {
+      "identifier": "cio-increase-reduce-exit",
+      "category": "decision",
+      "test_node_id": "tests/test_canonical_cio.py::test_existing_holding_can_be_increased_reduced_or_exited"
+    },
+    {
+      "identifier": "paper-fill-reconciliation-canonical-state",
+      "category": "implementation",
+      "test_node_id": "tests/test_paper_execution_orchestration.py::test_sell_fills_before_dependent_buy_and_reconciles"
+    },
+    {
+      "identifier": "exact-replay-idempotency",
+      "category": "restart",
+      "test_node_id": "tests/test_paper_execution_orchestration.py::test_exact_completed_replay_is_idempotent"
+    },
+    {
+      "identifier": "partial-fill-retry-reconciliation",
+      "category": "chaos",
+      "test_node_id": "tests/test_paper_execution_orchestration.py::test_partial_funding_sale_holds_dependent_buy_then_retry_completes"
+    },
+    {
+      "identifier": "stale-quote-fails-closed",
+      "category": "chaos",
+      "test_node_id": "tests/test_paper_execution_orchestration.py::test_stale_quote_rejects_sell_and_holds_funding_buy"
+    },
+    {
+      "identifier": "provider-outage-blocks",
+      "category": "chaos",
+      "test_node_id": "tests/test_resilience_exercises.py::test_provider_exception_becomes_blocked_evidence"
+    },
+    {
+      "identifier": "daily-stage-provider-retry",
+      "category": "restart",
+      "test_node_id": "tests/test_canonical_daily_operations.py::test_transient_provider_failure_retries_with_same_stage_key"
+    },
+    {
+      "identifier": "daily-point-in-time-mismatch",
+      "category": "chaos",
+      "test_node_id": "tests/test_canonical_daily_operations.py::test_mismatched_point_in_time_cutoff_fails_closed"
+    },
+    {
+      "identifier": "overlap-fencing",
+      "category": "restart",
+      "test_node_id": "tests/test_paper_execution_leases.py::test_runtime_rejects_overlapping_exact_construction"
+    },
+    {
+      "identifier": "lost-fence-prevents-publication",
+      "category": "restart",
+      "test_node_id": "tests/test_paper_execution_leases.py::test_lost_fence_blocks_status_publication_after_runner_returns"
+    },
+    {
+      "identifier": "encrypted-backup-restore-lineage",
+      "category": "recovery",
+      "test_node_id": "tests/test_recovery_drill.py::test_encrypted_recovery_restores_and_reconstructs_lineage"
+    },
+    {
+      "identifier": "alpaca-paper-transport-reconciles",
+      "category": "transport",
+      "test_node_id": "tests/test_alpaca_paper_broker.py::test_governed_neutral_round_trip_submits_and_reconciles"
+    },
+    {
+      "identifier": "alpaca-live-endpoint-denied",
+      "category": "authority",
+      "test_node_id": "tests/test_alpaca_paper_broker.py::test_live_alpaca_broker_endpoint_is_rejected"
+    }
+  ],
+  "required_categories": [
+    "decision",
+    "implementation",
+    "restart",
+    "chaos",
+    "recovery",
+    "transport",
+    "authority"
+  ],
+  "real_money_authorized": false
+}

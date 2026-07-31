@@ -158,6 +158,21 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Rollback:** revert harness only if invalid, preserving the failing scenario as an issue/fixture.
 - **Authority change:** none.
 
+- **Implementation record:** `config/golden_end_to_end_scenarios.json` is the
+  executable scenario authority and the CLI `golden-gate` command derives its
+  result from 15 explicit behavioral pytest nodes. The gate covers CIO buy,
+  increase, reduce, exit and no-opportunity outcomes; construction through
+  canonical reconciled fills; exact replay; partial-fill recovery; stale and
+  provider failure; point-in-time mismatch; overlap/lost-fence restart safety;
+  encrypted restoration; separate Alpaca paper transport; and live Alpaca
+  endpoint rejection. The report records the executed nodes and cannot accept
+  a self-declared pass. The focused gate passes **15/15** plus **3/3** harness
+  contract tests. It is now an explicit release-validation step and produces a
+  retained CI artifact. Only isolated test databases are affected; there is no
+  migration and no CIO, construction, governance, execution, or real-money
+  authority change. Rollback removes the gate while preserving any failing
+  scenario evidence for diagnosis.
+
 ## PR10 — Event-intelligence quality and portfolio-impact mapping
 
 - **Invariant:** events remain educational evidence and reach CIO context only through benchmarked, provenance-preserving quality gates; they never authorize a change.

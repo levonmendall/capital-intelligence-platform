@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence
 
 
 MANIFEST_PATH = Path(__file__).with_name("config") / "runtime_topologies.json"
+GOLDEN_MANIFEST_PATH = Path(__file__).with_name("config") / "golden_end_to_end_scenarios.json"
 
 
 def load_manifest(path: str | Path = MANIFEST_PATH) -> dict[str, Any]:
@@ -70,6 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
     topology.add_argument("environment", choices=tuple(load_manifest()["topologies"]))
     subparsers.add_parser("inventory")
     subparsers.add_parser("validate")
+    golden = subparsers.add_parser("golden-gate")
+    golden.add_argument("--manifest", default=str(GOLDEN_MANIFEST_PATH))
+    golden.add_argument("--report", default="reports/golden-end-to-end-gate.json")
     return parser
 
 
@@ -83,6 +87,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = validate_manifest(manifest, repository_root=Path(__file__).parent)
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if report["ready"] else 2
+    if args.action == "golden-gate":
+        from operations.golden_end_to_end import run_golden_gate
+
+        report = run_golden_gate(
+            manifest_path=args.manifest,
+            repository_root=Path(__file__).parent,
+            report_path=args.report,
+        )
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0 if report["status"] == "passed" else 2
 
     command = command_tokens(args.command, manifest)
     if args.command == "api":

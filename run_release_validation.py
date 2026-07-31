@@ -37,6 +37,17 @@ def _steps(*, include_container: bool) -> tuple[ReleaseValidationStep, ...]:
             120,
         ),
         ReleaseValidationStep(
+            "golden_end_to_end_and_chaos",
+            (
+                python,
+                "capital_intelligence_cli.py",
+                "golden-gate",
+                "--report",
+                "reports/golden-end-to-end-gate.json",
+            ),
+            300,
+        ),
+        ReleaseValidationStep(
             "run_intelligence",
             (python, "run_intelligence.py"),
             300,
