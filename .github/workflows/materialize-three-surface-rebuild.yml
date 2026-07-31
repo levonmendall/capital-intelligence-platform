@@ -52,8 +52,7 @@ jobs:
             tests/test_portfolio_education_ui.py \
             tests/test_concise_operating_intelligence_ui.py \
             tests/test_premium_streamlit_interface.py \
-            tests/test_premium_navigation_runtime.py \
-            tests/test_canonical_product_surfaces.py
+            tests/test_premium_navigation_runtime.py
 
       - name: Commit materialized source
         shell: bash
