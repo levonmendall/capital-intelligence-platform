@@ -74,6 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
     golden = subparsers.add_parser("golden-gate")
     golden.add_argument("--manifest", default=str(GOLDEN_MANIFEST_PATH))
     golden.add_argument("--report", default="reports/golden-end-to-end-gate.json")
+    benchmark = subparsers.add_parser("event-quality-benchmark")
+    benchmark.add_argument(
+        "--benchmark",
+        default=str(Path(__file__).with_name("config") / "event_quality_benchmark.v1.json"),
+    )
+    benchmark.add_argument("--report", default="reports/event-quality-benchmark.json")
+    benchmark.add_argument("--require-certified", action="store_true")
     return parser
 
 
@@ -97,6 +104,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if report["status"] == "passed" else 2
+    if args.action == "event-quality-benchmark":
+        from intelligence.event_quality import evaluate_benchmark
+
+        report = evaluate_benchmark(args.benchmark)
+        destination = Path(args.report)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(json.dumps(report, indent=2, sort_keys=True))
+        passed = report["certified"] if args.require_certified else report["metrics_passed"]
+        return 0 if passed else 2
 
     command = command_tokens(args.command, manifest)
     if args.command == "api":

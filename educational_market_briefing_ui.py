@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 import premium_ui as ui
+from intelligence.event_quality import assess_event_clusters
 from providers.economic_snapshot import EconomicReadings, load_dashboard_data
 
 
@@ -247,6 +248,14 @@ def _select_records(
         record
         for record in records
         if _displayable(record, now=now, allowed_channels=allowed_channels)
+    ]
+    # The governed quality layer semantically clusters syndicated or differently
+    # worded descriptions before the educational UI ranks representatives.  Its
+    # CIO-review flag is deliberately not consumed here: display is information,
+    # never authority.
+    candidates = [
+        representative
+        for _, representative in assess_event_clusters(candidates)
     ]
     candidates.sort(
         key=lambda record: (

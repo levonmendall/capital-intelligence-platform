@@ -19,6 +19,6 @@ Status vocabulary:
 | Options/volatility | Yes | Not broadly certified | Only bounded listed wrappers; direct options prohibited until contract/margin/surface gates pass | OCC/CME/ICE/derived surfaces disabled |
 | Fundamentals/filings | SEC current coverage | Partial | Supports only instruments/candidates whose complete gate passes | Older SEC archive, revisions, global accounting coverage incomplete |
 | Security master/reference | Current SEC + configured sources | Partial | Pilot identities are bounded/configured | Delistings, historical listings, actions, membership, calendars incomplete |
-| Public events/news | Multiple official/public sources | Educational only | Never directly allocatable | Semantic quality benchmark and exposure mapping pending PR10 |
+| Public events/news | Multiple official/public sources | Educational only; five-case quality benchmark human-approved | Never directly allocatable | Benchmarking improves relevance and portfolio mapping but cannot authorize a decision or allocation |
 
 The all-market manifest contains 20 declared provider capabilities; only official FRED and SEC EDGAR are enabled at this baseline. A provider being configured or monitored does not make a market decision-certified or allocatable.

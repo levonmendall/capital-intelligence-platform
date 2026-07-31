@@ -48,6 +48,18 @@ def _steps(*, include_container: bool) -> tuple[ReleaseValidationStep, ...]:
             300,
         ),
         ReleaseValidationStep(
+            "certified_event_quality_benchmark",
+            (
+                python,
+                "capital_intelligence_cli.py",
+                "event-quality-benchmark",
+                "--require-certified",
+                "--report",
+                "reports/event-quality-benchmark.json",
+            ),
+            120,
+        ),
+        ReleaseValidationStep(
             "run_intelligence",
             (python, "run_intelligence.py"),
             300,
