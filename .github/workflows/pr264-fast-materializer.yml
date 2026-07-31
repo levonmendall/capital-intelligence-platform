@@ -5,7 +5,7 @@ on:
     branches:
       - agent/recover-pr264-materialization
     paths:
-      - .comprehensive-market-discovery/fast-trigger-v2
+      - .comprehensive-market-discovery/fast-trigger-v3
 
 permissions:
   contents: write
