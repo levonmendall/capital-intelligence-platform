@@ -263,6 +263,47 @@ class SQLiteAlertStore:
             )
         return True
 
+    def cycle_attempt_due(
+        self,
+        cycle_key: str,
+        *,
+        now: datetime,
+        lease: timedelta = timedelta(minutes=30),
+    ) -> bool:
+        """Return whether a cycle may collect evidence and claim execution now."""
+
+        now = _aware(now, "now")
+        if lease <= timedelta(0):
+            raise ValueError("lease must be positive")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM scheduled_cycles WHERE cycle_key = ?",
+                (cycle_key,),
+            ).fetchone()
+        if row is None:
+            return True
+        status = CycleStatus(row["status"])
+        if status is CycleStatus.COMPLETED:
+            return False
+        if status is CycleStatus.RUNNING and row["started_at"]:
+            started_at = datetime.fromisoformat(row["started_at"])
+            if started_at + lease > now:
+                return False
+        if row["next_attempt_at"]:
+            next_attempt_at = datetime.fromisoformat(row["next_attempt_at"])
+            if next_attempt_at > now:
+                return False
+        return True
+
+    def latest_cycle(self) -> ScheduledCycleRecord | None:
+        """Return the most recently updated canonical cycle record."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM scheduled_cycles ORDER BY updated_at DESC LIMIT 1"
+            ).fetchone()
+        return None if row is None else self._cycle_from_row(row)
+
     def complete_cycle(
         self,
         cycle_key: str,

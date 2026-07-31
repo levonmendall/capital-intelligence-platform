@@ -37,6 +37,7 @@ from premium_ui import (
 )
 from providers.economic_snapshot import load_dashboard_data
 from live_operating_console import load_live_market_console
+from operating_status import load_cio_operating_status
 
 
 PRIMARY_SURFACES = ["Today", "Environment", "Portfolio", "History"]
@@ -152,6 +153,7 @@ def _render_today() -> None:
     theses = _latest_theses()
     live_market = load_live_market_console()
     totals = get_portfolio_totals()
+    operating_status = load_cio_operating_status()
     _today_construction = _latest("portfolio_construction")
 
     page_header(
@@ -165,12 +167,9 @@ def _render_today() -> None:
 
     if briefing is None:
         signal_panel(
-            "Daily CIO briefing // unavailable",
-            "No governed CIO conclusion is available yet",
-            (
-                "The portfolio remains unchanged until opportunity comparison, independent "
-                "review, CIO synthesis, and construction complete successfully."
-            ),
+            f"Daily CIO briefing // {operating_status.state}",
+            operating_status.headline,
+            operating_status.detail,
             variant="today",
         )
         metric_grid(
@@ -178,7 +177,7 @@ def _render_today() -> None:
                 ("U.S. session", _market_session(live_market), "Live provider clock"),
                 ("Live coverage", _coverage_label(live_market), "Governed instruments"),
                 ("Portfolio posture", _deployment_label(cash=totals["cash"], nav=totals["nav"]), "Current capital"),
-                ("Decision state", "Standby", "Fail-closed"),
+                ("Decision state", operating_status.label, operating_status.cycle_status or "Fail-closed"),
             ),
             variant="today",
         )

@@ -31,6 +31,7 @@ from live_operating_console import (
     render_operating_report_history,
 )
 from navigation_ui import install as _install_navigation_ui
+from operating_status import load_cio_operating_status
 from paper_trading_ui import render_paper_decision_controls
 from streamlit_paper_execution_worker import render_background_paper_execution_worker
 
@@ -129,18 +130,20 @@ def _compatible_signal_panel(
 
 
 def _safe_render_sidebar() -> None:
-    """Render the brand and administrator operations in the sidebar."""
+    """Render truthful operating status and administrator controls."""
 
+    operating_status = load_cio_operating_status()
     with _premium_ui.st.sidebar:
         _premium_ui.st.markdown(
             '<div class="sidebar-brand">'
             '<div class="sidebar-mark">CI</div>'
             '<div class="sidebar-brand-title">Capital Intelligence</div>'
             '<div class="sidebar-brand-copy">A continuously operating decision system for one governed portfolio.</div>'
-            '<div class="sidebar-system">System online</div>'
+            f'<div class="sidebar-system">{operating_status.label}</div>'
             '</div>',
             unsafe_allow_html=True,
         )
+        _premium_ui.st.caption(operating_status.detail)
         _premium_ui.st.caption("Four distinct surfaces. One governed portfolio.")
         principal = globals().get("authenticated_principal")
         is_render_host = bool(os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip())
