@@ -9,9 +9,7 @@ on:
       - operations/comprehensive_market_discovery.py
       - operations/provider_validation.py
       - providers/databento_options.py
-      - providers/yahoo_public.py
       - tests/test_databento_options.py
-      - tests/test_yahoo_public.py
 
 permissions:
   contents: read
@@ -37,7 +35,7 @@ jobs:
           python3 -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -r requirements.txt
-      - name: Probe prior-session Databento OPRA chain
+      - name: Probe Databento OPRA definitions directly
         shell: bash
         run: |
           set -euo pipefail
@@ -58,115 +56,50 @@ jobs:
           end_date = next_date.isoformat()
           print("completed_option_session", start_date)
 
-          parent_response = requests.post(
-              "https://hist.databento.com/v0/symbology.resolve",
-              auth=auth,
-              data={
-                  "dataset": "OPRA.PILLAR",
-                  "symbols": "SPY.OPT",
-                  "stype_in": "parent",
-                  "stype_out": "instrument_id",
-                  "start_date": start_date,
-                  "end_date": end_date,
-              },
-              timeout=60,
-          )
-          print("parent_to_instrument_http", parent_response.status_code)
-          parent_payload = parent_response.json()
-          parent_result = parent_payload.get("result", {}) if isinstance(parent_payload, dict) else {}
-          parent_rows = parent_result.get("SPY.OPT", []) if isinstance(parent_result, dict) else []
-          instrument_ids = sorted(
-              {
-                  str(row.get("s"))
-                  for row in parent_rows
-                  if isinstance(row, dict) and row.get("s") is not None
-              }
-          )
-          print("parent_to_instrument_count", len(instrument_ids))
-          print("parent_to_instrument_sample", instrument_ids[:5])
-          if not instrument_ids:
-              print("parent_to_instrument_detail", parent_payload)
-              raise SystemExit(1)
-
-          sample_ids = instrument_ids[:200]
-          raw_response = requests.post(
-              "https://hist.databento.com/v0/symbology.resolve",
-              auth=auth,
-              data={
-                  "dataset": "OPRA.PILLAR",
-                  "symbols": ",".join(sample_ids),
-                  "stype_in": "instrument_id",
-                  "stype_out": "raw_symbol",
-                  "start_date": start_date,
-                  "end_date": end_date,
-              },
-              timeout=60,
-          )
-          print("instrument_to_raw_http", raw_response.status_code)
-          raw_payload = raw_response.json()
-          raw_result = raw_payload.get("result", {}) if isinstance(raw_payload, dict) else {}
-          raw_symbols = []
-          if isinstance(raw_result, dict):
-              for rows in raw_result.values():
-                  if not isinstance(rows, list):
-                      continue
-                  for row in rows:
-                      if isinstance(row, dict) and row.get("s"):
-                          raw_symbols.append(str(row["s"]))
-          raw_symbols = sorted(set(raw_symbols))
-          print("instrument_to_raw_count", len(raw_symbols))
-          print("instrument_to_raw_sample", raw_symbols[:5])
-          if not raw_symbols:
-              print("instrument_to_raw_detail", raw_payload)
-              raise SystemExit(1)
-
-          bars_response = requests.post(
+          definition_response = requests.post(
               "https://hist.databento.com/v0/timeseries.get_range",
               auth=auth,
               data={
                   "dataset": "OPRA.PILLAR",
-                  "schema": "ohlcv-1d",
-                  "symbols": ",".join(raw_symbols[:20]),
-                  "stype_in": "raw_symbol",
+                  "schema": "definition",
+                  "symbols": "SPY.OPT",
+                  "stype_in": "parent",
                   "start": start_date,
                   "end": end_date,
                   "encoding": "json",
                   "pretty_px": "true",
                   "pretty_ts": "true",
                   "map_symbols": "true",
-                  "limit": "200",
+                  "limit": "20",
               },
-              timeout=60,
+              timeout=90,
           )
-          print("raw_option_bars_http", bars_response.status_code)
-          bar_records = []
-          for line in bars_response.text.splitlines():
+          print("definition_http", definition_response.status_code)
+          records = []
+          for line in definition_response.text.splitlines():
               try:
                   value = json.loads(line)
               except json.JSONDecodeError:
                   continue
               if isinstance(value, dict) and "detail" not in value:
-                  bar_records.append(value)
-          print("raw_option_bars_count", len(bar_records))
-          if bar_records:
-              print("raw_option_bar_keys", sorted(bar_records[0]))
-              print(
-                  "raw_option_bar_sample",
-                  {
-                      key: bar_records[0].get(key)
-                      for key in (
-                          "symbol",
-                          "open",
-                          "high",
-                          "low",
-                          "close",
-                          "volume",
-                          "pretty_ts_event",
-                      )
-                  },
+                  records.append(value)
+          print("definition_count", len(records))
+          if records:
+              print("definition_keys", sorted(records[0]))
+              safe_keys = (
+                  "symbol",
+                  "raw_symbol",
+                  "instrument_id",
+                  "asset",
+                  "instrument_class",
+                  "expiration",
+                  "strike_price",
+                  "underlying",
+                  "pretty_ts_event",
               )
+              print("definition_sample", {key: records[0].get(key) for key in safe_keys})
           else:
-              print("raw_option_bars_detail", bars_response.text[:1000])
+              print("definition_detail", definition_response.text[:1000])
               raise SystemExit(1)
           PY
       - name: Validate required live providers
