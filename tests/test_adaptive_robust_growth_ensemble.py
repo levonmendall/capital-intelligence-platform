@@ -43,3 +43,4 @@ def test_cio_uses_ensemble_and_progressive_lanes() -> None:
     assert 'progressive_lane = str(analysis_lane).lower()' in source
     assert "ensemble.minimum_target_weight" in source
     assert "effective_position_multiplier" in source
+    assert "if not progressive_lane:" in source
