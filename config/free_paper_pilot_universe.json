@@ -1,7 +1,7 @@
 {
   "schema_version": "free-paper-pilot-universe.v1",
   "identifier": "free-paper-pilot-us-listed-wrappers.v3-growth",
-  "objective": "Provide liquid U.S.-listed implementation alternatives while direct spot FX, direct spot crypto, and fully collateralized futures compete in the same canonical paper portfolio through the direct-market universe.",
+  "objective": "Pursue compounded growth by allowing liquid U.S.-listed implementation alternatives, direct spot FX, direct spot crypto, and fully collateralized futures to compete in the same canonical paper portfolio.",
   "portfolio_code": "COMPOUNDING",
   "reporting_currency": "USD",
   "quote_provider": "alpaca-paper-iex",
