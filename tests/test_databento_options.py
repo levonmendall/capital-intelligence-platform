@@ -112,6 +112,11 @@ def test_selects_priced_call_and_put_from_completed_session():
         "ohlcv-1d",
     }
     assert all(call[1]["auth"] == ("secret", "") for call in post.calls)
+    assert all(
+        call[1]["data"]["stype_out"] == "raw_symbol"
+        for call in post.calls
+        if call[1]["data"]["schema"] == "ohlcv-1d"
+    )
 
 
 def test_daily_bars_limit_each_provider_request_to_twenty_contracts():
