@@ -45,7 +45,7 @@ jobs:
           block_end = next(
               index
               for index in range(block_start + 1, len(lines))
-              if line_starts := lines[index].startswith("start = source.find('def _authorized_source()")
+              if lines[index].startswith("start = source.find('def _authorized_source()")
           )
           replacement = [
               "page_config_start = source.find('st.set_page_config(\\n')\n",
