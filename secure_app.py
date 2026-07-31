@@ -294,14 +294,18 @@ if principal is None:
     _login_screen()
 
 with st.sidebar:
-    st.caption(f"Signed in as **{principal.display_name}**")
-    _render_alert_controls(principal)
-    if st.button("Sign out"):
-        token = st.session_state.get("access_token")
-        if token:
-            authentication_service().store.logout(token)
-        _clear_session()
-        st.rerun()
+    if getattr(principal, "is_anonymous", False):
+        st.caption("Public read-only viewer")
+        st.caption("Administrative and paper-operation controls are private.")
+    else:
+        st.caption(f"Signed in as **{principal.display_name}**")
+        _render_alert_controls(principal)
+        if st.button("Sign out"):
+            token = st.session_state.get("access_token")
+            if token:
+                authentication_service().store.logout(token)
+            _clear_session()
+            st.rerun()
 
 app_source_path = Path(__file__).with_name("app.py")
 execution_globals = {

@@ -217,9 +217,13 @@ def test_render_entrypoint_renders_complete_authenticated_console(
     assert not app.exception
     assert len(app.segmented_control) == 1
     captions = [item.value for item in app.caption]
+    assert "Public read-only viewer" in captions
+    assert any("controls are private" in value for value in captions)
     assert any("Persistent operating host" in value for value in captions)
     assert any("render-smoke" in value for value in captions)
     assert any(str(tmp_path) in value for value in captions)
+    assert "Sign out" not in [item.label for item in app.button]
+    assert "Production smoke test" not in [item.label for item in app.button]
     for surface in ("Today", "Environment", "Portfolio", "History"):
         app.segmented_control[0].set_value(surface)
         app.run()

@@ -350,6 +350,7 @@ _replace_source_once(
     + 'render_background_paper_execution_worker(\n'
     + '    construction=_latest("portfolio_construction"),\n'
     + '    briefing=_latest("daily_cio_briefing"),\n'
+    + '    principal=globals().get("authenticated_principal"),\n'
     + ')\n',
     "paper execution worker insertion point is unavailable",
 )
