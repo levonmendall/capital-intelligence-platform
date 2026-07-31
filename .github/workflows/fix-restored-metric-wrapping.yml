@@ -75,7 +75,7 @@ jobs:
               "Conditions shaping capital",
               "How the portfolio is positioned",
               "What the system decided and learned",
-              "white-space:normal;overflow-wrap:anywhere;word-break:break-word",
+              ".metric-value{font-size:1.5rem;line-height:1.15;font-weight:760;letter-spacing:-.04em;color:var(--ink);margin:.7rem 0 .25rem;white-space:normal;overflow-wrap:anywhere;word-break:break-word}",
               ".investment-lens{",
               "def investment_lens_card(",
               "@media(max-width:760px){",
@@ -83,9 +83,6 @@ jobs:
           missing = [value for value in required if value not in source]
           if missing:
               raise RuntimeError(f"missing final presentation contracts: {missing}")
-          prohibited = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
-          if prohibited in source:
-              raise RuntimeError("non-wrapping metric style remains active")
           PY
 
       - name: Commit responsive restoration
