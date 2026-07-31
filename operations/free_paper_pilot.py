@@ -658,6 +658,7 @@ def assess_free_paper_pilot_readiness(
     warnings = list(universe.limitations)
     validated: list[str] = []
     quote_times: list[tuple[str, str]] = []
+    execution_blocks: list[str] = []
     account_status = "unavailable"
     market_open = False
 
@@ -730,12 +731,15 @@ def assess_free_paper_pilot_readiness(
                 ask = float(quote["ap"])
                 if bid <= 0.0 or ask <= 0.0:
                     if market_open:
-                        raise ValueError(f"{symbol} quote is not executable")
-                    warnings.append(
-                        f"{symbol}: closed-market IEX top of book is not executable; execution remains held"
-                    )
+                        execution_blocks.append(
+                            f"{symbol}: IEX top of book is not executable"
+                        )
+                    else:
+                        warnings.append(
+                            f"{symbol}: closed-market IEX top of book is not executable; execution remains held"
+                        )
                 elif ask < bid:
-                    raise ValueError(f"{symbol} quote is crossed")
+                    execution_blocks.append(f"{symbol}: IEX quote is crossed")
                 observed = datetime.fromisoformat(
                     str(quote["t"]).replace("Z", "+00:00")
                 )
@@ -750,14 +754,17 @@ def assess_free_paper_pilot_readiness(
                 quote_times.append((symbol, observed.isoformat()))
                 effective_observed = min(observed, quote_reference_time)
                 if market_open and quote_reference_time - effective_observed > maximum_age:
-                    blockers.append(
+                    execution_blocks.append(
                         f"{symbol}: live quote is older than {universe.maximum_quote_age_minutes} minutes"
                     )
         except (AlpacaPaperProviderError, KeyError, TypeError, ValueError) as error:
-            blockers.append(f"Alpaca IEX quote validation failed: {error}")
+            execution_blocks.append(f"Alpaca IEX quote validation failed: {error}")
 
+    warnings.extend(
+        f"Execution held: {detail}" for detail in dict.fromkeys(execution_blocks)
+    )
     configuration_ready = not blockers
-    execution_ready_now = configuration_ready and market_open
+    execution_ready_now = configuration_ready and market_open and not execution_blocks
     return FreePaperPilotReadinessReport(
         evaluated_at=now,
         universe_identifier=universe.identifier,

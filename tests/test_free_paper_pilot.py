@@ -409,3 +409,71 @@ def test_live_readiness_uses_provider_clock_for_bounded_source_skew() -> None:
         for warning in report.warnings
     )
 
+def test_market_open_non_executable_unheld_wrapper_holds_execution_not_configuration() -> None:
+    def partial_quote_http_get(url: str, **kwargs: Any) -> _Response:
+        if url.endswith("/v2/stocks/quotes/latest"):
+            symbols = str(kwargs["params"]["symbols"]).split(",")
+            return _Response(
+                {
+                    "quotes": {
+                        symbol: {
+                            "bp": 0.0 if symbol == "WTPI" else 99.9,
+                            "ap": 0.0 if symbol == "WTPI" else 100.1,
+                            "bs": 0 if symbol == "WTPI" else 500,
+                            "as": 0 if symbol == "WTPI" else 400,
+                            "t": (NOW - timedelta(seconds=3)).isoformat(),
+                        }
+                        for symbol in symbols
+                    }
+                }
+            )
+        return _http_get(url, **kwargs)
+
+    universe = load_free_paper_pilot_universe(
+        ROOT / "config" / "free_paper_pilot_universe.json"
+    )
+    client = AlpacaPaperClient(
+        AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),
+        http_get=partial_quote_http_get,
+    )
+
+    report = assess_free_paper_pilot_readiness(
+        universe=universe,
+        client=client,
+        evaluated_at=NOW,
+    )
+
+    assert report.configuration_ready
+    assert not report.execution_ready_now
+    assert not report.blockers
+    assert any(
+        "Execution held: WTPI: IEX top of book is not executable" in warning
+        for warning in report.warnings
+    )
+
+
+def test_quote_provider_outage_holds_execution_without_invalidating_configuration() -> None:
+    def unavailable_quote_http_get(url: str, **kwargs: Any) -> _Response:
+        if url.endswith("/v2/stocks/quotes/latest"):
+            return _Response({"message": "temporarily unavailable"}, status_code=503)
+        return _http_get(url, **kwargs)
+
+    universe = load_free_paper_pilot_universe(
+        ROOT / "config" / "free_paper_pilot_universe.json"
+    )
+    client = AlpacaPaperClient(
+        AlpacaPaperSettings(api_key_id="paper-key", secret_key="paper-secret"),
+        http_get=unavailable_quote_http_get,
+    )
+
+    report = assess_free_paper_pilot_readiness(
+        universe=universe,
+        client=client,
+        evaluated_at=NOW,
+    )
+
+    assert report.configuration_ready
+    assert not report.execution_ready_now
+    assert not report.blockers
+    assert any("Execution held: Alpaca IEX quote validation failed" in warning for warning in report.warnings)
+
