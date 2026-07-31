@@ -1,7 +1,7 @@
 """Credential-safe live provider validation for comprehensive market discovery.
 
 This module proves that the production runtime can authenticate to required private
-providers and retrieve current public Yahoo market/option evidence without exposing
+providers and retrieve current Yahoo chart evidence and completed-session Databento OPRA evidence without exposing
 credentials or raw payloads.  It does not rank assets, construct a portfolio, authorize
 orders, or enable real-money execution.
 """
@@ -23,6 +23,10 @@ from providers.databento import (
     DatabentoProvider,
     DatabentoProviderError,
     build_databento_provider,
+)
+from providers.databento_options import (
+    DatabentoOptionsError,
+    DatabentoOptionsProvider,
 )
 from providers.eodhd import EODHDProvider, EODHDProviderError
 
@@ -311,8 +315,7 @@ def _validate_yahoo(
     http_get: HttpGet,
     *,
     as_of: datetime,
-) -> tuple[ProviderValidationCheck, ...]:
-    checks: list[ProviderValidationCheck] = []
+) -> tuple[tuple[ProviderValidationCheck, ...], float | None]:
     start = int((as_of - timedelta(days=10)).timestamp())
     end = int(as_of.timestamp())
     try:
@@ -330,111 +333,230 @@ def _validate_yahoo(
         if not isinstance(result, list) or not result:
             raise ProviderValidationError("Yahoo chart result is empty")
         timestamps = result[0].get("timestamp", ())
-        if not isinstance(timestamps, list) or not timestamps:
-            raise ProviderValidationError("Yahoo chart timestamps are empty")
-        checks.append(
-            _passed(
-                name="yahoo_chart_evidence",
-                provider="YAHOO",
-                required=True,
-                detail=f"public chart retrieval succeeded with {len(timestamps)} observations",
-                observed_at=as_of,
-                source_identifier="yahoo-chart:SPY",
-                evidence={"symbol": "SPY", "timestamps": timestamps[-5:]},
-            )
+        quote = result[0].get("indicators", {}).get("quote", ())[0]
+        closes = tuple(float(item) for item in quote.get("close", ()) if item is not None)
+        if not isinstance(timestamps, list) or not timestamps or not closes:
+            raise ProviderValidationError("Yahoo chart observations are empty")
+        latest_close = closes[-1]
+        if latest_close <= 0.0:
+            raise ProviderValidationError("Yahoo latest SPY close is not positive")
+        return (
+            (
+                _passed(
+                    name="yahoo_chart_evidence",
+                    provider="YAHOO",
+                    required=True,
+                    detail=(
+                        "public chart retrieval succeeded with "
+                        f"{len(timestamps)} observations"
+                    ),
+                    observed_at=as_of,
+                    source_identifier="yahoo-chart:SPY",
+                    evidence={
+                        "symbol": "SPY",
+                        "timestamps": timestamps[-5:],
+                        "latest_close": latest_close,
+                    },
+                ),
+            ),
+            latest_close,
         )
-    except (KeyError, IndexError, TypeError, ValueError, requests.RequestException, ProviderValidationError) as error:
-        checks.append(
-            _failed(
-                name="yahoo_chart_evidence",
-                provider="YAHOO",
-                required=True,
-                detail=f"{type(error).__name__}: {error}",
-                observed_at=as_of,
-            )
+    except (
+        KeyError,
+        IndexError,
+        TypeError,
+        ValueError,
+        requests.RequestException,
+        ProviderValidationError,
+    ) as error:
+        return (
+            (
+                _failed(
+                    name="yahoo_chart_evidence",
+                    provider="YAHOO",
+                    required=True,
+                    detail=f"{type(error).__name__}: {error}",
+                    observed_at=as_of,
+                ),
+            ),
+            None,
         )
-
-    try:
-        chain = _yahoo_json(
-            http_get,
-            "https://query2.finance.yahoo.com/v7/finance/options/SPY",
-        )
-        result = chain["optionChain"]["result"]
-        if not isinstance(result, list) or not result:
-            raise ProviderValidationError("Yahoo option-chain result is empty")
-        expirations = result[0].get("expirationDates", ())
-        if not isinstance(expirations, list) or not expirations:
-            raise ProviderValidationError("Yahoo option expirations are empty")
-        checks.append(
-            _passed(
-                name="yahoo_option_chain",
-                provider="YAHOO",
-                required=True,
-                detail=f"public option-chain retrieval succeeded with {len(expirations)} expirations",
-                observed_at=as_of,
-                source_identifier="yahoo-option-chain:SPY",
-                evidence={"symbol": "SPY", "expirations": expirations[:8]},
-            )
-        )
-    except (KeyError, IndexError, TypeError, ValueError, requests.RequestException, ProviderValidationError) as error:
-        checks.append(
-            _failed(
-                name="yahoo_option_chain",
-                provider="YAHOO",
-                required=True,
-                detail=f"{type(error).__name__}: {error}",
-                observed_at=as_of,
-            )
-        )
-    return tuple(checks)
 
 
 def _validate_databento(
     provider: DatabentoProvider,
+    options_provider: DatabentoOptionsProvider,
     *,
     as_of: datetime,
-) -> ProviderValidationCheck:
+    underlying_price: float | None,
+) -> tuple[ProviderValidationCheck, ...]:
+    checks: list[ProviderValidationCheck] = []
     if not provider.configured:
-        return _skipped(
-            name="databento_account_entitlement",
-            provider="DATABENTO",
-            detail="Databento is optional for PR264 and no API key is configured",
-            observed_at=as_of,
-        )
-    try:
-        snapshot = provider.fetch_dataset(
-            ProviderDatasetQuery(
-                dataset_type=ProviderDatasetType.ACCOUNT_ENTITLEMENT,
-                provider_symbol="ACCOUNT",
-                as_of=as_of,
-                limit=1_000,
+        checks.append(
+            _failed(
+                name="databento_account_entitlement",
+                provider="DATABENTO",
+                required=True,
+                detail="required Databento API key is not configured",
+                observed_at=as_of,
             )
         )
-        count = _payload_count(snapshot.payload)
-        if count < 1:
-            raise DatabentoProviderError("provider returned an empty dataset entitlement list")
-        return _passed(
-            name="databento_account_entitlement",
-            provider="DATABENTO",
-            required=False,
-            detail=f"optional authenticated dataset discovery succeeded with {count} records",
-            observed_at=snapshot.retrieved_at,
-            source_identifier=snapshot.provider_record_id,
-            evidence={
-                "content_hash": snapshot.content_hash,
-                "provider": snapshot.provider,
-                "source_version": snapshot.source_version,
-                "count": count,
-            },
+    else:
+        try:
+            snapshot = provider.fetch_dataset(
+                ProviderDatasetQuery(
+                    dataset_type=ProviderDatasetType.ACCOUNT_ENTITLEMENT,
+                    provider_symbol="ACCOUNT",
+                    as_of=as_of,
+                    limit=1_000,
+                )
+            )
+            count = _payload_count(snapshot.payload)
+            if count < 1:
+                raise DatabentoProviderError(
+                    "provider returned an empty dataset entitlement list"
+                )
+            checks.append(
+                _passed(
+                    name="databento_account_entitlement",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=(
+                        "authenticated dataset discovery succeeded with "
+                        f"{count} records"
+                    ),
+                    observed_at=snapshot.retrieved_at,
+                    source_identifier=snapshot.provider_record_id,
+                    evidence={
+                        "content_hash": snapshot.content_hash,
+                        "provider": snapshot.provider,
+                        "source_version": snapshot.source_version,
+                        "count": count,
+                    },
+                )
+            )
+        except (DatabentoProviderError, OSError, TypeError, ValueError) as error:
+            checks.append(
+                _failed(
+                    name="databento_account_entitlement",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=f"{type(error).__name__}: {error}",
+                    observed_at=as_of,
+                )
+            )
+    if not options_provider.configured:
+        detail = "required Databento OPRA credentials are not configured"
+        checks.extend(
+            (
+                _failed(
+                    name="databento_opra_definitions",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=detail,
+                    observed_at=as_of,
+                ),
+                _failed(
+                    name="databento_opra_daily_bars",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=detail,
+                    observed_at=as_of,
+                ),
+            )
         )
-    except (DatabentoProviderError, OSError, TypeError, ValueError) as error:
-        return _failed(
-            name="databento_account_entitlement",
-            provider="DATABENTO",
-            required=False,
-            detail=f"optional configured provider failed: {type(error).__name__}: {error}",
-            observed_at=as_of,
+        return tuple(checks)
+    if underlying_price is None or underlying_price <= 0.0:
+        detail = "current SPY reference price is unavailable for near-money OPRA validation"
+        checks.extend(
+            (
+                _failed(
+                    name="databento_opra_definitions",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=detail,
+                    observed_at=as_of,
+                ),
+                _failed(
+                    name="databento_opra_daily_bars",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=detail,
+                    observed_at=as_of,
+                ),
+            )
         )
+        return tuple(checks)
+    try:
+        proof = options_provider.validate_access(
+            as_of=as_of,
+            underlying_price=underlying_price,
+        )
+        checks.extend(
+            (
+                _passed(
+                    name="databento_opra_definitions",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=(
+                        "completed-session OPRA definition retrieval succeeded with "
+                        f"{proof['definition_count']} contracts"
+                    ),
+                    observed_at=as_of,
+                    source_identifier=(
+                        f"databento-opra-definitions:SPY:{proof['session_date']}"
+                    ),
+                    evidence={
+                        "dataset": proof["dataset"],
+                        "session_date": proof["session_date"],
+                        "definition_count": proof["definition_count"],
+                        "eligible_definition_count": proof[
+                            "eligible_definition_count"
+                        ],
+                    },
+                ),
+                _passed(
+                    name="databento_opra_daily_bars",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=(
+                        "production-aligned near-money OPRA retrieval succeeded with "
+                        f"{proof['priced_sample_count']} priced contracts"
+                    ),
+                    observed_at=as_of,
+                    source_identifier=(
+                        f"databento-opra-bars:SPY:{proof['session_date']}"
+                    ),
+                    evidence={
+                        "dataset": proof["dataset"],
+                        "session_date": proof["session_date"],
+                        "priced_sample_count": proof["priced_sample_count"],
+                        "sample_symbols": proof["sample_symbols"],
+                    },
+                ),
+            )
+        )
+    except (DatabentoOptionsError, OSError, TypeError, ValueError) as error:
+        detail = f"{type(error).__name__}: {error}"
+        checks.extend(
+            (
+                _failed(
+                    name="databento_opra_definitions",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=detail,
+                    observed_at=as_of,
+                ),
+                _failed(
+                    name="databento_opra_daily_bars",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=detail,
+                    observed_at=as_of,
+                ),
+            )
+        )
+    return tuple(checks)
 
 
 def validate_live_providers(
@@ -444,6 +566,7 @@ def validate_live_providers(
     http_get: HttpGet = requests.get,
     eodhd_provider: EODHDProvider | None = None,
     databento_provider: DatabentoProvider | None = None,
+    databento_options_provider: DatabentoOptionsProvider | None = None,
 ) -> ProviderValidationReport:
     """Run bounded live checks and return a credential-safe evidence report."""
 
@@ -466,10 +589,22 @@ def validate_live_providers(
             databento = DatabentoProvider()
     else:
         databento = databento_provider
+    databento_options = (
+        databento_options_provider or DatabentoOptionsProvider()
+    )
+    yahoo_checks, spy_reference_price = _validate_yahoo(
+        http_get,
+        as_of=generated_at,
+    )
     checks = (
         *_validate_eodhd(eodhd, as_of=generated_at),
-        *_validate_yahoo(http_get, as_of=generated_at),
-        _validate_databento(databento, as_of=generated_at),
+        *yahoo_checks,
+        *_validate_databento(
+            databento,
+            databento_options,
+            as_of=generated_at,
+            underlying_price=spy_reference_price,
+        ),
     )
     return ProviderValidationReport(
         release=str(resolved_release),

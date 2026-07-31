@@ -27,6 +27,11 @@ from cio import CandidateAssetClass
 from data.provider_dataset import ProviderDatasetQuery, ProviderDatasetType
 from governance import TradingSessionModel
 from operations.free_paper_pilot import FreePaperPilotInstrument
+from providers.databento_options import (
+    DATABENTO_OPRA_DATASET,
+    DatabentoOptionsError,
+    DatabentoOptionsProvider,
+)
 from providers.eodhd import EODHDProvider, EODHDProviderError, build_eodhd_provider
 
 DEFAULT_DISCOVERY_CONFIG_PATH = Path("config/comprehensive_market_discovery.json")
@@ -217,6 +222,7 @@ class DiscoveryCatalogRecord:
     option_right: str | None = None
     provider_dataset: str | None = None
     provider_stype_in: str | None = None
+    provider_instrument_id: int | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -259,6 +265,13 @@ class DiscoveryCatalogRecord:
                 "expiration_at",
                 _aware(self.expiration_at, field_name="expiration_at"),
             )
+        if self.provider_instrument_id is not None:
+            if (
+                isinstance(self.provider_instrument_id, bool)
+                or not isinstance(self.provider_instrument_id, int)
+                or self.provider_instrument_id < 1
+            ):
+                raise ValueError("provider_instrument_id must be a positive integer")
         if self.asset_class is CandidateAssetClass.OPTION:
             if (
                 self.expiration_at is None
@@ -695,93 +708,83 @@ def _option_catalog(
     config: ComprehensiveMarketDiscoveryConfig,
     policy: ComprehensiveMarketDiscoveryPolicy,
     http_get: Callable[..., Any] = requests.get,
+    databento_options_provider: DatabentoOptionsProvider | None = None,
 ) -> Sequence[DiscoveryCatalogRecord]:
+    provider = databento_options_provider or DatabentoOptionsProvider()
+    if not provider.configured:
+        raise ComprehensiveMarketDiscoveryError(
+            "Databento OPRA credentials are required for defined-risk option discovery"
+        )
     result: list[DiscoveryCatalogRecord] = []
     for underlying in config.option_underlyings:
-        try:
-            response = http_get(
-                f"https://query2.finance.yahoo.com/v7/finance/options/{underlying}",
-                headers={"User-Agent": "capital-intelligence-paper-research/1.0"},
-                timeout=20,
-            )
-            if int(getattr(response, "status_code", 0)) != 200:
-                continue
-            payload = response.json()
-            chain = payload["optionChain"]["result"][0]
-            expirations = tuple(int(item) for item in chain.get("expirationDates", ()))
-        except (KeyError, IndexError, TypeError, ValueError, requests.RequestException):
+        underlying_record = DiscoveryCatalogRecord(
+            symbol=underlying,
+            provider_symbol=underlying,
+            name=underlying,
+            asset_class=CandidateAssetClass.INTERNATIONAL_EQUITY,
+            economic_exposure="us_equity",
+            venue="US",
+            country_code="US",
+            currency="USD",
+            settlement_currency="USD",
+            instrument_type="common_stock",
+            provider_kind="yahoo",
+            source_identifier=f"yahoo-chart:{underlying}",
+        )
+        rows = _yahoo_rows(
+            underlying_record,
+            as_of=as_of,
+            history_days=15,
+            http_get=http_get,
+        )
+        if not rows:
             continue
-        valid_expirations = [
-            item
-            for item in expirations
-            if policy.option_minimum_days_to_expiry
-            <= (datetime.fromtimestamp(item, tz=timezone.utc) - as_of).days
-            <= policy.option_maximum_days_to_expiry
-        ]
-        for raw_expiry in valid_expirations[:4]:
-            try:
-                response = http_get(
-                    f"https://query2.finance.yahoo.com/v7/finance/options/{underlying}",
-                    params={"date": raw_expiry},
-                    headers={"User-Agent": "capital-intelligence-paper-research/1.0"},
-                    timeout=20,
+        underlying_price = float(rows[-1]["c"])
+        try:
+            selections = provider.select_contracts(
+                underlying,
+                underlying_price=underlying_price,
+                as_of=as_of,
+                minimum_days_to_expiry=policy.option_minimum_days_to_expiry,
+                maximum_days_to_expiry=policy.option_maximum_days_to_expiry,
+            )
+        except (DatabentoOptionsError, OSError, TypeError, ValueError):
+            continue
+        for selection in selections:
+            definition = selection.definition
+            bar = selection.bar
+            result.append(
+                DiscoveryCatalogRecord(
+                    symbol=definition.symbol,
+                    provider_symbol=definition.raw_symbol,
+                    name=(
+                        f"{definition.underlying} {definition.expiration_at.date()} "
+                        f"{definition.strike:g} {definition.option_right}"
+                    ),
+                    asset_class=CandidateAssetClass.OPTION,
+                    economic_exposure="option_strategies",
+                    venue="OPRA",
+                    country_code="US",
+                    currency="USD",
+                    settlement_currency="USD",
+                    instrument_type="option",
+                    provider_kind="databento",
+                    provider_dataset=DATABENTO_OPRA_DATASET,
+                    provider_stype_in="instrument_id",
+                    provider_instrument_id=definition.instrument_id,
+                    source_identifier=(
+                        "databento-opra-definition:"
+                        f"{definition.session_date.isoformat()}:"
+                        f"{definition.symbol}:bar:{bar.observed_at.isoformat()}"
+                    ),
+                    contract_multiplier=definition.contract_multiplier,
+                    quote_spread_bps=15.0,
+                    expiration_at=definition.expiration_at,
+                    underlying_symbol=definition.underlying,
+                    strike=definition.strike,
+                    option_right=definition.option_right,
                 )
-                payload = response.json()
-                chain = payload["optionChain"]["result"][0]
-                option_sets = chain["options"][0]
-                underlying_price = float(chain["quote"]["regularMarketPrice"])
-            except (KeyError, IndexError, TypeError, ValueError, requests.RequestException):
-                continue
-            expiration = datetime.fromtimestamp(raw_expiry, tz=timezone.utc)
-            for right, key in (("call", "calls"), ("put", "puts")):
-                rows = option_sets.get(key, ())
-                if not isinstance(rows, Sequence):
-                    continue
-                ranked: list[tuple[float, Mapping[str, Any]]] = []
-                for row in rows:
-                    if not isinstance(row, Mapping):
-                        continue
-                    strike = _number(row.get("strike"))
-                    bid = _number(row.get("bid"))
-                    ask = _number(row.get("ask"))
-                    volume = _number(row.get("volume"))
-                    open_interest = _number(row.get("openInterest"))
-                    if strike <= 0.0 or ask <= 0.0 or ask < bid:
-                        continue
-                    moneyness = abs(strike / max(underlying_price, 1e-9) - 1.0)
-                    if moneyness > 0.20:
-                        continue
-                    liquidity = math.log10(max(1.0, volume + open_interest))
-                    spread_penalty = (ask - bid) / max(ask, 1e-9)
-                    ranked.append((liquidity - 2.0 * spread_penalty - moneyness, row))
-                ranked.sort(key=lambda item: item[0], reverse=True)
-                for _score, row in ranked[:2]:
-                    contract_symbol = str(row.get("contractSymbol", "")).strip().upper()
-                    if not contract_symbol:
-                        continue
-                    strike = float(row["strike"])
-                    result.append(
-                        DiscoveryCatalogRecord(
-                            symbol=contract_symbol,
-                            provider_symbol=contract_symbol,
-                            name=f"{underlying} {expiration.date()} {strike:g} {right}",
-                            asset_class=CandidateAssetClass.OPTION,
-                            economic_exposure="option_strategies",
-                            venue="OPRA",
-                            country_code="US",
-                            currency="USD",
-                            settlement_currency="USD",
-                            instrument_type="option",
-                            provider_kind="yahoo_option",
-                            source_identifier=f"yahoo-option-chain:{underlying}:{raw_expiry}:{contract_symbol}",
-                            contract_multiplier=100.0,
-                            quote_spread_bps=15.0,
-                            expiration_at=expiration,
-                            underlying_symbol=underlying,
-                            strike=strike,
-                            option_right=right,
-                        )
-                    )
+            )
     return result
 
 
@@ -791,6 +794,7 @@ def default_catalog_probe(
     config: ComprehensiveMarketDiscoveryConfig | None = None,
     policy: ComprehensiveMarketDiscoveryPolicy | None = None,
     eodhd_provider: EODHDProvider | None = None,
+    databento_options_provider: DatabentoOptionsProvider | None = None,
 ) -> Mapping[CandidateAssetClass, Sequence[DiscoveryCatalogRecord]]:
     timestamp = _aware(as_of, field_name="as_of")
     resolved_config = config or load_comprehensive_market_discovery_config()
@@ -813,6 +817,7 @@ def default_catalog_probe(
             as_of=timestamp,
             config=resolved_config,
             policy=resolved_policy,
+            databento_options_provider=databento_options_provider,
         )
     )
     return result
@@ -911,11 +916,36 @@ def default_market_probe(
     *,
     http_get: Callable[..., Any] = requests.get,
     eodhd_provider: EODHDProvider | None = None,
+    databento_options_provider: DatabentoOptionsProvider | None = None,
 ) -> Mapping[str, DiscoveryMarketFeatures]:
     timestamp = _aware(as_of, field_name="as_of")
     provider = eodhd_provider or build_eodhd_provider()
+    options_provider = databento_options_provider or DatabentoOptionsProvider()
+    option_records = tuple(
+        item for item in records if item.asset_class is CandidateAssetClass.OPTION
+    )
+    option_histories: Mapping[str, tuple[object, ...]] = {}
+    if option_records and options_provider.configured:
+        try:
+            option_instruments = tuple(
+                (item.provider_instrument_id, item.provider_symbol)
+                for item in option_records
+                if item.provider_instrument_id is not None
+            )
+            if len(option_instruments) != len(option_records):
+                raise DatabentoOptionsError(
+                    "option records are missing provider instrument IDs"
+                )
+            _option_session, option_histories = options_provider.latest_daily_bars(
+                option_instruments,
+                as_of=timestamp,
+                history_days=min(policy.history_days, 365),
+            )
+        except (DatabentoOptionsError, OSError, TypeError, ValueError):
+            option_histories = {}
     result: dict[str, DiscoveryMarketFeatures] = {}
     for record in records:
+        option_evidence: tuple[str, ...] = ()
         if record.asset_class is CandidateAssetClass.OPTION and record.underlying_symbol:
             underlying = DiscoveryCatalogRecord(
                 symbol=record.underlying_symbol,
@@ -937,14 +967,21 @@ def default_market_probe(
                 history_days=policy.history_days,
                 http_get=http_get,
             )
-            option_rows = _yahoo_rows(
-                record,
-                as_of=timestamp,
-                history_days=min(policy.history_days, 365),
-                http_get=http_get,
-            )
-            option_price = float(option_rows[-1]["c"]) if option_rows else 0.0
-        elif record.provider_kind in {"yahoo", "yahoo_option"}:
+            option_rows = option_histories.get(record.provider_symbol.upper(), ())
+            option_price = float(option_rows[-1].close) if option_rows else 0.0
+            if option_rows:
+                option_material = [
+                    {
+                        "t": item.observed_at.isoformat(),
+                        "c": item.close,
+                        "v": item.volume,
+                    }
+                    for item in option_rows
+                ]
+                option_evidence = (
+                    f"databento-opra-bars:{record.symbol}:{_hash(option_material)}",
+                )
+        elif record.provider_kind == "yahoo":
             rows = _yahoo_rows(
                 record,
                 as_of=timestamp,
@@ -966,6 +1003,8 @@ def default_market_probe(
             # an explicit exclusion rather than being synthesized.
             continue
         if len(rows) < policy.minimum_history_bars:
+            continue
+        if record.asset_class is CandidateAssetClass.OPTION and option_price <= 0.0:
             continue
         closes = [float(item["c"]) for item in rows]
         volumes = [float(item["v"]) for item in rows]
@@ -989,9 +1028,14 @@ def default_market_probe(
             {"t": item["t"].isoformat(), "c": item["c"], "v": item["v"]}
             for item in rows
         ]
+        observed_at = (
+            option_rows[-1].observed_at
+            if record.asset_class is CandidateAssetClass.OPTION and option_rows
+            else rows[-1]["t"]
+        )
         result[record.symbol] = DiscoveryMarketFeatures(
             price=price,
-            observed_at=rows[-1]["t"],
+            observed_at=observed_at,
             one_month_return=_period_return(closes, 21),
             three_month_return=_period_return(closes, 63),
             six_month_return=_period_return(closes, 126),
@@ -1003,6 +1047,7 @@ def default_market_probe(
             evidence_identifiers=(
                 record.source_identifier,
                 f"discovery-bars:{record.symbol}:{_hash(material)}",
+                *option_evidence,
             ),
         )
     return result
