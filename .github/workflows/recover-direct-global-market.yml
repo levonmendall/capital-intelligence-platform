@@ -61,12 +61,68 @@ jobs:
           git apply --check /tmp/direct-market-complete.patch
           git apply --index /tmp/direct-market-complete.patch
 
+          # Current main contains a synopsis presenter that calls this premium UI
+          # helper, but the helper was omitted by a concurrent UI materialization.
+          # Repair the presentation-only contract on the final product branch so
+          # the authoritative release suite can validate the complete repository.
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('premium_ui.py')
+          source = path.read_text(encoding='utf-8')
+          if 'def investment_lens_card(' not in source:
+              marker = '\ndef text_card('
+              if marker not in source:
+                  raise SystemExit('premium_ui.py text_card insertion point is unavailable')
+              helper = '''
+
+          def investment_lens_card(
+              *,
+              title: str,
+              what_changed: object,
+              why_investors_care: object,
+              portfolio_effect: object,
+              cio_response: object,
+              watch_next: object,
+              variant: str = "today",
+          ) -> None:
+              """Render one concise event-to-portfolio investment explanation."""
+
+              profile = surface_profile(variant.title())
+
+              def value(item: object) -> str:
+                  return "No additional detail is available." if item in (None, "") else str(item)
+
+              rows = (
+                  ("Why investors care", why_investors_care),
+                  ("Portfolio effect", portfolio_effect),
+                  ("CIO response", cio_response),
+                  ("What to watch next", watch_next),
+              )
+              details = "".join(
+                  '<div class="minor-note">'
+                  f'<strong>{escape(label)}</strong><br>{escape(value(item))}</div>'
+                  for label, item in rows
+              )
+              st.markdown(
+                  f'<div class="callout-card callout-{profile.slug}">'
+                  f'<div class="callout-title">{escape(title)}</div>'
+                  '<div class="section-title">What changed</div>'
+                  f'<p class="callout-copy">{escape(value(what_changed))}</p>'
+                  f'{details}</div>',
+                  unsafe_allow_html=True,
+              )
+          '''
+              path.write_text(source.replace(marker, helper + marker, 1), encoding='utf-8')
+          PY
+
           rm -rf .github/direct-market-payload
           rm -f .github/direct-global-market-recovery.trigger
           rm -f .github/workflows/recover-direct-global-market.yml
           rm -rf .github/agent_payload
           rm -f .github/workflows/apply-direct-global-market.yml
           rm -f .github/workflows/export-agent-repo.yml
+          rm -f .github/workflows/apply-portfolio-first-ui-redesign.yml
           git add -A
 
           ! git grep -n 'direct_instrument_classes_prohibited' -- ':!tests/**'
@@ -89,6 +145,7 @@ jobs:
             tests/test_material_cio_reassessment.py \
             tests/test_multi_asset_paper_execution.py \
             tests/test_production_context_publication_runtime.py \
+            tests/test_render_persistent_deployment.py \
             tests/test_return_opportunity_expansion.py
 
       - name: Commit exact implementation
