@@ -65,3 +65,5 @@ jobs:
           git add app_impl.py
           git commit -m "Preserve decision audit ID in compact history table"
           git push origin HEAD:agent/compact-mobile-ui
+
+# Triggered after workflow registration.
