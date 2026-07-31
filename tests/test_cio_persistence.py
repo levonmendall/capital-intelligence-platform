@@ -209,7 +209,7 @@ def test_specialist_and_decision_serializers_preserve_authority_and_dissent() ->
     assert decision_payload["recommended_position_weight"] == pytest.approx(
         0.06
     )
-    assert decision_payload["policy_version"] == "cio-synthesis.v6"
+    assert decision_payload["policy_version"] == "cio-synthesis.v7-growth"
 
 
 def test_event_payload_is_canonical_json(tmp_path) -> None:
