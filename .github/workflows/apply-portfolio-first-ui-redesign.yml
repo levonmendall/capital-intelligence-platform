@@ -1,5 +1,6 @@
 name: Apply portfolio-first UI redesign
 
+# Trigger the one-time materialization now that this workflow exists on main.
 on:
   push:
     branches:
