@@ -9,7 +9,9 @@ on:
       - operations/comprehensive_market_discovery.py
       - operations/provider_validation.py
       - providers/databento_options.py
+      - tests/test_comprehensive_market_discovery.py
       - tests/test_databento_options.py
+      - tests/test_provider_validation.py
 
 permissions:
   contents: read
@@ -18,7 +20,7 @@ jobs:
   live-provider-proof:
     if: github.event.pull_request.head.ref == 'agent/prove-pr264-live-providers-now'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       CAPITAL_INTELLIGENCE_EODHD_API_TOKEN: ${{ secrets.CAPITAL_INTELLIGENCE_EODHD_API_TOKEN || secrets.EODHD_API_TOKEN || secrets.EODHD_API_KEY }}
       CAPITAL_INTELLIGENCE_DATABENTO_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_DATABENTO_API_KEY || secrets.DATABENTO_API_KEY }}
@@ -28,80 +30,31 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: agent/prove-pr264-live-providers-now
-      - name: Install provider validation runtime
+      - name: Install validation runtime
         shell: bash
         run: |
           set -euo pipefail
           python3 -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -r requirements.txt
-      - name: Probe Databento OPRA definitions directly
+          .venv/bin/python -m pip install -r requirements.txt "pytest>=8,<9"
+      - name: Compile option and validation source
         shell: bash
         run: |
           set -euo pipefail
-          .venv/bin/python - <<'PY'
-          from datetime import datetime, timedelta, timezone
-          import json
-          import os
-          import requests
-
-          key = os.environ["CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"]
-          auth = (key, "")
-          now = datetime.now(timezone.utc)
-          completed_date = now.date() - timedelta(days=1)
-          while completed_date.weekday() >= 5:
-              completed_date -= timedelta(days=1)
-          next_date = completed_date + timedelta(days=1)
-          start_date = completed_date.isoformat()
-          end_date = next_date.isoformat()
-          print("completed_option_session", start_date)
-
-          definition_response = requests.post(
-              "https://hist.databento.com/v0/timeseries.get_range",
-              auth=auth,
-              data={
-                  "dataset": "OPRA.PILLAR",
-                  "schema": "definition",
-                  "symbols": "SPY.OPT",
-                  "stype_in": "parent",
-                  "start": start_date,
-                  "end": end_date,
-                  "encoding": "json",
-                  "pretty_px": "true",
-                  "pretty_ts": "true",
-                  "map_symbols": "true",
-                  "limit": "20",
-              },
-              timeout=90,
-          )
-          print("definition_http", definition_response.status_code)
-          records = []
-          for line in definition_response.text.splitlines():
-              try:
-                  value = json.loads(line)
-              except json.JSONDecodeError:
-                  continue
-              if isinstance(value, dict) and "detail" not in value:
-                  records.append(value)
-          print("definition_count", len(records))
-          if records:
-              print("definition_keys", sorted(records[0]))
-              safe_keys = (
-                  "symbol",
-                  "raw_symbol",
-                  "instrument_id",
-                  "asset",
-                  "instrument_class",
-                  "expiration",
-                  "strike_price",
-                  "underlying",
-                  "pretty_ts_event",
-              )
-              print("definition_sample", {key: records[0].get(key) for key in safe_keys})
-          else:
-              print("definition_detail", definition_response.text[:1000])
-              raise SystemExit(1)
-          PY
+          .venv/bin/python -m py_compile \
+            providers/databento_options.py \
+            operations/comprehensive_market_discovery.py \
+            operations/provider_validation.py \
+            tests/test_databento_options.py \
+            tests/test_provider_validation.py
+      - name: Run deterministic PR264 provider regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q \
+            tests/test_comprehensive_market_discovery.py \
+            tests/test_databento_options.py \
+            tests/test_provider_validation.py
       - name: Validate required live providers
         shell: bash
         run: |
