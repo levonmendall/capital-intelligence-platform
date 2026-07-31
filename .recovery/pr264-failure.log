@@ -1,0 +1,16 @@
+Reconstructing immutable comprehensive-market package
+/tmp/comprehensive-market-discovery.b64: OK
+/tmp/comprehensive-market-discovery.tar.gz: OK
+Repairing compatibility templates
+Traceback (most recent call last):
+  File "/home/runner/work/capital-intelligence-platform-/capital-intelligence-platform-/tools/apply_comprehensive_market_discovery.py", line 846, in <module>
+    main()
+  File "/home/runner/work/capital-intelligence-platform-/capital-intelligence-platform-/tools/apply_comprehensive_market_discovery.py", line 839, in main
+    patch_production_evidence()
+  File "/home/runner/work/capital-intelligence-platform-/capital-intelligence-platform-/tools/apply_comprehensive_market_discovery.py", line 581, in patch_production_evidence
+    content = replace_once(
+              ^^^^^^^^^^^^^
+  File "/home/runner/work/capital-intelligence-platform-/capital-intelligence-platform-/tools/apply_comprehensive_market_discovery.py", line 21, in replace_once
+    raise RuntimeError(f"{label}: expected one match, found {count}")
+RuntimeError: use dynamic direct client universe: expected one match, found 0
+PR264 recovery failed with status 1
