@@ -582,13 +582,15 @@ class ChiefInvestmentOfficer:
                 None,
                 "Independent return engines do not yet support even an exploratory allocation.",
             )
+        growth_cap = (
+            min(feasible_cap, ensemble.maximum_target_weight or feasible_cap)
+            if progressive_lane
+            else feasible_cap
+        )
         robust_cap = self.robust_assessor.maximum_supported_weight(
             robustness_candidate,
             alternative_return=effective_alternative,
-            maximum_weight=min(
-                feasible_cap,
-                ensemble.maximum_target_weight or feasible_cap,
-            ),
+            maximum_weight=growth_cap,
             policy_profile=profile,
             allow_soft_failures=progressive_lane,
         )
