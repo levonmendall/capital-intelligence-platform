@@ -8,8 +8,9 @@ on:
       - .github/workflows/prove-pr264-live-providers-now.yml
       - operations/comprehensive_market_discovery.py
       - operations/provider_validation.py
-      - providers/databento.py
+      - providers/databento_options.py
       - providers/yahoo_public.py
+      - tests/test_databento_options.py
       - tests/test_yahoo_public.py
 
 permissions:
@@ -36,7 +37,7 @@ jobs:
           python3 -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -r requirements.txt
-      - name: Probe authenticated options entitlements
+      - name: Probe supported Databento option symbology path
         shell: bash
         run: |
           set -euo pipefail
@@ -48,52 +49,72 @@ jobs:
 
           key = os.environ["CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"]
           auth = (key, "")
-          datasets = requests.get(
-              "https://hist.databento.com/v0/metadata.list_datasets",
-              auth=auth,
-              timeout=30,
-          ).json()
-          print(
-              "databento_options_datasets",
-              [str(item) for item in datasets if "OPRA" in str(item).upper()],
-          )
-          schemas = requests.get(
-              "https://hist.databento.com/v0/metadata.list_schemas",
-              auth=auth,
-              params={"dataset": "OPRA.PILLAR"},
-              timeout=30,
-          ).json()
-          print("databento_opra_schemas", schemas)
-
           now = datetime.now(timezone.utc)
-          tomorrow = now.date() + timedelta(days=1)
-          resolved_response = requests.post(
+          start_date = (now.date() - timedelta(days=1)).isoformat()
+          end_date = (now.date() + timedelta(days=1)).isoformat()
+
+          parent_response = requests.post(
               "https://hist.databento.com/v0/symbology.resolve",
               auth=auth,
               data={
                   "dataset": "OPRA.PILLAR",
                   "symbols": "SPY.OPT",
                   "stype_in": "parent",
-                  "stype_out": "raw_symbol",
-                  "start_date": now.date().isoformat(),
-                  "end_date": tomorrow.isoformat(),
+                  "stype_out": "instrument_id",
+                  "start_date": start_date,
+                  "end_date": end_date,
               },
               timeout=60,
           )
-          print("databento_resolve_http", resolved_response.status_code)
-          resolved = resolved_response.json()
-          mappings = resolved.get("result", {}).get("SPY.OPT", []) if isinstance(resolved, dict) else []
-          raw_symbols = sorted(
+          print("parent_to_instrument_http", parent_response.status_code)
+          parent_payload = parent_response.json()
+          print("parent_to_instrument_keys", sorted(parent_payload) if isinstance(parent_payload, dict) else [])
+          parent_result = parent_payload.get("result", {}) if isinstance(parent_payload, dict) else {}
+          parent_rows = parent_result.get("SPY.OPT", []) if isinstance(parent_result, dict) else []
+          instrument_ids = sorted(
               {
-                  str(item.get("s"))
-                  for item in mappings
-                  if isinstance(item, dict) and item.get("s")
+                  str(row.get("s"))
+                  for row in parent_rows
+                  if isinstance(row, dict) and row.get("s") is not None
               }
           )
-          print("databento_resolve_count", len(raw_symbols))
-          print("databento_resolve_sample", raw_symbols[:3])
-          if not raw_symbols and isinstance(resolved, dict):
-              print("databento_resolve_detail", resolved)
+          print("parent_to_instrument_count", len(instrument_ids))
+          print("parent_to_instrument_sample", instrument_ids[:5])
+          if not instrument_ids:
+              print("parent_to_instrument_detail", parent_payload)
+              raise SystemExit(1)
+
+          sample_ids = instrument_ids[:100]
+          raw_response = requests.post(
+              "https://hist.databento.com/v0/symbology.resolve",
+              auth=auth,
+              data={
+                  "dataset": "OPRA.PILLAR",
+                  "symbols": ",".join(sample_ids),
+                  "stype_in": "instrument_id",
+                  "stype_out": "raw_symbol",
+                  "start_date": start_date,
+                  "end_date": end_date,
+              },
+              timeout=60,
+          )
+          print("instrument_to_raw_http", raw_response.status_code)
+          raw_payload = raw_response.json()
+          raw_result = raw_payload.get("result", {}) if isinstance(raw_payload, dict) else {}
+          raw_symbols = []
+          if isinstance(raw_result, dict):
+              for rows in raw_result.values():
+                  if not isinstance(rows, list):
+                      continue
+                  for row in rows:
+                      if isinstance(row, dict) and row.get("s"):
+                          raw_symbols.append(str(row["s"]))
+          raw_symbols = sorted(set(raw_symbols))
+          print("instrument_to_raw_count", len(raw_symbols))
+          print("instrument_to_raw_sample", raw_symbols[:5])
+          if not raw_symbols:
+              print("instrument_to_raw_detail", raw_payload)
+              raise SystemExit(1)
 
           bars_response = requests.post(
               "https://hist.databento.com/v0/timeseries.get_range",
@@ -101,19 +122,19 @@ jobs:
               data={
                   "dataset": "OPRA.PILLAR",
                   "schema": "ohlcv-1d",
-                  "symbols": "SPY.OPT",
-                  "stype_in": "parent",
-                  "start": (now - timedelta(days=7)).date().isoformat(),
-                  "end": tomorrow.isoformat(),
+                  "symbols": ",".join(raw_symbols[:10]),
+                  "stype_in": "raw_symbol",
+                  "start": (now - timedelta(days=30)).date().isoformat(),
+                  "end": end_date,
                   "encoding": "json",
                   "pretty_px": "true",
                   "pretty_ts": "true",
                   "map_symbols": "true",
-                  "limit": "20",
+                  "limit": "100",
               },
               timeout=60,
           )
-          print("databento_option_bars_http", bars_response.status_code)
+          print("raw_option_bars_http", bars_response.status_code)
           bar_records = []
           for line in bars_response.text.splitlines():
               try:
@@ -122,16 +143,27 @@ jobs:
                   continue
               if isinstance(value, dict):
                   bar_records.append(value)
-          print("databento_option_bars_count", len(bar_records))
+          print("raw_option_bars_count", len(bar_records))
           if bar_records:
-              print("databento_option_bars_keys", sorted(bar_records[0]))
+              print("raw_option_bar_keys", sorted(bar_records[0]))
               print(
-                  "databento_option_bars_sample",
+                  "raw_option_bar_sample",
                   {
                       key: bar_records[0].get(key)
-                      for key in ("symbol", "open", "high", "low", "close", "volume", "pretty_ts_event")
+                      for key in (
+                          "symbol",
+                          "open",
+                          "high",
+                          "low",
+                          "close",
+                          "volume",
+                          "pretty_ts_event",
+                      )
                   },
               )
+          elif bars_response.status_code != 200:
+              print("raw_option_bars_detail", bars_response.text[:1000])
+              raise SystemExit(1)
           PY
       - name: Validate required live providers
         shell: bash
