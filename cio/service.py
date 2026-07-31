@@ -231,6 +231,7 @@ class ChiefInvestmentOfficer:
                 reason=reason,
                 prior_context=prior_context,
                 profile=profile,
+                progressive_lane=progressive_lane,
                 emergency=(
                     specialists.has_emergency_evidence_veto
                     or reconciliation.expected_return <= self.policy.exit_threshold
@@ -654,6 +655,7 @@ class ChiefInvestmentOfficer:
         reason: str,
         prior_context: PriorDecisionContext | None,
         profile: DecisionPolicyProfile,
+        progressive_lane: bool,
         emergency: bool,
     ) -> tuple[CIOAction, float | None, str, bool, int]:
         """Require persistent evidence for non-urgent portfolio changes."""
@@ -667,7 +669,14 @@ class ChiefInvestmentOfficer:
         required = 1
         observed = 1
         if action is CIOAction.BUY:
-            required = profile.entry_persistence_cycles
+            # Participation and exploration lanes may establish a deliberately
+            # small first position immediately. Ordinary acquisition still
+            # requires confirmation across at least two completed cycles.
+            required = (
+                1
+                if progressive_lane
+                else max(2, profile.entry_persistence_cycles)
+            )
             observed = prior_context.consecutive_supportive_cycles + 1
         elif action is CIOAction.INCREASE:
             required = profile.increase_persistence_cycles
