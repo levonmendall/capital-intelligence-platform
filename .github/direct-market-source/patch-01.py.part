@@ -1,0 +1,70 @@
+source = source.replace("    direct_instrument_classes_prohibited: tuple[str, ...]\n", "")
+source = replace_once(
+    source,
+    '''        crypto = self.instrument_for_exposure("crypto")
+        if crypto.maximum_weight > self.maximum_crypto_proxy_weight:
+            raise ValueError("crypto proxy exceeds the pilot limit")
+''',
+    '''        crypto = tuple(
+            item for item in self.instruments
+            if item.execution_asset_class is CandidateAssetClass.CRYPTO
+            or item.economic_exposure == "crypto"
+        )
+        if any(item.maximum_weight > self.maximum_crypto_proxy_weight for item in crypto):
+            raise ValueError("crypto instrument exceeds the pilot limit")
+''',
+    "crypto limits",
+)
+source = replace_once(
+    source,
+    '''            currency=str(item["currency"]),
+            instrument_type=str(item["instrument_type"]),
+            maximum_weight=float(item["maximum_weight"]),
+            issuer_cik=(None if item.get("issuer_cik") in {None, ""} else str(item["issuer_cik"])),
+''',
+    '''            currency=str(item["currency"]),
+            settlement_currency=(None if item.get("settlement_currency") in {None, ""} else str(item["settlement_currency"])),
+            instrument_type=str(item["instrument_type"]),
+            maximum_weight=float(item["maximum_weight"]),
+            issuer_cik=(None if item.get("issuer_cik") in {None, ""} else str(item["issuer_cik"])),
+            provider_symbol=(None if item.get("provider_symbol") in {None, ""} else str(item["provider_symbol"])),
+            contract_multiplier=float(item.get("contract_multiplier", 1.0)),
+            trading_session_model=(None if item.get("trading_session_model") in {None, ""} else TradingSessionModel(str(item["trading_session_model"]))),
+            quote_spread_bps=float(item.get("quote_spread_bps", 5.0)),
+''',
+    "instrument parser fields",
+)
+prohibited_block = '''        direct_instrument_classes_prohibited=tuple(
+            str(item) for item in payload["direct_instrument_classes_prohibited"]
+        ),
+'''
+if prohibited_block not in source:
+    raise SystemExit("parser prohibition block unavailable")
+source = source.replace(prohibited_block, "", 1)
+source = replace_once(
+    source,
+    '''                "currency": item.currency,
+                "instrument_type": item.instrument_type,
+                "maximum_weight": item.maximum_weight,
+                "issuer_cik": item.issuer_cik,
+''',
+    '''                "currency": item.currency,
+                "settlement_currency": item.settlement_currency,
+                "instrument_type": item.instrument_type,
+                "maximum_weight": item.maximum_weight,
+                "issuer_cik": item.issuer_cik,
+                "provider_symbol": item.provider_symbol,
+                "contract_multiplier": item.contract_multiplier,
+                "trading_session_model": (None if item.trading_session_model is None else item.trading_session_model.value),
+                "quote_spread_bps": item.quote_spread_bps,
+''',
+    "instrument serialization fields",
+)
+serialization_block = '''        "direct_instrument_classes_prohibited": list(
+            universe.direct_instrument_classes_prohibited
+        ),
+'''
+if serialization_block not in source:
+    raise SystemExit("serialization prohibition block unavailable")
+source = source.replace(serialization_block, "", 1)
+path.write_text(source, encoding="utf-8")
