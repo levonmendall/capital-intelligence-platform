@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - .pr276-controller-trigger
+      - .pr276-controller-trigger-v2
 
 permissions:
   contents: write
@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           git fetch origin main
           git checkout -B main origin/main
-          rm -f .github/workflows/fix-pr276-controller.yml .pr276-controller-trigger
+          rm -f .github/workflows/fix-pr276-controller.yml .pr276-controller-trigger .pr276-controller-trigger-v2
           git add -A
           git commit -m "Remove PR276 correction controller"
           git push origin HEAD:main
