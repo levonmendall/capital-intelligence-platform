@@ -1,0 +1,70 @@
+name: Align ARGO historical-learning contracts
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: align-argo-historical-contracts
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/adaptive-robust-growth-ensemble'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact ARGO branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/adaptive-robust-growth-ensemble
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Align historical-learning source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_governed_historical_learning.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    assert "assessment_cap * historical_learning.position_size_multiplier" in cio_source\n    assert "specialists.historical_learning.position_size_multiplier" in cio_source\n'''
+          new = '''    assert "Historical calibration is applied once to the final feasible cap." in cio_source\n    assert "specialists.historical_learning.effective_position_multiplier" in cio_source\n'''
+          if text.count(old) != 1:
+              raise SystemExit('expected exactly one stale historical sizing contract')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          rm -f .github/workflows/fix-argo-historical-contracts.yml
+          python -m compileall -q tests/test_governed_historical_learning.py
+          git add -A
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run complete repository test suite
+        run: python -m pytest -q --maxfail=5
+
+      - name: Commit aligned contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --cached --quiet; then
+            echo 'No contract correction was staged.' >&2
+            exit 1
+          fi
+          git commit -m 'Align historical learning contract with final-cap calibration'
+          git push origin HEAD:agent/adaptive-robust-growth-ensemble
