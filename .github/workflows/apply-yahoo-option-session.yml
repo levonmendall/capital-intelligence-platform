@@ -1,0 +1,37 @@
+name: Apply Yahoo Option Session
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - tools/apply_yahoo_option_session.py
+      - .github/workflows/apply-yahoo-option-session.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/prove-pr264-live-providers-now'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out writable branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/prove-pr264-live-providers-now
+          fetch-depth: 0
+      - name: Apply integration and publish source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/apply_yahoo_option_session.py
+          python -m py_compile \
+            providers/yahoo_public.py \
+            operations/provider_validation.py \
+            operations/comprehensive_market_discovery.py
+          git config user.name "capital-intelligence-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Use cookie-backed Yahoo option sessions"
+          git push origin HEAD:agent/prove-pr264-live-providers-now
