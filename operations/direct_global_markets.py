@@ -8,6 +8,7 @@ never submits an order or authorizes real money.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,8 +35,16 @@ from providers.alpaca_paper import (
 
 DEFAULT_DIRECT_UNIVERSE_PATH = Path("config/direct_global_market_universe.json")
 DEFAULT_CHART_BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
+DEFAULT_EODHD_BASE_URL = "https://eodhd.com/api"
 DIRECT_EXECUTION_CLASSES = frozenset(
-    {CandidateAssetClass.FX, CandidateAssetClass.CRYPTO, CandidateAssetClass.FUTURE}
+    {
+        CandidateAssetClass.INTERNATIONAL_EQUITY,
+        CandidateAssetClass.FIXED_INCOME,
+        CandidateAssetClass.FX,
+        CandidateAssetClass.CRYPTO,
+        CandidateAssetClass.FUTURE,
+        CandidateAssetClass.OPTION,
+    }
 )
 
 
@@ -89,7 +98,7 @@ class DirectGlobalMarketUniverse:
             item.execution_asset_class not in DIRECT_EXECUTION_CLASSES
             for item in self.instruments
         ):
-            raise ValueError("direct-market universe may contain only FX, crypto, and futures")
+            raise ValueError("direct-market universe contains an unsupported direct discovery class")
         symbols = tuple(item.symbol for item in self.instruments)
         if len(symbols) != len(set(symbols)):
             raise ValueError("direct-market symbols must be unique")
@@ -135,6 +144,13 @@ def load_direct_global_market_universe(
                 str(item["trading_session_model"])
             ),
             quote_spread_bps=float(item.get("quote_spread_bps", 5.0)),
+            provider_kind=str(item.get("provider_kind", "yahoo")),
+            provider_dataset=(None if item.get("provider_dataset") in {None, ""} else str(item["provider_dataset"])),
+            provider_stype_in=(None if item.get("provider_stype_in") in {None, ""} else str(item["provider_stype_in"])),
+            expiration_at=(None if item.get("expiration_at") in {None, ""} else str(item["expiration_at"])),
+            underlying_symbol=(None if item.get("underlying_symbol") in {None, ""} else str(item["underlying_symbol"])),
+            strike=(None if item.get("strike") is None else float(item["strike"])),
+            option_right=(None if item.get("option_right") in {None, ""} else str(item["option_right"])),
         )
         for item in raw
         if isinstance(item, Mapping)
@@ -159,11 +175,20 @@ class DirectGlobalMarketClient:
         *,
         http_get: Callable[..., Any] | None = None,
         chart_base_url: str = DEFAULT_CHART_BASE_URL,
+        eodhd_base_url: str = DEFAULT_EODHD_BASE_URL,
+        eodhd_api_token: str | None = None,
         timeout_seconds: int = 15,
     ) -> None:
         self.universe = universe or load_direct_global_market_universe()
         self.http_get = http_get or requests.get
         self.chart_base_url = chart_base_url.rstrip("/")
+        self.eodhd_base_url = eodhd_base_url.rstrip("/")
+        self.eodhd_api_token = (
+            eodhd_api_token
+            or os.getenv("CAPITAL_INTELLIGENCE_EODHD_API_TOKEN")
+            or os.getenv("EODHD_API_KEY")
+            or os.getenv("EODHD_API_TOKEN")
+        )
         self.timeout_seconds = timeout_seconds
 
     def _instrument(self, symbol: str) -> FreePaperPilotInstrument:
@@ -184,6 +209,14 @@ class DirectGlobalMarketClient:
         start: datetime | None = None,
         end: datetime | None = None,
     ) -> Mapping[str, Any]:
+        if instrument.provider_kind == "eodhd":
+            return self._eodhd_chart(
+                instrument,
+                interval=interval,
+                range_value=range_value,
+                start=start,
+                end=end,
+            )
         params: dict[str, object] = {
             "interval": interval,
             "events": "history",
@@ -196,7 +229,14 @@ class DirectGlobalMarketClient:
                 raise ValueError("chart start and end are required")
             params["period1"] = int(_aware(start, field_name="start").timestamp())
             params["period2"] = int(_aware(end, field_name="end").timestamp())
-        url = f"{self.chart_base_url}/{urlquote(instrument.provider_symbol or instrument.symbol, safe='')}"
+        provider_symbol = (
+            instrument.underlying_symbol
+            if instrument.execution_asset_class is CandidateAssetClass.OPTION
+            and interval == "1d"
+            and start is not None
+            else instrument.provider_symbol or instrument.symbol
+        )
+        url = f"{self.chart_base_url}/{urlquote(provider_symbol, safe='')}"
         try:
             response = self.http_get(
                 url,
@@ -229,6 +269,119 @@ class DirectGlobalMarketClient:
         if not isinstance(result, Mapping):
             raise DirectGlobalMarketError("direct-market chart result must be an object")
         return result
+
+
+    def _eodhd_chart(
+        self,
+        instrument: FreePaperPilotInstrument,
+        *,
+        interval: str,
+        range_value: str | None,
+        start: datetime | None,
+        end: datetime | None,
+    ) -> Mapping[str, Any]:
+        if not self.eodhd_api_token:
+            raise DirectGlobalMarketError("EODHD direct-market token is unavailable")
+        symbol = instrument.provider_symbol or instrument.symbol
+        if interval == "5m" and range_value is not None:
+            path = f"/real-time/{urlquote(symbol, safe='')}"
+            params = {"api_token": self.eodhd_api_token, "fmt": "json"}
+            try:
+                response = self.http_get(
+                    self.eodhd_base_url + path,
+                    params=params,
+                    timeout=self.timeout_seconds,
+                )
+                if int(getattr(response, "status_code", 0)) != 200:
+                    raise DirectGlobalMarketError("EODHD real-time quote is unavailable")
+                payload = response.json()
+                price = payload.get("close", payload.get("previousClose"))
+                raw_time = payload.get("timestamp")
+                if price is None or raw_time is None:
+                    raise DirectGlobalMarketError("EODHD real-time quote is incomplete")
+                return {
+                    "timestamp": [int(raw_time)],
+                    "indicators": {"quote": [{"close": [float(price)], "volume": [float(payload.get("volume") or 0.0)]}]},
+                }
+            except (requests.RequestException, TypeError, ValueError) as error:
+                raise DirectGlobalMarketError("EODHD real-time request failed") from error
+        if start is None or end is None:
+            raise ValueError("EODHD history requires start and end")
+        params = {
+            "api_token": self.eodhd_api_token,
+            "fmt": "json",
+            "period": "d",
+            "order": "a",
+            "from": _aware(start, field_name="start").date().isoformat(),
+            "to": _aware(end, field_name="end").date().isoformat(),
+        }
+        try:
+            response = self.http_get(
+                self.eodhd_base_url + f"/eod/{urlquote(symbol, safe='')}",
+                params=params,
+                timeout=self.timeout_seconds,
+            )
+            if int(getattr(response, "status_code", 0)) != 200:
+                raise DirectGlobalMarketError("EODHD history is unavailable")
+            payload = response.json()
+        except (requests.RequestException, ValueError) as error:
+            raise DirectGlobalMarketError("EODHD history request failed") from error
+        if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
+            raise DirectGlobalMarketError("EODHD history response is invalid")
+        timestamps: list[int] = []
+        closes: list[float] = []
+        volumes: list[float] = []
+        for item in payload:
+            if not isinstance(item, Mapping):
+                continue
+            try:
+                observed = datetime.fromisoformat(str(item["date"])[:10]).replace(tzinfo=timezone.utc)
+                close = float(item.get("adjusted_close", item["close"]))
+                volume = float(item.get("volume") or 0.0)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if close > 0.0:
+                timestamps.append(int(observed.timestamp()))
+                closes.append(close)
+                volumes.append(max(0.0, volume))
+        if not timestamps:
+            raise DirectGlobalMarketError("EODHD history contains no usable rows")
+        return {
+            "timestamp": timestamps,
+            "indicators": {"quote": [{"close": closes, "volume": volumes}]},
+        }
+
+    def fx_rate_to_usd(self, currency: str) -> tuple[float, datetime]:
+        normalized = str(currency).strip().upper()
+        now = datetime.now(timezone.utc)
+        if normalized == "USD":
+            return 1.0, now
+        for symbol, invert in ((f"{normalized}USD=X", False), (f"USD{normalized}=X", True)):
+            synthetic = FreePaperPilotInstrument(
+                symbol=f"FX{normalized}USD",
+                instrument_identifier=f"instrument:fx-translation:{normalized}-usd",
+                name=f"{normalized} / USD translation",
+                execution_asset_class=CandidateAssetClass.FX,
+                economic_exposure="foreign_exchange",
+                venue="GLOBAL_FX",
+                country_code="GLOBAL",
+                currency="USD",
+                settlement_currency="USD",
+                instrument_type="spot",
+                maximum_weight=0.000001,
+                provider_symbol=symbol,
+                provider_kind="yahoo",
+                trading_session_model=TradingSessionModel.CONTINUOUS_24_5,
+            )
+            try:
+                rows = self._rows(self._chart(synthetic, interval="5m", range_value="5d"))
+            except DirectGlobalMarketError:
+                continue
+            if rows:
+                price = _positive(rows[-1]["c"], field_name="FX translation")
+                observed = _timestamp(rows[-1]["t"], field_name="FX translation timestamp")
+                return ((1.0 / price) if invert else price), observed
+        raise DirectGlobalMarketError(f"USD translation is unavailable for {normalized}")
 
     @staticmethod
     def _rows(result: Mapping[str, Any]) -> tuple[dict[str, object], ...]:
@@ -353,16 +506,29 @@ class DirectGlobalMarketClient:
         as_of: datetime,
     ) -> bool:
         now = _aware(as_of, field_name="as_of")
-        if instrument.execution_asset_class is CandidateAssetClass.CRYPTO:
+        model = instrument.trading_session_model
+        if model is TradingSessionModel.CONTINUOUS_24_7:
             return True
         weekday = now.weekday()
-        if weekday < 4:
-            return True
-        if weekday == 4:
-            return now.hour < 22
-        if weekday == 6:
-            return now.hour >= 22
-        return False
+        if model in {TradingSessionModel.CONTINUOUS_24_5, TradingSessionModel.DEALER_24_5}:
+            if weekday < 4:
+                return True
+            if weekday == 4:
+                return now.hour < 22
+            if weekday == 6:
+                return now.hour >= 22
+            return False
+        if weekday >= 5:
+            return False
+        windows = {
+            "LSE": (7, 17), "XETRA": (7, 17), "PA": (7, 17), "AS": (7, 17),
+            "BR": (7, 17), "SW": (7, 16), "TSE": (0, 7), "HK": (1, 9),
+            "AU": (0, 7), "ASX": (0, 7), "NSE": (3, 11), "BSE": (3, 11),
+            "SG": (1, 9), "KO": (0, 7), "WAR": (7, 16), "SA": (13, 21),
+            "MX": (14, 22), "TO": (13, 21), "V": (13, 21), "OPRA": (13, 21),
+        }
+        start, end = windows.get(instrument.venue, (0, 22))
+        return start <= now.hour < end
 
     def any_open(self, symbols: Sequence[str], *, as_of: datetime) -> bool:
         return any(
@@ -385,7 +551,7 @@ class DirectPaperSessionProvider:
         instrument = self.client._instrument(profile.symbol)
         if profile.asset_class not in DIRECT_EXECUTION_CLASSES:
             raise DirectGlobalMarketError(
-                f"{profile.symbol} is not a direct FX, crypto, or futures instrument"
+                f"{profile.symbol} is outside the governed direct discovery classes"
             )
         status = (
             InstrumentSessionStatus.OPEN
@@ -427,6 +593,7 @@ class DirectPaperQuoteProvider:
             )
             bid = _positive(item["bp"], field_name=f"{profile.symbol} bid")
             ask = _positive(item["ap"], field_name=f"{profile.symbol} ask")
+            fx_rate, fx_observed_at = self.client.fx_rate_to_usd(profile.price_currency)
             result[profile.symbol] = MultiAssetQuote(
                 symbol=profile.symbol,
                 instrument_identifier=profile.instrument_identifier,
@@ -437,12 +604,12 @@ class DirectPaperQuoteProvider:
                 last=_positive(item.get("last", (bid + ask) / 2.0), field_name="last"),
                 available_base_notional=5_000_000.0,
                 price_currency=profile.price_currency,
-                fx_rate_to_base=1.0,
-                fx_observed_at=observed,
+                fx_rate_to_base=fx_rate,
+                fx_observed_at=min(fx_observed_at, timestamp),
                 quote_source_identifier=(
                     f"{self.client.universe.provider_identifier}:latest-chart"
                 ),
-                fx_source_identifier="usd-base-rate:1.0",
+                fx_source_identifier=f"direct-fx-translation:{profile.price_currency}:USD",
                 quote_certification_identifier=(
                     f"direct-paper-quote:{profile.instrument_identifier}:{observed.isoformat()}"
                 ),
@@ -518,6 +685,7 @@ __all__ = [
     "CombinedPaperQuoteProvider",
     "CombinedPaperSessionProvider",
     "DEFAULT_DIRECT_UNIVERSE_PATH",
+    "DEFAULT_EODHD_BASE_URL",
     "DIRECT_EXECUTION_CLASSES",
     "DirectGlobalMarketClient",
     "DirectGlobalMarketError",
