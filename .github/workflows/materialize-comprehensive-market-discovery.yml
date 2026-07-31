@@ -37,6 +37,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          wc -c .comprehensive-market-discovery/payload.part*
+          echo "59b74e3405017f1beb671d11c3f87d73cc9287779366ffad62b2ee222e677c14  .comprehensive-market-discovery/payload.part00" | sha256sum --check --strict
+          echo "190c31c2a7afb6413068b9264709694507f543bf1863a67b764c9e73def8ed08  .comprehensive-market-discovery/payload.part01" | sha256sum --check --strict
+          echo "768794a1987507bd8765286539d6ce1a2f24acd2dfdc6395e35b70995615afdf  .comprehensive-market-discovery/payload.part02" | sha256sum --check --strict
           cat .comprehensive-market-discovery/payload.part* > /tmp/comprehensive-market-discovery.b64
           echo "512c76e9da01d0f73def32c6553b3e6e290ccf7478aae775b7302e53b10af5c5  /tmp/comprehensive-market-discovery.b64" | sha256sum --check --strict
           base64 --decode /tmp/comprehensive-market-discovery.b64 > /tmp/comprehensive-market-discovery.tar.gz
