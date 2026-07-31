@@ -634,6 +634,7 @@ def display_frame(frame: pd.DataFrame) -> None:
     st.dataframe(frame, use_container_width=True, hide_index=True)
 
 _CURRENT_INTERFACE_COMPATIBILITY = (
+    "A governed investment-intelligence system",
     "Today's capital briefing",
     "Today's market environment",
     'Current portfolio position',
