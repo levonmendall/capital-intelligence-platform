@@ -20,6 +20,12 @@ from governance import (
     load_maximum_decision_information_manifest,
 )
 from intelligence.governance_store import SQLiteGovernanceStore
+from governance.coverage_certification import (
+    certify_historical_cutoff,
+    load_historical_boundaries,
+    load_market_coverage,
+)
+from datetime import datetime, timezone
 
 
 router = APIRouter(prefix="/v1/governance", tags=["governance"])
@@ -219,3 +225,42 @@ def data_readiness() -> dict[str, Any]:
         }
     )
     return payload
+
+
+@router.get("/market-coverage", response_model=dict[str, Any])
+def market_coverage() -> dict[str, Any]:
+    """Return monitored, decision-certified, and allocatable scopes separately."""
+
+    path = os.getenv(
+        "CAPITAL_INTELLIGENCE_MARKET_COVERAGE_REGISTRY",
+        "config/market_coverage_registry.v1.json",
+    )
+    try:
+        return load_market_coverage(path).to_dict()
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"market coverage registry is unavailable: {error}",
+        ) from error
+
+
+@router.get("/historical-certification", response_model=dict[str, Any])
+def historical_certification() -> dict[str, Any]:
+    """Return the fail-closed point-in-time certification baseline."""
+
+    path = os.getenv(
+        "CAPITAL_INTELLIGENCE_HISTORICAL_CERTIFICATION_BOUNDARIES",
+        "config/historical_certification_boundaries.v1.json",
+    )
+    try:
+        boundaries = load_historical_boundaries(path)
+        return certify_historical_cutoff(
+            cutoff=datetime.now(timezone.utc),
+            boundaries=boundaries,
+            evidence=(),
+        ).to_dict()
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"historical certification is unavailable: {error}",
+        ) from error
