@@ -32,32 +32,32 @@ def _clamp(value: float) -> float:
 class OpportunityQualificationPolicy:
     """Versioned committee-attention and opportunity-ranking rules."""
 
-    version: str = "opportunity-qualification.v5"
-    minimum_net_expected_return: float = 0.05
-    minimum_probability_of_success: float = 0.55
+    version: str = "opportunity-qualification.v6-growth"
+    minimum_net_expected_return: float = 0.03
+    minimum_probability_of_success: float = 0.52
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     minimum_liquidity_score: float = 0.70
-    minimum_opportunity_edge: float = 0.01
-    maximum_expected_downside: float = -0.35
+    minimum_opportunity_edge: float = 0.005
+    maximum_expected_downside: float = -0.45
     maximum_implementation_cost_return: float = 0.02
     opportunity_cost_tolerance: float = 0.005
-    alternative_uncertainty_penalty: float = 0.02
-    alternative_liquidity_penalty: float = 0.01
+    alternative_uncertainty_penalty: float = 0.0075
+    alternative_liquidity_penalty: float = 0.005
 
-    expected_return_weight: float = 0.21
-    probability_weight: float = 0.10
+    expected_return_weight: float = 0.18
+    probability_weight: float = 0.08
     downside_weight: float = 0.10
-    evidence_weight: float = 0.14
-    freshness_weight: float = 0.05
-    independence_weight: float = 0.05
-    liquidity_weight: float = 0.07
-    opportunity_edge_weight: float = 0.10
-    portfolio_contribution_weight: float = 0.07
+    evidence_weight: float = 0.12
+    freshness_weight: float = 0.04
+    independence_weight: float = 0.04
+    liquidity_weight: float = 0.06
+    opportunity_edge_weight: float = 0.09
+    portfolio_contribution_weight: float = 0.16
     thesis_clarity_weight: float = 0.04
     invalidation_clarity_weight: float = 0.03
-    forecast_durability_weight: float = 0.02
-    cost_efficiency_weight: float = 0.02
+    forecast_durability_weight: float = 0.03
+    cost_efficiency_weight: float = 0.03
 
     def __post_init__(self) -> None:
         if not self.version.strip():
@@ -321,61 +321,61 @@ class OpportunityEngine:
         # compatibility. Qualification authority uses the horizon-normalized,
         # evidence-adjusted geometric edge below.
         holding_review = candidate.current_portfolio_weight > 0.0
-        reasons: list[str] = []
+        hard_reasons: list[str] = []
+        soft_reasons: list[str] = []
         if not universe.direct_recommendation_allowed:
-            reasons.extend(universe.reasons)
+            hard_reasons.extend(universe.reasons)
         if (
-            abs(
-                candidate.opportunity_cost_return
-                - baseline_opportunity_cost
-            )
+            abs(candidate.opportunity_cost_return - baseline_opportunity_cost)
             > self.policy.opportunity_cost_tolerance
         ):
-            reasons.append(
+            hard_reasons.append(
                 "recorded candidate opportunity cost does not match the point-in-time opportunity set baseline alternatives"
             )
         if candidate.evidence_quality.score < self.policy.minimum_evidence_score:
-            reasons.append("aggregate evidence quality is below threshold")
-        if (
-            candidate.evidence_quality.ceiling
-            < self.policy.minimum_evidence_dimension
-        ):
-            reasons.append("at least one evidence-quality dimension is below threshold")
+            hard_reasons.append("aggregate evidence quality is below threshold")
+        if candidate.evidence_quality.ceiling < self.policy.minimum_evidence_dimension:
+            hard_reasons.append("at least one evidence-quality dimension is below threshold")
         if candidate.liquidity_score < self.policy.minimum_liquidity_score:
-            reasons.append("candidate liquidity is below threshold")
-        if (
-            robustness.evidence_adjusted_return
-            < minimum_net_expected_return
-        ):
-            reasons.append(
-                "horizon-normalized evidence-adjusted expected return is below the absolute return threshold"
+            hard_reasons.append("candidate liquidity is below threshold")
+        if robustness.evidence_adjusted_return < minimum_net_expected_return:
+            soft_reasons.append(
+                "horizon-normalized evidence-adjusted expected return is below the full-conviction threshold"
             )
         if robustness.robust_edge < minimum_opportunity_edge:
-            reasons.append(
-                "horizon-normalized opportunity edge is below the required margin"
+            soft_reasons.append(
+                "horizon-normalized opportunity edge is below the full-conviction margin"
             )
         scenario_downside = min(
             item.total_return for item in candidate.scenario_distribution
         ) - candidate.implementation_cost_return
         if scenario_downside < maximum_downside:
-            reasons.append("expected downside exceeds the qualification limit")
-        if (
-            robustness.effective_probability_of_success
-            < minimum_probability
-        ):
-            reasons.append(
-                "scenario-derived probability of outperforming the best alternative is below threshold"
+            hard_reasons.append("expected downside exceeds the qualification limit")
+        if robustness.effective_probability_of_success < minimum_probability:
+            soft_reasons.append(
+                "scenario-derived probability of outperforming the best alternative is below the full-conviction threshold"
             )
         if (
             candidate.implementation_cost_return
             > self.policy.maximum_implementation_cost_return
         ):
-            reasons.append("implementation costs exceed the qualification limit")
+            hard_reasons.append("implementation costs exceed the qualification limit")
         if robustness.evidence_adjusted_return <= effective_opportunity_cost:
-            reasons.append(
-                "horizon-normalized expected return does not clear the best capital alternative"
+            soft_reasons.append(
+                "horizon-normalized expected return does not clearly exceed the best capital alternative"
             )
-        reasons.extend(robustness.reasons)
+        hard_robustness_markers = (
+            "scenario ordering",
+            "non-positive portfolio wealth",
+            "inconsistent with the disclosed scenarios",
+            "worst-case portfolio loss",
+        )
+        for reason in robustness.reasons:
+            if any(marker in reason for marker in hard_robustness_markers):
+                hard_reasons.append(reason)
+            else:
+                soft_reasons.append(reason)
+        reasons = tuple(dict.fromkeys((*hard_reasons, *soft_reasons)))
 
         if holding_review:
             diagnostics = tuple(dict.fromkeys(reasons))
@@ -401,7 +401,7 @@ class OpportunityEngine:
                 robustness,
             )
 
-        if reasons:
+        if hard_reasons:
             return (
                 CandidateQualification(
                     candidate_identifier=candidate.identifier,
@@ -415,7 +415,66 @@ class OpportunityEngine:
                     baseline_alternative_identifier=baseline_alternative.identifier,
                     baseline_opportunity_cost=baseline_opportunity_cost,
                     resolved_policy_profile=profile.identifier,
-                    reasons=tuple(dict.fromkeys(reasons)),
+                    reasons=tuple(dict.fromkeys(hard_reasons)),
+                ),
+                robustness,
+            )
+
+        if soft_reasons:
+            wrapper = (
+                candidate.instrument.replication_method
+                == "us-listed-economic-exposure-wrapper"
+            )
+            minimally_positive = (
+                robustness.evidence_adjusted_return
+                > effective_opportunity_cost - 0.005
+                and candidate.net_expected_return > -0.01
+            )
+            lane = (
+                AnalysisLane.PARTICIPATION
+                if wrapper and minimally_positive
+                else AnalysisLane.EXPLORATION
+            )
+            exploratory_viable = (
+                robustness.robust_edge > -0.01
+                and robustness.effective_probability_of_success >= 0.40
+            )
+            if not minimally_positive and not exploratory_viable:
+                return (
+                    CandidateQualification(
+                        candidate_identifier=candidate.identifier,
+                        outcome=QualificationOutcome.REJECTED,
+                        policy_version=self.policy.version,
+                        universe=universe,
+                        effective_opportunity_cost=effective_opportunity_cost,
+                        opportunity_edge=opportunity_edge,
+                        best_alternative_identifier=best_alternative.identifier,
+                        best_alternative_kind=best_alternative.kind,
+                        baseline_alternative_identifier=baseline_alternative.identifier,
+                        baseline_opportunity_cost=baseline_opportunity_cost,
+                        resolved_policy_profile=profile.identifier,
+                        reasons=tuple(dict.fromkeys(soft_reasons)),
+                    ),
+                    robustness,
+                )
+            return (
+                CandidateQualification(
+                    candidate_identifier=candidate.identifier,
+                    outcome=QualificationOutcome.QUALIFIED,
+                    policy_version=self.policy.version,
+                    universe=universe,
+                    effective_opportunity_cost=effective_opportunity_cost,
+                    opportunity_edge=opportunity_edge,
+                    best_alternative_identifier=best_alternative.identifier,
+                    best_alternative_kind=best_alternative.kind,
+                    baseline_alternative_identifier=baseline_alternative.identifier,
+                    baseline_opportunity_cost=baseline_opportunity_cost,
+                    resolved_policy_profile=profile.identifier,
+                    reasons=(
+                        f"{lane.value} lane: hard evidence, liquidity, downside, cost, and integrity controls passed",
+                        *tuple(dict.fromkeys(soft_reasons)),
+                    ),
+                    analysis_lane=lane,
                 ),
                 robustness,
             )
@@ -432,7 +491,7 @@ class OpportunityEngine:
                 baseline_alternative_identifier=baseline_alternative.identifier,
                 resolved_policy_profile=profile.identifier,
                 reasons=(
-                    "candidate clears universe, absolute return, horizon-normalized geometric robustness, scenario-derived probability, downside, evidence, liquidity, cost, and opportunity-edge requirements; portfolio contribution remains subject to final construction",
+                    "candidate clears full-conviction acquisition requirements; portfolio contribution and final size remain subject to the growth ensemble and independent construction",
                 ),
             ),
             robustness,
@@ -456,7 +515,7 @@ class OpportunityEngine:
         if alternative.kind is AlternativeKind.CASH:
             return alternative.net_expected_return
         reliability = max(
-            0.10,
+            0.35,
             min(1.0, (alternative.evidence_quality * alternative.liquidity_score) ** 0.5),
         )
         adjusted = cash_anchor + reliability * (

@@ -64,6 +64,10 @@ _LAZY_EXPORTS = {
     "UniverseDisposition": ("cio.universe", "UniverseDisposition"),
     "DecisionPolicyMatrix": ("cio.policy_matrix", "DecisionPolicyMatrix"),
     "DecisionPolicyProfile": ("cio.policy_matrix", "DecisionPolicyProfile"),
+    "AdaptiveRobustGrowthEnsemble": ("cio.growth_ensemble", "AdaptiveRobustGrowthEnsemble"),
+    "GrowthEnsembleAssessment": ("cio.growth_ensemble", "GrowthEnsembleAssessment"),
+    "GrowthEnsemblePolicy": ("cio.growth_ensemble", "GrowthEnsemblePolicy"),
+    "GrowthStage": ("cio.growth_ensemble", "GrowthStage"),
     "ChampionChallengerRegistry": ("cio.policy_governance", "ChampionChallengerRegistry"),
     "PolicyPerformanceEvidence": ("cio.policy_governance", "PolicyPerformanceEvidence"),
     "PolicyPromotionDecision": ("cio.policy_governance", "PolicyPromotionDecision"),
@@ -86,6 +90,7 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "AdaptiveRobustGrowthEnsemble",
     "CIOAction",
     "ChampionChallengerRegistry",
     "CIODecision",
@@ -101,6 +106,9 @@ __all__ = [
     "HistoricalLearningContext",
     "HistoricalLearningResolver",
     "HistoricalLearningStatus",
+    "GrowthEnsembleAssessment",
+    "GrowthEnsemblePolicy",
+    "GrowthStage",
     "IndependentSpecialistPacket",
     "MaterialDissent",
     "PayoffDistributionPoint",

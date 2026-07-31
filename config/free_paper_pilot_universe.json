@@ -1,13 +1,13 @@
 {
   "schema_version": "free-paper-pilot-universe.v1",
-  "identifier": "free-paper-pilot-us-listed-wrappers.v2",
-  "objective": "Begin controlled paper operation across the major economic asset classes using unlevered, liquid, U.S.-listed instruments and free Alpaca paper/IEX evidence while direct complex instruments remain analysis-only.",
+  "identifier": "free-paper-pilot-us-listed-wrappers.v3-growth",
+  "objective": "Maximize robust long-term compounded growth through persistent diversified participation, progressive opportunity sizing, and independent drawdown, liquidity, concentration, turnover, evidence-integrity, and execution controls.",
   "portfolio_code": "COMPOUNDING",
   "reporting_currency": "USD",
   "quote_provider": "alpaca-paper-iex",
   "execution_mode": "internal-simulated-fills-only",
-  "minimum_cash_weight": 0.2,
-  "maximum_batch_turnover": 0.1,
+  "minimum_cash_weight": 0.05,
+  "maximum_batch_turnover": 0.2,
   "maximum_single_instrument_weight": 0.45,
   "maximum_crypto_proxy_weight": 0.05,
   "maximum_volatility_proxy_weight": 0.02,
@@ -228,6 +228,7 @@
     "Alpaca Basic uses the free IEX market-data feed and is not consolidated full-market execution evidence.",
     "Closed-market zero top-of-book quotes may confirm provider availability, but execution remains held until a positive non-crossed market-open quote is available.",
     "All portfolio fills remain internal canonical simulations; the separate Alpaca paper transport verifier does not alter portfolio state.",
-    "The institutional all-market readiness gate remains unchanged and fail-closed."
+    "The institutional all-market readiness gate remains unchanged and fail-closed.",
+    "Cash is an explicit competing allocation rather than the default portfolio; complete opportunity search and portfolio-survival controls remain mandatory."
   ]
 }

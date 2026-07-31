@@ -10,6 +10,8 @@ from typing import Any, Mapping
 import pandas as pd
 import streamlit as st
 
+import premium_ui as ui
+
 
 MANIFEST_NAME = "latest-canonical-replay.json"
 SUPPORTED_SCHEMA_VERSIONS = frozenset(
@@ -310,7 +312,11 @@ def historical_macro_certification_detail(summary: Mapping[str, Any]) -> str:
 def render_canonical_historical_replay() -> None:
     """Render sanitized canonical replay status inside the History surface."""
 
-    st.markdown("#### Historical learning")
+    ui.page_header(
+        "Historical learning",
+        "Research evidence, outcome coverage, and the controls governing what may inform live decisions.",
+        "LAB",
+    )
     payload = load_canonical_replay_manifest()
     if payload is None:
         st.info(
@@ -321,39 +327,23 @@ def render_canonical_historical_replay() -> None:
         return
 
     summary = canonical_replay_summary(payload)
-    columns = st.columns(4)
-    columns[0].metric("Replay state", summary["state"])
-    columns[1].metric("Canonical cutoffs", summary["invoked_cutoffs"])
-    columns[2].metric("Blocked cutoffs", summary["blocked_cutoffs"])
-    columns[3].metric(
-        "Evidence mode", "Strict" if summary["strict_replay"] else "Research bridge"
+    ui.metric_grid(
+        (
+            ("Replay state", summary["state"], "Certification status"),
+            ("Evidence mode", "Strict" if summary["strict_replay"] else "Research bridge", "Research authority"),
+            ("Canonical cutoffs", summary["invoked_cutoffs"], "Invoked decision dates"),
+            ("Horizon outcomes", summary["realized_outcomes"], "Matured observations"),
+        ),
+        variant="history",
     )
-
-    learning_columns = st.columns(4)
-    learning_columns[0].metric(
-        "Learning observations", summary["learning_observations"]
-    )
-    learning_columns[1].metric("Horizon outcomes", summary["realized_outcomes"])
-    learning_columns[2].metric("Avoided losses", summary["avoided_losses"])
-    learning_columns[3].metric(
-        "Missed opportunities", summary["missed_opportunities"]
-    )
-
-    macro_columns = st.columns(4)
-    macro_columns[0].metric(
-        "Macro coverage",
-        "Complete" if summary["macro_coverage_satisfied"] else "Incomplete",
-    )
-    macro_columns[1].metric(
-        "Required macro series",
-        f"{summary['present_macro_dataset_count']} / {summary['required_macro_dataset_count']}",
-    )
-    macro_columns[2].metric(
-        "Macro-excluded observations", summary["macro_excluded_observations"]
-    )
-    macro_columns[3].metric(
-        "Live calibration",
-        "Certified" if summary["certification_ready"] else "Blocked",
+    ui.metric_grid(
+        (
+            ("Avoided losses", summary["avoided_losses"], "Rejected and later lagged cash"),
+            ("Missed opportunities", summary["missed_opportunities"], "Rejected and later beat cash"),
+            ("Macro coverage", "Complete" if summary["macro_coverage_satisfied"] else "Incomplete", f"{summary['present_macro_dataset_count']} / {summary['required_macro_dataset_count']} series"),
+            ("Live calibration", "Certified" if summary["certification_ready"] else "Blocked", "May influence confidence or size"),
+        ),
+        variant="history",
     )
 
     period = " · ".join(
@@ -392,14 +382,19 @@ def render_canonical_historical_replay() -> None:
         return
 
     if not summary["certification_ready"]:
-        st.warning(historical_macro_certification_detail(summary))
+        ui.callout_card(
+            "Why calibration is blocked",
+            historical_macro_certification_detail(summary),
+        )
 
-    st.info(
-        "This is governed research evidence, not an execution surface or verified "
-        "performance claim. CIO decisions and pre-CIO qualification outcomes are "
-        "reported separately. Only macro-complete, calibration-eligible observations "
-        "with outcomes aligned to the original decision horizon may affect live "
-        "confidence or size."
+    ui.callout_card(
+        "Governance boundary",
+        (
+            "This is governed research evidence, not an execution surface or verified "
+            "performance claim. Only macro-complete, calibration-eligible observations "
+            "aligned to the original decision horizon may reduce confidence or size."
+        ),
+        "Historical learning can inform review; it cannot authorize execution or override the live CIO process.",
     )
     st.caption(
         f"CIO decision observations: {summary['cio_decision_observations']} · "
@@ -414,11 +409,12 @@ def render_canonical_historical_replay() -> None:
     if not rows:
         st.warning("The replay manifest contains no historical cutoffs.")
         return
-    st.dataframe(
-        pd.DataFrame(rows),
-        use_container_width=True,
-        hide_index=True,
-    )
+    with st.expander("Replay cutoff detail", expanded=False):
+        st.dataframe(
+            pd.DataFrame(rows),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     blocked = [row for row in rows if row["Canonical cycle"] == "Blocked"]
     if blocked:

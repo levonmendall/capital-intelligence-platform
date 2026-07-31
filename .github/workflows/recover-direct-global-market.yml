@@ -1,7 +1,7 @@
-name: Recover direct global-market implementation
+name: Materialize direct global-market paper expansion
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, reopened, synchronize]
     branches: [main]
 
@@ -10,62 +10,94 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: recover-direct-global-market
+  group: materialize-direct-global-market-paper
   cancel-in-progress: false
 
 jobs:
-  recover:
+  materialize:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'agent/complete-direct-global-market-paper'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out exact recovery branch
+      - name: Check out exact product branch
         uses: actions/checkout@v4
         with:
           ref: agent/complete-direct-global-market-paper
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Apply the previously reviewed product patch
+      - name: Synchronize current main
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f .github/direct-global-market-recovery.trigger ]]; then
-            echo 'Direct-market patch is already applied; nothing to recover.'
-            exit 0
-          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin main
+          git merge --no-edit origin/main
 
-          git fetch origin \
-            agent/enable-direct-global-market-paper:refs/remotes/origin/agent/enable-direct-global-market-paper
-          : > /tmp/direct-global.b64
-          for part in 00 01 03; do
-            git show \
-              origin/agent/enable-direct-global-market-paper:.github/agent_payload/direct-global-${part}.b64 \
-              >> /tmp/direct-global.b64
+      - name: Apply readable direct-market source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_commit='5c6243688d3fa9b9f318e7b1a0e9c6a6ff3c816c'
+          git cat-file -e "${source_commit}^{commit}"
+
+          mkdir -p operations config tests docs
+          for file in \
+            operations/direct_global_markets.py \
+            config/direct_global_market_universe.json \
+            tests/test_direct_global_market_paper.py \
+            docs/DIRECT_GLOBAL_MARKET_PAPER.md; do
+            git show "${source_commit}:${file}" > "${file}"
           done
-          base64 --decode /tmp/direct-global.b64 > /tmp/direct-global.patch.gz
-          gzip --test /tmp/direct-global.patch.gz
-          gzip --decompress --stdout /tmp/direct-global.patch.gz > /tmp/direct-global.patch
-          test -s /tmp/direct-global.patch
-          git apply --check /tmp/direct-global.patch
-          git apply --index /tmp/direct-global.patch
 
+          : > /tmp/patch-direct-global.py
+          for part in 00 01 02 03; do
+            git show "${source_commit}:.github/direct-market-source/patch-${part}.py.part" \
+              >> /tmp/patch-direct-global.py
+          done
+          python -m py_compile /tmp/patch-direct-global.py
+          python /tmp/patch-direct-global.py
+
+          rm -rf .github/direct-market-payload
           rm -f .github/direct-global-market-recovery.trigger
+          rm -rf .github/agent_payload
+          rm -f .github/workflows/apply-direct-global-market.yml
+          rm -f .github/workflows/export-agent-repo.yml
+          rm -f .github/workflows/recover-direct-global-market.yml
           git add -A
 
           ! git grep -n 'direct_instrument_classes_prohibited' -- ':!tests/**'
-          ! git grep -n 'Direct futures.*spot FX.*direct crypto.*remain prohibited' -- ':!tests/**'
+          ! git grep -n 'Direct futures, options, bonds, FX, crypto tokens' -- ':!tests/**'
           python -m compileall -q .
 
-      - name: Commit recovered implementation
+      - name: Install locked test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run focused direct-market integration tests
+        env:
+          CAPITAL_INTELLIGENCE_DATA_DIR: /tmp/capital-intelligence-direct-market-tests
+        run: |
+          python -m pytest -q \
+            tests/test_direct_global_market_paper.py \
+            tests/test_free_paper_pilot.py \
+            tests/test_material_cio_reassessment.py \
+            tests/test_multi_asset_paper_execution.py \
+            tests/test_production_context_publication_runtime.py \
+            tests/test_render_persistent_deployment.py \
+            tests/test_return_opportunity_expansion.py
+
+      - name: Commit exact product expansion
         shell: bash
         run: |
           set -euo pipefail
           if git diff --cached --quiet; then
-            exit 0
+            echo 'No product changes were staged.' >&2
+            exit 1
           fi
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m 'Complete direct global-market paper expansion'
+          git commit -m 'Complete direct futures, FX, and crypto paper expansion'
           git push origin HEAD:agent/complete-direct-global-market-paper

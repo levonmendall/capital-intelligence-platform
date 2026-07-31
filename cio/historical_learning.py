@@ -202,6 +202,8 @@ class HistoricalLearningContext:
     summary: str
     limitations: tuple[str, ...]
     evidence_identifiers: tuple[str, ...]
+    growth_calibration_multiplier: float = 1.0
+    ensemble_calibration_authorized: bool = False
     subordinate_to_current_evidence: bool = True
     may_increase_expected_return: bool = False
     may_increase_confidence: bool = False
@@ -254,6 +256,15 @@ class HistoricalLearningContext:
                 field_name,
                 _ratio(getattr(self, field_name), field_name=field_name),
             )
+        growth_multiplier = _finite(
+            self.growth_calibration_multiplier,
+            field_name="growth_calibration_multiplier",
+            minimum=0.85,
+            maximum=1.10,
+        )
+        object.__setattr__(self, "growth_calibration_multiplier", growth_multiplier)
+        if not isinstance(self.ensemble_calibration_authorized, bool):
+            raise TypeError("ensemble_calibration_authorized must be a bool")
         object.__setattr__(
             self,
             "median_realized_return",
@@ -371,6 +382,20 @@ class HistoricalLearningContext:
             evidence_identifiers=("historical-learning:not-applicable",),
         )
 
+    @property
+    def effective_position_multiplier(self) -> float:
+        """Return bounded meta-allocation calibration without investment authority."""
+
+        if not self.ensemble_calibration_authorized:
+            return self.position_size_multiplier
+        return round(
+            min(
+                1.10,
+                self.position_size_multiplier * self.growth_calibration_multiplier,
+            ),
+            8,
+        )
+
     def validate_for(self, candidate_identifier: str, *, completed_at: datetime) -> None:
         if self.candidate_identifier != candidate_identifier:
             raise ValueError("historical learning does not match the candidate")
@@ -399,6 +424,8 @@ class HistoricalLearningContext:
             "worst_realized_return": self.worst_realized_return,
             "position_size_multiplier": self.position_size_multiplier,
             "confidence_ceiling": self.confidence_ceiling,
+            "growth_calibration_multiplier": self.growth_calibration_multiplier,
+            "ensemble_calibration_authorized": self.ensemble_calibration_authorized,
             "summary": self.summary,
             "limitations": list(self.limitations),
             "evidence_identifiers": list(self.evidence_identifiers),
@@ -657,6 +684,19 @@ class HistoricalLearningResolver:
         )
         if limited:
             confidence_ceiling = min(confidence_ceiling, 0.70)
+        calibration_authorized = (
+            status is HistoricalLearningStatus.AVAILABLE
+            and strict_replay
+            and len(realized_values) >= self.minimum_sample_size
+        )
+        growth_calibration = 1.0
+        if calibration_authorized:
+            outcome_signal = (hit_rate - 0.50) * 0.12
+            return_signal = max(-0.03, min(0.03, median_realized * 0.25))
+            growth_calibration = min(
+                1.10,
+                max(0.90, 1.0 + outcome_signal + return_signal),
+            )
         limitations = [
             "Historical replay is research evidence and cannot override current point-in-time evidence.",
             "Historical learning may only reduce live confidence and position size.",
@@ -690,8 +730,9 @@ class HistoricalLearningResolver:
             f"(exact={exact_count}, regime={regime_count}, horizon={horizon_count}); "
             f"support={support_rate:.1%}, abstention={abstention_rate:.1%}, "
             f"median confidence={historical_confidence:.1%}, {realized_summary}. "
-            f"Live size is capped at {size_multiplier:.1%} of the otherwise supported target "
-            f"and confidence cannot exceed {confidence_ceiling:.1%}. Current evidence remains controlling."
+            f"Live conservative size multiplier is {size_multiplier:.1%}; bounded ensemble "
+            f"calibration is {growth_calibration:.1%}; confidence cannot exceed "
+            f"{confidence_ceiling:.1%}. Current evidence remains controlling."
         )
         return HistoricalLearningContext(
             candidate_identifier=candidate.identifier,
@@ -713,6 +754,8 @@ class HistoricalLearningResolver:
             worst_realized_return=worst_realized,
             position_size_multiplier=size_multiplier,
             confidence_ceiling=confidence_ceiling,
+            growth_calibration_multiplier=round(growth_calibration, 8),
+            ensemble_calibration_authorized=calibration_authorized,
             summary=summary,
             limitations=tuple(limitations),
             evidence_identifiers=(source_identifier,),

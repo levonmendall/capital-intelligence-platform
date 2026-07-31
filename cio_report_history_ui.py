@@ -5,6 +5,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+import premium_ui as ui
+
 from cio_pending_transactions import pending_transaction_report_history
 from historical_replay_ui import render_canonical_historical_replay
 
@@ -24,7 +26,11 @@ def render_cio_report_archive() -> None:
     render_canonical_historical_replay()
 
     reports = pending_transaction_report_history(limit=250)
-    st.markdown("#### CIO report archive")
+    ui.page_header(
+        "CIO report archive",
+        "Open the governed report behind each portfolio recommendation and paper-implementation state.",
+        "ARC",
+    )
     if not reports:
         st.info("No historical CIO pending-transaction reports are available yet.")
         return
@@ -50,50 +56,41 @@ def render_cio_report_archive() -> None:
         f"Report {int(selected) + 1} of {len(reports)} · "
         f"Fingerprint {str(report.get('report_fingerprint', ''))[:16] or 'unavailable'}"
     )
-    metrics = st.columns(2)
-    metrics[0].metric("Report state", _label(report.get("report_state")))
-    metrics[1].metric("Execution state", _label(report.get("execution_state")))
-    metrics = st.columns(2)
-    metrics[0].metric(
-        "Transactions",
-        int(report.get("transaction_count", 0)),
+    target_allocation = (
+        "Unchanged"
+        if no_transaction and report.get("target_cash_weight") is None
+        else _percent(report.get("target_cash_weight"))
     )
-    metrics[1].metric(
-        "Target allocation",
-        (
-            "Unchanged"
-            if no_transaction and report.get("target_cash_weight") is None
-            else _percent(report.get("target_cash_weight"))
-        ),
+    turnover = (
+        "0.00%"
+        if no_transaction and report.get("turnover") is None
+        else _percent(report.get("turnover"))
     )
-    metrics = st.columns(2)
-    metrics[0].metric(
-        "Turnover",
-        (
-            "0.00%"
-            if no_transaction and report.get("turnover") is None
-            else _percent(report.get("turnover"))
-        ),
+    expected_improvement = (
+        "Not applicable"
+        if no_transaction and report.get("expected_return_improvement") is None
+        else _percent(report.get("expected_return_improvement"))
     )
-    metrics[1].metric(
-        "Expected improvement",
+    ui.metric_grid(
         (
-            "Not applicable"
-            if no_transaction and report.get("expected_return_improvement") is None
-            else _percent(report.get("expected_return_improvement"))
+            ("Report state", _label(report.get("report_state")), "Portfolio recommendation"),
+            ("Execution state", _label(report.get("execution_state")), "Paper worker status"),
+            ("Transactions", int(report.get("transaction_count", 0)), "Recommended paper actions"),
+            ("Target allocation", target_allocation, "Post-decision posture"),
+            ("Turnover", turnover, "Expected portfolio movement"),
+            ("Expected improvement", expected_improvement, "Net of implementation costs"),
         ),
+        variant="history",
     )
 
-    st.markdown("##### Decision lineage")
-    st.write(
-        f"Generated: {report.get('generated_at') or 'Unavailable'}"
-    )
-    st.write(
-        f"Decision reference: {decision_reference}"
-    )
-    st.write(
-        "Construction: "
-        f"{report.get('construction_identifier') or ('Not required' if no_transaction else 'Unavailable')}"
+    ui.callout_card(
+        "Decision lineage",
+        str(report.get("summary") or _label(report.get("report_state"))),
+        (
+            f"Generated {report.get('generated_at') or 'Unavailable'} · "
+            f"Decision {decision_reference} · Construction "
+            f"{report.get('construction_identifier') or ('not required' if no_transaction else 'unavailable')}"
+        ),
     )
 
     transactions = report.get("transactions")

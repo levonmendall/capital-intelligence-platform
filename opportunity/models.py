@@ -33,6 +33,8 @@ class AnalysisLane(str, Enum):
     """Why the candidate must reach specialist and CIO review."""
 
     ACQUISITION = "acquisition"
+    PARTICIPATION = "participation"
+    EXPLORATION = "exploration"
     HOLDING_REVIEW = "holding_review"
 
 

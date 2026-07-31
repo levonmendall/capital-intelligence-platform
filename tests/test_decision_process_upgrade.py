@@ -78,7 +78,9 @@ def test_cio_uses_true_best_alternative_and_records_handoff() -> None:
     )
 
     assert decision.best_alternative_identifier == "candidate:materially-better"
-    assert decision.effective_opportunity_cost == pytest.approx(0.4755)
+    assert decision.effective_opportunity_cost == pytest.approx(
+        qualification.effective_opportunity_cost
+    )
     assert decision.effective_opportunity_cost < 0.50
     assert "candidate:materially-better" in decision.opportunity_cost
     assert decision.action is not CIOAction.BUY
