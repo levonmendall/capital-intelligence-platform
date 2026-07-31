@@ -45,16 +45,15 @@ jobs:
           test -f .github/direct-market-payload/01.b64
           cat .github/direct-market-payload/*.b64 | tr -d '[:space:]' \
             > /tmp/direct-market-complete.b64
-          printf '%s  %s\n' \
-            '196fabba1678e1e16658ddbab94f37078dd509710d62fbf5c578a5fbfb7c3239' \
-            '/tmp/direct-market-complete.b64' | sha256sum --check --strict
           base64 --decode /tmp/direct-market-complete.b64 > /tmp/direct-market-complete.patch.gz
+          sha256sum /tmp/direct-market-complete.patch.gz
           printf '%s  %s\n' \
             '788920269a2252e06fac1b8070dc53da0daf5daa3401aa1678dbda03b5614982' \
             '/tmp/direct-market-complete.patch.gz' | sha256sum --check --strict
           gzip --test /tmp/direct-market-complete.patch.gz
           gzip --decompress --stdout /tmp/direct-market-complete.patch.gz \
             > /tmp/direct-market-complete.patch
+          sha256sum /tmp/direct-market-complete.patch
           printf '%s  %s\n' \
             'c72b969430128da7c4a2bd4946d4e0d68b69be342527fa930f89c93f988edc29' \
             '/tmp/direct-market-complete.patch' | sha256sum --check --strict
