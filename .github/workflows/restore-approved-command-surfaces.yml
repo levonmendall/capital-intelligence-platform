@@ -1,0 +1,136 @@
+name: Restore approved command surfaces
+
+on:
+  push:
+    branches:
+      - fix/restore-approved-command-surfaces
+
+permissions:
+  contents: write
+
+concurrency:
+  group: restore-approved-command-surfaces
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out restoration branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/restore-approved-command-surfaces
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore approved visual system and retain current contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import ast
+          import subprocess
+          from pathlib import Path
+
+          target_commit = "7427ea3860e508bf330b55c5f891fc7ccdf66519"
+          path = Path("premium_ui.py")
+          current = path.read_text(encoding="utf-8")
+          target = subprocess.check_output(
+              ["git", "show", f"{target_commit}:premium_ui.py"],
+              text=True,
+          )
+
+          def top_level_nodes(source: str) -> dict[str, ast.AST]:
+              tree = ast.parse(source)
+              result: dict[str, ast.AST] = {}
+              for node in tree.body:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                      result[node.name] = node
+              return result
+
+          def replace_named_definition(source: str, name: str, replacement_source: str) -> str:
+              nodes = top_level_nodes(source)
+              replacement_nodes = top_level_nodes(replacement_source)
+              if name not in nodes or name not in replacement_nodes:
+                  return source
+              node = nodes[name]
+              replacement = ast.get_source_segment(replacement_source, replacement_nodes[name])
+              if replacement is None:
+                  raise RuntimeError(f"could not extract current definition: {name}")
+              lines = source.splitlines(keepends=True)
+              start = node.lineno - 1
+              end = node.end_lineno
+              return "".join(lines[:start]) + replacement.rstrip() + "\n\n" + "".join(lines[end:])
+
+          # Preserve the current deployment/navigation contracts, including the
+          # always-dark four-tab navigation, while restoring the approved hero,
+          # per-surface identities, spacing, color fields, and card geometry.
+          hybrid = target
+          for name in ("render_navigation", "render_sidebar"):
+              hybrid = replace_named_definition(hybrid, name, current)
+
+          target_names = set(top_level_nodes(hybrid))
+          current_nodes = top_level_nodes(current)
+          additions: list[str] = []
+          for name, node in current_nodes.items():
+              if name in target_names:
+                  continue
+              segment = ast.get_source_segment(current, node)
+              if segment:
+                  additions.append(segment.rstrip())
+
+          if additions:
+              hybrid = hybrid.rstrip() + "\n\n\n" + "\n\n\n".join(additions) + "\n"
+
+          path.write_text(hybrid, encoding="utf-8")
+          PY
+
+          python -m compileall -q \
+            app.py \
+            app_impl.py \
+            premium_ui.py \
+            concise_operating_intelligence_ui.py \
+            navigation_ui.py \
+            cio_report_history_ui.py \
+            live_operating_console.py \
+            historical_replay_ui.py
+
+      - name: Validate restored interface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --quiet pytest
+          candidates=(
+            tests/test_premium_streamlit_interface.py
+            tests/test_surface_information_hierarchy.py
+            tests/test_portfolio_education_ui.py
+            tests/test_live_streamlit_navigation.py
+            tests/test_distinct_streamlit_surfaces.py
+            tests/test_signature_streamlit_interface.py
+            tests/test_streamlit_ui_import_cache.py
+          )
+          existing=()
+          for test_file in "${candidates[@]}"; do
+            if [[ -f "$test_file" ]]; then
+              existing+=("$test_file")
+            fi
+          done
+          if (( ${#existing[@]} == 0 )); then
+            echo "No targeted interface tests were found." >&2
+            exit 1
+          fi
+          pytest -q "${existing[@]}"
+
+      - name: Commit restored visual system
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/restore-approved-command-surfaces.yml
+          git add premium_ui.py
+          git commit -m "Restore approved distinct command-surface design"
+          git push origin HEAD:fix/restore-approved-command-surfaces
