@@ -26,7 +26,9 @@ scanner continues operating when the U.S. cash market is closed whenever a gover
 direct market is open.
 
 Direct evidence can request a full canonical CIO reassessment. It cannot rank,
-recommend, size, construct, or execute independently.
+recommend, size, construct, or execute independently. Simulated top-of-book spreads
+are conservative paper assumptions and remain explicitly distinguishable from
+broker-native executable quotes.
 
 ## Paper implementation
 
