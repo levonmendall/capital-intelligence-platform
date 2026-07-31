@@ -28,6 +28,15 @@ must compete with every other use of capital.
    strict, mature, point-in-time sample. It cannot create a candidate, increase a
    forecast, bypass current evidence, authorize execution, or promote policy.
 
+## Progressive-entry boundary
+
+The explicit participation and exploration lanes may establish a deliberately small
+first position after the hard safety controls pass. Ordinary acquisition remains
+subject to confirmation across at least two completed supportive cycles. Scaling an
+existing position continues to use its governed persistence and cooldown controls.
+This allows earlier learning without making every first-cycle idea immediately
+eligible for a normal-sized allocation.
+
 ## Opportunity-cost handoff
 
 Opportunity qualification records the true best competing use of capital after its
