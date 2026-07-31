@@ -36,24 +36,27 @@ jobs:
           end = text.index(end_marker, start)
           script = dedent(text[start:end])
           lines = script.splitlines(keepends=True)
-          block_start = next(
+          page_blocks = [
               index
               for index, line in enumerate(lines)
-              if line.startswith("page_config = '''st.set_page_config")
-              and index > 200
-          )
+              if "page_config = '''st.set_page_config" in line
+          ]
+          if len(page_blocks) < 2:
+              raise SystemExit(f'expected two page configuration blocks, found {len(page_blocks)}')
+          block_start = page_blocks[-1]
           block_end = next(
               index
               for index in range(block_start + 1, len(lines))
-              if lines[index].startswith("start = source.find('def _authorized_source()")
+              if "start = source.find('def _authorized_source()" in lines[index]
           )
+          indentation = lines[block_start][: len(lines[block_start]) - len(lines[block_start].lstrip())]
           replacement = [
-              "page_config_start = source.find('st.set_page_config(\\n')\n",
-              "if page_config_start >= 0:\n",
-              "    next_section = source.find('\\n\\n@st.cache_resource', page_config_start)\n",
-              "    if next_section < 0:\n",
-              "        raise SystemExit('secure_app page configuration boundary mismatch')\n",
-              "    source = source[:page_config_start] + source[next_section + 2:]\n",
+              indentation + "page_config_start = source.find('st.set_page_config(\\n')\n",
+              indentation + "if page_config_start >= 0:\n",
+              indentation + "    next_section = source.find('\\n\\n@st.cache_resource', page_config_start)\n",
+              indentation + "    if next_section < 0:\n",
+              indentation + "        raise SystemExit('secure_app page configuration boundary mismatch')\n",
+              indentation + "    source = source[:page_config_start] + source[next_section + 2:]\n",
           ]
           corrected = ''.join(lines[:block_start] + replacement + lines[block_end:])
           exec(compile(corrected, '<explicit-entrypoint-materializer>', 'exec'), {'__name__': '__main__'})
