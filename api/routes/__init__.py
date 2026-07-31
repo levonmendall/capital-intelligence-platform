@@ -15,6 +15,7 @@ from api.routes.market_breadth import router as market_breadth_router
 from api.routes.normalization import router as normalization_router
 from api.routes.operations import router as operations_router
 from api.routes.portfolios import router as portfolios_router
+from api.routes.provider_validation import router as provider_validation_router
 from api.routes.replays import router as replays_router
 from api.routes.risk import router as risk_router
 from api.routes.synthesis import router as synthesis_router
@@ -38,6 +39,7 @@ __all__ = [
     "normalization_router",
     "operations_router",
     "portfolios_router",
+    "provider_validation_router",
     "replays_router",
     "risk_router",
     "synthesis_router",
