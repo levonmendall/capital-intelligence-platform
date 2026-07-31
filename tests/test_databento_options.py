@@ -83,9 +83,11 @@ class _Post:
             for instrument_id in data["symbols"].split(","):
                 records.append(
                     {
-                        "hd": {"instrument_id": int(instrument_id)},
-                        "pretty_ts_event": "2026-07-30T13:30:00.000000000Z",
-                        "pretty_close": "12.500000000",
+                        "hd": {
+                            "instrument_id": int(instrument_id),
+                            "ts_event": "2026-07-30T13:30:00.000000000Z",
+                        },
+                        "close": "12.500000000",
                         "volume": "25",
                     }
                 )

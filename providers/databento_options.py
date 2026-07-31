@@ -104,6 +104,15 @@ def _instrument_id(row: Mapping[str, object]) -> int:
     return result
 
 
+def _event_timestamp(row: Mapping[str, object]) -> datetime:
+    value = row.get("pretty_ts_event", row.get("ts_event"))
+    if value is None:
+        header = row.get("hd")
+        if isinstance(header, Mapping):
+            value = header.get("pretty_ts_event", header.get("ts_event"))
+    return _timestamp(value, field_name="option bar timestamp")
+
+
 def _candidate_sessions(as_of: datetime, *, maximum_attempts: int = 7) -> tuple[date, ...]:
     timestamp = _aware(as_of, field_name="as_of")
     cursor = timestamp.date() - timedelta(days=1)
@@ -412,10 +421,7 @@ class DatabentoOptionsProvider:
                     symbol = instrument_lookup.get(instrument_id)
                     if symbol is None:
                         continue
-                    observed = _timestamp(
-                        row.get("pretty_ts_event", row.get("ts_event")),
-                        field_name="option bar timestamp",
-                    )
+                    observed = _event_timestamp(row)
                     if observed > timestamp:
                         continue
                     grouped[symbol].append(
