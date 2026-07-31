@@ -122,6 +122,28 @@ jobs:
               raise RuntimeError(f"discovery compatibility phrase count is {content.count(old)}")
           path.write_text(content.replace(old, new), encoding="utf-8")
           PY
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("operations/free_paper_pilot.py")
+          content = path.read_text(encoding="utf-8")
+          old = '''            if self.execution_asset_class in {CandidateAssetClass.FUTURE, CandidateAssetClass.OPTION}:
+                if self.expiration_at is None or not str(self.expiration_at).strip():
+                    raise ValueError("dated derivative instruments require expiration_at")'''
+          new = '''            dated_derivative = (
+                self.execution_asset_class is CandidateAssetClass.OPTION
+                or (
+                    self.execution_asset_class is CandidateAssetClass.FUTURE
+                    and "continuous" not in self.instrument_identifier.lower()
+                )
+            )
+            if dated_derivative:
+                if self.expiration_at is None or not str(self.expiration_at).strip():
+                    raise ValueError("dated derivative instruments require expiration_at")'''
+          if content.count(old) != 1:
+              raise RuntimeError(f"dated derivative compatibility anchor count is {content.count(old)}")
+          path.write_text(content.replace(old, new), encoding="utf-8")
+          PY
 
       - name: Remove one-use transport
         shell: bash
