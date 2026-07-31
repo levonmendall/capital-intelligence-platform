@@ -352,7 +352,6 @@ class DatabentoOptionsProvider:
                     "schema": "ohlcv-1d",
                     "symbols": ",".join(batch),
                     "stype_in": "raw_symbol",
-                    "stype_out": "raw_symbol",
                     "start": start_date.isoformat(),
                     "end": end_date.isoformat(),
                     "encoding": "json",
