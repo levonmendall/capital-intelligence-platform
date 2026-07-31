@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - .pr274-sync-trigger
+      - .pr274-sync-trigger-v2
 
 permissions:
   contents: write
