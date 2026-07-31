@@ -1,0 +1,39 @@
+{
+  "schema_version": "paper-experiment-protocol.v1",
+  "version": "compounding-paper-experiment.2026-07.v1",
+  "hypothesis": "The governed system can operate one $250,000 paper portfolio for six weeks with complete point-in-time lineage, fail-closed readiness, singular implementation, reconciliation, and after-cost benchmark reconstruction; results are descriptive evidence for human review, not proof of long-term outperformance.",
+  "portfolio_code": "COMPOUNDING",
+  "starting_capital": 250000.0,
+  "base_currency": "USD",
+  "universe_identifiers": [
+    "instrument:us-etf:vti", "instrument:us-etf:vxus", "instrument:us-etf:govt",
+    "instrument:us-etf:lqd", "instrument:us-etf:hyg", "instrument:us-etf:sgov",
+    "instrument:us-etf:dbc", "instrument:us-etf:gld", "instrument:us-etf:uup",
+    "instrument:us-etf:ibit", "instrument:us-etf:vnq", "instrument:us-etf:dbmf",
+    "instrument:us-etf:wtpi", "instrument:us-etf:vixy", "instrument:us-etf:btal"
+  ],
+  "provider_manifest_identifier": "all-markets-data-supply.development.v2",
+  "cost_model_version": "paper-execution-costs.v1",
+  "benchmark_definition": "80% VTI and 20% SGOV, valued from the same point-in-time quote authority, with recorded spread/slippage costs and no look-ahead reconstitution.",
+  "minimum_calendar_days": 42,
+  "minimum_operating_cycles": 30,
+  "maximum_missing_cycles": 2,
+  "observation_schedule": "One canonical post-reconciliation UTC observation per completed operating date; weekends and valid no-action days remain explicit.",
+  "metrics": [
+    "after_cost_total_return", "benchmark_after_cost_total_return", "maximum_drawdown",
+    "turnover", "transaction_cost", "reconciliation_rate", "data_readiness_rate",
+    "valid_no_action_rate", "alert_precision", "decision_latency", "incident_count"
+  ],
+  "required_failure_scenarios": [
+    "provider_outage", "stale_or_future_data", "incomplete_screening",
+    "worker_termination_and_fenced_takeover", "database_unavailable_or_locked",
+    "database_corruption_detection", "encrypted_backup_restore",
+    "execution_hold_and_retry", "duplicate_alert_suppression",
+    "valid_no_action_day", "evidence_lineage_reconstruction"
+  ],
+  "change_control": "Any code, provider, universe, cost, benchmark, schedule, metric, threshold, or configuration change terminates this registration. Preserve its observations and register a new version; never splice or silently restart.",
+  "automatic_threshold_change_permitted": false,
+  "policy_promotion_authorized": false,
+  "performance_claims_permitted": false,
+  "real_money_authorized": false
+}
