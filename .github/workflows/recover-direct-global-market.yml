@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
 
 concurrency:
@@ -25,47 +25,34 @@ jobs:
         with:
           ref: agent/complete-direct-global-market-paper
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Apply the previously reviewed product patch
+      - name: Locate newest complete direct-market foundation
+        id: locate
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f .github/direct-global-market-recovery.trigger ]]; then
-            echo 'Direct-market patch is already applied; nothing to recover.'
-            exit 0
-          fi
+          git fetch --all --prune
+          : > /tmp/direct-market-foundations.txt
+          while read -r ref timestamp; do
+            if git cat-file -e "${ref}:config/direct_global_market_universe.json" 2>/dev/null \
+              && git cat-file -e "${ref}:operations/direct_global_markets.py" 2>/dev/null; then
+              printf '%s %s\n' "$timestamp" "$ref" >> /tmp/direct-market-foundations.txt
+            fi
+          done < <(git for-each-ref --format='%(refname) %(committerdate:unix)' refs/remotes/origin)
+          sort -nr /tmp/direct-market-foundations.txt | tee /tmp/direct-market-foundations-sorted.txt
+          candidate=$(awk 'NR==1 {print $2}' /tmp/direct-market-foundations-sorted.txt)
+          test -n "$candidate"
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          git archive --format=tar.gz --output=/tmp/direct-market-foundation.tar.gz "$candidate"
+          git show -s --format='%H%n%ci%n%s' "$candidate" > /tmp/direct-market-foundation-source.txt
 
-          git fetch origin \
-            agent/enable-direct-global-market-paper:refs/remotes/origin/agent/enable-direct-global-market-paper
-          : > /tmp/direct-global.b64
-          for part in 00 01 03; do
-            git show \
-              origin/agent/enable-direct-global-market-paper:.github/agent_payload/direct-global-${part}.b64 \
-              >> /tmp/direct-global.b64
-          done
-          base64 --decode /tmp/direct-global.b64 > /tmp/direct-global.patch.gz
-          gzip --test /tmp/direct-global.patch.gz
-          gzip --decompress --stdout /tmp/direct-global.patch.gz > /tmp/direct-global.patch
-          test -s /tmp/direct-global.patch
-          git apply --check /tmp/direct-global.patch
-          git apply --index /tmp/direct-global.patch
-
-          rm -f .github/direct-global-market-recovery.trigger
-          git add -A
-
-          ! git grep -n 'direct_instrument_classes_prohibited' -- ':!tests/**'
-          ! git grep -n 'Direct futures.*spot FX.*direct crypto.*remain prohibited' -- ':!tests/**'
-          python -m compileall -q .
-
-      - name: Commit recovered implementation
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m 'Complete direct global-market paper expansion'
-          git push origin HEAD:agent/complete-direct-global-market-paper
+      - name: Upload readable foundation
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-market-foundation
+          path: |
+            /tmp/direct-market-foundation.tar.gz
+            /tmp/direct-market-foundation-source.txt
+            /tmp/direct-market-foundations-sorted.txt
+          if-no-files-found: error
+          retention-days: 1
