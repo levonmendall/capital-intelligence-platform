@@ -35,6 +35,19 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git fetch origin main
           git merge --no-ff --no-commit origin/main
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_premium_navigation_runtime.py')
+          text = path.read_text(encoding='utf-8')
+          old = '    assert "The interface stays quiet until evidence earns attention." in ui\n'
+          new = '    assert "A governed investment-intelligence system" in ui\n'
+          if text.count(old) != 1:
+              raise SystemExit(
+                  f'expected one stale premium UI copy contract, found {text.count(old)}'
+              )
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
           rm -f .github/workflows/sync-argo-current-main.yml
           git add -A
           python -m compileall -q .
