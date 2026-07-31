@@ -254,7 +254,7 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         .metric-portfolio .metric-node{border-left:3px solid rgba(var(--surface-rgb),.55);border-radius:14px 24px 24px 14px}
         .metric-history .metric-node{min-height:6.4rem;background:rgba(8,13,24,.7);border-style:dashed}
         .metric-seq{font-size:.61rem;font-weight:850;letter-spacing:.12em;color:var(--surface-accent);opacity:.88}
-        .metric-value{font-size:1.5rem;line-height:1.15;font-weight:760;letter-spacing:-.04em;color:var(--ink);margin:.7rem 0 .25rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .metric-value{font-size:1.5rem;line-height:1.15;font-weight:760;letter-spacing:-.04em;color:var(--ink);margin:.7rem 0 .25rem;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
         .metric-label{font-size:.76rem;color:var(--muted);font-weight:650}
         .metric-note{font-size:.66rem;color:#718299;margin-top:.32rem}
         .signal-panel{position:relative;overflow:hidden;border-radius:24px;padding:1.25rem 1.3rem;background:linear-gradient(135deg,rgba(var(--surface-rgb),.085),rgba(var(--surface-rgb-2),.08) 52%,rgba(var(--surface-rgb),.045));border:1px solid rgba(var(--surface-rgb),.28);box-shadow:0 18px 42px var(--shadow);margin:.3rem 0 1rem}
