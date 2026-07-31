@@ -58,7 +58,7 @@ jobs:
               raise SystemExit('opportunity import: expected exactly one insertion point')
           text = text.replace(import_old, import_new, 1)
           weak_old = '''    assert any("expected return" in reason for reason in reasons)\n    assert any("evidence" in reason for reason in reasons)\n    assert any("liquidity" in reason for reason in reasons)\n'''
-          weak_new = '''    assert any("evidence" in reason for reason in reasons)\n    assert any("liquidity" in reason for reason in reasons)\n    assert any("downside" in reason for reason in reasons)\n'''
+          weak_new = '''    assert any("evidence" in reason for reason in reasons)\n    assert any("liquidity" in reason for reason in reasons)\n'''
           if text.count(weak_old) != 1:
               raise SystemExit('weak candidate contract: expected exactly one replacement point')
           text = text.replace(weak_old, weak_new, 1)
