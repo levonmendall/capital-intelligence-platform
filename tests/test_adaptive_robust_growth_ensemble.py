@@ -44,3 +44,5 @@ def test_cio_uses_ensemble_and_progressive_lanes() -> None:
     assert "ensemble.minimum_target_weight" in source
     assert "effective_position_multiplier" in source
     assert "if not progressive_lane:" in source
+    assert "growth_cap = (" in source
+    assert "if progressive_lane" in source
