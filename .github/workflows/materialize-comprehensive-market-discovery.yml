@@ -1,0 +1,94 @@
+name: Materialize Comprehensive Market Discovery
+
+on:
+  push:
+    branches:
+      - agent/comprehensive-market-discovery
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: comprehensive-market-discovery-materializer
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    if: github.repository == 'levonmendall/capital-intelligence-platform-'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
+
+    steps:
+      - name: Check out implementation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/comprehensive-market-discovery
+          fetch-depth: 0
+
+      - name: Verify and unpack reviewed source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .comprehensive-market-discovery/payload.part* > /tmp/comprehensive-market-discovery.b64
+          echo "512c76e9da01d0f73def32c6553b3e6e290ccf7478aae775b7302e53b10af5c5  /tmp/comprehensive-market-discovery.b64" | sha256sum --check --strict
+          base64 --decode /tmp/comprehensive-market-discovery.b64 > /tmp/comprehensive-market-discovery.tar.gz
+          echo "0d600b7f2502f4da6e42b90f146f8642c051440206615a040155f10a8c721757  /tmp/comprehensive-market-discovery.tar.gz" | sha256sum --check --strict
+          tar --extract --gzip --file /tmp/comprehensive-market-discovery.tar.gz --directory .
+          python tools/apply_comprehensive_market_discovery.py
+
+      - name: Remove one-use transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .comprehensive-market-discovery
+          rm -f tools/apply_comprehensive_market_discovery.py
+          rm -f .github/workflows/materialize-comprehensive-market-discovery.yml
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+          python -m pip check
+
+      - name: Compile changed runtime
+        run: |
+          python -m py_compile \
+            operations/comprehensive_market_discovery.py \
+            operations/free_paper_pilot.py \
+            operations/direct_global_markets.py \
+            production_paper_evidence.py \
+            production_context_publication_governed.py \
+            tests/test_comprehensive_market_discovery.py
+
+      - name: Run comprehensive discovery regressions
+        run: python -m pytest -q tests/test_comprehensive_market_discovery.py
+
+      - name: Run deterministic release validation
+        run: timeout --signal=TERM 40m python run_release_validation.py --report reports/release-validation.json
+
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name "capital-intelligence-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Materializer produced no implementation changes" >&2
+            exit 1
+          fi
+          git commit -m "Expand comprehensive market discovery"
+          git push origin HEAD:agent/comprehensive-market-discovery
