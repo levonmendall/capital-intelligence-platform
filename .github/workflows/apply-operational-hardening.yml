@@ -1,0 +1,143 @@
+name: Apply operational hardening
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.head_ref == 'fix/operational-truth-and-runtime-hardening'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/operational-truth-and-runtime-hardening
+          fetch-depth: 0
+      - name: Check whether hardening is already applied
+        id: gate
+        shell: bash
+        run: |
+          if [[ -f .operational-hardening-applied ]]; then
+            echo "apply=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "apply=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Apply hardening
+        if: steps.gate.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('delivery/store.py')
+          text = path.read_text(encoding='utf-8')
+          anchor = '''    def complete_cycle(\n        self,\n        cycle_key: str,\n'''
+          insertion = '''    def cycle_attempt_due(\n        self,\n        cycle_key: str,\n        *,\n        now: datetime,\n        lease: timedelta = timedelta(minutes=30),\n    ) -> bool:\n        \"\"\"Return whether a cycle may collect evidence and claim execution now.\"\"\"\n\n        now = _aware(now, \"now\")\n        if lease <= timedelta(0):\n            raise ValueError(\"lease must be positive\")\n        with self._connect() as connection:\n            row = connection.execute(\n                \"SELECT * FROM scheduled_cycles WHERE cycle_key = ?\",\n                (cycle_key,),\n            ).fetchone()\n        if row is None:\n            return True\n        status = CycleStatus(row[\"status\"])\n        if status is CycleStatus.COMPLETED:\n            return False\n        if status is CycleStatus.RUNNING and row[\"started_at\"]:\n            started_at = datetime.fromisoformat(row[\"started_at\"])\n            if started_at + lease > now:\n                return False\n        if row[\"next_attempt_at\"]:\n            next_attempt_at = datetime.fromisoformat(row[\"next_attempt_at\"])\n            if next_attempt_at > now:\n                return False\n        return True\n\n    def latest_cycle(self) -> ScheduledCycleRecord | None:\n        \"\"\"Return the most recently updated canonical cycle record.\"\"\"\n\n        with self._connect() as connection:\n            row = connection.execute(\n                \"SELECT * FROM scheduled_cycles ORDER BY updated_at DESC LIMIT 1\"\n            ).fetchone()\n        return None if row is None else self._cycle_from_row(row)\n\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('delivery/store.py insertion anchor mismatch')
+          path.write_text(text.replace(anchor, insertion + anchor, 1), encoding='utf-8')
+
+          path = Path('delivery/canonical_scheduler.py')
+          text = path.read_text(encoding='utf-8')
+          anchor = '''    def triggered_cycle_key(self, trigger_key: str, *, now: datetime) -> str:\n'''
+          insertion = '''    def scheduled_attempt_due(self, now: datetime) -> bool:\n        \"\"\"Return whether the latest scheduled slot may collect and execute now.\"\"\"\n\n        if now.tzinfo is None or now.utcoffset() is None:\n            raise ValueError(\"now must be timezone-aware\")\n        scheduled_for = self.scheduled_for(now)\n        if now < scheduled_for:\n            return False\n        return self.cycle_store.cycle_attempt_due(\n            self._scheduled_cycle_key(scheduled_for),\n            now=now,\n            lease=self.cycle_lease,\n        )\n\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('canonical scheduler scheduled anchor mismatch')
+          text = text.replace(anchor, insertion + anchor, 1)
+          anchor = '''    def needs_triggered_cycle(self, trigger_key: str, *, now: datetime) -> bool:\n'''
+          insertion = '''    def triggered_attempt_due(self, trigger_key: str, *, now: datetime) -> bool:\n        \"\"\"Return whether a material-event cycle may collect and execute now.\"\"\"\n\n        if now.tzinfo is None or now.utcoffset() is None:\n            raise ValueError(\"now must be timezone-aware\")\n        return self.cycle_store.cycle_attempt_due(\n            self.triggered_cycle_key(trigger_key, now=now),\n            now=now,\n            lease=self.cycle_lease,\n        )\n\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('canonical scheduler triggered anchor mismatch')
+          path.write_text(text.replace(anchor, insertion + anchor, 1), encoding='utf-8')
+
+          path = Path('run_autonomous_paper_operator.py')
+          text = path.read_text(encoding='utf-8')
+          anchor = '''def _blocked_cycle(context_publication) -> WorkerRunResult:\n'''
+          insertion = '''def _attempt_due(worker, method_name: str, *args, **kwargs) -> bool:\n    \"\"\"Honor durable cooldowns while preserving lightweight test doubles.\"\"\"\n\n    method = getattr(worker, method_name, None)\n    return True if not callable(method) else bool(method(*args, **kwargs))\n\n\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('operator helper anchor mismatch')
+          text = text.replace(anchor, insertion + anchor, 1)
+          old = '''        if now >= scheduled_for and worker.needs_scheduled_cycle(now):\n            scheduled_attempted = True\n'''
+          new = '''        if (\n            now >= scheduled_for\n            and worker.needs_scheduled_cycle(now)\n            and _attempt_due(worker, \"scheduled_attempt_due\", now)\n        ):\n            scheduled_attempted = True\n'''
+          if text.count(old) != 1:
+              raise SystemExit('operator scheduled retry anchor mismatch')
+          text = text.replace(old, new, 1)
+          old = '''        and worker.needs_triggered_cycle(reassessment.trigger_key, now=now)\n    ):\n'''
+          new = '''        and worker.needs_triggered_cycle(reassessment.trigger_key, now=now)\n        and _attempt_due(\n            worker,\n            \"triggered_attempt_due\",\n            reassessment.trigger_key,\n            now=now,\n        )\n    ):\n'''
+          if text.count(old) != 1:
+              raise SystemExit('operator triggered retry anchor mismatch')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          Path('operating_status.py').write_text('''\"\"\"Truthful read-only operating status for the CIO interface.\"\"\"\n\nfrom __future__ import annotations\n\nimport os\nfrom dataclasses import dataclass\nfrom datetime import datetime, timezone\n\nfrom api.config import ApiSettings\nfrom api.repositories import JournalRepository\nfrom delivery.models import CycleStatus\nfrom delivery.store import SQLiteAlertStore\nfrom operations import OperationalSettings, WorkerHeartbeatStore\n\n\n@dataclass(frozen=True, slots=True)\nclass CIOOperatingStatus:\n    state: str\n    label: str\n    headline: str\n    detail: str\n    observed_at: datetime\n    cycle_status: str | None = None\n    cycle_key: str | None = None\n    next_retry_at: datetime | None = None\n    last_briefing_at: datetime | None = None\n    release: str = \"unknown\"\n\n    @property\n    def healthy(self) -> bool:\n        return self.state == \"healthy\"\n\n\ndef _parse_timestamp(value: object) -> datetime | None:\n    if not isinstance(value, str) or not value.strip():\n        return None\n    try:\n        parsed = datetime.fromisoformat(value.strip().replace(\"Z\", \"+00:00\"))\n    except ValueError:\n        return None\n    if parsed.tzinfo is None or parsed.utcoffset() is None:\n        return None\n    return parsed.astimezone(timezone.utc)\n\n\ndef load_cio_operating_status(*, now: datetime | None = None) -> CIOOperatingStatus:\n    timestamp = now or datetime.now(timezone.utc)\n    release = (\n        os.getenv(\"CAPITAL_INTELLIGENCE_RELEASE\")\n        or os.getenv(\"RENDER_GIT_COMMIT\")\n        or \"unknown\"\n    ).strip()\n    try:\n        settings = ApiSettings.from_env()\n        operational = OperationalSettings.from_env()\n        heartbeat_ok, heartbeat_detail, heartbeat = WorkerHeartbeatStore(\n            operational.worker_heartbeat_path\n        ).health(\n            maximum_age_seconds=max(180, int(settings.scheduler_poll_seconds) * 3),\n            now=timestamp,\n        )\n        alert_path = settings.alert_database or settings.snapshot_database.with_name(\n            \"alerts.db\"\n        )\n        latest_cycle = SQLiteAlertStore(alert_path).latest_cycle()\n        briefing = JournalRepository(\n            settings.journal_database, required=False\n        ).latest_payload(\"daily_cio_briefing\")\n    except (OSError, RuntimeError, TypeError, ValueError) as error:\n        return CIOOperatingStatus(\n            state=\"degraded\",\n            label=\"CIO degraded\",\n            headline=\"Operating status is unavailable\",\n            detail=str(error),\n            observed_at=timestamp,\n            release=release,\n        )\n\n    briefing_at = (\n        _parse_timestamp(briefing.get(\"as_of\"))\n        if isinstance(briefing, dict)\n        else None\n    )\n    cycle_status = None if latest_cycle is None else latest_cycle.status.value\n    cycle_key = None if latest_cycle is None else latest_cycle.cycle_key\n    next_retry = None if latest_cycle is None else latest_cycle.next_attempt_at\n    if not heartbeat_ok or heartbeat is None:\n        return CIOOperatingStatus(\n            state=\"degraded\",\n            label=\"CIO degraded\",\n            headline=\"The CIO operator is not healthy\",\n            detail=heartbeat_detail,\n            observed_at=timestamp,\n            cycle_status=cycle_status,\n            cycle_key=cycle_key,\n            next_retry_at=next_retry,\n            last_briefing_at=briefing_at,\n            release=release,\n        )\n    if latest_cycle is not None and latest_cycle.status is CycleStatus.FAILED:\n        retry_text = (\n            \"\"\n            if latest_cycle.next_attempt_at is None\n            else f\" Next retry: {latest_cycle.next_attempt_at.isoformat()}.\"\n        )\n        return CIOOperatingStatus(\n            state=\"degraded\",\n            label=\"CIO degraded\",\n            headline=\"The latest CIO cycle failed\",\n            detail=(latest_cycle.error or \"No failure detail was recorded.\") + retry_text,\n            observed_at=heartbeat.observed_at,\n            cycle_status=cycle_status,\n            cycle_key=cycle_key,\n            next_retry_at=next_retry,\n            last_briefing_at=briefing_at,\n            release=release,\n        )\n    if heartbeat.status == \"degraded\":\n        return CIOOperatingStatus(\n            state=\"degraded\",\n            label=\"CIO degraded\",\n            headline=\"The CIO operator completed with degraded evidence\",\n            detail=heartbeat.detail or heartbeat_detail,\n            observed_at=heartbeat.observed_at,\n            cycle_status=cycle_status,\n            cycle_key=cycle_key,\n            next_retry_at=next_retry,\n            last_briefing_at=briefing_at,\n            release=release,\n        )\n    if latest_cycle is not None and latest_cycle.status is CycleStatus.RUNNING:\n        return CIOOperatingStatus(\n            state=\"processing\",\n            label=\"CIO processing\",\n            headline=\"A CIO cycle is in progress\",\n            detail=heartbeat.detail or \"Evidence collection and CIO synthesis are running.\",\n            observed_at=heartbeat.observed_at,\n            cycle_status=cycle_status,\n            cycle_key=cycle_key,\n            last_briefing_at=briefing_at,\n            release=release,\n        )\n    if briefing_at is None:\n        return CIOOperatingStatus(\n            state=\"starting\",\n            label=\"Awaiting CIO cycle\",\n            headline=\"Awaiting the first completed CIO briefing\",\n            detail=heartbeat.detail or heartbeat_detail,\n            observed_at=heartbeat.observed_at,\n            cycle_status=cycle_status,\n            cycle_key=cycle_key,\n            release=release,\n        )\n    return CIOOperatingStatus(\n        state=\"healthy\",\n        label=\"CIO healthy\",\n        headline=\"The CIO operating path is current\",\n        detail=heartbeat.detail or heartbeat_detail,\n        observed_at=heartbeat.observed_at,\n        cycle_status=cycle_status,\n        cycle_key=cycle_key,\n        last_briefing_at=briefing_at,\n        release=release,\n    )\n\n\n__all__ = [\"CIOOperatingStatus\", \"load_cio_operating_status\"]\n''', encoding='utf-8')
+
+          path = Path('app.py')
+          text = path.read_text(encoding='utf-8')
+          anchor = 'from navigation_ui import install as _install_navigation_ui\n'
+          if text.count(anchor) != 1:
+              raise SystemExit('app.py status import anchor mismatch')
+          text = text.replace(anchor, anchor + 'from operating_status import load_cio_operating_status\n', 1)
+          old = '''def _safe_render_sidebar() -> None:\n    \"\"\"Render the brand and administrator operations in the sidebar.\"\"\"\n\n    with _premium_ui.st.sidebar:\n        _premium_ui.st.markdown(\n'''
+          new = '''def _safe_render_sidebar() -> None:\n    \"\"\"Render truthful operating status and administrator controls.\"\"\"\n\n    operating_status = load_cio_operating_status()\n    with _premium_ui.st.sidebar:\n        _premium_ui.st.markdown(\n'''
+          if text.count(old) != 1:
+              raise SystemExit('app.py sidebar anchor mismatch')
+          text = text.replace(old, new, 1)
+          text = text.replace("'<div class=\"sidebar-system\">System online</div>'", "f'<div class=\"sidebar-system\">{operating_status.label}</div>'", 1)
+          text = text.replace('        _premium_ui.st.caption("Four distinct surfaces. One governed portfolio.")\n', '        _premium_ui.st.caption(operating_status.detail)\n        _premium_ui.st.caption("Four distinct surfaces. One governed portfolio.")\n', 1)
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('app_impl.py')
+          text = path.read_text(encoding='utf-8')
+          anchor = 'from live_operating_console import load_live_market_console\n'
+          if text.count(anchor) != 1:
+              raise SystemExit('app_impl status import anchor mismatch')
+          text = text.replace(anchor, anchor + 'from operating_status import load_cio_operating_status\n', 1)
+          text = text.replace('    totals = get_portfolio_totals()\n', '    totals = get_portfolio_totals()\n    operating_status = load_cio_operating_status()\n', 1)
+          old = '''        signal_panel(\n            \"Daily CIO briefing // unavailable\",\n            \"No governed CIO conclusion is available yet\",\n            (\n                \"The portfolio remains unchanged until opportunity comparison, independent \"\n                \"review, CIO synthesis, and construction complete successfully.\"\n            ),\n            variant=\"today\",\n        )\n'''
+          new = '''        signal_panel(\n            f\"Daily CIO briefing // {operating_status.state}\",\n            operating_status.headline,\n            operating_status.detail,\n            variant=\"today\",\n        )\n'''
+          if text.count(old) != 1:
+              raise SystemExit('app_impl unavailable briefing anchor mismatch')
+          text = text.replace(old, new, 1)
+          text = text.replace('(\"Decision state\", \"Standby\", \"Fail-closed\"),', '(\"Decision state\", operating_status.label, operating_status.cycle_status or \"Fail-closed\"),', 1)
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('render.yaml')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('      - key: CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL\n        value: "false"\n', '      - key: CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL\n        value: "true"\n', 1)
+          anchor = '''      - key: FRED_API_KEY\n        sync: false\n'''
+          replacement = '''      - key: FRED_API_KEY\n        sync: false\n      - key: CAPITAL_INTELLIGENCE_EODHD_API_TOKEN\n        sync: false\n      - key: CAPITAL_INTELLIGENCE_DATABENTO_API_KEY\n        sync: false\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('render secret anchor mismatch')
+          path.write_text(text.replace(anchor, replacement, 1), encoding='utf-8')
+
+          Path('tests/test_operational_truth_runtime_hardening.py').write_text('''from __future__ import annotations\n\nfrom datetime import datetime, timedelta, timezone\n\nfrom delivery.models import CycleStatus\nfrom delivery.store import SQLiteAlertStore\n\n\nNOW = datetime(2026, 7, 31, 15, 0, tzinfo=timezone.utc)\n\n\ndef test_cycle_retry_cooldown_blocks_collection(tmp_path) -> None:\n    store = SQLiteAlertStore(tmp_path / \"alerts.db\")\n    key = \"canonical-cio:test\"\n    assert store.begin_cycle(key, scheduled_for=NOW, now=NOW) is True\n    record = store.fail_cycle(\n        key,\n        error=\"temporary provider outage\",\n        now=NOW,\n        retry_delay=timedelta(minutes=15),\n    )\n    assert record.status is CycleStatus.FAILED\n    assert store.cycle_attempt_due(key, now=NOW + timedelta(minutes=14)) is False\n    assert store.cycle_attempt_due(key, now=NOW + timedelta(minutes=15)) is True\n\n\ndef test_latest_cycle_exposes_failure_detail(tmp_path) -> None:\n    store = SQLiteAlertStore(tmp_path / \"alerts.db\")\n    key = \"canonical-cio:test\"\n    store.begin_cycle(key, scheduled_for=NOW, now=NOW)\n    store.fail_cycle(\n        key,\n        error=\"provider failed\",\n        now=NOW,\n        retry_delay=timedelta(minutes=15),\n    )\n    latest = store.latest_cycle()\n    assert latest is not None\n    assert latest.cycle_key == key\n    assert latest.error == \"provider failed\"\n\n\ndef test_render_declares_market_provider_secrets_and_required_journal() -> None:\n    source = open(\"render.yaml\", encoding=\"utf-8\").read()\n    assert \"CAPITAL_INTELLIGENCE_EODHD_API_TOKEN\" in source\n    assert \"CAPITAL_INTELLIGENCE_DATABENTO_API_KEY\" in source\n    assert 'CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL\\n        value: \"true\"' in source\n\n\ndef test_sidebar_no_longer_claims_system_online_unconditionally() -> None:\n    source = open(\"app.py\", encoding=\"utf-8\").read()\n    assert \"System online\" not in source\n    assert \"operating_status.label\" in source\n''', encoding='utf-8')
+
+          Path('.operational-hardening-applied').write_text('applied\n', encoding='utf-8')
+          PY
+      - name: Install dependencies
+        if: steps.gate.outputs.apply == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install -r requirements-dev.txt
+      - name: Compile changed runtime
+        if: steps.gate.outputs.apply == 'true'
+        run: python -m compileall -q delivery operations app.py app_impl.py operating_status.py run_autonomous_paper_operator.py
+      - name: Run complete repository suite
+        if: steps.gate.outputs.apply == 'true'
+        run: python -m pytest -q --maxfail=10
+      - name: Commit validated hardening
+        if: steps.gate.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git commit -m "Harden CIO operating truth and retry behavior"
+          git push origin HEAD:fix/operational-truth-and-runtime-hardening
