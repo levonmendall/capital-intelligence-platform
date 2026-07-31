@@ -5,7 +5,7 @@ on:
     branches:
       - agent/recover-pr264-materialization
     paths:
-      - .recovery/sync-trigger
+      - .recovery/sync-trigger-v2
 
 permissions:
   contents: write
