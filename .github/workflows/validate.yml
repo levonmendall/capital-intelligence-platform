@@ -71,6 +71,7 @@ jobs:
           name: release-validation-results
           path: |
             reports/release-validation.json
+            reports/golden-end-to-end-gate.json
             reports/pytest-results.xml
             reports/browser/
           if-no-files-found: ignore

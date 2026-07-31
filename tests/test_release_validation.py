@@ -44,6 +44,7 @@ def test_release_plan_is_one_ordered_bounded_command_surface() -> None:
         "compile_python",
         "initialize_platform",
         "validate_daily_plan",
+        "golden_end_to_end_and_chaos",
         "run_intelligence",
         "validate_provider_bundle_implementation",
         "validate_all_markets_internal_readiness",
