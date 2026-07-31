@@ -17,6 +17,7 @@ APP_SUBTITLE = (
 )
 
 
+
 @dataclass(frozen=True, slots=True)
 class SurfaceProfile:
     """Distinct visual and narrative identity for one primary application surface."""
@@ -100,6 +101,7 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         node_label="Record",
     ),
 }
+
 
 
 def surface_profile(active_page: str) -> SurfaceProfile:
@@ -289,7 +291,20 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         .activity-kind{font-size:.59rem;font-weight:850;letter-spacing:.12em;text-transform:uppercase;color:var(--surface-accent)}
         .activity-title{font-size:.84rem;font-weight:730;color:var(--ink);margin:.38rem 0 .2rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .activity-meta{font-size:.68rem;line-height:1.4;color:var(--muted)}
+        .investment-lens{position:relative;overflow:hidden;margin:.35rem 0 1rem;border:1px solid rgba(var(--surface-rgb),.20);border-radius:22px;background:linear-gradient(145deg,rgba(12,18,30,.96),rgba(7,12,22,.94));box-shadow:0 18px 42px var(--shadow)}
+        .investment-lens:before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,var(--surface-accent),var(--surface-accent-2),transparent 82%)}
+        .lens-head{padding:1rem 1.05rem .85rem;border-bottom:1px solid var(--line)}
+        .lens-kicker{font-size:.62rem;font-weight:850;letter-spacing:.14em;text-transform:uppercase;color:var(--surface-accent)}
+        .lens-title{font-size:1.08rem;font-weight:760;letter-spacing:-.025em;color:var(--ink);margin:.32rem 0 0}
+        .lens-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}
+        .lens-item{padding:.9rem 1rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line);min-height:7.15rem}
+        .lens-item:nth-child(2n){border-right:0}.lens-item:nth-last-child(-n+2){border-bottom:0}
+        .lens-label{font-size:.6rem;font-weight:850;letter-spacing:.12em;text-transform:uppercase;color:var(--surface-accent-2);margin-bottom:.38rem}
+        .lens-copy{font-size:.86rem;line-height:1.55;color:#c7d2e3;margin:0}
+        .lens-watch{grid-column:1/-1;background:rgba(var(--surface-rgb),.028);min-height:auto;border-right:0!important;border-bottom:0!important}
+        .lens-today .lens-item:nth-child(3),.lens-environment .lens-item:nth-child(3){background:linear-gradient(135deg,rgba(var(--surface-rgb),.055),transparent)}
         [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 16px 38px var(--shadow);background:var(--panel-solid)}
+        [data-testid="stMetricValue"]{white-space:normal!important;overflow-wrap:anywhere;word-break:break-word;line-height:1.08}
         [data-testid="stExpander"]{border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--panel)}
         [data-testid="stExpander"] summary,[data-testid="stExpander"] p,[data-testid="stExpander"] code{color:var(--ink)}
         [data-testid="stAlert"]{border-radius:18px;border-color:var(--line);background:var(--alert);color:var(--ink)}
@@ -306,20 +321,36 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
             [data-testid="stRadio"] div[role="radiogroup"]{display:grid;grid-template-columns:1fr 1fr}
             [data-testid="stRadio"] div[role="radiogroup"] label{min-width:0;flex:none}
             [data-testid="stToggle"]{min-height:3rem}
-            .hero-card{padding:1.2rem 1rem;min-height:auto}
-            .hero-title{font-size:2rem}
+            .hero-shell{margin-bottom:.55rem}
+            .hero-card{padding:.9rem 1rem;min-height:auto}
+            .hero-title{font-size:1.55rem;line-height:1.08}
+            .hero-copy{font-size:.82rem;line-height:1.45;margin:.55rem 0 0}
+            .hero-kicker{font-size:.56rem;margin-bottom:.5rem}
+            .hero-meta{margin-top:.65rem;gap:.3rem}
+            .signal-chip{font-size:.62rem;padding:.3rem .5rem}
+            .hero-meta .signal-chip:nth-child(2),
+            .hero-meta .signal-chip:nth-child(3),
+            .hero-meta .signal-chip:nth-child(4){display:none}
             .surface-story,.story-history{grid-template-columns:1fr}
             .story-lead{grid-column:auto}.story-portfolio .story-step{clip-path:none}
             .metric-grid{grid-template-columns:1fr 1fr;gap:.55rem}
             .metric-node{min-height:6.5rem;padding:.85rem}
-            .metric-value{font-size:1.25rem}
+            .metric-value{font-size:1.1rem}
+            .activity-title{white-space:normal;overflow:visible;text-overflow:clip}
+            [data-testid="stMetricValue"]{font-size:1.45rem!important}
             .capital-orbit{grid-template-columns:1fr;text-align:center}
             .capital-ring{margin:auto}.capital-ledger{text-align:left}
             .activity-rail{grid-template-columns:1fr}.activity-rail:before{display:none}
             .activity-item:before{display:none}
+            .lens-grid{grid-template-columns:1fr}
+            .lens-item{border-right:0;border-bottom:1px solid var(--line);min-height:auto;padding:.82rem .9rem}
+            .lens-item:nth-last-child(-n+2){border-bottom:1px solid var(--line)}
+            .lens-item:last-child{border-bottom:0}
+            .lens-watch{grid-column:auto}
         }
     """
     st.markdown(f"<style>{palette}{css}</style>", unsafe_allow_html=True)
+
 
 
 def render_sidebar() -> None:
@@ -339,7 +370,6 @@ def render_sidebar() -> None:
         st.caption("Four distinct surfaces. One governed portfolio.")
 
 
-
 def render_navigation(options: list[str]) -> tuple[str, bool]:
     st.markdown(
         '<div class="command-label">Capital Intelligence // Command Deck</div>',
@@ -357,7 +387,6 @@ def render_navigation(options: list[str]) -> tuple[str, bool]:
     with appearance:
         dark_mode = st.toggle("Dark", key="dark_mode")
     return page, bool(dark_mode)
-
 
 
 def _hero_visual(profile: SurfaceProfile) -> str:
@@ -492,6 +521,49 @@ def signal_panel(
     )
 
 
+def investment_lens_card(
+    *,
+    title: str,
+    what_changed: object,
+    why_investors_care: object,
+    portfolio_effect: object,
+    cio_response: object,
+    watch_next: object | None = None,
+    variant: str = "today",
+) -> None:
+    """Render a concise educational chain from event to portfolio response."""
+
+    profile = surface_profile(variant.title())
+    items = (
+        ("What changed", what_changed),
+        ("Why investors care", why_investors_care),
+        ("Portfolio effect", portfolio_effect),
+        ("CIO response", cio_response),
+    )
+    cards = []
+    for label, value in items:
+        text = "No additional detail is available." if value in (None, "") else str(value)
+        cards.append(
+            '<div class="lens-item">'
+            f'<div class="lens-label">{escape(label)}</div>'
+            f'<p class="lens-copy">{escape(text)}</p></div>'
+        )
+    if watch_next not in (None, ""):
+        cards.append(
+            '<div class="lens-item lens-watch">'
+            '<div class="lens-label">What to watch next</div>'
+            f'<p class="lens-copy">{escape(str(watch_next))}</p></div>'
+        )
+    st.markdown(
+        f'<div class="investment-lens lens-{profile.slug}">'
+        '<div class="lens-head">'
+        f'<div class="lens-kicker">{escape(profile.kicker)} // portfolio lens</div>'
+        f'<div class="lens-title">{escape(title)}</div></div>'
+        f'<div class="lens-grid">{"".join(cards)}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
 def text_card(title: str, body: object) -> None:
     text = "No additional detail is available." if body in (None, "") else str(body)
     st.markdown(
@@ -561,54 +633,9 @@ def bullet_lines(items: Iterable[object]) -> str:
 def display_frame(frame: pd.DataFrame) -> None:
     st.dataframe(frame, use_container_width=True, hide_index=True)
 
-
-def investment_lens_card(
-    *,
-    title: str,
-    what_changed: object,
-    why_investors_care: object,
-    portfolio_effect: object,
-    cio_response: object,
-    watch_next: object | None = None,
-    variant: str = "today",
-) -> None:
-    """Render a concise educational chain from event to portfolio response."""
-
-    profile = surface_profile(variant.title())
-    items = (
-        ("What changed", what_changed),
-        ("Why investors care", why_investors_care),
-        ("Portfolio effect", portfolio_effect),
-        ("CIO response", cio_response),
-    )
-    cards = []
-    for label, value in items:
-        text = "No additional detail is available." if value in (None, "") else str(value)
-        cards.append(
-            '<div class="lens-item">'
-            f'<div class="lens-label">{escape(label)}</div>'
-            f'<p class="lens-copy">{escape(text)}</p></div>'
-        )
-    if watch_next not in (None, ""):
-        cards.append(
-            '<div class="lens-item lens-watch">'
-            '<div class="lens-label">What to watch next</div>'
-            f'<p class="lens-copy">{escape(str(watch_next))}</p></div>'
-        )
-    st.markdown(
-        f'<div class="investment-lens lens-{profile.slug}">'
-        '<div class="lens-head">'
-        f'<div class="lens-kicker">{escape(profile.kicker)} // portfolio lens</div>'
-        f'<div class="lens-title">{escape(title)}</div></div>'
-        f'<div class="lens-grid">{"".join(cards)}</div></div>',
-        unsafe_allow_html=True,
-    )
-
 _CURRENT_INTERFACE_COMPATIBILITY = (
     "Today's capital briefing",
     "Today's market environment",
     'Current portfolio position',
     'Decisions, actions and learning',
-    '.hero-title{font-size:1.55rem',
-    '.hero-meta .signal-chip:nth-child(2)',
 )
