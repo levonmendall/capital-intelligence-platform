@@ -14,6 +14,7 @@ from cio import (
     EvidenceQuality,
 )
 from opportunity import (
+    AnalysisLane,
     AlternativeKind,
     AlternativeUse,
     OpportunityEngine,
@@ -202,7 +203,6 @@ def test_weak_stale_illiquid_or_incomplete_candidate_is_rejected() -> None:
     assert not queue.ranked
     reasons = queue.rejected[0].reasons
     assert len(reasons) >= 7
-    assert any("expected return" in reason for reason in reasons)
     assert any("evidence" in reason for reason in reasons)
     assert any("liquidity" in reason for reason in reasons)
 
@@ -231,19 +231,15 @@ def test_context_recalculates_opportunity_cost_against_current_holding() -> None
     (
         (
             OpportunityQualificationPolicy(minimum_net_expected_return=0.50),
-            "absolute return threshold",
+            "full-conviction threshold",
         ),
         (
             OpportunityQualificationPolicy(minimum_opportunity_edge=0.20),
             "opportunity edge",
         ),
-        (
-            OpportunityQualificationPolicy(maximum_expected_downside=-0.10),
-            "downside",
-        ),
     ),
 )
-def test_each_declared_qualification_hurdle_has_screening_authority(
+def test_soft_return_hurdles_route_safe_candidates_to_progressive_lanes(
     policy: OpportunityQualificationPolicy,
     reason_fragment: str,
 ) -> None:
@@ -251,8 +247,23 @@ def test_each_declared_qualification_hurdle_has_screening_authority(
         qualification_policy=policy
     ).qualify(_candidate("ACME"), _context())
 
-    assert not qualification.qualified
+    assert qualification.qualified
+    assert qualification.analysis_lane in {
+        AnalysisLane.PARTICIPATION,
+        AnalysisLane.EXPLORATION,
+    }
     assert any(reason_fragment in reason for reason in qualification.reasons)
+
+
+def test_downside_hurdle_retains_hard_screening_authority() -> None:
+    qualification = OpportunityEngine(
+        qualification_policy=OpportunityQualificationPolicy(
+            maximum_expected_downside=-0.10
+        )
+    ).qualify(_candidate("ACME"), _context())
+
+    assert not qualification.qualified
+    assert any("downside" in reason for reason in qualification.reasons)
 
 
 def test_stale_recorded_opportunity_cost_is_rejected() -> None:

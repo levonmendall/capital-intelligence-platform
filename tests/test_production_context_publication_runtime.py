@@ -8,6 +8,7 @@ from application import ProductionCanonicalCIOExecutor
 from application.cio_cycle import CanonicalCIOCycle
 from application.production_context_adapter import build_production_context_provider
 from cio.persistence import SQLiteCIOJournal
+from operations.equity_discovery import EquityDiscoveryResult
 from operations.free_paper_pilot import load_free_paper_pilot_universe
 from portfolio.state import (
     CanonicalPortfolioPosition,
@@ -104,6 +105,21 @@ def _evidence(decision_time: datetime):
     }
 
 
+def _equity_discovery_probe(*, as_of: datetime, **_kwargs) -> EquityDiscoveryResult:
+    return EquityDiscoveryResult(
+        identifier=f"equity-discovery:test:{as_of.isoformat()}",
+        as_of=as_of,
+        policy_version="broad-us-equity-discovery.v1",
+        screened_asset_count=100,
+        snapshot_covered_count=100,
+        deep_shortlist_count=0,
+        selected=(),
+        observed_prices=(),
+        exclusions=(),
+        security_master_snapshot_identifier="sec-company-master:test",
+    )
+
+
 def _provider(settings: ApiSettings, tmp_path):
     return build_production_context_provider(
         eligible_universe_database=tmp_path / "eligible_universe.db",
@@ -142,6 +158,7 @@ def test_publisher_creates_candidates_and_executable_cio_construction(tmp_path) 
         readiness_probe=lambda _universe: _readiness(decision_time),
         cash_probe=lambda: SimpleNamespace(date="2026-07-28", value=4.25),
         evidence_probe=lambda _universe, _as_of: _evidence(decision_time),
+        equity_discovery_probe=_equity_discovery_probe,
         clock=lambda: decision_time,
     )
 
@@ -184,6 +201,7 @@ def test_next_day_cycle_certifies_every_holding_and_routes_holding_review(tmp_pa
         readiness_probe=lambda _universe: _readiness(first_time),
         cash_probe=lambda: SimpleNamespace(date="2026-07-28", value=4.25),
         evidence_probe=lambda _universe, _as_of: _evidence(first_time),
+        equity_discovery_probe=_equity_discovery_probe,
         clock=lambda: first_time,
     )
     first_cycle = _executor(settings, tmp_path).run(as_of=first_time)
@@ -228,6 +246,7 @@ def test_next_day_cycle_certifies_every_holding_and_routes_holding_review(tmp_pa
         readiness_probe=lambda _universe: _readiness(next_time),
         cash_probe=lambda: SimpleNamespace(date="2026-07-29", value=4.20),
         evidence_probe=lambda _universe, _as_of: next_payload,
+        equity_discovery_probe=_equity_discovery_probe,
         clock=lambda: next_time,
     )
     assert second.ready
@@ -261,6 +280,7 @@ def test_live_publication_uses_collection_completion_as_decision_timestamp(tmp_p
         readiness_probe=lambda _universe: _readiness(collection_started),
         cash_probe=lambda: SimpleNamespace(date="2026-07-28", value=4.25),
         evidence_probe=lambda _universe, _as_of: payload,
+        equity_discovery_probe=_equity_discovery_probe,
         clock=lambda: next(times),
     )
 
@@ -286,6 +306,7 @@ def test_future_macro_observation_blocks_publication(tmp_path) -> None:
         readiness_probe=lambda _universe: _readiness(decision_time),
         cash_probe=lambda: SimpleNamespace(date="2026-07-28", value=4.25),
         evidence_probe=lambda _universe, _as_of: payload,
+        equity_discovery_probe=_equity_discovery_probe,
         clock=lambda: decision_time,
     )
 
@@ -307,6 +328,7 @@ def test_completed_publication_is_reused_without_new_provider_calls(tmp_path) ->
         readiness_probe=lambda _universe: _readiness(decision_time),
         cash_probe=lambda: SimpleNamespace(date="2026-07-28", value=4.25),
         evidence_probe=lambda _universe, _as_of: _evidence(decision_time),
+        equity_discovery_probe=_equity_discovery_probe,
         clock=lambda: decision_time,
     )
 
@@ -319,6 +341,7 @@ def test_completed_publication_is_reused_without_new_provider_calls(tmp_path) ->
         readiness_probe=should_not_run,
         cash_probe=should_not_run,
         evidence_probe=should_not_run,
+        equity_discovery_probe=should_not_run,
         clock=lambda: decision_time + timedelta(minutes=5),
     )
 

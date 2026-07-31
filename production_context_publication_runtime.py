@@ -647,6 +647,7 @@ def prepare_production_context_for_cycle(
     readiness_probe: ReadinessProbe | None = None,
     cash_probe: CashProbe | None = None,
     evidence_probe=None,
+    equity_discovery_probe=None,
     clock: Clock | None = None,
 ) -> ProductionContextPublicationResult:
     """Publish decision-complete candidate and holding evidence for the paper cycle."""
@@ -662,6 +663,7 @@ def prepare_production_context_for_cycle(
         readiness_probe=readiness_probe,
         cash_probe=cash_probe,
         evidence_probe=evidence_probe,
+        equity_discovery_probe=equity_discovery_probe,
         clock=clock,
     )
 
