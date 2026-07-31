@@ -232,3 +232,18 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Deployment/migration:** launch new experiment ID only after PR1-PR11 production gates and exact deployed SHA verification.
 - **Rollback:** pause experiment, preserve observations, record termination; never erase or silently restart.
 - **Authority change:** governed research protocol only; no direct policy promotion, CIO change, or real-money authority.
+- **Implementation record:** `config/paper_experiment_protocol.v1.json` freezes
+  one six-week, 30-cycle experiment for the $250,000 `COMPOUNDING` portfolio,
+  including the 15-instrument universe, provider manifest, costs, benchmark,
+  schedule, metrics, missing-data rules, eleven failure scenarios, and
+  terminate-and-reregister change control. Registration requires every PR1-PR11
+  gate, real desktop/mobile browser evidence, a human-approved event benchmark,
+  and equality between the exact Render SHA and experiment code SHA. The
+  append-only store is restart-idempotent; evaluation blocks protocol/code
+  drift, duplicate dates, excess missing data, unreconciled state, and an
+  unreconstructable benchmark. Completion still awaits human review and cannot
+  tune thresholds, promote policy, make performance claims, or authorize real
+  money. Focused experiment/campaign/launch tests pass **25/25**. Deployment
+  creates `paper-experiment.db` only after all launch prerequisites pass; no
+  experiment has been launched prematurely. Rollback terminates the
+  registration, preserves all events, and registers a new version.

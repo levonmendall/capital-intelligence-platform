@@ -31,3 +31,18 @@ PR12 must freeze a versioned protocol before results are interpreted: hypothesis
 ## Launch decision
 
 Continue engineering and deterministic paper rehearsals. Do not call the platform production paper-trading ready and do not begin performance claims until PR1-PR11 gates pass and PR12 records an approved experiment version.
+# Formal paper experiment
+
+`config/paper_experiment_protocol.v1.json` pre-registers a 42-calendar-day,
+30-operating-cycle soak test for exactly one $250,000 `COMPOUNDING` paper
+portfolio. It freezes the 15-instrument pilot, providers, cost model, benchmark,
+schedule, metrics, missing-data policy, failure scenarios, and change control.
+Any drift terminates the registration rather than splicing results.
+
+The experiment is **not launched yet**. The private CLI registration command
+requires evidence that PR1-PR11 passed, the real desktop/iPhone browser gate
+passed, the human-approved event benchmark remains certified, and the exact
+40-character Render deployed SHA equals the experiment code SHA. Until then, registration
+fails closed. Even a completed experiment remains awaiting human review and
+cannot automatically change thresholds, promote policy, support performance
+claims, or authorize real money.
