@@ -118,6 +118,10 @@ def test_selects_priced_call_and_put_from_completed_session():
     }
     assert len(selected) == 4
     assert all(item.bar.close == 12.5 for item in selected)
+    assert all(
+        item.bar.observed_at == datetime(2026, 7, 30, 13, 30, tzinfo=timezone.utc)
+        for item in selected
+    )
     assert all(item.definition.session_date.isoformat() == "2026-07-30" for item in selected)
     assert selected[0].definition.symbol.startswith("SPY260918")
     assert {call[1]["data"]["schema"] for call in post.calls} == {
