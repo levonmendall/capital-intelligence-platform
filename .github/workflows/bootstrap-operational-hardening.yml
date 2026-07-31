@@ -1,0 +1,38 @@
+name: Bootstrap operational hardening
+
+on:
+  push:
+    branches:
+      - fix/operational-truth-and-runtime-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/operational-truth-and-runtime-hardening
+          fetch-depth: 0
+      - name: Activate one-use hardening workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          python - <<'PY'
+          from pathlib import Path
+          target = Path('.github/workflows/harden-operational-truth-runtime.yml')
+          text = target.read_text(encoding='utf-8')
+          old = 'on:\n  workflow_dispatch:\n'
+          new = 'on:\n  push:\n    branches:\n      - fix/operational-truth-and-runtime-hardening\n'
+          if text.count(old) != 1:
+              raise SystemExit('hardening workflow trigger anchor mismatch')
+          target.write_text(text.replace(old, new, 1), encoding='utf-8')
+          Path('.github/workflows/bootstrap-operational-hardening.yml').unlink()
+          PY
+          git add -A
+          git commit -m "Activate operational hardening workflow"
+          git push origin HEAD:fix/operational-truth-and-runtime-hardening
