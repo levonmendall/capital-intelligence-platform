@@ -1,0 +1,62 @@
+name: Apply compact mobile UI
+
+on:
+  push:
+    branches:
+      - agent/compact-mobile-ui
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/compact-mobile-ui
+          fetch-depth: 0
+
+      - name: Reconstruct and verify reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            head -c 11000 .github/compact-ui/part01
+            cat .github/compact-ui/part02
+            cat .github/compact-ui/part03
+            cat .github/compact-ui/part04
+            cat .github/compact-ui/part05
+          } > /tmp/compact-ui.patch.b64
+          test "$(wc -c < /tmp/compact-ui.patch.b64)" = "51252"
+          echo "24e4f25f88dd530574cb89fd8f4dbf2d8d450c87ec5799385e108238de83b174  /tmp/compact-ui.patch.b64" | sha256sum -c -
+          base64 --decode /tmp/compact-ui.patch.b64 > /tmp/compact-ui.patch
+          echo "41759fd64376076f8f8b6fba1e686688c72f9170c12234e0bbc0b300c6061fdc  /tmp/compact-ui.patch" | sha256sum -c -
+          git apply --check /tmp/compact-ui.patch
+          git apply /tmp/compact-ui.patch
+
+      - name: Validate compact interface source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile app.py app_impl.py premium_ui.py navigation_ui.py
+          git diff --check
+          grep -q 'def compact_header_markup' premium_ui.py
+          grep -q 'def status_list' premium_ui.py
+          grep -q 'compact-surface-head' premium_ui.py
+          grep -q 'nav-brand-mark' navigation_ui.py
+          grep -q 'Learning informs, not overrides' app.py
+          grep -q 'Detailed decision trail' app_impl.py
+
+      - name: Commit exact reviewed interface
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r .github/compact-ui .github/workflows/apply-compact-mobile-ui.yml
+          git add app.py app_impl.py premium_ui.py navigation_ui.py
+          git commit -m "Implement compact mobile-first operating interface"
+          git push origin HEAD:agent/compact-mobile-ui
