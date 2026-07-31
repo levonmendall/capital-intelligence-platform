@@ -146,6 +146,20 @@ class ScheduledCanonicalCIOWorker:
         record = self.cycle_store.get_cycle(self._scheduled_cycle_key(scheduled_for))
         return record is None or record.status is not CycleStatus.COMPLETED
 
+    def scheduled_attempt_due(self, now: datetime) -> bool:
+        """Return whether the latest scheduled slot may collect and execute now."""
+
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        scheduled_for = self.scheduled_for(now)
+        if now < scheduled_for:
+            return False
+        return self.cycle_store.cycle_attempt_due(
+            self._scheduled_cycle_key(scheduled_for),
+            now=now,
+            lease=self.cycle_lease,
+        )
+
     def triggered_cycle_key(self, trigger_key: str, *, now: datetime) -> str:
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
@@ -153,6 +167,17 @@ class ScheduledCanonicalCIOWorker:
         return (
             f"canonical-cio:{self.schedule_timezone}:{local_date}:event:"
             f"{_trigger_slug(trigger_key)}"
+        )
+
+    def triggered_attempt_due(self, trigger_key: str, *, now: datetime) -> bool:
+        """Return whether a material-event cycle may collect and execute now."""
+
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        return self.cycle_store.cycle_attempt_due(
+            self.triggered_cycle_key(trigger_key, now=now),
+            now=now,
+            lease=self.cycle_lease,
         )
 
     def needs_triggered_cycle(self, trigger_key: str, *, now: datetime) -> bool:

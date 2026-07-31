@@ -69,6 +69,13 @@ def _invalidate_context_reuse_cache(settings: ApiSettings) -> None:
         return
 
 
+def _attempt_due(worker, method_name: str, *args, **kwargs) -> bool:
+    """Honor durable cooldowns while preserving lightweight test doubles."""
+
+    method = getattr(worker, method_name, None)
+    return True if not callable(method) else bool(method(*args, **kwargs))
+
+
 def _blocked_cycle(context_publication) -> WorkerRunResult:
     return WorkerRunResult(
         cycle_key=context_publication.cycle_key,
@@ -109,7 +116,11 @@ def _run_pass(
     scheduled_attempted = False
     if context_preparer is not None:
         scheduled_for = worker.scheduled_for(now)
-        if now >= scheduled_for and worker.needs_scheduled_cycle(now):
+        if (
+            now >= scheduled_for
+            and worker.needs_scheduled_cycle(now)
+            and _attempt_due(worker, "scheduled_attempt_due", now)
+        ):
             scheduled_attempted = True
             _invalidate_context_reuse_cache(settings)
             scheduled_context = context_preparer(
@@ -143,6 +154,12 @@ def _run_pass(
         and reassessment.trigger_key is not None
         and context_preparer is not None
         and worker.needs_triggered_cycle(reassessment.trigger_key, now=now)
+        and _attempt_due(
+            worker,
+            "triggered_attempt_due",
+            reassessment.trigger_key,
+            now=now,
+        )
     ):
         _invalidate_context_reuse_cache(settings)
         event_scheduled_for = datetime.now(timezone.utc)
