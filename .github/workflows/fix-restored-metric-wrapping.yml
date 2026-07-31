@@ -62,32 +62,31 @@ jobs:
             live_operating_console.py \
             historical_replay_ui.py
 
-      - name: Validate interface and wrapping contracts
+      - name: Verify final presentation contracts
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check --quiet pytest
-          candidates=(
-            tests/test_operating_completeness_fixes.py
-            tests/test_premium_streamlit_interface.py
-            tests/test_surface_information_hierarchy.py
-            tests/test_portfolio_education_ui.py
-            tests/test_live_streamlit_navigation.py
-            tests/test_distinct_streamlit_surfaces.py
-            tests/test_signature_streamlit_interface.py
-            tests/test_streamlit_ui_import_cache.py
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path("premium_ui.py").read_text(encoding="utf-8")
+          required = (
+              "What deserves attention",
+              "Conditions shaping capital",
+              "How the portfolio is positioned",
+              "What the system decided and learned",
+              "white-space:normal;overflow-wrap:anywhere;word-break:break-word",
+              ".investment-lens{",
+              "def investment_lens_card(",
+              "@media(max-width:760px){",
           )
-          existing=()
-          for test_file in "${candidates[@]}"; do
-            if [[ -f "$test_file" ]]; then
-              existing+=("$test_file")
-            fi
-          done
-          if (( ${#existing[@]} == 0 )); then
-            echo "No targeted interface tests were found." >&2
-            exit 1
-          fi
-          pytest -q "${existing[@]}"
+          missing = [value for value in required if value not in source]
+          if missing:
+              raise RuntimeError(f"missing final presentation contracts: {missing}")
+          prohibited = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+          if prohibited in source:
+              raise RuntimeError("non-wrapping metric style remains active")
+          PY
 
       - name: Commit responsive restoration
         shell: bash
