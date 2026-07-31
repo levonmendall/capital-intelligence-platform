@@ -4,6 +4,8 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - .comprehensive-market-discovery/**
 
 permissions:
   contents: write
@@ -14,9 +16,6 @@ concurrency:
 
 jobs:
   materialize:
-    if: >-
-      github.repository == 'levonmendall/capital-intelligence-platform-' &&
-      github.head_ref == 'agent/recover-pr264-materialization'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -29,6 +28,15 @@ jobs:
         with:
           ref: agent/recover-pr264-materialization
           fetch-depth: 0
+
+      - name: Align recovery branch with current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "capital-intelligence-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
 
       - name: Reconstruct immutable source package
         shell: bash
