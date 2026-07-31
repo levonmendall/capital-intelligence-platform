@@ -47,6 +47,39 @@ class _MissingEODHD:
 
 
 class _Databento:
+    configured = True
+
+    def fetch_dataset(self, query):
+        assert query.dataset_type is ProviderDatasetType.ACCOUNT_ENTITLEMENT
+        return _Snapshot(
+            payload=["OPRA.PILLAR", "GLBX.MDP3"],
+            identifier="databento:datasets",
+        )
+
+
+class _MissingDatabento:
+    configured = False
+
+
+class _DatabentoOptions:
+    configured = True
+
+    def validate_access(self, *, as_of):
+        assert as_of == NOW
+        return {
+            "dataset": "OPRA.PILLAR",
+            "session_date": "2026-07-30",
+            "definition_count": 6_888,
+            "eligible_definition_count": 5_000,
+            "priced_sample_count": 4,
+            "sample_symbols": (
+                "SPY260918C00620000",
+                "SPY260918P00620000",
+            ),
+        }
+
+
+class _MissingDatabentoOptions:
     configured = False
 
 
@@ -61,10 +94,17 @@ class _Response:
 
 def _http_get(url, **_kwargs):
     if "/chart/" in url:
-        return _Response({"chart": {"result": [{"timestamp": [1, 2, 3]}]}})
-    if "/options/" in url:
         return _Response(
-            {"optionChain": {"result": [{"expirationDates": [1800000000]}]}}
+            {
+                "chart": {
+                    "result": [
+                        {
+                            "timestamp": [1, 2, 3],
+                            "indicators": {"quote": [{"close": [600.0, 605.0, 610.0]}]},
+                        }
+                    ]
+                }
+            }
         )
     raise AssertionError(url)
 
@@ -94,14 +134,17 @@ def test_live_provider_validation_is_credential_safe_and_ready():
         http_get=_http_get,
         eodhd_provider=_EODHD(),
         databento_provider=_Databento(),
+        databento_options_provider=_DatabentoOptions(),
     )
     assert report.ready is True
-    assert len(report.checks) == 5
+    assert len(report.checks) == 6
     assert {item.name for item in report.checks if item.required} == {
         "eodhd_account_entitlement",
         "eodhd_exchange_directory",
         "yahoo_chart_evidence",
-        "yahoo_option_chain",
+        "databento_account_entitlement",
+        "databento_opra_definitions",
+        "databento_opra_daily_bars",
     }
     payload = report.to_dict()
     encoded = json.dumps(payload)
@@ -119,6 +162,7 @@ def test_missing_required_eodhd_credentials_fail_closed():
         http_get=_http_get,
         eodhd_provider=_MissingEODHD(),
         databento_provider=_Databento(),
+        databento_options_provider=_DatabentoOptions(),
     )
     assert report.ready is False
     assert report.failed_required_checks == (
@@ -127,6 +171,23 @@ def test_missing_required_eodhd_credentials_fail_closed():
     )
     with pytest.raises(ProviderValidationError, match="eodhd_account_entitlement"):
         require_provider_validation(report)
+
+
+def test_missing_required_databento_credentials_fail_closed():
+    report = validate_live_providers(
+        release="release-1",
+        clock=lambda: NOW,
+        http_get=_http_get,
+        eodhd_provider=_EODHD(),
+        databento_provider=_MissingDatabento(),
+        databento_options_provider=_MissingDatabentoOptions(),
+    )
+    assert report.ready is False
+    assert report.failed_required_checks == (
+        "databento_account_entitlement",
+        "databento_opra_definitions",
+        "databento_opra_daily_bars",
+    )
 
 
 def test_provider_validation_report_round_trip(tmp_path):
