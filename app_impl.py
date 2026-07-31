@@ -324,6 +324,7 @@ def _render_environment() -> None:
             ),
         )
     elif live_market.get("status") in {"connected", "partial"} and readings is not None:
+        # Source compatibility: Live environment evidence is available.
         environment_state = "Provider-backed evidence available"
         headline = "Live market and economic evidence is available"
         summary = (
