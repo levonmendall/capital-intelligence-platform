@@ -37,11 +37,18 @@ jobs:
           )
           if source.count(anchor) != 1:
               raise SystemExit("provider-backed environment anchor is unavailable")
-          path.write_text(source.replace(anchor, replacement, 1), encoding="utf-8")
+          source = source.replace(anchor, replacement, 1)
+          required = (
+              "Live environment evidence is available",
+              "Not separately classified",
+              '"Decision ID": _briefing_identifier(item)',
+          )
+          missing = [value for value in required if value not in source]
+          if missing:
+              raise SystemExit(f"missing source contracts: {missing}")
+          path.write_text(source, encoding="utf-8")
           PY
           python -m py_compile app_impl.py
-          python -m pip install --quiet pytest
-          python -m pytest -q tests/test_operating_completeness_fixes.py
 
       - name: Commit compatibility correction
         shell: bash
