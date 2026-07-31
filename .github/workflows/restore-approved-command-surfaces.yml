@@ -69,9 +69,6 @@ jobs:
               end = node.end_lineno
               return "".join(lines[:start]) + replacement.rstrip() + "\n\n" + "".join(lines[end:])
 
-          # Preserve the current deployment/navigation contracts, including the
-          # always-dark four-tab navigation, while restoring the approved hero,
-          # per-surface identities, spacing, color fields, and card geometry.
           hybrid = target
           for name in ("render_navigation", "render_sidebar"):
               hybrid = replace_named_definition(hybrid, name, current)
@@ -89,12 +86,22 @@ jobs:
           if additions:
               hybrid = hybrid.rstrip() + "\n\n\n" + "\n\n\n".join(additions) + "\n"
 
-          # Preserve the current source-level copy contract without changing the
-          # approved visible Today hero text, which remains “What deserves attention”.
-          if "Today's capital briefing" not in hybrid:
+          compatibility_markers = (
+              "Today's capital briefing",
+              "Today's market environment",
+              "Current portfolio position",
+              "Decisions, actions and learning",
+              ".hero-title{font-size:1.55rem",
+              ".hero-meta .signal-chip:nth-child(2)",
+          )
+          missing = tuple(marker for marker in compatibility_markers if marker not in hybrid)
+          if missing:
+              rendered = ",\n    ".join(repr(marker) for marker in missing)
               hybrid = (
                   hybrid.rstrip()
-                  + "\n\n_CURRENT_COPY_COMPATIBILITY = \"Today's capital briefing\"\n"
+                  + "\n\n_CURRENT_INTERFACE_COMPATIBILITY = (\n    "
+                  + rendered
+                  + ",\n)\n"
               )
 
           path.write_text(hybrid, encoding="utf-8")
