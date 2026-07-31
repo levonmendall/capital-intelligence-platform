@@ -114,6 +114,27 @@ def test_selects_priced_call_and_put_from_completed_session():
     assert all(call[1]["auth"] == ("secret", "") for call in post.calls)
 
 
+def test_daily_bars_limit_each_provider_request_to_twenty_contracts():
+    post = _Post()
+    provider = DatabentoOptionsProvider(api_key="secret", http_post=post)
+    symbols = tuple(f"SPY_OPT_{index:03d}" for index in range(45))
+
+    bars = provider.daily_bars(
+        symbols,
+        as_of=AS_OF,
+        session_date=AS_OF.date(),
+    )
+
+    requests = [
+        call[1]["data"]["symbols"].split(",")
+        for call in post.calls
+        if call[1]["data"]["schema"] == "ohlcv-1d"
+    ]
+    assert [len(batch) for batch in requests] == [20, 20, 5]
+    assert sum(len(batch) for batch in requests) == len(symbols)
+    assert set(bars) == set(symbols)
+
+
 def test_validation_returns_only_credential_safe_counts():
     provider = DatabentoOptionsProvider(api_key="secret", http_post=_Post())
 
