@@ -331,12 +331,11 @@ class DatabentoOptionsProvider:
         """Return historical daily bars ending after the completed definition session."""
 
         timestamp = _aware(as_of, field_name="as_of")
-        symbols = tuple(
-            dict.fromkeys(
-                _text(item, field_name="raw_symbol").upper()
-                for item in raw_symbols
-            )
-        )
+        symbol_lookup: dict[str, str] = {}
+        for item in raw_symbols:
+            raw_symbol = _text(item, field_name="raw_symbol").upper()
+            symbol_lookup.setdefault(_compact_occ_symbol(raw_symbol), raw_symbol)
+        symbols = tuple(symbol_lookup.values())
         if not symbols:
             return {}
         if history_days < 1 or history_days > 400:
@@ -353,6 +352,7 @@ class DatabentoOptionsProvider:
                     "schema": "ohlcv-1d",
                     "symbols": ",".join(batch),
                     "stype_in": "raw_symbol",
+                    "stype_out": "raw_symbol",
                     "start": start_date.isoformat(),
                     "end": end_date.isoformat(),
                     "encoding": "json",
@@ -364,8 +364,12 @@ class DatabentoOptionsProvider:
             )
             for row in rows:
                 try:
-                    symbol = _text(row.get("symbol"), field_name="symbol").upper()
-                    if symbol not in grouped:
+                    provider_symbol = _text(
+                        row.get("symbol"),
+                        field_name="symbol",
+                    ).upper()
+                    symbol = symbol_lookup.get(_compact_occ_symbol(provider_symbol))
+                    if symbol is None:
                         continue
                     observed = _timestamp(
                         row.get("pretty_ts_event", row.get("ts_event")),
@@ -377,7 +381,10 @@ class DatabentoOptionsProvider:
                         DatabentoOptionBar(
                             raw_symbol=symbol,
                             observed_at=observed,
-                            close=_number(row.get("close"), field_name="close"),
+                            close=_number(
+                                row.get("pretty_close", row.get("close")),
+                                field_name="close",
+                            ),
                             volume=max(
                                 0.0,
                                 _number(row.get("volume", 0.0), field_name="volume"),

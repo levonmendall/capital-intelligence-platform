@@ -79,9 +79,9 @@ class _Post:
             for symbol in data["symbols"].split(","):
                 records.append(
                     {
-                        "symbol": symbol,
+                        "symbol": "".join(symbol.split()),
                         "pretty_ts_event": "2026-07-30T13:30:00.000000000Z",
-                        "close": "12.500000000",
+                        "pretty_close": "12.500000000",
                         "volume": "25",
                     }
                 )
@@ -117,7 +117,10 @@ def test_selects_priced_call_and_put_from_completed_session():
 def test_daily_bars_limit_each_provider_request_to_twenty_contracts():
     post = _Post()
     provider = DatabentoOptionsProvider(api_key="secret", http_post=post)
-    symbols = tuple(f"SPY_OPT_{index:03d}" for index in range(45))
+    symbols = tuple(
+        f"SPY   260918C{600000 + index:08d}"
+        for index in range(45)
+    )
 
     bars = provider.daily_bars(
         symbols,
