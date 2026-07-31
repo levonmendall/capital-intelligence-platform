@@ -39,6 +39,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: pr264-operational-${{ github.ref }}
@@ -84,20 +85,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      CAPITAL_INTELLIGENCE_EODHD_API_TOKEN: ${{ secrets.CAPITAL_INTELLIGENCE_EODHD_API_TOKEN }}
-      CAPITAL_INTELLIGENCE_DATABENTO_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_DATABENTO_API_KEY }}
+      CAPITAL_INTELLIGENCE_EODHD_API_TOKEN: ${{ secrets.CAPITAL_INTELLIGENCE_EODHD_API_TOKEN || secrets.EODHD_API_TOKEN || secrets.EODHD_API_KEY }}
+      CAPITAL_INTELLIGENCE_DATABENTO_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_DATABENTO_API_KEY || secrets.DATABENTO_API_KEY }}
       CAPITAL_INTELLIGENCE_RELEASE: ${{ github.sha }}
     steps:
       - name: Check out exact release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Require EODHD validation credential
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${CAPITAL_INTELLIGENCE_EODHD_API_TOKEN:-}" ]]; then
-            echo "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN is required for release validation." >&2
-            exit 1
-          fi
       - name: Install provider validation runtime
         shell: bash
         run: |
@@ -105,11 +98,12 @@ jobs:
           python3 -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -r requirements.txt
-      - name: Validate live providers for this release
+      - name: Generate credential-safe live-provider report
         shell: bash
         run: |
           set -euo pipefail
           .venv/bin/python run_provider_validation.py \
+            --allow-failure \
             --report provider-validation-report.json \
             | tee provider-validation-output.json
       - name: Publish credential-safe validation summary
@@ -129,3 +123,116 @@ jobs:
               echo "No report was produced. Review the failed validation step."
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Publish durable audit evidence to PR276
+        if: always() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+
+          marker = "<!-- pr264-live-provider-audit -->"
+          report_path = Path("provider-validation-report.json")
+          if report_path.exists():
+              report = json.loads(report_path.read_text(encoding="utf-8"))
+              ready = report.get("ready") is True
+              status = "✅ PASSED" if ready else "❌ BLOCKED"
+              report_text = json.dumps(report, sort_keys=True, indent=2)
+          else:
+              ready = False
+              status = "❌ BLOCKED"
+              report_text = json.dumps(
+                  {
+                      "ready": False,
+                      "release": os.environ.get("GITHUB_SHA", "unknown"),
+                      "detail": "The live-provider workflow did not produce a report.",
+                      "credentials_exposed": False,
+                      "real_money_authorized": False,
+                  },
+                  sort_keys=True,
+                  indent=2,
+              )
+
+          body = (
+              f"{marker}\n"
+              f"## PR264 live-provider release audit — {status}\n\n"
+              f"Release: `{os.environ.get('GITHUB_SHA', 'unknown')}`\n\n"
+              "This is the credential-safe result from the trusted `main` workflow. "
+              "It contains no provider tokens or raw market payloads.\n\n"
+              f"```json\n{report_text}\n```"
+          )
+          repository = os.environ["GH_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          api_root = f"https://api.github.com/repos/{repository}"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "capital-intelligence-provider-validation",
+          }
+
+          def request_json(url: str, *, method: str = "GET", payload=None):
+              data = None
+              if payload is not None:
+                  data = json.dumps(payload).encode("utf-8")
+              request = Request(url, data=data, headers=headers, method=method)
+              try:
+                  with urlopen(request, timeout=30) as response:
+                      return json.loads(response.read().decode("utf-8"))
+              except HTTPError as error:
+                  detail = error.read().decode("utf-8", errors="replace")
+                  raise RuntimeError(
+                      f"GitHub audit publication failed with HTTP {error.code}: {detail[:500]}"
+                  ) from error
+
+          comments = request_json(f"{api_root}/issues/276/comments?per_page=100")
+          existing = next(
+              (
+                  item
+                  for item in comments
+                  if isinstance(item, dict)
+                  and marker in str(item.get("body") or "")
+              ),
+              None,
+          )
+          if existing is None:
+              request_json(
+                  f"{api_root}/issues/276/comments",
+                  method="POST",
+                  payload={"body": body},
+              )
+          else:
+              request_json(
+                  f"{api_root}/issues/comments/{existing['id']}",
+                  method="PATCH",
+                  payload={"body": body},
+              )
+          PY
+      - name: Enforce required live-provider proof
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("provider-validation-report.json")
+          if not path.exists():
+              raise SystemExit("live-provider validation report was not produced")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          if payload.get("ready") is not True:
+              failed = payload.get("failed_required_checks") or ["unknown"]
+              raise SystemExit(
+                  "required live-provider proof failed: " + ", ".join(map(str, failed))
+              )
+          PY
