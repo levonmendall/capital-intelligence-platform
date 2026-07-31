@@ -22,3 +22,11 @@ Status vocabulary:
 | Public events/news | Multiple official/public sources | Educational only; five-case quality benchmark human-approved | Never directly allocatable | Benchmarking improves relevance and portfolio mapping but cannot authorize a decision or allocation |
 
 The all-market manifest contains 20 declared provider capabilities; only official FRED and SEC EDGAR are enabled at this baseline. A provider being configured or monitored does not make a market decision-certified or allocatable.
+
+The machine-readable authority is now
+`config/market_coverage_registry.v1.json`. Its only allocatable scope is the
+bounded 15-instrument U.S.-listed wrapper pilot. Direct equities, international
+equities, fixed income, commodities/futures, spot FX, spot crypto,
+real-estate/alternatives, and options/volatility remain monitored but are not
+decision-certified or allocatable. The registry validator forbids an
+allocatable instrument without an explicit decision certification.

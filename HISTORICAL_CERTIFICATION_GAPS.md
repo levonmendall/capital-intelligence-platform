@@ -22,3 +22,15 @@ A historical result is certifiable only when every decision input can be reconst
 ## Current conclusion
 
 Historical replay is research-grade infrastructure, not yet a certified basis for performance claims or automatic policy changes. Completion belongs to PR11; experiment use belongs to PR12.
+
+## Machine-enforced baseline
+
+`config/historical_certification_boundaries.v1.json` now names every required
+domain and its exact provider/availability boundary. The baseline deliberately
+marks all eight domains blocked until externally verifiable evidence exists.
+`governance.coverage_certification.certify_historical_cutoff` rejects missing
+boundaries, future-known records, providers outside their certified interval,
+revision-bearing data without revision safety, and universe-changing data
+without survivorship safety. The API exposes the resulting blockers read-only.
+This completes the certification mechanism; it does not mislabel missing data
+as certified, permit performance claims, or promote policy.

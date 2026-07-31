@@ -1,0 +1,18 @@
+{
+  "schema_version": "historical-certification-boundaries.v1",
+  "identifier": "historical-boundaries:baseline:2026-07-31",
+  "boundaries": [
+    {"domain": "macro_vintages", "state": "blocked", "provider_identifier": "official-fred", "coverage_start": null, "coverage_end": null, "certification_identifier": null, "evidence_identifiers": [], "revision_safe": false, "survivorship_safe": false, "limitation": "ALFRED vintages, release calendars, revisions, and late corrections are not certified."},
+    {"domain": "filings_revisions", "state": "blocked", "provider_identifier": "official-sec-edgar", "coverage_start": null, "coverage_end": null, "certification_identifier": null, "evidence_identifiers": [], "revision_safe": false, "survivorship_safe": false, "limitation": "Acceptance timestamps, amendments, restatements, older archives, and normalization-era versions are incomplete."},
+    {"domain": "listings_delistings", "state": "blocked", "provider_identifier": "unassigned-global-reference", "coverage_start": null, "coverage_end": null, "certification_identifier": null, "evidence_identifiers": [], "revision_safe": false, "survivorship_safe": false, "limitation": "Historical identities, listings, delistings, symbol changes, bankruptcies, and venue migrations are incomplete."},
+    {"domain": "corporate_actions", "state": "blocked", "provider_identifier": "unassigned-global-reference", "coverage_start": null, "coverage_end": null, "certification_identifier": null, "evidence_identifiers": [], "revision_safe": false, "survivorship_safe": false, "limitation": "Splits, dividends, mergers, spin-offs, rights, tenders, and adjustment methods are incomplete."},
+    {"domain": "index_membership", "state": "blocked", "provider_identifier": "unassigned-benchmark-history", "coverage_start": null, "coverage_end": null, "certification_identifier": null, "evidence_identifiers": [], "revision_safe": false, "survivorship_safe": false, "limitation": "Announcement dates, effective dates, and constituent histories are incomplete."},
+    {"domain": "liquidity_quotes", "state": "blocked", "provider_identifier": "unassigned-historical-market-data", "coverage_start": null, "coverage_end": null, "certification_identifier": null, "evidence_identifiers": [], "revision_safe": false, "survivorship_safe": false, "limitation": "Contemporaneous bid, ask, depth, volume, venue coverage, and stale-market rules are incomplete."},
+    {"domain": "market_calendars", "state": "blocked", "provider_identifier": "unassigned-global-reference", "coverage_start": null, "coverage_end": null, "certification_identifier": null, "evidence_identifiers": [], "revision_safe": false, "survivorship_safe": false, "limitation": "Historical holidays, half-days, outages, DST, and venue sessions are incomplete."},
+    {"domain": "provider_availability", "state": "blocked", "provider_identifier": "platform-provider-ledger", "coverage_start": null, "coverage_end": null, "certification_identifier": null, "evidence_identifiers": [], "revision_safe": false, "survivorship_safe": false, "limitation": "Exact entitlement, product, adapter, and system-availability periods are not yet registered."}
+  ],
+  "research_only": true,
+  "performance_claims_authorized": false,
+  "policy_promotion_authorized": false,
+  "real_money_authorized": false
+}

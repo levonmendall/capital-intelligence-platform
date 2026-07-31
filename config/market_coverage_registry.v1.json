@@ -1,0 +1,40 @@
+{
+  "schema_version": "market-coverage-registry.v1",
+  "identifier": "market-coverage:compounding-pilot:2026-07-31",
+  "portfolio_code": "COMPOUNDING",
+  "markets": [
+    {
+      "market": "us_listed_pilot_wrappers",
+      "monitored": true,
+      "decision_certification_identifier": "bounded-pilot-universe:free-paper-pilot.v1",
+      "allocatable_instrument_identifiers": [
+        "instrument:us-etf:vti", "instrument:us-etf:vxus", "instrument:us-etf:govt",
+        "instrument:us-etf:lqd", "instrument:us-etf:hyg", "instrument:us-etf:sgov",
+        "instrument:us-etf:dbc", "instrument:us-etf:gld", "instrument:us-etf:uup",
+        "instrument:us-etf:ibit", "instrument:us-etf:vnq", "instrument:us-etf:dbmf",
+        "instrument:us-etf:wtpi", "instrument:us-etf:vixy", "instrument:us-etf:btal"
+      ],
+      "limitations": [
+        "Allocation is limited to these 15 listed U.S. fund instruments and their instrument-level caps.",
+        "Economic exposure through a listed wrapper does not certify its underlying direct market."
+      ]
+    },
+    {
+      "market": "us_macro_rates",
+      "monitored": true,
+      "decision_certification_identifier": "current-macro-evidence:fred:v1",
+      "allocatable_instrument_identifiers": [],
+      "limitations": ["Macro evidence informs CIO context; ALFRED vintage history remains uncertified."]
+    },
+    {"market": "direct_us_equities", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Broad direct stock allocation is outside the current bounded pilot."]},
+    {"market": "direct_international_equities", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Global reference, filing, market, and execution providers are not certified."]},
+    {"market": "direct_fixed_income_credit", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Direct terms, evaluated prices, accrued interest, calls, defaults, and liquidity are not certified."]},
+    {"market": "direct_commodities_futures", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Curves, contracts, rolls, margin, settlement, and execution inputs are blocked."]},
+    {"market": "direct_spot_fx", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Executable FX, fixing, availability, and conversion-cost certification is blocked."]},
+    {"market": "direct_spot_crypto", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Crypto venue corroboration, custody, outages, forks, and historical listing boundaries are blocked."]},
+    {"market": "direct_real_estate_alternatives", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Only listed pilot wrappers are currently bounded for implementation."]},
+    {"market": "direct_options_volatility", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Contract, surface, margin, lifecycle, and execution certifications are blocked."]},
+    {"market": "public_events_information", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Events are educational evidence and never independently allocatable."]}
+  ],
+  "real_money_authorized": false
+}

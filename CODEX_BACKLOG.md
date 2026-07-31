@@ -206,6 +206,22 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Deployment/migration:** append-only certification versions; no market becomes allocatable merely by migration.
 - **Rollback:** deactivate certificate version and fail closed.
 - **Authority change:** governance/data eligibility only; CIO remains sole action authority; no real-money authority.
+- **Implementation record:** `governance/coverage_certification.py` and two
+  versioned registries make monitored, decision-certified, and allocatable
+  scope machine-distinct. Only the 15 explicitly named U.S.-listed pilot
+  wrappers are allocatable; direct crypto and every other broad direct market
+  remain monitored and blocked. Historical certification now requires all
+  eight named domains and rejects missing boundaries, future-known revisions,
+  provider use before availability, weak revision safety, and survivorship
+  gaps. The honest production baseline marks every unresolved domain blocked,
+  research-only, and ineligible for performance claims/policy promotion.
+  Read-only API routes disclose both matrices. Focused behavioral and
+  failure-mode tests cover each domain, blocked allocation, future leakage,
+  revision, survivorship, provider boundaries, API disclosure, and append-only
+  persistence. Deployment adds optional append-only coverage evidence state;
+  no existing data is rewritten. Rollback removes the readers/registry version
+  and must retain the blocked historical posture. CIO authority and real-money
+  authority are unchanged.
 
 ## PR12 — Formal paper experiment and multi-week soak-test launch
 
