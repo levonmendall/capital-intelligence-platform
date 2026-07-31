@@ -56,6 +56,11 @@ from operations.artifact_ordering import (
     parse_embedded_utc,
     stable_payload_identifier,
 )
+from operations.paper_execution_leases import (
+    PaperExecutionLeaseGrant,
+    PaperExecutionLeaseLost,
+    SQLitePaperExecutionLeaseStore,
+)
 from operations.incidents import (
     OperationalIncidentError,
     OperationalIncidentEvent,
@@ -218,6 +223,8 @@ __all__ = [
     "OperationalSLOStatus",
     "OperationalSettings",
     "PaperTestCampaignBaseline",
+    "PaperExecutionLeaseGrant",
+    "PaperExecutionLeaseLost",
     "PaperTestCampaignError",
     "PaperTestCampaignEvaluator",
     "PaperTestCampaignIntegrityError",
@@ -246,6 +253,7 @@ __all__ = [
     "SQLiteOperationalSLOSource",
     "SQLiteOperationalSLOStore",
     "SQLitePaperTestCampaignStore",
+    "SQLitePaperExecutionLeaseStore",
     "SQLiteRecoveryDrillStore",
     "SQLiteResilienceExerciseStore",
     "SecurityMasterSLOObservation",

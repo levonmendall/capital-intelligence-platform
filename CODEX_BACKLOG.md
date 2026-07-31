@@ -109,6 +109,20 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Deployment/migration:** versioned lease/checkpoint schema; operator paused during migration.
 - **Rollback:** pause execution, restore binary, preserve new records for forensic compatibility.
 - **Authority change:** reliability of existing paper authority only; no real-money authority.
+- **Implementation record:** the daily scheduler's existing durable operation
+  leases, stage leases, heartbeat renewal, fencing tokens, idempotency keys, and
+  reconciliation checkpoints were retained. The remaining mtime lock in the
+  exact paper executor is replaced by `paper_execution_leases.db`: atomic
+  acquisition, monotonic fencing tokens, heartbeat renewal, expired-owner
+  takeover, owner/token-qualified release, and a final ownership assertion
+  before status publication. Lost ownership produces a reconciliation-required
+  block and no new status publication. Focused scheduler, restart, overlap,
+  daily-operation, autonomous-operator, and multi-asset reconciliation tests
+  pass **42/42**. Deployment creates one mutable coordination table
+  automatically; it is not canonical portfolio state and is not added to
+  backups. Rollback requires pausing the operator first; the prior binary may
+  ignore but must not delete the lease database. CIO, construction, governance,
+  paper-only scope, and real-money authority are unchanged.
 
 ## PR8 — Real Streamlit browser, mobile, and visual regression testing
 
