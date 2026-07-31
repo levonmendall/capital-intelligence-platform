@@ -1,0 +1,154 @@
+h state", launch_state, "Operating availability"),
++                ("Execution", execution_state, "Current worker state"),
++            ),
++            variant="history",
++        )
++        ui.callout_card(
++            "Current report",
++            str(report.get("summary") or report_state),
++            (
++                f"Generated {_format_timestamp(report.get('generated_at'))} · "
++                f"Decision reference {report.get('decision_identifier') or 'not applicable'}"
++            ),
+         )
+         transactions = report.get("transactions")
+         if isinstance(transactions, list) and transactions:
+@@ -502,15 +511,13 @@ def render_operating_report_history() -> None:
+                 "Attempted": _format_timestamp(payload.get("attempted_at")),
+                 "State": str(payload.get("state", "unavailable")).title(),
+                 "Detail": str(payload.get("detail", "")),
+-                "Execution ID": str(
+-                    payload.get("execution_identifier") or ""
+-                ),
++                "Execution ID": str(payload.get("execution_identifier") or ""),
+                 "Paper only": payload.get("real_money_authorized") is False,
+             }
+         )
+     if statuses:
+-        st.markdown("#### Paper execution attempts")
+-        st.dataframe(statuses, use_container_width=True, hide_index=True)
++        with st.expander("Paper execution attempts", expanded=False):
++            st.dataframe(statuses, use_container_width=True, hide_index=True)
+ 
+ 
+ __all__ = [
+diff --git a/navigation_ui.py b/navigation_ui.py
+index 78932a284805b4531529ecd52865e713aea26295..e0b2938c50e5ee1c7410969e0c2e0f3f952347a6 100644
+--- a/navigation_ui.py
++++ b/navigation_ui.py
+@@ -22,7 +22,7 @@ _NAVIGATION_CSS = """
+ 
+ [data-testid="stSegmentedControl"] {
+     width: 100% !important;
+-    margin: 0 0 1.05rem !important;
++    margin: 0 0 .75rem !important;
+ }
+ 
+ [data-testid="stSegmentedControl"] > div,
+@@ -34,16 +34,16 @@ _NAVIGATION_CSS = """
+     display: grid !important;
+     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+     gap: 0 !important;
+-    padding: .32rem !important;
++    padding: .22rem !important;
+     overflow: hidden !important;
+-    border: 1px solid rgba(86, 224, 255, .34) !important;
+-    border-radius: 1.35rem !important;
++    border: 1px solid rgba(138, 157, 188, .18) !important;
++    border-radius: 1.05rem !important;
+     background:
+         linear-gradient(180deg, rgba(13, 19, 32, .96), rgba(7, 11, 19, .96)) !important;
+     box-shadow:
+         inset 0 1px 0 rgba(255, 255, 255, .045),
+-        0 0 0 1px rgba(91, 124, 255, .08),
+-        0 18px 46px rgba(0, 0, 0, .30) !important;
++        0 0 0 1px rgba(91, 124, 255, .045),
++        0 12px 32px rgba(0, 0, 0, .24) !important;
+     backdrop-filter: blur(22px) !important;
+ }
+ 
+@@ -51,15 +51,15 @@ _NAVIGATION_CSS = """
+     position: relative !important;
+     width: 100% !important;
+     min-width: 0 !important;
+-    min-height: 3.15rem !important;
+-    padding: .72rem .35rem !important;
++    min-height: 2.75rem !important;
++    padding: .56rem .28rem !important;
+     border: 0 !important;
+-    border-radius: 1rem !important;
++    border-radius: .82rem !important;
+     background: transparent !important;
+     color: #9aa9bf !important;
+     box-shadow: none !important;
+     font-size: clamp(.68rem, 2.8vw, .94rem) !important;
+-    font-weight: 620 !important;
++    font-weight: 650 !important;
+     letter-spacing: -.015em !important;
+     white-space: nowrap !important;
+     transition:
+@@ -88,11 +88,10 @@ _NAVIGATION_CSS = """
+     color: #ffffff !important;
+     font-weight: 760 !important;
+     background:
+-        radial-gradient(circle at 50% 115%, rgba(86, 224, 255, .30), transparent 58%),
+-        linear-gradient(135deg, rgba(86, 224, 255, .15), rgba(91, 124, 255, .20)) !important;
++        linear-gradient(135deg, rgba(86, 224, 255, .11), rgba(91, 124, 255, .14)) !important;
+     box-shadow:
+         inset 0 1px 0 rgba(255, 255, 255, .08),
+-        0 0 28px rgba(86, 224, 255, .10) !important;
++        0 8px 22px rgba(86, 224, 255, .08) !important;
+ }
+ 
+ [data-testid="stSegmentedControl"] button[aria-checked="true"]::before,
+@@ -101,7 +100,7 @@ _NAVIGATION_CSS = """
+     position: absolute;
+     left: 16%;
+     right: 16%;
+-    bottom: .18rem;
++    bottom: .1rem;
+     height: 2px;
+     border-radius: 999px;
+     background: #56e0ff;
+@@ -111,14 +110,14 @@ _NAVIGATION_CSS = """
+ @media (max-width: 760px) {
+     [data-testid="stSegmentedControl"] div[role="radiogroup"] {
+         grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+-        padding: .26rem !important;
+-        border-radius: 1.15rem !important;
++        padding: .18rem !important;
++        border-radius: .95rem !important;
+     }
+ 
+     [data-testid="stSegmentedControl"] button {
+-        min-height: 2.9rem !important;
+-        padding: .62rem .12rem !important;
+-        border-radius: .88rem !important;
++        min-height: 2.62rem !important;
++        padding: .48rem .08rem !important;
++        border-radius: .72rem !important;
+     }
+ }
+ 
+diff --git a/premium_ui.py b/premium_ui.py
+index 68c244939af36bbda1af35f4fd4e6fd6e24e4c26..798239d41b777615ae86df5a937b8fb509343dc5 100644
+--- a/premium_ui.py
++++ b/premium_ui.py
+@@ -12,8 +12,8 @@ import streamlit as st
+ 
+ 
+ APP_SUBTITLE = (
+-    "A living capital-allocation command system for one governed portfolio. "
+-    "The interface stays quiet until evidence earns attention."
++    "A governed investment-intelligence system that explains markets, the economy, "
++    "and daily events through their effect on one portfolio."
+ )
+ 
+ 
+@@ -41,8 +41,8 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
+         kicker="Decision pulse",
+         title="Today's capital briefing",
+         copy=(
+-            "What changed, why it matters to the portfolio, and what the CIO "
+-            "recommends now."
++            "Daily market events, economic developments, why investors car
