@@ -128,6 +128,7 @@ def test_validation_returns_only_credential_safe_counts():
 def test_missing_key_fails_closed():
     provider = DatabentoOptionsProvider(api_key="", http_post=_Post())
 
+    assert provider.configured is False
     with pytest.raises(DatabentoOptionsError, match="API key"):
         provider.definitions("SPY", as_of=AS_OF)
 
