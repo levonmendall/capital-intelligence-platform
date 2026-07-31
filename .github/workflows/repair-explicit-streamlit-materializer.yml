@@ -28,12 +28,26 @@ jobs:
           from pathlib import Path
 
           path = Path('.github/workflows/materialize-explicit-streamlit-entrypoints.yml')
-          text = path.read_text(encoding='utf-8')
-          old = '''          page_config = '''st.set_page_config(\\n    page_title=\\\"Capital Intelligence Platform\\\",\\n    page_icon=\\\"📊\\\",\\n    layout=\\\"wide\\\",\\n)\\n\\n\\n'''\n          if source.count(page_config) != 1:\n              raise SystemExit('secure_app page configuration anchor mismatch')\n          source = source.replace(page_config, '', 1)\n          start = source.find('def _authorized_source() -> str:\\n')\n'''
-          new = '''          page_config_start = source.find('st.set_page_config(\\n')\n          if page_config_start >= 0:\n              next_section = source.find('\\n\\n@st.cache_resource', page_config_start)\n              if next_section < 0:\n                  raise SystemExit('secure_app page configuration boundary mismatch')\n              source = source[:page_config_start] + source[next_section + 2:]\n          start = source.find('def _authorized_source() -> str:\\n')\n'''
-          if text.count(old) != 1:
-              raise SystemExit('materializer secure-app repair anchor mismatch')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+          start = next(
+              index
+              for index, line in enumerate(lines)
+              if line.startswith("          page_config = '''st.set_page_config")
+          )
+          end = next(
+              index
+              for index in range(start + 1, len(lines))
+              if "start = source.find('def _authorized_source()" in lines[index]
+          )
+          replacement = [
+              "          page_config_start = source.find('st.set_page_config(\\n')\n",
+              "          if page_config_start >= 0:\n",
+              "              next_section = source.find('\\n\\n@st.cache_resource', page_config_start)\n",
+              "              if next_section < 0:\n",
+              "                  raise SystemExit('secure_app page configuration boundary mismatch')\n",
+              "              source = source[:page_config_start] + source[next_section + 2:]\n",
+          ]
+          path.write_text(''.join(lines[:start] + replacement + lines[end:]), encoding='utf-8')
           Path('.github/workflows/repair-explicit-streamlit-materializer.yml').unlink()
           PY
           git add -A
