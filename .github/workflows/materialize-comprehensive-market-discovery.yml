@@ -44,7 +44,13 @@ jobs:
           echo "584fa603abe1cd1571ef0c54fcfaf2723b26d5b0fce002e22f00441b2a941aa9  .comprehensive-market-discovery/payload.part01.0" | sha256sum --check --strict
           echo "9903e0ec383cfd18e11079097c533fa033fa3ef17915f7833033efae6049bc59  .comprehensive-market-discovery/payload.part01.1" | sha256sum --check --strict
           echo "7641fb5281be09fd6762ebcefbbe350d5aba1054417b5e63f18cd244d11107d0  .comprehensive-market-discovery/payload.part01.2" | sha256sum --check --strict
-          echo "da4163ed5ed57efd40c951f3b33f01c01c9767a16bbacef56a8d73ed6c0ada70  .comprehensive-market-discovery/payload.part01.3" | sha256sum --check --strict
+          echo "950ef6cbec90b790d3202a76577c37d0f61846a1779d0757022c1aaf280dfc08  .comprehensive-market-discovery/payload.part01.3.0" | sha256sum --check --strict
+          echo "01d51489c5efdf0c7e69260df6ab326c3188a4135569afc1730e9b9aad8a45d6  .comprehensive-market-discovery/payload.part01.3.1" | sha256sum --check --strict
+          echo "b73e40072cb370dd48ade29976768d15c39df3d7ef018bcfa7fc553e828643af  .comprehensive-market-discovery/payload.part01.3.2" | sha256sum --check --strict
+          echo "a90a6fdbea78e423aad50e045e22152808f4b4b884824f8bd103a92010a86ec2  .comprehensive-market-discovery/payload.part01.3.3" | sha256sum --check --strict
+          echo "e6d800b4157487c6892ae733e811e5719576ab3287ffd0f8cadce6d991e06fab  .comprehensive-market-discovery/payload.part01.3.4" | sha256sum --check --strict
+          echo "ceac0d63ca60f0703c90ca79eb2f95d5b2f0d7454d1e8b4fabdd5c9a1cfa77ff  .comprehensive-market-discovery/payload.part01.3.5" | sha256sum --check --strict
+          echo "d3171cdb643ecfce5f310dcf464c8185dbe7c7484a37082fb94d39d12a9eb864  .comprehensive-market-discovery/payload.part01.3.6" | sha256sum --check --strict
           echo "768794a1987507bd8765286539d6ce1a2f24acd2dfdc6395e35b70995615afdf  .comprehensive-market-discovery/payload.part02" | sha256sum --check --strict
           cat \
             .comprehensive-market-discovery/payload.part00.0 \
@@ -54,7 +60,13 @@ jobs:
             .comprehensive-market-discovery/payload.part01.0 \
             .comprehensive-market-discovery/payload.part01.1 \
             .comprehensive-market-discovery/payload.part01.2 \
-            .comprehensive-market-discovery/payload.part01.3 \
+            .comprehensive-market-discovery/payload.part01.3.0 \
+            .comprehensive-market-discovery/payload.part01.3.1 \
+            .comprehensive-market-discovery/payload.part01.3.2 \
+            .comprehensive-market-discovery/payload.part01.3.3 \
+            .comprehensive-market-discovery/payload.part01.3.4 \
+            .comprehensive-market-discovery/payload.part01.3.5 \
+            .comprehensive-market-discovery/payload.part01.3.6 \
             .comprehensive-market-discovery/payload.part02 \
             > /tmp/comprehensive-market-discovery.b64
           echo "512c76e9da01d0f73def32c6553b3e6e290ccf7478aae775b7302e53b10af5c5  /tmp/comprehensive-market-discovery.b64" | sha256sum --check --strict
