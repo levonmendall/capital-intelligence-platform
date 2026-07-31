@@ -1218,7 +1218,7 @@ def _company_candidate_and_evidence(
         evidence_identifiers=evidence_ids,
         source_versions=(
             (
-                f"{'DIRECT_MARKET' if direct_market else 'ALPACA_IEX'}:{instrument.symbol}",
+                f"ALPACA_IEX:{instrument.symbol}",
                 features.latest_observed_at.isoformat(),
             ),
             (f"SEC_COMPANY_FACTS:{instrument.issuer_cik}", history.latest.available_at.isoformat()),
