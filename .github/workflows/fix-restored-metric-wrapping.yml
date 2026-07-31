@@ -1,0 +1,89 @@
+name: Fix restored metric wrapping
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: fix-restored-metric-wrapping
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'fix/restore-approved-command-surfaces' &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out restoration branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/restore-approved-command-surfaces
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore responsive metric wrapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("premium_ui.py")
+          source = path.read_text(encoding="utf-8")
+          old = (
+              ".metric-value{font-size:1.5rem;line-height:1.15;font-weight:760;"
+              "letter-spacing:-.04em;color:var(--ink);margin:.7rem 0 .25rem;"
+              "white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+          )
+          new = (
+              ".metric-value{font-size:1.5rem;line-height:1.15;font-weight:760;"
+              "letter-spacing:-.04em;color:var(--ink);margin:.7rem 0 .25rem;"
+              "white-space:normal;overflow-wrap:anywhere;word-break:break-word}"
+          )
+          if source.count(old) != 1:
+              raise RuntimeError("expected restored metric style exactly once")
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
+          PY
+
+          python -m compileall -q \
+            app.py \
+            app_impl.py \
+            premium_ui.py \
+            concise_operating_intelligence_ui.py \
+            navigation_ui.py \
+            cio_report_history_ui.py \
+            live_operating_console.py \
+            historical_replay_ui.py
+
+      - name: Validate interface and wrapping contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --quiet pytest
+          pytest -q \
+            tests/test_operating_completeness_fixes.py \
+            tests/test_premium_streamlit_interface.py \
+            tests/test_surface_information_hierarchy.py \
+            tests/test_portfolio_education_ui.py \
+            tests/test_live_streamlit_navigation.py \
+            tests/test_distinct_streamlit_surfaces.py \
+            tests/test_signature_streamlit_interface.py \
+            tests/test_streamlit_ui_import_cache.py
+
+      - name: Commit responsive restoration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/fix-restored-metric-wrapping.yml
+          git add premium_ui.py
+          git commit -m "Preserve responsive metric wrapping in restored UI"
+          git push origin HEAD:fix/restore-approved-command-surfaces
