@@ -145,8 +145,15 @@ def test_validation_returns_only_credential_safe_counts():
 
     assert result["dataset"] == "OPRA.PILLAR"
     assert result["definition_count"] == 4
+    assert result["eligible_definition_count"] == 4
     assert result["priced_sample_count"] == 4
     assert result["session_date"] == "2026-07-30"
+    assert set(result["sample_symbols"]) == {
+        "SPY260918C00620000",
+        "SPY260918P00620000",
+        "SPY261218C00625000",
+        "SPY261218P00625000",
+    }
     assert "secret" not in json.dumps(result)
 
 
