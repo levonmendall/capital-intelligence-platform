@@ -1,0 +1,41 @@
+name: Repair explicit Streamlit materializer
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.head_ref == 'fix/explicit-streamlit-entrypoints'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/explicit-streamlit-entrypoints
+          fetch-depth: 0
+      - name: Repair secure entrypoint transformation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/materialize-explicit-streamlit-entrypoints.yml')
+          text = path.read_text(encoding='utf-8')
+          old = '''          page_config = '''st.set_page_config(\\n    page_title=\\\"Capital Intelligence Platform\\\",\\n    page_icon=\\\"📊\\\",\\n    layout=\\\"wide\\\",\\n)\\n\\n\\n'''\n          if source.count(page_config) != 1:\n              raise SystemExit('secure_app page configuration anchor mismatch')\n          source = source.replace(page_config, '', 1)\n          start = source.find('def _authorized_source() -> str:\\n')\n'''
+          new = '''          page_config_start = source.find('st.set_page_config(\\n')\n          if page_config_start >= 0:\n              next_section = source.find('\\n\\n@st.cache_resource', page_config_start)\n              if next_section < 0:\n                  raise SystemExit('secure_app page configuration boundary mismatch')\n              source = source[:page_config_start] + source[next_section + 2:]\n          start = source.find('def _authorized_source() -> str:\\n')\n'''
+          if text.count(old) != 1:
+              raise SystemExit('materializer secure-app repair anchor mismatch')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          Path('.github/workflows/repair-explicit-streamlit-materializer.yml').unlink()
+          PY
+          git add -A
+          git commit -m "Repair explicit Streamlit materializer"
+          git push origin HEAD:fix/explicit-streamlit-entrypoints
