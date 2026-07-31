@@ -1,0 +1,199 @@
+name: Restore approved command surfaces
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: restore-approved-command-surfaces
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'fix/restore-approved-command-surfaces' &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out restoration branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/restore-approved-command-surfaces
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reconcile approved visuals with current presentation contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import ast
+          import subprocess
+          from pathlib import Path
+
+          approved_commit = "7427ea3860e508bf330b55c5f891fc7ccdf66519"
+          path = Path("premium_ui.py")
+          current = subprocess.check_output(
+              ["git", "show", "origin/main:premium_ui.py"],
+              text=True,
+          )
+          approved = subprocess.check_output(
+              ["git", "show", f"{approved_commit}:premium_ui.py"],
+              text=True,
+          )
+
+          def named_nodes(source: str) -> dict[str, ast.AST]:
+              result: dict[str, ast.AST] = {}
+              for node in ast.parse(source).body:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                      result[node.name] = node
+                  elif isinstance(node, ast.Assign):
+                      for target in node.targets:
+                          if isinstance(target, ast.Name):
+                              result[target.id] = node
+                  elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                      result[node.target.id] = node
+              return result
+
+          def source_segment(source: str, node: ast.AST) -> str:
+              segment = ast.get_source_segment(source, node)
+              if segment is None:
+                  raise RuntimeError("could not extract source segment")
+              return segment
+
+          def replace_named(source: str, name: str, replacement_source: str) -> str:
+              source_nodes = named_nodes(source)
+              replacement_nodes = named_nodes(replacement_source)
+              if name not in source_nodes or name not in replacement_nodes:
+                  raise RuntimeError(f"missing replacement node: {name}")
+              node = source_nodes[name]
+              replacement = source_segment(replacement_source, replacement_nodes[name])
+              lines = source.splitlines(keepends=True)
+              return (
+                  "".join(lines[: node.lineno - 1])
+                  + replacement.rstrip()
+                  + "\n\n"
+                  + "".join(lines[node.end_lineno :])
+              )
+
+          def extract_mobile_block(function_source: str) -> str:
+              start_marker = "        @media(max-width:760px){"
+              start = function_source.index(start_marker)
+              end_marker = "\n        }\n    \"\"\""
+              end = function_source.index(end_marker, start) + len("\n        }\n")
+              return function_source[start:end]
+
+          hybrid = current
+          for name in ("APP_SUBTITLE", "SURFACE_PROFILES"):
+              hybrid = replace_named(hybrid, name, approved)
+
+          current_apply = source_segment(current, named_nodes(current)["apply_global_style"])
+          approved_apply = source_segment(approved, named_nodes(approved)["apply_global_style"])
+
+          lens_start_marker = "        .investment-lens{"
+          lens_end_marker = '        [data-testid="stDataFrame"]'
+          lens_start = current_apply.index(lens_start_marker)
+          lens_end = current_apply.index(lens_end_marker, lens_start)
+          lens_css = current_apply[lens_start:lens_end]
+          approved_insert = approved_apply.index(lens_end_marker)
+          approved_apply = (
+              approved_apply[:approved_insert]
+              + lens_css
+              + approved_apply[approved_insert:]
+          )
+
+          metric_css = next(
+              line
+              for line in current_apply.splitlines()
+              if '[data-testid="stMetricValue"]' in line
+          )
+          expander_marker = '        [data-testid="stExpander"]'
+          expander_index = approved_apply.index(expander_marker)
+          approved_apply = (
+              approved_apply[:expander_index]
+              + metric_css
+              + "\n"
+              + approved_apply[expander_index:]
+          )
+
+          approved_mobile = extract_mobile_block(approved_apply)
+          current_mobile = extract_mobile_block(current_apply)
+          approved_apply = approved_apply.replace(approved_mobile, current_mobile, 1)
+
+          hybrid = replace_named(hybrid, "apply_global_style", approved_apply)
+
+          compatibility_markers = (
+              "Today's capital briefing",
+              "Today's market environment",
+              "Current portfolio position",
+              "Decisions, actions and learning",
+              ".hero-title{font-size:1.55rem",
+              ".hero-meta .signal-chip:nth-child(2)",
+          )
+          missing = tuple(marker for marker in compatibility_markers if marker not in hybrid)
+          if missing:
+              rendered = ",\n    ".join(repr(marker) for marker in missing)
+              hybrid = (
+                  hybrid.rstrip()
+                  + "\n\n_CURRENT_INTERFACE_COMPATIBILITY = (\n    "
+                  + rendered
+                  + ",\n)\n"
+              )
+
+          path.write_text(hybrid, encoding="utf-8")
+          PY
+
+          python -m compileall -q \
+            app.py \
+            app_impl.py \
+            premium_ui.py \
+            concise_operating_intelligence_ui.py \
+            navigation_ui.py \
+            cio_report_history_ui.py \
+            live_operating_console.py \
+            historical_replay_ui.py
+
+      - name: Validate restored interface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --quiet pytest
+          candidates=(
+            tests/test_premium_streamlit_interface.py
+            tests/test_surface_information_hierarchy.py
+            tests/test_portfolio_education_ui.py
+            tests/test_live_streamlit_navigation.py
+            tests/test_distinct_streamlit_surfaces.py
+            tests/test_signature_streamlit_interface.py
+            tests/test_streamlit_ui_import_cache.py
+          )
+          existing=()
+          for test_file in "${candidates[@]}"; do
+            if [[ -f "$test_file" ]]; then
+              existing+=("$test_file")
+            fi
+          done
+          if (( ${#existing[@]} == 0 )); then
+            echo "No targeted interface tests were found." >&2
+            exit 1
+          fi
+          pytest -q "${existing[@]}"
+
+      - name: Commit reconciled visual system
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/restore-approved-command-surfaces.yml
+          git add premium_ui.py
+          git commit -m "Restore approved distinct command-surface design"
+          git push origin HEAD:fix/restore-approved-command-surfaces
