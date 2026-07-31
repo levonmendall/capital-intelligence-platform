@@ -64,10 +64,10 @@ Strategic wrappers retain exposure-specific caps.
 
 ## Validation boundary
 
-The implementation is synchronized with current `main` and its complete repository
-test suite passes as one merged tree. Repository validation, live paper-readiness,
-ten-year historical certification, and security review remain mandatory on the exact
-final head before merge.
+The implementation is synchronized with current `main`, and all 1,670 tests pass as
+one merged tree. Repository validation, live paper-readiness, ten-year historical
+certification, and security review remain mandatory on the exact final head before
+merge.
 
 ## Authority
 
