@@ -610,6 +610,7 @@ class ChiefInvestmentOfficer:
             reconciliation=reconciliation,
             profile=profile,
             ensemble=ensemble,
+            progressive_lane=progressive_lane,
         )
         if target <= 0.0:
             return (
@@ -721,6 +722,7 @@ class ChiefInvestmentOfficer:
         reconciliation: ReturnReconciliation,
         profile: DecisionPolicyProfile,
         ensemble: GrowthEnsembleAssessment,
+        progressive_lane: bool,
     ) -> float:
         evidence_scale = min(1.0, robustness.evidence_reliability / 0.85)
         probability_scale = min(
@@ -733,6 +735,9 @@ class ChiefInvestmentOfficer:
             max(0.0, robustness.robust_edge)
             / max(profile.minimum_opportunity_edge * 2.0, 0.02),
         )
+        if not progressive_lane:
+            scale = min(evidence_scale, probability_scale, edge_scale)
+            return round(max(0.0, robust_cap * scale), 8)
         blended = (
             evidence_scale * 0.35
             + probability_scale * 0.25
