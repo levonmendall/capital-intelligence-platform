@@ -1,0 +1,146 @@
+2].metric("Avoided losses", summary["avoided_losses"])
+-    learning_columns[3].metric(
+-        "Missed opportunities", summary["missed_opportunities"]
+-    )
+-
+-    macro_columns = st.columns(4)
+-    macro_columns[0].metric(
+-        "Macro coverage",
+-        "Complete" if summary["macro_coverage_satisfied"] else "Incomplete",
+-    )
+-    macro_columns[1].metric(
+-        "Required macro series",
+-        f"{summary['present_macro_dataset_count']} / {summary['required_macro_dataset_count']}",
+-    )
+-    macro_columns[2].metric(
+-        "Macro-excluded observations", summary["macro_excluded_observations"]
++    ui.metric_grid(
++        (
++            ("Replay state", summary["state"], "Certification status"),
++            ("Evidence mode", "Strict" if summary["strict_replay"] else "Research bridge", "Research authority"),
++            ("Canonical cutoffs", summary["invoked_cutoffs"], "Invoked decision dates"),
++            ("Horizon outcomes", summary["realized_outcomes"], "Matured observations"),
++        ),
++        variant="history",
+     )
+-    macro_columns[3].metric(
+-        "Live calibration",
+-        "Certified" if summary["certification_ready"] else "Blocked",
++    ui.metric_grid(
++        (
++            ("Avoided losses", summary["avoided_losses"], "Rejected and later lagged cash"),
++            ("Missed opportunities", summary["missed_opportunities"], "Rejected and later beat cash"),
++            ("Macro coverage", "Complete" if summary["macro_coverage_satisfied"] else "Incomplete", f"{summary['present_macro_dataset_count']} / {summary['required_macro_dataset_count']} series"),
++            ("Live calibration", "Certified" if summary["certification_ready"] else "Blocked", "May influence confidence or size"),
++        ),
++        variant="history",
+     )
+ 
+     period = " · ".join(
+@@ -392,14 +382,19 @@ def render_canonical_historical_replay() -> None:
+         return
+ 
+     if not summary["certification_ready"]:
+-        st.warning(historical_macro_certification_detail(summary))
++        ui.callout_card(
++            "Why calibration is blocked",
++            historical_macro_certification_detail(summary),
++        )
+ 
+-    st.info(
+-        "This is governed research evidence, not an execution surface or verified "
+-        "performance claim. CIO decisions and pre-CIO qualification outcomes are "
+-        "reported separately. Only macro-complete, calibration-eligible observations "
+-        "with outcomes aligned to the original decision horizon may affect live "
+-        "confidence or size."
++    ui.callout_card(
++        "Governance boundary",
++        (
++            "This is governed research evidence, not an execution surface or verified "
++            "performance claim. Only macro-complete, calibration-eligible observations "
++            "aligned to the original decision horizon may reduce confidence or size."
++        ),
++        "Historical learning can inform review; it cannot authorize execution or override the live CIO process.",
+     )
+     st.caption(
+         f"CIO decision observations: {summary['cio_decision_observations']} · "
+@@ -414,11 +409,12 @@ def render_canonical_historical_replay() -> None:
+     if not rows:
+         st.warning("The replay manifest contains no historical cutoffs.")
+         return
+-    st.dataframe(
+-        pd.DataFrame(rows),
+-        use_container_width=True,
+-        hide_index=True,
+-    )
++    with st.expander("Replay cutoff detail", expanded=False):
++        st.dataframe(
++            pd.DataFrame(rows),
++            use_container_width=True,
++            hide_index=True,
++        )
+ 
+     blocked = [row for row in rows if row["Canonical cycle"] == "Blocked"]
+     if blocked:
+diff --git a/live_operating_console.py b/live_operating_console.py
+index e4a8c679dd66d9901fbafb8b02aa1b0de7d1374b..ab1b7855e7d092e3faa0a87ec0de8a9da7b46024 100644
+--- a/live_operating_console.py
++++ b/live_operating_console.py
+@@ -15,6 +15,8 @@ from typing import Any, Mapping, Sequence
+ import pandas as pd
+ import streamlit as st
+ 
++import premium_ui as ui
++
+ from cio_pending_transactions import pending_report_paths
+ from operations.free_paper_pilot import (
+     DEFAULT_UNIVERSE_PATH,
+@@ -445,36 +447,43 @@ def _load_json(path: Path) -> dict[str, Any] | None:
+ 
+ 
+ def render_operating_report_history() -> None:
+-    st.markdown("#### Operating reports")
++    ui.page_header(
++        "Operating reports",
++        "The current portfolio-level report, launch state, and paper-execution status.",
++        "OPS",
++    )
+     json_path, markdown_path = pending_report_paths()
+     report = _load_json(json_path)
+     if report is None:
+         st.info("The first CIO pending-transactions report has not been generated yet.")
+     else:
+-        metrics = st.columns(4)
+-        metrics[0].metric(
+-            "Report state",
++        report_state = (
+             str(report.get("report_state", "Unavailable"))
+             .replace("_", " ")
+-            .title(),
+-        )
+-        metrics[1].metric(
+-            "Transactions",
+-            int(report.get("transaction_count", 0)),
+-        )
+-        metrics[2].metric(
+-            "Launch state",
+-            str(report.get("launch_state", "Unavailable")).title(),
++            .title()
+         )
+-        metrics[3].metric(
+-            "Execution",
++        launch_state = str(report.get("launch_state", "Unavailable")).title()
++        execution_state = (
+             str(report.get("execution_state", "Unavailable"))
+             .replace("_", " ")
+-            .title(),
++            .title()
+         )
+-        st.caption(
+-            f"Generated {_format_timestamp(report.get('generated_at'))} · "
+-            f"Decision {report.get('decision_identifier') or 'unavailable'}"
++        ui.metric_grid(
++            (
++                ("Report state", report_state, "Portfolio recommendation"),
++                ("Transactions", int(report.get("transaction_count", 0)), "Paper actions"),
++                ("Launc
