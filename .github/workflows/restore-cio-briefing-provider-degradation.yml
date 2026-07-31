@@ -1,0 +1,87 @@
+name: Restore CIO briefing provider degradation
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: restore-cio-briefing-provider-degradation
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'fix/restore-cio-briefing-provider-degradation'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out hotfix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/restore-cio-briefing-provider-degradation
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Isolate direct-market provider failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('production_paper_evidence.py')
+          text = source.read_text(encoding='utf-8')
+          old = '''    if direct_instruments:\n        direct_client = DirectGlobalMarketClient()\n        direct_symbols = tuple(item.symbol for item in direct_instruments)\n        bars.update(direct_client.historical_bars(direct_symbols, start=as_of - timedelta(days=_HISTORY_DAYS), end=as_of, timeframe="1Day"))\n        quotes.update(direct_client.latest_quotes(direct_symbols))\n    fred = FREDProvider()\n'''
+          new = '''    direct_market_errors: dict[str, str] = {}\n    if direct_instruments:\n        direct_client = DirectGlobalMarketClient()\n        for instrument in direct_instruments:\n            symbol = instrument.symbol\n            try:\n                symbol_bars = direct_client.historical_bars(\n                    (symbol,),\n                    start=as_of - timedelta(days=_HISTORY_DAYS),\n                    end=as_of,\n                    timeframe="1Day",\n                )\n                symbol_quotes = direct_client.latest_quotes((symbol,))\n            except (OSError, TypeError, ValueError, RuntimeError) as error:\n                direct_market_errors[symbol] = (\n                    f"{type(error).__name__}: {str(error)[:300]}"\n                )\n                continue\n            bars.update(symbol_bars)\n            quotes.update(symbol_quotes)\n    fred = FREDProvider()\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'direct collection replacement point count={text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          old = '''        "company_facts": company_facts,\n        "provider_clock": provider_clock,\n    }\n'''
+          new = '''        "company_facts": company_facts,\n        "provider_clock": provider_clock,\n        "_direct_market_errors": direct_market_errors,\n    }\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'direct error payload insertion count={text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          old = '''    company_facts = payload.get("company_facts", {})\n    live_collection = payload.get("_live_collection") is True\n'''
+          new = '''    company_facts = payload.get("company_facts", {})\n    raw_direct_market_errors = payload.get("_direct_market_errors", {})\n    if not isinstance(raw_direct_market_errors, Mapping):\n        raise ProductionPaperEvidenceError(\n            "direct-market error detail must be a mapping"\n        )\n    direct_market_errors = {\n        str(symbol).strip().upper(): str(detail).strip()\n        for symbol, detail in raw_direct_market_errors.items()\n        if str(symbol).strip() and str(detail).strip()\n    }\n    live_collection = payload.get("_live_collection") is True\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'direct error normalization insertion count={text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          old = '''            exclusions.append(\n                (\n                    instrument.instrument_identifier,\n                    (f"Certified listed-wrapper evidence is incomplete: {error}",),\n                )\n            )\n'''
+          new = '''            detail = f"Certified listed-wrapper evidence is incomplete: {error}"\n            if (\n                instrument.execution_asset_class in DIRECT_EXECUTION_CLASSES\n                and instrument.symbol in direct_market_errors\n            ):\n                detail = (\n                    "Direct-market evidence is temporarily unavailable: "\n                    + direct_market_errors[instrument.symbol]\n                )\n            exclusions.append(\n                (\n                    instrument.instrument_identifier,\n                    (detail,),\n                )\n            )\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'direct exclusion replacement point count={text.count(old)}')
+          source.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          test = Path('tests/test_direct_market_evidence_degradation.py')
+          test.write_text('''from __future__ import annotations\n\nfrom dataclasses import replace\nfrom datetime import datetime, timezone\n\nimport production_paper_evidence as evidence\nfrom operations.direct_global_markets import load_direct_global_market_universe\nfrom operations.free_paper_pilot import load_free_paper_pilot_universe\n\n\nNOW = datetime(2026, 7, 31, 14, 0, tzinfo=timezone.utc)\n\n\nclass _AlpacaClient:\n    def historical_bars(self, symbols, **_kwargs):\n        return {symbol: () for symbol in symbols}\n\n    def latest_quotes(self, symbols):\n        return {symbol: {} for symbol in symbols}\n\n    def clock(self):\n        return {"timestamp": NOW.isoformat()}\n\n\nclass _FredProvider:\n    def get_latest_value(self, series):\n        return {"series": series, "date": NOW.date().isoformat(), "value": 1.0}\n\n\nclass _DirectClient:\n    failed_symbol = ""\n\n    def historical_bars(self, symbols, **_kwargs):\n        symbol = tuple(symbols)[0]\n        if symbol == self.failed_symbol:\n            raise RuntimeError("temporary public provider outage")\n        return {\n            symbol: (\n                {"t": NOW.isoformat(), "c": 100.0, "v": 1_000_000.0},\n            )\n        }\n\n    def latest_quotes(self, symbols):\n        symbol = tuple(symbols)[0]\n        if symbol == self.failed_symbol:\n            raise RuntimeError("temporary public provider outage")\n        return {\n            symbol: {\n                "bp": 99.9,\n                "ap": 100.1,\n                "bs": 100.0,\n                "as": 100.0,\n                "t": NOW.isoformat(),\n                "last": 100.0,\n            }\n        }\n\n\ndef test_one_direct_market_outage_does_not_abort_the_entire_evidence_payload(monkeypatch) -> None:\n    base = load_free_paper_pilot_universe()\n    direct = load_direct_global_market_universe()\n    failed = direct.instruments[0].symbol\n    available = direct.instruments[1].symbol\n    _DirectClient.failed_symbol = failed\n    universe = replace(\n        base,\n        identifier=f"{base.identifier}+degradation-test",\n        instruments=tuple((*base.instruments, *direct.instruments[:2])),\n    )\n\n    monkeypatch.setattr(evidence, "create_alpaca_paper_client", lambda: _AlpacaClient())\n    monkeypatch.setattr(evidence, "FREDProvider", _FredProvider)\n    monkeypatch.setattr(evidence, "DirectGlobalMarketClient", _DirectClient)\n\n    payload = evidence._default_probe(universe, NOW)\n\n    assert failed not in payload["bars"]\n    assert failed not in payload["quotes"]\n    assert available in payload["bars"]\n    assert available in payload["quotes"]\n    assert failed in payload["_direct_market_errors"]\n    assert "temporary public provider outage" in payload["_direct_market_errors"][failed]\n''', encoding='utf-8')
+          PY
+
+          rm -f .github/workflows/restore-cio-briefing-provider-degradation.yml
+          python -m compileall -q production_paper_evidence.py tests/test_direct_market_evidence_degradation.py
+          git add -A
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run complete repository suite
+        run: python -m pytest -q --maxfail=10
+
+      - name: Commit validated hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git commit -m 'Restore CIO briefing during direct-provider degradation'
+          git push origin HEAD:fix/restore-cio-briefing-provider-degradation
