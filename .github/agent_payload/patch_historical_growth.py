@@ -122,10 +122,10 @@ replace_once(
 )
 replace_once(
     "cio/historical_learning.py",
-    '''            confidence_ceiling=round(confidence_ceiling, 8),
+    '''            confidence_ceiling=confidence_ceiling,
             summary=summary,
 ''',
-    '''            confidence_ceiling=round(confidence_ceiling, 8),
+    '''            confidence_ceiling=confidence_ceiling,
             growth_calibration_multiplier=round(growth_calibration, 8),
             ensemble_calibration_authorized=calibration_authorized,
             summary=summary,
