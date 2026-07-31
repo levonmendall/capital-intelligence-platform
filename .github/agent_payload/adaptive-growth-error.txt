@@ -1,0 +1,17 @@
+Applying .github/agent_payload/patch_cio_growth.py
+CIO growth ensemble integration patched
+Applying .github/agent_payload/patch_growth_opportunity.py
+growth opportunity integration patched
+Applying .github/agent_payload/patch_growth_policy.py
+aggressive compounding policy matrix patched
+Applying .github/agent_payload/patch_growth_production.py
+production search, capital policy, documentation, and tests patched
+Applying .github/agent_payload/patch_growth_risk.py
+growth risk sizing patched
+Applying .github/agent_payload/patch_historical_growth.py
+Traceback (most recent call last):
+  File "/home/runner/work/capital-intelligence-platform-/capital-intelligence-platform-/.github/agent_payload/patch_historical_growth.py", line 123, in <module>
+    replace_once(
+  File "/home/runner/work/capital-intelligence-platform-/capital-intelligence-platform-/.github/agent_payload/patch_historical_growth.py", line 20, in replace_once
+    raise RuntimeError(f"{path}: expected 1 match, found {count}: {old[:120]!r}")
+RuntimeError: cio/historical_learning.py: expected 1 match, found 0: '            confidence_ceiling=round(confidence_ceiling, 8),\n            summary=summary,\n'
