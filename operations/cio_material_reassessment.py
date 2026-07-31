@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
+from operations.direct_global_markets import DirectGlobalMarketClient
 from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     active_paper_universe_path,
@@ -134,6 +135,7 @@ class MaterialCIOReassessmentEngine:
         company_move_threshold: float = 0.05,
         scheduled_guard: timedelta = timedelta(minutes=10),
         client_factory: Callable[[], object] = default_alpaca_client,
+        direct_client_factory: Callable[[], object] = DirectGlobalMarketClient,
         active_universe_path: str | Path | None = None,
         fallback_universe_path: str | Path = DEFAULT_UNIVERSE_PATH,
     ) -> None:
@@ -156,6 +158,7 @@ class MaterialCIOReassessmentEngine:
         self.company_move_threshold = float(company_move_threshold)
         self.scheduled_guard = scheduled_guard
         self.client_factory = client_factory
+        self.direct_client_factory = direct_client_factory
         self.active_universe_path = Path(
             active_universe_path or active_paper_universe_path()
         ).expanduser()
@@ -238,17 +241,25 @@ class MaterialCIOReassessmentEngine:
             )
 
         try:
+            instruments = self._instruments()
+            direct_types = {"spot", "token", "future"}
+            listed_symbols = tuple(symbol for symbol, instrument_type in instruments if instrument_type not in direct_types)
+            direct_symbols = tuple(symbol for symbol, instrument_type in instruments if instrument_type in direct_types)
             client = self.client_factory()
-            if client.clock().get("is_open") is not True:
+            listed_open = client.clock().get("is_open") is True
+            snapshots: dict[str, Mapping[str, Any]] = {}
+            if listed_symbols and listed_open:
+                snapshots.update(client.snapshots(listed_symbols))
+            direct_open = False
+            if direct_symbols:
+                direct_client = self.direct_client_factory()
+                direct_open = direct_client.any_open(direct_symbols, as_of=timestamp)
+                if direct_open:
+                    snapshots.update(direct_client.snapshots(direct_symbols))
+            if not listed_open and not direct_open:
                 state["last_scanned_at"] = timestamp.isoformat()
                 save_json(self.state_path, state)
-                return ReassessmentResult(
-                    "market_closed",
-                    timestamp,
-                    detail="The regular U.S. market is closed.",
-                )
-            instruments = self._instruments()
-            snapshots = client.snapshots([symbol for symbol, _ in instruments])
+                return ReassessmentResult("market_closed", timestamp, detail="No governed listed or direct market is currently open.")
         except Exception as error:
             return ReassessmentResult(
                 "failed",
@@ -282,13 +293,9 @@ class MaterialCIOReassessmentEngine:
                         f"benchmark {symbol} moved {day_move:+.2%} from the prior close"
                     )
                 company = instrument_type == "common_stock"
-                threshold = (
-                    self.company_move_threshold
-                    if company
-                    else self.instrument_move_threshold
-                )
+                threshold = {"common_stock": self.company_move_threshold, "spot": 0.0075, "token": 0.04, "future": 0.015}.get(instrument_type, self.instrument_move_threshold)
                 if abs(day_move) >= threshold:
-                    label = "company" if company else "instrument"
+                    label = {"common_stock": "company", "spot": "spot FX market", "token": "crypto market", "future": "futures market"}.get(instrument_type, "instrument")
                     reasons.append(
                         f"{label} {symbol} moved {day_move:+.2%} from the prior close"
                     )

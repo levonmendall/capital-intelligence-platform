@@ -1,10 +1,10 @@
-"""Controlled free-data paper pilot for broad economic asset-class exposure.
+"""Controlled paper universe for listed and direct liquid-market opportunities.
 
-This module intentionally creates a narrower authority than the institutional
-all-market readiness gate. It permits only unlevered, U.S.-listed instruments in
-a versioned allowlist, free Alpaca paper/IEX evidence, exact user approval, and
-internal simulated fills. Direct futures, options, bonds, FX, crypto tokens,
-non-U.S. listings, leverage, and real-money order routing remain prohibited.
+Listed securities use authenticated Alpaca paper/IEX evidence. Direct spot FX,
+direct spot crypto, and fully collateralized futures use a separate public,
+point-in-time paper evidence adapter. Every instrument remains subject to the
+same canonical CIO, construction, authorization, simulation, and portfolio
+controls. Real-money order routing is never authorized here.
 """
 
 from __future__ import annotations
@@ -34,6 +34,16 @@ SUPPORTED_EXECUTION_CLASSES = frozenset(
         CandidateAssetClass.US_EQUITY,
         CandidateAssetClass.US_ETF,
         CandidateAssetClass.CASH_EQUIVALENT,
+        CandidateAssetClass.FX,
+        CandidateAssetClass.CRYPTO,
+        CandidateAssetClass.FUTURE,
+    }
+)
+DIRECT_EXECUTION_CLASSES = frozenset(
+    {
+        CandidateAssetClass.FX,
+        CandidateAssetClass.CRYPTO,
+        CandidateAssetClass.FUTURE,
     }
 )
 
@@ -77,6 +87,11 @@ class FreePaperPilotInstrument:
     instrument_type: str
     maximum_weight: float
     issuer_cik: str | None = None
+    provider_symbol: str | None = None
+    settlement_currency: str | None = None
+    contract_multiplier: float = 1.0
+    trading_session_model: TradingSessionModel | None = None
+    quote_spread_bps: float = 5.0
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -96,18 +111,47 @@ class FreePaperPilotInstrument:
                 value = value.lower()
             object.__setattr__(self, field_name, value)
         if self.execution_asset_class not in SUPPORTED_EXECUTION_CLASSES:
-            raise ValueError(
-                "free paper pilot instruments must be U.S. equity, U.S. ETF, or cash-equivalent instruments"
-            )
-        if self.country_code != "US" or self.currency != "USD":
-            raise ValueError("free paper pilot instruments must be U.S.-listed and USD-denominated")
-        if self.instrument_type not in {"common_stock", "preferred_stock", "fund"}:
-            raise ValueError("free paper pilot permits listed stocks and funds only")
+            raise ValueError("paper instrument has an unsupported execution asset class")
+        direct = self.execution_asset_class in DIRECT_EXECUTION_CLASSES
+        if direct:
+            if self.instrument_type not in {"spot", "token", "future"}:
+                raise ValueError("direct paper instruments must be spot, token, or future")
+            if self.provider_symbol is None or not str(self.provider_symbol).strip():
+                raise ValueError("direct paper instruments require provider_symbol")
+            object.__setattr__(self, "provider_symbol", str(self.provider_symbol).strip())
+            settlement = str(self.settlement_currency or "USD").strip().upper()
+            if settlement != "USD" or self.currency != "USD":
+                raise ValueError("initial direct paper instruments must quote and settle in USD")
+            object.__setattr__(self, "settlement_currency", settlement)
+            if not isinstance(self.trading_session_model, TradingSessionModel):
+                raise ValueError("direct paper instruments require a trading session model")
+            if self.execution_asset_class is CandidateAssetClass.CRYPTO:
+                if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_7:
+                    raise ValueError("direct crypto must use continuous 24/7 sessions")
+            elif self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_5:
+                raise ValueError("direct FX and futures must use continuous 24/5 sessions")
+        else:
+            if self.country_code != "US" or self.currency != "USD":
+                raise ValueError("listed paper instruments must be U.S.-listed and USD-denominated")
+            if self.instrument_type not in {"common_stock", "preferred_stock", "fund"}:
+                raise ValueError("listed paper instruments must be stocks or funds")
+            object.__setattr__(self, "settlement_currency", "USD")
+            object.__setattr__(self, "trading_session_model", TradingSessionModel.EXCHANGE_LOCAL)
         if self.issuer_cik is not None:
             normalized_cik = str(self.issuer_cik).strip()
             if not normalized_cik.isdigit():
                 raise ValueError("issuer_cik must contain only digits")
             object.__setattr__(self, "issuer_cik", normalized_cik.zfill(10))
+        if isinstance(self.contract_multiplier, bool) or not isinstance(
+            self.contract_multiplier, (int, float)
+        ) or float(self.contract_multiplier) <= 0:
+            raise ValueError("contract_multiplier must be positive")
+        object.__setattr__(self, "contract_multiplier", float(self.contract_multiplier))
+        if isinstance(self.quote_spread_bps, bool) or not isinstance(
+            self.quote_spread_bps, (int, float)
+        ) or float(self.quote_spread_bps) <= 0:
+            raise ValueError("quote_spread_bps must be positive")
+        object.__setattr__(self, "quote_spread_bps", float(self.quote_spread_bps))
         object.__setattr__(
             self,
             "maximum_weight",
@@ -120,6 +164,18 @@ class FreePaperPilotInstrument:
         )
 
     def profile(self, *, universe_identifier: str) -> MultiAssetInstrumentProfile:
+        if self.execution_asset_class is CandidateAssetClass.FX:
+            custody = "prime-broker-spot-fx-paper.v1"
+            execution = "direct-spot-fx-simulated-fill.v1"
+        elif self.execution_asset_class is CandidateAssetClass.CRYPTO:
+            custody = "qualified-digital-asset-paper-custody.v1"
+            execution = "direct-spot-crypto-simulated-fill.v1"
+        elif self.execution_asset_class is CandidateAssetClass.FUTURE:
+            custody = "futures-clearing-fully-collateralized-paper.v1"
+            execution = "direct-future-simulated-fill.v1"
+        else:
+            custody = "alpaca-paper-broker-custody.v1"
+            execution = "alpaca-paper-iex-simulated-fill.v1"
         return MultiAssetInstrumentProfile(
             symbol=self.symbol,
             instrument_identifier=self.instrument_identifier,
@@ -127,19 +183,41 @@ class FreePaperPilotInstrument:
             venue=self.venue,
             country_code=self.country_code,
             price_currency=self.currency,
-            settlement_currency=self.currency,
+            settlement_currency=self.settlement_currency or self.currency,
             approval_identifier=f"core-policy:{universe_identifier}",
             approval_state=AssetClassApprovalState.PAPER_ELIGIBLE,
             unlevered=True,
-            spot_only=True,
-            custody_settlement_identifier="alpaca-paper-broker-custody.v1",
-            execution_model_version="alpaca-paper-iex-simulated-fill.v1",
+            spot_only=self.execution_asset_class is not CandidateAssetClass.FUTURE,
+            custody_settlement_identifier=custody,
+            execution_model_version=execution,
             instrument_type=self.instrument_type,
             gross_leverage=1.0,
             defined_risk=True,
             margin_required=False,
-            trading_session_model=TradingSessionModel.EXCHANGE_LOCAL,
+            contract_multiplier=self.contract_multiplier,
+            contract_model_version=(
+                "fully-collateralized-continuous-future-contract.v1"
+                if self.execution_asset_class is CandidateAssetClass.FUTURE
+                else None
+            ),
+            margin_model_version=(
+                "fully-collateralized-notional-no-margin-leverage.v1"
+                if self.execution_asset_class is CandidateAssetClass.FUTURE
+                else None
+            ),
+            lifecycle_model_version=(
+                "continuous-future-expiry-lifecycle.v1"
+                if self.execution_asset_class is CandidateAssetClass.FUTURE
+                else None
+            ),
+            roll_model_version=(
+                "continuous-future-explicit-roll-research.v1"
+                if self.execution_asset_class is CandidateAssetClass.FUTURE
+                else None
+            ),
+            trading_session_model=self.trading_session_model,
         )
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +236,6 @@ class FreePaperPilotUniverse:
     maximum_quote_age_minutes: int
     required_exposure_classes: tuple[str, ...]
     instruments: tuple[FreePaperPilotInstrument, ...]
-    direct_instrument_classes_prohibited: tuple[str, ...]
     limitations: tuple[str, ...]
     schema_version: str = "free-paper-pilot-universe.v1"
 
@@ -222,9 +299,13 @@ class FreePaperPilotUniverse:
             if item.economic_exposure not in {"cash_treasury"}
         ):
             raise ValueError("instrument maximum exceeds pilot single-instrument limit")
-        crypto = self.instrument_for_exposure("crypto")
-        if crypto.maximum_weight > self.maximum_crypto_proxy_weight:
-            raise ValueError("crypto proxy exceeds the pilot limit")
+        crypto = tuple(
+            item for item in self.instruments
+            if item.execution_asset_class is CandidateAssetClass.CRYPTO
+            or item.economic_exposure == "crypto"
+        )
+        if any(item.maximum_weight > self.maximum_crypto_proxy_weight for item in crypto):
+            raise ValueError("crypto instrument exceeds the pilot limit")
         volatility = self.instrument_for_exposure("volatility")
         if volatility.maximum_weight > self.maximum_volatility_proxy_weight:
             raise ValueError("volatility proxy exceeds the pilot limit")
@@ -311,9 +392,14 @@ def _free_paper_pilot_universe_from_payload(
             venue=str(item["venue"]),
             country_code=str(item["country_code"]),
             currency=str(item["currency"]),
+            settlement_currency=(None if item.get("settlement_currency") in {None, ""} else str(item["settlement_currency"])),
             instrument_type=str(item["instrument_type"]),
             maximum_weight=float(item["maximum_weight"]),
             issuer_cik=(None if item.get("issuer_cik") in {None, ""} else str(item["issuer_cik"])),
+            provider_symbol=(None if item.get("provider_symbol") in {None, ""} else str(item["provider_symbol"])),
+            contract_multiplier=float(item.get("contract_multiplier", 1.0)),
+            trading_session_model=(None if item.get("trading_session_model") in {None, ""} else TradingSessionModel(str(item["trading_session_model"]))),
+            quote_spread_bps=float(item.get("quote_spread_bps", 5.0)),
         )
         for item in raw_instruments
         if isinstance(item, Mapping)
@@ -341,9 +427,6 @@ def _free_paper_pilot_universe_from_payload(
             str(item) for item in payload["required_exposure_classes"]
         ),
         instruments=instruments,
-        direct_instrument_classes_prohibited=tuple(
-            str(item) for item in payload["direct_instrument_classes_prohibited"]
-        ),
         limitations=tuple(str(item) for item in payload["limitations"]),
         schema_version=str(payload["schema_version"]),
     )
@@ -392,15 +475,17 @@ def free_paper_pilot_universe_payload(
                 "venue": item.venue,
                 "country_code": item.country_code,
                 "currency": item.currency,
+                "settlement_currency": item.settlement_currency,
                 "instrument_type": item.instrument_type,
                 "maximum_weight": item.maximum_weight,
                 "issuer_cik": item.issuer_cik,
+                "provider_symbol": item.provider_symbol,
+                "contract_multiplier": item.contract_multiplier,
+                "trading_session_model": (None if item.trading_session_model is None else item.trading_session_model.value),
+                "quote_spread_bps": item.quote_spread_bps,
             }
             for item in universe.instruments
         ],
-        "direct_instrument_classes_prohibited": list(
-            universe.direct_instrument_classes_prohibited
-        ),
         "limitations": list(universe.limitations),
     }
 

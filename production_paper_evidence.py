@@ -47,6 +47,10 @@ from committee.specialists import (
     MacroSpecialistContext,
     MarketSpecialistContext,
 )
+from operations.direct_global_markets import (
+    DIRECT_EXECUTION_CLASSES,
+    DirectGlobalMarketClient,
+)
 from operations.free_paper_pilot import FreePaperPilotInstrument, FreePaperPilotUniverse
 from portfolio.state import CanonicalPortfolioSnapshot
 from providers.alpaca_paper import create_alpaca_paper_client
@@ -61,6 +65,7 @@ _MODEL_VERSION = "listed-wrapper-evidence.v1"
 _FORECAST_VERSION = "listed-wrapper-macro-distribution-forecast.v1"
 _VALUATION_VERSION = "listed-wrapper-distribution-valuation.v1"
 _COMPANY_EVIDENCE_VERSION = "sec-company-equity-evidence.v1"
+_DIRECT_MARKET_EVIDENCE_VERSION = "direct-global-market-evidence.v1"
 
 
 class ProductionPaperEvidenceError(RuntimeError):
@@ -114,20 +119,22 @@ def _default_probe(
     decision_as_of: datetime,
 ) -> Mapping[str, object]:
     as_of = _aware(decision_as_of, field_name="decision_as_of")
-    symbols = tuple(item.symbol for item in universe.instruments)
+    listed_instruments = tuple(item for item in universe.instruments if item.execution_asset_class not in DIRECT_EXECUTION_CLASSES)
+    direct_instruments = tuple(item for item in universe.instruments if item.execution_asset_class in DIRECT_EXECUTION_CLASSES)
+    bars: dict[str, object] = {}
+    quotes: dict[str, object] = {}
     client = create_alpaca_paper_client()
-    bars = client.historical_bars(
-        symbols,
-        start=as_of - timedelta(days=_HISTORY_DAYS),
-        end=as_of,
-        timeframe="1Day",
-    )
-    quotes = client.latest_quotes(symbols)
+    if listed_instruments:
+        listed_symbols = tuple(item.symbol for item in listed_instruments)
+        bars.update(client.historical_bars(listed_symbols, start=as_of - timedelta(days=_HISTORY_DAYS), end=as_of, timeframe="1Day"))
+        quotes.update(client.latest_quotes(listed_symbols))
+    if direct_instruments:
+        direct_client = DirectGlobalMarketClient()
+        direct_symbols = tuple(item.symbol for item in direct_instruments)
+        bars.update(direct_client.historical_bars(direct_symbols, start=as_of - timedelta(days=_HISTORY_DAYS), end=as_of, timeframe="1Day"))
+        quotes.update(direct_client.latest_quotes(direct_symbols))
     fred = FREDProvider()
-    macro = {
-        series: fred.get_latest_value(series)
-        for series in ("DGS10", "T10Y2Y", "VIXCLS", "DFF")
-    }
+    macro = {series: fred.get_latest_value(series) for series in ("DGS10", "T10Y2Y", "VIXCLS", "DFF")}
     company_facts: dict[str, object] = {}
     stock_instruments = tuple(
         item for item in universe.instruments
@@ -667,10 +674,15 @@ def _candidate_and_evidence(
     candidate_identifier = f"candidate:paper-pilot:{as_of.strftime('%Y%m%dT%H%M%S%fZ')}:{instrument.symbol}"
     market_ids = features.evidence_identifiers
     evidence_ids = tuple(dict.fromkeys((*market_ids, *macro_identifiers)))
+    direct_market = instrument.execution_asset_class in DIRECT_EXECUTION_CLASSES
+    security_master_prefix = "direct-market-universe" if direct_market else "alpaca-paper-assets"
+    security_record_prefix = "direct-market-instrument" if direct_market else "alpaca-paper-asset"
+    replication_method = {CandidateAssetClass.FX: "direct-spot-fx-paper", CandidateAssetClass.CRYPTO: "direct-spot-crypto-paper", CandidateAssetClass.FUTURE: "direct-fully-collateralized-future-paper"}.get(instrument.execution_asset_class, "us-listed-economic-exposure-wrapper")
+    model_versions = ((_DIRECT_MARKET_EVIDENCE_VERSION,) if direct_market else (_MODEL_VERSION,))
     candidate = CandidateDecisionRecord(
         identifier=candidate_identifier,
         as_of=as_of,
-        schema_version="paper-listed-wrapper-candidate.v1",
+        schema_version=("paper-direct-market-candidate.v1" if direct_market else "paper-listed-wrapper-candidate.v1"),
         instrument=CandidateInstrument(
             instrument_id=instrument.instrument_identifier,
             symbol=instrument.symbol,
@@ -681,22 +693,16 @@ def _candidate_and_evidence(
             average_daily_dollar_volume=features.average_daily_dollar_volume,
             data_age_hours=data_age,
             analytical_coverage=min(1.0, features.bar_count / 756.0),
-            security_master_snapshot_identifier=f"alpaca-paper-assets:{as_of.strftime('%Y%m%dT%H%M%S%fZ')}",
-            security_master_record_identifiers=(
-                f"alpaca-paper-asset:{instrument.symbol}",
-            ),
+            security_master_snapshot_identifier=f"{security_master_prefix}:{as_of.strftime('%Y%m%dT%H%M%S%fZ')}",
+            security_master_record_identifiers=(f"{security_record_prefix}:{instrument.symbol}",),
             instrument_type=instrument.instrument_type,
             economic_exposure_class=_EXPOSURE_ASSET_CLASSES.get(
                 instrument.economic_exposure,
                 instrument.execution_asset_class,
             ),
             leverage_multiplier=1.0,
-            uses_derivatives=instrument.economic_exposure in {
-                "managed_futures",
-                "option_strategies",
-                "volatility",
-            },
-            replication_method="us-listed-economic-exposure-wrapper",
+            uses_derivatives=(instrument.execution_asset_class is CandidateAssetClass.FUTURE or instrument.economic_exposure in {"managed_futures", "option_strategies", "volatility"}),
+            replication_method=replication_method,
         ),
         current_price=features.current_price,
         decision_horizon_days=365,
@@ -717,7 +723,7 @@ def _candidate_and_evidence(
             f"Annualized volatility is {features.annualized_volatility:.2%} and maximum drawdown is {features.maximum_drawdown:.2%}",
         ),
         critical_assumptions=(
-            "The listed wrapper continues to represent its governed economic exposure",
+            ("The direct market remains liquid and operational under its governed session and contract model" if direct_market else "The listed wrapper continues to represent its governed economic exposure"),
             "Point-in-time return distributions remain informative over the one-year horizon",
         ),
         invalidation_conditions=(
@@ -748,7 +754,7 @@ def _candidate_and_evidence(
         ),
         review_at=as_of + timedelta(days=30),
         evidence_identifiers=evidence_ids,
-        model_versions=(_MODEL_VERSION,),
+        model_versions=model_versions,
         evidence_dependencies=(
             EvidenceDependency(
                 identifier=f"derived-market-distribution:{instrument.symbol}:{as_of.date().isoformat()}",
