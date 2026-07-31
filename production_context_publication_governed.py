@@ -25,6 +25,10 @@ from cio.persistence import serialize_candidate_decision, serialize_opportunity_
 from evaluation.opportunity_outcomes import SQLiteOpportunityOutcomeStore
 from opportunity import AlternativeKind, AlternativeUse, OpportunityEngine, OpportunitySetContext
 from operations.direct_global_markets import load_direct_global_market_universe
+from operations.comprehensive_market_discovery import (
+    ComprehensiveMarketDiscoveryResult,
+    discover_comprehensive_markets,
+)
 from operations.equity_discovery import (
     EquityDiscoveryResult,
     discover_us_equities,
@@ -65,9 +69,10 @@ from production_context_publication_runtime import (
     _state_path,
 )
 
-STATE_SCHEMA = "production-context-publication-state.v4-growth"
+STATE_SCHEMA = "production-context-publication-state.v5-comprehensive-markets"
 
 EquityDiscoveryProbe = Callable[..., EquityDiscoveryResult]
+ComprehensiveDiscoveryProbe = Callable[..., ComprehensiveMarketDiscoveryResult]
 
 
 def _blocked(
@@ -243,6 +248,7 @@ def prepare_governed_production_context_for_cycle(
     cash_probe: CashProbe | None = None,
     evidence_probe: EvidenceProbe | None = None,
     equity_discovery_probe: EquityDiscoveryProbe | None = None,
+    comprehensive_discovery_probe: ComprehensiveDiscoveryProbe | None = None,
     clock: Clock | None = None,
 ) -> ProductionContextPublicationResult:
     """Publish cross-asset wrappers plus dynamically discovered company equities."""
@@ -416,23 +422,57 @@ def prepare_governed_production_context_for_cycle(
             excluded_symbols=tuple(base_symbols),
         )
         discovered = discovery.instruments_for_holdings(held_symbols)
-        direct_universe = load_direct_global_market_universe()
+        fully_injected_publication = all(
+            item is not None
+            for item in (
+                readiness_probe,
+                cash_probe,
+                evidence_probe,
+                equity_discovery_probe,
+                clock,
+            )
+        )
+        if comprehensive_discovery_probe is None and fully_injected_publication:
+            direct_universe = load_direct_global_market_universe()
+
+            class _InjectedComprehensiveDiscovery:
+                identifier = f"injected-publication:{direct_universe.identifier}"
+                manifest_fingerprint = direct_universe.identifier
+                policy_version = direct_universe.schema_version
+                lanes = ()
+
+                @staticmethod
+                def instruments_for_holdings(_held_symbols):
+                    return direct_universe.instruments
+
+            comprehensive = _InjectedComprehensiveDiscovery()
+        else:
+            comprehensive = (comprehensive_discovery_probe or discover_comprehensive_markets)(
+                as_of=decision_as_of,
+                held_symbols=held_symbols,
+                tracked_symbols=tracked_symbols,
+                excluded_symbols=tuple((*base_symbols, *(item.symbol for item in discovered))),
+            )
+        comprehensive_instruments = comprehensive.instruments_for_holdings(held_symbols)
         universe = replace(
             base_universe,
             identifier=(
                 f"{base_universe.identifier}+{discovery.identifier}"
-                f"+{direct_universe.identifier}"
+                f"+{comprehensive.identifier}"
             ),
             objective=(
                 base_universe.objective
-                + " Daily broad U.S.-company discovery competes for exploratory capital."
+                + " Daily broad U.S.-company and comprehensive global-market discovery compete for capital."
             ),
-            instruments=tuple((*base_universe.instruments, *discovered, *direct_universe.instruments)),
+            instruments=tuple(
+                (*base_universe.instruments, *discovered, *comprehensive_instruments)
+            ),
             limitations=tuple(
                 dict.fromkeys(
                     (*base_universe.limitations,
-                     "Individual equities enter through broad SEC/Alpaca discovery and begin with a 1% exploratory cap.",
-                     *direct_universe.limitations)
+                     "Individual U.S. equities enter through broad SEC/Alpaca discovery and begin with a 1% exploratory cap.",
+                     "International equities, complete FX and crypto catalogs, dated futures chains, direct bonds, and long-premium defined-risk options enter through comprehensive point-in-time discovery.",
+                     "Discovery can nominate instruments but cannot choose an action, size a position, construct a portfolio, authorize execution, or enable real money.")
                 )
             ),
         )
@@ -443,7 +483,7 @@ def prepare_governed_production_context_for_cycle(
             decision_as_of=decision_as_of,
             detail=(
                 "Complete opportunity search is unavailable; a no-superior-opportunity "
-                "conclusion is prohibited until broad U.S.-equity discovery completes: "
+                "conclusion is prohibited until broad U.S.-equity discovery completes and six-lane global discovery completes: "
                 f"{type(error).__name__}: {error}"
             ),
             instrument_count=len(base_universe.instruments),
@@ -596,6 +636,8 @@ def prepare_governed_production_context_for_cycle(
             + (() if discovery is None else (
                 ("broad_us_equity_discovery", discovery.identifier),
                 ("sec_company_master", discovery.security_master_snapshot_identifier),
+                ("comprehensive_market_discovery", comprehensive.identifier),
+                ("comprehensive_market_manifest", comprehensive.manifest_fingerprint),
             ))
         ),
         model_versions=(
@@ -603,6 +645,7 @@ def prepare_governed_production_context_for_cycle(
             ("wrapper_candidate_admission", "listed-wrapper-evidence.v1"),
             ("company_candidate_admission", "sec-company-equity-evidence.v1"),
             ("equity_discovery", "disabled" if discovery is None else discovery.policy_version),
+            ("comprehensive_market_discovery", comprehensive.policy_version),
         ),
         instrument_approval_identifiers=tuple(
             (
@@ -846,6 +889,16 @@ def prepare_governed_production_context_for_cycle(
         "qualified_candidate_count": len(qualified_identifiers),
         "holding_evidence_count": len(build_result.holding_evidence),
         "instrument_count": len(universe.instruments),
+        "comprehensive_discovery_identifier": comprehensive.identifier,
+        "comprehensive_discovery_manifest_fingerprint": comprehensive.manifest_fingerprint,
+        "comprehensive_discovery_lane_counts": {
+            lane.asset_class.value: {
+                "catalog": lane.catalog_count,
+                "deep": lane.deep_analyzed_count,
+                "selected": len(lane.selected),
+            }
+            for lane in comprehensive.lanes
+        },
         "opportunity_outcomes": (
             {"state": "unavailable", "resolved_this_cycle": outcome_resolution_count}
             if outcome_summary is None

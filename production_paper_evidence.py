@@ -50,6 +50,7 @@ from committee.specialists import (
 from operations.direct_global_markets import (
     DIRECT_EXECUTION_CLASSES,
     DirectGlobalMarketClient,
+    DirectGlobalMarketUniverse,
 )
 from operations.free_paper_pilot import FreePaperPilotInstrument, FreePaperPilotUniverse
 from portfolio.state import CanonicalPortfolioSnapshot
@@ -130,7 +131,14 @@ def _default_probe(
         quotes.update(client.latest_quotes(listed_symbols))
     direct_market_errors: dict[str, str] = {}
     if direct_instruments:
-        direct_client = DirectGlobalMarketClient()
+        direct_client = DirectGlobalMarketClient(
+            DirectGlobalMarketUniverse(
+                identifier=f"dynamic-direct-evidence:{universe.identifier}",
+                provider_identifier="comprehensive-direct-market-evidence.v1",
+                instruments=direct_instruments,
+                limitations=universe.limitations,
+            )
+        )
         for instrument in direct_instruments:
             symbol = instrument.symbol
             try:
@@ -693,8 +701,27 @@ def _candidate_and_evidence(
     direct_market = instrument.execution_asset_class in DIRECT_EXECUTION_CLASSES
     security_master_prefix = "direct-market-universe" if direct_market else "alpaca-paper-assets"
     security_record_prefix = "direct-market-instrument" if direct_market else "alpaca-paper-asset"
-    replication_method = {CandidateAssetClass.FX: "direct-spot-fx-paper", CandidateAssetClass.CRYPTO: "direct-spot-crypto-paper", CandidateAssetClass.FUTURE: "direct-fully-collateralized-future-paper"}.get(instrument.execution_asset_class, "us-listed-economic-exposure-wrapper")
+    replication_method = {
+        CandidateAssetClass.INTERNATIONAL_EQUITY: "direct-global-equity-paper",
+        CandidateAssetClass.FIXED_INCOME: "direct-bond-paper",
+        CandidateAssetClass.FX: "direct-spot-fx-paper",
+        CandidateAssetClass.CRYPTO: "direct-spot-crypto-paper",
+        CandidateAssetClass.FUTURE: "direct-dated-fully-collateralized-future-paper",
+        CandidateAssetClass.OPTION: "direct-long-premium-defined-risk-option-paper",
+    }.get(instrument.execution_asset_class, "us-listed-economic-exposure-wrapper")
     model_versions = ((_DIRECT_MARKET_EVIDENCE_VERSION,) if direct_market else (_MODEL_VERSION,))
+    horizon_days = 365
+    if instrument.expiration_at:
+        try:
+            expiry = _aware(
+                datetime.fromisoformat(instrument.expiration_at.replace("Z", "+00:00")),
+                field_name="instrument expiration",
+            )
+            horizon_days = max(7, min(365, (expiry - as_of).days))
+        except ValueError as error:
+            raise ProductionPaperEvidenceError(
+                f"{instrument.symbol} expiration is invalid"
+            ) from error
     candidate = CandidateDecisionRecord(
         identifier=candidate_identifier,
         as_of=as_of,
@@ -717,11 +744,11 @@ def _candidate_and_evidence(
                 instrument.execution_asset_class,
             ),
             leverage_multiplier=1.0,
-            uses_derivatives=(instrument.execution_asset_class is CandidateAssetClass.FUTURE or instrument.economic_exposure in {"managed_futures", "option_strategies", "volatility"}),
+            uses_derivatives=(instrument.execution_asset_class in {CandidateAssetClass.FUTURE, CandidateAssetClass.OPTION} or instrument.economic_exposure in {"managed_futures", "option_strategies", "volatility"}),
             replication_method=replication_method,
         ),
         current_price=features.current_price,
-        decision_horizon_days=365,
+        decision_horizon_days=horizon_days,
         base_case_return=base_return,
         bull_case_return=bull_return,
         bear_case_return=bear_return,
@@ -747,7 +774,7 @@ def _candidate_and_evidence(
             "The macro regime or rolling return distribution changes materially",
         ),
         supporting_evidence=(
-            f"{features.bar_count} authenticated point-in-time IEX daily bars",
+            f"{features.bar_count} point-in-time daily market bars with provider lineage",
             f"Rolling one-year median return is {features.rolling_annual_median:.2%}",
         ),
         contradictory_evidence=(
@@ -900,7 +927,10 @@ def _candidate_and_evidence(
         fresh_until=as_of + timedelta(days=1),
         evidence_identifiers=evidence_ids,
         source_versions=(
-            (f"ALPACA_IEX:{instrument.symbol}", features.latest_observed_at.isoformat()),
+            (
+                f"{'DIRECT_MARKET' if direct_market else 'ALPACA_IEX'}:{instrument.symbol}",
+                features.latest_observed_at.isoformat(),
+            ),
             (
                 "FRED_MACRO",
                 hashlib.sha256(
@@ -1187,7 +1217,10 @@ def _company_candidate_and_evidence(
         fresh_until=as_of + timedelta(days=1),
         evidence_identifiers=evidence_ids,
         source_versions=(
-            (f"ALPACA_IEX:{instrument.symbol}", features.latest_observed_at.isoformat()),
+            (
+                f"{'DIRECT_MARKET' if direct_market else 'ALPACA_IEX'}:{instrument.symbol}",
+                features.latest_observed_at.isoformat(),
+            ),
             (f"SEC_COMPANY_FACTS:{instrument.issuer_cik}", history.latest.available_at.isoformat()),
             ("FRED_MACRO", hashlib.sha256("|".join(macro_identifiers).encode("utf-8")).hexdigest()),
         ),

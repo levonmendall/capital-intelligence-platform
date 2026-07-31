@@ -34,16 +34,22 @@ SUPPORTED_EXECUTION_CLASSES = frozenset(
         CandidateAssetClass.US_EQUITY,
         CandidateAssetClass.US_ETF,
         CandidateAssetClass.CASH_EQUIVALENT,
+        CandidateAssetClass.INTERNATIONAL_EQUITY,
+        CandidateAssetClass.FIXED_INCOME,
         CandidateAssetClass.FX,
         CandidateAssetClass.CRYPTO,
         CandidateAssetClass.FUTURE,
+        CandidateAssetClass.OPTION,
     }
 )
 DIRECT_EXECUTION_CLASSES = frozenset(
     {
+        CandidateAssetClass.INTERNATIONAL_EQUITY,
+        CandidateAssetClass.FIXED_INCOME,
         CandidateAssetClass.FX,
         CandidateAssetClass.CRYPTO,
         CandidateAssetClass.FUTURE,
+        CandidateAssetClass.OPTION,
     }
 )
 
@@ -92,6 +98,13 @@ class FreePaperPilotInstrument:
     contract_multiplier: float = 1.0
     trading_session_model: TradingSessionModel | None = None
     quote_spread_bps: float = 5.0
+    provider_kind: str = "alpaca"
+    provider_dataset: str | None = None
+    provider_stype_in: str | None = None
+    expiration_at: str | None = None
+    underlying_symbol: str | None = None
+    strike: float | None = None
+    option_right: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -114,25 +127,66 @@ class FreePaperPilotInstrument:
             raise ValueError("paper instrument has an unsupported execution asset class")
         direct = self.execution_asset_class in DIRECT_EXECUTION_CLASSES
         if direct:
-            if self.instrument_type not in {"spot", "token", "future"}:
-                raise ValueError("direct paper instruments must be spot, token, or future")
+            allowed_types = {
+                CandidateAssetClass.INTERNATIONAL_EQUITY: {"common_stock", "preferred_stock", "fund"},
+                CandidateAssetClass.FIXED_INCOME: {"bond"},
+                CandidateAssetClass.FX: {"spot"},
+                CandidateAssetClass.CRYPTO: {"token", "stablecoin"},
+                CandidateAssetClass.FUTURE: {"future"},
+                CandidateAssetClass.OPTION: {"option"},
+            }[self.execution_asset_class]
+            if self.instrument_type not in allowed_types:
+                raise ValueError(
+                    f"{self.execution_asset_class.value} paper instrument type is unsupported"
+                )
             if self.provider_symbol is None or not str(self.provider_symbol).strip():
                 raise ValueError("direct paper instruments require provider_symbol")
             object.__setattr__(self, "provider_symbol", str(self.provider_symbol).strip())
-            settlement = str(self.settlement_currency or "USD").strip().upper()
-            if settlement != "USD" or self.currency != "USD":
-                raise ValueError("initial direct paper instruments must quote and settle in USD")
+            provider_kind = str(self.provider_kind or "yahoo").strip().lower()
+            if provider_kind not in {"yahoo", "yahoo_option", "eodhd", "databento"}:
+                raise ValueError("unsupported direct market provider kind")
+            object.__setattr__(self, "provider_kind", provider_kind)
+            if self.provider_dataset is not None:
+                object.__setattr__(self, "provider_dataset", str(self.provider_dataset).strip())
+            if self.provider_stype_in is not None:
+                object.__setattr__(self, "provider_stype_in", str(self.provider_stype_in).strip().lower())
+            settlement = str(self.settlement_currency or self.currency).strip().upper()
             object.__setattr__(self, "settlement_currency", settlement)
             if not isinstance(self.trading_session_model, TradingSessionModel):
                 raise ValueError("direct paper instruments require a trading session model")
             if self.execution_asset_class is CandidateAssetClass.CRYPTO:
                 if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_7:
                     raise ValueError("direct crypto must use continuous 24/7 sessions")
-            elif self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_5:
-                raise ValueError("direct FX and futures must use continuous 24/5 sessions")
+            elif self.execution_asset_class is CandidateAssetClass.FX:
+                if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_5:
+                    raise ValueError("direct FX must use continuous 24/5 sessions")
+            elif self.execution_asset_class is CandidateAssetClass.FIXED_INCOME:
+                if self.trading_session_model is not TradingSessionModel.DEALER_24_5:
+                    raise ValueError("direct bonds must use dealer 24/5 sessions")
+            dated_derivative = (
+                self.execution_asset_class is CandidateAssetClass.OPTION
+                or (
+                    self.execution_asset_class is CandidateAssetClass.FUTURE
+                    and "continuous" not in self.instrument_identifier.lower()
+                )
+            )
+            if dated_derivative:
+                if self.expiration_at is None or not str(self.expiration_at).strip():
+                    raise ValueError("dated derivative instruments require expiration_at")
+                object.__setattr__(self, "expiration_at", str(self.expiration_at).strip())
+            if self.execution_asset_class is CandidateAssetClass.OPTION:
+                if self.underlying_symbol is None or not str(self.underlying_symbol).strip():
+                    raise ValueError("defined-risk options require underlying_symbol")
+                if self.option_right not in {"call", "put"}:
+                    raise ValueError("defined-risk options require call or put option_right")
+                if isinstance(self.strike, bool) or not isinstance(self.strike, (int, float)) or float(self.strike) <= 0:
+                    raise ValueError("defined-risk options require a positive strike")
+                object.__setattr__(self, "underlying_symbol", str(self.underlying_symbol).strip().upper())
+                object.__setattr__(self, "strike", float(self.strike))
         else:
+            object.__setattr__(self, "provider_kind", "alpaca")
             if self.country_code != "US" or self.currency != "USD":
-                raise ValueError("listed paper instruments must be U.S.-listed and USD-denominated")
+                raise ValueError("listed Alpaca paper instruments must be U.S.-listed and USD-denominated")
             if self.instrument_type not in {"common_stock", "preferred_stock", "fund"}:
                 raise ValueError("listed paper instruments must be stocks or funds")
             object.__setattr__(self, "settlement_currency", "USD")
@@ -165,17 +219,30 @@ class FreePaperPilotInstrument:
 
     def profile(self, *, universe_identifier: str) -> MultiAssetInstrumentProfile:
         if self.execution_asset_class is CandidateAssetClass.FX:
-            custody = "prime-broker-spot-fx-paper.v1"
-            execution = "direct-spot-fx-simulated-fill.v1"
+            custody = "prime-broker-spot-fx-paper.v2"
+            execution = "direct-spot-fx-simulated-fill.v2"
         elif self.execution_asset_class is CandidateAssetClass.CRYPTO:
-            custody = "qualified-digital-asset-paper-custody.v1"
-            execution = "direct-spot-crypto-simulated-fill.v1"
+            custody = "qualified-digital-asset-paper-custody.v2"
+            execution = "direct-spot-crypto-simulated-fill.v2"
         elif self.execution_asset_class is CandidateAssetClass.FUTURE:
-            custody = "futures-clearing-fully-collateralized-paper.v1"
-            execution = "direct-future-simulated-fill.v1"
+            custody = "futures-clearing-fully-collateralized-paper.v2"
+            execution = "dated-future-simulated-fill.v2"
+        elif self.execution_asset_class is CandidateAssetClass.INTERNATIONAL_EQUITY:
+            custody = "global-security-paper-custody.v1"
+            execution = "direct-global-equity-simulated-fill.v1"
+        elif self.execution_asset_class is CandidateAssetClass.FIXED_INCOME:
+            custody = "book-entry-direct-bond-paper-custody.v1"
+            execution = "direct-bond-simulated-fill.v1"
+        elif self.execution_asset_class is CandidateAssetClass.OPTION:
+            custody = "options-clearing-long-premium-paper.v1"
+            execution = "defined-risk-option-simulated-fill.v1"
         else:
             custody = "alpaca-paper-broker-custody.v1"
             execution = "alpaca-paper-iex-simulated-fill.v1"
+        derivative = self.execution_asset_class in {
+            CandidateAssetClass.FUTURE,
+            CandidateAssetClass.OPTION,
+        }
         return MultiAssetInstrumentProfile(
             symbol=self.symbol,
             instrument_identifier=self.instrument_identifier,
@@ -187,7 +254,10 @@ class FreePaperPilotInstrument:
             approval_identifier=f"core-policy:{universe_identifier}",
             approval_state=AssetClassApprovalState.PAPER_ELIGIBLE,
             unlevered=True,
-            spot_only=self.execution_asset_class is not CandidateAssetClass.FUTURE,
+            spot_only=self.execution_asset_class in {
+                CandidateAssetClass.FX,
+                CandidateAssetClass.CRYPTO,
+            },
             custody_settlement_identifier=custody,
             execution_model_version=execution,
             instrument_type=self.instrument_type,
@@ -196,28 +266,35 @@ class FreePaperPilotInstrument:
             margin_required=False,
             contract_multiplier=self.contract_multiplier,
             contract_model_version=(
-                "fully-collateralized-continuous-future-contract.v1"
+                "dated-exchange-future-contract.v1"
                 if self.execution_asset_class is CandidateAssetClass.FUTURE
+                else "long-premium-option-contract.v1"
+                if self.execution_asset_class is CandidateAssetClass.OPTION
                 else None
             ),
             margin_model_version=(
                 "fully-collateralized-notional-no-margin-leverage.v1"
                 if self.execution_asset_class is CandidateAssetClass.FUTURE
+                else "premium-paid-upfront-no-margin-borrowing.v1"
+                if self.execution_asset_class is CandidateAssetClass.OPTION
                 else None
             ),
             lifecycle_model_version=(
-                "continuous-future-expiry-lifecycle.v1"
+                "dated-future-expiry-settlement-lifecycle.v1"
                 if self.execution_asset_class is CandidateAssetClass.FUTURE
+                else "defined-risk-option-expiry-exercise-lifecycle.v1"
+                if self.execution_asset_class is CandidateAssetClass.OPTION
+                else "direct-bond-coupon-maturity-lifecycle.v1"
+                if self.execution_asset_class is CandidateAssetClass.FIXED_INCOME
                 else None
             ),
             roll_model_version=(
-                "continuous-future-explicit-roll-research.v1"
+                "dated-future-liquidity-and-expiry-roll.v1"
                 if self.execution_asset_class is CandidateAssetClass.FUTURE
                 else None
             ),
             trading_session_model=self.trading_session_model,
         )
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,6 +477,13 @@ def _free_paper_pilot_universe_from_payload(
             contract_multiplier=float(item.get("contract_multiplier", 1.0)),
             trading_session_model=(None if item.get("trading_session_model") in {None, ""} else TradingSessionModel(str(item["trading_session_model"]))),
             quote_spread_bps=float(item.get("quote_spread_bps", 5.0)),
+            provider_kind=str(item.get("provider_kind", "alpaca")),
+            provider_dataset=(None if item.get("provider_dataset") in {None, ""} else str(item["provider_dataset"])),
+            provider_stype_in=(None if item.get("provider_stype_in") in {None, ""} else str(item["provider_stype_in"])),
+            expiration_at=(None if item.get("expiration_at") in {None, ""} else str(item["expiration_at"])),
+            underlying_symbol=(None if item.get("underlying_symbol") in {None, ""} else str(item["underlying_symbol"])),
+            strike=(None if item.get("strike") is None else float(item["strike"])),
+            option_right=(None if item.get("option_right") in {None, ""} else str(item["option_right"])),
         )
         for item in raw_instruments
         if isinstance(item, Mapping)
@@ -483,6 +567,13 @@ def free_paper_pilot_universe_payload(
                 "contract_multiplier": item.contract_multiplier,
                 "trading_session_model": (None if item.trading_session_model is None else item.trading_session_model.value),
                 "quote_spread_bps": item.quote_spread_bps,
+                "provider_kind": item.provider_kind,
+                "provider_dataset": item.provider_dataset,
+                "provider_stype_in": item.provider_stype_in,
+                "expiration_at": item.expiration_at,
+                "underlying_symbol": item.underlying_symbol,
+                "strike": item.strike,
+                "option_right": item.option_right,
             }
             for item in universe.instruments
         ],

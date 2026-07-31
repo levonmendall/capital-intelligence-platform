@@ -101,3 +101,7 @@ services:
         sync: false
       - key: FRED_API_KEY
         sync: false
+      - key: EODHD_API_KEY
+        sync: false
+      - key: DATABENTO_API_KEY
+        sync: false
