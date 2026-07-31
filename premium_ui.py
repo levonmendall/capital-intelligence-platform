@@ -291,18 +291,22 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         .activity-kind{font-size:.59rem;font-weight:850;letter-spacing:.12em;text-transform:uppercase;color:var(--surface-accent)}
         .activity-title{font-size:.84rem;font-weight:730;color:var(--ink);margin:.38rem 0 .2rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .activity-meta{font-size:.68rem;line-height:1.4;color:var(--muted)}
-        .investment-lens{position:relative;overflow:hidden;margin:.35rem 0 1rem;border:1px solid rgba(var(--surface-rgb),.20);border-radius:22px;background:linear-gradient(145deg,rgba(12,18,30,.96),rgba(7,12,22,.94));box-shadow:0 18px 42px var(--shadow)}
+        .investment-lens{position:relative;overflow:hidden;margin:.35rem 0 1rem;border:1px solid rgba(var(--surface-rgb),.23);border-radius:22px;background:linear-gradient(145deg,rgba(12,18,30,.97),rgba(7,12,22,.95));box-shadow:0 18px 42px var(--shadow)}
         .investment-lens:before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,var(--surface-accent),var(--surface-accent-2),transparent 82%)}
-        .lens-head{padding:1rem 1.05rem .85rem;border-bottom:1px solid var(--line)}
-        .lens-kicker{font-size:.62rem;font-weight:850;letter-spacing:.14em;text-transform:uppercase;color:var(--surface-accent)}
-        .lens-title{font-size:1.08rem;font-weight:760;letter-spacing:-.025em;color:var(--ink);margin:.32rem 0 0}
+        .lens-head{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;padding:.92rem 1rem .78rem;border-bottom:1px solid var(--line);background:linear-gradient(90deg,rgba(var(--surface-rgb),.045),transparent 58%)}
+        .lens-kicker{font-size:.6rem;font-weight:850;letter-spacing:.14em;text-transform:uppercase;color:var(--surface-accent)}
+        .lens-title{font-size:1.05rem;font-weight:760;letter-spacing:-.025em;color:var(--ink);margin:.28rem 0 0}
+        .lens-hint{font-size:.61rem;line-height:1.35;color:var(--muted);text-align:right;max-width:12rem}
         .lens-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}
-        .lens-item{padding:.9rem 1rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line);min-height:7.15rem}
+        .lens-item{display:grid;grid-template-columns:2.35rem minmax(0,1fr);gap:.72rem;align-items:start;padding:.82rem .92rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line);min-height:0;background:linear-gradient(145deg,rgba(255,255,255,.018),transparent)}
         .lens-item:nth-child(2n){border-right:0}.lens-item:nth-last-child(-n+2){border-bottom:0}
-        .lens-label{font-size:.6rem;font-weight:850;letter-spacing:.12em;text-transform:uppercase;color:var(--surface-accent-2);margin-bottom:.38rem}
-        .lens-copy{font-size:.86rem;line-height:1.55;color:#c7d2e3;margin:0}
-        .lens-watch{grid-column:1/-1;background:rgba(var(--surface-rgb),.028);min-height:auto;border-right:0!important;border-bottom:0!important}
-        .lens-today .lens-item:nth-child(3),.lens-environment .lens-item:nth-child(3){background:linear-gradient(135deg,rgba(var(--surface-rgb),.055),transparent)}
+        .lens-icon{width:2.25rem;height:2.25rem;border-radius:.78rem;display:grid;place-items:center;color:var(--surface-accent);background:linear-gradient(145deg,rgba(var(--surface-rgb),.15),rgba(var(--surface-rgb-2),.08));border:1px solid rgba(var(--surface-rgb),.24);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+        .lens-icon svg{width:1.08rem;height:1.08rem;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+        .lens-body{min-width:0}
+        .lens-label{font-size:.58rem;font-weight:850;letter-spacing:.12em;text-transform:uppercase;color:var(--surface-accent-2);margin-bottom:.28rem}
+        .lens-copy{font-size:.82rem;line-height:1.42;font-weight:630;color:var(--ink-soft);margin:0}
+        .lens-watch{grid-column:1/-1;background:linear-gradient(90deg,rgba(var(--surface-rgb),.052),rgba(var(--surface-rgb-2),.025));min-height:auto;border-right:0!important;border-bottom:0!important}
+        .lens-today .lens-item:nth-child(3),.lens-environment .lens-item:nth-child(3){background:linear-gradient(135deg,rgba(var(--surface-rgb),.065),transparent)}
         [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 16px 38px var(--shadow);background:var(--panel-solid)}
         [data-testid="stMetricValue"]{white-space:normal!important;overflow-wrap:anywhere;word-break:break-word;line-height:1.08}
         [data-testid="stExpander"]{border:1px solid var(--line);border-radius:18px;overflow:hidden;background:var(--panel)}
@@ -342,11 +346,14 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
             .capital-ring{margin:auto}.capital-ledger{text-align:left}
             .activity-rail{grid-template-columns:1fr}.activity-rail:before{display:none}
             .activity-item:before{display:none}
+            .lens-head{align-items:flex-start}
+            .lens-hint{max-width:8.5rem;font-size:.56rem}
             .lens-grid{grid-template-columns:1fr}
-            .lens-item{border-right:0;border-bottom:1px solid var(--line);min-height:auto;padding:.82rem .9rem}
+            .lens-item{border-right:0;border-bottom:1px solid var(--line);min-height:auto;padding:.74rem .82rem;grid-template-columns:2.1rem minmax(0,1fr);gap:.62rem}
             .lens-item:nth-last-child(-n+2){border-bottom:1px solid var(--line)}
             .lens-item:last-child{border-bottom:0}
             .lens-watch{grid-column:auto}
+            .lens-icon{width:2rem;height:2rem;border-radius:.68rem}
         }
 
         /* Compact mobile operating-console system. Legacy hero selectors remain
@@ -419,12 +426,15 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         .activity-title{font-size:.78rem;line-height:1.35;margin:.58rem 0 .2rem;white-space:normal}
         .activity-meta{font-size:.61rem}
         .investment-lens{border-radius:1rem;margin:.25rem 0 .8rem;box-shadow:0 12px 32px rgba(0,0,0,.26)}
-        .lens-head{padding:.78rem .86rem .65rem}
-        .lens-kicker{font-size:.55rem;letter-spacing:.11em}
-        .lens-title{font-size:.96rem;margin:.24rem 0 0}
-        .lens-item{padding:.72rem .78rem;min-height:5.8rem}
-        .lens-label{font-size:.55rem;letter-spacing:.1em}
-        .lens-copy{font-size:.73rem;line-height:1.45;color:#aebbd0}
+        .lens-head{padding:.76rem .82rem .64rem}
+        .lens-kicker{font-size:.54rem;letter-spacing:.11em}
+        .lens-title{font-size:.94rem;margin:.22rem 0 0}
+        .lens-hint{font-size:.56rem}
+        .lens-item{padding:.68rem .74rem;min-height:0;grid-template-columns:2rem minmax(0,1fr);gap:.58rem}
+        .lens-icon{width:1.92rem;height:1.92rem;border-radius:.64rem}
+        .lens-icon svg{width:.92rem;height:.92rem}
+        .lens-label{font-size:.53rem;letter-spacing:.1em}
+        .lens-copy{font-size:.72rem;line-height:1.38;color:#c0cbdb}
         .capital-orbit{grid-template-columns:6.7rem 1fr;gap:.9rem;border-radius:1rem;padding:.85rem;box-shadow:0 12px 30px rgba(0,0,0,.24)}
         .capital-ring{width:6rem;height:6rem}.capital-ring-value{font-size:1rem}
         .capital-copy h4{font-size:.9rem}.capital-copy p{font-size:.7rem}
@@ -442,6 +452,8 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
             .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.42rem}
             .metric-node{min-height:5.8rem;padding:.65rem}
             .metric-value{font-size:.94rem}
+            .lens-head{display:block}
+            .lens-hint{margin-top:.3rem;max-width:none;text-align:left}
             .lens-grid{grid-template-columns:1fr}
             .lens-item{min-height:auto;border-right:0;border-bottom:1px solid var(--line)}
             .lens-item:last-child{border-bottom:0}
@@ -653,6 +665,26 @@ def metric_grid(
     )
 
 
+def _compact_headline(value: object, *, limit: int = 150) -> str:
+    text = " ".join(str(value or "No additional detail is available.").split())
+    if len(text) <= limit:
+        return text
+    shortened = text[: max(1, limit - 1)].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return (shortened or text[: max(1, limit - 1)]) + "…"
+
+
+def _status_headline(label: object, value: object) -> str:
+    normalized = str(label).strip().lower()
+    if normalized == "what could change the decision":
+        return (
+            "A stronger, liquid, risk-adjusted opportunity must clear every "
+            "decision threshold."
+        )
+    if normalized == "what deserves attention":
+        return _compact_headline(value, limit=132)
+    return _compact_headline(value, limit=158)
+
+
 def status_list(
     items: Sequence[tuple[str, object, str | None]],
     *,
@@ -660,19 +692,31 @@ def status_list(
 ) -> None:
     profile = surface_profile(variant.title())
     rows: list[str] = []
+    expanded_details: list[tuple[str, str]] = []
     for label, value, note in items:
+        full_text = " ".join(str(value or "No additional detail is available.").split())
+        visible_text = (
+            _status_headline(label, full_text)
+            if profile.slug in {"today", "environment"}
+            else full_text
+        )
         note_html = "" if not note else f'<div class="status-note">{escape(str(note))}</div>'
         rows.append(
             '<div class="status-row">'
             f'<div class="status-icon">{_icon_svg(_icon_name(label))}</div>'
             '<div>'
             f'<div class="status-label">{escape(str(label))}</div>'
-            f'<div class="status-value">{escape(str(value))}</div>{note_html}</div></div>'
+            f'<div class="status-value">{escape(visible_text)}</div>{note_html}</div></div>'
         )
+        if visible_text != full_text:
+            expanded_details.append((str(label), full_text))
     st.markdown(
         f'<div class="status-list status-{profile.slug}">{"".join(rows)}</div>',
         unsafe_allow_html=True,
     )
+    for label, detail in expanded_details:
+        with st.expander(f"Explore {label.lower()}", expanded=False):
+            st.write(detail)
 
 def signal_panel(
     state: str,
@@ -699,34 +743,41 @@ def investment_lens_card(
     watch_next: object | None = None,
     variant: str = "today",
 ) -> None:
-    """Render a concise educational chain from event to portfolio response."""
+    """Render headline-first educational context with detail available below."""
 
     profile = surface_profile(variant.title())
     items = (
-        ("What changed", what_changed),
-        ("Why investors care", why_investors_care),
-        ("Portfolio effect", portfolio_effect),
-        ("CIO response", cio_response),
+        ("What changed", what_changed, 126),
+        ("Why investors care", why_investors_care, 122),
+        ("Portfolio effect", portfolio_effect, 126),
+        ("CIO response", cio_response, 104),
     )
     cards = []
-    for label, value in items:
-        text = "No additional detail is available." if value in (None, "") else str(value)
+    for label, value, limit in items:
+        text = _compact_headline(value, limit=limit)
         cards.append(
             '<div class="lens-item">'
+            f'<div class="lens-icon">{_icon_svg(_icon_name(label))}</div>'
+            '<div class="lens-body">'
             f'<div class="lens-label">{escape(label)}</div>'
-            f'<p class="lens-copy">{escape(text)}</p></div>'
+            f'<p class="lens-copy">{escape(text)}</p></div></div>'
         )
     if watch_next not in (None, ""):
         cards.append(
             '<div class="lens-item lens-watch">'
+            f'<div class="lens-icon">{_icon_svg(_icon_name("What to watch next"))}</div>'
+            '<div class="lens-body">'
             '<div class="lens-label">What to watch next</div>'
-            f'<p class="lens-copy">{escape(str(watch_next))}</p></div>'
+            f'<p class="lens-copy">{escape(_compact_headline(watch_next, limit=132))}</p>'
+            '</div></div>'
         )
     st.markdown(
         f'<div class="investment-lens lens-{profile.slug}">'
         '<div class="lens-head">'
+        '<div>'
         f'<div class="lens-kicker">{escape(profile.kicker)} // portfolio lens</div>'
         f'<div class="lens-title">{escape(title)}</div></div>'
+        '<div class="lens-hint">Headlines first · expand below for context</div></div>'
         f'<div class="lens-grid">{"".join(cards)}</div></div>',
         unsafe_allow_html=True,
     )
