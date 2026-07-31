@@ -62,6 +62,13 @@ turnover assumptions. Individual exploratory company entries remain capped at 1%
 while established company positions remain subject to the governed 5% ceiling.
 Strategic wrappers retain exposure-specific caps.
 
+## Validation boundary
+
+The implementation is synchronized with current `main` and its complete repository
+test suite passes as one merged tree. Repository validation, live paper-readiness,
+ten-year historical certification, and security review remain mandatory on the exact
+final head before merge.
+
 ## Authority
 
 There is one canonical CIO and one canonical portfolio. The ensemble provides
