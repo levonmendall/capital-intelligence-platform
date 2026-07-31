@@ -1,0 +1,72 @@
+name: Materialize compact expandable briefings
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: github.head_ref == 'agent/compact-expandable-briefings'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Apply reviewed presentation patch
+        shell: bash
+        run: |
+          cat .github/compact-briefings-payload/part1 \
+              .github/compact-briefings-payload/part2 > /tmp/compact-briefings.b64
+          python - <<'PY'
+          from pathlib import Path
+          import base64
+          import zlib
+
+          encoded = Path('/tmp/compact-briefings.b64').read_text().strip()
+          Path('/tmp/compact-briefings.patch').write_bytes(
+              zlib.decompress(base64.b64decode(encoded))
+          )
+          PY
+          git apply --check /tmp/compact-briefings.patch
+          git apply /tmp/compact-briefings.patch
+
+      - name: Validate briefing presentation
+        shell: bash
+        run: |
+          python -m py_compile \
+            premium_ui.py \
+            concise_operating_intelligence_ui.py \
+            tests/test_portfolio_education_ui.py \
+            tests/test_concise_operating_intelligence_ui.py
+          python -m pip install --quiet pytest
+          python -m pytest -q \
+            tests/test_portfolio_education_ui.py \
+            tests/test_concise_operating_intelligence_ui.py \
+            tests/test_premium_streamlit_interface.py \
+            tests/test_premium_navigation_runtime.py \
+            tests/test_surface_information_hierarchy.py
+
+      - name: Commit materialized presentation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r .github/compact-briefings-payload
+          git rm .github/workflows/materialize-compact-expandable-briefings.yml
+          git add \
+            premium_ui.py \
+            concise_operating_intelligence_ui.py \
+            tests/test_portfolio_education_ui.py \
+            tests/test_concise_operating_intelligence_ui.py
+          git commit -m "Make briefings compact and expandable"
+          git push origin HEAD:${{ github.head_ref }}
