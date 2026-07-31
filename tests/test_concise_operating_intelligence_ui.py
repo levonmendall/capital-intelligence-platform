@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_app_uses_synopsis_first_operating_presenter() -> None:
-    source = Path("app.py").read_text(encoding="utf-8")
+    source = Path("app_impl.py").read_text(encoding="utf-8")
 
     assert "from concise_operating_intelligence_ui import (" in source
     assert "render_today_market_brief" in source
@@ -12,7 +12,6 @@ def test_app_uses_synopsis_first_operating_presenter() -> None:
     assert "render_today_opportunity_scan" in source
     assert "render_history_decision_accountability" in source
     assert "render_information_freshness" in source
-
 
 def test_information_heavy_sections_are_collapsed_by_default() -> None:
     source = Path("concise_operating_intelligence_ui.py").read_text(encoding="utf-8")

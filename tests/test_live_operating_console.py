@@ -142,7 +142,7 @@ def test_live_console_sanitizes_provider_authentication_failure(monkeypatch) -> 
 
 
 def test_app_wires_all_four_surfaces_to_live_refresh_and_reports() -> None:
-    source = open("app.py", encoding="utf-8").read()
+    source = open("app_impl.py", encoding="utf-8").read()
 
     for surface in (
         "_render_today",
@@ -151,9 +151,10 @@ def test_app_wires_all_four_surfaces_to_live_refresh_and_reports() -> None:
         "_render_history",
     ):
         assert surface in source
-    assert '@st.fragment(run_every="30s")' in source
+    assert source.count('@st.fragment(run_every="30s")') == 4
     assert "render_live_market_status(" in source
     assert "render_live_environment_market_table(" in source
     assert "render_live_portfolio_marks(" in source
     assert "render_operating_report_history(" in source
     assert "render_pending_transaction_report(" in source
+

@@ -8,25 +8,10 @@ from pathlib import Path
 import streamlit as st
 
 from production_smoke_test_ui import render_production_smoke_test
+from secure_app import run_authenticated_app
 
 
-# Execute the authenticated entrypoint from source on every Streamlit rerun. A normal
-# import would remain cached and could prevent navigation, authentication, or refreshed
-# operating data from rendering after the first session pass. Retain the execution
-# globals so the Render wrapper can apply administrator-only operational controls to the
-# authenticated principal without changing the four primary application screens.
-secure_source_path = Path(__file__).with_name("secure_app.py")
-secure_source = secure_source_path.read_text(encoding="utf-8")
-secure_globals = {
-    "__name__": "__main__",
-    "__file__": str(secure_source_path),
-}
-exec(
-    compile(secure_source, str(secure_source_path), "exec"),
-    secure_globals,
-)
-principal = secure_globals.get("principal")
-
+principal = run_authenticated_app(configure_page=True)
 release = (
     os.getenv("CAPITAL_INTELLIGENCE_RELEASE")
     or os.getenv("RENDER_GIT_COMMIT")
@@ -46,9 +31,6 @@ with st.sidebar:
     st.caption(f"State authority: `{state_root}`")
     if render_host:
         st.caption(f"Render service: `{render_host}`")
-    if principal is not None and getattr(principal, "is_administrator", False):
-        if st.button("Production smoke test", key="open-production-smoke-test"):
-            st.session_state["production_smoke_test_open"] = True
 
 if (
     principal is not None

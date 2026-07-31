@@ -52,18 +52,16 @@ def test_streamlit_theme_defaults_to_signature_dark_mode() -> None:
 
 def test_secure_app_source_adapter_remains_compatible() -> None:
     app = (ROOT / "app.py").read_text(encoding="utf-8")
+    implementation = (ROOT / "app_impl.py").read_text(encoding="utf-8")
     secure = (ROOT / "secure_app.py").read_text(encoding="utf-8")
 
-    expected_import = '''from core.portfolio import (
-    get_mandate_details,
-    get_portfolio_totals,
-    get_trade_history,
-)
-'''
-    assert expected_import in app
-    assert expected_import in secure
-    assert 'exec(compile(_authorized_source(), "app.py", "exec"), execution_globals)' in secure
-
+    assert "import app_impl as _app_impl" in app
+    assert "def render_application(" in implementation
+    assert "def run_authenticated_app(" in secure
+    assert "from app import render_application" in secure
+    assert "configure_page=False" in secure
+    assert "exec(compile" not in app
+    assert "exec(compile" not in secure
 
 def test_optional_dashboard_reads_fail_soft_in_streamlit_surface() -> None:
     app = (ROOT / "app.py").read_text(encoding="utf-8")

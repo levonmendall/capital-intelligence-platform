@@ -23,13 +23,6 @@ from security import (
     SQLiteIdentityStore,
 )
 
-st.set_page_config(
-    page_title="Capital Intelligence Platform",
-    page_icon="📊",
-    layout="wide",
-)
-
-
 @st.cache_resource
 def runtime_settings() -> ApiSettings:
     return ApiSettings.from_env()
@@ -262,52 +255,41 @@ def _authorized_bindings(principal) -> dict[str, object]:
     }
 
 
-def _authorized_source() -> str:
-    source = Path("app.py").read_text(encoding="utf-8")
-    source = source.replace(
-        '''st.set_page_config(
-    page_title="Capital Intelligence Platform",
-    page_icon="📊",
-    layout="wide",
-)
+def run_authenticated_app(*, configure_page: bool = True):
+    """Authenticate once and render through explicit authorized bindings."""
 
+    if configure_page:
+        st.set_page_config(
+            page_title="Capital Intelligence Platform",
+            page_icon="📊",
+            layout="wide",
+        )
+    principal = _principal()
+    if principal is None:
+        _login_screen()
 
-''',
-        "",
-        1,
+    with st.sidebar:
+        st.caption(f"Signed in as **{principal.display_name}**")
+        _render_alert_controls(principal)
+        if st.button("Sign out"):
+            token = st.session_state.get("access_token")
+            if token:
+                authentication_service().store.logout(token)
+            _clear_session()
+            st.rerun()
+
+    from app import render_application
+
+    bindings = _authorized_bindings(principal)
+    render_application(
+        configure_page=False,
+        principal=principal,
+        get_mandate_details_fn=bindings["get_mandate_details"],
+        get_portfolio_totals_fn=bindings["get_portfolio_totals"],
+        get_trade_history_fn=bindings["get_trade_history"],
     )
-    source = source.replace(
-        '''from core.portfolio import (
-    get_mandate_details,
-    get_portfolio_totals,
-    get_trade_history,
-)
-''',
-        "",
-        1,
-    )
-    return source
+    return principal
 
 
-principal = _principal()
-if principal is None:
-    _login_screen()
-
-with st.sidebar:
-    st.caption(f"Signed in as **{principal.display_name}**")
-    _render_alert_controls(principal)
-    if st.button("Sign out"):
-        token = st.session_state.get("access_token")
-        if token:
-            authentication_service().store.logout(token)
-        _clear_session()
-        st.rerun()
-
-app_source_path = Path(__file__).with_name("app.py")
-execution_globals = {
-    "__name__": "__main__",
-    "__file__": str(app_source_path),
-    "authenticated_principal": principal,
-    **_authorized_bindings(principal),
-}
-exec(compile(_authorized_source(), "app.py", "exec"), execution_globals)
+if __name__ == "__main__":
+    run_authenticated_app()

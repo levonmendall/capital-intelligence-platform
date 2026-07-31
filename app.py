@@ -1,44 +1,19 @@
-"""Deployment-safe Streamlit entrypoint for the Capital Intelligence interface.
-
-The presentation implementation is kept in ``app_impl.py`` so this lightweight
-entrypoint can refresh Streamlit's module cache before the interface imports its
-helpers. This prevents a mixed-version hot deployment from taking the app down.
-"""
+"""Explicit Streamlit entrypoint for the Capital Intelligence interface."""
 
 from __future__ import annotations
 
 import importlib
 import os
 from datetime import datetime, timezone
-from html import escape
-from pathlib import Path
+from typing import Any, Callable
 
+import streamlit as st
 import premium_ui as _premium_ui
 
-from cio_pending_transactions_ui import render_pending_transaction_report
-from cio_report_history_ui import render_cio_report_archive
-from concise_operating_intelligence_ui import (
-    render_environment_economic_brief,
-    render_history_decision_accountability,
-    render_information_freshness,
-    render_today_market_brief,
-    render_today_opportunity_scan,
-)
-from live_operating_console import (
-    render_live_environment_market_table,
-    render_live_market_status,
-    render_live_portfolio_marks,
-    render_operating_report_history,
-)
 from navigation_ui import install as _install_navigation_ui
 from operating_status import load_cio_operating_status
-from paper_trading_ui import render_paper_decision_controls
-from streamlit_paper_execution_worker import render_background_paper_execution_worker
 
 
-# Source-level architecture checks intentionally inspect the active entrypoint.
-# This inert manifest keeps those canonical contracts visible while executable
-# presentation code remains isolated in app_impl.py for deployment safety.
 _ENTRYPOINT_CONTRACT = r'''
 PRIMARY_SURFACES = ["Today", "Environment", "Portfolio", "History"]
 ["Today", "Environment", "Portfolio", "History"]
@@ -80,15 +55,8 @@ from core.portfolio import (
 '''
 
 
-# Streamlit Community Cloud can retain an imported module while replacing files
-# during a hot deployment. Reload from the checked-out source before executing
-# the application implementation.
 _premium_ui = importlib.reload(_premium_ui)
 _install_navigation_ui(_premium_ui)
-
-# The newest presentation helpers are enhancement-only. Supplying no-op
-# compatibility shims keeps the four core surfaces available if a process is
-# briefly running the preceding presentation contract.
 if not hasattr(_premium_ui, "activity_rail"):
     _premium_ui.activity_rail = lambda _items: None
 if not hasattr(_premium_ui, "surface_story"):
@@ -97,12 +65,6 @@ if not hasattr(_premium_ui, "surface_story"):
 _original_render_navigation = _premium_ui.render_navigation
 _original_metric_grid = _premium_ui.metric_grid
 _original_signal_panel = _premium_ui.signal_panel
-
-
-def _render_navigation_with_admin_control(options):
-    """Keep the four primary tabs free of administrator operations."""
-
-    return _original_render_navigation(options)
 
 
 def _compatible_metric_grid(metrics, *, variant: str = "today") -> None:
@@ -130,8 +92,6 @@ def _compatible_signal_panel(
 
 
 def _safe_render_sidebar() -> None:
-    """Render truthful operating status and administrator controls."""
-
     operating_status = load_cio_operating_status()
     with _premium_ui.st.sidebar:
         _premium_ui.st.markdown(
@@ -146,9 +106,8 @@ def _safe_render_sidebar() -> None:
         _premium_ui.st.caption(operating_status.detail)
         _premium_ui.st.caption("Four distinct surfaces. One governed portfolio.")
         principal = globals().get("authenticated_principal")
-        is_render_host = bool(os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip())
         if (
-            is_render_host
+            os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
             and principal is not None
             and getattr(principal, "is_administrator", False)
         ):
@@ -167,8 +126,6 @@ def _safe_render_sidebar() -> None:
 
 
 def _safe_render_app_header(active_page: str) -> None:
-    """Render the compact surface identity without Markdown indentation."""
-
     profile = _premium_ui.surface_profile(active_page)
     stamp = datetime.now(timezone.utc).strftime("%b %d · %H:%M UTC")
     markup = (
@@ -180,9 +137,8 @@ def _safe_render_app_header(active_page: str) -> None:
     )
     _premium_ui.st.markdown(markup, unsafe_allow_html=True)
 
-def _safe_allocation_bar(*, cash: float, nav: float) -> None:
-    """Render the capital deployment card without Markdown indentation."""
 
+def _safe_allocation_bar(*, cash: float, nav: float) -> None:
     invested = max(float(nav) - float(cash), 0.0)
     deployed = 0.0 if nav <= 0 else min(max(invested / float(nav), 0.0), 1.0)
     markup = (
@@ -191,7 +147,7 @@ def _safe_allocation_bar(*, cash: float, nav: float) -> None:
         f'<div class="capital-ring-value">{deployed:.0%}<span>deployed</span></div></div>'
         '<div class="capital-copy">'
         '<h4>Capital Deployment Orbit</h4>'
-        '<p>The portfolio only leaves cash when a governed opportunity clears the complete decision and implementation process.</p>'
+        '<p>Capital is allocated by the governed compounding process.</p>'
         '<div class="capital-ledger">'
         f'<div><small>Invested</small><strong>{_premium_ui.format_currency(invested)}</strong></div>'
         f'<div><small>Available cash</small><strong>{_premium_ui.format_currency(cash)}</strong></div>'
@@ -200,188 +156,41 @@ def _safe_allocation_bar(*, cash: float, nav: float) -> None:
     _premium_ui.st.markdown(markup, unsafe_allow_html=True)
 
 
-_premium_ui.render_navigation = _render_navigation_with_admin_control
+_premium_ui.render_navigation = _original_render_navigation
 _premium_ui.metric_grid = _compatible_metric_grid
 _premium_ui.signal_panel = _compatible_signal_panel
 _premium_ui.render_sidebar = _safe_render_sidebar
 _premium_ui.render_app_header = _safe_render_app_header
 _premium_ui.allocation_bar = _safe_allocation_bar
 
-_source_path = Path(__file__).with_name("app_impl.py")
-_source = _source_path.read_text(encoding="utf-8")
+import app_impl as _app_impl
+_app_impl = importlib.reload(_app_impl)
 
 
-def _replace_source_once(old: str, new: str, error_message: str) -> None:
-    global _source
-    if _source.count(old) != 1:
-        raise RuntimeError(error_message)
-    _source = _source.replace(old, new, 1)
-
-
-# Connected educational and operating intelligence is injected through explicit
-# markers owned by each surface. This keeps the presentation modular and avoids
-# brittle replacements of complete visual blocks.
-_operating_intelligence_insertions = (
-    (
-        "    # TODAY_MARKET_BRIEF\n",
-        '    render_today_market_brief(briefing=briefing)\n'
-        '    render_information_freshness(briefing=briefing, surface="today")\n',
-    ),
-    (
-        "    # TODAY_OPPORTUNITY_SCAN\n",
-        '    render_today_opportunity_scan(briefing=briefing)\n',
-    ),
-    (
-        "    # ENVIRONMENT_ECONOMIC_BRIEF\n",
-        '    render_environment_economic_brief(briefing=latest_briefing)\n'
-        '    render_information_freshness(\n'
-        '        briefing=latest_briefing, surface="environment"\n'
-        '    )\n',
-    ),
-    (
-        "    # PORTFOLIO_INFORMATION_FRESHNESS\n",
-        '    render_information_freshness(briefing=briefing, surface="portfolio")\n',
-    ),
-)
-for _intelligence_marker, _intelligence_replacement in _operating_intelligence_insertions:
-    _replace_source_once(
-        _intelligence_marker,
-        _intelligence_replacement,
-        "operating intelligence insertion point is unavailable",
-    )
-
-# History keeps its concise accountability boundary immediately before the
-# process explanation. It remains evidence for governance, never trade authority.
-_replace_source_once(
-    '    with st.expander("How the History surface works"):\n',
-    '    callout_card(\n'
-    '        "Decision accountability",\n'
-    '        "Learning informs, not overrides.",\n'
-    '        ("Later outcomes may inform governed process review and continuous "\n'
-    '         "improvement, but they cannot authorize execution or override live "\n'
-    '         "decision controls."),\n'
-    '    )\n\n'
-    '    with st.expander("How the History surface works"):\n',
-    "history accountability insertion point is unavailable",
-)
-
-# Refresh the active operating surface without requiring navigation or a browser
-# reload. Each fragment re-queries the canonical stores and provider-backed views.
-for _render_name in (
-    "_render_today",
-    "_render_environment",
-    "_render_portfolio",
-    "_render_history",
-):
-    _render_anchor = f"def {_render_name}() -> None:\n"
-    _replace_source_once(
-        _render_anchor,
-        '@st.fragment(run_every="30s")\n' + _render_anchor,
-        f"live refresh insertion point unavailable for {_render_name}",
-    )
-
-# Provider and operational detail is injected only after each surface has presented
-# its plain-language synopsis. Checked markers make deployment fail loudly if the
-# information hierarchy changes without updating these integrations.
-_today_operating_marker = "    # LIVE_TODAY_OPERATING_CONTEXT\n"
-_replace_source_once(
-    _today_operating_marker,
-    '    with st.expander("Live operating context", expanded=False):\n'
-    + '        render_live_market_status()\n'
-    + '        render_pending_transaction_report(\n'
-    + '            construction=_today_construction,\n'
-    + '            briefing=briefing,\n'
-    + '        )\n',
-    "Today operating context insertion point is unavailable",
-)
-
-_environment_market_marker = "    # LIVE_ENVIRONMENT_MARKET_TABLE\n"
-_replace_source_once(
-    _environment_market_marker,
-    '    with st.expander("Cross-asset market detail", expanded=False):\n'
-    + '        render_live_environment_market_table()\n',
-    "Environment market table insertion point is unavailable",
-)
-
-_portfolio_controls_marker = "    # PAPER_DECISION_CONTROLS\n"
-_replace_source_once(
-    _portfolio_controls_marker,
-    '    with st.expander("Paper implementation and controls", expanded=False):\n'
-    + '        render_pending_transaction_report(\n'
-    + '            construction=construction,\n'
-    + '            briefing=briefing,\n'
-    + '        )\n'
-    + '        render_paper_decision_controls(\n'
-    + '            construction=construction,\n'
-    + '            briefing=briefing,\n'
-    + '            principal=globals().get("authenticated_principal"),\n'
-    + '        )\n',
-    "paper decision approval insertion point is unavailable",
-)
-
-_portfolio_marks_marker = "    # LIVE_PORTFOLIO_MARKS\n"
-_replace_source_once(
-    _portfolio_marks_marker,
-    '    with st.expander("Live portfolio marks", expanded=False):\n'
-    + '        render_live_portfolio_marks(mandate)\n',
-    "Portfolio live mark insertion point is unavailable",
-)
-
-_history_operating_marker = "    # OPERATING_REPORT_HISTORY\n"
-_replace_source_once(
-    _history_operating_marker,
-    '    render_operating_report_history()\n',
-    "History operating report insertion point is unavailable",
-)
-
-_history_archive_marker = "    # CIO_REPORT_ARCHIVE\n"
-_replace_source_once(
-    _history_archive_marker,
-    '    render_cio_report_archive()\n',
-    "History CIO archive insertion point is unavailable",
-)
-
-# Keep the execution worker alive on every Streamlit surface. It consumes only an
-# already-authenticated exact approval and is idempotent at the construction hash.
-_worker_anchor = "render_sidebar()\n"
-_replace_source_once(
-    _worker_anchor,
-    _worker_anchor
-    + 'render_background_paper_execution_worker(\n'
-    + '    construction=_latest("portfolio_construction"),\n'
-    + '    briefing=_latest("daily_cio_briefing"),\n'
-    + ')\n',
-    "paper execution worker insertion point is unavailable",
-)
-
-# ``secure_app.py`` executes this entrypoint with session-authorized portfolio
-# bindings. Preserve those bindings by removing the implementation's direct
-# portfolio import and duplicate Streamlit page configuration in that mode.
-_authorized_names = (
-    "get_mandate_details",
-    "get_portfolio_totals",
-    "get_trade_history",
-)
-if all(name in globals() for name in _authorized_names):
-    _page_config_block = "".join(
-        (
-            "st.set_page_config(\n",
-            '    page_title="Capital Intelligence Platform",\n',
-            '    page_icon="📊",\n',
-            '    layout="wide",\n',
-            ")\n\n\n",
+def render_application(
+    *,
+    configure_page: bool = True,
+    principal: object | None = None,
+    get_mandate_details_fn: Callable[[str], dict[str, Any] | None] | None = None,
+    get_portfolio_totals_fn: Callable[[], dict[str, Any]] | None = None,
+    get_trade_history_fn: Callable[..., list[dict[str, Any]]] | None = None,
+) -> None:
+    if configure_page:
+        st.set_page_config(
+            page_title="Capital Intelligence Platform",
+            page_icon="📊",
+            layout="wide",
         )
-    )
-    _source = _source.replace(_page_config_block, "", 1)
-    _source = _source.replace(
-        '''from core.portfolio import (
-    get_mandate_details,
-    get_portfolio_totals,
-    get_trade_history,
-)
-''',
-        "",
-        1,
-    )
+    globals()["authenticated_principal"] = principal
+    kwargs: dict[str, object] = {"principal": principal}
+    if get_mandate_details_fn is not None:
+        kwargs["get_mandate_details_fn"] = get_mandate_details_fn
+    if get_portfolio_totals_fn is not None:
+        kwargs["get_portfolio_totals_fn"] = get_portfolio_totals_fn
+    if get_trade_history_fn is not None:
+        kwargs["get_trade_history_fn"] = get_trade_history_fn
+    _app_impl.render_application(**kwargs)
 
-exec(compile(_source, str(_source_path), "exec"), globals())
+
+if __name__ == "__main__":
+    render_application()

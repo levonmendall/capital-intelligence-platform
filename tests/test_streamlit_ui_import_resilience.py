@@ -17,11 +17,17 @@ def test_streamlit_entrypoint_reloads_presentation_module() -> None:
 
 def test_streamlit_entrypoint_preserves_secure_portfolio_bindings() -> None:
     entrypoint = (ROOT / "app.py").read_text(encoding="utf-8")
+    implementation = (ROOT / "app_impl.py").read_text(encoding="utf-8")
+    secure = (ROOT / "secure_app.py").read_text(encoding="utf-8")
 
-    assert 'Path(__file__).with_name("app_impl.py")' in entrypoint
-    assert 'if all(name in globals() for name in _authorized_names):' in entrypoint
-    assert 'exec(compile(_source, str(_source_path), "exec"), globals())' in entrypoint
-
+    assert "import app_impl as _app_impl" in entrypoint
+    assert "_app_impl.render_application(**kwargs)" in entrypoint
+    assert "get_mandate_details_fn" in implementation
+    assert "get_portfolio_totals_fn" in implementation
+    assert "get_trade_history_fn" in implementation
+    assert "_authorized_bindings(principal)" in secure
+    assert "exec(compile" not in entrypoint
+    assert "exec(compile" not in secure
 
 def test_premium_html_helpers_are_rebound_to_non_indented_renderers() -> None:
     entrypoint = (ROOT / "app.py").read_text(encoding="utf-8")

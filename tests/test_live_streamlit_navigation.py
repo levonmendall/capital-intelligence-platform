@@ -13,12 +13,11 @@ def test_live_entrypoint_installs_navigation_before_application_execution() -> N
         "from navigation_ui import install as _install_navigation_ui"
     )
     install_position = source.index("_install_navigation_ui(_premium_ui)")
-    execute_position = source.index(
-        'exec(compile(_source, str(_source_path), "exec"), globals())'
-    )
+    implementation_position = source.index("import app_impl as _app_impl")
+    render_position = source.index("_app_impl.render_application(**kwargs)")
 
-    assert import_position < install_position < execute_position
-
+    assert import_position < install_position < implementation_position < render_position
+    assert "exec(compile" not in source
 
 def test_primary_navigation_is_one_permanent_dark_segmented_control() -> None:
     source = (ROOT / "navigation_ui.py").read_text(encoding="utf-8")

@@ -155,17 +155,16 @@ def test_economic_context_explains_readings_and_portfolio_channels() -> None:
 
 
 def test_app_places_connected_intelligence_at_surface_entry() -> None:
-    source = Path("app.py").read_text(encoding="utf-8")
+    source = Path("app_impl.py").read_text(encoding="utf-8")
 
     assert "render_today_market_brief" in source
     assert "render_environment_economic_brief" in source
     assert "render_today_opportunity_scan" in source
     assert "render_history_decision_accountability" in source
     assert "render_information_freshness" in source
-    assert "operating intelligence insertion point is unavailable" in source
-    assert 'render_today_market_brief(briefing=briefing)\\n' in source
-    assert 'render_environment_economic_brief(briefing=latest_briefing)\\n' in source
-
+    assert "operating intelligence insertion point is unavailable" not in source
+    assert "render_today_market_brief(briefing=briefing)" in source
+    assert "render_environment_economic_brief(briefing=latest_briefing)" in source
 
 def test_daily_briefing_operating_date_rolls_at_seven_pacific(monkeypatch) -> None:
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE", "America/Los_Angeles")
