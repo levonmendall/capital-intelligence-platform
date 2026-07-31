@@ -69,6 +69,17 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Deployment/migration:** documented command changes; staged deprecation aliases.
 - **Rollback:** retain prior command aliases for one release.
 - **Authority change:** none.
+- **Implementation record:** `config/runtime_topologies.json` is the
+  machine-readable command/topology authority and `capital_intelligence_cli.py`
+  is the supported gateway. Render, Docker API, Compose, local UI, and CI each
+  have one explicit topology. Compose now uses `app.py`, includes historical
+  backfill, and retains the sole headless operator. All **89/89** current root
+  runners are classified exactly once (9 runtime-active, 80 specialized
+  supported, 0 silently legacy). Focused manifest, Render, operator, release,
+  and documentation tests pass **21/21**. No persistent state, CIO,
+  construction, governance, execution semantics, or real-money authority
+  changed. Rollback may restore the old direct commands because the underlying
+  compatibility scripts remain present for one release.
 
 ## PR6 — Deterministic history and archive ordering
 

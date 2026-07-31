@@ -4,7 +4,7 @@ services:
       context: .
       target: runtime
     image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
-    command: ["sh", "-c", "python initialize.py && exec uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers"]
+    command: ["python", "capital_intelligence_cli.py", "run", "api"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
     ports:
       - "127.0.0.1:8000:8000"
@@ -31,7 +31,7 @@ services:
     build:
       context: .
       target: runtime
-    command: ["python", "run_autonomous_paper_operator.py", "--loop"]
+    command: ["python", "capital_intelligence_cli.py", "run", "operator"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
     volumes:
       - capital_data:/app/database
@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "python", "-c", "from operations import OperationalSettings, WorkerHeartbeatStore; s=OperationalSettings.from_env(); ok,_,_=WorkerHeartbeatStore(s.worker_heartbeat_path).health(maximum_age_seconds=s.worker_max_age_seconds); raise SystemExit(0 if ok else 1)"]
+      test: ["CMD", "python", "-c", "import os; from pathlib import Path; from operations import OperationalSettings, WorkerHeartbeatStore, component_heartbeat_path; s=OperationalSettings.from_env(); p=component_heartbeat_path(Path(os.getenv('CAPITAL_INTELLIGENCE_DATA_DIR','database')), 'cio-paper-operator'); ok,_,_=WorkerHeartbeatStore(p).health(maximum_age_seconds=s.worker_max_age_seconds); raise SystemExit(0 if ok else 1)"]
       interval: 60s
       timeout: 5s
       retries: 3
@@ -60,7 +60,7 @@ services:
     build:
       context: .
       target: runtime
-    command: ["streamlit", "run", "secure_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+    command: ["python", "capital_intelligence_cli.py", "run", "ui"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
     ports:
       - "127.0.0.1:8501:8501"
@@ -91,7 +91,7 @@ services:
     build:
       context: .
       target: runtime
-    command: ["python", "run_backup.py", "--loop"]
+    command: ["python", "capital_intelligence_cli.py", "run", "backup"]
     env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
     volumes:
       - capital_data:/app/database:ro
@@ -110,6 +110,28 @@ services:
       timeout: 30s
       retries: 3
       start_period: 2m
+    depends_on:
+      api:
+        condition: service_healthy
+
+  backfill:
+    image: capital-intelligence:${CAPITAL_INTELLIGENCE_RELEASE:-local}
+    build:
+      context: .
+      target: runtime
+    command: ["python", "capital_intelligence_cli.py", "run", "backfill"]
+    env_file: ${CAPITAL_INTELLIGENCE_ENV_FILE:-deploy/staging.env}
+    volumes:
+      - capital_data:/app/database
+      - capital_backups:/app/backups
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
     depends_on:
       api:
         condition: service_healthy

@@ -1,13 +1,20 @@
 # Deployment Topology
 
-## Current declared topologies
+## Canonical declared topologies
 
-| Environment | Current command | Current processes | Conflict |
+| Environment | Canonical command | Processes | Policy |
 |---|---|---|---|
-| Render | `python run_render_service.py` | API, headless operator, backfill, backup, `render_app.py` | Health checks only Streamlit |
-| Docker image default | `python initialize.py && uvicorn ...` | API only | Does not match Render supervisor |
-| Docker Compose | separate API, scheduler, backup, `secure_app.py` web | Four services | Different UI entrypoint; no historical loop |
-| README/local | multiple direct commands including `streamlit run secure_app.py` | Operator-selected | Not a single canonical topology |
+| Render | `python run_render_service.py` | API, headless operator, backfill, backup, Streamlit, readiness watchdog | automatic paper mode; one persistent disk |
+| Docker API image | `python capital_intelligence_cli.py run api` | API | paper disabled unless a separate operator is explicitly started |
+| Docker Compose | `docker compose up --build` | API, operator, backfill, backup, Streamlit | environment-explicit paper mode |
+| Local | `python capital_intelligence_cli.py run ui` | Streamlit | paper disabled by default |
+| CI | `python capital_intelligence_cli.py run validate` | deterministic validation | no execution |
+
+The machine-readable authority is `config/runtime_topologies.json`. The CLI
+validates all 89 root `run_*.py` entrypoints: 9 are active runtime commands, 80
+are supported specialized compatibility tools, and none is silently classified
+as legacy. Existing specialized scripts remain callable for one-release
+compatibility; new operator-facing documentation uses the CLI gateway.
 
 ## Target canonical topologies
 

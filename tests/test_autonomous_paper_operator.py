@@ -152,6 +152,10 @@ def test_operator_publishes_report_but_holds_execution_before_launch(
 
 
 def test_docker_scheduler_uses_autonomous_operator_without_binding_secret() -> None:
+    from capital_intelligence_cli import command_tokens, load_manifest
+
+    operator = command_tokens("operator", load_manifest())
+    assert "run_autonomous_paper_operator.py" in operator
     compose = open("docker-compose.yml", encoding="utf-8").read()
-    assert '"run_autonomous_paper_operator.py", "--loop"' in compose
+    assert '"capital_intelligence_cli.py", "run", "operator"' in compose
     assert "CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS_FILE:?" not in compose
