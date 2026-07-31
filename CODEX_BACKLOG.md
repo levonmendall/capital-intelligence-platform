@@ -182,6 +182,20 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Deployment/migration:** versioned quality schema; old records remain readable but uncertified.
 - **Rollback:** disable new intelligence version and fall back to educational unclustered display; CIO gate remains fail closed.
 - **Authority change:** information quality only; CIO/construction/execution/real-money authority unchanged.
+- **Implementation record:** `intelligence/event_quality.py` provides
+  deterministic semantic clustering, novelty, independent-source
+  corroboration, event materiality, market confirmation, exact entity and
+  instrument exposure mapping, simple portfolio explanations, and an
+  idempotent append-only cluster store. The educational UI uses clustered
+  representatives but never consumes the CIO-review flag as authority. The
+  versioned five-case benchmark scores precision/recall above its 0.80 floors.
+  Product owner LeVon Mendall approved all five labels on 2026-07-31, so the
+  release command now passes `--require-certified`. Focused event and briefing
+  tests pass **13/13**. Persistent state is a new append-only event-cluster DB
+  only when explicitly configured; old records stay readable. Rollback removes
+  the clustering/ranking adapter and leaves unclustered educational display;
+  it cannot relax CIO readiness. No CIO, construction, execution, or
+  real-money authority changed.
 
 ## PR11 — Provider coverage and historical certification
 

@@ -72,6 +72,7 @@ jobs:
           path: |
             reports/release-validation.json
             reports/golden-end-to-end-gate.json
+            reports/event-quality-benchmark.json
             reports/pytest-results.xml
             reports/browser/
           if-no-files-found: ignore

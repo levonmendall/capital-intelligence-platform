@@ -1,0 +1,86 @@
+{
+  "schema_version": "event-quality-benchmark.v1",
+  "version": "event-quality-benchmark.2026-07-31.v1",
+  "purpose": "Measure whether the event gate requests CIO context only for novel, material, independently corroborated, market-confirmed information.",
+  "human_review": {
+    "state": "approved",
+    "reviewer": "LeVon Mendall, product owner",
+    "reviewed_at": "2026-07-31T19:18:46Z",
+    "instructions": "A human reviewer must verify every label and set state to approved before this benchmark is decision-certified."
+  },
+  "acceptance_thresholds": {
+    "minimum_precision": 0.8,
+    "minimum_recall": 0.8
+  },
+  "annotations": [
+    {
+      "identifier": "material-corroborated-rate-event",
+      "expected_cio_context": true,
+      "owned_instruments": ["instrument:TLT"],
+      "market_confirmation": {"event:fed-rate": 0.8},
+      "records": [
+        {
+          "identifier": "fed:1", "canonical_event_identifier": "event:fed-rate", "topic": "Federal Reserve changes rate guidance", "summary": "Policy guidance changed materially.",
+          "entities": ["Federal Reserve"], "instruments": ["instrument:TLT"], "impact_channels": ["policy", "discount_rate"],
+          "reliability": 0.95, "relevance": 0.95, "materiality": 0.9,
+          "provenance": {"provider": "Federal Reserve", "source_identifier": "source:fed", "independence_group": "official"}
+        },
+        {
+          "identifier": "wire:1", "canonical_event_identifier": "event:fed-rate", "topic": "Rate guidance shifts", "summary": "Independent reporting confirms the policy shift.",
+          "entities": ["Federal Reserve"], "instruments": ["instrument:TLT"], "impact_channels": ["policy", "discount_rate"],
+          "reliability": 0.85, "relevance": 0.9, "materiality": 0.85,
+          "provenance": {"provider": "Independent Wire", "source_identifier": "source:wire", "independence_group": "wire"}
+        }
+      ]
+    },
+    {
+      "identifier": "syndicated-duplicates",
+      "expected_cio_context": false,
+      "market_confirmation": {"event:supply": 0.7},
+      "records": [
+        {
+          "identifier": "syndicated:1", "canonical_event_identifier": "event:supply", "topic": "Supply disruption reported", "summary": "A report describes a disruption.",
+          "entities": ["Producer"], "instruments": [], "impact_channels": ["supply"], "reliability": 0.8, "relevance": 0.8, "materiality": 0.8,
+          "provenance": {"provider": "Outlet A", "source_identifier": "source:a", "independence_group": "same-wire"}
+        },
+        {
+          "identifier": "syndicated:2", "canonical_event_identifier": "event:supply", "topic": "Supply disruption reported", "summary": "The same wire copy describes a disruption.",
+          "entities": ["Producer"], "instruments": [], "impact_channels": ["supply"], "reliability": 0.8, "relevance": 0.8, "materiality": 0.8,
+          "provenance": {"provider": "Outlet B", "source_identifier": "source:b", "independence_group": "same-wire"}
+        }
+      ]
+    },
+    {
+      "identifier": "already-known-event",
+      "expected_cio_context": false,
+      "prior_semantic_keys": ["event:known"],
+      "market_confirmation": {"event:known": 0.9},
+      "records": [
+        {"identifier": "known:1", "canonical_event_identifier": "event:known", "topic": "Previously incorporated event", "summary": "No novel fact is present.", "entities": [], "instruments": [], "impact_channels": ["growth"], "reliability": 0.9, "relevance": 0.9, "materiality": 0.8, "provenance": {"provider": "Official", "source_identifier": "source:known:1", "independence_group": "official"}},
+        {"identifier": "known:2", "canonical_event_identifier": "event:known", "topic": "Previously incorporated event update", "summary": "No novel fact is present.", "entities": [], "instruments": [], "impact_channels": ["growth"], "reliability": 0.8, "relevance": 0.8, "materiality": 0.8, "provenance": {"provider": "Wire", "source_identifier": "source:known:2", "independence_group": "wire"}}
+      ]
+    },
+    {
+      "identifier": "unconfirmed-rumor",
+      "expected_cio_context": false,
+      "market_confirmation": {"event:rumor": 0.0},
+      "records": [
+        {"identifier": "rumor:1", "canonical_event_identifier": "event:rumor", "topic": "Unconfirmed takeover rumor", "summary": "A rumor circulates without market confirmation.", "entities": ["Issuer"], "instruments": ["instrument:ISSUER"], "impact_channels": ["sentiment"], "reliability": 0.5, "relevance": 0.8, "materiality": 0.8, "provenance": {"provider": "Outlet", "source_identifier": "source:rumor:1", "independence_group": "outlet"}},
+        {"identifier": "rumor:2", "canonical_event_identifier": "event:rumor", "topic": "Takeover speculation", "summary": "A second outlet repeats speculation.", "entities": ["Issuer"], "instruments": ["instrument:ISSUER"], "impact_channels": ["sentiment"], "reliability": 0.5, "relevance": 0.8, "materiality": 0.8, "provenance": {"provider": "Outlet Two", "source_identifier": "source:rumor:2", "independence_group": "outlet-two"}}
+      ]
+    },
+    {
+      "identifier": "material-corroborated-portfolio-event",
+      "expected_cio_context": true,
+      "owned_instruments": ["instrument:XLE"],
+      "exposure_map": {"Energy Sector": ["instrument:XLE"]},
+      "market_confirmation": {"event:energy": 0.6},
+      "records": [
+        {"identifier": "energy:1", "canonical_event_identifier": "event:energy", "topic": "Energy production materially curtailed", "summary": "Official production data confirms a material curtailment.", "entities": ["Energy Sector"], "instruments": [], "impact_channels": ["commodity", "supply"], "reliability": 0.95, "relevance": 0.9, "materiality": 0.9, "provenance": {"provider": "Energy Authority", "source_identifier": "source:energy:1", "independence_group": "official"}},
+        {"identifier": "energy:2", "canonical_event_identifier": "event:energy", "topic": "Production curtailment confirmed", "summary": "Independent data confirms lower production.", "entities": ["Energy Sector"], "instruments": [], "impact_channels": ["commodity", "supply"], "reliability": 0.85, "relevance": 0.9, "materiality": 0.85, "provenance": {"provider": "Industry Data", "source_identifier": "source:energy:2", "independence_group": "industry"}}
+      ]
+    }
+  ],
+  "authorizes_portfolio_change": false,
+  "real_money_authorized": false
+}
