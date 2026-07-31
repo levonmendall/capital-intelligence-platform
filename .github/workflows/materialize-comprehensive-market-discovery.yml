@@ -73,6 +73,36 @@ jobs:
           base64 --decode /tmp/comprehensive-market-discovery.b64 > /tmp/comprehensive-market-discovery.tar.gz
           echo "0d600b7f2502f4da6e42b90f146f8642c051440206615a040155f10a8c721757  /tmp/comprehensive-market-discovery.tar.gz" | sha256sum --check --strict
           tar --extract --gzip --file /tmp/comprehensive-market-discovery.tar.gz --directory .
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tools/apply_comprehensive_market_discovery.py")
+          content = path.read_text(encoding="utf-8")
+          old = '''    content = replace_once(
+              content,
+              ''' + "'''" + '''            (f"ALPACA_IEX:{instrument.symbol}", features.latest_observed_at.isoformat()),''' + "'''" + ''',
+              ''' + "'''" + '''            (
+                          f"{'DIRECT_MARKET' if direct_market else 'ALPACA_IEX'}:{instrument.symbol}",
+                          features.latest_observed_at.isoformat(),
+                      ),''' + "'''" + ''',
+              label="generalize source lineage",
+          )'''
+          new = '''    source_lineage = ''' + "'''" + '''            (f"ALPACA_IEX:{instrument.symbol}", features.latest_observed_at.isoformat()),''' + "'''" + '''
+          if content.count(source_lineage) != 2:
+              raise RuntimeError(
+                  f"generalize source lineage: expected two matches, found {content.count(source_lineage)}"
+              )
+          content = content.replace(
+              source_lineage,
+              ''' + "'''" + '''            (
+                          f"{'DIRECT_MARKET' if direct_market else 'ALPACA_IEX'}:{instrument.symbol}",
+                          features.latest_observed_at.isoformat(),
+                      ),''' + "'''" + ''',
+          )'''
+          if content.count(old) != 1:
+              raise RuntimeError("source-lineage patch repair anchor is unavailable")
+          path.write_text(content.replace(old, new), encoding="utf-8")
+          PY
           python tools/apply_comprehensive_market_discovery.py
 
       - name: Remove one-use transport
