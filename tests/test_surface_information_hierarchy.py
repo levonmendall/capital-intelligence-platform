@@ -1,4 +1,4 @@
-# Compact hierarchy contract for all four governed operating surfaces.
+# Compact hierarchy contract for the four governed operating surfaces.
 
 from pathlib import Path
 
