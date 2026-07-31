@@ -85,6 +85,25 @@ def _compact_occ_symbol(raw_symbol: str) -> str:
     return compact
 
 
+def _instrument_id(row: Mapping[str, object]) -> int:
+    value = row.get("instrument_id")
+    if value is None:
+        header = row.get("hd")
+        if isinstance(header, Mapping):
+            value = header.get("instrument_id")
+    if isinstance(value, bool):
+        raise DatabentoOptionsError("instrument_id must be a positive integer")
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as error:
+        raise DatabentoOptionsError(
+            "instrument_id is unavailable in the Databento record header"
+        ) from error
+    if result < 1:
+        raise DatabentoOptionsError("instrument_id must be a positive integer")
+    return result
+
+
 def _candidate_sessions(as_of: datetime, *, maximum_attempts: int = 7) -> tuple[date, ...]:
     timestamp = _aware(as_of, field_name="as_of")
     cursor = timestamp.date() - timedelta(days=1)
@@ -294,7 +313,7 @@ class DatabentoOptionsProvider:
                         DatabentoOptionDefinition(
                             symbol=_compact_occ_symbol(raw_symbol),
                             raw_symbol=raw_symbol,
-                            instrument_id=int(row.get("instrument_id")),
+                            instrument_id=_instrument_id(row),
                             underlying=row_underlying,
                             option_right="call" if instrument_class == "C" else "put",
                             expiration_at=_timestamp(
@@ -389,7 +408,7 @@ class DatabentoOptionsProvider:
             )
             for row in rows:
                 try:
-                    instrument_id = int(row.get("instrument_id"))
+                    instrument_id = _instrument_id(row)
                     symbol = instrument_lookup.get(instrument_id)
                     if symbol is None:
                         continue
