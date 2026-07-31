@@ -13,6 +13,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from operations.artifact_ordering import ordered_json_artifacts
 from zoneinfo import ZoneInfo
 
 
@@ -411,20 +413,15 @@ def load_pending_transaction_report() -> dict[str, Any] | None:
 def pending_transaction_report_history(*, limit: int = 100) -> tuple[dict[str, Any], ...]:
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("limit must be positive")
-    reports: list[dict[str, Any]] = []
     try:
-        paths = sorted(
+        ranked = ordered_json_artifacts(
             pending_report_history_directory().glob("*.json"),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
+            timestamp_fields=("generated_at",),
+            identifier_fields=("report_fingerprint", "decision_identifier"),
         )
     except OSError:
         return ()
-    for path in paths[:limit]:
-        report = _load_json(path)
-        if report is not None:
-            reports.append(report)
-    return tuple(reports)
+    return tuple(payload for _, payload in ranked[:limit])
 
 
 def write_pending_transaction_report(report: Mapping[str, Any]) -> tuple[Path, Path]:

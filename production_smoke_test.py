@@ -221,24 +221,22 @@ def load_pre_restart_snapshot(
 def _latest_execution_attempt(root: Path) -> dict[str, Any] | None:
     directory = root / "paper_execution_artifacts"
     try:
-        paths = sorted(
+        ranked = ordered_json_artifacts(
             directory.glob("*.status.json"),
-            key=lambda item: item.stat().st_mtime,
-            reverse=True,
+            timestamp_fields=("attempted_at",),
+            identifier_fields=("execution_identifier",),
         )
     except OSError:
         return None
-    for path in paths:
-        payload = _load_json(path)
-        if payload is not None:
-            return {
-                "state": payload.get("state"),
-                "attempted_at": payload.get("attempted_at"),
-                "exit_code": payload.get("exit_code"),
-                "execution_identifier": payload.get("execution_identifier"),
-                "paper_only": True,
-                "real_money_authorized": False,
-            }
+    for _, payload in ranked:
+        return {
+            "state": payload.get("state"),
+            "attempted_at": payload.get("attempted_at"),
+            "exit_code": payload.get("exit_code"),
+            "execution_identifier": payload.get("execution_identifier"),
+            "paper_only": True,
+            "real_money_authorized": False,
+        }
     return None
 
 
@@ -546,3 +544,4 @@ __all__ = [
     "load_pre_restart_snapshot",
     "pre_restart_snapshot_path",
 ]
+from operations.artifact_ordering import ordered_json_artifacts
