@@ -1,0 +1,29 @@
+name: Diagnose Databento Option Identifiers
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diagnose-databento-option-identifiers.yml
+      - tools/diagnose_databento_option_identifiers.py
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.event.pull_request.head.ref == 'agent/prove-pr264-live-providers-now'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CAPITAL_INTELLIGENCE_DATABENTO_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_DATABENTO_API_KEY || secrets.DATABENTO_API_KEY }}
+    steps:
+      - name: Check out diagnostic branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/prove-pr264-live-providers-now
+      - name: Install diagnostic dependency
+        run: python3 -m pip install "requests>=2.32,<3"
+      - name: Compare credential-safe OPRA identifier protocols
+        run: python3 tools/diagnose_databento_option_identifiers.py
