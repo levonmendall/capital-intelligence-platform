@@ -37,6 +37,7 @@ from premium_ui import (
 )
 from providers.economic_snapshot import load_dashboard_data
 from live_operating_console import load_live_market_console
+from operating_status import load_cio_operating_status
 
 
 PRIMARY_SURFACES = ["Today", "Environment", "Portfolio", "History"]
@@ -151,6 +152,7 @@ def _render_today() -> None:
     briefing = _latest("daily_cio_briefing")
     live_market = load_live_market_console()
     totals = get_portfolio_totals()
+    operating_status = load_cio_operating_status()
     _today_construction = _latest("portfolio_construction")
 
     # TODAY_MARKET_BRIEF
@@ -158,12 +160,12 @@ def _render_today() -> None:
     status = (
         _status_title(briefing.get("status"))
         if isinstance(briefing, dict)
-        else "Awaiting CIO conclusion"
+        else operating_status.label
     )
     confidence = briefing.get("confidence") if isinstance(briefing, dict) else None
     decision = _plain_text(
         briefing.get("portfolio_decision") if isinstance(briefing, dict) else None,
-        "Maintain the current portfolio posture until the governed process completes.",
+        operating_status.headline,
     )
     portfolio_effect = _plain_text(
         briefing.get("why_it_matters") if isinstance(briefing, dict) else None,
@@ -200,7 +202,11 @@ def _render_today() -> None:
             (
                 "Portfolio action",
                 decision,
-                f"CIO state: {status} · {decision_note}.",
+                (
+                    f"CIO state: {status} · {decision_note}."
+                    if isinstance(briefing, dict)
+                    else operating_status.detail
+                ),
             ),
             (
                 "Portfolio effect",
