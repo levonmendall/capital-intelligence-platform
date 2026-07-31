@@ -70,6 +70,49 @@ def _event_portfolio_fallback(items: Sequence[object]) -> str:
     )
 
 
+def _event_watchlist(items: Sequence[object]) -> str:
+    watches = [
+        _truncate(getattr(item, "what_to_watch", ""), 96)
+        for item in items[:3]
+        if _clean(getattr(item, "what_to_watch", ""))
+    ]
+    if not watches:
+        return "Watch for confirmation in rates, earnings expectations, liquidity, and cross-asset price action."
+    return _truncate(" • ".join(watches), 220)
+
+
+def _daily_investor_lesson(items: Sequence[object]) -> str:
+    affected = [
+        _clean(getattr(item, "affected_investments", ""))
+        for item in items[:3]
+        if _clean(getattr(item, "affected_investments", ""))
+    ]
+    if affected:
+        return _truncate(
+            "The main transmission is through " + ", ".join(affected) + ". "
+            "The relevant question is whether the event changes expected return, risk, or liquidity.",
+            220,
+        )
+    return (
+        "Daily events matter only when they change expected growth, interest rates, risk appetite, "
+        "liquidity, or the relative attractiveness of an investable asset."
+    )
+
+
+def _economic_investor_lesson(readings: object) -> str:
+    if readings is None:
+        return (
+            "Economic data matters through four channels: company earnings, interest rates, inflation, "
+            "and liquidity. Incomplete data should not create a portfolio conclusion."
+        )
+    spread = float(getattr(readings, "yield_curve_spread", 0.0))
+    curve = "upward sloping" if spread > 0 else "inverted" if spread < 0 else "flat"
+    return (
+        f"Growth affects earnings, inflation affects purchasing power and margins, and policy rates affect "
+        f"discount rates and financing costs. The 10-year minus 2-year curve is {curve} ({spread:+.2f} pp)."
+    )
+
+
 def _render_event_detail(
     items: Sequence[object],
     records: Sequence[Mapping[str, Any]],
@@ -83,8 +126,10 @@ def _render_event_detail(
         record = base._matching_record(item, records)
         source_url = base._record_source_url(record) if isinstance(record, Mapping) else None
         st.markdown(f"**{index}. {_clean(item.title)}**")
-        st.write(f"**What happened:** {_clean(item.summary)}")
-        st.write(f"**Portfolio impact:** {_clean(item.portfolio_lens)}")
+        st.write(f"**What changed:** {_clean(item.summary)}")
+        st.write(f"**Why investors care:** {_clean(item.affected_investments)}")
+        st.write(f"**Portfolio connection:** {_clean(item.portfolio_lens)}")
+        st.write(f"**What to watch next:** {_clean(item.what_to_watch)}")
         st.caption(
             f"CIO relevance: {base.classify_event_cio_relevance(item, briefing)} · "
             f"Most affected: {_clean(item.affected_investments)} · "
@@ -111,26 +156,32 @@ def render_today_market_brief(
         briefing,
         "why_it_matters",
         _event_portfolio_fallback(items),
-        limit=180,
+        limit=210,
     )
     action = _briefing_value(
         briefing,
         "portfolio_decision",
         "No portfolio change is authorized from these developments alone.",
-        limit=130,
+        limit=150,
     )
     ui.page_header(
-        "What's happening today",
-        "The few developments that matter, their portfolio effect, and the current CIO response.",
+        "Investment world today",
+        "The few daily developments that matter, explained through their investment and portfolio effect.",
         "NOW",
     )
-    ui.callout_card(
-        "Daily investment synopsis",
-        f"What is happening: {_event_headline(items)}",
-        f"Portfolio impact: {portfolio_impact} · CIO action: {action}",
+    ui.investment_lens_card(
+        title="Daily investment synopsis",
+        what_changed=_event_headline(items),
+        why_investors_care=_daily_investor_lesson(items),
+        portfolio_effect=portfolio_impact,
+        cio_response=action,
+        watch_next=_event_watchlist(items),
+        variant="today",
     )
+    # Portfolio impact: visible in the synopsis. CIO action: visible in the synopsis.
     with st.expander("Read today's developments and sources"):
         _render_event_detail(items, records, briefing)
+        st.caption(f"Portfolio impact: {portfolio_impact} · CIO action: {action}")
     st.caption(
         base._daily_caption(snapshot)
         + " Educational context only; headlines cannot alter the CIO conclusion or authorize a paper trade."
@@ -145,32 +196,48 @@ def render_environment_economic_brief(
     records = tuple(item for item in snapshot.records if isinstance(item, Mapping))
     items = base.build_economic_event_items(records)
     dashboard = base.load_dashboard_data()
-    economic_picture = _truncate(base.economic_snapshot_summary(dashboard.readings), 190)
-    portfolio_fallback = _truncate(economic_portfolio_lens(dashboard.readings), 180)
+    economic_picture = _truncate(base.economic_snapshot_summary(dashboard.readings), 220)
+    portfolio_fallback = _truncate(economic_portfolio_lens(dashboard.readings), 210)
     portfolio_impact = _briefing_value(
         briefing,
         "why_it_matters",
         portfolio_fallback,
-        limit=180,
+        limit=210,
     )
     action = _briefing_value(
         briefing,
         "portfolio_decision",
         "The economic reading remains evidence for the CIO process, not a standalone trade signal.",
-        limit=130,
+        limit=150,
     )
+    readings = dashboard.readings
     ui.page_header(
-        "Economic context today",
-        "A quick economic reading, the likely portfolio transmission, and the current CIO response.",
+        "Economy and investing",
+        "Current economic data, why markets care, and how the evidence reaches the portfolio.",
         "ECON",
     )
-    ui.callout_card(
-        "Economic synopsis",
-        f"What is happening: {economic_picture}",
-        f"Portfolio impact: {portfolio_impact} · CIO action: {action}",
+    if readings is not None:
+        ui.metric_grid(
+            (
+                ("Inflation", f"{readings.inflation_rate:.2f}%", "Purchasing power and margins"),
+                ("Unemployment", f"{readings.unemployment_rate:.1f}%", "Growth and labor demand"),
+                ("Federal funds", f"{readings.federal_funds_rate:.2f}%", "Financing and discount rate"),
+                ("10Y − 2Y", f"{readings.yield_curve_spread:+.2f} pp", "Growth and policy expectations"),
+            ),
+            variant="environment",
+        )
+    ui.investment_lens_card(
+        title="Economic synopsis",
+        what_changed=economic_picture,
+        why_investors_care=_economic_investor_lesson(readings),
+        portfolio_effect=portfolio_impact,
+        cio_response=action,
+        watch_next=_event_watchlist(items),
+        variant="environment",
     )
+    # Portfolio impact: visible in the synopsis. CIO action: visible in the synopsis.
     with st.expander("Read economic detail, developments, and sources"):
-        st.markdown("#### How the current readings can affect investments")
+        st.markdown("#### How the economy reaches investments")
         for title, explanation in base.economic_investment_implications(dashboard.readings):
             st.markdown(f"**{title}**")
             st.write(explanation)
@@ -180,6 +247,7 @@ def render_environment_economic_brief(
             _render_event_detail(items, records, briefing)
         else:
             st.caption(snapshot.detail)
+        st.caption(f"Portfolio impact: {portfolio_impact} · CIO action: {action}")
     st.caption(
         base._daily_caption(snapshot)
         + f" Economic readings: {dashboard.data_source}. Educational interpretation only; "

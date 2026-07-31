@@ -34,4 +34,4 @@ def test_signature_components_are_present() -> None:
     assert "metric_grid(" in app
     assert "signal_panel(" in app
     assert "Capital Deployment Orbit" in ui
-    assert "The interface stays quiet until evidence earns attention." in ui
+    assert "A governed investment-intelligence system" in ui
