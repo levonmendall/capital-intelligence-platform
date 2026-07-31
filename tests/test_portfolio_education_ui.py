@@ -1,5 +1,7 @@
 """Presentation contracts for portfolio-first market and economic education."""
 
+# Final validation trigger for the compact expandable briefing presentation.
+
 from pathlib import Path
 
 
