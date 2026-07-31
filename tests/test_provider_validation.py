@@ -105,6 +105,7 @@ def test_live_provider_validation_is_credential_safe_and_ready():
     }
     payload = report.to_dict()
     encoded = json.dumps(payload)
+    assert payload["schema_version"] == "capital-intelligence-provider-validation.v1"
     assert payload["credentials_exposed"] is False
     assert payload["real_money_authorized"] is False
     assert "api_token" not in encoded.lower()
