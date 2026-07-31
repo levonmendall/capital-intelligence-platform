@@ -8,6 +8,7 @@ on:
       - .github/workflows/prove-pr264-live-providers-now.yml
       - operations/comprehensive_market_discovery.py
       - operations/provider_validation.py
+      - providers/databento.py
       - providers/yahoo_public.py
       - tests/test_yahoo_public.py
 
@@ -40,6 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           .venv/bin/python - <<'PY'
+          from datetime import datetime, timezone
           import json
           import os
           import requests
@@ -56,36 +58,72 @@ jobs:
               timeout=30,
           )
           print("eodhd_options_http", response.status_code)
-          try:
-              payload = response.json()
-          except ValueError:
-              payload = None
-          if isinstance(payload, dict):
-              print("eodhd_options_keys", sorted(payload)[:20])
-              data = payload.get("data")
-              print("eodhd_options_count", len(data) if isinstance(data, list) else -1)
-              if isinstance(data, list) and data and isinstance(data[0], dict):
-                  print("eodhd_option_record_keys", sorted(data[0])[:40])
-              error = payload.get("message") or payload.get("error")
-              if error:
-                  print("eodhd_options_error", str(error)[:300])
-          elif isinstance(payload, list):
-              print("eodhd_options_count", len(payload))
-              if payload and isinstance(payload[0], dict):
-                  print("eodhd_option_record_keys", sorted(payload[0])[:40])
-          else:
-              print("eodhd_options_non_json", response.text[:300])
 
-          key = os.environ.get("CAPITAL_INTELLIGENCE_DATABENTO_API_KEY", "")
-          if key:
-              db = requests.get(
-                  "https://hist.databento.com/v0/metadata.list_datasets",
-                  auth=(key, ""),
-                  timeout=30,
-              )
-              datasets = db.json() if db.status_code == 200 else []
-              option_sets = [str(item) for item in datasets if "OPRA" in str(item).upper()]
-              print("databento_options_datasets", option_sets)
+          key = os.environ["CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"]
+          auth = (key, "")
+          datasets_response = requests.get(
+              "https://hist.databento.com/v0/metadata.list_datasets",
+              auth=auth,
+              timeout=30,
+          )
+          datasets = datasets_response.json() if datasets_response.status_code == 200 else []
+          print(
+              "databento_options_datasets",
+              [str(item) for item in datasets if "OPRA" in str(item).upper()],
+          )
+          schemas_response = requests.get(
+              "https://hist.databento.com/v0/metadata.list_schemas",
+              auth=auth,
+              params={"dataset": "OPRA.PILLAR"},
+              timeout=30,
+          )
+          schemas = schemas_response.json() if schemas_response.status_code == 200 else []
+          print("databento_opra_schemas", schemas)
+
+          now = datetime.now(timezone.utc)
+          definition_response = requests.post(
+              "https://hist.databento.com/v0/timeseries.get_range",
+              auth=auth,
+              data={
+                  "dataset": "OPRA.PILLAR",
+                  "schema": "definition",
+                  "symbols": "SPY.OPT",
+                  "stype_in": "parent",
+                  "start": now.date().isoformat(),
+                  "end": now.isoformat(),
+                  "encoding": "json",
+                  "pretty_px": "true",
+                  "pretty_ts": "true",
+                  "map_symbols": "true",
+                  "limit": "20",
+              },
+              timeout=60,
+          )
+          print("databento_definition_http", definition_response.status_code)
+          records = []
+          for line in definition_response.text.splitlines():
+              try:
+                  value = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if isinstance(value, dict):
+                  records.append(value)
+          print("databento_definition_count", len(records))
+          if records:
+              print("databento_definition_keys", sorted(records[0]))
+              safe = {
+                  key: records[0].get(key)
+                  for key in (
+                      "symbol",
+                      "raw_symbol",
+                      "asset",
+                      "instrument_class",
+                      "expiration",
+                      "strike_price",
+                      "underlying",
+                  )
+              }
+              print("databento_definition_sample", safe)
           PY
       - name: Validate required live providers
         shell: bash
