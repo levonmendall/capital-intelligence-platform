@@ -100,6 +100,7 @@ def _candidate_sessions(as_of: datetime, *, maximum_attempts: int = 7) -> tuple[
 class DatabentoOptionDefinition:
     symbol: str
     raw_symbol: str
+    instrument_id: int
     underlying: str
     option_right: str
     expiration_at: datetime
@@ -111,6 +112,13 @@ class DatabentoOptionDefinition:
         symbol = _text(self.symbol, field_name="symbol").upper()
         raw_symbol = _text(self.raw_symbol, field_name="raw_symbol").upper()
         underlying = _text(self.underlying, field_name="underlying").upper()
+        instrument_id = self.instrument_id
+        if (
+            isinstance(instrument_id, bool)
+            or not isinstance(instrument_id, int)
+            or instrument_id < 1
+        ):
+            raise ValueError("instrument_id must be a positive integer")
         if self.option_right not in {"call", "put"}:
             raise ValueError("option_right must be call or put")
         expiration = _aware(self.expiration_at, field_name="expiration_at")
@@ -120,6 +128,7 @@ class DatabentoOptionDefinition:
             raise ValueError("strike and contract_multiplier must be positive")
         object.__setattr__(self, "symbol", symbol)
         object.__setattr__(self, "raw_symbol", raw_symbol)
+        object.__setattr__(self, "instrument_id", instrument_id)
         object.__setattr__(self, "underlying", underlying)
         object.__setattr__(self, "expiration_at", expiration)
         object.__setattr__(self, "strike", strike)
@@ -285,6 +294,7 @@ class DatabentoOptionsProvider:
                         DatabentoOptionDefinition(
                             symbol=_compact_occ_symbol(raw_symbol),
                             raw_symbol=raw_symbol,
+                            instrument_id=int(row.get("instrument_id")),
                             underlying=row_underlying,
                             option_right="call" if instrument_class == "C" else "put",
                             expiration_at=_timestamp(
@@ -322,52 +332,65 @@ class DatabentoOptionsProvider:
 
     def daily_bars(
         self,
-        raw_symbols: Sequence[str],
+        instruments: Sequence[DatabentoOptionDefinition | tuple[int, str]],
         *,
         as_of: datetime,
         session_date: date,
         history_days: int = 45,
     ) -> Mapping[str, tuple[DatabentoOptionBar, ...]]:
-        """Return historical daily bars ending after the completed definition session."""
+        """Return completed-session bars using provider-native instrument IDs."""
 
         timestamp = _aware(as_of, field_name="as_of")
-        symbol_lookup: dict[str, str] = {}
-        for item in raw_symbols:
-            raw_symbol = _text(item, field_name="raw_symbol").upper()
-            symbol_lookup.setdefault(_compact_occ_symbol(raw_symbol), raw_symbol)
-        symbols = tuple(symbol_lookup.values())
-        if not symbols:
+        instrument_lookup: dict[int, str] = {}
+        for item in instruments:
+            if isinstance(item, DatabentoOptionDefinition):
+                instrument_id = item.instrument_id
+                raw_symbol = item.raw_symbol
+            else:
+                if not isinstance(item, tuple) or len(item) != 2:
+                    raise TypeError(
+                        "instruments must contain definitions or (instrument_id, raw_symbol) tuples"
+                    )
+                instrument_id, raw_symbol = item
+            if (
+                isinstance(instrument_id, bool)
+                or not isinstance(instrument_id, int)
+                or instrument_id < 1
+            ):
+                raise ValueError("instrument_id must be a positive integer")
+            normalized_symbol = _text(raw_symbol, field_name="raw_symbol").upper()
+            instrument_lookup.setdefault(instrument_id, normalized_symbol)
+        instrument_ids = tuple(instrument_lookup)
+        if not instrument_ids:
             return {}
         if history_days < 1 or history_days > 400:
             raise ValueError("history_days must be between 1 and 400")
         end_date = session_date + timedelta(days=1)
         start_date = end_date - timedelta(days=history_days)
-        grouped: dict[str, list[DatabentoOptionBar]] = {item: [] for item in symbols}
+        grouped: dict[str, list[DatabentoOptionBar]] = {
+            raw_symbol: [] for raw_symbol in instrument_lookup.values()
+        }
         batch_size = 20
-        for offset in range(0, len(symbols), batch_size):
-            batch = symbols[offset : offset + batch_size]
+        for offset in range(0, len(instrument_ids), batch_size):
+            batch = instrument_ids[offset : offset + batch_size]
             rows = self._records(
                 data={
                     "dataset": DATABENTO_OPRA_DATASET,
                     "schema": "ohlcv-1d",
-                    "symbols": ",".join(batch),
-                    "stype_in": "raw_symbol",
+                    "symbols": ",".join(str(item) for item in batch),
+                    "stype_in": "instrument_id",
                     "start": start_date.isoformat(),
                     "end": end_date.isoformat(),
                     "encoding": "json",
                     "pretty_px": "true",
                     "pretty_ts": "true",
-                    "map_symbols": "true",
                     "limit": max(1_000, len(batch) * history_days),
                 }
             )
             for row in rows:
                 try:
-                    provider_symbol = _text(
-                        row.get("symbol"),
-                        field_name="symbol",
-                    ).upper()
-                    symbol = symbol_lookup.get(_compact_occ_symbol(provider_symbol))
+                    instrument_id = int(row.get("instrument_id"))
+                    symbol = instrument_lookup.get(instrument_id)
                     if symbol is None:
                         continue
                     observed = _timestamp(
@@ -400,7 +423,7 @@ class DatabentoOptionsProvider:
 
     def latest_daily_bars(
         self,
-        raw_symbols: Sequence[str],
+        instruments: Sequence[DatabentoOptionDefinition | tuple[int, str]],
         *,
         as_of: datetime,
         history_days: int = 45,
@@ -412,7 +435,7 @@ class DatabentoOptionsProvider:
         for session_date in _candidate_sessions(timestamp):
             try:
                 bars = self.daily_bars(
-                    raw_symbols,
+                    instruments,
                     as_of=timestamp,
                     session_date=session_date,
                     history_days=history_days,
@@ -474,7 +497,7 @@ class DatabentoOptionsProvider:
         if not candidates:
             return ()
         _priced_session, bars = self.latest_daily_bars(
-            tuple(item.raw_symbol for item in candidates),
+            tuple(candidates),
             as_of=timestamp,
         )
         selected: list[DatabentoOptionSelection] = []

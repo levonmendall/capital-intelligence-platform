@@ -222,6 +222,7 @@ class DiscoveryCatalogRecord:
     option_right: str | None = None
     provider_dataset: str | None = None
     provider_stype_in: str | None = None
+    provider_instrument_id: int | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -264,6 +265,13 @@ class DiscoveryCatalogRecord:
                 "expiration_at",
                 _aware(self.expiration_at, field_name="expiration_at"),
             )
+        if self.provider_instrument_id is not None:
+            if (
+                isinstance(self.provider_instrument_id, bool)
+                or not isinstance(self.provider_instrument_id, int)
+                or self.provider_instrument_id < 1
+            ):
+                raise ValueError("provider_instrument_id must be a positive integer")
         if self.asset_class is CandidateAssetClass.OPTION:
             if (
                 self.expiration_at is None
@@ -762,7 +770,8 @@ def _option_catalog(
                     instrument_type="option",
                     provider_kind="databento",
                     provider_dataset=DATABENTO_OPRA_DATASET,
-                    provider_stype_in="raw_symbol",
+                    provider_stype_in="instrument_id",
+                    provider_instrument_id=definition.instrument_id,
                     source_identifier=(
                         "databento-opra-definition:"
                         f"{definition.session_date.isoformat()}:"
@@ -918,8 +927,17 @@ def default_market_probe(
     option_histories: Mapping[str, tuple[object, ...]] = {}
     if option_records and options_provider.configured:
         try:
+            option_instruments = tuple(
+                (item.provider_instrument_id, item.provider_symbol)
+                for item in option_records
+                if item.provider_instrument_id is not None
+            )
+            if len(option_instruments) != len(option_records):
+                raise DatabentoOptionsError(
+                    "option records are missing provider instrument IDs"
+                )
             _option_session, option_histories = options_provider.latest_daily_bars(
-                tuple(item.provider_symbol for item in option_records),
+                option_instruments,
                 as_of=timestamp,
                 history_days=min(policy.history_days, 365),
             )

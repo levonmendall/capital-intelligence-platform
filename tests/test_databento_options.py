@@ -35,6 +35,7 @@ class _Post:
                     {
                         "symbol": "SPY   260918C00620000",
                         "raw_symbol": "SPY   260918C00620000",
+                        "instrument_id": 101,
                         "asset": "SPY",
                         "underlying": "SPY",
                         "instrument_class": "C",
@@ -45,6 +46,7 @@ class _Post:
                     {
                         "symbol": "SPY   260918P00620000",
                         "raw_symbol": "SPY   260918P00620000",
+                        "instrument_id": 102,
                         "asset": "SPY",
                         "underlying": "SPY",
                         "instrument_class": "P",
@@ -55,6 +57,7 @@ class _Post:
                     {
                         "symbol": "SPY   261218C00625000",
                         "raw_symbol": "SPY   261218C00625000",
+                        "instrument_id": 103,
                         "asset": "SPY",
                         "underlying": "SPY",
                         "instrument_class": "C",
@@ -65,6 +68,7 @@ class _Post:
                     {
                         "symbol": "SPY   261218P00625000",
                         "raw_symbol": "SPY   261218P00625000",
+                        "instrument_id": 104,
                         "asset": "SPY",
                         "underlying": "SPY",
                         "instrument_class": "P",
@@ -76,10 +80,10 @@ class _Post:
             )
         if data["schema"] == "ohlcv-1d":
             records = []
-            for symbol in data["symbols"].split(","):
+            for instrument_id in data["symbols"].split(","):
                 records.append(
                     {
-                        "symbol": "".join(symbol.split()),
+                        "instrument_id": int(instrument_id),
                         "pretty_ts_event": "2026-07-30T13:30:00.000000000Z",
                         "pretty_close": "12.500000000",
                         "volume": "25",
@@ -113,8 +117,8 @@ def test_selects_priced_call_and_put_from_completed_session():
     }
     assert all(call[1]["auth"] == ("secret", "") for call in post.calls)
     assert all(
-        call[1]["data"]["stype_in"] == "raw_symbol"
-        and call[1]["data"]["map_symbols"] == "true"
+        call[1]["data"]["stype_in"] == "instrument_id"
+        and "map_symbols" not in call[1]["data"]
         and "stype_out" not in call[1]["data"]
         for call in post.calls
         if call[1]["data"]["schema"] == "ohlcv-1d"
@@ -124,13 +128,16 @@ def test_selects_priced_call_and_put_from_completed_session():
 def test_daily_bars_limit_each_provider_request_to_twenty_contracts():
     post = _Post()
     provider = DatabentoOptionsProvider(api_key="secret", http_post=post)
-    symbols = tuple(
-        f"SPY   260918C{600000 + index:08d}"
+    instruments = tuple(
+        (
+            1_000 + index,
+            f"SPY   260918C{600000 + index:08d}",
+        )
         for index in range(45)
     )
 
     bars = provider.daily_bars(
-        symbols,
+        instruments,
         as_of=AS_OF,
         session_date=AS_OF.date(),
     )
@@ -141,8 +148,8 @@ def test_daily_bars_limit_each_provider_request_to_twenty_contracts():
         if call[1]["data"]["schema"] == "ohlcv-1d"
     ]
     assert [len(batch) for batch in requests] == [20, 20, 5]
-    assert sum(len(batch) for batch in requests) == len(symbols)
-    assert set(bars) == set(symbols)
+    assert sum(len(batch) for batch in requests) == len(instruments)
+    assert set(bars) == {raw_symbol for _instrument_id, raw_symbol in instruments}
 
 
 def test_validation_returns_only_credential_safe_counts():
