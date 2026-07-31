@@ -93,6 +93,7 @@ def test_selects_priced_call_and_put_from_completed_session():
     post = _Post()
     provider = DatabentoOptionsProvider(api_key="secret", http_post=post)
 
+    assert provider.configured is True
     selected = provider.select_contracts(
         "SPY",
         underlying_price=620.0,
