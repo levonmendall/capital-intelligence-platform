@@ -56,9 +56,11 @@ concentration limits, or thesis and evidence-integrity emergencies.
 ## Capital policy
 
 The paper pilot retains a 5% operational cash floor and permits up to 20% normal
-batch turnover. Individual exploratory company entries remain capped at 1%, while
-established company positions remain subject to the governed 5% ceiling. Strategic
-wrappers retain exposure-specific caps.
+batch turnover. Validation tests reject allocations below the 5% floor and turnover
+above the 20% ceiling rather than preserving the superseded 20% cash and 10%
+turnover assumptions. Individual exploratory company entries remain capped at 1%,
+while established company positions remain subject to the governed 5% ceiling.
+Strategic wrappers retain exposure-specific caps.
 
 ## Authority
 
