@@ -47,6 +47,12 @@ services:
         value: "true"
       - key: CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER
         value: "true"
+      - key: CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP
+        value: "true"
+      - key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_REQUIRED
+        value: "true"
+      - key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_MAX_AGE_HOURS
+        value: "168"
       - key: CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT
         value: "true"
       - key: CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE

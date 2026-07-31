@@ -29,6 +29,15 @@ class _FredProvider:
 
 class _DirectClient:
     failed_symbol = ""
+    received_symbols: tuple[str, ...] = ()
+
+    def __init__(self, universe=None):
+        self.universe = universe
+        type(self).received_symbols = (
+            ()
+            if universe is None
+            else tuple(item.symbol for item in universe.instruments)
+        )
 
     def historical_bars(self, symbols, **_kwargs):
         symbol = tuple(symbols)[0]
@@ -62,6 +71,7 @@ def test_one_direct_market_outage_does_not_abort_the_entire_evidence_payload(mon
     failed = direct.instruments[0].symbol
     available = direct.instruments[1].symbol
     _DirectClient.failed_symbol = failed
+    _DirectClient.received_symbols = ()
     universe = replace(
         base,
         identifier=f"{base.identifier}+degradation-test",
@@ -74,6 +84,7 @@ def test_one_direct_market_outage_does_not_abort_the_entire_evidence_payload(mon
 
     payload = evidence._default_probe(universe, NOW)
 
+    assert _DirectClient.received_symbols == (failed, available)
     assert failed not in payload["bars"]
     assert failed not in payload["quotes"]
     assert available in payload["bars"]

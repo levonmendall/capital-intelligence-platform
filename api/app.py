@@ -32,6 +32,7 @@ from api.routes import (
     normalization_router,
     operations_router,
     portfolios_router,
+    provider_validation_router,
     replays_router,
     risk_router,
     synthesis_router,
@@ -155,6 +156,7 @@ def create_app(
     protected = [Depends(require_principal)]
     app.include_router(health_router)
     app.include_router(operations_router)
+    app.include_router(provider_validation_router)
     if resolved_authentication.required:
         app.include_router(authentication_router)
         app.include_router(users_router)
