@@ -1,0 +1,66 @@
+e, and "
++            "what they mean for the portfolio."
+         ),
+         core_label="CIO\nPulse",
+         accent="#56e0ff",
+@@ -57,8 +57,8 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
+         kicker="Market atmosphere",
+         title="Today's market environment",
+         copy=(
+-            "Current growth, inflation, policy, liquidity and cross-asset evidence, "
+-            "with the portfolio implication stated plainly."
++            "Growth, inflation, policy, liquidity and cross-asset conditions explained "
++            "through their portfolio transmission."
+         ),
+         core_label="Signal\nField",
+         accent="#52e3a4",
+@@ -131,12 +131,12 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
+     palette = (
+         """
+         :root{
+-            --bg:#05070d;--bg-2:#080d18;--panel:rgba(13,19,32,.88);
++            --bg:#05070d;--bg-2:#080d18;--panel:rgba(12,18,30,.92);
+             --panel-solid:#0d1320;--panel-2:#111a2b;--ink:#f8fafc;
+-            --ink-soft:#dce7f6;--muted:#8492a8;--line:rgba(138,157,188,.15);
++            --ink-soft:#dce7f6;--muted:#98a6bb;--line:rgba(138,157,188,.15);
+             --line-hot:rgba(86,224,255,.28);--cyan:#56e0ff;--blue:#5b7cff;
+             --violet:#9b7cff;--green:#52e3a4;--amber:#ffc96b;
+-            --shadow:rgba(0,0,0,.42);--grid:rgba(105,137,187,.055);
++            --shadow:rgba(0,0,0,.42);--grid:rgba(105,137,187,.038);
+             --alert:rgba(17,26,43,.92);--track:#1b2638;
+             --surface-accent:#56e0ff;--surface-rgb:86,224,255;
+             --surface-accent-2:#5b7cff;--surface-rgb-2:91,124,255;
+@@ -170,10 +170,10 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
+                 radial-gradient(circle at 84% 2%,rgba(var(--surface-rgb),.12),transparent 25rem),
+                 radial-gradient(circle at 14% 18%,rgba(var(--surface-rgb-2),.11),transparent 28rem),
+                 linear-gradient(180deg,var(--bg),var(--bg-2));
+-            background-size:34px 34px,34px 34px,auto,auto,auto;
++            background-size:40px 40px,40px 40px,auto,auto,auto;
+             transition:background-image 260ms ease;
+         }
+-        .block-container{max-width:1320px;padding-top:.75rem;padding-bottom:3rem}
++        .block-container{max-width:1180px;padding-top:.55rem;padding-bottom:3rem}
+         [data-testid="stSidebar"]{background:#070b13;border-right:1px solid rgba(255,255,255,.06)}
+         [data-testid="stSidebar"] *{color:#e5edf8}
+         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:#8fa0b8}
+@@ -193,15 +193,15 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
+         [data-testid="stRadio"] div[role="radiogroup"] label>div:first-child{display:none}
+         [data-testid="stToggle"]{min-height:3.4rem;display:flex;align-items:center;justify-content:center;border-radius:19px;padding:.35rem .7rem;background:rgba(8,13,24,.88);border:1px solid rgba(138,157,188,.15);box-shadow:0 16px 40px rgba(0,0,0,.2);backdrop-filter:blur(22px)}
+         [data-testid="stToggle"] p{color:#dce7f6!important;font-size:.84rem;font-weight:680}
+-        .hero-shell{position:relative;overflow:hidden;border-radius:30px;padding:1px;background:linear-gradient(115deg,rgba(var(--surface-rgb),.42),rgba(var(--surface-rgb-2),.16) 43%,rgba(var(--surface-rgb),.24));box-shadow:0 30px 75px var(--shadow);margin-bottom:.9rem}
+-        .hero-card{position:relative;overflow:hidden;background:linear-gradient(130deg,rgba(12,18,31,.97),rgba(8,13,24,.95));border-radius:29px;padding:1.6rem 1.7rem;min-height:13rem}
+-        .hero-card:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(var(--surface-rgb),.045),transparent);transform:translateX(-100%);animation:scan 8s linear infinite}
++        .hero-shell{position:relative;overflow:hidden;border-radius:24px;padding:1px;background:linear-gradient(115deg,rgba(var(--surface-rgb),.42),rgba(var(--surface-rgb-2),.16) 43%,rgba(var(--surface-rgb),.24));box-shadow:0 30px 75px var(--shadow);margin-bottom:.9rem}
++        .hero-card{position:relative;overflow:hidden;background:linear-gradient(135deg,rgba(11,17,29,.98),rgba(7,12,22,.97));border-radius:23px;padding:1.45rem 1.55rem;min-height:11.8rem}
++        .hero-card:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(var(--surface-rgb),.028),transparent);transform:translateX(-100%);animation:scan 12s linear infinite}
+         .hero-card:after{content:"";position:absolute;width:25rem;height:25rem;right:-10rem;top:-15rem;border-radius:50%;border:1px solid rgba(var(--surface-rgb),.12);box-shadow:0 0 0 3rem rgba(var(--surface-rgb),.018),0 0 0 6rem rgba(var(--surface-rgb-2),.012)}
+         @keyframes scan{to{transform:translateX(100%)}}
+         .hero-grid{display:grid;grid-template-columns:minmax(0,1fr) 14rem;gap:2rem;align-items:center;position:relative;z-index:2}
+         .hero-kicker{display:flex;align-items:center;gap:.55rem;font-size:.69rem;font-weight:820;letter-spacing:.14em;text-transform:uppercase;color:var(--surface-accent);margin-bottom:.75rem}
+         .hero-kicker:before{content:"";width:1.9rem;height:1px;background:linear-gradient(90deg,var(--surface-accent),transparent)}
+-        .hero-title{font-size:clamp(2rem,5vw,3.35rem);line-height:1;font-weight:760;letter-spacing:-.055em;color:#f7fbff;margin:0;max-width:49rem}
++        .hero-title{font-size:clamp(2rem,4.4vw,3.05rem);line-height:1;font-weight:760;letter-spacing:-.055em;color:#f7fbff;margin:0;max-width:49rem}
+         .hero-copy{font-size:.98rem;line-height:1.65;color:#93a2b8;margin:.85rem 0 0;max-width:43rem}
+         .hero-meta{margin-top:1rem;display:flex;flex-wrap:wrap;gap:.45rem}
+         .signal-chip{display:inline-flex;align-items:center;gap:.45rem;padding:.42rem .68rem;border-radius:999px;font-size:.72rem;font-weight:680;border:1px solid rgba(138,157,188,.16);background:rgba(255,255,255,.025);color:#b8c5d8}
+@@ -255,7 +255,7 @@ def apply_global_style(*, d
