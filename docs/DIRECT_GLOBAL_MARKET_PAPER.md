@@ -30,6 +30,20 @@ recommend, size, construct, or execute independently. Simulated top-of-book spre
 are conservative paper assumptions and remain explicitly distinguishable from
 broker-native executable quotes.
 
+## Provider-degradation boundary
+
+Direct-market evidence is collected independently for each governed instrument. A
+temporary outage affecting an unheld FX, crypto, or futures instrument records an
+explicit exclusion for that instrument rather than suppressing the complete CIO
+briefing and decision-status publication. Successfully collected listed and direct
+market evidence can continue through the canonical opportunity, CIO, and construction
+process.
+
+The boundary remains fail-closed for current holdings. When a held instrument lacks
+current mandatory evidence, the production context and CIO cycle remain blocked until
+that evidence recovers. No stale mark, fabricated quote, or unsupported holding
+conclusion is substituted.
+
 ## Paper implementation
 
 Spot FX and spot crypto are unlevered. Futures are represented with explicit contract

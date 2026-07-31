@@ -128,11 +128,26 @@ def _default_probe(
         listed_symbols = tuple(item.symbol for item in listed_instruments)
         bars.update(client.historical_bars(listed_symbols, start=as_of - timedelta(days=_HISTORY_DAYS), end=as_of, timeframe="1Day"))
         quotes.update(client.latest_quotes(listed_symbols))
+    direct_market_errors: dict[str, str] = {}
     if direct_instruments:
         direct_client = DirectGlobalMarketClient()
-        direct_symbols = tuple(item.symbol for item in direct_instruments)
-        bars.update(direct_client.historical_bars(direct_symbols, start=as_of - timedelta(days=_HISTORY_DAYS), end=as_of, timeframe="1Day"))
-        quotes.update(direct_client.latest_quotes(direct_symbols))
+        for instrument in direct_instruments:
+            symbol = instrument.symbol
+            try:
+                symbol_bars = direct_client.historical_bars(
+                    (symbol,),
+                    start=as_of - timedelta(days=_HISTORY_DAYS),
+                    end=as_of,
+                    timeframe="1Day",
+                )
+                symbol_quotes = direct_client.latest_quotes((symbol,))
+            except (OSError, TypeError, ValueError, RuntimeError) as error:
+                direct_market_errors[symbol] = (
+                    f"{type(error).__name__}: {str(error)[:300]}"
+                )
+                continue
+            bars.update(symbol_bars)
+            quotes.update(symbol_quotes)
     fred = FREDProvider()
     macro = {series: fred.get_latest_value(series) for series in ("DGS10", "T10Y2Y", "VIXCLS", "DFF")}
     company_facts: dict[str, object] = {}
@@ -161,6 +176,7 @@ def _default_probe(
         "macro": macro,
         "company_facts": company_facts,
         "provider_clock": provider_clock,
+        "_direct_market_errors": direct_market_errors,
     }
 
 
@@ -1296,6 +1312,16 @@ def build_paper_evidence(
     quotes = payload.get("quotes")
     raw_macro = payload.get("macro")
     company_facts = payload.get("company_facts", {})
+    raw_direct_market_errors = payload.get("_direct_market_errors", {})
+    if not isinstance(raw_direct_market_errors, Mapping):
+        raise ProductionPaperEvidenceError(
+            "direct-market error detail must be a mapping"
+        )
+    direct_market_errors = {
+        str(symbol).strip().upper(): str(detail).strip()
+        for symbol, detail in raw_direct_market_errors.items()
+        if str(symbol).strip() and str(detail).strip()
+    }
     live_collection = payload.get("_live_collection") is True
     maximum_future_skew_seconds = -1 if live_collection else 0
     future_reference_at = as_of
@@ -1352,10 +1378,19 @@ def build_paper_evidence(
                 raise ProductionPaperEvidenceError(
                     f"mandatory holding evidence failed for {instrument.symbol}: {error}"
                 ) from error
+            detail = f"Certified listed-wrapper evidence is incomplete: {error}"
+            if (
+                instrument.execution_asset_class in DIRECT_EXECUTION_CLASSES
+                and instrument.symbol in direct_market_errors
+            ):
+                detail = (
+                    "Direct-market evidence is temporarily unavailable: "
+                    + direct_market_errors[instrument.symbol]
+                )
             exclusions.append(
                 (
                     instrument.instrument_identifier,
-                    (f"Certified listed-wrapper evidence is incomplete: {error}",),
+                    (detail,),
                 )
             )
     candidates: list[CandidateDecisionRecord] = []
