@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 
 import premium_ui as ui
+from operations.artifact_ordering import ordered_json_artifacts
 
 from cio_pending_transactions import pending_report_paths
 from operations.free_paper_pilot import (
@@ -495,17 +496,14 @@ def render_operating_report_history() -> None:
 
     statuses: list[dict[str, object]] = []
     try:
-        status_paths = sorted(
+        ranked_statuses = ordered_json_artifacts(
             artifact_directory().glob("*.status.json"),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
+            timestamp_fields=("attempted_at",),
+            identifier_fields=("execution_identifier",),
         )[:25]
     except OSError:
-        status_paths = []
-    for path in status_paths:
-        payload = _load_json(path)
-        if payload is None:
-            continue
+        ranked_statuses = ()
+    for _, payload in ranked_statuses:
         statuses.append(
             {
                 "Attempted": _format_timestamp(payload.get("attempted_at")),

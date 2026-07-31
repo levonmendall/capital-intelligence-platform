@@ -50,6 +50,12 @@ from operations.composite_readiness import (
     assess_composite_readiness,
     component_heartbeat_path,
 )
+from operations.artifact_ordering import (
+    embedded_artifact_key,
+    ordered_json_artifacts,
+    parse_embedded_utc,
+    stable_payload_identifier,
+)
 from operations.incidents import (
     OperationalIncidentError,
     OperationalIncidentEvent,
@@ -253,6 +259,7 @@ __all__ = [
     "WorkerHeartbeatStore",
     "assess_composite_readiness",
     "component_heartbeat_path",
+    "embedded_artifact_key",
     "assert_current_stage_fence",
     "build_canonical_backup_registry",
     "build_operational_slo_service",
@@ -261,8 +268,11 @@ __all__ = [
     "get_request_id",
     "install_operational_middleware",
     "operation_result_to_dict",
+    "ordered_json_artifacts",
+    "parse_embedded_utc",
     "operational_slo_policy_from_settings",
     "policy_from_payload",
     "scenario_from_payload",
     "set_request_id",
+    "stable_payload_identifier",
 ]

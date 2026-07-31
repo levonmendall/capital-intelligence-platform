@@ -90,6 +90,15 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Deployment/migration:** lazy/read-time compatibility plus optional append-only metadata index; no rewrite of canonical events.
 - **Rollback:** old reader can consume unchanged payloads; do not delete generated index.
 - **Authority change:** none.
+- **Implementation record:** shared artifact ordering now requires an embedded
+  timezone-aware timestamp normalized to UTC and uses an explicit stable ID or
+  canonical payload SHA as the tie-breaker. Pending CIO reports, smoke-test
+  execution attempts, live-console execution history, backup selection, and
+  backup pruning no longer use filesystem metadata. Invalid archive ordering
+  metadata fails closed; invalid backup metadata is never pruned. Focused
+  deterministic, pending-report, backup, smoke, and console tests pass
+  **25/25**. Existing payloads and backup schemas are unchanged, so rollback is
+  reader-only and requires no data rewrite. No authority changed.
 
 ## PR7 — Scheduler, restart, idempotency, and reconciliation hardening
 

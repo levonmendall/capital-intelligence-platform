@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from cryptography.fernet import Fernet, InvalidToken
+from operations.artifact_ordering import parse_embedded_utc, stable_payload_identifier
 
 
 class BackupError(RuntimeError):
@@ -455,28 +456,28 @@ class SQLiteBackupManager:
             raise ValueError("minimum_archive_bytes must be positive")
         if not self.destination.exists():
             return False, "backup directory does not exist", None
-        candidates = sorted(
-            self.destination.glob("capital-intelligence-*.tar.gz*"),
-            key=lambda candidate: candidate.stat().st_mtime,
-            reverse=True,
-        )
+        candidates = tuple(self.destination.glob("capital-intelligence-*.tar.gz*"))
         if not candidates:
             return False, "no backup archive exists", None
-        latest = candidates[0]
+        ranked: list[tuple[datetime, str, Path, dict[str, object]]] = []
+        for candidate in candidates:
+            try:
+                manifest = self.verify_archive(candidate)
+                created_at = parse_embedded_utc(manifest.get("created_at"))
+                identifier = stable_payload_identifier(manifest)
+            except (BackupError, OSError, ValueError, KeyError, TypeError) as error:
+                return (
+                    False,
+                    f"backup archive failed verification or embedded ordering metadata: {error}",
+                    candidate,
+                )
+            ranked.append((created_at, identifier, candidate, manifest))
+        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        created_at, _, latest, manifest = ranked[0]
         if latest.stat().st_size < minimum_archive_bytes:
             return False, f"latest backup archive is empty: {latest.name}", latest
         if self.require_encryption and latest.suffix != ".fernet":
             return False, f"latest backup is not encrypted: {latest.name}", latest
-        try:
-            manifest = self.verify_archive(latest)
-            created_at_value = manifest.get("created_at")
-            if not isinstance(created_at_value, str):
-                raise BackupError("backup manifest creation time is missing")
-            created_at = datetime.fromisoformat(created_at_value)
-            if created_at.tzinfo is None:
-                raise BackupError("backup manifest creation time has no timezone")
-        except (BackupError, OSError, ValueError, KeyError, TypeError) as error:
-            return False, f"latest backup failed verification: {error}", latest
         now = self._clock()
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
@@ -550,17 +551,17 @@ class SQLiteBackupManager:
             return ()
         cutoff = self._clock() - timedelta(days=self.retention_days)
         removed: list[Path] = []
-        for candidate in self.destination.glob(
-            "capital-intelligence-*.tar.gz*"
-        ):
-            modified = datetime.fromtimestamp(
-                candidate.stat().st_mtime,
-                timezone.utc,
-            )
-            if modified < cutoff:
+        for candidate in self.destination.glob("capital-intelligence-*.tar.gz*"):
+            try:
+                manifest = self.verify_archive(candidate)
+                created_at = parse_embedded_utc(manifest.get("created_at"))
+            except (BackupError, OSError, ValueError, KeyError, TypeError):
+                # Never delete an archive whose embedded lineage cannot be proven.
+                continue
+            if created_at < cutoff.astimezone(timezone.utc):
                 candidate.unlink()
                 removed.append(candidate)
-        return tuple(removed)
+        return tuple(sorted(removed, key=lambda item: item.name))
 
 
 __all__ = ["BackupError", "BackupResult", "SQLiteBackupManager"]
