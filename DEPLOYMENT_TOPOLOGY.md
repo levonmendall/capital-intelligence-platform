@@ -15,6 +15,18 @@
 
 One Render service is acceptable while one persistent disk is required, provided `run_render_service.py` is the sole supervisor, the headless operator is the only execution authority, each child emits a heartbeat, and a composite readiness endpoint gates deployment.
 
+Render exposes Streamlit's built-in liveness endpoint on the single public
+service port. A critical `composite-readiness-watchdog` probes the internal API
+readiness contract after a bounded startup grace. If composite readiness stays
+blocked, or regresses after first becoming ready, the watchdog exits and the
+supervisor terminates the service so the public liveness probe fails and Render
+restarts it. This bridges the single-port constraint without exposing private
+diagnostics.
+
+Composite production readiness requires component heartbeats, current operator
+evidence, reconciled operational evidence, a recent successful encrypted backup,
+and the exact deployed 40-character Git SHA.
+
 ### Local development
 
 One documented CLI command starts API, Streamlit read-only UI, and optional non-authoritative fixtures. Paper execution is disabled by default and requires an explicit paper-only profile.

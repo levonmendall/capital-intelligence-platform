@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -25,7 +26,12 @@ from cio_pending_transactions import (
     publish_pending_transaction_report,
 )
 from delivery.service import WorkerRunResult
-from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
+from operations import (
+    OperationalSettings,
+    WorkerHeartbeatStore,
+    component_heartbeat_path,
+    configure_logging,
+)
 from operations.cio_reassessment import (
     AfterCloseLearningResult,
     ReassessmentResult,
@@ -325,7 +331,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             service_name="capital-intelligence-paper-operator",
         )
     configure_logging(operational)
-    heartbeat = WorkerHeartbeatStore(operational.worker_heartbeat_path)
+    heartbeat = WorkerHeartbeatStore(
+        component_heartbeat_path(
+            Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")),
+            "cio-paper-operator",
+        )
+    )
     logger = logging.getLogger("capital_intelligence.paper_operator")
 
     try:
