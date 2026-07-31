@@ -1,16 +1,13 @@
 name: Apply portfolio-first UI redesign
 
-# Trigger the one-time materialization now that this workflow exists on main.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/agent_payload/portfolio-first-ui.tar.gz.b64
-      - .github/workflows/apply-portfolio-first-ui-redesign.yml
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
   group: portfolio-first-ui-redesign
@@ -18,6 +15,9 @@ concurrency:
 
 jobs:
   apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/run-portfolio-first-ui-materialization'
     runs-on: ubuntu-latest
     steps:
       - name: Check out main
