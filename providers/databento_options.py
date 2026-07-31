@@ -171,12 +171,14 @@ class DatabentoOptionsProvider:
         http_post: HttpPost = requests.post,
         timeout_seconds: int = 90,
     ) -> None:
-        resolved = (
-            api_key
-            or os.getenv("CAPITAL_INTELLIGENCE_DATABENTO_API_KEY")
-            or os.getenv("DATABENTO_API_KEY")
-            or ""
-        ).strip()
+        if api_key is None:
+            resolved = (
+                os.getenv("CAPITAL_INTELLIGENCE_DATABENTO_API_KEY")
+                or os.getenv("DATABENTO_API_KEY")
+                or ""
+            ).strip()
+        else:
+            resolved = str(api_key).strip()
         if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int):
             raise TypeError("timeout_seconds must be an integer")
         if timeout_seconds < 1 or timeout_seconds > 180:

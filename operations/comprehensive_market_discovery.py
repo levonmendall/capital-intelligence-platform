@@ -986,6 +986,8 @@ def default_market_probe(
             continue
         if len(rows) < policy.minimum_history_bars:
             continue
+        if record.asset_class is CandidateAssetClass.OPTION and option_price <= 0.0:
+            continue
         closes = [float(item["c"]) for item in rows]
         volumes = [float(item["v"]) for item in rows]
         daily = [
@@ -1008,9 +1010,14 @@ def default_market_probe(
             {"t": item["t"].isoformat(), "c": item["c"], "v": item["v"]}
             for item in rows
         ]
+        observed_at = (
+            option_rows[-1].observed_at
+            if record.asset_class is CandidateAssetClass.OPTION and option_rows
+            else rows[-1]["t"]
+        )
         result[record.symbol] = DiscoveryMarketFeatures(
             price=price,
-            observed_at=rows[-1]["t"],
+            observed_at=observed_at,
             one_month_return=_period_return(closes, 21),
             three_month_return=_period_return(closes, 63),
             six_month_return=_period_return(closes, 126),
