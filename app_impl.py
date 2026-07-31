@@ -820,13 +820,16 @@ def _render_history() -> None:
         else:
             display_frame(
                 pd.DataFrame(
-                    {
-                        "As of": format_datetime(item.get("as_of")),
-                        "Status": item.get("status"),
-                        "Decision": item.get("portfolio_decision"),
-                    }
-                    for item in briefings
-                )
+                    (
+                        {
+                            "As of": format_datetime(item.get("as_of")),
+                            "Status": item.get("status"),
+                            "Decision": item.get("portfolio_decision"),
+                            "Decision ID": _briefing_identifier(item),
+                        }
+                        for item in briefings
+                    )
+                )[["As of", "Status", "Decision"]]
             )
     with eval_tab:
         if not evaluations:
