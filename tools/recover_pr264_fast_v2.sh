@@ -50,7 +50,7 @@ replacement = [
     "    )",
 ]
 lines[start:end + 1] = replacement
-path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
 PATCHPY
 
 """
