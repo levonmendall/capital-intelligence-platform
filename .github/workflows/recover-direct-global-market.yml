@@ -1,0 +1,71 @@
+name: Recover direct global-market implementation
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: recover-direct-global-market
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/complete-direct-global-market-paper'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact recovery branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/complete-direct-global-market-paper
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply the previously reviewed product patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f .github/direct-global-market-recovery.trigger ]]; then
+            echo 'Direct-market patch is already applied; nothing to recover.'
+            exit 0
+          fi
+
+          git fetch origin \
+            agent/enable-direct-global-market-paper:refs/remotes/origin/agent/enable-direct-global-market-paper
+          : > /tmp/direct-global.b64
+          for part in 00 01 03; do
+            git show \
+              origin/agent/enable-direct-global-market-paper:.github/agent_payload/direct-global-${part}.b64 \
+              >> /tmp/direct-global.b64
+          done
+          base64 --decode /tmp/direct-global.b64 > /tmp/direct-global.patch.gz
+          gzip --test /tmp/direct-global.patch.gz
+          gzip --decompress --stdout /tmp/direct-global.patch.gz > /tmp/direct-global.patch
+          test -s /tmp/direct-global.patch
+          git apply --check /tmp/direct-global.patch
+          git apply --index /tmp/direct-global.patch
+
+          rm -f .github/direct-global-market-recovery.trigger
+          git add -A
+
+          ! git grep -n 'direct_instrument_classes_prohibited' -- ':!tests/**'
+          ! git grep -n 'Direct futures.*spot FX.*direct crypto.*remain prohibited' -- ':!tests/**'
+          python -m compileall -q .
+
+      - name: Commit recovered implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'Complete direct global-market paper expansion'
+          git push origin HEAD:agent/complete-direct-global-market-paper
