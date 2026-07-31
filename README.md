@@ -111,7 +111,7 @@ History exposes canonical CIO briefings, living theses, evaluations, attribution
 Run the authenticated interface:
 
 ```bash
-streamlit run secure_app.py
+python capital_intelligence_cli.py run ui
 ```
 
 The presentation system lives in `premium_ui.py`. Dark mode is the configured default; users may switch to the alternate light appearance without changing any investment or data behavior.
@@ -263,7 +263,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
 python initialize.py
-streamlit run secure_app.py
+python capital_intelligence_cli.py run ui
 ```
 
 For Windows PowerShell, activate the environment with:
@@ -279,7 +279,7 @@ Provider credentials, database paths, stage bindings, and deployment settings ar
 Start the read-only API:
 
 ```bash
-uvicorn api.app:create_app --factory --host 0.0.0.0 --port 8000
+python capital_intelligence_cli.py run api
 ```
 
 Primary institutional endpoints include:
@@ -313,7 +313,7 @@ The API is query-only for investment authority and exposes no live-trade or allo
 The default operating worker starts the canonical scheduler and exact paper executor without an external launch sequence or a browser session:
 
 ```bash
-python run_autonomous_paper_operator.py --loop
+python capital_intelligence_cli.py run operator
 ```
 
 Automatic mode writes an append-only authorization for the exact construction hash and then delegates to the existing reconciled paper executor. It remains idle when no current canonical construction exists and never substitutes fixtures or synthetic recommendations for missing evidence. Set `CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE=manual` to restore per-construction approval, or `disabled` to monitor without implementation.
@@ -375,6 +375,20 @@ The production runtime image does not include test tooling.
 
 ## Deployment
 
+Canonical commands and supported environment topologies are declared in
+`config/runtime_topologies.json`. Inspect or validate them without starting a
+service:
+
+```bash
+python capital_intelligence_cli.py topology render
+python capital_intelligence_cli.py validate
+```
+
+The Render production entrypoint is exactly `python run_render_service.py`.
+The Docker runtime image is the API-only topology. Compose explicitly starts
+the API, sole headless paper operator, Streamlit UI, historical backfill, and
+encrypted backup against shared state.
+
 Prepare the environment and start the autonomous paper operator:
 
 ```bash
@@ -388,7 +402,7 @@ The default scheduler service does not require an external stage-binding secret.
 ## Backup and recovery
 
 ```bash
-python run_backup.py
+python capital_intelligence_cli.py run backup
 python run_backup.py --healthcheck
 python run_restore.py backups/<archive>.tar.gz.fernet --verify-only
 ```

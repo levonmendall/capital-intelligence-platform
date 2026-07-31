@@ -1,0 +1,61 @@
+{
+  "schema_version": "capital-intelligence-runtime-topologies.v1",
+  "commands": {
+    "api": ["{python}", "-m", "uvicorn", "api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"],
+    "backup": ["{python}", "run_backup.py", "--loop"],
+    "backfill": ["{python}", "run_historical_backfill.py", "--loop"],
+    "operator": ["{python}", "run_autonomous_paper_operator.py", "--loop"],
+    "render": ["{python}", "run_render_service.py"],
+    "ui": ["{python}", "-m", "streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"],
+    "validate": ["{python}", "run_release_validation.py"]
+  },
+  "topologies": {
+    "render": {
+      "entry_command": "render",
+      "processes": ["api", "cio-paper-operator", "historical-backfill", "encrypted-backup", "streamlit", "composite-readiness-watchdog"],
+      "paper_execution_default": "automatic",
+      "persistent_state": "/app/database"
+    },
+    "docker-api": {
+      "entry_command": "api",
+      "processes": ["api"],
+      "paper_execution_default": "disabled",
+      "persistent_state": "/app/database"
+    },
+    "compose": {
+      "entry_command": "docker compose up --build",
+      "processes": ["api", "scheduler", "backfill", "backup", "web"],
+      "paper_execution_default": "environment-explicit",
+      "persistent_state": "capital_data"
+    },
+    "local": {
+      "entry_command": "ui",
+      "processes": ["streamlit"],
+      "paper_execution_default": "disabled",
+      "persistent_state": "database"
+    },
+    "ci": {
+      "entry_command": "validate",
+      "processes": ["validation"],
+      "paper_execution_default": "disabled",
+      "persistent_state": "temporary"
+    }
+  },
+  "root_script_inventory": {
+    "runtime_active": [
+      "run_autonomous_paper_operator.py",
+      "run_backup.py",
+      "run_composite_readiness_watchdog.py",
+      "run_container_acceptance.py",
+      "run_daily_operations.py",
+      "run_historical_backfill.py",
+      "run_release_validation.py",
+      "run_render_service.py",
+      "run_restore.py"
+    ],
+    "specialized_supported": [
+      "run_all_market_provider_bundle.py", "run_all_markets_paper_readiness.py", "run_all_markets_paper_rehearsal.py", "run_alpaca_paper_broker_smoke.py", "run_approved_paper_execution.py", "run_asset_class_governance.py", "run_asset_specific_evidence.py", "run_business_cycle.py", "run_canonical_historical_replay.py", "run_configured_dataset_provider.py", "run_credit_cycle.py", "run_crypto_venue_validation.py", "run_daily_stage_adapter.py", "run_daily_stage_fixture.py", "run_data_readiness.py", "run_databento_catalog.py", "run_decision_information_activation.py", "run_decision_information_readiness.py", "run_derivative_data_certification.py", "run_environment_evidence.py", "run_eodhd_binding_expansion.py", "run_eodhd_provider.py", "run_execution_calibration.py", "run_forecast_evidence.py", "run_fred_live_smoke.py", "run_free_paper_pilot.py", "run_free_paper_pilot_readiness.py", "run_free_paper_pilot_universe.py", "run_free_provider_connections.py", "run_full_universe_screening.py", "run_governance.py", "run_historical_shadow_replay.py", "run_intelligence.py", "run_liquidity.py", "run_market_breadth.py", "run_multi_asset_attribution.py", "run_multi_asset_paper_execution.py", "run_normalization.py", "run_operational_incident.py", "run_operational_readiness.py", "run_paper_execution.py", "run_paper_operation_review.py", "run_paper_readiness_status.py", "run_paper_test_campaign.py", "run_paper_test_entry_governance.py", "run_paper_trading_control.py", "run_paper_trading_launch.py", "run_portfolio_accounting_migration.py", "run_portfolio_cash_flow.py", "run_portfolio_mark_to_market.py", "run_portfolio_migration.py", "run_portfolio_position_adjustment.py", "run_provider_activation.py", "run_provider_activation_package.py", "run_provider_backfill.py", "run_provider_certification.py", "run_provider_reconciliation.py", "run_provider_runtime_diagnostics.py", "run_provider_secret_validation.py", "run_provider_smoke.py", "run_provider_technical_certification.py", "run_provider_validation.py", "run_public_live_information.py", "run_recovery_drill.py", "run_regime.py", "run_resilience_exercises.py", "run_risk.py", "run_scheduler.py", "run_security_master.py", "run_slos.py", "run_stage_binding_governance.py", "run_supplemental_quote_crosscheck.py", "run_synthesis.py", "run_technical_momentum.py", "run_test_readiness.py", "run_test_readiness_evidence.py", "run_thesis_monitoring.py", "run_universal_paper_availability.py", "run_valuation.py", "run_volatility_surface.py"
+    ],
+    "legacy": []
+  }
+}
