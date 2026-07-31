@@ -33,7 +33,6 @@ from live_operating_console import (
 from navigation_ui import install as _install_navigation_ui
 from operating_status import load_cio_operating_status
 from paper_trading_ui import render_paper_decision_controls
-from streamlit_paper_execution_worker import render_background_paper_execution_worker
 
 
 # Source-level architecture checks intentionally inspect the active entrypoint.
@@ -65,7 +64,6 @@ render_operating_report_history(
 render_cio_report_archive(
 render_pending_transaction_report(
 render_paper_decision_controls(
-render_background_paper_execution_worker(
 render_today_market_brief(
 render_environment_economic_brief(
 render_today_opportunity_scan(
@@ -339,20 +337,6 @@ _replace_source_once(
     _history_archive_marker,
     '    render_cio_report_archive()\n',
     "History CIO archive insertion point is unavailable",
-)
-
-# Keep the execution worker alive on every Streamlit surface. It consumes only an
-# already-authenticated exact approval and is idempotent at the construction hash.
-_worker_anchor = "render_sidebar()\n"
-_replace_source_once(
-    _worker_anchor,
-    _worker_anchor
-    + 'render_background_paper_execution_worker(\n'
-    + '    construction=_latest("portfolio_construction"),\n'
-    + '    briefing=_latest("daily_cio_briefing"),\n'
-    + '    principal=globals().get("authenticated_principal"),\n'
-    + ')\n',
-    "paper execution worker insertion point is unavailable",
 )
 
 # ``secure_app.py`` executes this entrypoint with session-authorized portfolio

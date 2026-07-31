@@ -1,38 +1,28 @@
-"""Authenticated controls and status for exact canonical paper implementation."""
+"""Read-only Streamlit status for exact canonical paper implementation."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any, Mapping
 
 import streamlit as st
 
-from governance.paper_decision_approval import (
-    PaperDecisionApprovalState,
-    SQLitePaperDecisionApprovalStore,
-    canonical_construction_sha256,
-)
 from paper_execution_runtime import (
     PaperExecutionMode,
-    approval_database,
-    attempt_paper_execution,
     paper_execution_mode,
+    read_paper_execution_status,
 )
-from portfolio.constants import CANONICAL_PORTFOLIO_CODE
 
 
 def _identifier(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _can_manage(principal: object | None) -> bool:
-    if principal is None:
-        return False
-    can_manage = getattr(principal, "can_access_mandate", None)
-    return bool(
-        callable(can_manage)
-        and can_manage(CANONICAL_PORTFOLIO_CODE, write=True)
-    )
+def paper_execution_view(
+    construction: Mapping[str, Any] | None,
+) -> tuple[PaperExecutionMode, dict[str, Any] | None]:
+    """Load the headless execution projection without writing runtime state."""
+
+    return paper_execution_mode(), read_paper_execution_status(construction)
 
 
 @st.fragment(run_every="5s")
@@ -42,7 +32,9 @@ def render_paper_decision_controls(
     briefing: Mapping[str, Any] | None,
     principal: object | None,
 ) -> None:
-    """Show paper state while preserving a human pause for automatic operation."""
+    """Show paper state without authorizing or invoking implementation."""
+
+    del principal
 
     if not isinstance(construction, Mapping):
         return
@@ -66,189 +58,30 @@ def render_paper_decision_controls(
         )
         return
 
-    can_manage = _can_manage(principal)
-    if not can_manage:
-        st.markdown("### Paper implementation")
-        st.caption(
-            "Paper implementation status is read-only. Approval, pause, resume, "
-            "decline, and execution controls are private."
-        )
-        return
-
-    mode = paper_execution_mode()
-    construction_hash = canonical_construction_sha256(construction)
-    store = SQLitePaperDecisionApprovalStore(approval_database())
-    store.verify_integrity()
-    now = datetime.now(timezone.utc)
-    attempt = attempt_paper_execution(
-        construction=construction,
-        briefing=briefing,
-        now=now,
-        mode=mode,
-    )
-    latest = store.latest(decision_identifier, construction_identifier)
+    mode, status = paper_execution_view(construction)
 
     st.markdown("### Paper implementation")
-    if mode is PaperExecutionMode.AUTOMATIC:
-        st.caption(
-            "Autonomous paper mode authorizes only this exact canonical construction. "
-            "It cannot bypass market data, eligibility, portfolio, liquidity, cost, "
-            "or reconciliation controls and never authorizes real money."
-        )
-    elif mode is PaperExecutionMode.MANUAL:
-        st.caption(
-            "Manual mode requires approval of the exact proposed transactions. "
-            "Approval never authorizes real money or a live brokerage order."
-        )
-    else:
-        st.warning(attempt.detail)
-        return
-
-    if attempt.completed:
-        toast_key = f"paper-execution-complete:{construction_hash}"
-        if not st.session_state.get(toast_key, False):
-            st.toast("Paper transaction completed.", icon="✅")
-            st.session_state[toast_key] = True
-        st.success(
-            "Paper implementation executed"
-            + (
-                "."
-                if attempt.execution_identifier is None
-                else f": {attempt.execution_identifier}."
-            )
-        )
-        return
-
-    if attempt.state == "blocked":
-        st.warning(f"Paper execution is blocked: {attempt.detail}")
-    elif attempt.state == "held":
-        st.info(f"Paper execution is held: {attempt.detail}")
-    elif attempt.state == "paused":
-        st.info(attempt.detail)
-    elif mode is PaperExecutionMode.AUTOMATIC:
-        st.success("Autonomous paper execution is active for this construction.")
-    else:
-        st.info(attempt.detail)
-
-    if attempt.attempted_at is not None:
-        st.caption(
-            "Last execution check: "
-            f"{attempt.attempted_at.astimezone(timezone.utc).isoformat()}"
-        )
-
-    if mode is PaperExecutionMode.AUTOMATIC:
-        if latest is not None and latest.state in {
-            PaperDecisionApprovalState.DECLINED,
-            PaperDecisionApprovalState.REVOKED,
-        }:
-            if st.button(
-                "Resume autonomous paper execution",
-                key=f"resume-paper-{construction_hash}",
-                type="primary",
-                use_container_width=True,
-            ):
-                store.approve(
-                    decision_identifier=decision_identifier,
-                    construction_identifier=construction_identifier,
-                    construction_sha256=construction_hash,
-                    actor_user_id=str(principal.user_id),
-                    actor_session_id=str(principal.session_id),
-                    occurred_at=now,
-                    rationale=(
-                        "Portfolio manager resumed autonomous paper execution for "
-                        "the exact displayed construction."
-                    ),
-                )
-                st.rerun()
-            return
-        if st.button(
-            "Pause this paper implementation",
-            key=f"pause-paper-{construction_hash}",
-            use_container_width=True,
-        ):
-            store.conclude(
-                state=PaperDecisionApprovalState.REVOKED,
-                decision_identifier=decision_identifier,
-                construction_identifier=construction_identifier,
-                construction_sha256=construction_hash,
-                actor_user_id=str(principal.user_id),
-                actor_session_id=str(principal.session_id),
-                occurred_at=now,
-                rationale=(
-                    "Portfolio manager paused autonomous execution for the exact "
-                    "displayed construction."
-                ),
-            )
-            st.rerun()
-        return
-
-    # Manual compatibility mode.
-    if latest is not None and latest.active_at(now):
-        st.success("Approved and queued for exact paper execution.")
-        if latest.expires_at is not None:
-            st.caption(f"Approval expires {latest.expires_at.isoformat()}.")
-        if st.button(
-            "Revoke paper approval",
-            key=f"revoke-paper-{construction_hash}",
-            use_container_width=True,
-        ):
-            store.conclude(
-                state=PaperDecisionApprovalState.REVOKED,
-                decision_identifier=decision_identifier,
-                construction_identifier=construction_identifier,
-                construction_sha256=construction_hash,
-                actor_user_id=str(principal.user_id),
-                actor_session_id=str(principal.session_id),
-                occurred_at=now,
-                rationale="User revoked the pending paper implementation.",
-            )
-            st.rerun()
-        return
-
-    rationale = st.text_input(
-        "Decision note",
-        value="I support the exact displayed paper implementation.",
-        key=f"paper-rationale-{construction_hash}",
-        max_chars=500,
+    st.caption(
+        "Streamlit is a read-only execution observer. The headless paper operator is "
+        "the sole implementation authority; real-money execution is prohibited."
     )
-    approve_column, decline_column = st.columns(2)
-    with approve_column:
-        approve = st.button(
-            "Approve for paper execution",
-            key=f"approve-paper-{construction_hash}",
-            type="primary",
-            use_container_width=True,
-        )
-    with decline_column:
-        decline = st.button(
-            "Decline implementation",
-            key=f"decline-paper-{construction_hash}",
-            use_container_width=True,
-        )
-
-    if approve:
-        store.approve(
-            decision_identifier=decision_identifier,
-            construction_identifier=construction_identifier,
-            construction_sha256=construction_hash,
-            actor_user_id=str(principal.user_id),
-            actor_session_id=str(principal.session_id),
-            occurred_at=now,
-            rationale=rationale,
-        )
-        st.rerun()
-    if decline:
-        store.conclude(
-            state=PaperDecisionApprovalState.DECLINED,
-            decision_identifier=decision_identifier,
-            construction_identifier=construction_identifier,
-            construction_sha256=construction_hash,
-            actor_user_id=str(principal.user_id),
-            actor_session_id=str(principal.session_id),
-            occurred_at=now,
-            rationale=rationale or "User declined the paper implementation.",
-        )
+    if mode is PaperExecutionMode.DISABLED:
+        st.info("Paper execution is disabled.")
+    elif status is None:
+        st.info("No headless execution status has been recorded for this construction.")
+    else:
+        state = str(status.get("state") or status.get("status") or "unknown")
+        detail = str(status.get("detail") or status.get("error") or "")
+        message = f"Headless execution state: {state}."
+        if detail:
+            message += f" {detail}"
+        if state == "completed":
+            st.success(message)
+        elif state in {"blocked", "failed"}:
+            st.warning(message)
+        else:
+            st.info(message)
         st.rerun()
 
 
-__all__ = ["render_paper_decision_controls"]
+__all__ = ["paper_execution_view", "render_paper_decision_controls"]
