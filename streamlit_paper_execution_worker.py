@@ -30,6 +30,16 @@ StreamlitPaperExecutionAttempt = PaperExecutionAttempt
 streamlit_paper_execution_enabled = paper_execution_enabled
 
 
+def _has_private_operator_access(principal: object | None) -> bool:
+    """Return true only for an authenticated administrator session."""
+
+    return bool(
+        principal is not None
+        and not getattr(principal, "is_anonymous", False)
+        and getattr(principal, "is_administrator", False)
+    )
+
+
 @st.cache_resource
 def _streamlit_operator_runtime():
     settings = ApiSettings.from_env()
@@ -47,7 +57,17 @@ def render_background_paper_execution_worker(
     *,
     construction: Mapping[str, Any] | None,
     briefing: Mapping[str, Any] | None,
+    principal: object | None = None,
 ) -> None:
+    if not _has_private_operator_access(principal):
+        st.session_state["capital_intelligence_operator_status"] = {
+            "status": "read-only",
+            "detail": "The Streamlit paper operator is private.",
+            "paper_only": True,
+            "real_money_authorized": False,
+        }
+        return
+
     # The parameters preserve the prior public contract. The authoritative pass reloads
     # the journal after running the due CIO cycle so it cannot execute stale page values.
     del construction, briefing

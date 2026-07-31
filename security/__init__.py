@@ -1,6 +1,7 @@
 """Identity, sessions, roles, and mandate authorization."""
 
 from security.identity import (
+    ANONYMOUS_VIEWER_USER_ID,
     AuthenticatedPrincipal,
     AuthenticationError,
     AuthenticationReadiness,
@@ -22,6 +23,7 @@ from security.identity import (
 )
 
 __all__ = [
+    "ANONYMOUS_VIEWER_USER_ID",
     "AuthenticatedPrincipal",
     "AuthenticationError",
     "AuthenticationReadiness",

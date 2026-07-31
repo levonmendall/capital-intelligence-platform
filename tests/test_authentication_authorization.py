@@ -13,6 +13,7 @@ from portfolio.state import CanonicalPortfolioSnapshot, SQLiteCanonicalPortfolio
 
 from api import ApiSettings, create_app
 from security import (
+    AuthenticatedPrincipal,
     AuthenticationService,
     InvalidCredentialsError,
     MandatePermission,
@@ -282,3 +283,47 @@ def test_environment_loaded_settings_require_authentication_by_default() -> None
 
     assert runtime.authentication_required is True
     assert explicit_fixture.authentication_required is False
+
+
+def test_disabled_authentication_returns_true_anonymous_read_only_viewer(
+    tmp_path,
+) -> None:
+    service = AuthenticationService(
+        SQLiteIdentityStore(tmp_path / "identity.db"),
+        required=False,
+    )
+
+    principal = service.principal_for_access_token(None)
+
+    assert isinstance(principal, AuthenticatedPrincipal)
+    assert principal.is_anonymous
+    assert not principal.is_administrator
+    assert not principal.is_auditor
+    assert principal.roles == frozenset()
+    assert principal.can_access_mandate("COMPOUNDING")
+    assert not principal.can_access_mandate("COMPOUNDING", write=True)
+    assert not principal.can_access_investor("primary")
+
+
+def test_disabled_authentication_api_exposes_no_mutation_routes(tmp_path) -> None:
+    snapshot_database = tmp_path / "daily.db"
+    portfolio_database = tmp_path / "portfolio.db"
+    _create_snapshot_database(snapshot_database)
+    _create_portfolio_database(portfolio_database)
+    settings = ApiSettings(
+        snapshot_database=snapshot_database,
+        portfolio_database=portfolio_database,
+        identity_database=tmp_path / "identity.db",
+        journal_database=tmp_path / "journal.db",
+        replay_directory=None,
+        authentication_required=False,
+    )
+    client = TestClient(create_app(settings=settings))
+
+    assert client.get("/v1/portfolios/COMPOUNDING").status_code == 200
+    paths = client.get("/openapi.json").json()["paths"]
+    for path, operations in paths.items():
+        assert not ({"post", "put", "patch", "delete"} & set(operations)), path
+    assert client.post("/v1/portfolios", json={}).status_code == 405
+    assert client.post("/v1/users", json={}).status_code == 404
+    assert client.put("/v1/alerts/preferences", json={}).status_code == 404

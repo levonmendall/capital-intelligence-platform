@@ -66,6 +66,15 @@ def render_paper_decision_controls(
         )
         return
 
+    can_manage = _can_manage(principal)
+    if not can_manage:
+        st.markdown("### Paper implementation")
+        st.caption(
+            "Paper implementation status is read-only. Approval, pause, resume, "
+            "decline, and execution controls are private."
+        )
+        return
+
     mode = paper_execution_mode()
     construction_hash = canonical_construction_sha256(construction)
     store = SQLitePaperDecisionApprovalStore(approval_database())
@@ -127,14 +136,7 @@ def render_paper_decision_controls(
             f"{attempt.attempted_at.astimezone(timezone.utc).isoformat()}"
         )
 
-    can_manage = _can_manage(principal)
     if mode is PaperExecutionMode.AUTOMATIC:
-        if not can_manage:
-            st.caption(
-                "A portfolio manager can pause or resume autonomous execution for "
-                "this exact construction."
-            )
-            return
         if latest is not None and latest.state in {
             PaperDecisionApprovalState.DECLINED,
             PaperDecisionApprovalState.REVOKED,
@@ -181,9 +183,6 @@ def render_paper_decision_controls(
         return
 
     # Manual compatibility mode.
-    if not can_manage:
-        st.info("Your account has read-only access to this portfolio.")
-        return
     if latest is not None and latest.active_at(now):
         st.success("Approved and queued for exact paper execution.")
         if latest.expires_at is not None:

@@ -17,6 +17,9 @@ from uuid import uuid4
 from portfolio.constants import CANONICAL_PORTFOLIO_CODE
 
 
+ANONYMOUS_VIEWER_USER_ID = "anonymous:public-viewer"
+
+
 class AuthenticationError(RuntimeError):
     """Base authentication failure."""
 
@@ -91,6 +94,10 @@ class AuthenticatedPrincipal:
         return UserRole.ADMINISTRATOR in self.roles
 
     @property
+    def is_anonymous(self) -> bool:
+        return self.user_id == ANONYMOUS_VIEWER_USER_ID
+
+    @property
     def is_auditor(self) -> bool:
         return UserRole.AUDITOR in self.roles
 
@@ -136,6 +143,26 @@ class AuthenticatedPrincipal:
             investor_identifier="primary",
             roles=frozenset({UserRole.ADMINISTRATOR}),
             mandate_grants=(),
+            investor_grants=(),
+        )
+
+    @classmethod
+    def anonymous_viewer(cls) -> "AuthenticatedPrincipal":
+        """Return the non-persisted principal used for public read-only access."""
+
+        return cls(
+            user_id=ANONYMOUS_VIEWER_USER_ID,
+            session_id="anonymous:public-viewer",
+            email="anonymous@public.invalid",
+            display_name="Public viewer",
+            investor_identifier=None,
+            roles=frozenset(),
+            mandate_grants=(
+                MandateGrant(
+                    mandate_code=CANONICAL_PORTFOLIO_CODE,
+                    permission=MandatePermission.VIEW,
+                ),
+            ),
             investor_grants=(),
         )
 
@@ -875,7 +902,7 @@ class SQLiteIdentityStore:
 
 
 class AuthenticationService:
-    """Application-facing identity service with an explicit test compatibility mode."""
+    """Application-facing identity service with explicit public-viewer mode."""
 
     def __init__(self, store: SQLiteIdentityStore, *, required: bool = True) -> None:
         if not isinstance(store, SQLiteIdentityStore):
@@ -885,7 +912,7 @@ class AuthenticationService:
 
     def principal_for_access_token(self, token: str | None) -> AuthenticatedPrincipal:
         if not self.required:
-            return AuthenticatedPrincipal.testing_system()
+            return AuthenticatedPrincipal.anonymous_viewer()
         if token is None:
             raise InvalidCredentialsError("authentication is required")
         return self.store.principal_for_access_token(token)
@@ -895,6 +922,7 @@ class AuthenticationService:
 
 
 __all__ = [
+    "ANONYMOUS_VIEWER_USER_ID",
     "AuthenticatedPrincipal",
     "AuthenticationError",
     "AuthenticationReadiness",
