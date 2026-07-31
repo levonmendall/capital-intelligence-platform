@@ -64,7 +64,7 @@ from production_context_publication_runtime import (
     _state_path,
 )
 
-STATE_SCHEMA = "production-context-publication-state.v3"
+STATE_SCHEMA = "production-context-publication-state.v4-growth"
 
 EquityDiscoveryProbe = Callable[..., EquityDiscoveryResult]
 
@@ -431,19 +431,17 @@ def prepare_governed_production_context_for_cycle(
             ),
         )
     except Exception as error:
-        if dynamic_holdings:
-            return _blocked(
-                cycle_key=cycle_key,
-                scheduled_for=scheduled,
-                decision_as_of=decision_as_of,
-                detail=(
-                    "Broad-equity discovery failed while company holdings require review: "
-                    f"{type(error).__name__}: {error}"
-                ),
-                instrument_count=len(base_universe.instruments),
-            )
-        discovery = None
-        universe = base_universe
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail=(
+                "Complete opportunity search is unavailable; a no-superior-opportunity "
+                "conclusion is prohibited until broad U.S.-equity discovery completes: "
+                f"{type(error).__name__}: {error}"
+            ),
+            instrument_count=len(base_universe.instruments),
+        )
 
     cash_expected_return = round(max(-1.0, min(1.0, cash_value / 100.0)), 8)
     try:

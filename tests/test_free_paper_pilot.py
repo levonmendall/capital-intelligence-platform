@@ -202,7 +202,7 @@ def test_pilot_construction_enforces_scope_cash_turnover_and_symbol_limits() -> 
         validate_pilot_construction(
             {
                 **valid,
-                "target_cash_weight": 0.10,
+                "target_cash_weight": 0.04,
                 "target_weights": [{"symbol": "VTI", "weight": 0.20}],
             },
             universe=universe,

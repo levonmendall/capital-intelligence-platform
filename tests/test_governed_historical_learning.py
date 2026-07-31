@@ -261,8 +261,8 @@ def test_live_cycle_committee_and_cio_apply_historical_controls() -> None:
     assert "historical_learning=historical_learning" in cycle_source
     assert "self._historically_calibrate" in specialist_source
     assert "learning.confidence_ceiling" in specialist_source
-    assert "assessment_cap * historical_learning.position_size_multiplier" in cio_source
-    assert "specialists.historical_learning.position_size_multiplier" in cio_source
+    assert "Historical calibration is applied once to the final feasible cap." in cio_source
+    assert "specialists.historical_learning.effective_position_multiplier" in cio_source
     assert "historical_learning.confidence_ceiling" in cio_source
     assert '"historical_learning": packet.historical_learning.as_dict()' in persistence_source
     assert "realized_return_to_next_cutoff" in replay_source

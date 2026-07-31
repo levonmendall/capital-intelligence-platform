@@ -567,6 +567,7 @@ class CanonicalCIOCycle:
                 packet,
                 capital_comparison=ranked.qualification.capital_comparison,
                 prior_context=prior_map.get(candidate.identifier),
+                analysis_lane=ranked.qualification.analysis_lane.value,
             )
             decisions.append(decision)
             if self.journal is not None:
