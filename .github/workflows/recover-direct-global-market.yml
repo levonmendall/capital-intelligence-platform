@@ -43,7 +43,8 @@ jobs:
           test -f .github/direct-global-market-recovery.trigger
           test -f .github/direct-market-payload/00.b64
           test -f .github/direct-market-payload/01.b64
-          cat .github/direct-market-payload/*.b64 > /tmp/direct-market-complete.b64
+          cat .github/direct-market-payload/*.b64 | tr -d '[:space:]' \
+            > /tmp/direct-market-complete.b64
           printf '%s  %s\n' \
             '196fabba1678e1e16658ddbab94f37078dd509710d62fbf5c578a5fbfb7c3239' \
             '/tmp/direct-market-complete.b64' | sha256sum --check --strict
