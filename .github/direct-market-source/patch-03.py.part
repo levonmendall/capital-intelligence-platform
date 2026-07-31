@@ -1,0 +1,154 @@
+source = source.replace("Listed-wrapper evidence collection failed:", "Cross-market evidence collection failed:")
+path.write_text(source, encoding="utf-8")
+
+path = Path("production_paper_evidence.py")
+source = path.read_text(encoding="utf-8")
+source = replace_once(source, "from operations.free_paper_pilot import FreePaperPilotInstrument, FreePaperPilotUniverse\n", '''from operations.direct_global_markets import (
+    DIRECT_EXECUTION_CLASSES,
+    DirectGlobalMarketClient,
+)
+from operations.free_paper_pilot import FreePaperPilotInstrument, FreePaperPilotUniverse
+''', "direct evidence imports")
+source = replace_once(source, '_COMPANY_EVIDENCE_VERSION = "sec-company-equity-evidence.v1"\n', '_COMPANY_EVIDENCE_VERSION = "sec-company-equity-evidence.v1"\n_DIRECT_MARKET_EVIDENCE_VERSION = "direct-global-market-evidence.v1"\n', "direct model version")
+block_start = source.index('    symbols = tuple(item.symbol for item in universe.instruments)\n', source.index("def _default_probe("))
+block_end = source.index("    company_facts: dict[str, object] = {}\n", block_start)
+replacement = '''    listed_instruments = tuple(item for item in universe.instruments if item.execution_asset_class not in DIRECT_EXECUTION_CLASSES)
+    direct_instruments = tuple(item for item in universe.instruments if item.execution_asset_class in DIRECT_EXECUTION_CLASSES)
+    bars: dict[str, object] = {}
+    quotes: dict[str, object] = {}
+    client = create_alpaca_paper_client()
+    if listed_instruments:
+        listed_symbols = tuple(item.symbol for item in listed_instruments)
+        bars.update(client.historical_bars(listed_symbols, start=as_of - timedelta(days=_HISTORY_DAYS), end=as_of, timeframe="1Day"))
+        quotes.update(client.latest_quotes(listed_symbols))
+    if direct_instruments:
+        direct_client = DirectGlobalMarketClient()
+        direct_symbols = tuple(item.symbol for item in direct_instruments)
+        bars.update(direct_client.historical_bars(direct_symbols, start=as_of - timedelta(days=_HISTORY_DAYS), end=as_of, timeframe="1Day"))
+        quotes.update(direct_client.latest_quotes(direct_symbols))
+    fred = FREDProvider()
+    macro = {series: fred.get_latest_value(series) for series in ("DGS10", "T10Y2Y", "VIXCLS", "DFF")}
+'''
+source = source[:block_start] + replacement + source[block_end:]
+insert_at = source.index("    candidate = CandidateDecisionRecord(", source.index("def _candidate_and_evidence("))
+source = source[:insert_at] + '''    direct_market = instrument.execution_asset_class in DIRECT_EXECUTION_CLASSES
+    security_master_prefix = "direct-market-universe" if direct_market else "alpaca-paper-assets"
+    security_record_prefix = "direct-market-instrument" if direct_market else "alpaca-paper-asset"
+    replication_method = {CandidateAssetClass.FX: "direct-spot-fx-paper", CandidateAssetClass.CRYPTO: "direct-spot-crypto-paper", CandidateAssetClass.FUTURE: "direct-fully-collateralized-future-paper"}.get(instrument.execution_asset_class, "us-listed-economic-exposure-wrapper")
+    model_versions = ((_DIRECT_MARKET_EVIDENCE_VERSION,) if direct_market else (_MODEL_VERSION,))
+''' + source[insert_at:]
+source = replace_once(source, '        schema_version="paper-listed-wrapper-candidate.v1",\n', '        schema_version=("paper-direct-market-candidate.v1" if direct_market else "paper-listed-wrapper-candidate.v1"),\n', "candidate schema")
+source = replace_once(source, '''            security_master_snapshot_identifier=f"alpaca-paper-assets:{as_of.strftime('%Y%m%dT%H%M%S%fZ')}",
+            security_master_record_identifiers=(
+                f"alpaca-paper-asset:{instrument.symbol}",
+            ),
+''', '''            security_master_snapshot_identifier=f"{security_master_prefix}:{as_of.strftime('%Y%m%dT%H%M%S%fZ')}",
+            security_master_record_identifiers=(f"{security_record_prefix}:{instrument.symbol}",),
+''', "candidate security master")
+source = replace_once(source, '''            uses_derivatives=instrument.economic_exposure in {
+                "managed_futures",
+                "option_strategies",
+                "volatility",
+            },
+            replication_method="us-listed-economic-exposure-wrapper",
+''', '''            uses_derivatives=(instrument.execution_asset_class is CandidateAssetClass.FUTURE or instrument.economic_exposure in {"managed_futures", "option_strategies", "volatility"}),
+            replication_method=replication_method,
+''', "candidate implementation metadata")
+source = replace_once(source, "        model_versions=(_MODEL_VERSION,),\n", "        model_versions=model_versions,\n", "candidate model versions")
+source = source.replace('"The listed wrapper continues to represent its governed economic exposure",', '("The direct market remains liquid and operational under its governed session and contract model" if direct_market else "The listed wrapper continues to represent its governed economic exposure"),', 1)
+path.write_text(source, encoding="utf-8")
+
+path = Path("operations/cio_material_reassessment.py")
+source = path.read_text(encoding="utf-8")
+source = replace_once(source, "from operations.free_paper_pilot import (\n", "from operations.direct_global_markets import DirectGlobalMarketClient\nfrom operations.free_paper_pilot import (\n", "direct reassessment import")
+source = replace_once(source, '''        client_factory: Callable[[], object] = default_alpaca_client,
+        active_universe_path: str | Path | None = None,
+''', '''        client_factory: Callable[[], object] = default_alpaca_client,
+        direct_client_factory: Callable[[], object] = DirectGlobalMarketClient,
+        active_universe_path: str | Path | None = None,
+''', "direct client factory signature")
+source = replace_once(source, "        self.client_factory = client_factory\n        self.active_universe_path = Path(\n", "        self.client_factory = client_factory\n        self.direct_client_factory = direct_client_factory\n        self.active_universe_path = Path(\n", "direct client factory assignment")
+source = replace_once(source, '''        try:
+            client = self.client_factory()
+            if client.clock().get("is_open") is not True:
+                state["last_scanned_at"] = timestamp.isoformat()
+                save_json(self.state_path, state)
+                return ReassessmentResult(
+                    "market_closed",
+                    timestamp,
+                    detail="The regular U.S. market is closed.",
+                )
+            instruments = self._instruments()
+            snapshots = client.snapshots([symbol for symbol, _ in instruments])
+        except Exception as error:
+''', '''        try:
+            instruments = self._instruments()
+            direct_types = {"spot", "token", "future"}
+            listed_symbols = tuple(symbol for symbol, instrument_type in instruments if instrument_type not in direct_types)
+            direct_symbols = tuple(symbol for symbol, instrument_type in instruments if instrument_type in direct_types)
+            client = self.client_factory()
+            listed_open = client.clock().get("is_open") is True
+            snapshots: dict[str, Mapping[str, Any]] = {}
+            if listed_symbols and listed_open:
+                snapshots.update(client.snapshots(listed_symbols))
+            direct_open = False
+            if direct_symbols:
+                direct_client = self.direct_client_factory()
+                direct_open = direct_client.any_open(direct_symbols, as_of=timestamp)
+                if direct_open:
+                    snapshots.update(direct_client.snapshots(direct_symbols))
+            if not listed_open and not direct_open:
+                state["last_scanned_at"] = timestamp.isoformat()
+                save_json(self.state_path, state)
+                return ReassessmentResult("market_closed", timestamp, detail="No governed listed or direct market is currently open.")
+        except Exception as error:
+''', "direct reassessment collection")
+source = replace_once(source, '''                company = instrument_type == "common_stock"
+                threshold = (
+                    self.company_move_threshold
+                    if company
+                    else self.instrument_move_threshold
+                )
+                if abs(day_move) >= threshold:
+                    label = "company" if company else "instrument"
+''', '''                company = instrument_type == "common_stock"
+                threshold = {"common_stock": self.company_move_threshold, "spot": 0.0075, "token": 0.04, "future": 0.015}.get(instrument_type, self.instrument_move_threshold)
+                if abs(day_move) >= threshold:
+                    label = {"common_stock": "company", "spot": "spot FX market", "token": "crypto market", "future": "futures market"}.get(instrument_type, "instrument")
+''', "direct reassessment thresholds")
+path.write_text(source, encoding="utf-8")
+
+path = Path("paper_execution_runtime.py")
+source = path.read_text(encoding="utf-8")
+source = source.replace('"providers.alpaca_paper:create_alpaca_paper_session_provider"', '"operations.direct_global_markets:create_combined_paper_session_provider"')
+source = source.replace('"providers.alpaca_paper:create_alpaca_paper_quote_provider"', '"operations.direct_global_markets:create_combined_paper_quote_provider"')
+path.write_text(source, encoding="utf-8")
+
+path = Path("tests/test_free_paper_pilot.py")
+source = path.read_text(encoding="utf-8")
+if "import json\n" not in source[:200]:
+    source = source.replace("from __future__ import annotations\n", "from __future__ import annotations\n\nimport json\n", 1)
+source = replace_once(source, "def test_free_pilot_has_exact_broad_exposure_and_no_direct_complex_assets() -> None:", "def test_listed_pilot_remains_a_valid_implementation_lane_without_blanket_market_bans() -> None:", "free pilot test name")
+source = replace_once(source, '''    assert "future_contract" in universe.direct_instrument_classes_prohibited
+    assert "option_contract" in universe.direct_instrument_classes_prohibited
+''', '''    payload = json.loads((ROOT / "config" / "free_paper_pilot_universe.json").read_text(encoding="utf-8"))
+    assert "direct_instrument_classes_prohibited" not in payload
+''', "obsolete prohibition assertions")
+path.write_text(source, encoding="utf-8")
+
+path = Path("premium_ui.py")
+source = path.read_text(encoding="utf-8")
+quiet = "The interface stays quiet until evidence earns attention."
+if quiet not in source:
+    anchor = "A continuously operating decision system for one governed portfolio."
+    if anchor not in source:
+        raise SystemExit("premium UI quiet-copy anchor is unavailable")
+    source = source.replace(anchor, f"{anchor} {quiet}", 1)
+path.write_text(source, encoding="utf-8")
+
+path = Path(".github/workflows/free-paper-pilot-readiness.yml")
+source = path.read_text(encoding="utf-8")
+anchor = "      - 'operations/free_paper_pilot.py'\n"
+if anchor in source and "operations/direct_global_markets.py" not in source:
+    source = source.replace(anchor, anchor + "      - 'operations/direct_global_markets.py'\n      - 'config/direct_global_market_universe.json'\n", 1)
+path.write_text(source, encoding="utf-8")
