@@ -71,13 +71,29 @@ jobs:
           git apply --check /tmp/direct-market-complete.patch
           git apply --index /tmp/direct-market-complete.patch
 
-          # Preserve the synopsis-first UI contract if a concurrent main update
-          # still lacks its presentation helper. This has no CIO or execution authority.
+          # Preserve the synopsis-first UI contracts if concurrent main updates
+          # still lack them. These edits are presentation-only and carry no CIO
+          # or execution authority.
           python - <<'PY'
           from pathlib import Path
 
           path = Path('premium_ui.py')
           source = path.read_text(encoding='utf-8')
+          changed = False
+          quiet_copy = 'The interface stays quiet until evidence earns attention.'
+          sidebar_copy = (
+              'A continuously operating decision system for one governed portfolio.'
+          )
+          if quiet_copy not in source:
+              if sidebar_copy not in source:
+                  raise SystemExit('premium_ui.py sidebar copy insertion point is unavailable')
+              source = source.replace(
+                  sidebar_copy,
+                  f'{sidebar_copy} {quiet_copy}',
+                  1,
+              )
+              changed = True
+
           if 'def investment_lens_card(' not in source:
               marker = '\ndef text_card('
               if marker not in source:
@@ -121,7 +137,11 @@ jobs:
                   unsafe_allow_html=True,
               )
           '''
-              path.write_text(source.replace(marker, helper + marker, 1), encoding='utf-8')
+              source = source.replace(marker, helper + marker, 1)
+              changed = True
+
+          if changed:
+              path.write_text(source, encoding='utf-8')
           PY
 
           # Remove only direct-market recovery artifacts. Do not delete payloads
