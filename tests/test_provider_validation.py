@@ -64,8 +64,9 @@ class _MissingDatabento:
 class _DatabentoOptions:
     configured = True
 
-    def validate_access(self, *, as_of):
+    def validate_access(self, *, as_of, underlying_price):
         assert as_of == NOW
+        assert underlying_price == 610.0
         return {
             "dataset": "OPRA.PILLAR",
             "session_date": "2026-07-30",

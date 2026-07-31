@@ -490,46 +490,52 @@ class DatabentoOptionsProvider:
                 )
         return tuple(selected)
 
-    def validate_access(self, *, as_of: datetime) -> dict[str, object]:
-        """Return credential-safe proof of OPRA definitions and priced daily bars."""
+    def validate_access(
+        self,
+        *,
+        as_of: datetime,
+        underlying_price: float,
+    ) -> dict[str, object]:
+        """Prove the same completed-session, near-money OPRA path used in production."""
 
         timestamp = _aware(as_of, field_name="as_of")
+        price = _number(underlying_price, field_name="underlying_price")
+        if price <= 0.0:
+            raise ValueError("underlying_price must be positive")
         definitions = self.definitions("SPY", as_of=timestamp)
         eligible = tuple(
             item
             for item in definitions
             if 30 <= (item.expiration_at - timestamp).days <= 365
+            and abs(item.strike / price - 1.0) <= 0.20
         )
         if not eligible:
-            raise DatabentoOptionsError("SPY OPRA definitions contain no eligible expirations")
-        maximum_sample = min(80, len(eligible))
-        if len(eligible) <= maximum_sample:
-            sample = eligible
-        else:
-            indices = tuple(
-                sorted(
-                    {
-                        round(index * (len(eligible) - 1) / (maximum_sample - 1))
-                        for index in range(maximum_sample)
-                    }
-                )
+            raise DatabentoOptionsError(
+                "SPY OPRA definitions contain no eligible near-money expirations"
             )
-            sample = tuple(eligible[index] for index in indices)
-        priced_session, bars = self.latest_daily_bars(
-            tuple(item.raw_symbol for item in sample),
+        selections = self.select_contracts(
+            "SPY",
+            underlying_price=price,
             as_of=timestamp,
-            history_days=45,
+            minimum_days_to_expiry=30,
+            maximum_days_to_expiry=365,
+            maximum_expirations=3,
+            candidates_per_bucket=12,
         )
-        priced = tuple(symbol for symbol, history in bars.items() if history)
-        if not priced:
-            raise DatabentoOptionsError("SPY OPRA daily bars are unavailable")
+        if not selections:
+            raise DatabentoOptionsError(
+                "SPY OPRA near-money contracts contain no completed-session prices"
+            )
+        priced_session = max(item.bar.observed_at.date() for item in selections)
         return {
             "dataset": DATABENTO_OPRA_DATASET,
             "session_date": priced_session.isoformat(),
             "definition_count": len(definitions),
             "eligible_definition_count": len(eligible),
-            "priced_sample_count": len(priced),
-            "sample_symbols": tuple(_compact_occ_symbol(item) for item in priced[:5]),
+            "priced_sample_count": len(selections),
+            "sample_symbols": tuple(
+                item.definition.symbol for item in selections[:5]
+            ),
         }
 
 

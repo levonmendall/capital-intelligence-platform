@@ -315,7 +315,7 @@ def _validate_yahoo(
     http_get: HttpGet,
     *,
     as_of: datetime,
-) -> tuple[ProviderValidationCheck, ...]:
+) -> tuple[tuple[ProviderValidationCheck, ...], float | None]:
     start = int((as_of - timedelta(days=10)).timestamp())
     end = int(as_of.timestamp())
     try:
@@ -334,23 +334,32 @@ def _validate_yahoo(
             raise ProviderValidationError("Yahoo chart result is empty")
         timestamps = result[0].get("timestamp", ())
         quote = result[0].get("indicators", {}).get("quote", ())[0]
-        closes = tuple(item for item in quote.get("close", ()) if item is not None)
+        closes = tuple(float(item) for item in quote.get("close", ()) if item is not None)
         if not isinstance(timestamps, list) or not timestamps or not closes:
             raise ProviderValidationError("Yahoo chart observations are empty")
+        latest_close = closes[-1]
+        if latest_close <= 0.0:
+            raise ProviderValidationError("Yahoo latest SPY close is not positive")
         return (
-            _passed(
-                name="yahoo_chart_evidence",
-                provider="YAHOO",
-                required=True,
-                detail=f"public chart retrieval succeeded with {len(timestamps)} observations",
-                observed_at=as_of,
-                source_identifier="yahoo-chart:SPY",
-                evidence={
-                    "symbol": "SPY",
-                    "timestamps": timestamps[-5:],
-                    "latest_close": closes[-1],
-                },
+            (
+                _passed(
+                    name="yahoo_chart_evidence",
+                    provider="YAHOO",
+                    required=True,
+                    detail=(
+                        "public chart retrieval succeeded with "
+                        f"{len(timestamps)} observations"
+                    ),
+                    observed_at=as_of,
+                    source_identifier="yahoo-chart:SPY",
+                    evidence={
+                        "symbol": "SPY",
+                        "timestamps": timestamps[-5:],
+                        "latest_close": latest_close,
+                    },
+                ),
             ),
+            latest_close,
         )
     except (
         KeyError,
@@ -361,13 +370,16 @@ def _validate_yahoo(
         ProviderValidationError,
     ) as error:
         return (
-            _failed(
-                name="yahoo_chart_evidence",
-                provider="YAHOO",
-                required=True,
-                detail=f"{type(error).__name__}: {error}",
-                observed_at=as_of,
+            (
+                _failed(
+                    name="yahoo_chart_evidence",
+                    provider="YAHOO",
+                    required=True,
+                    detail=f"{type(error).__name__}: {error}",
+                    observed_at=as_of,
+                ),
             ),
+            None,
         )
 
 
@@ -376,6 +388,7 @@ def _validate_databento(
     options_provider: DatabentoOptionsProvider,
     *,
     as_of: datetime,
+    underlying_price: float | None,
 ) -> tuple[ProviderValidationCheck, ...]:
     checks: list[ProviderValidationCheck] = []
     if not provider.configured:
@@ -453,8 +466,32 @@ def _validate_databento(
             )
         )
         return tuple(checks)
+    if underlying_price is None or underlying_price <= 0.0:
+        detail = "current SPY reference price is unavailable for near-money OPRA validation"
+        checks.extend(
+            (
+                _failed(
+                    name="databento_opra_definitions",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=detail,
+                    observed_at=as_of,
+                ),
+                _failed(
+                    name="databento_opra_daily_bars",
+                    provider="DATABENTO",
+                    required=True,
+                    detail=detail,
+                    observed_at=as_of,
+                ),
+            )
+        )
+        return tuple(checks)
     try:
-        proof = options_provider.validate_access(as_of=as_of)
+        proof = options_provider.validate_access(
+            as_of=as_of,
+            underlying_price=underlying_price,
+        )
         checks.extend(
             (
                 _passed(
@@ -483,8 +520,8 @@ def _validate_databento(
                     provider="DATABENTO",
                     required=True,
                     detail=(
-                        "completed-session OPRA daily-bar retrieval succeeded with "
-                        f"{proof['priced_sample_count']} priced sample contracts"
+                        "production-aligned near-money OPRA retrieval succeeded with "
+                        f"{proof['priced_sample_count']} priced contracts"
                     ),
                     observed_at=as_of,
                     source_identifier=(
@@ -555,13 +592,18 @@ def validate_live_providers(
     databento_options = (
         databento_options_provider or DatabentoOptionsProvider()
     )
+    yahoo_checks, spy_reference_price = _validate_yahoo(
+        http_get,
+        as_of=generated_at,
+    )
     checks = (
         *_validate_eodhd(eodhd, as_of=generated_at),
-        *_validate_yahoo(http_get, as_of=generated_at),
+        *yahoo_checks,
         *_validate_databento(
             databento,
             databento_options,
             as_of=generated_at,
+            underlying_price=spy_reference_price,
         ),
     )
     return ProviderValidationReport(

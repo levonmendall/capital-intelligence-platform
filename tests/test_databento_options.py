@@ -138,7 +138,10 @@ def test_daily_bars_limit_each_provider_request_to_twenty_contracts():
 def test_validation_returns_only_credential_safe_counts():
     provider = DatabentoOptionsProvider(api_key="secret", http_post=_Post())
 
-    result = provider.validate_access(as_of=AS_OF)
+    result = provider.validate_access(
+        as_of=AS_OF,
+        underlying_price=620.0,
+    )
 
     assert result["dataset"] == "OPRA.PILLAR"
     assert result["definition_count"] == 4
