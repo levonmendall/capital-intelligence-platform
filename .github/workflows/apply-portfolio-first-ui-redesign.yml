@@ -27,28 +27,35 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Apply reviewed interface files
+      - name: Apply reviewed interface patch
         shell: bash
         run: |
           set -euo pipefail
-          chunks=(
-            .github/agent_payload/portfolio-first-ui-00.b64
-            .github/agent_payload/portfolio-first-ui-01.b64
-            .github/agent_payload/portfolio-first-ui-02.b64
-            .github/agent_payload/portfolio-first-ui-03.b64
-            .github/agent_payload/portfolio-first-ui-04.b64
-            .github/agent_payload/portfolio-first-ui-05.b64
+          parts=(
+            .github/agent_payload/portfolio-first-ui-patch-00.part
+            .github/agent_payload/portfolio-first-ui-patch-01.part
+            .github/agent_payload/portfolio-first-ui-patch-02.part
+            .github/agent_payload/portfolio-first-ui-patch-03.part
+            .github/agent_payload/portfolio-first-ui-patch-04.part
+            .github/agent_payload/portfolio-first-ui-patch-05.part
+            .github/agent_payload/portfolio-first-ui-patch-06.part
+            .github/agent_payload/portfolio-first-ui-patch-07.part
           )
-          for chunk in "${chunks[@]}"; do
-            test -s "$chunk"
+          for part in "${parts[@]}"; do
+            test -s "$part"
           done
-          cat "${chunks[@]}" > /tmp/portfolio-first-ui.b64
-          base64 --decode /tmp/portfolio-first-ui.b64 > /tmp/portfolio-first-ui.tar.gz
-          gzip --test /tmp/portfolio-first-ui.tar.gz
-          tar --extract --gzip --file /tmp/portfolio-first-ui.tar.gz --directory .
+          cat "${parts[@]}" > /tmp/portfolio-first-ui.patch
+          git apply --check /tmp/portfolio-first-ui.patch
+          git apply /tmp/portfolio-first-ui.patch
           rm -f \
             .github/agent_payload/portfolio-first-ui.tar.gz.b64 \
-            "${chunks[@]}" \
+            .github/agent_payload/portfolio-first-ui-00.b64 \
+            .github/agent_payload/portfolio-first-ui-01.b64 \
+            .github/agent_payload/portfolio-first-ui-02.b64 \
+            .github/agent_payload/portfolio-first-ui-03.b64 \
+            .github/agent_payload/portfolio-first-ui-04.b64 \
+            .github/agent_payload/portfolio-first-ui-05.b64 \
+            "${parts[@]}" \
             .github/portfolio-first-ui-materialization.trigger \
             .github/workflows/apply-portfolio-first-ui-redesign.yml
 
