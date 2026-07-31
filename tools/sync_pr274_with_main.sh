@@ -9,6 +9,7 @@ if git merge --no-edit origin/main; then
   rm -rf .recovery
   rm -f tools/sync_pr274_with_main.sh
   rm -f .github/workflows/sync-pr274-with-main.yml
+  rm -f .github/workflows/pr264-fast-materializer.yml
   python -m py_compile \
     operations/comprehensive_market_discovery.py \
     operations/free_paper_pilot.py \
