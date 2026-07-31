@@ -2,8 +2,8 @@ Reconstructing immutable comprehensive-market package
 /tmp/comprehensive-market-discovery.b64: OK
 /tmp/comprehensive-market-discovery.tar.gz: OK
 Repairing compatibility templates
-  File "<stdin>", line 40
-    path.write_text("
-                    ^
-SyntaxError: unterminated string literal (detected at line 40)
+  File "<stdin>", line 29
+    "                identifier=f"dynamic-direct-evidence:{universe.identifier}",",
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: invalid syntax. Perhaps you forgot a comma?
 PR264 recovery failed with status 1
