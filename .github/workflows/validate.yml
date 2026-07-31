@@ -44,11 +44,22 @@ jobs:
       - name: Install development dependencies
         run: pip install -r requirements-dev.txt
 
+      - name: Install browser-test dependencies
+        run: pip install -r requirements-browser.txt
+
       - name: Verify dependency consistency
         run: python -m pip check
 
       - name: Verify runtime lock integrity
         run: python scripts/verify_requirements_lock.py
+
+      - name: Install Chromium for real Streamlit browser tests
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run desktop and iPhone Streamlit browser gate
+        env:
+          CAPITAL_INTELLIGENCE_BROWSER_TESTS: "1"
+        run: pytest -q tests/browser/test_streamlit_browser.py
 
       - name: Run deterministic release validation
         run: timeout --signal=TERM 40m python run_release_validation.py --report reports/release-validation.json
@@ -61,5 +72,6 @@ jobs:
           path: |
             reports/release-validation.json
             reports/pytest-results.xml
+            reports/browser/
           if-no-files-found: ignore
           retention-days: 14
