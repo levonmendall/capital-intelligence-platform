@@ -5,7 +5,7 @@ on:
     branches:
       - agent/recover-pr264-materialization
     paths:
-      - .comprehensive-market-discovery/fast-trigger
+      - .comprehensive-market-discovery/fast-trigger-v2
 
 permissions:
   contents: write
@@ -20,4 +20,4 @@ jobs:
           ref: agent/recover-pr264-materialization
           fetch-depth: 0
       - shell: bash
-        run: bash tools/recover_pr264_fast.sh
+        run: bash tools/recover_pr264_fast_v2.sh
