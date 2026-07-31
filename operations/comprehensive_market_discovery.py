@@ -28,6 +28,7 @@ from data.provider_dataset import ProviderDatasetQuery, ProviderDatasetType
 from governance import TradingSessionModel
 from operations.free_paper_pilot import FreePaperPilotInstrument
 from providers.eodhd import EODHDProvider, EODHDProviderError, build_eodhd_provider
+from providers.yahoo_public import YahooPublicProviderError, YahooPublicSession
 
 DEFAULT_DISCOVERY_CONFIG_PATH = Path("config/comprehensive_market_discovery.json")
 
@@ -695,21 +696,57 @@ def _option_catalog(
     config: ComprehensiveMarketDiscoveryConfig,
     policy: ComprehensiveMarketDiscoveryPolicy,
     http_get: Callable[..., Any] = requests.get,
+    yahoo_session: YahooPublicSession | None = None,
 ) -> Sequence[DiscoveryCatalogRecord]:
     result: list[DiscoveryCatalogRecord] = []
+    session = yahoo_session
+    if session is None and http_get is requests.get:
+        session = YahooPublicSession(
+            user_agent="capital-intelligence-paper-research/1.0"
+        )
+
+    def option_json(
+        underlying: str,
+        *,
+        raw_expiry: int | None = None,
+    ) -> Mapping[str, Any]:
+        url = f"https://query2.finance.yahoo.com/v7/finance/options/{underlying}"
+        params = {} if raw_expiry is None else {"date": raw_expiry}
+        if session is not None:
+            return session.get_json(
+                url,
+                params=params,
+                require_crumb=True,
+            )
+        response = http_get(
+            url,
+            params=params,
+            headers={"User-Agent": "capital-intelligence-paper-research/1.0"},
+            timeout=20,
+        )
+        status = int(getattr(response, "status_code", 0))
+        if status < 200 or status >= 300:
+            raise YahooPublicProviderError(f"Yahoo HTTP {status}")
+        payload = response.json()
+        if not isinstance(payload, Mapping):
+            raise YahooPublicProviderError(
+                "Yahoo returned a non-object option-chain payload"
+            )
+        return payload
+
     for underlying in config.option_underlyings:
         try:
-            response = http_get(
-                f"https://query2.finance.yahoo.com/v7/finance/options/{underlying}",
-                headers={"User-Agent": "capital-intelligence-paper-research/1.0"},
-                timeout=20,
-            )
-            if int(getattr(response, "status_code", 0)) != 200:
-                continue
-            payload = response.json()
+            payload = option_json(underlying)
             chain = payload["optionChain"]["result"][0]
             expirations = tuple(int(item) for item in chain.get("expirationDates", ()))
-        except (KeyError, IndexError, TypeError, ValueError, requests.RequestException):
+        except (
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+            requests.RequestException,
+            YahooPublicProviderError,
+        ):
             continue
         valid_expirations = [
             item
@@ -720,17 +757,18 @@ def _option_catalog(
         ]
         for raw_expiry in valid_expirations[:4]:
             try:
-                response = http_get(
-                    f"https://query2.finance.yahoo.com/v7/finance/options/{underlying}",
-                    params={"date": raw_expiry},
-                    headers={"User-Agent": "capital-intelligence-paper-research/1.0"},
-                    timeout=20,
-                )
-                payload = response.json()
+                payload = option_json(underlying, raw_expiry=raw_expiry)
                 chain = payload["optionChain"]["result"][0]
                 option_sets = chain["options"][0]
                 underlying_price = float(chain["quote"]["regularMarketPrice"])
-            except (KeyError, IndexError, TypeError, ValueError, requests.RequestException):
+            except (
+                KeyError,
+                IndexError,
+                TypeError,
+                ValueError,
+                requests.RequestException,
+                YahooPublicProviderError,
+            ):
                 continue
             expiration = datetime.fromtimestamp(raw_expiry, tz=timezone.utc)
             for right, key in (("call", "calls"), ("put", "puts")):

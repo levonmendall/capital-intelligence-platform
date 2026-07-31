@@ -25,6 +25,7 @@ from providers.databento import (
     build_databento_provider,
 )
 from providers.eodhd import EODHDProvider, EODHDProviderError
+from providers.yahoo_public import YahooPublicProviderError, YahooPublicSession
 
 DEFAULT_PROVIDER_VALIDATION_REPORT = Path("database/provider-validation-report.json")
 PROVIDER_VALIDATION_SCHEMA = "capital-intelligence-provider-validation.v1"
@@ -311,6 +312,7 @@ def _validate_yahoo(
     http_get: HttpGet,
     *,
     as_of: datetime,
+    yahoo_session: YahooPublicSession | None = None,
 ) -> tuple[ProviderValidationCheck, ...]:
     checks: list[ProviderValidationCheck] = []
     start = int((as_of - timedelta(days=10)).timestamp())
@@ -354,11 +356,22 @@ def _validate_yahoo(
             )
         )
 
-    try:
-        chain = _yahoo_json(
-            http_get,
-            "https://query2.finance.yahoo.com/v7/finance/options/SPY",
+    session = yahoo_session
+    if session is None and http_get is requests.get:
+        session = YahooPublicSession(
+            user_agent="capital-intelligence-provider-validation/1.0"
         )
+    try:
+        if session is None:
+            chain = _yahoo_json(
+                http_get,
+                "https://query2.finance.yahoo.com/v7/finance/options/SPY",
+            )
+        else:
+            chain = session.get_json(
+                "https://query2.finance.yahoo.com/v7/finance/options/SPY",
+                require_crumb=True,
+            )
         result = chain["optionChain"]["result"]
         if not isinstance(result, list) or not result:
             raise ProviderValidationError("Yahoo option-chain result is empty")
@@ -370,13 +383,21 @@ def _validate_yahoo(
                 name="yahoo_option_chain",
                 provider="YAHOO",
                 required=True,
-                detail=f"public option-chain retrieval succeeded with {len(expirations)} expirations",
+                detail=f"cookie-backed public option-chain retrieval succeeded with {len(expirations)} expirations",
                 observed_at=as_of,
                 source_identifier="yahoo-option-chain:SPY",
                 evidence={"symbol": "SPY", "expirations": expirations[:8]},
             )
         )
-    except (KeyError, IndexError, TypeError, ValueError, requests.RequestException, ProviderValidationError) as error:
+    except (
+        KeyError,
+        IndexError,
+        TypeError,
+        ValueError,
+        requests.RequestException,
+        ProviderValidationError,
+        YahooPublicProviderError,
+    ) as error:
         checks.append(
             _failed(
                 name="yahoo_option_chain",
@@ -444,6 +465,7 @@ def validate_live_providers(
     http_get: HttpGet = requests.get,
     eodhd_provider: EODHDProvider | None = None,
     databento_provider: DatabentoProvider | None = None,
+    yahoo_session: YahooPublicSession | None = None,
 ) -> ProviderValidationReport:
     """Run bounded live checks and return a credential-safe evidence report."""
 
@@ -468,7 +490,11 @@ def validate_live_providers(
         databento = databento_provider
     checks = (
         *_validate_eodhd(eodhd, as_of=generated_at),
-        *_validate_yahoo(http_get, as_of=generated_at),
+        *_validate_yahoo(
+            http_get,
+            as_of=generated_at,
+            yahoo_session=yahoo_session,
+        ),
         _validate_databento(databento, as_of=generated_at),
     )
     return ProviderValidationReport(
