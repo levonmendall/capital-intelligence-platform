@@ -1,0 +1,34 @@
+name: Fix Databento OPRA Row Mapping
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fix-databento-opra-row-mapping.yml
+      - tools/fix_databento_opra_row_mapping.py
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.pull_request.head.ref == 'agent/prove-pr264-live-providers-now'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out writable branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/prove-pr264-live-providers-now
+          fetch-depth: 0
+      - name: Normalize OPRA row mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/fix_databento_opra_row_mapping.py
+          python3 -m py_compile providers/databento_options.py tests/test_databento_options.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Normalize Databento OPRA row mapping"
+          git push origin HEAD:agent/prove-pr264-live-providers-now
