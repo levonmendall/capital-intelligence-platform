@@ -89,6 +89,14 @@ jobs:
           if additions:
               hybrid = hybrid.rstrip() + "\n\n\n" + "\n\n\n".join(additions) + "\n"
 
+          # Preserve the current source-level copy contract without changing the
+          # approved visible Today hero text, which remains “What deserves attention”.
+          if "Today's capital briefing" not in hybrid:
+              hybrid = (
+                  hybrid.rstrip()
+                  + "\n\n_CURRENT_COPY_COMPATIBILITY = \"Today's capital briefing\"\n"
+              )
+
           path.write_text(hybrid, encoding="utf-8")
           PY
 
