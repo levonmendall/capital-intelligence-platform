@@ -28,6 +28,14 @@ must compete with every other use of capital.
    strict, mature, point-in-time sample. It cannot create a candidate, increase a
    forecast, bypass current evidence, authorize execution, or promote policy.
 
+## Opportunity-cost handoff
+
+Opportunity qualification records the true best competing use of capital after its
+current evidence-quality, liquidity, uncertainty, and implementation adjustments.
+The canonical CIO consumes that exact governed comparison rather than independently
+recreating a stale cash hurdle. This keeps cash and every alternative on the same
+current policy basis while preserving the complete decision lineage.
+
 ## Hard vetoes
 
 The growth model cannot bypass incomplete or invalid evidence and lineage,
