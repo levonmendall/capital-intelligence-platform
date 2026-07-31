@@ -37,7 +37,7 @@ jobs:
           python3 -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -r requirements.txt
-      - name: Probe supported Databento option symbology path
+      - name: Probe prior-session Databento OPRA chain
         shell: bash
         run: |
           set -euo pipefail
@@ -50,8 +50,13 @@ jobs:
           key = os.environ["CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"]
           auth = (key, "")
           now = datetime.now(timezone.utc)
-          start_date = (now.date() - timedelta(days=1)).isoformat()
-          end_date = (now.date() + timedelta(days=1)).isoformat()
+          completed_date = now.date() - timedelta(days=1)
+          while completed_date.weekday() >= 5:
+              completed_date -= timedelta(days=1)
+          next_date = completed_date + timedelta(days=1)
+          start_date = completed_date.isoformat()
+          end_date = next_date.isoformat()
+          print("completed_option_session", start_date)
 
           parent_response = requests.post(
               "https://hist.databento.com/v0/symbology.resolve",
@@ -68,7 +73,6 @@ jobs:
           )
           print("parent_to_instrument_http", parent_response.status_code)
           parent_payload = parent_response.json()
-          print("parent_to_instrument_keys", sorted(parent_payload) if isinstance(parent_payload, dict) else [])
           parent_result = parent_payload.get("result", {}) if isinstance(parent_payload, dict) else {}
           parent_rows = parent_result.get("SPY.OPT", []) if isinstance(parent_result, dict) else []
           instrument_ids = sorted(
@@ -84,7 +88,7 @@ jobs:
               print("parent_to_instrument_detail", parent_payload)
               raise SystemExit(1)
 
-          sample_ids = instrument_ids[:100]
+          sample_ids = instrument_ids[:200]
           raw_response = requests.post(
               "https://hist.databento.com/v0/symbology.resolve",
               auth=auth,
@@ -122,15 +126,15 @@ jobs:
               data={
                   "dataset": "OPRA.PILLAR",
                   "schema": "ohlcv-1d",
-                  "symbols": ",".join(raw_symbols[:10]),
+                  "symbols": ",".join(raw_symbols[:20]),
                   "stype_in": "raw_symbol",
-                  "start": (now - timedelta(days=30)).date().isoformat(),
+                  "start": start_date,
                   "end": end_date,
                   "encoding": "json",
                   "pretty_px": "true",
                   "pretty_ts": "true",
                   "map_symbols": "true",
-                  "limit": "100",
+                  "limit": "200",
               },
               timeout=60,
           )
@@ -141,7 +145,7 @@ jobs:
                   value = json.loads(line)
               except json.JSONDecodeError:
                   continue
-              if isinstance(value, dict):
+              if isinstance(value, dict) and "detail" not in value:
                   bar_records.append(value)
           print("raw_option_bars_count", len(bar_records))
           if bar_records:
@@ -161,7 +165,7 @@ jobs:
                       )
                   },
               )
-          elif bars_response.status_code != 200:
+          else:
               print("raw_option_bars_detail", bars_response.text[:1000])
               raise SystemExit(1)
           PY
