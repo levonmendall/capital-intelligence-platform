@@ -1,54 +1,40 @@
-"""Regression checks for deployment-safe Streamlit presentation startup."""
+"""Architecture checks for normal Streamlit imports and explicit composition."""
 
+from __future__ import annotations
+
+import ast
+import inspect
 from pathlib import Path
+
+from app_impl import ApplicationDependencies, render_surfaces
+from secure_app import create_streamlit_application
 
 
 ROOT = Path(__file__).resolve().parents[1]
+ACTIVE = ("app.py", "render_app.py", "secure_app.py", "app_impl.py")
 
 
-def test_streamlit_entrypoint_reloads_presentation_module() -> None:
-    entrypoint = (ROOT / "app.py").read_text(encoding="utf-8")
-
-    assert "import premium_ui as _premium_ui" in entrypoint
-    assert "_premium_ui = importlib.reload(_premium_ui)" in entrypoint
-    assert 'hasattr(_premium_ui, "activity_rail")' in entrypoint
-    assert 'hasattr(_premium_ui, "surface_story")' in entrypoint
-
-
-def test_streamlit_entrypoint_preserves_secure_portfolio_bindings() -> None:
-    entrypoint = (ROOT / "app.py").read_text(encoding="utf-8")
-
-    assert 'Path(__file__).with_name("app_impl.py")' in entrypoint
-    assert 'if all(name in globals() for name in _authorized_names):' in entrypoint
-    assert 'exec(compile(_source, str(_source_path), "exec"), globals())' in entrypoint
+def test_active_entrypoints_do_not_execute_or_rewrite_source() -> None:
+    for relative in ACTIVE:
+        tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                assert node.func.id not in {"exec", "eval", "compile"}, relative
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                assert node.func.attr not in {"read_text", "reload"}, relative
 
 
-def test_premium_html_helpers_are_rebound_to_non_indented_renderers() -> None:
-    entrypoint = (ROOT / "app.py").read_text(encoding="utf-8")
-
-    assert "def _safe_render_app_header(active_page: str)" in entrypoint
-    assert "def _safe_render_sidebar()" in entrypoint
-    assert "def _safe_allocation_bar(*, cash: float, nav: float)" in entrypoint
-    assert "_premium_ui.render_app_header = _safe_render_app_header" in entrypoint
-    assert "_premium_ui.render_sidebar = _safe_render_sidebar" in entrypoint
-    assert "_premium_ui.allocation_bar = _safe_allocation_bar" in entrypoint
+def test_portfolio_access_is_explicitly_injected() -> None:
+    assert tuple(ApplicationDependencies.__dataclass_fields__) == (
+        "get_mandate_details",
+        "get_portfolio_totals",
+        "get_trade_history",
+    )
+    assert "dependencies" in inspect.signature(render_surfaces).parameters
 
 
-def test_surface_hero_markup_starts_with_html_not_markdown_indentation() -> None:
-    entrypoint = (ROOT / "app.py").read_text(encoding="utf-8")
-
-    assert "markup = (\n        f'<style>:root" in entrypoint
-    assert "_premium_ui.st.markdown(markup, unsafe_allow_html=True)" in entrypoint
-    assert 'f"""\n        <style>' not in entrypoint
-    assert 'f"""\n        <div class="capital-orbit">' not in entrypoint
-
-
-def test_interface_implementation_retains_four_distinct_surfaces() -> None:
-    implementation = (ROOT / "app_impl.py").read_text(encoding="utf-8")
-
-    assert 'PRIMARY_SURFACES = ["Today", "Environment", "Portfolio", "History"]' in implementation
-    assert "surface_story(" in implementation
-    assert "activity_rail(" in implementation
-    assert 'variant="environment"' in implementation
-    assert 'variant="portfolio"' in implementation
-    assert 'variant="history"' in implementation
+def test_one_factory_composes_authentication_and_surfaces() -> None:
+    source = inspect.getsource(create_streamlit_application)
+    assert "_principal()" in source
+    assert "_authorized_dependencies(principal)" in source
+    assert "render_surfaces(" in source

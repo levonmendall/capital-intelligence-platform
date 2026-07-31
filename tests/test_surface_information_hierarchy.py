@@ -4,11 +4,11 @@ from pathlib import Path
 
 
 def _function_block(source: str, name: str, next_name: str | None) -> str:
-    start = source.index(f"def {name}() -> None:")
+    start = source.index(f"def {name}(")
     end = (
         len(source)
         if next_name is None
-        else source.index(f"def {next_name}() -> None:", start)
+        else source.index(f"def {next_name}(", start)
     )
     return source[start:end]
 
@@ -55,7 +55,7 @@ def test_today_answers_the_five_user_questions_visibly() -> None:
     )
     ui_source = Path("premium_ui.py").read_text(encoding="utf-8")
     block = _function_block(app_source, "_render_today", "_render_environment")
-    assert "TODAY_MARKET_BRIEF" in block
+    assert "render_today_market_brief(briefing=briefing)" in block
     assert "Investment world today" in presenter_source
     for label in (
         "What changed",
@@ -89,40 +89,32 @@ def test_environment_portfolio_and_history_communicate_current_state() -> None:
 
 
 def test_operational_detail_follows_surface_synopses() -> None:
-    entrypoint = Path("app.py").read_text(encoding="utf-8")
     implementation = Path("app_impl.py").read_text(encoding="utf-8")
-    for marker in (
-        "TODAY_MARKET_BRIEF",
-        "TODAY_OPPORTUNITY_SCAN",
-        "ENVIRONMENT_ECONOMIC_BRIEF",
-        "PORTFOLIO_INFORMATION_FRESHNESS",
-        "LIVE_TODAY_OPERATING_CONTEXT",
-        "LIVE_ENVIRONMENT_MARKET_TABLE",
-        "PAPER_DECISION_CONTROLS",
-        "LIVE_PORTFOLIO_MARKS",
-        "OPERATING_REPORT_HISTORY",
-        "CIO_REPORT_ARCHIVE",
+    secure = Path("secure_app.py").read_text(encoding="utf-8")
+    for renderer in (
+        "render_today_market_brief",
+        "render_today_opportunity_scan",
+        "render_environment_economic_brief",
+        "render_information_freshness",
+        "render_live_market_status",
+        "render_live_environment_market_table",
+        "render_paper_decision_controls",
+        "render_live_portfolio_marks",
+        "render_operating_report_history",
+        "render_cio_report_archive",
     ):
-        assert marker in entrypoint or marker in implementation
-    assert "Administrator operations" in entrypoint
-    assert "Production smoke test" in entrypoint
-    assert "paper decision approval insertion point is unavailable" in entrypoint
-    navigation = entrypoint[
-        entrypoint.index("def _render_navigation_with_admin_control") :
-    ]
-    navigation = navigation[: navigation.index("def _compatible_metric_grid")]
-    assert "Production smoke test" not in navigation
+        assert renderer in implementation
+    assert "Production smoke test" in secure
+    assert "is_administrator" in secure
 
 
 def test_decision_change_details_are_collapsed_by_default() -> None:
     implementation = Path("app_impl.py").read_text(encoding="utf-8")
-    entrypoint = Path("app.py").read_text(encoding="utf-8")
     assert 'with st.expander("Decision evidence and audit reference", expanded=False):' in implementation
     assert 'with st.expander("What could change the assessment", expanded=False):' in implementation
-    assert 'with st.expander("Live operating context", expanded=False):' in entrypoint
-    assert 'with st.expander("Cross-asset market detail", expanded=False):' in entrypoint
-    assert 'with st.expander("Paper implementation and controls", expanded=False):' in entrypoint
-    assert "brittle replacements of complete visual blocks" in entrypoint
+    assert 'with st.expander("Live operating context", expanded=False):' in implementation
+    assert 'with st.expander("Cross-asset market detail", expanded=False):' in implementation
+    assert 'with st.expander("Paper implementation and controls", expanded=False):' in implementation
 
 
 def test_mobile_hero_is_compact_and_direct() -> None:

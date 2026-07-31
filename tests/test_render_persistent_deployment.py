@@ -153,12 +153,11 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
 
 
 def test_render_interface_displays_release_and_persistent_state_identity() -> None:
-    source = Path("render_app.py").read_text(encoding="utf-8")
+    from render_app import deployment_context_from_environment
 
-    assert "Persistent operating host" in source
-    assert "CAPITAL_INTELLIGENCE_RELEASE" in source
-    assert "RENDER_GIT_COMMIT" in source
-    assert "CAPITAL_INTELLIGENCE_DATA_DIR" in source
+    context = deployment_context_from_environment()
+    assert context.release
+    assert isinstance(context.state_root, Path)
 
 
 def test_render_entrypoint_renders_complete_authenticated_console(

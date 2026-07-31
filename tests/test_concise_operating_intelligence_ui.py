@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_app_uses_synopsis_first_operating_presenter() -> None:
-    source = Path("app.py").read_text(encoding="utf-8")
+    source = Path("app_impl.py").read_text(encoding="utf-8")
 
     assert "from concise_operating_intelligence_ui import (" in source
     assert "render_today_market_brief" in source

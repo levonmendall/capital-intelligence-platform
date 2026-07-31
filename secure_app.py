@@ -1,13 +1,16 @@
-"""Authenticated Streamlit entrypoint with per-session authorization adapters."""
+"""Normal Streamlit application composition with session authorization."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import streamlit as st
 
 from api.config import ApiSettings
+from app_impl import ApplicationDependencies, render_surfaces
 from core import portfolio as portfolio_services
 from portfolio.constants import CANONICAL_PORTFOLIO_CODE
 from delivery import (
@@ -22,12 +25,14 @@ from security import (
     InvalidCredentialsError,
     SQLiteIdentityStore,
 )
+from production_smoke_test_ui import render_production_smoke_test
 
-st.set_page_config(
-    page_title="Capital Intelligence Platform",
-    page_icon="📊",
-    layout="wide",
-)
+
+@dataclass(frozen=True)
+class DeploymentContext:
+    release: str = "unknown"
+    state_root: Path = Path("database")
+    render_host: str = ""
 
 
 @st.cache_resource
@@ -218,7 +223,7 @@ def _render_alert_controls(principal) -> None:
                 st.rerun()
 
 
-def _authorized_bindings(principal) -> dict[str, object]:
+def _authorized_dependencies(principal) -> ApplicationDependencies:
     """Build session-local adapters for the sole canonical portfolio."""
 
     original_get_details = portfolio_services.get_mandate_details
@@ -255,49 +260,19 @@ def _authorized_bindings(principal) -> dict[str, object]:
             }
         return original_get_totals()
 
-    return {
-        "get_mandate_details": authorized_details,
-        "get_portfolio_totals": authorized_totals,
-        "get_trade_history": authorized_trades,
-    }
-
-
-def _authorized_source() -> str:
-    source = Path("app.py").read_text(encoding="utf-8")
-    source = source.replace(
-        '''st.set_page_config(
-    page_title="Capital Intelligence Platform",
-    page_icon="📊",
-    layout="wide",
-)
-
-
-''',
-        "",
-        1,
+    return ApplicationDependencies(
+        get_mandate_details=authorized_details,
+        get_portfolio_totals=authorized_totals,
+        get_trade_history=authorized_trades,
     )
-    source = source.replace(
-        '''from core.portfolio import (
-    get_mandate_details,
-    get_portfolio_totals,
-    get_trade_history,
-)
-''',
-        "",
-        1,
-    )
-    return source
 
 
-principal = _principal()
-if principal is None:
-    _login_screen()
-
-with st.sidebar:
-    if getattr(principal, "is_anonymous", False):
-        st.caption("Public read-only viewer")
-        st.caption("Administrative and paper-operation controls are private.")
-    else:
+def _render_identity_controls(principal: Any) -> None:
+    with st.sidebar:
+        if getattr(principal, "is_anonymous", False):
+            st.caption("Public read-only viewer")
+            st.caption("Administrative and paper-operation controls are private.")
+            return
         st.caption(f"Signed in as **{principal.display_name}**")
         _render_alert_controls(principal)
         if st.button("Sign out"):
@@ -307,11 +282,56 @@ with st.sidebar:
             _clear_session()
             st.rerun()
 
-app_source_path = Path(__file__).with_name("app.py")
-execution_globals = {
-    "__name__": "__main__",
-    "__file__": str(app_source_path),
-    "authenticated_principal": principal,
-    **_authorized_bindings(principal),
-}
-exec(compile(_authorized_source(), "app.py", "exec"), execution_globals)
+
+def _render_deployment_controls(
+    principal: Any,
+    deployment: DeploymentContext,
+) -> None:
+    with st.sidebar:
+        st.divider()
+        st.caption(
+            "Persistent operating host · "
+            f"build `{deployment.release[:12] if deployment.release else 'unknown'}`"
+        )
+        st.caption(f"State authority: `{deployment.state_root}`")
+        if deployment.render_host:
+            st.caption(f"Render service: `{deployment.render_host}`")
+        if getattr(principal, "is_administrator", False):
+            if st.button("Production smoke test", key="open-production-smoke-test"):
+                st.session_state["production_smoke_test_open"] = True
+
+    if (
+        getattr(principal, "is_administrator", False)
+        and st.session_state.get("production_smoke_test_open") is True
+    ):
+
+        @st.dialog("Production Smoke Test", width="large")
+        def _production_smoke_test_dialog() -> None:
+            render_production_smoke_test(principal)
+
+        _production_smoke_test_dialog()
+
+
+def create_streamlit_application(
+    *,
+    deployment: DeploymentContext | None = None,
+) -> None:
+    """Build the application once from normal imports and explicit adapters."""
+
+    st.set_page_config(
+        page_title="Capital Intelligence Platform",
+        page_icon="📊",
+        layout="wide",
+    )
+    principal = _principal()
+    if principal is None:
+        _login_screen()
+        return
+
+    _render_identity_controls(principal)
+    render_surfaces(
+        dependencies=_authorized_dependencies(principal),
+        principal=principal,
+    )
+    if deployment is not None:
+        _render_deployment_controls(principal, deployment)

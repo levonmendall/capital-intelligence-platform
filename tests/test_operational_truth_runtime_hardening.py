@@ -48,6 +48,6 @@ def test_render_declares_market_provider_secrets_and_required_journal() -> None:
 
 
 def test_sidebar_no_longer_claims_system_online_unconditionally() -> None:
-    source = open("app.py", encoding="utf-8").read()
+    source = open("premium_ui.py", encoding="utf-8").read()
     assert "System online" not in source
     assert "operating_status.label" in source

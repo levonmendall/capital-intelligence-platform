@@ -19,18 +19,21 @@ def _source(relative: str) -> str:
 
 
 def test_streamlit_has_only_four_canonical_primary_surfaces() -> None:
-    source = _source("app.py")
+    from app_impl import PRIMARY_SURFACES
 
-    assert '["Today", "Environment", "Portfolio", "History"]' in source
-    assert '"daily_cio_briefing"' in source
-    assert '"portfolio_construction"' in source
-    assert '"decision_evaluation"' in source
-    assert '"thesis_snapshot"' in source
-    assert "No governed CIO briefing is available" in source
+    assert PRIMARY_SURFACES == ["Today", "Environment", "Portfolio", "History"]
+    source = _source("app_impl.py")
+    for canonical_record in (
+        "daily_cio_briefing",
+        "portfolio_construction",
+        "decision_evaluation",
+        "thesis_snapshot",
+    ):
+        assert canonical_record in source
 
 
 def test_active_streamlit_surface_has_no_legacy_decision_authority() -> None:
-    source = _source("app.py")
+    source = _source("app_impl.py")
     secure_source = _source("secure_app.py")
 
     for prohibited in (

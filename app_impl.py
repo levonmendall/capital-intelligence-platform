@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
 import pandas as pd
 import streamlit as st
@@ -14,6 +15,23 @@ from core.portfolio import (
     get_portfolio_totals,
     get_trade_history,
 )
+from cio_pending_transactions_ui import render_pending_transaction_report
+from cio_report_history_ui import render_cio_report_archive
+from concise_operating_intelligence_ui import (
+    render_environment_economic_brief,
+    render_history_decision_accountability,
+    render_information_freshness,
+    render_today_market_brief,
+    render_today_opportunity_scan,
+)
+from live_operating_console import (
+    load_live_market_console,
+    render_live_environment_market_table,
+    render_live_market_status,
+    render_live_portfolio_marks,
+    render_operating_report_history,
+)
+from paper_trading_ui import render_paper_decision_controls
 from portfolio.constants import CANONICAL_PORTFOLIO_CODE, PORTFOLIO_OBJECTIVE
 from premium_ui import (
     activity_rail,
@@ -36,18 +54,27 @@ from premium_ui import (
     text_card,
 )
 from providers.economic_snapshot import load_dashboard_data
-from live_operating_console import load_live_market_console
 from operating_status import load_cio_operating_status
 
 
 PRIMARY_SURFACES = ["Today", "Environment", "Portfolio", "History"]
 
 
-st.set_page_config(
-    page_title="Capital Intelligence Platform",
-    page_icon="📊",
-    layout="wide",
-)
+@dataclass(frozen=True)
+class ApplicationDependencies:
+    """Session-scoped read adapters for the canonical portfolio."""
+
+    get_mandate_details: Callable[..., dict[str, Any] | None]
+    get_portfolio_totals: Callable[[], dict[str, Any]]
+    get_trade_history: Callable[..., list[dict[str, Any]]]
+
+
+def default_dependencies() -> ApplicationDependencies:
+    return ApplicationDependencies(
+        get_mandate_details=get_mandate_details,
+        get_portfolio_totals=get_portfolio_totals,
+        get_trade_history=get_trade_history,
+    )
 
 
 @st.cache_resource
@@ -148,14 +175,16 @@ def _deployment_label(*, cash: float, nav: float) -> str:
     return f"{invested / float(nav):.0%} deployed"
 
 
-def _render_today() -> None:
+@st.fragment(run_every="30s")
+def _render_today(dependencies: ApplicationDependencies) -> None:
     briefing = _latest("daily_cio_briefing")
     live_market = load_live_market_console()
-    totals = get_portfolio_totals()
+    totals = dependencies.get_portfolio_totals()
     operating_status = load_cio_operating_status()
     _today_construction = _latest("portfolio_construction")
 
-    # TODAY_MARKET_BRIEF
+    render_today_market_brief(briefing=briefing)
+    render_information_freshness(briefing=briefing, surface="today")
 
     status = (
         _status_title(briefing.get("status"))
@@ -222,7 +251,7 @@ def _render_today() -> None:
         variant="today",
     )
 
-    # TODAY_OPPORTUNITY_SCAN
+    render_today_opportunity_scan(briefing=briefing)
 
     page_header(
         "Portfolio at a glance",
@@ -289,9 +318,16 @@ def _render_today() -> None:
             ),
         )
 
-    # LIVE_TODAY_OPERATING_CONTEXT
+    with st.expander("Live operating context", expanded=False):
+        render_live_market_status()
+        render_pending_transaction_report(
+            construction=_today_construction,
+            briefing=briefing,
+        )
 
-def _render_environment() -> None:
+@st.fragment(run_every="30s")
+def _render_environment(dependencies: ApplicationDependencies) -> None:
+    del dependencies
     payload = _diagnostic_environment()
     environment = None if payload is None else payload.get("environment")
     dashboard_data = load_dashboard_data()
@@ -309,7 +345,11 @@ def _render_environment() -> None:
         else f"{float(getattr(readings, 'yield_curve_spread', 0.0)):+.2f} pp"
     )
 
-    # ENVIRONMENT_ECONOMIC_BRIEF
+    render_environment_economic_brief(briefing=latest_briefing)
+    render_information_freshness(
+        briefing=latest_briefing,
+        surface="environment",
+    )
 
     if isinstance(environment, dict):
         environment_state = "Governed environment available"
@@ -415,7 +455,8 @@ def _render_environment() -> None:
     with st.expander("What could change the assessment", expanded=False):
         st.write(assessment_change_conditions)
 
-    # LIVE_ENVIRONMENT_MARKET_TABLE
+    with st.expander("Cross-asset market detail", expanded=False):
+        render_live_environment_market_table()
 
     with st.expander("How the Environment surface works", expanded=False):
         surface_story(
@@ -428,10 +469,15 @@ def _render_environment() -> None:
             ),
         )
 
-def _render_portfolio() -> None:
+@st.fragment(run_every="30s")
+def _render_portfolio(
+    dependencies: ApplicationDependencies,
+    *,
+    principal: object | None,
+) -> None:
     construction = _latest("portfolio_construction")
     briefing = _latest("daily_cio_briefing")
-    mandate = get_mandate_details(CANONICAL_PORTFOLIO_CODE)
+    mandate = dependencies.get_mandate_details(CANONICAL_PORTFOLIO_CODE)
     if mandate is None:
         st.warning("The canonical paper portfolio is unavailable.")
         return
@@ -468,7 +514,7 @@ def _render_portfolio() -> None:
             f"{trade_count} proposed paper transaction{'s' if trade_count != 1 else ''}."
         )
 
-    # PORTFOLIO_INFORMATION_FRESHNESS
+    render_information_freshness(briefing=briefing, surface="portfolio")
 
     page_header(
         "Portfolio posture",
@@ -515,7 +561,16 @@ def _render_portfolio() -> None:
         "Paper implementation cannot alter the CIO conclusion or create real-money authority.",
     )
 
-    # PAPER_DECISION_CONTROLS
+    with st.expander("Paper implementation and controls", expanded=False):
+        render_pending_transaction_report(
+            construction=construction,
+            briefing=briefing,
+        )
+        render_paper_decision_controls(
+            construction=construction,
+            briefing=briefing,
+            principal=principal,
+        )
 
     page_header(
         "Construction and implementation",
@@ -558,7 +613,8 @@ def _render_portfolio() -> None:
         for block in construction.get("blocks", []):
             st.warning(block)
 
-    # LIVE_PORTFOLIO_MARKS
+    with st.expander("Live portfolio marks", expanded=False):
+        render_live_portfolio_marks(mandate)
 
     page_header(
         "Positions and capital path",
@@ -646,11 +702,12 @@ def _render_portfolio() -> None:
             ),
         )
 
-def _render_history() -> None:
+@st.fragment(run_every="30s")
+def _render_history(dependencies: ApplicationDependencies) -> None:
     briefings = _history("daily_cio_briefing")
     evaluations = _history("decision_evaluation")
     theses = _latest_theses()
-    trades = get_trade_history(limit=250)
+    trades = dependencies.get_trade_history(limit=250)
 
     latest_briefing = briefings[0] if briefings else {}
     latest_evaluation = evaluations[0] if evaluations else {}
@@ -719,6 +776,18 @@ def _render_history() -> None:
             ),
         )
 
+    render_history_decision_accountability()
+
+    callout_card(
+        "Decision accountability",
+        "Learning informs, not overrides.",
+        (
+            "Later outcomes may inform governed process review and continuous "
+            "improvement, but they cannot authorize execution or override live "
+            "decision controls."
+        ),
+    )
+
     with st.expander("How the History surface works"):
         surface_story(
             "History",
@@ -730,8 +799,8 @@ def _render_history() -> None:
             ),
         )
 
-    # OPERATING_REPORT_HISTORY
-    # CIO_REPORT_ARCHIVE
+    render_operating_report_history()
+    render_cio_report_archive()
 
     page_header(
         "Detailed decision trail",
@@ -830,16 +899,24 @@ def _render_history() -> None:
                 frame["created_at"] = frame["created_at"].map(format_datetime)
             display_frame(frame)
 
-st.session_state.setdefault("dark_mode", True)
-apply_global_style(dark_mode=bool(st.session_state["dark_mode"]))
-render_sidebar()
-page, _ = render_navigation(PRIMARY_SURFACES)
-render_app_header(page)
-if page == "Today":
-    _render_today()
-elif page == "Environment":
-    _render_environment()
-elif page == "Portfolio":
-    _render_portfolio()
-else:
-    _render_history()
+def render_surfaces(
+    *,
+    dependencies: ApplicationDependencies | None = None,
+    principal: object | None = None,
+) -> None:
+    """Render the four product surfaces using explicit read dependencies."""
+
+    resolved = dependencies or default_dependencies()
+    st.session_state.setdefault("dark_mode", True)
+    apply_global_style(dark_mode=bool(st.session_state["dark_mode"]))
+    render_sidebar()
+    page, _ = render_navigation(PRIMARY_SURFACES)
+    render_app_header(page)
+    if page == "Today":
+        _render_today(resolved)
+    elif page == "Environment":
+        _render_environment(resolved)
+    elif page == "Portfolio":
+        _render_portfolio(resolved, principal=principal)
+    else:
+        _render_history(resolved)

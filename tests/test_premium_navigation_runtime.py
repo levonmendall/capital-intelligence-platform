@@ -1,37 +1,33 @@
-"""Focused source contracts for visible navigation and runtime appearance controls."""
+"""Architecture contracts for navigation and permanent-dark presentation."""
 
-from pathlib import Path
+from __future__ import annotations
 
+import inspect
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_main_workspace_exposes_all_four_screens() -> None:
-    app = (ROOT / "app.py").read_text(encoding="utf-8")
-    ui = (ROOT / "premium_ui.py").read_text(encoding="utf-8")
-
-    assert 'PRIMARY_SURFACES = ["Today", "Environment", "Portfolio", "History"]' in app
-    assert "render_navigation(PRIMARY_SURFACES)" in app
-    assert "st.radio(" in ui
-    assert "horizontal=True" in ui
+import premium_ui
+from app_impl import PRIMARY_SURFACES, render_surfaces
 
 
-def test_dark_mode_palette_is_default_and_runtime_selectable() -> None:
-    app = (ROOT / "app.py").read_text(encoding="utf-8")
-    ui = (ROOT / "premium_ui.py").read_text(encoding="utf-8")
-
-    assert 'st.toggle("Dark", key="dark_mode")' in ui
-    assert 'st.session_state.setdefault("dark_mode", True)' in app
-    assert "--bg:#05070d" in ui
-    assert "--bg:#eef3f9" in ui
-    assert 'st.markdown(f"<style>{palette}{css}</style>"' in ui
+def test_main_workspace_exposes_only_four_primary_screens() -> None:
+    assert PRIMARY_SURFACES == ["Today", "Environment", "Portfolio", "History"]
+    assert callable(render_surfaces)
 
 
-def test_signature_components_are_present() -> None:
-    app = (ROOT / "app.py").read_text(encoding="utf-8")
-    ui = (ROOT / "premium_ui.py").read_text(encoding="utf-8")
+def test_navigation_uses_one_required_segmented_control() -> None:
+    source = inspect.getsource(premium_ui.render_navigation)
+    assert "segmented_control" in source
+    assert 'selection_mode="single"' in source
+    assert "required=True" in source
+    assert "st.radio" not in source
+    assert "st.toggle" not in source
 
-    assert "metric_grid(" in app
-    assert "signal_panel(" in app
-    assert "Capital Deployment Orbit" in ui
-    assert "A governed investment-intelligence system" in ui
+
+def test_signature_components_are_real_functions() -> None:
+    for name in (
+        "metric_grid",
+        "signal_panel",
+        "allocation_bar",
+        "render_app_header",
+        "render_sidebar",
+    ):
+        assert callable(getattr(premium_ui, name))

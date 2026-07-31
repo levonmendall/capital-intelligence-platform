@@ -155,16 +155,21 @@ def test_economic_context_explains_readings_and_portfolio_channels() -> None:
 
 
 def test_app_places_connected_intelligence_at_surface_entry() -> None:
-    source = Path("app.py").read_text(encoding="utf-8")
+    import ast
 
-    assert "render_today_market_brief" in source
-    assert "render_environment_economic_brief" in source
-    assert "render_today_opportunity_scan" in source
-    assert "render_history_decision_accountability" in source
-    assert "render_information_freshness" in source
-    assert "operating intelligence insertion point is unavailable" in source
-    assert 'render_today_market_brief(briefing=briefing)\\n' in source
-    assert 'render_environment_economic_brief(briefing=latest_briefing)\\n' in source
+    tree = ast.parse(Path("app_impl.py").read_text(encoding="utf-8"))
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert {
+        "render_today_market_brief",
+        "render_environment_economic_brief",
+        "render_today_opportunity_scan",
+        "render_history_decision_accountability",
+        "render_information_freshness",
+    } <= called
 
 
 def test_daily_briefing_operating_date_rolls_at_seven_pacific(monkeypatch) -> None:

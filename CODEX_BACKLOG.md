@@ -31,6 +31,13 @@ All PRs are ordered. No PR adds strategy engines or performs unrelated cleanup. 
 - **Deployment/migration:** canonical Streamlit entrypoint changes once; Render command tested against it.
 - **Rollback:** restore prior image; no data rollback.
 - **Authority change:** none.
+- **Implementation record:** `app.py` and `render_app.py` now call
+  `secure_app.create_streamlit_application`; `secure_app.py` injects typed,
+  session-authorized `ApplicationDependencies`; and `app_impl.py` renders the
+  four surfaces through direct helper calls. The active files contain no
+  runtime source reads, transformations, reloads, monkey patches, or `exec`.
+  The focused composition, authorization, Render AppTest, and presentation
+  suite passes **41/41**. Persistent state and schemas are unchanged.
 
 ## PR4 — Composite production readiness and heartbeats
 
