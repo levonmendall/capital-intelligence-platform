@@ -12,7 +12,9 @@ from __future__ import annotations
 import io
 import json
 import os
-import time
+import sqlite3
+import threading
+import uuid
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -30,6 +32,11 @@ from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     load_execution_paper_universe,
     validate_pilot_construction,
+)
+from operations.paper_execution_leases import (
+    PaperExecutionLeaseGrant,
+    PaperExecutionLeaseLost,
+    SQLitePaperExecutionLeaseStore,
 )
 from run_approved_paper_execution import main as run_approved_paper_execution
 
@@ -216,39 +223,86 @@ def _parse_runner_payload(output: str) -> dict[str, Any]:
     return {}
 
 
+def _execution_lease_seconds() -> int:
+    raw = os.getenv("CAPITAL_INTELLIGENCE_PAPER_EXECUTION_LEASE_SECONDS", "120")
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError("paper execution lease seconds must be an integer") from error
+    if not 15 <= value <= 3600:
+        raise ValueError("paper execution lease seconds must be between 15 and 3600")
+    return value
+
+
+class _MaintainedExecutionLease:
+    def __init__(
+        self,
+        store: SQLitePaperExecutionLeaseStore,
+        grant: PaperExecutionLeaseGrant,
+        *,
+        lease_seconds: int,
+    ) -> None:
+        self.store = store
+        self.grant = grant
+        self.lease_seconds = lease_seconds
+        self._stop = threading.Event()
+        self._lost: BaseException | None = None
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._maintain, daemon=True)
+        self._thread.start()
+
+    def _maintain(self) -> None:
+        interval = max(5.0, self.lease_seconds / 3)
+        while not self._stop.wait(interval):
+            try:
+                with self._lock:
+                    self.grant = self.store.renew(
+                        self.grant,
+                        lease_seconds=self.lease_seconds,
+                    )
+            except (OSError, sqlite3.Error, PaperExecutionLeaseLost) as error:
+                self._lost = error
+                return
+
+    def assert_owned(self) -> None:
+        if self._lost is not None:
+            raise PaperExecutionLeaseLost(str(self._lost))
+        with self._lock:
+            self.grant = self.store.renew(
+                self.grant,
+                lease_seconds=self.lease_seconds,
+            )
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=max(1.0, self.lease_seconds / 3 + 1))
+        with self._lock:
+            self.store.release(self.grant)
+
+
 @contextmanager
 def _construction_lease(construction_hash: str):
-    lock_directory = artifact_directory() / "locks"
-    lock_directory.mkdir(parents=True, exist_ok=True)
-    lock_path = lock_directory / f"{construction_hash}.lock"
-    stale_after = max(120, _retry_seconds() * 2)
-    descriptor: int | None = None
+    lease_seconds = _execution_lease_seconds()
+    store = SQLitePaperExecutionLeaseStore(
+        _data_dir() / "paper_execution_leases.db"
+    )
+    grant = store.acquire(
+        construction_hash,
+        owner_identifier=f"{os.getpid()}:{uuid.uuid4().hex}",
+        lease_seconds=lease_seconds,
+    )
+    if grant is None:
+        yield None
+        return
+    maintained = _MaintainedExecutionLease(
+        store,
+        grant,
+        lease_seconds=lease_seconds,
+    )
     try:
-        try:
-            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError:
-            try:
-                age = time.time() - lock_path.stat().st_mtime
-            except OSError:
-                age = 0
-            if age <= stale_after:
-                yield False
-                return
-            try:
-                lock_path.unlink()
-            except OSError:
-                yield False
-                return
-            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        os.write(descriptor, str(os.getpid()).encode("ascii"))
-        yield True
+        yield maintained
     finally:
-        if descriptor is not None:
-            os.close(descriptor)
-            try:
-                lock_path.unlink()
-            except OSError:
-                pass
+        maintained.close()
 
 
 def _trade_symbols(construction: Mapping[str, Any]) -> tuple[str, ...]:
@@ -569,8 +623,8 @@ def attempt_paper_execution(
                 mode=resolved_mode,
             )
 
-    with _construction_lease(construction_hash) as acquired:
-        if not acquired:
+    with _construction_lease(construction_hash) as execution_lease:
+        if execution_lease is None:
             return PaperExecutionAttempt(
                 state="held",
                 detail="Another paper-execution attempt is already running.",
@@ -618,6 +672,21 @@ def attempt_paper_execution(
                 payload.get("error")
                 or payload.get("status")
                 or "Paper execution was blocked."
+            )
+        try:
+            execution_lease.assert_owned()
+        except (OSError, sqlite3.Error, PaperExecutionLeaseLost) as error:
+            return PaperExecutionAttempt(
+                state="blocked",
+                detail=(
+                    "Paper execution lease was lost before status publication; "
+                    f"reconciliation is required: {error}"
+                ),
+                attempted_at=timestamp,
+                exit_code=exit_code,
+                execution_identifier=execution_identifier,
+                authorization_identifier=authorization.identifier,
+                mode=resolved_mode,
             )
         _atomic_json(
             status_path,

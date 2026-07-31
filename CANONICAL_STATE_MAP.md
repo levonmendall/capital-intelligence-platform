@@ -14,6 +14,7 @@
 | Historical replay | `/app/database/historical_replay/` | Backfill/replay loop | Certification/evaluation | Research evidence only |
 | Backups | `/app/database/backups/` | Backup loop/admin control | Restore drills | Recovery copies only |
 | Heartbeats/readiness | `/app/database/...` configured operational paths | Each component (target state) | Composite readiness | Operational state only |
+| Paper execution leases | `/app/database/paper_execution_leases.db` | Sole headless executor | Executor fencing checks | Mutable coordination only; never portfolio or decision authority |
 
 ## Publication rule
 
