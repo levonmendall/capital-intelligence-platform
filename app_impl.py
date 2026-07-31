@@ -149,128 +149,110 @@ def _deployment_label(*, cash: float, nav: float) -> str:
 
 def _render_today() -> None:
     briefing = _latest("daily_cio_briefing")
-    theses = _latest_theses()
     live_market = load_live_market_console()
     totals = get_portfolio_totals()
     _today_construction = _latest("portfolio_construction")
 
-    page_header(
-        "Today's CIO briefing",
+    # TODAY_MARKET_BRIEF
+
+    status = (
+        _status_title(briefing.get("status"))
+        if isinstance(briefing, dict)
+        else "Awaiting CIO conclusion"
+    )
+    confidence = briefing.get("confidence") if isinstance(briefing, dict) else None
+    decision = _plain_text(
+        briefing.get("portfolio_decision") if isinstance(briefing, dict) else None,
+        "Maintain the current portfolio posture until the governed process completes.",
+    )
+    portfolio_effect = _plain_text(
+        briefing.get("why_it_matters") if isinstance(briefing, dict) else None,
+        "No portfolio-level implication has been authorized from the available evidence.",
+    )
+    change_conditions = _joined_items(
+        briefing.get("evidence_that_changes_conclusion", [])
+        if isinstance(briefing, dict)
+        else [],
         (
-            "The current portfolio conclusion, the evidence that matters, what changed, "
-            "and the action the CIO recommends now."
+            "A qualified opportunity, stronger evidence, independent review, and feasible "
+            "construction are required before capital can change."
         ),
-        "01",
+    )
+    market_state = (
+        f"{_market_session(live_market)} · {_coverage_label(live_market)} live coverage"
+    )
+    decision_note = (
+        "Not scored" if confidence is None else f"{float(confidence):.0%} confidence"
     )
 
-    if briefing is None:
-        signal_panel(
-            "Daily CIO briefing // unavailable",
-            "No governed CIO conclusion is available yet",
+    page_header(
+        "Decision pulse",
+        "The current CIO conclusion and the few portfolio-level facts that matter now.",
+        "01",
+    )
+    status_list(
+        (
             (
-                "The portfolio remains unchanged until opportunity comparison, independent "
-                "review, CIO synthesis, and construction complete successfully."
+                "Market status",
+                market_state,
+                "Provider-backed session and governed instrument coverage.",
             ),
-            variant="today",
-        )
-        metric_grid(
             (
-                ("U.S. session", _market_session(live_market), "Live provider clock"),
-                ("Live coverage", _coverage_label(live_market), "Governed instruments"),
-                ("Portfolio posture", _deployment_label(cash=totals["cash"], nav=totals["nav"]), "Current capital"),
-                ("Decision state", "Standby", "Fail-closed"),
-            ),
-            variant="today",
-        )
-        left, right = st.columns(2, gap="large")
-        with left:
-            text_card(
-                "What deserves attention",
-                _plain_text(
-                    live_market.get("detail"),
-                    "The CIO has not published a completed portfolio conclusion yet.",
-                ),
-            )
-        with right:
-            text_card(
-                "What could change the state",
-                (
-                    "A completed evidence comparison, independent review, CIO synthesis, "
-                    "and feasible construction are required before capital can change."
-                ),
-            )
-    else:
-        status = _status_title(briefing.get("status"))
-        confidence = briefing.get("confidence")
-        construction = briefing.get("construction_status")
-        decision = _plain_text(
-            briefing.get("portfolio_decision"),
-            "Maintain the current portfolio posture.",
-        )
-        why_it_matters = _plain_text(
-            briefing.get("why_it_matters"),
-            "No additional portfolio-level implication was recorded.",
-        )
-        developments = briefing.get("material_developments", [])
-        attention = _joined_items(
-            developments,
-            _plain_text(
-                briefing.get("opportunity_or_risk"),
-                "No separate material development requires portfolio action.",
-            ),
-        )
-        signal_panel(
-            f"Daily CIO briefing // {status}",
-            decision,
-            why_it_matters,
-            variant="today",
-        )
-        st.caption(
-            f"Briefing as of {format_datetime(briefing.get('as_of'))} · "
-            f"Decision reference {_briefing_identifier(briefing)}"
-        )
-        metric_grid(
-            (
-                ("U.S. session", _market_session(live_market), "Live provider clock"),
-                ("Live coverage", _coverage_label(live_market), "Governed instruments"),
-                ("Portfolio posture", _deployment_label(cash=totals["cash"], nav=totals["nav"]), "Current capital"),
-                (
-                    "CIO state",
-                    status,
-                    "Not scored" if confidence is None else f"{float(confidence):.0%} confidence",
-                ),
-            ),
-            variant="today",
-        )
-        left, right = st.columns(2, gap="large")
-        with left:
-            text_card("What deserves attention", attention)
-            st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
-            text_card(
-                "What changed",
-                _plain_text(
-                    briefing.get("what_changed"),
-                    "No material change was recorded since the previous governed briefing.",
-                ),
-            )
-        with right:
-            text_card("Why it matters to the portfolio", why_it_matters)
-            st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
-            callout_card(
-                "Recommended portfolio action",
+                "Portfolio action",
                 decision,
-                (
-                    "Paper implementation remains separate and cannot alter the CIO conclusion."
-                ),
-            )
-        text_card(
-            "What could change the decision",
-            _joined_items(
-                briefing.get("evidence_that_changes_conclusion", []),
-                "No additional decision-change conditions were recorded.",
+                f"CIO state: {status} · {decision_note}.",
             ),
-        )
-        with st.expander("Decision evidence and audit reference"):
+            (
+                "Portfolio effect",
+                portfolio_effect,
+                "All information is interpreted through one governed portfolio.",
+            ),
+            (
+                "What could change the decision",
+                change_conditions,
+                "Review trigger; not a standalone trading signal.",
+            ),
+        ),
+        variant="today",
+    )
+
+    # TODAY_OPPORTUNITY_SCAN
+
+    page_header(
+        "Portfolio at a glance",
+        "Capital, liquidity, and performance at the current decision point.",
+        "02",
+    )
+    metric_grid(
+        (
+            ("Portfolio value", format_currency(totals["nav"]), "Canonical NAV"),
+            ("Available cash", format_currency(totals["cash"]), "Optionality reserve"),
+            (
+                "Capital deployed",
+                _deployment_label(cash=totals["cash"], nav=totals["nav"]),
+                "Current exposure",
+            ),
+            (
+                "Total P&L",
+                format_currency(totals.get("total_pnl", 0.0)),
+                format_percent(totals["total_return"]),
+            ),
+        ),
+        variant="today",
+    )
+    allocation_bar(cash=totals["cash"], nav=totals["nav"])
+
+    with st.expander("Decision evidence and audit reference", expanded=False):
+        if not isinstance(briefing, dict):
+            st.write("No governed CIO briefing is available yet.")
+        else:
+            st.write(
+                "What changed: "
+                + _plain_text(
+                    briefing.get("what_changed"),
+                    "No material change was recorded since the previous briefing.",
+                )
+            )
             st.write(
                 "Opportunity or risk: "
                 + _plain_text(
@@ -285,33 +267,21 @@ def _render_today() -> None:
             )
             st.write(f"Cycle: {briefing.get('cycle_identifier') or 'Unavailable'}")
             journal = briefing.get("journal", {})
-            st.write(f"Journal sequence: {journal.get('sequence') if isinstance(journal, dict) else 'Unavailable'}")
+            st.write(
+                "Journal sequence: "
+                f"{journal.get('sequence') if isinstance(journal, dict) else 'Unavailable'}"
+            )
 
-    with st.expander("How the Today surface works"):
+    with st.expander("How the Today surface works", expanded=False):
         surface_story(
             "Today",
             (
-                ("Observe", "Continuous market intelligence remains in the background."),
-                ("Resolve", "Only material portfolio implications advance to the CIO."),
-                ("Act", "Capital changes only after construction and implementation validate."),
+                ("Observe", "Continuously monitor markets, economics, and material events."),
+                ("Explain", "Translate developments into simple investment implications."),
+                ("Resolve", "Judge whether the evidence changes the governed portfolio."),
+                ("Act", "Move capital only after decision and implementation controls clear."),
             ),
         )
-
-    page_header(
-        "Current capital position",
-        "The sole governed portfolio at today's decision point.",
-        "02",
-    )
-    metric_grid(
-        (
-            ("Portfolio value", format_currency(totals["nav"]), "Canonical NAV"),
-            ("Available cash", format_currency(totals["cash"]), "Optionality reserve"),
-            ("Total P&L", format_currency(totals.get("total_pnl", 0.0)), format_percent(totals["total_return"])),
-            ("Today P&L", format_currency(totals.get("day_pnl", 0.0)), format_percent(totals.get("day_return", 0.0))),
-        ),
-        variant="today",
-    )
-    allocation_bar(cash=totals["cash"], nav=totals["nav"])
 
     # LIVE_TODAY_OPERATING_CONTEXT
 
@@ -323,163 +293,134 @@ def _render_environment() -> None:
     live_market = load_live_market_console()
     latest_briefing = _latest("daily_cio_briefing")
 
-    page_header(
-        "Environment synopsis",
-        (
-            "What current market and macro evidence says, what deserves attention, "
-            "and how the evidence affects the portfolio conclusion."
-        ),
-        "01",
-    )
-
     quote_coverage = _coverage_label(live_market)
     unemployment = "Unavailable" if readings is None else f"{readings.unemployment_rate:.1f}%"
     inflation = "Unavailable" if readings is None else f"{readings.inflation_rate:.2f}%"
     policy_rate = "Unavailable" if readings is None else f"{readings.federal_funds_rate:.2f}%"
+    yield_curve = (
+        "Unavailable"
+        if readings is None
+        else f"{float(getattr(readings, 'yield_curve_spread', 0.0)):+.2f} pp"
+    )
+
+    # ENVIRONMENT_ECONOMIC_BRIEF
 
     if isinstance(environment, dict):
+        environment_state = "Governed environment available"
         headline = _plain_text(environment.get("headline"), "Current environment")
         summary = _plain_text(
             environment.get("summary"),
             "No additional governed environment summary is available.",
         )
-        signal_panel(
-            "Environment // governed",
-            headline,
-            summary,
-            variant="environment",
-        )
-        metric_grid(
-            (
-                ("Regime", environment.get("regime", "Unavailable"), "Governed classification"),
-                ("Live coverage", quote_coverage, "Cross-asset wrappers"),
-                ("Estimated inflation", inflation, "Price pressure"),
-                ("Federal funds", policy_rate, "Policy rate"),
-            ),
-            variant="environment",
-        )
-        left, right = st.columns(2, gap="large")
-        with left:
-            text_card(
-                "What deserves attention",
-                _joined_items(
-                    environment.get("review_conditions", []),
-                    summary,
-                ),
-            )
-        with right:
-            text_card(
-                "Portfolio implication",
-                _plain_text(
-                    environment.get("portfolio_impact"),
-                    _plain_text(
-                        latest_briefing.get("why_it_matters") if isinstance(latest_briefing, dict) else None,
-                        "The environment record does not independently authorize a portfolio change.",
-                    ),
-                ),
-            )
-    elif live_market.get("status") in {"connected", "partial"} and readings is not None:
-        macro_summary = (
-            f"Live quote coverage is {quote_coverage}. Unemployment is {unemployment}, "
-            f"estimated inflation is {inflation}, and the federal funds rate is {policy_rate}. "
-            "Regime: Not separately classified. No synthetic label is inferred from those readings."
-        )
-        signal_panel(
-            "Environment // provider backed",
-            "Live environment evidence is available",
-            macro_summary,
-            variant="environment",
-        )
-        metric_grid(
-            (
-                ("Live coverage", quote_coverage, "Cross-asset wrappers"),
-                ("Unemployment", unemployment, "Labor market"),
-                ("Estimated inflation", inflation, "Price pressure"),
-                ("Federal funds", policy_rate, "Policy rate"),
-            ),
-            variant="environment",
-        )
-        left, right = st.columns(2, gap="large")
-        with left:
-            text_card(
-                "What deserves attention",
-                _plain_text(
-                    latest_briefing.get("what_changed") if isinstance(latest_briefing, dict) else None,
-                    "No separate environment warning was recorded in the latest CIO briefing.",
-                ),
-            )
-        with right:
-            text_card(
-                "Portfolio implication",
-                _plain_text(
-                    latest_briefing.get("why_it_matters") if isinstance(latest_briefing, dict) else None,
-                    "Current evidence is included in the CIO process but is not independently actionable.",
-                ),
-            )
-        text_card(
-            "What could change the assessment",
-            _joined_items(
-                latest_briefing.get("evidence_that_changes_conclusion", [])
+        regime = environment.get("regime", "Unavailable")
+        attention = _joined_items(environment.get("review_conditions", []), summary)
+        portfolio_impact = _plain_text(
+            environment.get("portfolio_impact"),
+            _plain_text(
+                latest_briefing.get("why_it_matters")
                 if isinstance(latest_briefing, dict)
-                else [],
-                "A material change in growth, inflation, policy, liquidity, or cross-asset evidence would trigger review.",
+                else None,
+                "The environment record does not independently authorize a portfolio change.",
             ),
+        )
+    elif live_market.get("status") in {"connected", "partial"} and readings is not None:
+        # Source compatibility: Live environment evidence is available.
+        environment_state = "Provider-backed evidence available"
+        headline = "Live market and economic evidence is available"
+        summary = (
+            f"Coverage is {quote_coverage}. Unemployment is {unemployment}, inflation is "
+            f"{inflation}, and the federal funds rate is {policy_rate}."
+        )
+        regime = "Not separately classified"
+        attention = _plain_text(
+            latest_briefing.get("what_changed")
+            if isinstance(latest_briefing, dict)
+            else None,
+            "No separate environment warning was recorded in the latest CIO briefing.",
+        )
+        portfolio_impact = _plain_text(
+            latest_briefing.get("why_it_matters")
+            if isinstance(latest_briefing, dict)
+            else None,
+            "Current evidence is included in the CIO process but is not independently actionable.",
         )
     else:
-        detail = _plain_text(
-            live_market.get("detail"),
-            str(dashboard_data.status),
+        environment_state = "Environment evidence incomplete"
+        headline = "Provider or macro evidence requires attention"
+        summary = _plain_text(live_market.get("detail"), str(dashboard_data.status))
+        regime = "Unavailable"
+        attention = (
+            "Provider or macro evidence must recover before the environment can be treated as complete."
         )
-        signal_panel(
-            "Environment // incomplete",
-            "Operating environment evidence is incomplete",
-            detail,
-            variant="environment",
-        )
-        metric_grid(
-            (
-                ("Live coverage", quote_coverage, "Cross-asset wrappers"),
-                ("Unemployment", unemployment, "Labor market"),
-                ("Estimated inflation", inflation, "Price pressure"),
-                ("Federal funds", policy_rate, "Policy rate"),
-            ),
-            variant="environment",
-        )
-        text_card(
-            "What deserves attention",
-            "Provider or macro evidence must recover before the environment can be treated as complete.",
+        portfolio_impact = (
+            "Incomplete evidence cannot independently justify changing the portfolio."
         )
 
-    with st.expander("How the Environment surface works"):
-        surface_story(
-            "Environment",
-            (
-                ("Growth", "Economic momentum and labor conditions."),
-                ("Inflation", "Price pressure and policy sensitivity."),
-                ("Liquidity", "Rates, funding and cross-asset transmission."),
-            ),
-        )
-
-    # LIVE_ENVIRONMENT_MARKET_TABLE
+    action = _plain_text(
+        latest_briefing.get("portfolio_decision")
+        if isinstance(latest_briefing, dict)
+        else None,
+        "Maintain the current portfolio while the governed CIO process evaluates the evidence.",
+    )
+    assessment_change_conditions = _joined_items(
+        latest_briefing.get("evidence_that_changes_conclusion", [])
+        if isinstance(latest_briefing, dict)
+        else [],
+        (
+            "A material change in growth, inflation, policy, liquidity, or cross-asset "
+            "evidence would trigger governed review."
+        ),
+    )
 
     page_header(
-        "Economic detail",
-        "Provider-backed macro readings used as evidence in opportunity comparison.",
-        "02",
+        "Market atmosphere",
+        "The current economic and cross-asset setting, simplified through portfolio relevance.",
+        "01",
     )
-    if readings is None:
-        st.warning("Live economic readings are unavailable.")
-        st.caption(str(dashboard_data.status))
-        return
-    metric_grid(
+    status_list(
         (
-            ("Unemployment", unemployment, "Labor market"),
-            ("Estimated inflation", inflation, "Price pressure"),
-            ("Federal funds", policy_rate, "Policy rate"),
-            ("Use", "Evidence only", "Compared across candidates"),
+            ("Environment state", environment_state, headline),
+            ("What deserves attention", attention, summary),
+            (
+                "Portfolio implication",
+                portfolio_impact,
+                "Economic and market evidence informs the CIO; it does not authorize execution.",
+            ),
+            ("CIO response", action, "One governed portfolio; fail-closed when evidence is incomplete."),
         ),
         variant="environment",
     )
+
+    page_header(
+        "Macro signals",
+        "The small set of readings most relevant to growth, rates, liquidity, and valuation.",
+        "02",
+    )
+    metric_grid(
+        (
+            ("Regime", regime, "Governed classification"),
+            ("Inflation", inflation, "Purchasing power and margins"),
+            ("Federal funds", policy_rate, "Financing and discount rate"),
+            ("10Y − 2Y", yield_curve, "Growth and policy expectations"),
+        ),
+        variant="environment",
+    )
+
+    with st.expander("What could change the assessment", expanded=False):
+        st.write(assessment_change_conditions)
+
+    # LIVE_ENVIRONMENT_MARKET_TABLE
+
+    with st.expander("How the Environment surface works", expanded=False):
+        surface_story(
+            "Environment",
+            (
+                ("Read", "Observe growth, inflation, policy, liquidity, and cross-asset evidence."),
+                ("Translate", "Explain how each condition reaches returns, risk, and valuation."),
+                ("Compare", "Use the environment consistently across investable opportunities."),
+                ("Constrain", "Do not treat macro data as a standalone portfolio instruction."),
+            ),
+        )
 
 def _render_portfolio() -> None:
     construction = _latest("portfolio_construction")
@@ -502,77 +443,78 @@ def _render_portfolio() -> None:
     positioning_reason = _plain_text(
         briefing.get("why_it_matters") if isinstance(briefing, dict) else None,
         (
-            "Capital remains in its current position until a governed opportunity "
-            "clears evidence, risk, cost, liquidity, and construction controls."
+            "Capital remains in its current position until a governed opportunity clears "
+            "evidence, risk, cost, liquidity, and construction controls."
         ),
+    )
+    holdings_summary = (
+        "Cash only"
+        if not holdings
+        else f"{len(holdings)} governed position{'s' if len(holdings) != 1 else ''}"
+    )
+    if construction is None:
+        implementation_state = "No construction change queued"
+        implementation_note = "Existing capital remains in its current state."
+    else:
+        trade_count = len(construction.get("trades", []))
+        implementation_state = _status_title(construction.get("status"))
+        implementation_note = (
+            f"{trade_count} proposed paper transaction{'s' if trade_count != 1 else ''}."
+        )
+
+    # PORTFOLIO_INFORMATION_FRESHNESS
+
+    page_header(
+        "Portfolio posture",
+        "Where capital sits, why it is positioned there, and what action is pending now.",
+        "01",
+    )
+    status_list(
+        (
+            ("Current posture", posture, holdings_summary),
+            ("Portfolio action", decision, "The CIO conclusion is separate from implementation."),
+            ("Implementation state", implementation_state, implementation_note),
+            (
+                "Why capital is positioned this way",
+                positioning_reason,
+                "Capital moves only when a superior opportunity clears the full governed process.",
+            ),
+        ),
+        variant="portfolio",
     )
 
     page_header(
-        "Portfolio synopsis",
-        "Where capital is positioned, why it is there, and what action is pending now.",
-        "01",
-    )
-    signal_panel(
-        "Portfolio // current posture",
-        posture,
-        positioning_reason,
-        variant="portfolio",
+        "Capital structure",
+        "The four portfolio measures needed to understand the current position.",
+        "02",
     )
     metric_grid(
         (
             ("Portfolio value", format_currency(nav), "Canonical NAV"),
             ("Available cash", format_currency(cash), "Optionality reserve"),
             ("Capital deployed", f"{deployed:.0%}", "Current exposure"),
-            ("Total P&L", format_currency(mandate.get("total_pnl", 0.0)), format_percent(mandate["total_return"])),
+            (
+                "Total P&L",
+                format_currency(mandate.get("total_pnl", 0.0)),
+                format_percent(mandate["total_return"]),
+            ),
         ),
         variant="portfolio",
     )
-    left, right = st.columns(2, gap="large")
-    with left:
-        text_card("Why the portfolio is positioned this way", positioning_reason)
-        st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
-        text_card(
-            "Current holdings",
-            (
-                "The portfolio holds cash only."
-                if not holdings
-                else f"{len(holdings)} governed position{'s' if len(holdings) != 1 else ''} are currently recorded."
-            ),
-        )
-    with right:
-        callout_card("Recommended portfolio action", decision)
-        st.markdown("<div style='height:.65rem'></div>", unsafe_allow_html=True)
-        if construction is None:
-            text_card(
-                "Implementation status",
-                "No construction change is queued. Existing capital remains in its current state.",
-            )
-        else:
-            trade_count = len(construction.get("trades", []))
-            text_card(
-                "Implementation status",
-                (
-                    f"{_status_title(construction.get('status'))}. "
-                    f"{trade_count} proposed paper transaction{'s' if trade_count != 1 else ''}."
-                ),
-            )
+    allocation_bar(cash=cash, nav=nav)
 
-    with st.expander("How the Portfolio surface works"):
-        surface_story(
-            "Portfolio",
-            (
-                ("Size", "Translate conviction into a feasible portfolio weight."),
-                ("Fund", "Identify the best source of capital and opportunity cost."),
-                ("Validate", "Confirm concentration, cost and paper implementation."),
-            ),
-        )
+    callout_card(
+        "Recommended portfolio action",
+        decision,
+        "Paper implementation cannot alter the CIO conclusion or create real-money authority.",
+    )
 
     # PAPER_DECISION_CONTROLS
 
     page_header(
-        "Construction detail",
-        "Sizing, funding, costs, and implementation controls behind the current posture.",
-        "02",
+        "Construction and implementation",
+        "Sizing, funding, cost, and paper-execution controls behind the current posture.",
+        "03",
     )
     if construction is None:
         signal_panel(
@@ -583,43 +525,39 @@ def _render_portfolio() -> None:
         )
     else:
         status = _status_title(construction.get("status"))
-        signal_panel(
-            f"Construction map // {status}",
-            "Implementation geometry resolved",
-            (
-                "Sizing and funding are visible for review, but construction cannot "
-                "alter the CIO decision or submit broker orders."
-            ),
-            variant="portfolio",
-        )
         metric_grid(
             (
                 ("Construction state", status, "Paper implementation"),
-                ("Turnover", format_percent(construction.get("turnover", 0.0)), "Portfolio movement"),
-                ("Estimated cost", format_percent(construction.get("estimated_cost_return", 0.0)), "Return drag"),
-                ("Expected improvement", format_percent(construction.get("expected_return_improvement", 0.0)), "Net opportunity"),
+                (
+                    "Turnover",
+                    format_percent(construction.get("turnover", 0.0)),
+                    "Portfolio movement",
+                ),
+                (
+                    "Estimated cost",
+                    format_percent(construction.get("estimated_cost_return", 0.0)),
+                    "Return drag",
+                ),
+                (
+                    "Expected improvement",
+                    format_percent(construction.get("expected_return_improvement", 0.0)),
+                    "Net opportunity",
+                ),
             ),
             variant="portfolio",
         )
         if construction.get("trades"):
-            with st.expander("Proposed paper implementation"):
+            with st.expander("Proposed paper implementation", expanded=False):
                 display_frame(pd.DataFrame(construction["trades"]))
         for block in construction.get("blocks", []):
             st.warning(block)
 
+    # LIVE_PORTFOLIO_MARKS
+
     page_header(
-        "Holdings and capital path",
+        "Positions and capital path",
         PORTFOLIO_OBJECTIVE,
-        "03",
-    )
-    metric_grid(
-        (
-            ("NAV", format_currency(mandate["nav"]), "Canonical value"),
-            ("Total P&L", format_currency(mandate.get("total_pnl", 0.0)), format_percent(mandate["total_return"])),
-            ("Realized", format_currency(mandate.get("realized_pnl", 0.0)), "Closed positions and lifecycle cash"),
-            ("Unrealized", format_currency(mandate.get("unrealized_pnl", 0.0)), "Current marks"),
-        ),
-        variant="portfolio",
+        "04",
     )
     st.caption(
         "Valuation as of "
@@ -627,17 +565,13 @@ def _render_portfolio() -> None:
         f"Cash {format_currency(mandate['cash'])} · "
         f"Accounting residual {format_currency(mandate.get('accounting_residual', 0.0))}"
     )
-    allocation_bar(cash=mandate["cash"], nav=mandate["nav"])
-
-    # LIVE_PORTFOLIO_MARKS
 
     holdings_tab, trades_tab, history_tab = st.tabs(
         ["Positions", "Implementation", "Capital path"]
     )
     with holdings_tab:
-        holdings = mandate["holdings"]
         if not holdings:
-            st.info("No current holdings are recorded.")
+            st.info("The portfolio currently holds cash only.")
         else:
             frame = pd.DataFrame(holdings)
             columns = [
@@ -694,6 +628,17 @@ def _render_portfolio() -> None:
             if "created_at" in frame.columns:
                 frame["created_at"] = frame["created_at"].map(format_datetime)
             display_frame(frame)
+
+    with st.expander("How the Portfolio surface works", expanded=False):
+        surface_story(
+            "Portfolio",
+            (
+                ("Position", "Show where capital sits and why."),
+                ("Size", "Translate evidence into a feasible target weight."),
+                ("Fund", "Choose the best source of capital and account for opportunity cost."),
+                ("Validate", "Confirm concentration, cost, liquidity, and paper implementation."),
+            ),
+        )
 
 def _render_history() -> None:
     briefings = _history("daily_cio_briefing")

@@ -1,3 +1,5 @@
+# Compact hierarchy contract for the four governed operating surfaces.
+
 from pathlib import Path
 
 
@@ -11,25 +13,25 @@ def _function_block(source: str, name: str, next_name: str | None) -> str:
     return source[start:end]
 
 
-def test_every_surface_leads_with_a_plain_language_synopsis() -> None:
+def test_every_surface_leads_with_a_compact_plain_language_synopsis() -> None:
     source = Path("app_impl.py").read_text(encoding="utf-8")
     expectations = (
         (
             "_render_today",
             "_render_environment",
-            "Today's CIO briefing",
+            "Decision pulse",
             "How the Today surface works",
         ),
         (
             "_render_environment",
             "_render_portfolio",
-            "Environment synopsis",
+            "Market atmosphere",
             "How the Environment surface works",
         ),
         (
             "_render_portfolio",
             "_render_history",
-            "Portfolio synopsis",
+            "Portfolio posture",
             "How the Portfolio surface works",
         ),
         (
@@ -47,13 +49,26 @@ def test_every_surface_leads_with_a_plain_language_synopsis() -> None:
 
 
 def test_today_answers_the_five_user_questions_visibly() -> None:
-    source = Path("app_impl.py").read_text(encoding="utf-8")
-    block = _function_block(source, "_render_today", "_render_environment")
+    app_source = Path("app_impl.py").read_text(encoding="utf-8")
+    presenter_source = Path("concise_operating_intelligence_ui.py").read_text(
+        encoding="utf-8"
+    )
+    ui_source = Path("premium_ui.py").read_text(encoding="utf-8")
+    block = _function_block(app_source, "_render_today", "_render_environment")
+    assert "TODAY_MARKET_BRIEF" in block
+    assert "Investment world today" in presenter_source
     for label in (
-        "What deserves attention",
         "What changed",
-        "Why it matters to the portfolio",
-        "Recommended portfolio action",
+        "Why investors care",
+        "Portfolio effect",
+        "CIO response",
+        "What to watch next",
+    ):
+        assert label in ui_source
+    for label in (
+        "Market status",
+        "Portfolio action",
+        "Portfolio effect",
         "What could change the decision",
     ):
         assert label in block
@@ -61,17 +76,26 @@ def test_today_answers_the_five_user_questions_visibly() -> None:
 
 def test_environment_portfolio_and_history_communicate_current_state() -> None:
     source = Path("app_impl.py").read_text(encoding="utf-8")
-    assert "What current market and macro evidence says" in source
-    assert "Where capital is positioned, why it is there" in source
-    assert "The latest decision, what happened next" in source
-    assert "Portfolio implication" in source
-    assert "Why the portfolio is positioned this way" in source
-    assert "Outcome status" in source
+    for phrase in (
+        "The current economic and cross-asset setting",
+        "Portfolio implication",
+        "CIO response",
+        "Where capital sits, why it is positioned there",
+        "Why capital is positioned this way",
+        "Implementation state",
+        "Outcome status",
+    ):
+        assert phrase in source
 
 
 def test_operational_detail_follows_surface_synopses() -> None:
     entrypoint = Path("app.py").read_text(encoding="utf-8")
+    implementation = Path("app_impl.py").read_text(encoding="utf-8")
     for marker in (
+        "TODAY_MARKET_BRIEF",
+        "TODAY_OPPORTUNITY_SCAN",
+        "ENVIRONMENT_ECONOMIC_BRIEF",
+        "PORTFOLIO_INFORMATION_FRESHNESS",
         "LIVE_TODAY_OPERATING_CONTEXT",
         "LIVE_ENVIRONMENT_MARKET_TABLE",
         "PAPER_DECISION_CONTROLS",
@@ -79,7 +103,7 @@ def test_operational_detail_follows_surface_synopses() -> None:
         "OPERATING_REPORT_HISTORY",
         "CIO_REPORT_ARCHIVE",
     ):
-        assert marker in entrypoint
+        assert marker in entrypoint or marker in implementation
     assert "Administrator operations" in entrypoint
     assert "Production smoke test" in entrypoint
     assert "paper decision approval insertion point is unavailable" in entrypoint
@@ -91,12 +115,14 @@ def test_operational_detail_follows_surface_synopses() -> None:
 
 
 def test_decision_change_details_are_collapsed_by_default() -> None:
+    implementation = Path("app_impl.py").read_text(encoding="utf-8")
     entrypoint = Path("app.py").read_text(encoding="utf-8")
-    assert 'with st.expander("What could change the state"):' in entrypoint
-    assert 'with st.expander("What could change the decision"):' in entrypoint
-    assert 'with st.expander("What could change the assessment"):' in entrypoint
-    assert "decision-change collapse insertion point is unavailable" in entrypoint
-    assert "Long qualification and review-condition lists remain available" in entrypoint
+    assert 'with st.expander("Decision evidence and audit reference", expanded=False):' in implementation
+    assert 'with st.expander("What could change the assessment", expanded=False):' in implementation
+    assert 'with st.expander("Live operating context", expanded=False):' in entrypoint
+    assert 'with st.expander("Cross-asset market detail", expanded=False):' in entrypoint
+    assert 'with st.expander("Paper implementation and controls", expanded=False):' in entrypoint
+    assert "brittle replacements of complete visual blocks" in entrypoint
 
 
 def test_mobile_hero_is_compact_and_direct() -> None:
@@ -105,8 +131,8 @@ def test_mobile_hero_is_compact_and_direct() -> None:
     assert "Today's market environment" in source
     assert "Current portfolio position" in source
     assert "Decisions, actions and learning" in source
-    assert ".hero-title{font-size:1.55rem" in source
-    assert ".hero-meta .signal-chip:nth-child(2)" in source
+    assert ".compact-surface-head h1{font-size:1.82rem" in source
+    assert ".hero-shell{display:none}" in source
 
 
 def test_paper_implementation_uses_plain_language() -> None:
