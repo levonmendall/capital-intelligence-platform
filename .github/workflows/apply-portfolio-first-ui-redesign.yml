@@ -45,8 +45,10 @@ jobs:
             test -s "$part"
           done
           cat "${parts[@]}" > /tmp/portfolio-first-ui.patch
-          git apply --check /tmp/portfolio-first-ui.patch
-          git apply /tmp/portfolio-first-ui.patch
+          # The daily/economic presentation file was already committed directly to main.
+          # Apply the remaining reviewed files without attempting to replay that hunk.
+          git apply --exclude=concise_operating_intelligence_ui.py --check /tmp/portfolio-first-ui.patch
+          git apply --exclude=concise_operating_intelligence_ui.py /tmp/portfolio-first-ui.patch
           rm -f \
             .github/agent_payload/portfolio-first-ui.tar.gz.b64 \
             .github/agent_payload/portfolio-first-ui-00.b64 \
