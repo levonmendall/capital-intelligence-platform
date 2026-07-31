@@ -92,3 +92,5 @@ jobs:
           fi
           git commit -m "Expand comprehensive market discovery"
           git push origin HEAD:agent/comprehensive-market-discovery
+
+# This second branch push activates the already-installed one-use workflow.
