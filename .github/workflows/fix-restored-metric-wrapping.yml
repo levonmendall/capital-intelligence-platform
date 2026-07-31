@@ -67,15 +67,27 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check --quiet pytest
-          pytest -q \
-            tests/test_operating_completeness_fixes.py \
-            tests/test_premium_streamlit_interface.py \
-            tests/test_surface_information_hierarchy.py \
-            tests/test_portfolio_education_ui.py \
-            tests/test_live_streamlit_navigation.py \
-            tests/test_distinct_streamlit_surfaces.py \
-            tests/test_signature_streamlit_interface.py \
+          candidates=(
+            tests/test_operating_completeness_fixes.py
+            tests/test_premium_streamlit_interface.py
+            tests/test_surface_information_hierarchy.py
+            tests/test_portfolio_education_ui.py
+            tests/test_live_streamlit_navigation.py
+            tests/test_distinct_streamlit_surfaces.py
+            tests/test_signature_streamlit_interface.py
             tests/test_streamlit_ui_import_cache.py
+          )
+          existing=()
+          for test_file in "${candidates[@]}"; do
+            if [[ -f "$test_file" ]]; then
+              existing+=("$test_file")
+            fi
+          done
+          if (( ${#existing[@]} == 0 )); then
+            echo "No targeted interface tests were found." >&2
+            exit 1
+          fi
+          pytest -q "${existing[@]}"
 
       - name: Commit responsive restoration
         shell: bash
