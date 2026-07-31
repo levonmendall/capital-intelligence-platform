@@ -1,0 +1,131 @@
+name: Apply operational hardening to current main
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.head_ref == 'fix/operational-truth-and-runtime-hardening'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out current hardening branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/operational-truth-and-runtime-hardening
+          fetch-depth: 0
+      - name: Check whether source is already applied
+        id: gate
+        shell: bash
+        run: |
+          if [[ -f .operational-hardening-applied ]]; then
+            echo "apply=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "apply=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Apply validated runtime source
+        if: steps.gate.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin fix/operational-hardening-source-20260731
+          git checkout origin/fix/operational-hardening-source-20260731 -- \
+            delivery/store.py \
+            delivery/canonical_scheduler.py \
+            run_autonomous_paper_operator.py \
+            operating_status.py \
+            render.yaml \
+            tests/test_operational_truth_runtime_hardening.py
+          python - <<'PY'
+          from pathlib import Path
+
+          app = Path('app.py')
+          text = app.read_text(encoding='utf-8')
+          anchor = 'from navigation_ui import install as _install_navigation_ui\n'
+          if text.count(anchor) != 1:
+              raise SystemExit('app.py status import anchor mismatch')
+          text = text.replace(
+              anchor,
+              anchor + 'from operating_status import load_cio_operating_status\n',
+              1,
+          )
+          old = '''def _safe_render_sidebar() -> None:\n    \"\"\"Render the brand and administrator operations in the sidebar.\"\"\"\n\n    with _premium_ui.st.sidebar:\n        _premium_ui.st.markdown(\n'''
+          new = '''def _safe_render_sidebar() -> None:\n    \"\"\"Render truthful operating status and administrator controls.\"\"\"\n\n    operating_status = load_cio_operating_status()\n    with _premium_ui.st.sidebar:\n        _premium_ui.st.markdown(\n'''
+          if text.count(old) != 1:
+              raise SystemExit('app.py sidebar anchor mismatch')
+          text = text.replace(old, new, 1)
+          old = "'<div class=\"sidebar-system\">System online</div>'"
+          new = "f'<div class=\"sidebar-system\">{operating_status.label}</div>'"
+          if text.count(old) != 1:
+              raise SystemExit('app.py online label anchor mismatch')
+          text = text.replace(old, new, 1)
+          caption = '        _premium_ui.st.caption("Four distinct surfaces. One governed portfolio.")\n'
+          if text.count(caption) != 1:
+              raise SystemExit('app.py status caption anchor mismatch')
+          text = text.replace(
+              caption,
+              '        _premium_ui.st.caption(operating_status.detail)\n' + caption,
+              1,
+          )
+          app.write_text(text, encoding='utf-8')
+
+          impl = Path('app_impl.py')
+          text = impl.read_text(encoding='utf-8')
+          anchor = 'from live_operating_console import load_live_market_console\n'
+          if text.count(anchor) != 1:
+              raise SystemExit('app_impl.py status import anchor mismatch')
+          text = text.replace(
+              anchor,
+              anchor + 'from operating_status import load_cio_operating_status\n',
+              1,
+          )
+          anchor = '''    totals = get_portfolio_totals()\n    _today_construction = _latest(\"portfolio_construction\")\n'''
+          replacement = '''    totals = get_portfolio_totals()\n    operating_status = load_cio_operating_status()\n    _today_construction = _latest(\"portfolio_construction\")\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('app_impl.py operating status load anchor mismatch')
+          text = text.replace(anchor, replacement, 1)
+          old = '''    status = (\n        _status_title(briefing.get(\"status\"))\n        if isinstance(briefing, dict)\n        else \"Awaiting CIO conclusion\"\n    )\n'''
+          new = '''    status = (\n        _status_title(briefing.get(\"status\"))\n        if isinstance(briefing, dict)\n        else operating_status.label\n    )\n'''
+          if text.count(old) != 1:
+              raise SystemExit('app_impl.py decision status anchor mismatch')
+          text = text.replace(old, new, 1)
+          old = '''    decision = _plain_text(\n        briefing.get(\"portfolio_decision\") if isinstance(briefing, dict) else None,\n        \"Maintain the current portfolio posture until the governed process completes.\",\n    )\n'''
+          new = '''    decision = _plain_text(\n        briefing.get(\"portfolio_decision\") if isinstance(briefing, dict) else None,\n        operating_status.headline,\n    )\n'''
+          if text.count(old) != 1:
+              raise SystemExit('app_impl.py decision fallback anchor mismatch')
+          text = text.replace(old, new, 1)
+          old = '''                f\"CIO state: {status} · {decision_note}.\",\n'''
+          new = '''                (\n                    f\"CIO state: {status} · {decision_note}.\"\n                    if isinstance(briefing, dict)\n                    else operating_status.detail\n                ),\n'''
+          if text.count(old) != 1:
+              raise SystemExit('app_impl.py CIO detail anchor mismatch')
+          impl.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          Path('.operational-hardening-applied').write_text('applied\n', encoding='utf-8')
+          PY
+      - name: Install dependencies
+        if: steps.gate.outputs.apply == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install -r requirements-dev.txt
+      - name: Compile changed runtime
+        if: steps.gate.outputs.apply == 'true'
+        run: python -m compileall -q delivery operations app.py app_impl.py operating_status.py run_autonomous_paper_operator.py
+      - name: Run complete repository suite
+        if: steps.gate.outputs.apply == 'true'
+        run: python -m pytest -q --maxfail=10
+      - name: Commit validated source
+        if: steps.gate.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f database/worker-heartbeat.json
+          git add -A
+          git commit -m "Harden CIO operating truth and retry behavior"
+          git push origin HEAD:fix/operational-truth-and-runtime-hardening
