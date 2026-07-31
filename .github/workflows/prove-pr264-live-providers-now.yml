@@ -41,56 +41,70 @@ jobs:
         run: |
           set -euo pipefail
           .venv/bin/python - <<'PY'
-          from datetime import datetime, timezone
+          from datetime import datetime, timedelta, timezone
           import json
           import os
           import requests
 
-          token = os.environ["CAPITAL_INTELLIGENCE_EODHD_API_TOKEN"]
-          response = requests.get(
-              "https://eodhd.com/api/mp/unicornbay/options/contracts",
-              params={
-                  "api_token": token,
-                  "filter[underlying_symbol]": "SPY",
-                  "page[limit]": 5,
-                  "fmt": "json",
-              },
-              timeout=30,
-          )
-          print("eodhd_options_http", response.status_code)
-
           key = os.environ["CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"]
           auth = (key, "")
-          datasets_response = requests.get(
+          datasets = requests.get(
               "https://hist.databento.com/v0/metadata.list_datasets",
               auth=auth,
               timeout=30,
-          )
-          datasets = datasets_response.json() if datasets_response.status_code == 200 else []
+          ).json()
           print(
               "databento_options_datasets",
               [str(item) for item in datasets if "OPRA" in str(item).upper()],
           )
-          schemas_response = requests.get(
+          schemas = requests.get(
               "https://hist.databento.com/v0/metadata.list_schemas",
               auth=auth,
               params={"dataset": "OPRA.PILLAR"},
               timeout=30,
-          )
-          schemas = schemas_response.json() if schemas_response.status_code == 200 else []
+          ).json()
           print("databento_opra_schemas", schemas)
 
           now = datetime.now(timezone.utc)
-          definition_response = requests.post(
+          tomorrow = now.date() + timedelta(days=1)
+          resolved_response = requests.post(
+              "https://hist.databento.com/v0/symbology.resolve",
+              auth=auth,
+              data={
+                  "dataset": "OPRA.PILLAR",
+                  "symbols": "SPY.OPT",
+                  "stype_in": "parent",
+                  "stype_out": "raw_symbol",
+                  "start_date": now.date().isoformat(),
+                  "end_date": tomorrow.isoformat(),
+              },
+              timeout=60,
+          )
+          print("databento_resolve_http", resolved_response.status_code)
+          resolved = resolved_response.json()
+          mappings = resolved.get("result", {}).get("SPY.OPT", []) if isinstance(resolved, dict) else []
+          raw_symbols = sorted(
+              {
+                  str(item.get("s"))
+                  for item in mappings
+                  if isinstance(item, dict) and item.get("s")
+              }
+          )
+          print("databento_resolve_count", len(raw_symbols))
+          print("databento_resolve_sample", raw_symbols[:3])
+          if not raw_symbols and isinstance(resolved, dict):
+              print("databento_resolve_detail", resolved)
+
+          bars_response = requests.post(
               "https://hist.databento.com/v0/timeseries.get_range",
               auth=auth,
               data={
                   "dataset": "OPRA.PILLAR",
-                  "schema": "definition",
+                  "schema": "ohlcv-1d",
                   "symbols": "SPY.OPT",
                   "stype_in": "parent",
-                  "start": now.date().isoformat(),
-                  "end": now.isoformat(),
+                  "start": (now - timedelta(days=7)).date().isoformat(),
+                  "end": tomorrow.isoformat(),
                   "encoding": "json",
                   "pretty_px": "true",
                   "pretty_ts": "true",
@@ -99,31 +113,25 @@ jobs:
               },
               timeout=60,
           )
-          print("databento_definition_http", definition_response.status_code)
-          records = []
-          for line in definition_response.text.splitlines():
+          print("databento_option_bars_http", bars_response.status_code)
+          bar_records = []
+          for line in bars_response.text.splitlines():
               try:
                   value = json.loads(line)
               except json.JSONDecodeError:
                   continue
               if isinstance(value, dict):
-                  records.append(value)
-          print("databento_definition_count", len(records))
-          if records:
-              print("databento_definition_keys", sorted(records[0]))
-              safe = {
-                  key: records[0].get(key)
-                  for key in (
-                      "symbol",
-                      "raw_symbol",
-                      "asset",
-                      "instrument_class",
-                      "expiration",
-                      "strike_price",
-                      "underlying",
-                  )
-              }
-              print("databento_definition_sample", safe)
+                  bar_records.append(value)
+          print("databento_option_bars_count", len(bar_records))
+          if bar_records:
+              print("databento_option_bars_keys", sorted(bar_records[0]))
+              print(
+                  "databento_option_bars_sample",
+                  {
+                      key: bar_records[0].get(key)
+                      for key in ("symbol", "open", "high", "low", "close", "volume", "pretty_ts_event")
+                  },
+              )
           PY
       - name: Validate required live providers
         shell: bash
