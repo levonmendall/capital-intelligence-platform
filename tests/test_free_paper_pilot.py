@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -93,7 +95,7 @@ def _client() -> AlpacaPaperClient:
     )
 
 
-def test_free_pilot_has_exact_broad_exposure_and_no_direct_complex_assets() -> None:
+def test_listed_pilot_remains_a_valid_implementation_lane_without_blanket_market_bans() -> None:
     universe = load_free_paper_pilot_universe(
         ROOT / "config" / "free_paper_pilot_universe.json"
     )
@@ -111,8 +113,8 @@ def test_free_pilot_has_exact_broad_exposure_and_no_direct_complex_assets() -> N
         }
         for item in universe.instruments
     )
-    assert "future_contract" in universe.direct_instrument_classes_prohibited
-    assert "option_contract" in universe.direct_instrument_classes_prohibited
+    payload = json.loads((ROOT / "config" / "free_paper_pilot_universe.json").read_text(encoding="utf-8"))
+    assert "direct_instrument_classes_prohibited" not in payload
     assert universe.instrument_for_exposure("crypto").maximum_weight == pytest.approx(0.05)
     assert universe.instrument_for_exposure("volatility").maximum_weight == pytest.approx(0.02)
 

@@ -24,6 +24,7 @@ from application.eligible_universe import (
 from cio.persistence import serialize_candidate_decision, serialize_opportunity_queue
 from evaluation.opportunity_outcomes import SQLiteOpportunityOutcomeStore
 from opportunity import AlternativeKind, AlternativeUse, OpportunityEngine, OpportunitySetContext
+from operations.direct_global_markets import load_direct_global_market_universe
 from operations.equity_discovery import (
     EquityDiscoveryResult,
     discover_us_equities,
@@ -415,18 +416,23 @@ def prepare_governed_production_context_for_cycle(
             excluded_symbols=tuple(base_symbols),
         )
         discovered = discovery.instruments_for_holdings(held_symbols)
+        direct_universe = load_direct_global_market_universe()
         universe = replace(
             base_universe,
-            identifier=f"{base_universe.identifier}+{discovery.identifier}",
+            identifier=(
+                f"{base_universe.identifier}+{discovery.identifier}"
+                f"+{direct_universe.identifier}"
+            ),
             objective=(
                 base_universe.objective
                 + " Daily broad U.S.-company discovery competes for exploratory capital."
             ),
-            instruments=tuple((*base_universe.instruments, *discovered)),
+            instruments=tuple((*base_universe.instruments, *discovered, *direct_universe.instruments)),
             limitations=tuple(
                 dict.fromkeys(
                     (*base_universe.limitations,
-                     "Individual equities enter through broad SEC/Alpaca discovery and begin with a 1% exploratory cap.")
+                     "Individual equities enter through broad SEC/Alpaca discovery and begin with a 1% exploratory cap.",
+                     *direct_universe.limitations)
                 )
             ),
         )
@@ -455,7 +461,7 @@ def prepare_governed_production_context_for_cycle(
             cycle_key=cycle_key,
             scheduled_for=scheduled,
             decision_as_of=decision_as_of,
-            detail=f"Listed-wrapper evidence collection failed: {type(error).__name__}: {error}",
+            detail=f"Cross-market evidence collection failed: {type(error).__name__}: {error}",
             instrument_count=len(universe.instruments),
         )
 

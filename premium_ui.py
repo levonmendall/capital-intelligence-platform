@@ -357,7 +357,7 @@ def render_sidebar() -> None:
             <div class="sidebar-brand">
                 <div class="sidebar-mark">CI</div>
                 <div class="sidebar-brand-title">Capital Intelligence</div>
-                <div class="sidebar-brand-copy">A continuously operating decision system for one governed portfolio.</div>
+                <div class="sidebar-brand-copy">A continuously operating decision system for one governed portfolio. The interface stays quiet until evidence earns attention.</div>
                 <div class="sidebar-system">System online</div>
             </div>
             """,

@@ -165,7 +165,9 @@ def test_publisher_creates_candidates_and_executable_cio_construction(tmp_path) 
     assert result.ready is True
     assert result.decision_as_of == decision_time
     assert result.candidate_count == 15
-    assert result.exclusion_count == 0
+    # The injected fixture supplies only the original 15 listed candidates;
+    # all 14 direct markets are therefore truthfully recorded as exclusions.
+    assert result.exclusion_count == 14
     context = _provider(settings, tmp_path).load_context(as_of=decision_time)
     assert any(
         item.startswith("alpaca-iex-bars:VTI:")
