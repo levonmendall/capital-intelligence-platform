@@ -30,7 +30,21 @@ render_app.py
   append Render deployment identity + administrator smoke-test dialog
 ```
 
-This graph is active technical debt. PR3 must replace it with normal imports and one application factory without changing investment behavior.
+PR3 replaces this graph with the following active composition:
+
+```text
+render_app.py / app.py
+  -> secure_app.create_streamlit_application(...)
+       -> session principal
+       -> typed authorized read dependencies
+       -> app_impl.render_surfaces(...)
+            -> direct presentation/helper imports
+```
+
+No active Streamlit entrypoint reads, rewrites, reloads, monkey-patches, or
+executes Python source. The four product surfaces and their intelligence,
+archive, live-market, and read-only paper-status panels remain connected by
+ordinary calls.
 
 ## Headless operating graph
 

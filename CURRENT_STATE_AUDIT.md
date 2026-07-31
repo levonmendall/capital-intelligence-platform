@@ -62,6 +62,15 @@ The production surface is not yet safe for unauthenticated public use. Authentic
 
 No CIO, construction, governance, execution, or real-money authority is changed by the audit documents. No strategy engine is added.
 
+## Remediation progress
+
+- PR1: auth-off sessions now receive a true anonymous, view-only principal.
+- PR2: Streamlit is a read-only paper-execution projection; the autonomous
+  headless operator is the sole implementation authority.
+- PR3: the active Streamlit chain now uses normal imports, typed dependency
+  injection, and one application factory. The row above records the audited
+  pre-remediation state for traceability.
+
 ## Validation record
 
 - PR1-focused authorization, API, Streamlit, paper-control, and Render tests: **37 passed**.

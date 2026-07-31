@@ -130,6 +130,9 @@ def format_datetime(value: object) -> str:
 
 
 def apply_global_style(*, dark_mode: bool = True) -> None:
+    # Production is a single permanent-dark command surface.  Retain the
+    # argument for the presentation API while refusing a second runtime theme.
+    dark_mode = True
     palette = (
         """
         :root{
@@ -467,43 +470,61 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         }
     """
     st.markdown(f"<style>{palette}{css}</style>", unsafe_allow_html=True)
+    from navigation_ui import _NAVIGATION_CSS
+
+    st.markdown(_NAVIGATION_CSS, unsafe_allow_html=True)
 
 
 
 def render_sidebar() -> None:
+    from operating_status import load_cio_operating_status
+
+    operating_status = load_cio_operating_status()
     with st.sidebar:
         st.markdown(
-            """
-            <div class="sidebar-brand">
-                <div class="sidebar-mark">CI</div>
-                <div class="sidebar-brand-title">Capital Intelligence</div>
-                <div class="sidebar-brand-copy">A continuously operating decision system for one governed portfolio. The interface stays quiet until evidence earns attention.</div>
-                <div class="sidebar-system">System online</div>
-            </div>
-            """,
+            '<div class="sidebar-brand">'
+            '<div class="sidebar-mark">CI</div>'
+            '<div class="sidebar-brand-title">Capital Intelligence</div>'
+            '<div class="sidebar-brand-copy">A continuously operating decision system for one governed portfolio. The interface stays quiet until evidence earns attention.</div>'
+            f'<div class="sidebar-system">{escape(operating_status.label)}</div>'
+            '</div>',
             unsafe_allow_html=True,
         )
-        st.caption("Dark command mode is the default appearance.")
+        st.caption(operating_status.detail)
         st.caption("Four distinct surfaces. One governed portfolio.")
 
 
 def render_navigation(options: list[str]) -> tuple[str, bool]:
-    st.markdown(
-        '<div class="command-label">Capital Intelligence // Command Deck</div>',
-        unsafe_allow_html=True,
+    choices = [str(option) for option in options]
+    if not choices:
+        raise ValueError("primary navigation requires at least one surface")
+
+    brand, navigation = st.columns(
+        (0.42, 5.58),
+        gap="small",
+        vertical_alignment="center",
     )
-    navigation, appearance = st.columns((5.8, 1.2), gap="small")
-    with navigation:
-        page = st.radio(
-            "Primary screens",
-            options,
-            horizontal=True,
-            label_visibility="collapsed",
-            key="primary_surface",
+    with brand:
+        st.markdown(
+            '<div class="nav-brand-mark">'
+            '<svg viewBox="0 0 24 24" aria-hidden="true">'
+            '<path d="m12 3 7 4v10l-7 4-7-4V7z"/>'
+            '<path d="m8.5 9 3.5-2 3.5 2v6L12 17l-3.5-2z"/>'
+            '</svg></div>',
+            unsafe_allow_html=True,
         )
-    with appearance:
-        dark_mode = st.toggle("Dark", key="dark_mode")
-    return page, bool(dark_mode)
+    with navigation:
+        selected = st.segmented_control(
+            "Primary screens",
+            choices,
+            selection_mode="single",
+            default=choices[0],
+            required=True,
+            label_visibility="collapsed",
+            width="stretch",
+            key="primary_surface_navigation_v2",
+        )
+    return str(selected or choices[0]), True
 
 
 def _hero_visual(profile: SurfaceProfile) -> str:
