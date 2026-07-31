@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -81,6 +82,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark.add_argument("--report", default="reports/event-quality-benchmark.json")
     benchmark.add_argument("--require-certified", action="store_true")
+    experiment = subparsers.add_parser("paper-experiment-register")
+    experiment.add_argument(
+        "--protocol",
+        default=str(Path(__file__).with_name("config") / "paper_experiment_protocol.v1.json"),
+    )
+    experiment.add_argument("--gate-evidence", required=True)
+    experiment.add_argument("--code-version", required=True)
+    experiment.add_argument("--deployed-git-sha", required=True)
+    experiment.add_argument("--start-date", required=True)
+    experiment.add_argument("--database", default="database/paper-experiment.db")
     return parser
 
 
@@ -114,6 +125,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
         passed = report["certified"] if args.require_certified else report["metrics_passed"]
         return 0 if passed else 2
+    if args.action == "paper-experiment-register":
+        from operations.paper_experiment import (
+            SQLitePaperExperimentStore,
+            load_paper_experiment_protocol,
+            register_paper_experiment,
+        )
+
+        gate_payload = json.loads(Path(args.gate_evidence).read_text(encoding="utf-8"))
+        if not isinstance(gate_payload, dict):
+            raise ValueError("gate evidence must be a JSON object")
+        protocol = load_paper_experiment_protocol(args.protocol)
+        registration = register_paper_experiment(
+            protocol,
+            registered_at=datetime.now(timezone.utc),
+            start_date=date.fromisoformat(args.start_date),
+            code_version=args.code_version,
+            deployed_git_sha=args.deployed_git_sha,
+            launch_gates={str(key): value is True for key, value in gate_payload.items()},
+        )
+        SQLitePaperExperimentStore(args.database).append(
+            identifier=registration.identifier,
+            event_type="registration",
+            recorded_at=registration.registered_at,
+            payload=registration.to_dict(),
+        )
+        print(json.dumps(registration.to_dict(), indent=2, sort_keys=True))
+        return 0
 
     command = command_tokens(args.command, manifest)
     if args.command == "api":
