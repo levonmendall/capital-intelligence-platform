@@ -1,0 +1,21 @@
+name: Inspect PR264 Package
+
+on:
+  push:
+    branches:
+      - agent/recover-pr264-materialization
+    paths:
+      - .comprehensive-market-discovery/inspect-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/recover-pr264-materialization
+          fetch-depth: 0
+      - run: bash tools/extract_pr264_apply_script.sh
