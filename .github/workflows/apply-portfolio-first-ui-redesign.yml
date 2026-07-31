@@ -7,9 +7,16 @@ on:
     paths:
       - .github/agent_payload/portfolio-first-ui.tar.gz.b64
       - .github/workflows/apply-portfolio-first-ui-redesign.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/agent_payload/portfolio-first-ui.tar.gz.b64
+      - .github/workflows/apply-portfolio-first-ui-redesign.yml
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
   group: portfolio-first-ui-redesign
@@ -17,6 +24,7 @@ concurrency:
 
 jobs:
   apply:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Check out redesign branch
