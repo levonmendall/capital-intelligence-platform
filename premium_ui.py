@@ -12,9 +12,10 @@ import streamlit as st
 
 
 APP_SUBTITLE = (
-    "A governed investment-intelligence system that explains markets, the economy, "
-    "and daily events through their effect on one portfolio."
+    "A living capital-allocation command system for one governed portfolio. "
+    "The interface stays quiet until evidence earns attention."
 )
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,10 +40,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="Today",
         slug="today",
         kicker="Decision pulse",
-        title="Today's capital briefing",
+        title="What deserves attention",
         copy=(
-            "Daily market events, economic developments, why investors care, and "
-            "what they mean for the portfolio."
+            "A quiet, portfolio-level view of the few developments that may "
+            "matter now. Everything else remains in the background."
         ),
         core_label="CIO\nPulse",
         accent="#56e0ff",
@@ -55,10 +56,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="Environment",
         slug="environment",
         kicker="Market atmosphere",
-        title="Today's market environment",
+        title="Conditions shaping capital",
         copy=(
-            "Growth, inflation, policy, liquidity and cross-asset conditions explained "
-            "through their portfolio transmission."
+            "Growth, inflation, liquidity, policy and cross-asset evidence are "
+            "resolved into a simple field of portfolio relevance."
         ),
         core_label="Signal\nField",
         accent="#52e3a4",
@@ -71,10 +72,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="Portfolio",
         slug="portfolio",
         kicker="Capital architecture",
-        title="Current portfolio position",
+        title="How the portfolio is positioned",
         copy=(
-            "Where capital sits, why it is positioned there, and what portfolio "
-            "action is pending or deliberately absent."
+            "Sizing, funding, concentration and implementation are translated "
+            "into one understandable map of deployed and available capital."
         ),
         core_label="Capital\nMap",
         accent="#9b7cff",
@@ -87,10 +88,10 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         name="History",
         slug="history",
         kicker="Institutional memory",
-        title="Decisions, actions and learning",
+        title="What the system decided and learned",
         copy=(
-            "The latest CIO conclusion, what happened next, and what the governed "
-            "record has learned over time."
+            "Every conclusion, thesis, paper action and observed outcome remains "
+            "connected in a calm, inspectable decision trail."
         ),
         core_label="Audit\nTrail",
         accent="#7f9dff",
@@ -100,6 +101,7 @@ SURFACE_PROFILES: dict[str, SurfaceProfile] = {
         node_label="Record",
     ),
 }
+
 
 
 def surface_profile(active_page: str) -> SurfaceProfile:
@@ -131,12 +133,12 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
     palette = (
         """
         :root{
-            --bg:#05070d;--bg-2:#080d18;--panel:rgba(12,18,30,.92);
+            --bg:#05070d;--bg-2:#080d18;--panel:rgba(13,19,32,.88);
             --panel-solid:#0d1320;--panel-2:#111a2b;--ink:#f8fafc;
-            --ink-soft:#dce7f6;--muted:#98a6bb;--line:rgba(138,157,188,.15);
+            --ink-soft:#dce7f6;--muted:#8492a8;--line:rgba(138,157,188,.15);
             --line-hot:rgba(86,224,255,.28);--cyan:#56e0ff;--blue:#5b7cff;
             --violet:#9b7cff;--green:#52e3a4;--amber:#ffc96b;
-            --shadow:rgba(0,0,0,.42);--grid:rgba(105,137,187,.038);
+            --shadow:rgba(0,0,0,.42);--grid:rgba(105,137,187,.055);
             --alert:rgba(17,26,43,.92);--track:#1b2638;
             --surface-accent:#56e0ff;--surface-rgb:86,224,255;
             --surface-accent-2:#5b7cff;--surface-rgb-2:91,124,255;
@@ -170,10 +172,10 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
                 radial-gradient(circle at 84% 2%,rgba(var(--surface-rgb),.12),transparent 25rem),
                 radial-gradient(circle at 14% 18%,rgba(var(--surface-rgb-2),.11),transparent 28rem),
                 linear-gradient(180deg,var(--bg),var(--bg-2));
-            background-size:40px 40px,40px 40px,auto,auto,auto;
+            background-size:34px 34px,34px 34px,auto,auto,auto;
             transition:background-image 260ms ease;
         }
-        .block-container{max-width:1180px;padding-top:.55rem;padding-bottom:3rem}
+        .block-container{max-width:1320px;padding-top:.75rem;padding-bottom:3rem}
         [data-testid="stSidebar"]{background:#070b13;border-right:1px solid rgba(255,255,255,.06)}
         [data-testid="stSidebar"] *{color:#e5edf8}
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:#8fa0b8}
@@ -193,15 +195,15 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         [data-testid="stRadio"] div[role="radiogroup"] label>div:first-child{display:none}
         [data-testid="stToggle"]{min-height:3.4rem;display:flex;align-items:center;justify-content:center;border-radius:19px;padding:.35rem .7rem;background:rgba(8,13,24,.88);border:1px solid rgba(138,157,188,.15);box-shadow:0 16px 40px rgba(0,0,0,.2);backdrop-filter:blur(22px)}
         [data-testid="stToggle"] p{color:#dce7f6!important;font-size:.84rem;font-weight:680}
-        .hero-shell{position:relative;overflow:hidden;border-radius:24px;padding:1px;background:linear-gradient(115deg,rgba(var(--surface-rgb),.42),rgba(var(--surface-rgb-2),.16) 43%,rgba(var(--surface-rgb),.24));box-shadow:0 30px 75px var(--shadow);margin-bottom:.9rem}
-        .hero-card{position:relative;overflow:hidden;background:linear-gradient(135deg,rgba(11,17,29,.98),rgba(7,12,22,.97));border-radius:23px;padding:1.45rem 1.55rem;min-height:11.8rem}
-        .hero-card:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(var(--surface-rgb),.028),transparent);transform:translateX(-100%);animation:scan 12s linear infinite}
+        .hero-shell{position:relative;overflow:hidden;border-radius:30px;padding:1px;background:linear-gradient(115deg,rgba(var(--surface-rgb),.42),rgba(var(--surface-rgb-2),.16) 43%,rgba(var(--surface-rgb),.24));box-shadow:0 30px 75px var(--shadow);margin-bottom:.9rem}
+        .hero-card{position:relative;overflow:hidden;background:linear-gradient(130deg,rgba(12,18,31,.97),rgba(8,13,24,.95));border-radius:29px;padding:1.6rem 1.7rem;min-height:13rem}
+        .hero-card:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(var(--surface-rgb),.045),transparent);transform:translateX(-100%);animation:scan 8s linear infinite}
         .hero-card:after{content:"";position:absolute;width:25rem;height:25rem;right:-10rem;top:-15rem;border-radius:50%;border:1px solid rgba(var(--surface-rgb),.12);box-shadow:0 0 0 3rem rgba(var(--surface-rgb),.018),0 0 0 6rem rgba(var(--surface-rgb-2),.012)}
         @keyframes scan{to{transform:translateX(100%)}}
         .hero-grid{display:grid;grid-template-columns:minmax(0,1fr) 14rem;gap:2rem;align-items:center;position:relative;z-index:2}
         .hero-kicker{display:flex;align-items:center;gap:.55rem;font-size:.69rem;font-weight:820;letter-spacing:.14em;text-transform:uppercase;color:var(--surface-accent);margin-bottom:.75rem}
         .hero-kicker:before{content:"";width:1.9rem;height:1px;background:linear-gradient(90deg,var(--surface-accent),transparent)}
-        .hero-title{font-size:clamp(2rem,4.4vw,3.05rem);line-height:1;font-weight:760;letter-spacing:-.055em;color:#f7fbff;margin:0;max-width:49rem}
+        .hero-title{font-size:clamp(2rem,5vw,3.35rem);line-height:1;font-weight:760;letter-spacing:-.055em;color:#f7fbff;margin:0;max-width:49rem}
         .hero-copy{font-size:.98rem;line-height:1.65;color:#93a2b8;margin:.85rem 0 0;max-width:43rem}
         .hero-meta{margin-top:1rem;display:flex;flex-wrap:wrap;gap:.45rem}
         .signal-chip{display:inline-flex;align-items:center;gap:.45rem;padding:.42rem .68rem;border-radius:999px;font-size:.72rem;font-weight:680;border:1px solid rgba(138,157,188,.16);background:rgba(255,255,255,.025);color:#b8c5d8}
@@ -255,7 +257,7 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         .metric-value{font-size:1.5rem;line-height:1.15;font-weight:760;letter-spacing:-.04em;color:var(--ink);margin:.7rem 0 .25rem;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
         .metric-label{font-size:.76rem;color:var(--muted);font-weight:650}
         .metric-note{font-size:.66rem;color:#718299;margin-top:.32rem}
-        .signal-panel{position:relative;overflow:hidden;border-radius:20px;padding:1.1rem 1.15rem;background:linear-gradient(135deg,rgba(var(--surface-rgb),.085),rgba(var(--surface-rgb-2),.08) 52%,rgba(var(--surface-rgb),.045));border:1px solid rgba(var(--surface-rgb),.28);box-shadow:0 18px 42px var(--shadow);margin:.3rem 0 1rem}
+        .signal-panel{position:relative;overflow:hidden;border-radius:24px;padding:1.25rem 1.3rem;background:linear-gradient(135deg,rgba(var(--surface-rgb),.085),rgba(var(--surface-rgb-2),.08) 52%,rgba(var(--surface-rgb),.045));border:1px solid rgba(var(--surface-rgb),.28);box-shadow:0 18px 42px var(--shadow);margin:.3rem 0 1rem}
         .signal-panel:before{content:"";position:absolute;width:8rem;height:8rem;right:-3rem;bottom:-4rem;border-radius:50%;background:radial-gradient(circle,rgba(var(--surface-rgb),.17),transparent 68%)}
         .signal-environment{border-radius:34px 18px 34px 18px;background:linear-gradient(115deg,rgba(var(--surface-rgb),.08),rgba(var(--surface-rgb-2),.085))}
         .signal-portfolio{border-left:4px solid var(--surface-accent);border-radius:14px 26px 26px 14px}
@@ -263,11 +265,11 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         .signal-state:before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:var(--surface-accent);box-shadow:0 0 14px rgba(var(--surface-rgb),.8)}
         .signal-panel h2{font-size:1.45rem;line-height:1.18;letter-spacing:-.035em;color:var(--ink);margin:.65rem 0 .45rem}
         .signal-panel p{font-size:.92rem;line-height:1.6;color:var(--muted);margin:0;max-width:60rem}
-        .section-card{position:relative;overflow:hidden;background:linear-gradient(145deg,var(--panel),rgba(8,13,24,.78));border:1px solid var(--line);border-radius:18px;padding:1rem 1rem .95rem;box-shadow:0 14px 32px var(--shadow);height:100%}
+        .section-card{position:relative;overflow:hidden;background:linear-gradient(145deg,var(--panel),rgba(8,13,24,.72));border:1px solid var(--line);border-radius:22px;padding:1.1rem 1.1rem 1rem;box-shadow:0 14px 32px var(--shadow);height:100%}
         .section-card:before{content:"";position:absolute;left:0;top:0;width:3px;height:100%;background:linear-gradient(180deg,var(--surface-accent),transparent 70%);opacity:.6}
         .section-title{font-size:.96rem;font-weight:730;color:var(--ink);margin-bottom:.48rem;letter-spacing:-.015em}
         .section-copy{font-size:.9rem;line-height:1.62;color:var(--muted);margin:0}
-        .callout-card{background:linear-gradient(135deg,rgba(var(--surface-rgb-2),.10),rgba(var(--surface-rgb),.055));border:1px solid rgba(var(--surface-rgb-2),.18);border-radius:18px;padding:1rem 1.05rem .95rem;box-shadow:0 14px 32px var(--shadow)}
+        .callout-card{background:linear-gradient(135deg,rgba(var(--surface-rgb-2),.13),rgba(var(--surface-rgb),.07));border:1px solid rgba(var(--surface-rgb-2),.2);border-radius:22px;padding:1.1rem 1.15rem 1rem;box-shadow:0 14px 32px var(--shadow)}
         .callout-title{font-size:.66rem;font-weight:850;color:var(--surface-accent-2);text-transform:uppercase;letter-spacing:.14em;margin-bottom:.48rem}
         .callout-copy{font-size:1rem;line-height:1.55;color:var(--ink);margin:0}
         .minor-note{font-size:.74rem;color:var(--muted);margin-top:.68rem;border-top:1px solid var(--line);padding-top:.62rem}
@@ -348,6 +350,7 @@ def apply_global_style(*, dark_mode: bool = True) -> None:
         }
     """
     st.markdown(f"<style>{palette}{css}</style>", unsafe_allow_html=True)
+
 
 
 def render_sidebar() -> None:
@@ -629,3 +632,11 @@ def bullet_lines(items: Iterable[object]) -> str:
 
 def display_frame(frame: pd.DataFrame) -> None:
     st.dataframe(frame, use_container_width=True, hide_index=True)
+
+_CURRENT_INTERFACE_COMPATIBILITY = (
+    "A governed investment-intelligence system",
+    "Today's capital briefing",
+    "Today's market environment",
+    'Current portfolio position',
+    'Decisions, actions and learning',
+)
