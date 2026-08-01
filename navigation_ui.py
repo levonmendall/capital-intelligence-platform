@@ -125,9 +125,8 @@ _NAVIGATION_CSS = """
 }
 
 /* Streamlit wraps each columns row in a short element container. Making only
-   the inner row sticky allows that short wrapper to release the navigation as
-   soon as it leaves the viewport. Pin the complete element wrapper instead,
-   then keep the visual row relative inside it. */
+   the inner row sticky allows that short wrapper to leave the viewport. Pin
+   the complete wrapper as well so the rail persists for the full page. */
 :is(
     div[data-testid="stElementContainer"],
     div.stElementContainer,
@@ -139,16 +138,6 @@ _NAVIGATION_CSS = """
     width: 100% !important;
     align-self: stretch !important;
     isolation: isolate !important;
-}
-
-:is(
-    div[data-testid="stElementContainer"],
-    div.stElementContainer,
-    div.element-container
-):has(div[data-testid="stHorizontalBlock"] .nav-brand-mark)
-  div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) {
-    position: relative !important;
-    top: auto !important;
 }
 
 @media (min-width: 761px) {
