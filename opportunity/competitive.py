@@ -219,10 +219,9 @@ def prepare_competitive_opportunity_set(
     alternatives. Their comparable return is already net, horizon-normalized,
     evidence-adjusted, and uncertainty-penalized, so it is not charged or shrunk twice.
 
-    Before the final queue is built, each candidate's probability is aligned to its
-    actual strongest other alternative, including a qualified peer candidate. This
-    prevents a baseline-relative probability from creating a false hard consistency
-    veto during final candidate competition.
+    Before the final queue is built, each pass-one-qualified candidate's probability is
+    aligned to its actual strongest other alternative, including a qualified peer. A
+    preliminary reject is never realigned or resurrected during this final pass.
     """
 
     if not isinstance(engine, OpportunityEngine):
@@ -251,6 +250,9 @@ def prepare_competitive_opportunity_set(
         for candidate in candidates
     )
     preliminary = engine.build_queue(baseline_aligned, baseline_context)
+    preliminary_qualified = {
+        item.candidate.identifier for item in preliminary.ranked
+    }
 
     alternatives = list(baseline_context.alternatives)
     admitted: list[str] = []
@@ -277,11 +279,15 @@ def prepare_competitive_opportunity_set(
         alternatives=tuple(alternatives),
     )
     final_candidates = tuple(
-        _align_to_final_competition(
-            engine,
-            candidate,
-            context=final_context,
-            baseline_opportunity_cost=baseline_cost,
+        (
+            _align_to_final_competition(
+                engine,
+                candidate,
+                context=final_context,
+                baseline_opportunity_cost=baseline_cost,
+            )
+            if candidate.identifier in preliminary_qualified
+            else candidate
         )
         for candidate in baseline_aligned
     )
