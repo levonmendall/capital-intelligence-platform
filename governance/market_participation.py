@@ -8,15 +8,25 @@ for promoting an exact instrument beyond observation.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, is_dataclass, replace
 from enum import Enum
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterable
 
 from cio.models import CandidateAssetClass
-from governance.coverage_certification import MarketCoverage, MarketCoverageRegistry, load_market_coverage
+from governance.coverage_certification import (
+    MarketCoverage,
+    MarketCoverageRegistry,
+    load_market_coverage,
+)
 
-DEFAULT_MARKET_COVERAGE_PATH = Path(os.getenv("CAPITAL_INTELLIGENCE_MARKET_COVERAGE_REGISTRY", "config/market_coverage_registry.v1.json")).expanduser()
+DEFAULT_MARKET_COVERAGE_PATH = Path(
+    os.getenv(
+        "CAPITAL_INTELLIGENCE_MARKET_COVERAGE_REGISTRY",
+        "config/market_coverage_registry.v1.json",
+    )
+).expanduser()
 
 
 class MarketParticipationStage(str, Enum):
@@ -65,6 +75,8 @@ _MARKET_BY_ASSET_CLASS = {
 
 
 class CanonicalMarketParticipationAuthority:
+    """Enforce observed, decision-certified, and allocatable scopes separately."""
+
     def __init__(self, registry: MarketCoverageRegistry) -> None:
         if not isinstance(registry, MarketCoverageRegistry):
             raise TypeError("registry must be a MarketCoverageRegistry")
@@ -77,45 +89,118 @@ class CanonicalMarketParticipationAuthority:
         }
 
     @classmethod
-    def load(cls, path: str | Path = DEFAULT_MARKET_COVERAGE_PATH) -> "CanonicalMarketParticipationAuthority":
+    def load(
+        cls,
+        path: str | Path = DEFAULT_MARKET_COVERAGE_PATH,
+    ) -> "CanonicalMarketParticipationAuthority":
         return cls(load_market_coverage(path))
 
     @property
     def allocatable_instrument_identifiers(self) -> frozenset[str]:
         return frozenset(self._allocatable_entry_by_instrument)
 
-    def assess(self, *, instrument_identifier: str, asset_class: CandidateAssetClass | None = None) -> MarketParticipationAssessment:
+    def assess(
+        self,
+        *,
+        instrument_identifier: str,
+        asset_class: CandidateAssetClass | None = None,
+    ) -> MarketParticipationAssessment:
         identifier = str(instrument_identifier).strip()
         if not identifier:
             raise ValueError("instrument_identifier cannot be empty")
         exact = self._allocatable_entry_by_instrument.get(identifier)
         if exact is not None:
-            return MarketParticipationAssessment(identifier, exact.market, exact.monitored, True, True, exact.decision_certification_identifier, exact.limitations, self.registry.identifier)
+            return MarketParticipationAssessment(
+                instrument_identifier=identifier,
+                market=exact.market,
+                monitored=exact.monitored,
+                decision_certified=True,
+                paper_allocatable=True,
+                certification_identifier=exact.decision_certification_identifier,
+                limitations=exact.limitations,
+                registry_identifier=self.registry.identifier,
+            )
         market = _MARKET_BY_ASSET_CLASS.get(asset_class)
         entry: MarketCoverage | None = self._by_market.get(market) if market else None
         if entry is None:
-            return MarketParticipationAssessment(identifier, "unclassified", False, False, False, None, ("Instrument is outside the classified market registry.",), self.registry.identifier)
-        return MarketParticipationAssessment(identifier, entry.market, entry.monitored, False, False, None, entry.limitations, self.registry.identifier)
+            return MarketParticipationAssessment(
+                instrument_identifier=identifier,
+                market="unclassified",
+                monitored=False,
+                decision_certified=False,
+                paper_allocatable=False,
+                certification_identifier=None,
+                limitations=("Instrument is outside the classified market registry.",),
+                registry_identifier=self.registry.identifier,
+            )
+        return MarketParticipationAssessment(
+            instrument_identifier=identifier,
+            market=entry.market,
+            monitored=entry.monitored,
+            decision_certified=False,
+            paper_allocatable=False,
+            certification_identifier=None,
+            limitations=entry.limitations,
+            registry_identifier=self.registry.identifier,
+        )
 
-    def filter_paper_allocatable(self, instruments: Iterable[object]) -> tuple[object, ...]:
-        selected = tuple(item for item in instruments if str(getattr(item, "instrument_identifier", "")).strip() in self.allocatable_instrument_identifiers)
-        identifiers = tuple(str(getattr(item, "instrument_identifier", "")).strip() for item in selected)
+    def filter_paper_allocatable(
+        self,
+        instruments: Iterable[object],
+    ) -> tuple[object, ...]:
+        selected = tuple(
+            item
+            for item in instruments
+            if str(getattr(item, "instrument_identifier", "")).strip()
+            in self.allocatable_instrument_identifiers
+        )
+        identifiers = tuple(
+            str(getattr(item, "instrument_identifier", "")).strip()
+            for item in selected
+        )
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("paper authority contains duplicate instruments")
         return selected
 
     def require_complete_allocatable_set(self, instruments: Iterable[object]) -> None:
-        available = {str(getattr(item, "instrument_identifier", "")).strip() for item in instruments}
+        available = {
+            str(getattr(item, "instrument_identifier", "")).strip()
+            for item in instruments
+        }
         missing = sorted(self.allocatable_instrument_identifiers - available)
         if missing:
-            raise ValueError("certified paper-allocatable set is incomplete: " + ", ".join(missing))
+            raise ValueError(
+                "certified paper-allocatable set is incomplete: "
+                + ", ".join(missing)
+            )
 
     def decision_authority_universe(self, universe):
-        self.require_complete_allocatable_set(universe.instruments)
-        instruments = self.filter_paper_allocatable(universe.instruments)
-        if not instruments:
+        instruments = tuple(getattr(universe, "instruments", ()))
+        self.require_complete_allocatable_set(instruments)
+        selected = self.filter_paper_allocatable(instruments)
+        if not selected:
             raise ValueError("market registry contains no paper-allocatable instruments")
-        return replace(universe, instruments=instruments, limitations=tuple(dict.fromkeys((*universe.limitations, "Committee, CIO, construction, and paper authority is limited to exact registry-listed instruments.", "Observed direct markets remain intelligence-only until separately certified and paper-approved."))))
+        limitations = tuple(
+            dict.fromkeys(
+                (
+                    *tuple(getattr(universe, "limitations", ())),
+                    "Committee, CIO, construction, and paper authority is limited to exact registry-listed instruments.",
+                    "Observed direct markets remain intelligence-only until separately certified and paper-approved.",
+                )
+            )
+        )
+        if is_dataclass(universe):
+            return replace(universe, instruments=selected, limitations=limitations)
+        return SimpleNamespace(
+            identifier=str(getattr(universe, "identifier", "")).strip(),
+            instruments=selected,
+            limitations=limitations,
+        )
 
 
-__all__ = ["CanonicalMarketParticipationAuthority", "DEFAULT_MARKET_COVERAGE_PATH", "MarketParticipationAssessment", "MarketParticipationStage"]
+__all__ = [
+    "CanonicalMarketParticipationAuthority",
+    "DEFAULT_MARKET_COVERAGE_PATH",
+    "MarketParticipationAssessment",
+    "MarketParticipationStage",
+]
