@@ -27,7 +27,8 @@ import production_paper_evidence as paper_evidence
 from production_paper_evidence import collect_paper_evidence
 
 
-# Weekend eligibility follows the America/New_York market calendar.
+# Weekend eligibility follows the America/New_York market calendar and prevents
+# weekday-only provider access before candidate screening or specialist analysis.
 WEEKEND_AS_OF = datetime(2026, 8, 1, 15, 0, tzinfo=timezone.utc)
 WEEKDAY_AS_OF = datetime(2026, 7, 31, 15, 0, tzinfo=timezone.utc)
 
@@ -301,4 +302,3 @@ def test_weekend_evidence_collection_skips_listed_provider_calls(monkeypatch):
     assert payload["quotes"] == {}
     assert set(payload["_scheduled_closed_symbols"]) == {"VTI", "VIXY"}
     assert payload["provider_clock"]["source"] == "governed_collection_clock"
-
