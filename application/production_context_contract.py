@@ -21,7 +21,9 @@ from opportunity.snapshot import (
     build_opportunity_snapshot,
     load_opportunity_snapshot,
 )
-from operations.free_paper_pilot import load_free_paper_pilot_universe
+from operations.active_paper_universe import (
+    load_active_paper_universe_for_publication,
+)
 from screening import candidate_from_payload
 
 
@@ -204,7 +206,9 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
         if governed_context:
             existing_engine = self.cycle.opportunity_engine
             capability_authority = BoundedPilotCapabilityAuthority.from_universe(
-                load_free_paper_pilot_universe()
+                load_active_paper_universe_for_publication(
+                    context.eligible_universe_publication_identifier
+                )
             )
             runtime_engine = OpportunityEngine(
                 universe_policy=RecommendationUniversePolicy(
