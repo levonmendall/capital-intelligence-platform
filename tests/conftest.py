@@ -1,10 +1,12 @@
 """Shared test configuration."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 import core.database as database
+from committee.specialists import AssetValuationSpecialistContext
 from core.seed import seed_mandates
 
 
@@ -27,3 +29,58 @@ def isolated_database(
     seed_mandates()
 
     yield database_path
+
+
+@pytest.fixture(autouse=True)
+def certified_adapter_asset_valuation(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Give the production ETF adapter its required certified valuation packet."""
+
+    module = request.module
+    if module.__name__ != "tests.test_canonical_production_context_adapter":
+        yield
+        return
+
+    original = module._candidate_evidence
+
+    def candidate_evidence_with_asset_valuation(candidate):
+        evidence = original(candidate)
+        return replace(
+            evidence,
+            asset_valuation=AssetValuationSpecialistContext(
+                as_of=module.AS_OF,
+                asset_class=candidate.instrument.asset_class,
+                expected_return_impact=0.02,
+                confidence=0.90,
+                valuation_evidence=(
+                    "Certified ETF look-through valuation supports the candidate",
+                ),
+                contradictory_evidence=(
+                    "Underlying index valuation can contract before fundamentals change",
+                ),
+                critical_assumptions=(
+                    "The ETF continues to track its certified underlying exposure",
+                ),
+                risks=(
+                    "Broad-market valuation multiples may compress",
+                ),
+                limitations=(
+                    "ETF valuation is derived from the underlying index exposure",
+                ),
+                change_conditions=(
+                    "Reassess after a material change in index composition or valuation",
+                ),
+                evidence_identifiers=(
+                    "evidence:fundamental:spy",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        module,
+        "_candidate_evidence",
+        candidate_evidence_with_asset_valuation,
+    )
+    yield
