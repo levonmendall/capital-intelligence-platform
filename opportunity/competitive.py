@@ -3,8 +3,8 @@
 Candidate records are built independently from the current portfolio and initially
 carry the observable cash hurdle. Once the current portfolio is known, every candidate
 must be compared with the same strongest baseline use of capital. Only candidates that
-first pass the governed universe, evidence, liquidity, downside, cost, and robustness
-controls may then appear as competing candidate alternatives.
+first pass the governed universe, evidence, liquidity, downside, cost, and applicable
+robustness controls may then appear as competing candidate alternatives.
 
 This module changes no investment threshold and grants no decision or execution
 authority. It only prevents stale baseline values and unqualified candidates from
@@ -97,6 +97,29 @@ def _baseline_opportunity_cost(
     )
 
 
+def _scenario_success_probability(
+    engine: OpportunityEngine,
+    candidate: CandidateDecisionRecord,
+    *,
+    baseline_opportunity_cost: float,
+) -> float:
+    """Resolve success as disclosed scenarios outperforming the actual baseline."""
+
+    horizon_baseline = engine.robust_assessor.horizon_return(
+        baseline_opportunity_cost,
+        horizon_days=candidate.decision_horizon_days,
+    )
+    return round(
+        sum(
+            outcome.probability
+            for outcome in candidate.scenario_distribution
+            if outcome.total_return - candidate.implementation_cost_return
+            > horizon_baseline
+        ),
+        8,
+    )
+
+
 def prepare_competitive_opportunity_set(
     engine: OpportunityEngine,
     candidates: tuple[CandidateDecisionRecord, ...],
@@ -107,7 +130,10 @@ def prepare_competitive_opportunity_set(
     Pass one evaluates all candidates against cash and current holdings only. Candidate
     records are immutably aligned to that same point-in-time baseline so the engine's
     stale-opportunity-cost integrity control remains effective without rejecting every
-    new candidate after the portfolio acquires a stronger holding.
+    new candidate after the portfolio acquires a stronger holding. Probability of
+    success is resolved from the candidate's disclosed scenario distribution against
+    that same horizon-matched baseline, preventing a cash-relative probability from
+    creating a false scenario-consistency veto after the portfolio is invested.
 
     Pass two adds only pass-one qualified, non-held candidates as competing uses of
     capital. Their alternative return is already net, horizon-normalized,
@@ -133,9 +159,15 @@ def prepare_competitive_opportunity_set(
 
     baseline_cost = _baseline_opportunity_cost(engine, baseline_context)
     aligned = tuple(
-        candidate
-        if abs(candidate.opportunity_cost_return - baseline_cost) <= 1e-12
-        else replace(candidate, opportunity_cost_return=baseline_cost)
+        replace(
+            candidate,
+            opportunity_cost_return=baseline_cost,
+            probability_of_success=_scenario_success_probability(
+                engine,
+                candidate,
+                baseline_opportunity_cost=baseline_cost,
+            ),
+        )
         for candidate in candidates
     )
     preliminary = engine.build_queue(aligned, baseline_context)
