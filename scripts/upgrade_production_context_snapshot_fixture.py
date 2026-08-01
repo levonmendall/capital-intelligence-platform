@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def replace_once(path: Path, old: str, new: str, label: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"{label}: expected one match, found {count}")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def upgrade_fixture() -> None:
+    path = ROOT / "tests/test_production_context_assembly.py"
+    replace_once(
+        path,
+        "from portfolio.state import (\n",
+        "from opportunity.snapshot import (\n"
+        "    PUBLICATION_SNAPSHOT_KIND,\n"
+        "    build_opportunity_snapshot,\n"
+        ")\n"
+        "from portfolio.state import (\n",
+        "snapshot imports",
+    )
+    replace_once(
+        path,
+        '''    queue = OpportunityEngine().build_queue(
+        (candidate,),
+        _screening_context(),
+    )
+    publication = FullUniverseScreeningPublication(
+        identifier="publication:screening:production",
+''',
+        '''    engine = OpportunityEngine()
+    context = _screening_context()
+    queue = engine.build_queue(
+        (candidate,),
+        context,
+    )
+    publication_identifier = "publication:screening:production"
+    snapshot_payload = build_opportunity_snapshot(
+        snapshot_kind=PUBLICATION_SNAPSHOT_KIND,
+        context=context,
+        queue=queue,
+        engine=engine,
+        created_at=AS_OF,
+        code_version="commit:integration",
+        screening_publication_identifier=publication_identifier,
+    )
+    publication = FullUniverseScreeningPublication(
+        identifier=publication_identifier,
+''',
+        "snapshot fixture construction",
+    )
+    replace_once(
+        path,
+        '''        opportunity_queue_payload=serialize_opportunity_queue(
+            queue,
+            occurred_at=AS_OF,
+        ),
+''',
+        '''        opportunity_queue_payload={
+            **serialize_opportunity_queue(
+                queue,
+                occurred_at=AS_OF,
+            ),
+            "opportunity_context_snapshot": snapshot_payload,
+        },
+''',
+        "snapshot fixture persistence",
+    )
+    replace_once(
+        path,
+        '''        CIOJournalEventType.OPPORTUNITY_QUEUE,
+        CIOJournalEventType.SPECIALIST_PACKET,
+''',
+        '''        CIOJournalEventType.OPPORTUNITY_QUEUE,
+        CIOJournalEventType.OPPORTUNITY_DECISION_SNAPSHOT,
+        CIOJournalEventType.SPECIALIST_PACKET,
+''',
+        "decision snapshot event assertion",
+    )
+
+
+def broaden_snapshot_authority() -> None:
+    path = ROOT / "application/production_context_contract.py"
+    replace_once(
+        path,
+        '''        decision_context = context.opportunity_context
+        authoritative_queue = None
+        if governed_context:
+            publication_identifiers = qualified_identifiers + rejected_identifiers
+''',
+        '''        decision_context = context.opportunity_context
+        authoritative_queue = None
+        if governed_context and context.opportunity_snapshot_hash is None:
+            raise RuntimeError(
+                "governed production context lacks immutable opportunity lineage"
+            )
+        if context.opportunity_snapshot_hash is not None:
+            publication_identifiers = qualified_identifiers + rejected_identifiers
+''',
+        "snapshot authority boundary",
+    )
+    replace_once(
+        path,
+        '''            if context.opportunity_snapshot_hash is None:
+                raise RuntimeError(
+                    "governed production context lacks immutable opportunity lineage"
+                )
+            if cycle.journal is None:
+''',
+        '''            if cycle.journal is None:
+''',
+        "remove redundant governed-only snapshot check",
+    )
+
+
+def main() -> None:
+    upgrade_fixture()
+    broaden_snapshot_authority()
+
+
+if __name__ == "__main__":
+    main()

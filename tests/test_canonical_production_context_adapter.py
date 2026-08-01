@@ -32,6 +32,10 @@ from committee.specialists import (
     MarketSpecialistContext,
 )
 from opportunity import OpportunityEngine
+from opportunity.snapshot import (
+    PUBLICATION_SNAPSHOT_KIND,
+    build_opportunity_snapshot,
+)
 from portfolio.state import SQLiteCanonicalPortfolioStore
 from screening import (
     FullUniverseScreeningPublication,
@@ -173,14 +177,29 @@ def _persist_screening(
     force_rejected: bool = False,
     published_at=None,
 ) -> FullUniverseScreeningPublication:
-    queue = OpportunityEngine().build_queue(
+    engine = OpportunityEngine()
+    context = _screening_context()
+    queue = engine.build_queue(
         (candidate,),
-        _screening_context(),
+        context,
     )
-    queue_payload = serialize_opportunity_queue(
-        queue,
-        occurred_at=AS_OF,
+    publication_identifier = "publication:screening:canonical-adapter"
+    snapshot_payload = build_opportunity_snapshot(
+        snapshot_kind=PUBLICATION_SNAPSHOT_KIND,
+        context=context,
+        queue=queue,
+        engine=engine,
+        created_at=AS_OF,
+        code_version="commit:canonical-adapter",
+        screening_publication_identifier=publication_identifier,
     )
+    queue_payload = {
+        **serialize_opportunity_queue(
+            queue,
+            occurred_at=AS_OF,
+        ),
+        "opportunity_context_snapshot": snapshot_payload,
+    }
     if force_rejected:
         queue_payload = {
             "code_version": "test",
@@ -200,9 +219,10 @@ def _persist_screening(
                     "reasons": ["forced persisted rejection for drift test"],
                 }
             ],
+            "opportunity_context_snapshot": snapshot_payload,
         }
     publication = FullUniverseScreeningPublication(
-        identifier="publication:screening:canonical-adapter",
+        identifier=publication_identifier,
         cycle_identifier="screening:canonical-adapter",
         published_at=published_at or AS_OF - timedelta(minutes=5),
         security_master_catalog_identifier="catalog:canonical-adapter",
@@ -330,6 +350,7 @@ def test_persisted_certified_authorities_complete_the_full_cio_path(
     assert {
         CIOJournalEventType.CANDIDATE_DECISION,
         CIOJournalEventType.OPPORTUNITY_QUEUE,
+        CIOJournalEventType.OPPORTUNITY_DECISION_SNAPSHOT,
         CIOJournalEventType.SPECIALIST_PACKET,
         CIOJournalEventType.CIO_DECISION,
         CIOJournalEventType.PORTFOLIO_CONSTRUCTION,
@@ -371,7 +392,7 @@ def test_runtime_ranking_drift_blocks_the_cio_cycle(
     )
 
     with pytest.raises(
-        ValueError,
-        match="runtime opportunity ranking differs",
+        ProductionContextError,
+        match="opportunity snapshot queue differs",
     ):
         executor.run(as_of=AS_OF)
