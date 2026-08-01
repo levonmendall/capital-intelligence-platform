@@ -17,10 +17,12 @@ It does not lower an investment threshold, alter the canonical strategy, expand 
 2. **Point-in-time capability evaluation**
    - The opportunity engine evaluates universe and capability eligibility at the candidate decision timestamp.
    - Production publication injects the exact bounded-pilot authority into the queue used by the canonical CIO cycle.
+   - The production executor reconstructs an equivalent exact authority from the persisted complete-universe publication before independently reconciling and running the queue.
 
 3. **Historical replay parity**
    - Default replay loads the canonical paper-universe configuration instead of relying on a stale ETF whitelist.
    - Historical candidates preserve canonical instrument identifiers, actual listing venues, execution asset classes, economic exposures, and wrapper structure.
+   - Provider symbol suffixes are normalized before feature-to-instrument reconciliation.
    - Every expected pilot instrument is accounted for at every cutoff as a candidate or an explicit exclusion.
    - Missing provider records can no longer silently remove an expected instrument from the replay funnel.
 
@@ -42,6 +44,8 @@ The regression suite publishes a decision-complete production context through th
 - receive a persisted CIO decision;
 - produce a committee/CIO information trace; and
 - appear in the persistent-cash funnel as having reached specialist analysis and CIO consideration.
+
+The focused remediation suite passed before the implementation commit was produced. The clean implementation commit must also pass the repository's normal browser, deterministic release-validation, and security workflows before merge.
 
 This confirms candidate reachability through the production code path. It does not claim that a completed cycle on the private Render persistent disk has already observed the same event. Live-cycle frequencies require the deployed diagnostic release and access to, or an export of, the Render institutional journal.
 
