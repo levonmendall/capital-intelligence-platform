@@ -37,6 +37,7 @@ class CIOJournalEventType(str, Enum):
 
     CANDIDATE_DECISION = "candidate_decision"
     OPPORTUNITY_QUEUE = "opportunity_queue"
+    OPPORTUNITY_DECISION_SNAPSHOT = "opportunity_decision_snapshot"
     SPECIALIST_PACKET = "specialist_packet"
     CIO_DECISION = "cio_decision"
     THESIS_SNAPSHOT = "thesis_snapshot"

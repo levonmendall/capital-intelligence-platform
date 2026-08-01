@@ -15,7 +15,7 @@
     {
       "identifier": "cio-increase-reduce-exit",
       "category": "decision",
-      "test_node_id": "tests/test_canonical_cio.py::test_existing_holding_can_be_increased_reduced_or_exited"
+      "test_node_id": "tests/test_canonical_cio.py::test_existing_holding_requires_continuity_for_ordinary_changes_but_emergency_exit_is_immediate"
     },
     {
       "identifier": "paper-fill-reconciliation-canonical-state",
