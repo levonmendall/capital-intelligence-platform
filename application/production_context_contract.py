@@ -11,6 +11,7 @@ from application.production_cio import (
     ProductionCanonicalCIOContextProvider,
     ProductionCanonicalCIOExecutor as _BaseProductionCanonicalCIOExecutor,
 )
+from cio.persistence import CIOJournalEventType
 from screening import candidate_from_payload
 
 
@@ -289,6 +290,56 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                 _LOGGER.exception(
                     "persistent-cash diagnostic failed after canonical CIO cycle %s; "
                     "the non-authoritative diagnostic cannot alter the cycle result",
+                    context.identifier,
+                )
+            try:
+                from evaluation.committee_cio_trace import (
+                    append_committee_cio_information_trace,
+                    build_committee_cio_information_trace,
+                )
+
+                context_by_candidate = {
+                    item.candidate_identifier: item
+                    for item in context.specialist_contexts
+                }
+                candidate_by_identifier = {
+                    item.identifier: item for item in candidates
+                }
+                snapshot_by_candidate = {
+                    item.candidate_identifier: item
+                    for item in result.evaluation_snapshots
+                }
+                for decision in result.decisions:
+                    packet_event = journal.latest(
+                        aggregate_identifier=decision.candidate_identifier,
+                        event_type=CIOJournalEventType.SPECIALIST_PACKET,
+                    )
+                    if packet_event is None:
+                        raise RuntimeError(
+                            "committee/CIO trace requires the persisted specialist packet"
+                        )
+                    trace = build_committee_cio_information_trace(
+                        candidate=candidate_by_identifier[
+                            decision.candidate_identifier
+                        ],
+                        context=context_by_candidate[
+                            decision.candidate_identifier
+                        ],
+                        portfolio=portfolio,
+                        packet_payload=packet_event.payload,
+                        decision=decision,
+                        snapshot=snapshot_by_candidate[
+                            decision.candidate_identifier
+                        ],
+                        construction=result.construction,
+                        manifest=context.manifest,
+                        code_version=context.code_version,
+                    )
+                    append_committee_cio_information_trace(journal, trace)
+            except Exception:
+                _LOGGER.exception(
+                    "committee/CIO information trace failed after canonical CIO "
+                    "cycle %s; the non-authoritative trace cannot alter the result",
                     context.identifier,
                 )
         return result

@@ -49,6 +49,7 @@ class CIOJournalEventType(str, Enum):
     PAPER_TRADE_FILL = "paper_trade_fill"
     DAILY_CIO_BRIEFING = "daily_cio_briefing"
     PERSISTENT_CASH_DIAGNOSTIC = "persistent_cash_diagnostic"
+    COMMITTEE_CIO_INFORMATION_TRACE = "committee_cio_information_trace"
 
 
 class CIOJournalIntegrityError(RuntimeError):
