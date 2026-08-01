@@ -476,6 +476,11 @@ def serialize_cio_decision(
         "prior_decision_identifier": decision.prior_decision_identifier,
         "persistence_cycles": decision.persistence_cycles,
         "hysteresis_applied": decision.hysteresis_applied,
+        "deferred_action": (
+            None
+            if decision.deferred_action is None
+            else decision.deferred_action.value
+        ),
         "resolved_policy_profile": decision.resolved_policy_profile,
         "policy_matrix_version": decision.policy_matrix_version,
         "return_reconciliation": (
@@ -1026,6 +1031,17 @@ class SQLiteCIOJournal:
         }
         opposing = {CIOAction.REDUCE, CIOAction.EXIT}
         material = {CIOAction.BUY, CIOAction.INCREASE, CIOAction.REDUCE, CIOAction.EXIT}
+
+        def continuity_action(event: CIOJournalEvent) -> CIOAction:
+            payload = event.payload
+            deferred = payload.get("deferred_action")
+            if payload.get("hysteresis_applied") is True and deferred:
+                try:
+                    return CIOAction(str(deferred))
+                except ValueError:
+                    pass
+            return CIOAction(payload["action"])
+
         for candidate in candidates:
             historical_ids = {
                 event.aggregate_identifier
@@ -1049,7 +1065,7 @@ class SQLiteCIOJournal:
             supportive_cycles = 0
             opposing_cycles = 0
             for event in reversed(history):
-                item_action = CIOAction(event.payload["action"])
+                item_action = continuity_action(event)
                 if item_action in supportive:
                     if opposing_cycles:
                         break

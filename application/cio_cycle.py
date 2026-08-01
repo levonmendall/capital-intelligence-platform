@@ -528,6 +528,9 @@ class CanonicalCIOCycle:
                 candidate=candidate,
                 rank=ranked.rank,
                 portfolio=portfolio,
+                effective_opportunity_cost=(
+                    ranked.qualification.effective_opportunity_cost
+                ),
             )
             if cycle_identifier.startswith("historical-canonical-cycle:"):
                 historical_learning = HistoricalLearningContext.not_applicable(
@@ -776,6 +779,7 @@ class CanonicalCIOCycle:
         candidate: CandidateDecisionRecord,
         rank: int,
         portfolio: CyclePortfolioState,
+        effective_opportunity_cost: float,
     ) -> PortfolioSpecialistContext:
         profile = portfolio.profile(candidate.identifier)
         current_weight = portfolio.current_weight(
@@ -807,7 +811,7 @@ class CanonicalCIOCycle:
             requested_target_weight=requested_target_weight,
             expected_return=annualized_return,
             opportunity_edge=round(
-                annualized_return - candidate.opportunity_cost_return,
+                annualized_return - effective_opportunity_cost,
                 8,
             ),
             maximum_position_weight=candidate.maximum_position_weight,
@@ -879,9 +883,7 @@ class CanonicalCIOCycle:
                 else annualized_return
                 * (proposed - current_weight)
             ),
-            opportunity_cost_return=(
-                candidate.opportunity_cost_return
-            ),
+            opportunity_cost_return=effective_opportunity_cost,
             constraint_evidence=evidence,
             implementation_blocks=hard_blocks,
             review_conditions=review_conditions,

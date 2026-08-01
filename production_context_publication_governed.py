@@ -778,6 +778,15 @@ def prepare_governed_production_context_for_cycle(
         for item in instrument_results
         if item.disposition is ScreeningDisposition.EXCLUDED
     )
+    opportunity_queue_payload = {
+        **serialize_opportunity_queue(
+            queue,
+            occurred_at=decision_as_of,
+        ),
+        "candidate_alternative_identifiers": list(
+            competitive.candidate_alternative_identifiers
+        ),
+    }
     screening_publication = FullUniverseScreeningPublication(
         identifier=screening_publication_identifier,
         cycle_identifier=screening_cycle_identifier,
@@ -794,10 +803,7 @@ def prepare_governed_production_context_for_cycle(
             dict(item.candidate_payload or {}) for item in candidate_results
         ),
         exclusions=tuple(item.to_dict() for item in exclusion_results),
-        opportunity_queue_payload=serialize_opportunity_queue(
-            queue,
-            occurred_at=decision_as_of,
-        ),
+        opportunity_queue_payload=opportunity_queue_payload,
     )
     start_payload = {
         "cycle_identifier": screening_cycle_identifier,

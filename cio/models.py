@@ -954,6 +954,7 @@ class CIODecision:
     prior_decision_identifier: str | None = None
     persistence_cycles: int = 1
     hysteresis_applied: bool = False
+    deferred_action: CIOAction | None = None
     resolved_policy_profile: str | None = None
     policy_matrix_version: str | None = None
 
@@ -1050,6 +1051,10 @@ class CIODecision:
             raise ValueError("persistence_cycles must be positive")
         if not isinstance(self.hysteresis_applied, bool):
             raise TypeError("hysteresis_applied must be a bool")
+        if self.deferred_action is not None and not isinstance(
+            self.deferred_action, CIOAction
+        ):
+            raise TypeError("deferred_action must be a CIOAction or None")
         if self.resolved_policy_profile is not None:
             object.__setattr__(
                 self,
