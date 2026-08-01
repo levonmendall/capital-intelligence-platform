@@ -34,6 +34,21 @@ def test_stronger_holding_realigns_candidate_without_blocking_valid_review() -> 
     assert prepared.queue.ranked[0].candidate.identifier == candidate.identifier
 
 
+def test_unchanged_cash_baseline_preserves_existing_probability_estimate() -> None:
+    engine = OpportunityEngine()
+    candidate = _candidate("CASH", opportunity_cost=0.04, probability=0.68)
+
+    prepared = prepare_competitive_opportunity_set(
+        engine,
+        (candidate,),
+        _context(cash_return=0.04),
+    )
+
+    aligned = prepared.candidates[0]
+    assert aligned.opportunity_cost_return == candidate.opportunity_cost_return
+    assert aligned.probability_of_success == candidate.probability_of_success
+
+
 def test_cash_relative_success_probability_cannot_create_false_consistency_veto() -> None:
     engine = OpportunityEngine()
     context = _context(holding_return=0.15)
