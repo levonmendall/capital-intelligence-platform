@@ -1,18 +1,20 @@
 name: Apply committee review corrections v3
 
 on:
-  push:
-    branches:
-      - fix/cio-cycle-decision-integrity
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths-ignore:
+      - tools/committee-correction-failure.txt
 
 permissions:
   contents: write
 
 jobs:
   patch-and-validate:
-    if: >-
-      github.event.head_commit.message != 'Apply committee review corrections' &&
-      github.event.head_commit.message != 'Record committee correction failure'
+    if: github.event.pull_request.head.ref == 'fix/cio-cycle-decision-integrity'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +28,6 @@ jobs:
         run: |
           base64 -d tools/apply_committee_review_corrections_v3.py.gz.b64 | gzip -d > /tmp/apply_committee_review_corrections.py
       - name: Apply corrections with diagnostics
-        id: patch
         shell: bash
         run: |
           set +e
@@ -72,7 +73,7 @@ jobs:
             cp /tmp/committee-tests.log tools/committee-correction-failure.txt
             git config user.name "capital-intelligence-bot"
             git config user.email "capital-intelligence-bot@users.noreply.github.com"
-            git add -A opportunity committee cio portfolio tests tools/committee-correction-failure.txt
+            git add tools/committee-correction-failure.txt
             git commit -m "Record committee correction failure"
             git push origin HEAD:fix/cio-cycle-decision-integrity
             exit $status
@@ -85,6 +86,7 @@ jobs:
           git rm -f .github/workflows/apply-committee-review-corrections-v3.yml
           git rm -f tools/apply_committee_review_corrections_v3.py.gz.b64
           git rm -f tools/apply_cio_cycle_integrity_corrections.py.gz.b64
+          git rm -f tools/committee-correction-trigger-v3.txt
           git add -A opportunity committee cio portfolio tests tools
           git commit -m "Apply committee review corrections"
           git push origin HEAD:fix/cio-cycle-decision-integrity
