@@ -242,7 +242,10 @@ class OpportunityEngine:
                 "candidate and opportunity context must share an as_of timestamp"
             )
 
-        universe = self.universe_policy.evaluate(candidate.instrument)
+        universe = self.universe_policy.evaluate(
+            candidate.instrument,
+            as_of=candidate.as_of,
+        )
         baseline_alternatives = tuple(
             item
             for item in context.alternatives

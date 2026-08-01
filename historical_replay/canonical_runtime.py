@@ -321,6 +321,11 @@ class EfficientCanonicalHistoricalReplayEngine(CanonicalHistoricalReplayEngine):
                     "state": "completed",
                     "canonical_cio_invoked": True,
                     "candidate_count": len(candidates),
+                    "expected_instrument_count": (
+                        None if self.builder.universe is None
+                        else len(self.builder.universe.instruments)
+                    ),
+                    "instrument_exclusions": list(self.builder.last_exclusions),
                     "decision_count": len(result.decisions),
                     "qualification_rejection_count": len(rejection_payloads),
                     "learning_observation_count": len(learning_observations),
@@ -358,6 +363,11 @@ class EfficientCanonicalHistoricalReplayEngine(CanonicalHistoricalReplayEngine):
                     "visible_record_count": len(records),
                     "error_type": type(error).__name__,
                     "error": str(error),
+                    "expected_instrument_count": (
+                        None if self.builder.universe is None
+                        else len(self.builder.universe.instruments)
+                    ),
+                    "instrument_exclusions": list(self.builder.last_exclusions),
                     "portfolio_value": state.value,
                     "portfolio_weights": dict(state.weights),
                     "cash_weight": state.cash_weight,
@@ -403,6 +413,13 @@ class EfficientCanonicalHistoricalReplayEngine(CanonicalHistoricalReplayEngine):
             "strict_only": strict_only,
             "strict_replay": strict_only,
             "research_only": True,
+            "universe_identifier": (
+                None if self.builder.universe is None else self.builder.universe.identifier
+            ),
+            "capability_policy": (
+                None if self.capability_authority is None
+                else self.capability_authority.coverage_payload()
+            ),
             "canonical_cio_available": True,
             "canonical_cio_invoked_count": completed,
             "blocked_cutoff_count": blocked,
