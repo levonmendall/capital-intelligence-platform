@@ -89,8 +89,8 @@ def test_valid_candidate_reaches_six_specialists_after_portfolio_is_invested(
     candidate = govt.candidate
     assert candidate.opportunity_cost_return > 0.0425
     assert govt.qualification.baseline_alternative_identifier == "holding:VTI"
-    horizon_baseline = RobustCandidateAssessor.horizon_return(
-        candidate.opportunity_cost_return,
+    horizon_effective = RobustCandidateAssessor.horizon_return(
+        govt.qualification.effective_opportunity_cost,
         horizon_days=candidate.decision_horizon_days,
     )
     scenario_success = round(
@@ -98,7 +98,7 @@ def test_valid_candidate_reaches_six_specialists_after_portfolio_is_invested(
             item.probability
             for item in candidate.scenario_distribution
             if item.total_return - candidate.implementation_cost_return
-            > horizon_baseline
+            > horizon_effective
         ),
         8,
     )
