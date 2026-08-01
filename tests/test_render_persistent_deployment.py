@@ -150,10 +150,17 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
         "python",
         "run_composite_readiness_watchdog.py",
     )
+    assert by_name["composite-readiness-watchdog"].critical is False
+    assert by_name["composite-readiness-watchdog"].restart_delay_seconds == 300
     assert all(
         process.critical
         for process in processes
-        if process.name not in {"historical-backfill", "encrypted-backup"}
+        if process.name
+        not in {
+            "historical-backfill",
+            "encrypted-backup",
+            "composite-readiness-watchdog",
+        }
     )
 
 
