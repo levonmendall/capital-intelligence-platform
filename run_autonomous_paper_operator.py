@@ -45,11 +45,12 @@ from paper_execution_runtime import (
 )
 from portfolio.state import ensure_canonical_portfolio_store
 from production_context_publication_runtime import prepare_production_context_for_cycle
+from production_context_state_resilience import (
+    invalidate_reuse_preserving_success,
+    recording_context_preparer,
+)
 from public_live_collection_runtime import collect_public_live_information_if_due
 from run_scheduler import build_worker
-
-
-_CONTEXT_CACHE_FILENAME = "production-context-publication-state.json"
 
 
 def _payloads(settings: ApiSettings) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -61,18 +62,14 @@ def _payloads(settings: ApiSettings) -> tuple[dict[str, Any] | None, dict[str, A
 
 
 def _invalidate_context_reuse_cache(settings: ApiSettings) -> None:
-    """Remove only the latest-publication reuse pointer before a new intraday review.
+    """Require fresh intraday evidence while preserving the last successful scan.
 
-    Persisted certified universes, screenings, contexts, portfolios, decisions, and
-    journals remain untouched. This prevents a later slot or event from reusing the
-    first review's evidence merely because both belong to the same market date.
+    The existing successful state remains readable by the user interface. Only its
+    reuse key is invalidated, so the next context preparation must create a complete
+    replacement rather than silently reusing the earlier review.
     """
 
-    path = settings.portfolio_database.parent / _CONTEXT_CACHE_FILENAME
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return
+    invalidate_reuse_preserving_success(settings)
 
 
 def _attempt_due(worker, method_name: str, *args, **kwargs) -> bool:
@@ -344,6 +341,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         worker = build_worker(settings)
         reassessment_engine = build_default_reassessment_engine(settings)
         after_close_reviewer = build_default_after_close_reviewer(settings)
+        context_preparer = recording_context_preparer(
+            prepare_production_context_for_cycle
+        )
     except (ImportError, AttributeError, OSError, TypeError, ValueError, RuntimeError) as error:
         heartbeat.write("failed", detail=str(error)[:1000])
         logger.exception("paper operator configuration failed")
@@ -373,7 +373,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 settings=settings,
                 worker=worker,
                 force_public_collection=force_public_collection,
-                context_preparer=prepare_production_context_for_cycle,
+                context_preparer=context_preparer,
                 reassessment_engine=reassessment_engine,
                 after_close_reviewer=after_close_reviewer,
             )
