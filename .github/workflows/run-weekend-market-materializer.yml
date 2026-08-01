@@ -39,14 +39,10 @@ jobs:
               end = lines.index(end_marker, start)
           except ValueError as error:
               raise RuntimeError('cannot extract materializer patch script') from error
-          script_lines = []
-          for line in lines[start:end]:
-              if not line:
-                  script_lines.append("")
-                  continue
-              if not line.startswith('          '):
-                  raise RuntimeError(f'unexpected materializer indentation: {line!r}')
-              script_lines.append(line[10:])
+          script_lines = [
+              line[10:] if line.startswith('          ') else line
+              for line in lines[start:end]
+          ]
           Path('/tmp/apply_weekend_market_patch.py').write_text(
               '\n'.join(script_lines) + '\n',
               encoding='utf-8',
