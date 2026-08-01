@@ -124,14 +124,12 @@ _NAVIGATION_CSS = """
     box-shadow: 0 0 12px rgba(var(--surface-rgb), .85);
 }
 
-/* Streamlit wraps each columns row in a short element container. Making only
-   the inner row sticky allows that short wrapper to leave the viewport. Pin
-   the complete wrapper as well so the rail persists for the full page. */
-:is(
-    div[data-testid="stElementContainer"],
-    div.stElementContainer,
-    div.element-container
-):has(div[data-testid="stHorizontalBlock"] .nav-brand-mark) {
+/* Streamlit generates the element-container class name, so target the stable
+   structural relationship instead: the direct parent of the navigation row.
+   Pinning that parent removes the short containing-block limit that released
+   the inner sticky row during a full-page scroll. */
+:is([data-testid="stMainBlockContainer"], .block-container)
+  div:has(> div[data-testid="stHorizontalBlock"] .nav-brand-mark) {
     position: sticky !important;
     top: max(.28rem, env(safe-area-inset-top, 0px)) !important;
     z-index: 1000 !important;
@@ -159,11 +157,8 @@ _NAVIGATION_CSS = """
         border-radius: .48rem !important;
     }
 
-    :is(
-        div[data-testid="stElementContainer"],
-        div.stElementContainer,
-        div.element-container
-    ):has(div[data-testid="stHorizontalBlock"] .nav-brand-mark) {
+    :is([data-testid="stMainBlockContainer"], .block-container)
+      div:has(> div[data-testid="stHorizontalBlock"] .nav-brand-mark) {
         top: max(.16rem, env(safe-area-inset-top, 0px)) !important;
     }
 }
