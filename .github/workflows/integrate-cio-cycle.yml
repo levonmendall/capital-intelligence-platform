@@ -27,6 +27,7 @@ jobs:
           git config user.email "capital-intelligence-bot@users.noreply.github.com"
           git fetch origin fix/cio-cycle-decision-integrity
           git merge --no-ff --no-commit origin/fix/cio-cycle-decision-integrity || true
+          rm -f cio-integration-conflicts.txt
           python - <<'PY'
           from pathlib import Path
 
@@ -73,9 +74,16 @@ jobs:
               ),
           )
 
+          excluded = {
+              ".github/workflows/integrate-cio-cycle.yml",
+          }
           unresolved = []
           for path in Path(".").rglob("*"):
-              if not path.is_file() or ".git" in path.parts:
+              if (
+                  not path.is_file()
+                  or ".git" in path.parts
+                  or str(path) in excluded
+              ):
                   continue
               try:
                   text = path.read_text(encoding="utf-8")
