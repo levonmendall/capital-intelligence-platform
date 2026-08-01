@@ -664,33 +664,43 @@ class ChiefInvestmentOfficer:
     ) -> tuple[CIOAction, float | None, str, bool, int]:
         """Require persistent evidence for non-urgent portfolio changes."""
 
-        if prior_context is None:
-            return action, position_weight, reason, False, 1
-        if emergency or prior_context.emergency_override:
-            cycles = max(1, prior_context.consecutive_opposing_cycles + 1)
+        if emergency or (
+            prior_context is not None and prior_context.emergency_override
+        ):
+            cycles = (
+                1
+                if prior_context is None
+                else max(1, prior_context.consecutive_opposing_cycles + 1)
+            )
             return action, position_weight, reason, False, cycles
 
+        # The resolved policy profile is the sole persistence authority.  A first
+        # valid observation counts as cycle one rather than bypassing the profile.
         required = 1
         observed = 1
         if action is CIOAction.BUY:
-            # Participation and exploration lanes may establish a deliberately
-            # small first position immediately. Ordinary acquisition still
-            # requires confirmation across at least two completed cycles.
             required = (
                 1
                 if progressive_lane
-                else max(2, profile.entry_persistence_cycles)
+                else max(1, profile.entry_persistence_cycles)
             )
-            observed = prior_context.consecutive_supportive_cycles + 1
+            if prior_context is not None:
+                observed = prior_context.consecutive_supportive_cycles + 1
         elif action is CIOAction.INCREASE:
-            required = profile.increase_persistence_cycles
-            observed = prior_context.consecutive_supportive_cycles + 1
+            required = max(1, profile.increase_persistence_cycles)
+            if prior_context is not None:
+                observed = prior_context.consecutive_supportive_cycles + 1
         elif action in {CIOAction.REDUCE, CIOAction.EXIT}:
-            required = profile.reduce_persistence_cycles
-            observed = prior_context.consecutive_opposing_cycles + 1
+            required = max(1, profile.reduce_persistence_cycles)
+            if prior_context is not None:
+                observed = prior_context.consecutive_opposing_cycles + 1
 
         cooldown_active = False
-        if prior_context.last_material_change_at is not None and profile.cooldown_days > 0:
+        if (
+            prior_context is not None
+            and prior_context.last_material_change_at is not None
+            and profile.cooldown_days > 0
+        ):
             elapsed = (candidate.as_of - prior_context.last_material_change_at).days
             cooldown_active = elapsed < profile.cooldown_days
         if required <= 1 and not cooldown_active:
