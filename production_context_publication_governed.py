@@ -26,6 +26,7 @@ from cio.persistence import serialize_candidate_decision, serialize_opportunity_
 from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from evaluation.opportunity_outcomes import SQLiteOpportunityOutcomeStore
 from opportunity import AlternativeKind, AlternativeUse, OpportunityEngine, OpportunitySetContext
+from opportunity.competitive import prepare_competitive_opportunity_set
 from operations.direct_global_markets import load_direct_global_market_universe
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryResult,
@@ -702,32 +703,27 @@ def prepare_governed_production_context_for_cycle(
         )
         for position in marked.positions
     )
-    alternatives.extend(
-        AlternativeUse(
-            identifier=candidate.identifier,
-            kind=AlternativeKind.QUALIFIED_CANDIDATE,
-            expected_return=candidate.probability_weighted_expected_return,
-            implementation_cost_return=candidate.implementation_cost_return,
-            evidence_quality=candidate.evidence_quality.score,
-            liquidity_score=candidate.liquidity_score,
-            current_weight=0.0,
-        )
-        for candidate in build_result.candidates
-    )
-    opportunity_context = OpportunitySetContext(
+    baseline_opportunity_context = OpportunitySetContext(
         identifier=opportunity_identifier,
         as_of=decision_as_of,
         alternatives=tuple(alternatives),
     )
     capability_authority = BoundedPilotCapabilityAuthority.from_universe(base_universe)
-    queue = OpportunityEngine(
+    opportunity_engine = OpportunityEngine(
         universe_policy=RecommendationUniversePolicy(
             asset_class_authority=capability_authority,
         )
-    ).build_queue(
-        build_result.candidates,
-        opportunity_context,
     )
+    competitive = prepare_competitive_opportunity_set(
+        opportunity_engine,
+        build_result.candidates,
+        baseline_opportunity_context,
+    )
+    # Candidate evidence is immutable; only its point-in-time opportunity-cost field
+    # is reconciled to the same current cash/holding baseline consumed by qualification.
+    build_result = replace(build_result, candidates=competitive.candidates)
+    opportunity_context = competitive.context
+    queue = competitive.queue
     try:
         outcome_store.append_screening_decisions(
             queue=queue,
@@ -895,6 +891,10 @@ def prepare_governed_production_context_for_cycle(
         "exclusion_count": len(exclusion_results),
         "qualified_candidate_count": len(qualified_identifiers),
         "capability_policy": capability_authority.coverage_payload(),
+        "baseline_opportunity_cost": competitive.baseline_opportunity_cost,
+        "qualified_candidate_alternative_count": len(
+            competitive.candidate_alternative_identifiers
+        ),
         "holding_evidence_count": len(build_result.holding_evidence),
         "instrument_count": len(universe.instruments),
         "comprehensive_discovery_identifier": comprehensive.identifier,
