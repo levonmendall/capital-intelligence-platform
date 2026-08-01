@@ -126,6 +126,43 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
             research_only=research_only,
         )
 
+    @classmethod
+    def from_candidates(
+        cls,
+        candidates: tuple[object, ...],
+        *,
+        authority_identifier: str,
+        research_only: bool = False,
+    ) -> "BoundedPilotCapabilityAuthority":
+        identifier = str(authority_identifier).strip()
+        if not identifier:
+            raise ValueError("authority_identifier cannot be empty")
+        capabilities: list[BoundedPilotInstrumentCapability] = []
+        for value in candidates:
+            instrument = getattr(value, "instrument", value)
+            if not isinstance(instrument, CandidateInstrument):
+                raise TypeError("candidates must contain candidate records or instruments")
+            governed = instrument.economic_exposure_class or instrument.asset_class
+            capabilities.append(
+                BoundedPilotInstrumentCapability(
+                    instrument_identifier=instrument.instrument_id,
+                    symbol=instrument.symbol,
+                    execution_asset_class=instrument.asset_class,
+                    governed_asset_class=governed,
+                    venue=instrument.venue,
+                    country_code=instrument.country_code,
+                    instrument_type=instrument.instrument_type,
+                    approval_identifier=(
+                        f"screening-policy:{identifier}:{instrument.instrument_id}"
+                    ),
+                )
+            )
+        return cls(
+            tuple(capabilities),
+            universe_identifier=identifier,
+            research_only=research_only,
+        )
+
     def assess(
         self,
         instrument: CandidateInstrument,

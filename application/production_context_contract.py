@@ -11,7 +11,11 @@ from application.production_cio import (
     ProductionCanonicalCIOContextProvider,
     ProductionCanonicalCIOExecutor as _BaseProductionCanonicalCIOExecutor,
 )
+from application.cio_cycle import CanonicalCIOCycle
+from cio import RecommendationUniversePolicy
 from cio.persistence import CIOJournalEventType
+from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
+from opportunity import OpportunityEngine
 from screening import candidate_from_payload
 
 
@@ -190,6 +194,32 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
             and context.eligible_universe_publication_identifier != "unknown"
             and context.process_version != "unknown"
         )
+        cycle = self.cycle
+        if governed_context:
+            existing_engine = self.cycle.opportunity_engine
+            capability_authority = BoundedPilotCapabilityAuthority.from_candidates(
+                candidates,
+                authority_identifier=publication.universe_snapshot_identifier,
+            )
+            runtime_engine = OpportunityEngine(
+                universe_policy=RecommendationUniversePolicy(
+                    asset_class_authority=capability_authority
+                ),
+                qualification_policy=existing_engine.policy,
+                robustness_policy=existing_engine.robust_assessor.policy,
+                policy_matrix=existing_engine.policy_matrix,
+            )
+            cycle = CanonicalCIOCycle(
+                opportunity_engine=runtime_engine,
+                specialist_service=self.cycle.specialist_service,
+                cio=self.cycle.cio,
+                construction_engine=self.cycle.construction_engine,
+                briefing_builder=self.cycle.briefing_builder,
+                journal=self.cycle.journal,
+                historical_learning_resolver=(
+                    self.cycle.historical_learning_resolver
+                ),
+            )
         if governed_context:
             publication_identifiers = qualified_identifiers + rejected_identifiers
             candidate_identifiers = tuple(item.identifier for item in candidates)
@@ -204,7 +234,7 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                     "persisted opportunity queue must reconcile every screened "
                     f"candidate: missing={missing} extra={extra}"
                 )
-            runtime_queue = self.cycle.opportunity_engine.build_queue(
+            runtime_queue = cycle.opportunity_engine.build_queue(
                 candidates,
                 context.opportunity_context,
             )
@@ -244,16 +274,16 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
             )
         prior_decision_contexts = ()
         active_theses = ()
-        if self.cycle.journal is not None:
-            prior_decision_contexts = self.cycle.journal.prior_decision_contexts(
+        if cycle.journal is not None:
+            prior_decision_contexts = cycle.journal.prior_decision_contexts(
                 candidates,
                 as_of=context.opportunity_context.as_of,
             )
-            active_theses = self.cycle.journal.active_theses(
+            active_theses = cycle.journal.active_theses(
                 candidates,
                 as_of=context.opportunity_context.as_of,
             )
-        result = self.cycle.run(
+        result = cycle.run(
             identifier=context.identifier,
             candidates=candidates,
             opportunity_context=context.opportunity_context,
@@ -263,7 +293,7 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
             active_theses=active_theses,
             code_version=context.code_version,
         )
-        journal = self.cycle.journal
+        journal = cycle.journal
         if journal is not None:
             try:
                 from evaluation.persistent_cash import (
@@ -278,10 +308,10 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                     result=result,
                     cash_weight_before=portfolio.cash_weight,
                     minimum_evidence_score=(
-                        self.cycle.opportunity_engine.policy.minimum_evidence_score
+                        cycle.opportunity_engine.policy.minimum_evidence_score
                     ),
                     minimum_evidence_dimension=(
-                        self.cycle.opportunity_engine.policy.minimum_evidence_dimension
+                        cycle.opportunity_engine.policy.minimum_evidence_dimension
                     ),
                     code_version=context.code_version,
                 )

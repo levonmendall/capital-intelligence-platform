@@ -21,7 +21,9 @@ from application.eligible_universe import (
     EligibleUniverseCertificationState,
     SQLiteCertifiedEligibleUniverseStore,
 )
+from cio import RecommendationUniversePolicy
 from cio.persistence import serialize_candidate_decision, serialize_opportunity_queue
+from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from evaluation.opportunity_outcomes import SQLiteOpportunityOutcomeStore
 from opportunity import AlternativeKind, AlternativeUse, OpportunityEngine, OpportunitySetContext
 from operations.direct_global_markets import load_direct_global_market_universe
@@ -717,7 +719,12 @@ def prepare_governed_production_context_for_cycle(
         as_of=decision_as_of,
         alternatives=tuple(alternatives),
     )
-    queue = OpportunityEngine().build_queue(
+    capability_authority = BoundedPilotCapabilityAuthority.from_universe(universe)
+    queue = OpportunityEngine(
+        universe_policy=RecommendationUniversePolicy(
+            asset_class_authority=capability_authority,
+        )
+    ).build_queue(
         build_result.candidates,
         opportunity_context,
     )
@@ -887,6 +894,7 @@ def prepare_governed_production_context_for_cycle(
         "candidate_count": len(candidate_results),
         "exclusion_count": len(exclusion_results),
         "qualified_candidate_count": len(qualified_identifiers),
+        "capability_policy": capability_authority.coverage_payload(),
         "holding_evidence_count": len(build_result.holding_evidence),
         "instrument_count": len(universe.instruments),
         "comprehensive_discovery_identifier": comprehensive.identifier,

@@ -738,6 +738,10 @@ def _candidate_and_evidence(
             analytical_coverage=min(1.0, features.bar_count / 756.0),
             security_master_snapshot_identifier=f"{security_master_prefix}:{as_of.strftime('%Y%m%dT%H%M%S%fZ')}",
             security_master_record_identifiers=(f"{security_record_prefix}:{instrument.symbol}",),
+            is_us_treasury=(instrument.economic_exposure == "cash_treasury"),
+            effective_duration_years=(
+                0.25 if instrument.economic_exposure == "cash_treasury" else None
+            ),
             instrument_type=instrument.instrument_type,
             economic_exposure_class=_EXPOSURE_ASSET_CLASSES.get(
                 instrument.economic_exposure,

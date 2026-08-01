@@ -27,6 +27,7 @@ from cio import (
     CandidateDecisionRecord,
     CandidateInstrument,
     EvidenceQuality,
+    RecommendationUniversePolicy,
 )
 from committee.specialists import (
     AssetValuationSpecialistContext,
@@ -35,7 +36,21 @@ from committee.specialists import (
     MacroSpecialistContext,
     MarketSpecialistContext,
 )
-from opportunity import AlternativeKind, AlternativeUse, OpportunitySetContext
+from opportunity import (
+    AlternativeKind,
+    AlternativeUse,
+    OpportunityEngine,
+    OpportunitySetContext,
+)
+from governance.bounded_pilot_scope import (
+    BoundedPilotCapabilityAuthority,
+    governed_asset_class_for_exposure,
+)
+from operations.free_paper_pilot import (
+    DEFAULT_UNIVERSE_PATH,
+    FreePaperPilotUniverse,
+    load_free_paper_pilot_universe,
+)
 from portfolio.construction_api import ConstructionStatus, PortfolioAsset
 
 from .features import market_features
@@ -209,13 +224,25 @@ class ReplayPortfolioState:
 class HistoricalCanonicalContextBuilder:
     """Build production-domain CIO inputs from the historical evidence store."""
 
-    def __init__(self, *, minimum_observations: int = 63, maximum_candidates: int = 25) -> None:
+    def __init__(
+        self,
+        *,
+        minimum_observations: int = 63,
+        maximum_candidates: int = 25,
+        universe_path: str | Path | None = None,
+    ) -> None:
         if minimum_observations < 21:
             raise ValueError("minimum_observations must be at least 21")
         if maximum_candidates < 1:
             raise ValueError("maximum_candidates must be positive")
         self.minimum_observations = minimum_observations
         self.maximum_candidates = maximum_candidates
+        self.universe: FreePaperPilotUniverse | None = (
+            None
+            if universe_path is None
+            else load_free_paper_pilot_universe(universe_path)
+        )
+        self.last_exclusions: tuple[dict[str, str], ...] = ()
 
     def build(
         self,
@@ -232,12 +259,47 @@ class HistoricalCanonicalContextBuilder:
         dict[str, float],
     ]:
         cutoff_text = iso_timestamp(cutoff)
-        features = market_features(records, cutoff=cutoff_text)
+        raw_features = market_features(records, cutoff=cutoff_text)
+        features = {_symbol(symbol): value for symbol, value in raw_features.items()}
         grouped = _price_records(records)
-        eligible = [
-            symbol for symbol, values in grouped.items()
-            if symbol in features and len(values) >= self.minimum_observations
-        ]
+        configured = None if self.universe is None else self.universe.symbol_map
+        if configured is None:
+            eligible = [
+                symbol for symbol, values in grouped.items()
+                if symbol in features and len(values) >= self.minimum_observations
+            ]
+            self.last_exclusions = ()
+        else:
+            exclusions: list[dict[str, str]] = []
+            eligible = []
+            for symbol in sorted(configured):
+                values = grouped.get(symbol, [])
+                if not values:
+                    exclusions.append({
+                        "symbol": symbol,
+                        "instrument_identifier": configured[symbol].instrument_identifier,
+                        "reason": "historical price provider returned no records",
+                    })
+                    continue
+                if symbol not in features:
+                    exclusions.append({
+                        "symbol": symbol,
+                        "instrument_identifier": configured[symbol].instrument_identifier,
+                        "reason": "historical features are unavailable at the cutoff",
+                    })
+                    continue
+                if len(values) < self.minimum_observations:
+                    exclusions.append({
+                        "symbol": symbol,
+                        "instrument_identifier": configured[symbol].instrument_identifier,
+                        "reason": (
+                            f"only {len(values)} historical observations are available; "
+                            f"{self.minimum_observations} are required"
+                        ),
+                    })
+                    continue
+                eligible.append(symbol)
+            self.last_exclusions = tuple(exclusions)
         eligible.sort(
             key=lambda symbol: (
                 _average_dollar_volume(grouped[symbol]),
@@ -266,8 +328,53 @@ class HistoricalCanonicalContextBuilder:
             latest = values[-1]
             raw_symbol = str(latest.payload.get("symbol", symbol)).upper()
             feature = features[symbol]
-            asset = _asset_class(symbol, raw_symbol)
-            sector, bucket, venue, instrument_type = _metadata(symbol, raw_symbol)
+            configured_instrument = None if configured is None else configured[symbol]
+            if configured_instrument is None:
+                asset = _asset_class(symbol, raw_symbol)
+                economic_asset = asset
+                sector, bucket, venue, instrument_type = _metadata(symbol, raw_symbol)
+                instrument_identifier = f"historical-instrument:{raw_symbol}"
+                instrument_name = f"Historical replay {symbol}"
+                country_code = "US" if asset is not CandidateAssetClass.CRYPTO else "XX"
+                security_master_snapshot = f"historical-security-master:{cutoff.date()}"
+                security_master_records = (f"historical-security-master:{raw_symbol}",)
+                is_us_treasury = False
+                effective_duration_years = None
+                uses_derivatives = False
+                replication_method = None
+                maximum_position_weight = max(0.10, state.weights.get(symbol, 0.0))
+                candidate_model_versions = ("historical-canonical-context.v1",)
+            else:
+                asset = configured_instrument.execution_asset_class
+                economic_asset = governed_asset_class_for_exposure(
+                    configured_instrument.economic_exposure,
+                    fallback=asset,
+                )
+                sector = configured_instrument.economic_exposure
+                bucket = configured_instrument.economic_exposure
+                venue = configured_instrument.venue
+                instrument_type = configured_instrument.instrument_type
+                instrument_identifier = configured_instrument.instrument_identifier
+                instrument_name = configured_instrument.name
+                country_code = configured_instrument.country_code
+                security_master_snapshot = (
+                    f"historical-pilot-security-master:{self.universe.identifier}:{cutoff.date()}"
+                )
+                security_master_records = (configured_instrument.instrument_identifier,)
+                is_us_treasury = configured_instrument.economic_exposure == "cash_treasury"
+                effective_duration_years = 0.25 if is_us_treasury else None
+                uses_derivatives = configured_instrument.economic_exposure in {
+                    "managed_futures", "option_strategies", "volatility"
+                }
+                replication_method = "us-listed-economic-exposure-wrapper"
+                maximum_position_weight = max(
+                    configured_instrument.maximum_weight,
+                    state.weights.get(symbol, 0.0),
+                )
+                candidate_model_versions = (
+                    "historical-canonical-context.v2-pilot-parity",
+                    self.universe.identifier,
+                )
             adv = _average_dollar_volume(values)
             momentum = float(feature["momentum"])
             volatility = max(0.01, float(feature["annualized_volatility"]))
@@ -295,27 +402,28 @@ class HistoricalCanonicalContextBuilder:
             current_weight = state.weights.get(symbol, 0.0)
             candidate_id = f"historical:{cutoff.date()}:{symbol}"
             instrument = CandidateInstrument(
-                instrument_id=f"historical-instrument:{raw_symbol}",
+                instrument_id=instrument_identifier,
                 symbol=symbol,
-                name=f"Historical replay {symbol}",
+                name=instrument_name,
                 asset_class=asset,
                 venue=venue,
-                country_code=(
-                    "US" if asset is not CandidateAssetClass.CRYPTO else "XX"
-                ),
+                country_code=country_code,
                 average_daily_dollar_volume=adv,
                 data_age_hours=max(
                     0.0,
                     (cutoff - latest.available_datetime).total_seconds() / 3600.0,
                 ),
                 analytical_coverage=min(1.0, len(values) / 252),
-                security_master_snapshot_identifier=(
-                    f"historical-security-master:{cutoff.date()}"
-                ),
-                security_master_record_identifiers=(
-                    f"historical-security-master:{raw_symbol}",
-                ),
+                security_master_snapshot_identifier=security_master_snapshot,
+                security_master_record_identifiers=security_master_records,
+                is_us_treasury=is_us_treasury,
+                effective_duration_years=effective_duration_years,
                 instrument_type=instrument_type,
+                economic_exposure_class=(
+                    None if configured_instrument is None else economic_asset
+                ),
+                uses_derivatives=uses_derivatives,
+                replication_method=replication_method,
             )
             candidate = CandidateDecisionRecord(
                 identifier=candidate_id,
@@ -363,16 +471,17 @@ class HistoricalCanonicalContextBuilder:
                 transaction_cost_bps=transaction_cost,
                 slippage_bps=slippage,
                 opportunity_cost_return=cash_return,
-                expected_portfolio_contribution=base_return
-                * min(0.10, 1.0 - state.cash_weight + 0.10),
+                expected_portfolio_contribution=(
+                    base_return * min(maximum_position_weight, 0.10)
+                ),
                 current_portfolio_weight=current_weight,
-                maximum_position_weight=max(0.10, current_weight),
+                maximum_position_weight=maximum_position_weight,
                 monitoring_indicators=(
                     "momentum", "volatility", "drawdown", "macro_regime"
                 ),
                 review_at=cutoff + timedelta(days=30),
                 evidence_identifiers=evidence_ids,
-                model_versions=("historical-canonical-context.v1",),
+                model_versions=candidate_model_versions,
             )
             market_impact = _clamp(momentum * 0.10, -0.10, 0.10)
             market = MarketSpecialistContext(
@@ -443,7 +552,7 @@ class HistoricalCanonicalContextBuilder:
             )
             valuation = AssetValuationSpecialistContext(
                 as_of=cutoff,
-                asset_class=asset,
+                asset_class=economic_asset,
                 expected_return_impact=_clamp(
                     base_return * 0.20, -0.10, 0.10
                 ),
@@ -576,8 +685,25 @@ class CanonicalHistoricalReplayEngine:
         builder: HistoricalCanonicalContextBuilder | None = None,
     ) -> None:
         self.store = store
-        self.cycle = cycle or CanonicalCIOCycle()
-        self.builder = builder or HistoricalCanonicalContextBuilder()
+        self.builder = builder or HistoricalCanonicalContextBuilder(
+            universe_path=DEFAULT_UNIVERSE_PATH
+        )
+        if self.builder.universe is None:
+            self.capability_authority = None
+            self.cycle = cycle or CanonicalCIOCycle()
+        else:
+            capability_authority = BoundedPilotCapabilityAuthority.from_universe(
+                self.builder.universe,
+                research_only=True,
+            )
+            self.capability_authority = capability_authority
+            self.cycle = cycle or CanonicalCIOCycle(
+                opportunity_engine=OpportunityEngine(
+                    universe_policy=RecommendationUniversePolicy(
+                        asset_class_authority=capability_authority,
+                    )
+                )
+            )
 
     @staticmethod
     def _decision_payload(
@@ -729,6 +855,11 @@ class CanonicalHistoricalReplayEngine:
                     "state": "completed",
                     "canonical_cio_invoked": True,
                     "candidate_count": len(candidates),
+                    "expected_instrument_count": (
+                        None if self.builder.universe is None
+                        else len(self.builder.universe.instruments)
+                    ),
+                    "instrument_exclusions": list(self.builder.last_exclusions),
                     "decision_count": len(result.decisions),
                     "decisions": decision_payloads,
                     "prices": dict(prices),
@@ -757,6 +888,11 @@ class CanonicalHistoricalReplayEngine:
                     "canonical_cio_invoked": False,
                     "error_type": type(error).__name__,
                     "error": str(error),
+                    "expected_instrument_count": (
+                        None if self.builder.universe is None
+                        else len(self.builder.universe.instruments)
+                    ),
+                    "instrument_exclusions": list(self.builder.last_exclusions),
                     "portfolio_value": state.value,
                     "portfolio_weights": dict(state.weights),
                     "cash_weight": state.cash_weight,
@@ -773,6 +909,13 @@ class CanonicalHistoricalReplayEngine:
             "strict_only": strict_only,
             "strict_replay": strict_only,
             "research_only": True,
+            "universe_identifier": (
+                None if self.builder.universe is None else self.builder.universe.identifier
+            ),
+            "capability_policy": (
+                None if self.capability_authority is None
+                else self.capability_authority.coverage_payload()
+            ),
             "canonical_cio_available": True,
             "canonical_cio_invoked_count": completed,
             "blocked_cutoff_count": blocked,

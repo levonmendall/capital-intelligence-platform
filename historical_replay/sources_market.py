@@ -239,9 +239,11 @@ class StooqSource(HistoricalSource):
 
     def collect(self, start: date, end: date, *, max_records: int) -> SourceResult:
         records: list[HistoricalRecord] = []
+        missing_symbols: list[str] = []
         retrieved = utc_now()
         try:
             for symbol in self.symbols:
+                before = len(records)
                 response = self.client.get(
                     "https://stooq.com/q/d/l/",
                     params={
@@ -287,11 +289,31 @@ class StooqSource(HistoricalSource):
                             tuple(records),
                             warnings=("max_records_reached",),
                         )
+                if len(records) == before:
+                    missing_symbols.append(symbol)
+
+            if not records:
+                return SourceResult(
+                    self.name,
+                    "unavailable",
+                    blockers=("configured_symbols_returned_no_records",),
+                    warnings=tuple(
+                        ["non_strict_research_bridge"]
+                        + [f"missing_symbol:{item}" for item in missing_symbols]
+                    ),
+                )
+
+            warnings = ["non_strict_research_bridge"]
+            state = "available"
+            if missing_symbols:
+                state = "degraded"
+                warnings.append(f"missing_symbol_count:{len(missing_symbols)}")
+                warnings.extend(f"missing_symbol:{item}" for item in missing_symbols)
             return SourceResult(
                 self.name,
-                "available",
+                state,
                 tuple(records),
-                warnings=("non_strict_research_bridge",),
+                warnings=tuple(warnings),
             )
         except Exception as error:
             return self._degraded(records, error)
