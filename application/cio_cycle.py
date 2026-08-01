@@ -15,6 +15,10 @@ from cio import (
     IndependentSpecialistPacket,
     PriorDecisionContext,
 )
+from cio.cycle_disposition import (
+    CIOCycleDisposition,
+    CIOCycleDispositionAuthority,
+)
 from cio.persistence import CIOJournalEventType, SQLiteCIOJournal
 from committee.specialists import (
     AssetValuationSpecialistContext,
@@ -350,6 +354,7 @@ class CanonicalCIOCycleResult:
     theses: tuple[LivingThesis, ...]
     evaluation_snapshots: tuple[DecisionEvidenceSnapshot, ...]
     briefing: DailyCIOBriefing
+    cycle_disposition: CIOCycleDisposition | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -390,6 +395,10 @@ class CanonicalCIOCycleResult:
             raise TypeError("briefing must be DailyCIOBriefing")
         if self.briefing.as_of != self.as_of:
             raise ValueError("briefing must share cycle timestamp")
+        if self.opportunity_queue.ranked and self.cycle_disposition is not None:
+            raise ValueError(
+                "a cycle disposition is only valid when no candidate reaches CIO review"
+            )
 
 
 class CanonicalCIOCycle:
@@ -420,6 +429,7 @@ class CanonicalCIOCycle:
         self.historical_learning_resolver = (
             historical_learning_resolver or HistoricalLearningResolver.from_environment()
         )
+        self.cycle_disposition_authority = CIOCycleDispositionAuthority()
 
     def run(
         self,
@@ -504,6 +514,10 @@ class CanonicalCIOCycle:
         queue = self.opportunity_engine.build_queue(
             candidates,
             opportunity_context,
+        )
+        cycle_disposition = self.cycle_disposition_authority.decide(
+            queue,
+            as_of=portfolio.as_of,
         )
         self._journal_candidates_and_queue(
             candidates=candidates,
@@ -623,6 +637,7 @@ class CanonicalCIOCycle:
             decisions=tuple(decisions),
             construction=construction,
             theses=theses,
+            cycle_disposition=cycle_disposition,
         )
         if self.journal is not None:
             self.journal.append(
@@ -632,6 +647,11 @@ class CanonicalCIOCycle:
                 payload={
                     **briefing.to_dict(),
                     "cycle_identifier": cycle_identifier,
+                    "cycle_disposition": (
+                        None
+                        if cycle_disposition is None
+                        else cycle_disposition.to_dict()
+                    ),
                     "code_version": code_version or "unknown",
                 },
                 schema_version="daily-cio-briefing.v1",
@@ -646,6 +666,7 @@ class CanonicalCIOCycle:
             theses=theses,
             evaluation_snapshots=snapshots,
             briefing=briefing,
+            cycle_disposition=cycle_disposition,
         )
 
 
@@ -801,8 +822,6 @@ class CanonicalCIOCycle:
             requested_target_weight = round(current_weight / 2.0, 8)
         else:
             action = CIOAction.INCREASE if current_weight > 0.0 else CIOAction.BUY
-            # This preview establishes only a feasible ceiling and exact funding
-            # source. Final sizing occurs after specialist return reconciliation.
             requested_target_weight = candidate.maximum_position_weight
         intent = ConstructionIntent(
             candidate_identifier=candidate.identifier,
