@@ -120,6 +120,25 @@ def _scenario_success_probability(
     )
 
 
+def _align_candidate(
+    engine: OpportunityEngine,
+    candidate: CandidateDecisionRecord,
+    *,
+    baseline_opportunity_cost: float,
+) -> CandidateDecisionRecord:
+    if abs(candidate.opportunity_cost_return - baseline_opportunity_cost) <= 1e-12:
+        return candidate
+    return replace(
+        candidate,
+        opportunity_cost_return=baseline_opportunity_cost,
+        probability_of_success=_scenario_success_probability(
+            engine,
+            candidate,
+            baseline_opportunity_cost=baseline_opportunity_cost,
+        ),
+    )
+
+
 def prepare_competitive_opportunity_set(
     engine: OpportunityEngine,
     candidates: tuple[CandidateDecisionRecord, ...],
@@ -130,10 +149,11 @@ def prepare_competitive_opportunity_set(
     Pass one evaluates all candidates against cash and current holdings only. Candidate
     records are immutably aligned to that same point-in-time baseline so the engine's
     stale-opportunity-cost integrity control remains effective without rejecting every
-    new candidate after the portfolio acquires a stronger holding. Probability of
-    success is resolved from the candidate's disclosed scenario distribution against
-    that same horizon-matched baseline, preventing a cash-relative probability from
-    creating a false scenario-consistency veto after the portfolio is invested.
+    new candidate after the portfolio acquires a stronger holding. When that baseline
+    changes, probability of success is resolved from the candidate's disclosed scenario
+    distribution against the same horizon-matched baseline, preventing a cash-relative
+    probability from creating a false scenario-consistency veto. Unchanged all-cash
+    baselines retain the candidate's existing probability estimate.
 
     Pass two adds only pass-one qualified, non-held candidates as competing uses of
     capital. Their alternative return is already net, horizon-normalized,
@@ -159,14 +179,10 @@ def prepare_competitive_opportunity_set(
 
     baseline_cost = _baseline_opportunity_cost(engine, baseline_context)
     aligned = tuple(
-        replace(
+        _align_candidate(
+            engine,
             candidate,
-            opportunity_cost_return=baseline_cost,
-            probability_of_success=_scenario_success_probability(
-                engine,
-                candidate,
-                baseline_opportunity_cost=baseline_cost,
-            ),
+            baseline_opportunity_cost=baseline_cost,
         )
         for candidate in candidates
     )
