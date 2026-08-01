@@ -227,7 +227,11 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
             )
         decision_context = context.opportunity_context
         authoritative_queue = None
-        if governed_context:
+        if governed_context and context.opportunity_snapshot_hash is None:
+            raise RuntimeError(
+                "governed production context lacks immutable opportunity lineage"
+            )
+        if context.opportunity_snapshot_hash is not None:
             publication_identifiers = qualified_identifiers + rejected_identifiers
             candidate_identifiers = tuple(item.identifier for item in candidates)
             if set(publication_identifiers) != set(candidate_identifiers):
@@ -240,10 +244,6 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                 raise ValueError(
                     "persisted opportunity queue must reconcile every screened "
                     f"candidate: missing={missing} extra={extra}"
-                )
-            if context.opportunity_snapshot_hash is None:
-                raise RuntimeError(
-                    "governed production context lacks immutable opportunity lineage"
                 )
             if cycle.journal is None:
                 raise RuntimeError(
