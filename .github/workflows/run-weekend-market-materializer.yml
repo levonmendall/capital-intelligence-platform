@@ -24,31 +24,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Extract and apply correction
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          source = Path('.github/workflows/materialize-weekend-market-availability.yml')
-          lines = source.read_text(encoding='utf-8').splitlines()
-          start_marker = "          python - <<'PY'"
-          end_marker = "          PY"
-          try:
-              start = lines.index(start_marker) + 1
-              end = lines.index(end_marker, start)
-          except ValueError as error:
-              raise RuntimeError('cannot extract materializer patch script') from error
-          script_lines = [
-              line[10:] if line.startswith('          ') else line
-              for line in lines[start:end]
-          ]
-          Path('/tmp/apply_weekend_market_patch.py').write_text(
-              '\n'.join(script_lines) + '\n',
-              encoding='utf-8',
-          )
-          PY
-          python /tmp/apply_weekend_market_patch.py
+      - name: Apply schedule-aware discovery correction
+        run: python .github/scripts/apply_weekend_market_availability.py
 
       - name: Install test dependencies
         run: |
@@ -74,6 +51,7 @@ jobs:
         shell: bash
         run: |
           rm \
+            .github/scripts/apply_weekend_market_availability.py \
             .github/workflows/materialize-weekend-market-availability.yml \
             .github/workflows/run-weekend-market-materializer.yml
           git config user.name "github-actions[bot]"
@@ -82,6 +60,7 @@ jobs:
             operations/comprehensive_market_discovery.py \
             operations/equity_discovery.py \
             tests/test_weekend_discovery_schedule.py \
+            .github/scripts/apply_weekend_market_availability.py \
             .github/workflows/materialize-weekend-market-availability.yml \
             .github/workflows/run-weekend-market-materializer.yml
           git commit -m "Schedule closed-market discovery on weekdays"
