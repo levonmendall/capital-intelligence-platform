@@ -11,6 +11,9 @@ class _FakeStreamlit:
     def __init__(self, events: list[tuple[object, ...]]) -> None:
         self.events = events
 
+    def html(self, value: str) -> None:
+        self.events.append(("html", value))
+
     @contextmanager
     def expander(self, label: str, *args: object, **kwargs: object):
         self.events.append(("expander", label, args, kwargs))
@@ -39,13 +42,17 @@ def test_today_story_is_visible_immediately_after_surface_header() -> None:
     app_impl.render_app_header("Today")
 
     assert events[0] == ("header", "Today")
-    assert events[1][0:2] == ("story", "Today")
-    assert [step[0] for step in events[1][2]] == [
-        "Observe",
-        "Explain",
-        "Resolve",
-        "Act",
-    ]
+    assert events[1][0] == "html"
+    markup = str(events[1][1])
+    assert 'class="surface-story story-today today-lens-horizontal"' in markup
+    assert 'class="today-lens-row"' in markup
+    assert "grid-template-columns:repeat(4,minmax(0,1fr))" in markup
+    assert "display:flex" in markup
+    assert "flex-wrap:nowrap" in markup
+    assert "overflow-x:auto" in markup
+    assert markup.count('class="today-lens-card"') == 4
+    for label in ("Observe", "Explain", "Resolve", "Act"):
+        assert f'class="today-lens-title">{label}</div>' in markup
 
 
 def test_legacy_today_dropdown_and_duplicate_story_are_suppressed() -> None:
