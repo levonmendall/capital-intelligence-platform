@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - .github/workflows/trigger-weekend-cio-run.yml
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
