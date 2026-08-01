@@ -11,8 +11,8 @@ class _FakeStreamlit:
     def __init__(self, calls: list[tuple[object, ...]]) -> None:
         self.calls = calls
 
-    def markdown(self, value: str, **kwargs: object) -> None:
-        self.calls.append(("markdown", value, kwargs))
+    def html(self, value: str) -> None:
+        self.calls.append(("html", value))
 
     @contextmanager
     def expander(self, label: str, *args: object, **kwargs: object):
@@ -36,7 +36,7 @@ def _app(calls: list[tuple[object, ...]]) -> SimpleNamespace:
     )
 
 
-def test_environment_story_is_rendered_after_header_in_horizontal_layout() -> None:
+def test_environment_story_matches_today_two_by_two_mobile_grid() -> None:
     calls: list[tuple[object, ...]] = []
     app = _app(calls)
 
@@ -44,18 +44,20 @@ def test_environment_story_is_rendered_after_header_in_horizontal_layout() -> No
     app.render_app_header("Environment")
 
     assert calls[0] == ("header", "Environment")
-    assert calls[1][0] == "markdown"
-    css = str(calls[1][1])
-    assert ".surface-story.story-environment" in css
-    assert "repeat(4" in css
-    assert "overflow-x: auto" in css
-    assert "scroll-snap-type: x proximity" in css
-    assert "border-radius: 16px" in css
-    assert calls[2] == (
-        "story",
-        "Environment",
-        refinement._ENVIRONMENT_STEPS,
-    )
+    assert calls[1][0] == "html"
+    markup = str(calls[1][1])
+    assert (
+        'class="surface-story story-environment process-lens-grid '
+        'process-lens-environment"'
+    ) in markup
+    assert 'class="process-lens-cards"' in markup
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in markup
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in markup
+    assert "aspect-ratio: 1 / 1" in markup
+    assert "overflow-x: auto" not in markup
+    assert markup.count('class="process-lens-card"') == 4
+    for label in ("Measure", "Classify", "Confirm", "Monitor"):
+        assert f'class="process-lens-card-title">{label}</div>' in markup
 
 
 def test_environment_legacy_dropdown_and_duplicate_story_are_suppressed() -> None:

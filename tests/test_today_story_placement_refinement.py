@@ -34,7 +34,7 @@ def _application(events: list[tuple[object, ...]]) -> SimpleNamespace:
     )
 
 
-def test_today_story_is_visible_immediately_after_surface_header() -> None:
+def test_today_story_is_visible_in_shared_two_by_two_mobile_grid() -> None:
     events: list[tuple[object, ...]] = []
     app_impl = _application(events)
 
@@ -44,15 +44,15 @@ def test_today_story_is_visible_immediately_after_surface_header() -> None:
     assert events[0] == ("header", "Today")
     assert events[1][0] == "html"
     markup = str(events[1][1])
-    assert 'class="surface-story story-today today-lens-horizontal"' in markup
-    assert 'class="today-lens-row"' in markup
-    assert "grid-template-columns:repeat(4,minmax(0,1fr))" in markup
-    assert "display:flex" in markup
-    assert "flex-wrap:nowrap" in markup
-    assert "overflow-x:auto" in markup
-    assert markup.count('class="today-lens-card"') == 4
+    assert 'class="surface-story story-today process-lens-grid process-lens-today"' in markup
+    assert 'class="process-lens-cards"' in markup
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in markup
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in markup
+    assert "aspect-ratio: 1 / 1" in markup
+    assert "overflow-x: auto" not in markup
+    assert markup.count('class="process-lens-card"') == 4
     for label in ("Observe", "Explain", "Resolve", "Act"):
-        assert f'class="today-lens-title">{label}</div>' in markup
+        assert f'class="process-lens-card-title">{label}</div>' in markup
 
 
 def test_legacy_today_dropdown_and_duplicate_story_are_suppressed() -> None:

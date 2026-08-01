@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.parametrize("viewport_name", ("desktop", "iphone"))
-def test_environment_story_is_visible_horizontal_and_before_economic_content(
+def test_environment_story_matches_today_grid_before_economic_content(
     live_streamlit,
     viewport_name,
 ) -> None:
@@ -32,8 +32,10 @@ def test_environment_story_is_visible_horizontal_and_before_economic_content(
         navigation.get_by_role("radio", name="Environment", exact=True).click()
         page.get_by_role("heading", name="Environment", exact=True).wait_for()
 
-        story = page.locator(".surface-story.story-environment")
+        story = page.locator(".story-environment.process-lens-grid")
         story.wait_for(state="visible")
+        grid = story.locator(".process-lens-cards")
+        cards = grid.locator(".process-lens-card")
         economy = page.get_by_text("Economy and investing", exact=True).first
         economy.wait_for(state="visible")
 
@@ -46,28 +48,50 @@ def test_environment_story_is_visible_horizontal_and_before_economic_content(
             page.get_by_text("How the Environment surface works", exact=True).count()
             == 0
         )
+        assert cards.count() == 4
 
-        for label in ("Measure", "Classify", "Confirm", "Monitor"):
-            assert story.get_by_text(label, exact=True).count() == 1
-
-        layout = story.evaluate(
+        layout = grid.evaluate(
             """element => {
                 const style = getComputedStyle(element);
-                const steps = Array.from(element.querySelectorAll('.story-step'));
-                const boxes = steps.map((step) => step.getBoundingClientRect());
+                const parent = element.getBoundingClientRect();
+                const boxes = Array.from(element.querySelectorAll('.process-lens-card'))
+                    .map(card => card.getBoundingClientRect());
                 return {
+                    display: style.display,
                     overflowX: style.overflowX,
                     scrollWidth: element.scrollWidth,
                     clientWidth: element.clientWidth,
-                    lefts: boxes.map((box) => box.left),
-                    tops: boxes.map((box) => box.top),
+                    parentLeft: parent.left,
+                    parentRight: parent.right,
+                    boxes: boxes.map(box => ({
+                        left: box.left,
+                        right: box.right,
+                        top: box.top,
+                        bottom: box.bottom,
+                        width: box.width,
+                        height: box.height
+                    }))
                 };
             }"""
         )
-        assert layout["overflowX"] in {"auto", "scroll"}
-        assert len(layout["lefts"]) == 4
-        assert layout["lefts"] == sorted(layout["lefts"])
-        assert max(layout["tops"]) - min(layout["tops"]) <= 3
+        assert layout["display"] == "grid"
+        assert layout["overflowX"] != "auto"
+        assert layout["scrollWidth"] <= layout["clientWidth"] + 2
+        assert all(
+            box["left"] >= layout["parentLeft"] - 1
+            and box["right"] <= layout["parentRight"] + 1
+            for box in layout["boxes"]
+        )
+
         if viewport_name == "iphone":
-            assert layout["scrollWidth"] > layout["clientWidth"]
+            tops = [round(box["top"]) for box in layout["boxes"]]
+            assert len(set(tops)) == 2
+            assert abs(layout["boxes"][0]["width"] - layout["boxes"][0]["height"]) <= 3
+            assert abs(layout["boxes"][3]["width"] - layout["boxes"][3]["height"]) <= 3
+        else:
+            tops = [round(box["top"]) for box in layout["boxes"]]
+            assert len(set(tops)) == 1
+
+        for label in ("Measure", "Classify", "Confirm", "Monitor"):
+            assert story.get_by_text(label, exact=True).count() == 1
         browser.close()
