@@ -223,6 +223,7 @@ class ChiefInvestmentOfficer:
             analysis_lane=analysis_lane,
             ensemble=ensemble,
         )
+        selected_action = action
         action, position_weight, reason, hysteresis_applied, persistence_cycles = (
             self._apply_hysteresis(
                 candidate,
@@ -336,6 +337,9 @@ class ChiefInvestmentOfficer:
             ),
             persistence_cycles=persistence_cycles,
             hysteresis_applied=hysteresis_applied,
+            deferred_action=(
+                selected_action if hysteresis_applied else None
+            ),
             resolved_policy_profile=profile.identifier,
             policy_matrix_version=self.policy_matrix.version,
         )

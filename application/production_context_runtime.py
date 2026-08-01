@@ -23,7 +23,12 @@ from application.production_context import (
     _text,
 )
 from cio import CandidateAssetClass
-from opportunity import AlternativeKind, AlternativeUse, OpportunitySetContext
+from opportunity import (
+    AlternativeKind,
+    AlternativeUse,
+    OpportunityEngine,
+    OpportunitySetContext,
+)
 from portfolio.state import SQLiteCanonicalPortfolioStore
 from screening import (
     ScreeningEventType,
@@ -242,28 +247,59 @@ class RepositoryProductionCanonicalCIOContextProvider(_StoredContextProvider):
             )
             for position in portfolio_snapshot.positions
         )
-        alternatives.extend(
-            AlternativeUse(
-                identifier=candidate_identifier,
-                kind=AlternativeKind.QUALIFIED_CANDIDATE,
-                expected_return=(
-                    candidate_map[
-                        candidate_identifier
-                    ].probability_weighted_expected_return
-                ),
-                implementation_cost_return=(
-                    candidate_map[candidate_identifier].implementation_cost_return
-                ),
-                evidence_quality=(
-                    candidate_map[candidate_identifier].evidence_quality.score
-                ),
-                liquidity_score=(
-                    candidate_map[candidate_identifier].liquidity_score
-                ),
-                current_weight=0.0,
-            )
-            for candidate_identifier in qualified_ids
+        raw_candidate_alternatives = publication.opportunity_queue_payload.get(
+            "candidate_alternative_identifiers"
         )
+        if raw_candidate_alternatives is None:
+            candidate_alternative_ids = tuple(
+                identifier
+                for identifier in qualified_ids
+                if candidate_map[identifier].current_portfolio_weight <= 0.0
+            )
+        else:
+            if not isinstance(raw_candidate_alternatives, (list, tuple)):
+                raise ProductionContextError(
+                    "persisted candidate alternative identifiers must be a sequence"
+                )
+            candidate_alternative_ids = tuple(
+                _text(item, field_name="candidate alternative identifier")
+                for item in raw_candidate_alternatives
+            )
+        if len(candidate_alternative_ids) != len(set(candidate_alternative_ids)):
+            raise ProductionContextError(
+                "persisted candidate alternative identifiers contain duplicates"
+            )
+        if not set(candidate_alternative_ids).issubset(candidate_map):
+            raise ProductionContextError(
+                "persisted candidate alternatives reference unknown candidates"
+            )
+        baseline_context = OpportunitySetContext(
+            identifier=publication.opportunity_context_identifier,
+            as_of=decision_time,
+            alternatives=tuple(alternatives),
+        )
+        comparison_engine = OpportunityEngine()
+        for candidate_identifier in candidate_alternative_ids:
+            candidate = candidate_map[candidate_identifier]
+            if candidate.current_portfolio_weight > 0.0:
+                raise ProductionContextError(
+                    "a current holding cannot be duplicated as a candidate alternative"
+                )
+            assessment = comparison_engine.robustness(
+                candidate,
+                baseline_context,
+            )
+            alternatives.append(
+                AlternativeUse(
+                    identifier=candidate_identifier,
+                    kind=AlternativeKind.QUALIFIED_CANDIDATE,
+                    expected_return=assessment.evidence_adjusted_return,
+                    implementation_cost_return=0.0,
+                    evidence_quality=1.0,
+                    liquidity_score=1.0,
+                    current_weight=0.0,
+                )
+            )
         opportunity_context = OpportunitySetContext(
             identifier=publication.opportunity_context_identifier,
             as_of=decision_time,
