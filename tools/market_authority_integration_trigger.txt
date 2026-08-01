@@ -1,1 +1,0 @@
-Run the current main integration controller and apply the canonical market participation authority.
