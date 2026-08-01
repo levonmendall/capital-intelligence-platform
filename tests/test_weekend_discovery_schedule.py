@@ -18,6 +18,7 @@ from operations.equity_discovery import (
 )
 
 
+# Weekend eligibility follows the America/New_York market calendar.
 WEEKEND_AS_OF = datetime(2026, 8, 1, 15, 0, tzinfo=timezone.utc)
 WEEKDAY_AS_OF = datetime(2026, 7, 31, 15, 0, tzinfo=timezone.utc)
 
