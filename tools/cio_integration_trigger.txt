@@ -1,1 +1,1 @@
-Trigger the resolved three-way CIO correction integration.
+Trigger the corrected line-based CIO integration resolver.
