@@ -12,7 +12,7 @@ services:
     numInstances: 1
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: python run_resilient_render_service.py
+    dockerCommand: python run_render_service.py
     healthCheckPath: /_stcore/health
     disk:
       name: capital-intelligence-state
