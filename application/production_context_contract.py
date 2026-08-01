@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime
 
@@ -11,6 +12,9 @@ from application.production_cio import (
     ProductionCanonicalCIOExecutor as _BaseProductionCanonicalCIOExecutor,
 )
 from screening import candidate_from_payload
+
+
+_LOGGER = logging.getLogger("capital_intelligence.persistent_cash")
 
 
 def _required_text(value: object, *, field_name: str) -> str:
@@ -248,7 +252,7 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                 candidates,
                 as_of=context.opportunity_context.as_of,
             )
-        return self.cycle.run(
+        result = self.cycle.run(
             identifier=context.identifier,
             candidates=candidates,
             opportunity_context=context.opportunity_context,
@@ -258,6 +262,36 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
             active_theses=active_theses,
             code_version=context.code_version,
         )
+        journal = self.cycle.journal
+        if journal is not None:
+            try:
+                from evaluation.persistent_cash import (
+                    append_persistent_cash_diagnostic,
+                    build_persistent_cash_diagnostic,
+                )
+
+                diagnostic = build_persistent_cash_diagnostic(
+                    publication=publication,
+                    candidates=candidates,
+                    context_candidate_identifiers=context_identifiers,
+                    result=result,
+                    cash_weight_before=portfolio.cash_weight,
+                    minimum_evidence_score=(
+                        self.cycle.opportunity_engine.policy.minimum_evidence_score
+                    ),
+                    minimum_evidence_dimension=(
+                        self.cycle.opportunity_engine.policy.minimum_evidence_dimension
+                    ),
+                    code_version=context.code_version,
+                )
+                append_persistent_cash_diagnostic(journal, diagnostic)
+            except Exception:
+                _LOGGER.exception(
+                    "persistent-cash diagnostic failed after canonical CIO cycle %s; "
+                    "the non-authoritative diagnostic cannot alter the cycle result",
+                    context.identifier,
+                )
+        return result
 
 
 __all__ = [

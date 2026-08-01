@@ -92,6 +92,9 @@ def build_parser() -> argparse.ArgumentParser:
     experiment.add_argument("--deployed-git-sha", required=True)
     experiment.add_argument("--start-date", required=True)
     experiment.add_argument("--database", default="database/paper-experiment.db")
+    cash = subparsers.add_parser("persistent-cash-report")
+    cash.add_argument("--journal-database", default="database/cio_journal.db")
+    cash.add_argument("--report", default="reports/persistent-cash-summary.json")
     return parser
 
 
@@ -151,6 +154,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload=registration.to_dict(),
         )
         print(json.dumps(registration.to_dict(), indent=2, sort_keys=True))
+        return 0
+    if args.action == "persistent-cash-report":
+        from cio.persistence import SQLiteCIOJournal
+        from evaluation.persistent_cash import summarize_persistent_cash_journal
+
+        summary = summarize_persistent_cash_journal(
+            SQLiteCIOJournal(args.journal_database)
+        )
+        destination = Path(args.report)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(json.dumps(summary, indent=2, sort_keys=True))
         return 0
 
     command = command_tokens(args.command, manifest)
