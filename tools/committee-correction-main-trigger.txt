@@ -1,3 +1,0 @@
-triggered_at=2026-08-01T20:05:00Z
-target=fix/cio-cycle-decision-integrity
-purpose=apply committee review corrections to PR 324
