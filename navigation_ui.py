@@ -124,6 +124,33 @@ _NAVIGATION_CSS = """
     box-shadow: 0 0 12px rgba(var(--surface-rgb), .85);
 }
 
+/* Streamlit wraps each columns row in a short element container. Making only
+   the inner row sticky allows that short wrapper to release the navigation as
+   soon as it leaves the viewport. Pin the complete element wrapper instead,
+   then keep the visual row relative inside it. */
+:is(
+    div[data-testid="stElementContainer"],
+    div.stElementContainer,
+    div.element-container
+):has(div[data-testid="stHorizontalBlock"] .nav-brand-mark) {
+    position: sticky !important;
+    top: max(.28rem, env(safe-area-inset-top, 0px)) !important;
+    z-index: 1000 !important;
+    width: 100% !important;
+    align-self: stretch !important;
+    isolation: isolate !important;
+}
+
+:is(
+    div[data-testid="stElementContainer"],
+    div.stElementContainer,
+    div.element-container
+):has(div[data-testid="stHorizontalBlock"] .nav-brand-mark)
+  div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) {
+    position: relative !important;
+    top: auto !important;
+}
+
 @media (min-width: 761px) {
     .block-container {
         padding-top: 4rem !important;
@@ -141,6 +168,14 @@ _NAVIGATION_CSS = """
         min-height: 2.75rem !important;
         padding: .43rem .04rem !important;
         border-radius: .48rem !important;
+    }
+
+    :is(
+        div[data-testid="stElementContainer"],
+        div.stElementContainer,
+        div.element-container
+    ):has(div[data-testid="stHorizontalBlock"] .nav-brand-mark) {
+        top: max(.16rem, env(safe-area-inset-top, 0px)) !important;
     }
 }
 
