@@ -64,6 +64,7 @@ jobs:
           tests/browser/test_streamlit_browser.py
           tests/browser/test_sticky_primary_navigation.py
           tests/browser/test_today_story_placement.py
+          tests/browser/test_distinct_surface_content.py
 
       - name: Run deterministic release validation
         run: timeout --signal=TERM 40m python run_release_validation.py --report reports/release-validation.json

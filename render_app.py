@@ -22,6 +22,7 @@ import operating_status
 import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
 import secure_app
+import surface_content_refinement
 import today_story_placement_refinement
 import ui_experience_refinement
 import ui_refinement
@@ -206,11 +207,12 @@ def deployment_context_from_environment() -> DeploymentContext:
 def main() -> None:
     prepare_render_data_runtime()
     opportunity_scan_resilience.install()
-    prepare_render_surface_runtime()
     ui_refinement.install(app_impl, secure_app)
     ui_experience_refinement.install(app_impl)
     opportunity_funnel_ui_refinement.install(app_impl)
     today_story_placement_refinement.install(app_impl)
+    surface_content_refinement.install(app_impl)
+    prepare_render_surface_runtime()
     create_streamlit_application(
         deployment=deployment_context_from_environment()
     )
