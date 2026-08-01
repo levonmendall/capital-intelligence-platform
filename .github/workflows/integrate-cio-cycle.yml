@@ -10,38 +10,98 @@ permissions:
 
 jobs:
   merge:
-    if: >-
-      github.event.head_commit.message != 'Integrate CIO cycle corrections' &&
-      github.event.head_commit.message != 'Record CIO integration conflicts'
+    if: github.event.head_commit.message != 'Integrate CIO cycle corrections'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: integration/cio-cycle-decision-integrity
           fetch-depth: 0
-      - name: Merge correction branch
+      - name: Merge and resolve governance overlaps
         run: |
           git config user.name "capital-intelligence-bot"
           git config user.email "capital-intelligence-bot@users.noreply.github.com"
           git fetch origin fix/cio-cycle-decision-integrity
-          if ! git merge --no-ff --no-commit origin/fix/cio-cycle-decision-integrity; then
-            report=cio-integration-conflicts.txt
-            {
-              echo 'CIO INTEGRATION CONFLICT REPORT'
-              echo
-              echo 'Conflicted files:'
-              git diff --name-only --diff-filter=U
-              echo
-              for file in $(git diff --name-only --diff-filter=U); do
-                echo "===== $file ====="
-                grep -n -C 20 -E '^(<<<<<<<|=======|>>>>>>>)' "$file" || true
-                echo
-              done
-            } > "$report"
-            git merge --abort
-            git add "$report"
-            git commit -m "Record CIO integration conflicts"
-            git push origin HEAD:integration/cio-cycle-decision-integrity
+          git merge --no-ff --no-commit origin/fix/cio-cycle-decision-integrity || true
+          python - <<'PY'
+          from pathlib import Path
+
+          cycle_path = Path("application/cio_cycle.py")
+          cycle = cycle_path.read_text(encoding="utf-8")
+          cycle_conflict = """<<<<<<< HEAD
+          =======
+
+                  queue = self.opportunity_engine.build_queue(
+                      candidates,
+                      opportunity_context,
+                  )
+                  cycle_disposition = self.cycle_disposition_authority.decide(
+                      queue,
+                      as_of=portfolio.as_of,
+                  )
+          >>>>>>> origin/fix/cio-cycle-decision-integrity
+          """
+          cycle_resolution = """        cycle_disposition = self.cycle_disposition_authority.decide(
+                      queue,
+                      as_of=portfolio.as_of,
+                  )
+          """
+          if cycle_conflict not in cycle:
+              raise SystemExit("expected application/cio_cycle.py conflict was not found")
+          cycle_path.write_text(
+              cycle.replace(cycle_conflict, cycle_resolution),
+              encoding="utf-8",
+          )
+
+          contract_path = Path("application/production_context_contract.py")
+          contract = contract_path.read_text(encoding="utf-8")
+          contract_conflict = """<<<<<<< HEAD
+          from opportunity.snapshot import (
+              DECISION_SNAPSHOT_KIND,
+              build_opportunity_snapshot,
+              load_opportunity_snapshot,
+          )
+          from operations.free_paper_pilot import load_free_paper_pilot_universe
+          =======
+          from operations.active_paper_universe import (
+              load_active_paper_universe_for_publication,
+          )
+          >>>>>>> origin/fix/cio-cycle-decision-integrity
+          """
+          contract_resolution = """from opportunity.snapshot import (
+              DECISION_SNAPSHOT_KIND,
+              build_opportunity_snapshot,
+              load_opportunity_snapshot,
+          )
+          from operations.active_paper_universe import (
+              load_active_paper_universe_for_publication,
+          )
+          """
+          if contract_conflict not in contract:
+              raise SystemExit(
+                  "expected application/production_context_contract.py conflict was not found"
+              )
+          contract_path.write_text(
+              contract.replace(contract_conflict, contract_resolution),
+              encoding="utf-8",
+          )
+
+          unresolved = []
+          for path in Path(".").rglob("*"):
+              if not path.is_file() or ".git" in path.parts:
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (OSError, UnicodeDecodeError):
+                  continue
+              if "<<<<<<< " in text or ">>>>>>> " in text:
+                  unresolved.append(str(path))
+          if unresolved:
+              raise SystemExit(f"unresolved merge markers remain: {unresolved}")
+          PY
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "Git still reports unresolved paths:"
+            git diff --name-only --diff-filter=U
             exit 1
           fi
           rm -f tools/apply_cio_cycle_integrity_corrections.py.gz.b64
@@ -50,6 +110,7 @@ jobs:
           rm -f tools/apply_committee_review_corrections.py.gz.b64
           rm -f tools/cio_integration_trigger.txt
           rm -f cio-integration-conflicts.txt
+          rm -f .github/workflows/integrate-cio-cycle.yml
           git add -A
           git commit -m "Integrate CIO cycle corrections"
           git push origin HEAD:integration/cio-cycle-decision-integrity
