@@ -18,7 +18,7 @@ import json
 import os
 import time as time_module
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -48,6 +48,7 @@ from data.provider_dataset import (
 
 EODHD_API_BASE = "https://eodhd.com/api"
 EODHD_SOURCE_VERSION = "eodhd-rest.v1"
+_LIVE_DATASET_QUERY_GRACE = timedelta(minutes=5)
 
 
 class EODHDProviderError(ProviderDatasetError):
@@ -213,6 +214,16 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
         if not isinstance(query, ProviderDatasetQuery):
             raise TypeError("query must be ProviderDatasetQuery")
         retrieved_at = self._now()
+        snapshot_query = query
+        live_retrieval_limitations: tuple[str, ...] = ()
+        if retrieved_at > query.as_of:
+            retrieval_delay = retrieved_at - query.as_of
+            if retrieval_delay <= _LIVE_DATASET_QUERY_GRACE:
+                snapshot_query = replace(query, as_of=retrieved_at)
+                live_retrieval_limitations = (
+                    "live retrieval availability is recorded at collection time; "
+                    f"the requested cutoff was {query.as_of.isoformat()}",
+                )
         dataset_type = query.dataset_type
         limitations: tuple[str, ...]
         if dataset_type is ProviderDatasetType.ACCOUNT_ENTITLEMENT:
@@ -302,7 +313,7 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
         if observed_at > retrieved_at:
             observed_at = retrieved_at
         return ProviderDatasetSnapshot(
-            query=query,
+            query=snapshot_query,
             provider=self.name,
             source_version=EODHD_SOURCE_VERSION,
             observed_at=observed_at,
@@ -315,7 +326,7 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
                 f"eodhd:{dataset_type.value}:{query.provider_symbol}:"
                 f"{retrieved_at.isoformat()}"
             ),
-            limitations=limitations,
+            limitations=tuple((*live_retrieval_limitations, *limitations)),
         )
 
     def _fetch_bars(
