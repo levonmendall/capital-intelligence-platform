@@ -4,17 +4,23 @@ on:
   push:
     branches:
       - fix/cio-cycle-decision-integrity
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
 
 permissions:
   contents: write
 
 jobs:
   patch-and-validate:
-    if: github.event.head_commit.message != 'Apply CIO cycle integrity corrections'
+    if: github.event_name == 'pull_request' || github.event.head_commit.message != 'Apply CIO cycle integrity corrections'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: fix/cio-cycle-decision-integrity
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -59,4 +65,4 @@ jobs:
             public_live_collection_runtime.py \
             run_autonomous_paper_operator.py
           git commit -m "Apply CIO cycle integrity corrections"
-          git push origin HEAD
+          git push origin HEAD:fix/cio-cycle-decision-integrity
