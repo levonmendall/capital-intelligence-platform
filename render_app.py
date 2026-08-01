@@ -16,6 +16,7 @@ import streamlit as st
 
 import app_impl
 import educational_market_briefing_ui
+import environment_story_placement_refinement
 import live_operating_console
 import operating_intelligence_ui
 import operating_status
@@ -212,6 +213,7 @@ def main() -> None:
     opportunity_funnel_ui_refinement.install(app_impl)
     today_story_placement_refinement.install(app_impl)
     surface_content_refinement.install(app_impl)
+    environment_story_placement_refinement.install(app_impl)
     prepare_render_surface_runtime()
     create_streamlit_application(
         deployment=deployment_context_from_environment()
