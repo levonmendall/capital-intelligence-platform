@@ -64,17 +64,18 @@ def test_qualified_peer_cannot_create_false_final_consistency_veto() -> None:
 
     assert aligned.probability_of_success == pytest.approx(expected_success)
     assert aligned.probability_of_success != candidate.probability_of_success
-    final_qualification = next(
+    ranked = next(
         (
             item.qualification
             for item in prepared.queue.ranked
             if item.candidate.identifier == candidate.identifier
         ),
-        next(
-            item
-            for item in prepared.queue.rejected
-            if item.candidate_identifier == candidate.identifier
-        ),
+        None,
+    )
+    final_qualification = ranked or next(
+        item
+        for item in prepared.queue.rejected
+        if item.candidate_identifier == candidate.identifier
     )
     assert not any(
         "inconsistent with the disclosed scenarios" in reason
