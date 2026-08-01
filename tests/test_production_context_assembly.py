@@ -43,6 +43,10 @@ from opportunity import (
     OpportunityEngine,
     OpportunitySetContext,
 )
+from opportunity.snapshot import (
+    PUBLICATION_SNAPSHOT_KIND,
+    build_opportunity_snapshot,
+)
 from portfolio.state import (
     CanonicalPortfolioSnapshot,
     SQLiteCanonicalPortfolioStore,
@@ -216,12 +220,24 @@ def _persist_screening(
     store: SQLiteFullUniverseScreeningStore,
     candidate: CandidateDecisionRecord,
 ) -> FullUniverseScreeningPublication:
-    queue = OpportunityEngine().build_queue(
+    engine = OpportunityEngine()
+    context = _screening_context()
+    queue = engine.build_queue(
         (candidate,),
-        _screening_context(),
+        context,
+    )
+    publication_identifier = "publication:screening:production"
+    snapshot_payload = build_opportunity_snapshot(
+        snapshot_kind=PUBLICATION_SNAPSHOT_KIND,
+        context=context,
+        queue=queue,
+        engine=engine,
+        created_at=AS_OF,
+        code_version="commit:integration",
+        screening_publication_identifier=publication_identifier,
     )
     publication = FullUniverseScreeningPublication(
-        identifier="publication:screening:production",
+        identifier=publication_identifier,
         cycle_identifier="screening:production",
         published_at=datetime(2026, 7, 27, 11, 30, tzinfo=UTC),
         security_master_catalog_identifier="catalog:production",
@@ -234,10 +250,13 @@ def _persist_screening(
         excluded_count=0,
         candidate_payloads=(serialize_candidate_decision(candidate),),
         exclusions=(),
-        opportunity_queue_payload=serialize_opportunity_queue(
-            queue,
-            occurred_at=AS_OF,
-        ),
+        opportunity_queue_payload={
+            **serialize_opportunity_queue(
+                queue,
+                occurred_at=AS_OF,
+            ),
+            "opportunity_context_snapshot": snapshot_payload,
+        },
     )
     store.append(
         event_identifier="screening:production:start",
@@ -368,6 +387,7 @@ def test_persisted_authorities_complete_a_journaled_cio_cycle(
     assert {
         CIOJournalEventType.CANDIDATE_DECISION,
         CIOJournalEventType.OPPORTUNITY_QUEUE,
+        CIOJournalEventType.OPPORTUNITY_DECISION_SNAPSHOT,
         CIOJournalEventType.SPECIALIST_PACKET,
         CIOJournalEventType.CIO_DECISION,
         CIOJournalEventType.DECISION_EVIDENCE_SNAPSHOT,

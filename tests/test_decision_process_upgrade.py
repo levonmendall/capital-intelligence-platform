@@ -186,10 +186,20 @@ def test_forecast_abstention_lowers_coverage_without_creating_dissent() -> None:
     )
 
 
-def test_hysteresis_defers_first_buy_but_emergency_reduction_bypasses() -> None:
+def test_hysteresis_defers_two_cycle_buy_but_emergency_reduction_bypasses() -> None:
     candidate = _candidate("PERSIST")
-    qualification = OpportunityEngine().qualify(candidate, _context())
-    packet = _packet(candidate, duplicate_origins=False)
+    candidate = replace(
+        candidate,
+        instrument=replace(
+            candidate.instrument,
+            asset_class=CandidateAssetClass.US_ETF,
+            economic_exposure_class=CandidateAssetClass.CRYPTO,
+            replication_method="us-listed-economic-exposure-wrapper",
+        ),
+    )
+    cio = ChiefInvestmentOfficer()
+    profile = cio.policy_matrix.resolve(candidate)
+    assert profile.entry_persistence_cycles == 2
     prior = PriorDecisionContext(
         candidate_identifier=candidate.identifier,
         prior_decision_identifier="decision:prior",
@@ -199,24 +209,29 @@ def test_hysteresis_defers_first_buy_but_emergency_reduction_bypasses() -> None:
         thesis_state=ThesisState.CANDIDATE,
         consecutive_supportive_cycles=0,
     )
-    deferred = ChiefInvestmentOfficer().synthesize(
+    action, target, _reason, applied, cycles = cio._apply_hysteresis(
         candidate,
-        qualification.universe,
-        packet,
-        capital_comparison=qualification.capital_comparison,
+        action=CIOAction.BUY,
+        position_weight=0.03,
+        reason="Speculative wrapper clears the current-cycle decision gates.",
         prior_context=prior,
+        profile=profile,
+        progressive_lane=False,
+        emergency=False,
     )
-    assert deferred.action is CIOAction.WATCH
-    assert deferred.hysteresis_applied
+    assert action is CIOAction.WATCH
+    assert target is None
+    assert applied
+    assert cycles == 1
 
+    holding_base = _candidate("PERSIST-HOLDING")
     holding = replace(
-        candidate,
-        identifier="candidate:persist-holding",
+        holding_base,
         current_portfolio_weight=0.05,
         base_case_return=-0.15,
         bull_case_return=0.02,
         bear_case_return=-0.50,
-        estimated_fair_value=candidate.current_price * 0.85,
+        estimated_fair_value=holding_base.current_price * 0.85,
     )
     holding_packet = _packet(holding, duplicate_origins=False)
     holding_prior = replace(
