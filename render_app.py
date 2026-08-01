@@ -5,12 +5,20 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 import streamlit as st
 
 import app_impl
+import live_operating_console
+import operating_intelligence_ui
+from render_nonblocking_data import (
+    load_dashboard_data_nonblocking,
+    load_live_market_console_nonblocking,
+)
 from secure_app import DeploymentContext, create_streamlit_application
 
 
@@ -39,6 +47,17 @@ def _guarded_renderer(
 
     @functools.wraps(target, updated=())
     def guarded(*args: Any, **kwargs: Any) -> Any:
+        started_at = time.monotonic()
+        _LOGGER.info("primary Streamlit surface render started: %s", surface_name)
+        slow_warning = threading.Timer(
+            8.0,
+            lambda: _LOGGER.warning(
+                "primary Streamlit surface render is still running after 8 seconds: %s",
+                surface_name,
+            ),
+        )
+        slow_warning.daemon = True
+        slow_warning.start()
         try:
             return target(*args, **kwargs)
         except Exception as error:
@@ -54,12 +73,36 @@ def _guarded_renderer(
                 f"Surface: {surface_name} · Error class: {type(error).__name__}"
             )
             return None
+        finally:
+            slow_warning.cancel()
+            _LOGGER.info(
+                "primary Streamlit surface render completed: %s duration_seconds=%.3f",
+                surface_name,
+                time.monotonic() - started_at,
+            )
 
     guarded._capital_intelligence_guarded_surface = True  # type: ignore[attr-defined]
     guarded._capital_intelligence_fragment_removed = (  # type: ignore[attr-defined]
         target is not renderer
     )
     return guarded
+
+
+def prepare_render_data_runtime() -> None:
+    """Keep external provider latency out of the Streamlit presentation thread."""
+
+    # app_impl imported these callables directly, while the concise presentation
+    # resolves them through operating_intelligence_ui.  Patch both lookup paths,
+    # plus the live-console module used by collapsed detail panels.
+    app_impl.load_live_market_console = load_live_market_console_nonblocking
+    app_impl.load_dashboard_data = load_dashboard_data_nonblocking
+    operating_intelligence_ui.load_live_market_console = (
+        load_live_market_console_nonblocking
+    )
+    operating_intelligence_ui.load_dashboard_data = load_dashboard_data_nonblocking
+    live_operating_console.load_live_market_console = (
+        load_live_market_console_nonblocking
+    )
 
 
 def prepare_render_surface_runtime() -> None:
@@ -94,6 +137,7 @@ def deployment_context_from_environment() -> DeploymentContext:
 
 
 def main() -> None:
+    prepare_render_data_runtime()
     prepare_render_surface_runtime()
     create_streamlit_application(deployment=deployment_context_from_environment())
 
