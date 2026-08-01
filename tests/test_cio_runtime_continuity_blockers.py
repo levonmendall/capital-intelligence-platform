@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,7 @@ from application.cio_cycle import CanonicalCIOCycle
 from cio import CIOAction, ChiefInvestmentOfficer
 from cio.persistence import SQLiteCIOJournal
 from opportunity import AlternativeKind, OpportunityEngine
+from production_context_publication_runtime import prepare_production_context_for_cycle
 from screening import SQLiteFullUniverseScreeningStore
 from tests.test_canonical_cio_cycle import (
     _candidate as _cycle_candidate,
@@ -30,9 +32,6 @@ from tests.test_production_context_publication_runtime import (
     _readiness,
     _settings,
 )
-from production_context_publication_runtime import prepare_production_context_for_cycle
-from types import SimpleNamespace
-from datetime import datetime, timezone
 
 
 def _base_decision(candidate):
@@ -143,17 +142,17 @@ def test_runtime_context_reconstructs_persisted_competitive_alternatives(tmp_pat
     )
     assert result.ready
 
+    context = _provider(settings, tmp_path).load_context(as_of=decision_time)
     store = SQLiteFullUniverseScreeningStore(
         settings.full_universe_screening_database
     )
-    publication = store.publication(result.screening_cycle_identifier)
+    publication = store.publication(context.screening_cycle_identifier)
     assert publication is not None
     persisted = tuple(
         publication.opportunity_queue_payload[
             "candidate_alternative_identifiers"
         ]
     )
-    context = _provider(settings, tmp_path).load_context(as_of=decision_time)
     runtime = tuple(
         item.identifier
         for item in context.opportunity_context.alternatives
