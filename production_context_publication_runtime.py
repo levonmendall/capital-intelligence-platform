@@ -127,6 +127,7 @@ class ProductionContextPublicationResult:
     context_identifier: str | None = None
     instrument_count: int = 0
     candidate_count: int = 0
+    qualified_candidate_count: int = 0
     exclusion_count: int = 0
     paper_only: bool = True
     real_money_authorized: bool = False
@@ -149,6 +150,7 @@ class ProductionContextPublicationResult:
             "context_identifier": self.context_identifier,
             "instrument_count": self.instrument_count,
             "candidate_count": self.candidate_count,
+            "qualified_candidate_count": self.qualified_candidate_count,
             "exclusion_count": self.exclusion_count,
             "paper_only": True,
             "real_money_authorized": False,
@@ -281,6 +283,7 @@ def _reuse_if_complete(
         context_identifier=context_identifier,
         instrument_count=instrument_count,
         candidate_count=0,
+        qualified_candidate_count=0,
         exclusion_count=instrument_count,
     )
 
@@ -313,8 +316,6 @@ def _prepare_exclusion_only_production_context_for_cycle(
         )
         if reused is not None:
             return reused
-        # A partial publication cannot safely absorb later provider evidence under
-        # its original point-in-time boundary. Start a new immutable attempt.
         existing_state = None
 
     try:
@@ -635,6 +636,7 @@ def _prepare_exclusion_only_production_context_for_cycle(
         context_identifier=context_identifier,
         instrument_count=len(universe.instruments),
         candidate_count=0,
+        qualified_candidate_count=0,
         exclusion_count=len(universe.instruments),
     )
 
