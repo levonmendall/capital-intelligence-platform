@@ -14,6 +14,9 @@ from math import isfinite
 from portfolio.construction_models import PortfolioScenario
 
 
+_PROBABILITY_SCALE = 100_000_000
+
+
 def _text(value: object, *, name: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a string")
@@ -48,6 +51,39 @@ def _number(
     if maximum is not None and normalized > maximum:
         raise ValueError(f"{name} must be at most {maximum}")
     return round(normalized, 10)
+
+
+def _construction_probabilities(
+    scenarios: tuple["GovernedPortfolioScenario", ...],
+) -> tuple[float, ...]:
+    """Translate probabilities to construction precision without exceeding one.
+
+    Construction contracts retain eight decimal places. Independently rounding
+    every state can make a mathematically valid distribution total slightly more
+    than one, which can in turn produce an impossible probability above 100%.
+    Preserve the original proportions and remove only the rounding excess from
+    the final positive states. A one-unit safety margin is used only when binary
+    addition would otherwise exceed one after eight-decimal conversion.
+    """
+
+    units = [
+        max(0, int(round(item.probability * _PROBABILITY_SCALE)))
+        for item in scenarios
+    ]
+    values = [unit / _PROBABILITY_SCALE for unit in units]
+    total_units = sum(units)
+    if total_units > _PROBABILITY_SCALE or sum(values) > 1.0:
+        target = _PROBABILITY_SCALE - 1
+        excess = total_units - target
+        for index in range(len(units) - 1, -1, -1):
+            if excess <= 0:
+                break
+            reduction = min(units[index], excess)
+            units[index] -= reduction
+            excess -= reduction
+        if excess:
+            raise ValueError("construction scenario probabilities cannot be normalized")
+    return tuple(unit / _PROBABILITY_SCALE for unit in units)
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,10 +211,11 @@ class GovernedPortfolioScenarioSet:
     ) -> tuple[PortfolioScenario, ...]:
         expected = self._requested_symbols(symbols)
         self.validate_coverage(expected)
+        probabilities = _construction_probabilities(self.scenarios)
         return tuple(
             PortfolioScenario(
                 name=item.name,
-                probability=item.probability,
+                probability=probability,
                 cash_return=item.cash_return,
                 asset_returns=tuple(
                     (symbol, value)
@@ -186,7 +223,11 @@ class GovernedPortfolioScenarioSet:
                     if symbol in expected
                 ),
             )
-            for item in self.scenarios
+            for item, probability in zip(
+                self.scenarios,
+                probabilities,
+                strict=True,
+            )
         )
 
 
