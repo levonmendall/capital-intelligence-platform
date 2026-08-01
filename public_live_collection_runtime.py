@@ -1,10 +1,10 @@
-"""Persist public live-information evidence in the operating application runtime.
+"""Persist educational public live information for the operating application.
 
 The GitHub workflow remains an independent hourly observability check. This module
-ensures the Streamlit/headless paper operator writes the same credential-safe
-reports into the persistent application data volume before the CIO cycle runs.
-Temporary upstream outages are recorded as degraded evidence; they do not become
-available evidence and do not by themselves stop paper operation.
+writes credential-safe reports into the persistent application data volume for the
+daily explanatory experience. The collection has no candidate, ranking, sizing,
+portfolio, execution, or CIO authority. Canonical decision evidence remains governed
+by the production-context publication boundary.
 """
 
 from __future__ import annotations
@@ -51,6 +51,11 @@ class PublicLiveCollectionResult:
             "next_due_at": (
                 self.next_due_at.isoformat() if self.next_due_at is not None else None
             ),
+            "decision_evidence_authority": False,
+            "candidate_authority": False,
+            "ranking_authority": False,
+            "sizing_authority": False,
+            "execution_authority": False,
             "full_article_text_stored": False,
             "secret_values_disclosed": False,
             "real_money_authorized": False,
@@ -262,6 +267,7 @@ def collect_public_live_information_if_due(
             "report_path": str(report_path),
             "records_path": str(records_path),
             "interval_seconds": int(interval.total_seconds()),
+            "decision_evidence_authority": False,
             "real_money_authorized": False,
         }
         _write_json(state_path, attempted_payload)
@@ -274,12 +280,16 @@ def collect_public_live_information_if_due(
             catalog = load_public_live_source_catalog(catalog_path)
             factory = provider_factory or ImpactfulPublicLiveInformationProvider
             report = factory(catalog).collect(include_optional=True)
-            report_payload = report.to_dict(include_records=False)
+            report_payload = {
+                **report.to_dict(include_records=False),
+                "decision_evidence_authority": False,
+            }
             records_payload = {
                 "schema_version": "public-live-information-record-set.v1",
                 "catalog_identifier": report.catalog_identifier,
                 "evaluated_at": report.evaluated_at.isoformat(),
                 "records": [item.to_dict() for item in report.records],
+                "decision_evidence_authority": False,
                 "full_article_text_stored": False,
                 "secret_values_disclosed": False,
                 "real_money_authorized": False,
@@ -294,20 +304,24 @@ def collect_public_live_information_if_due(
                 exit_code = 3
                 state = "degraded"
                 detail = (
-                    "One or more required public sources were unavailable; exact "
-                    "failures are persisted and cannot support a CIO decision."
+                    "One or more sources required for complete educational coverage "
+                    "were unavailable. Exact failures are persisted; this collection "
+                    "is not canonical decision evidence and cannot independently "
+                    "authorize or block a CIO decision."
                 )
             elif failed_source_count:
                 exit_code = 2
                 state = "degraded"
                 detail = (
-                    "Required public sources are available, but one or more optional "
-                    "sources were unavailable."
+                    "Educational coverage is available, but one or more optional "
+                    "public sources were unavailable."
                 )
             else:
                 exit_code = 0
                 state = "available"
-                detail = "Runtime public live-information collection completed."
+                detail = (
+                    "Runtime educational public live-information collection completed."
+                )
 
             completed_at = _aware_utc(report.evaluated_at)
             next_due_at = completed_at + interval
@@ -327,6 +341,7 @@ def collect_public_live_information_if_due(
                 "report_path": str(report_path),
                 "records_path": str(records_path),
                 "interval_seconds": int(interval.total_seconds()),
+                "decision_evidence_authority": False,
                 "full_article_text_stored": False,
                 "secret_values_disclosed": False,
                 "real_money_authorized": False,
@@ -359,6 +374,7 @@ def collect_public_live_information_if_due(
                     "report_path": str(report_path),
                     "records_path": str(records_path),
                     "interval_seconds": int(interval.total_seconds()),
+                    "decision_evidence_authority": False,
                     "secret_values_disclosed": False,
                     "real_money_authorized": False,
                 },
