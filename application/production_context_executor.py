@@ -14,7 +14,25 @@ from screening import candidate_from_payload
 _AUTHORITY_BINDING_LOCK = threading.RLock()
 
 
-def _candidate_authority_universe(executor, *, as_of: datetime):
+class _CachedContextProvider:
+    """Return one already-loaded immutable context to the parent executor."""
+
+    def __init__(self, delegate, context, *, as_of: datetime) -> None:
+        self._delegate = delegate
+        self._context = context
+        self._as_of = as_of
+
+    @property
+    def code_version(self):
+        return getattr(self._delegate, "code_version", None)
+
+    def load_context(self, *, as_of: datetime):
+        if as_of != self._as_of:
+            raise ValueError("cached production context requested for another timestamp")
+        return self._context
+
+
+def _candidate_authority_universe(executor, *, context):
     """Build the exact authority view consumed by runtime requalification.
 
     The completed screening publication already contains immutable candidate
@@ -25,7 +43,6 @@ def _candidate_authority_universe(executor, *, as_of: datetime):
     structural placeholder.
     """
 
-    context = executor.context_provider.load_context(as_of=as_of)
     publication = executor.screening_store.publication(
         context.screening_cycle_identifier
     )
@@ -65,7 +82,12 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
     """Execute with authority derived from the exact certified candidate records."""
 
     def run(self, *, as_of: datetime):
-        authority_universe = _candidate_authority_universe(self, as_of=as_of)
+        # Load the immutable context exactly once. The parent executor receives a
+        # timestamp-bound cache and still performs all publication, snapshot,
+        # ranking, manifest, portfolio, and journal integrity checks.
+        original_provider = self.context_provider
+        context = original_provider.load_context(as_of=as_of)
+        authority_universe = _candidate_authority_universe(self, context=context)
         publication_identifier = authority_universe.identifier
 
         def load_exact_authority(requested_identifier: str):
@@ -76,14 +98,20 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
             return authority_universe
 
         # The parent contract owns every other integrity check. The lock keeps
-        # this narrow dependency injection process-local and deterministic.
+        # both narrow dependency injections process-local and deterministic.
         with _AUTHORITY_BINDING_LOCK:
-            original = contract.load_active_paper_universe_for_publication
+            original_loader = contract.load_active_paper_universe_for_publication
             contract.load_active_paper_universe_for_publication = load_exact_authority
+            self.context_provider = _CachedContextProvider(
+                original_provider,
+                context,
+                as_of=as_of,
+            )
             try:
                 return super().run(as_of=as_of)
             finally:
-                contract.load_active_paper_universe_for_publication = original
+                self.context_provider = original_provider
+                contract.load_active_paper_universe_for_publication = original_loader
 
 
 __all__ = ["ProductionCanonicalCIOExecutor"]
