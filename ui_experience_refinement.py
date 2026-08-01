@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from html import escape
 from types import ModuleType
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
 
@@ -137,6 +137,113 @@ div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) .nav-brand-mark {
     line-height: 1.38;
 }
 
+/* Each portfolio-lens row is now its own collapsed control. The icon sits
+   inside the clickable summary so tapping either the icon or copy expands the
+   information in its proper section. */
+.interactive-lens-head {
+    margin: .3rem 0 .44rem;
+    padding: 1rem 1.08rem .94rem;
+    border: 1px solid rgba(var(--surface-rgb), .2);
+    border-radius: 1rem;
+    background: linear-gradient(145deg, rgba(10, 16, 28, .96), rgba(8, 13, 24, .94));
+    box-shadow: 0 18px 42px rgba(0, 0, 0, .24);
+}
+
+.interactive-lens-kicker {
+    color: var(--surface-accent);
+    font-size: .66rem;
+    line-height: 1.2;
+    font-weight: 820;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+}
+
+.interactive-lens-title {
+    margin-top: .52rem;
+    color: #f4f8ff;
+    font-size: 1.08rem;
+    line-height: 1.25;
+    font-weight: 760;
+    letter-spacing: -.018em;
+}
+
+.interactive-lens-hint {
+    margin-top: .32rem;
+    color: #8292a8;
+    font-size: .72rem;
+    line-height: 1.42;
+}
+
+div[data-testid="stExpander"]:has(.interactive-lens-marker) {
+    margin: .36rem 0 !important;
+    border: 1px solid rgba(138, 157, 188, .18) !important;
+    border-radius: .92rem !important;
+    background: linear-gradient(135deg, rgba(13, 20, 34, .9), rgba(8, 14, 25, .9)) !important;
+    overflow: hidden !important;
+    box-shadow: none !important;
+}
+
+div[data-testid="stExpander"]:has(.interactive-lens-marker) summary {
+    min-height: 4.72rem !important;
+    padding: .68rem .82rem !important;
+    display: grid !important;
+    grid-template-columns: 2.7rem minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    gap: .78rem !important;
+}
+
+div[data-testid="stExpander"]:has(.interactive-lens-marker) summary::before {
+    content: "↗";
+    width: 2.5rem;
+    height: 2.5rem;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(var(--surface-rgb), .3);
+    border-radius: .78rem;
+    background: linear-gradient(145deg, rgba(var(--surface-rgb), .14), rgba(var(--surface-rgb-2), .08));
+    color: var(--surface-accent);
+    font-size: 1rem;
+    font-weight: 760;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05), 0 0 22px rgba(var(--surface-rgb), .06);
+}
+
+div[data-testid="stExpander"]:has(.lens-section-investors) summary::before {
+    content: "◎";
+}
+
+div[data-testid="stExpander"]:has(.lens-section-portfolio) summary::before {
+    content: "⌂";
+}
+
+div[data-testid="stExpander"]:has(.lens-section-cio) summary::before {
+    content: "✓";
+}
+
+div[data-testid="stExpander"]:has(.lens-section-watch) summary::before {
+    content: "↗";
+}
+
+div[data-testid="stExpander"]:has(.interactive-lens-marker) summary p {
+    margin: 0 !important;
+    color: #aebbd0 !important;
+    font-size: .88rem !important;
+    line-height: 1.45 !important;
+    font-weight: 650 !important;
+}
+
+div[data-testid="stExpander"]:has(.interactive-lens-marker)[open] {
+    border-color: rgba(var(--surface-rgb), .3) !important;
+    background: linear-gradient(135deg, rgba(var(--surface-rgb), .075), rgba(8, 14, 25, .94)) !important;
+}
+
+div[data-testid="stExpander"]:has(.interactive-lens-marker) [data-testid="stExpanderDetails"] {
+    padding: 0 .98rem .96rem 4.25rem !important;
+}
+
+.interactive-lens-marker {
+    display: none;
+}
+
 @media (max-width: 760px) {
     .block-container,
     [data-testid="stMainBlockContainer"] {
@@ -181,6 +288,37 @@ div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) .nav-brand-mark {
     .information-health-summary {
         font-size: .66rem;
     }
+
+    .interactive-lens-head {
+        padding: .88rem .9rem .82rem;
+        border-radius: .92rem;
+    }
+
+    .interactive-lens-title {
+        font-size: 1rem;
+    }
+
+    div[data-testid="stExpander"]:has(.interactive-lens-marker) summary {
+        min-height: 4.45rem !important;
+        grid-template-columns: 2.45rem minmax(0, 1fr) auto !important;
+        gap: .62rem !important;
+        padding: .62rem .68rem !important;
+    }
+
+    div[data-testid="stExpander"]:has(.interactive-lens-marker) summary::before {
+        width: 2.3rem;
+        height: 2.3rem;
+        border-radius: .7rem;
+    }
+
+    div[data-testid="stExpander"]:has(.interactive-lens-marker) summary p {
+        font-size: .82rem !important;
+        line-height: 1.42 !important;
+    }
+
+    div[data-testid="stExpander"]:has(.interactive-lens-marker) [data-testid="stExpanderDetails"] {
+        padding: 0 .76rem .82rem .76rem !important;
+    }
 }
 </style>
 """
@@ -212,6 +350,78 @@ def _freshness_tone(entries: Sequence[object]) -> tuple[str, str]:
     if refreshing:
         return "refreshing", "Information refresh is in progress"
     return "current", "Information is current"
+
+
+def _section_label(label: str, summary: object) -> str:
+    headline = concise._truncate(summary, 118)
+    return label.upper() if not headline else f"{label.upper()} · {headline}"
+
+
+def _render_interactive_lens(
+    *,
+    title: str,
+    variant: str,
+    sections: Sequence[
+        tuple[str, str, object, Callable[[], None] | None]
+    ],
+) -> None:
+    profile = concise.ui.surface_profile(variant.title())
+    st.markdown(
+        '<div class="interactive-lens-head">'
+        f'<div class="interactive-lens-kicker">{escape(profile.kicker)} // portfolio lens</div>'
+        f'<div class="interactive-lens-title">{escape(title)}</div>'
+        '<div class="interactive-lens-hint">Tap a section icon or headline to expand its context.</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    for marker_class, label, summary, detail_renderer in sections:
+        with st.expander(_section_label(label, summary), expanded=False):
+            st.markdown(
+                f'<span class="interactive-lens-marker {escape(marker_class)}" aria-hidden="true"></span>',
+                unsafe_allow_html=True,
+            )
+            st.write(concise._clean(summary) or "No additional detail is available.")
+            if detail_renderer is not None:
+                detail_renderer()
+
+
+def _render_event_field_details(
+    items: Sequence[object],
+    records: Sequence[Mapping[str, Any]],
+    *,
+    field_name: str,
+    empty_message: str,
+    include_sources: bool = False,
+) -> None:
+    if not items:
+        st.caption(empty_message)
+        return
+    for index, item in enumerate(items, start=1):
+        title = concise._clean(getattr(item, "title", "Market development"))
+        detail = concise._clean(getattr(item, field_name, ""))
+        st.markdown(f"**{index}. {title}**")
+        st.write(detail or "No additional detail is available.")
+        if include_sources:
+            record = concise.base._matching_record(item, records)
+            source_url = (
+                concise.base._record_source_url(record)
+                if isinstance(record, Mapping)
+                else None
+            )
+            published_at = getattr(item, "published_at", None)
+            published = (
+                published_at.strftime("%b %d · %H:%M UTC")
+                if hasattr(published_at, "strftime")
+                else "time unavailable"
+            )
+            st.caption(
+                f"{concise._clean(getattr(item, 'source_type', 'Public'))} source: "
+                f"{concise._clean(getattr(item, 'source', 'Unknown'))} · Published {published}"
+            )
+            if source_url is not None:
+                st.markdown(f"[Read original source]({source_url})")
+        if index != len(items):
+            st.divider()
 
 
 def render_information_freshness(
@@ -262,11 +472,118 @@ def render_information_freshness(
         )
 
 
+def render_today_market_brief(
+    *,
+    briefing: Mapping[str, Any] | None = None,
+) -> None:
+    """Render the daily lens as five independently expandable sections."""
+
+    snapshot = concise.base.load_public_event_snapshot()
+    records = tuple(
+        item for item in snapshot.records if isinstance(item, Mapping)
+    )
+    items = concise.base.build_today_items(records)
+    portfolio_impact = concise._briefing_value(
+        briefing,
+        "why_it_matters",
+        concise._event_portfolio_fallback(items),
+        limit=210,
+    )
+    action = concise._briefing_value(
+        briefing,
+        "portfolio_decision",
+        "No portfolio change is authorized from these developments alone.",
+        limit=150,
+    )
+    concise.ui.page_header(
+        "Investment world today",
+        "The few daily developments that matter, explained through their investment and portfolio effect.",
+        "NOW",
+    )
+    event_headline = concise._event_headline(items)
+    investor_lesson = concise._daily_investor_lesson(items)
+    watchlist = concise._event_watchlist(items)
+
+    def render_cio_detail() -> None:
+        st.caption(
+            f"Decision reference: {concise._decision_reference(briefing)}. "
+            "Daily information can inform the CIO process but cannot independently authorize a portfolio change."
+        )
+
+    _render_interactive_lens(
+        title="Daily investment synopsis",
+        variant="today",
+        sections=(
+            (
+                "lens-section-change",
+                "What changed",
+                event_headline,
+                lambda: _render_event_field_details(
+                    items,
+                    records,
+                    field_name="summary",
+                    empty_message=snapshot.detail,
+                    include_sources=True,
+                ),
+            ),
+            (
+                "lens-section-investors",
+                "Why investors care",
+                investor_lesson,
+                lambda: _render_event_field_details(
+                    items,
+                    records,
+                    field_name="affected_investments",
+                    empty_message=(
+                        "No additional investment-transmission detail is available for this period."
+                    ),
+                ),
+            ),
+            (
+                "lens-section-portfolio",
+                "Portfolio effect",
+                portfolio_impact,
+                lambda: _render_event_field_details(
+                    items,
+                    records,
+                    field_name="portfolio_lens",
+                    empty_message=(
+                        "The current information does not independently justify changing the portfolio."
+                    ),
+                ),
+            ),
+            (
+                "lens-section-cio",
+                "CIO response",
+                action,
+                render_cio_detail,
+            ),
+            (
+                "lens-section-watch",
+                "What to watch next",
+                watchlist,
+                lambda: _render_event_field_details(
+                    items,
+                    records,
+                    field_name="what_to_watch",
+                    empty_message=(
+                        "Watch rates, earnings expectations, liquidity, and cross-asset confirmation."
+                    ),
+                ),
+            ),
+        ),
+    )
+    st.caption(
+        concise.base._daily_caption(snapshot)
+        + " Educational context only; headlines cannot alter the CIO conclusion or authorize a paper trade."
+    )
+
+
 def render_environment_economic_brief(
     *,
     briefing: Mapping[str, Any] | None = None,
 ) -> None:
-    """Render the economic synopsis without repeating the macro metric grid."""
+    """Render the economic synopsis as five independently expandable sections."""
 
     snapshot = concise.base.load_public_event_snapshot()
     records = tuple(
@@ -302,37 +619,86 @@ def render_environment_economic_brief(
     )
     economic_lesson = concise._economic_investor_lesson(readings)
     watchlist = concise._event_watchlist(items)
-    concise.ui.investment_lens_card(
-        title="Economic synopsis",
-        what_changed=concise._economic_headline(readings),
-        why_investors_care=economic_lesson,
-        portfolio_effect=portfolio_impact,
-        cio_response=action,
-        watch_next=watchlist,
-        variant="environment",
-    )
-    with st.expander("Explore the economic investment context", expanded=False):
-        concise._render_lens_context(
-            what_changed=economic_picture,
-            why_investors_care=economic_lesson,
-            portfolio_effect=portfolio_impact,
-            cio_response=action,
-            watch_next=watchlist,
+
+    def render_economic_change_detail() -> None:
+        st.write(economic_picture)
+        _render_event_field_details(
+            items,
+            records,
+            field_name="summary",
+            empty_message=snapshot.detail,
+            include_sources=True,
         )
-        st.divider()
-        st.markdown("#### How the economy reaches investments")
-        for title, explanation in concise.base.economic_investment_implications(
+
+    def render_economic_transmission_detail() -> None:
+        implications = concise.base.economic_investment_implications(
             dashboard.readings
-        ):
+        )
+        if not implications:
+            st.caption("No additional economic-transmission detail is available.")
+            return
+        for index, (title, explanation) in enumerate(implications):
             st.markdown(f"**{title}**")
             st.write(explanation)
-        if items:
-            st.divider()
-            st.markdown("#### Recent economic and policy developments")
-            concise._render_event_detail(items, records, briefing)
-        else:
-            st.caption(snapshot.detail)
-        st.caption(f"Portfolio impact: {portfolio_impact} · CIO action: {action}")
+            if index != len(implications) - 1:
+                st.divider()
+
+    def render_portfolio_detail() -> None:
+        if portfolio_fallback != portfolio_impact:
+            st.caption(f"Economic portfolio lens: {portfolio_fallback}")
+        st.caption(
+            "Economic evidence reaches the portfolio only through the governed specialist, CIO, and construction process."
+        )
+
+    def render_cio_detail() -> None:
+        st.caption(
+            f"Decision reference: {concise._decision_reference(briefing)}. "
+            "The economic reading cannot independently authorize a trade."
+        )
+
+    _render_interactive_lens(
+        title="Economic synopsis",
+        variant="environment",
+        sections=(
+            (
+                "lens-section-change",
+                "What changed",
+                concise._economic_headline(readings),
+                render_economic_change_detail,
+            ),
+            (
+                "lens-section-investors",
+                "Why investors care",
+                economic_lesson,
+                render_economic_transmission_detail,
+            ),
+            (
+                "lens-section-portfolio",
+                "Portfolio effect",
+                portfolio_impact,
+                render_portfolio_detail,
+            ),
+            (
+                "lens-section-cio",
+                "CIO response",
+                action,
+                render_cio_detail,
+            ),
+            (
+                "lens-section-watch",
+                "What to watch next",
+                watchlist,
+                lambda: _render_event_field_details(
+                    items,
+                    records,
+                    field_name="what_to_watch",
+                    empty_message=(
+                        "Watch growth, inflation, policy rates, yields, liquidity, and earnings confirmation."
+                    ),
+                ),
+            ),
+        ),
+    )
     st.caption(
         concise.base._daily_caption(snapshot)
         + f" Economic readings: {dashboard.data_source}. Educational interpretation only; "
@@ -354,6 +720,7 @@ def install(app_impl: ModuleType) -> None:
 
     app_impl.apply_global_style = apply_global_style
     app_impl.render_information_freshness = render_information_freshness
+    app_impl.render_today_market_brief = render_today_market_brief
     app_impl.render_environment_economic_brief = render_environment_economic_brief
     setattr(app_impl, _INSTALLED_STATE_KEY, True)
 
@@ -362,4 +729,5 @@ __all__ = [
     "install",
     "render_environment_economic_brief",
     "render_information_freshness",
+    "render_today_market_brief",
 ]
