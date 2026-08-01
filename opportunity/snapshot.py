@@ -74,7 +74,7 @@ def _code_version(value: str | None) -> str:
     return _required_text(
         value
         or os.getenv("CAPITAL_INTELLIGENCE_CODE_VERSION")
-        or os.getenv("GITHUB_SHA")
+        or os.getenv("RENDER_GIT_COMMIT")
         or "unknown",
         field_name="code_version",
     )

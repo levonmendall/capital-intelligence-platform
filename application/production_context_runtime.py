@@ -26,8 +26,10 @@ from cio import CandidateAssetClass
 from opportunity import (
     AlternativeKind,
     AlternativeUse,
-    OpportunityEngine,
-    OpportunitySetContext,
+)
+from opportunity.snapshot import (
+    PUBLICATION_SNAPSHOT_KIND,
+    load_opportunity_snapshot,
 )
 from portfolio.state import SQLiteCanonicalPortfolioStore
 from screening import (
@@ -217,7 +219,7 @@ class RepositoryProductionCanonicalCIOContextProvider(_StoredContextProvider):
             exposure_profiles=exposure_profiles,
         )
 
-        alternatives: list[AlternativeUse] = [
+        expected_baseline = (
             AlternativeUse(
                 identifier="cash",
                 kind=AlternativeKind.CASH,
@@ -226,85 +228,80 @@ class RepositoryProductionCanonicalCIOContextProvider(_StoredContextProvider):
                 evidence_quality=evidence.cash_evidence_quality,
                 liquidity_score=evidence.cash_liquidity_score,
                 current_weight=cash_weight,
-            )
-        ]
-        alternatives.extend(
-            AlternativeUse(
-                identifier=f"holding:{position.symbol}",
-                kind=AlternativeKind.CURRENT_HOLDING,
-                expected_return=holding_context[position.symbol].expected_return,
-                implementation_cost_return=(
-                    holding_context[position.symbol].implementation_cost_return
-                ),
-                evidence_quality=holding_context[
-                    position.symbol
-                ].evidence_quality,
-                liquidity_score=holding_context[position.symbol].liquidity_score,
-                current_weight=round(
-                    position.market_value / portfolio_snapshot.nav,
-                    8,
-                ),
-            )
-            for position in portfolio_snapshot.positions
-        )
-        raw_candidate_alternatives = publication.opportunity_queue_payload.get(
-            "candidate_alternative_identifiers"
-        )
-        if raw_candidate_alternatives is None:
-            candidate_alternative_ids = tuple(
-                identifier
-                for identifier in qualified_ids
-                if candidate_map[identifier].current_portfolio_weight <= 0.0
-            )
-        else:
-            if not isinstance(raw_candidate_alternatives, (list, tuple)):
-                raise ProductionContextError(
-                    "persisted candidate alternative identifiers must be a sequence"
-                )
-            candidate_alternative_ids = tuple(
-                _text(item, field_name="candidate alternative identifier")
-                for item in raw_candidate_alternatives
-            )
-        if len(candidate_alternative_ids) != len(set(candidate_alternative_ids)):
-            raise ProductionContextError(
-                "persisted candidate alternative identifiers contain duplicates"
-            )
-        if not set(candidate_alternative_ids).issubset(candidate_map):
-            raise ProductionContextError(
-                "persisted candidate alternatives reference unknown candidates"
-            )
-        baseline_context = OpportunitySetContext(
-            identifier=publication.opportunity_context_identifier,
-            as_of=decision_time,
-            alternatives=tuple(alternatives),
-        )
-        comparison_engine = OpportunityEngine()
-        for candidate_identifier in candidate_alternative_ids:
-            candidate = candidate_map[candidate_identifier]
-            if candidate.current_portfolio_weight > 0.0:
-                raise ProductionContextError(
-                    "a current holding cannot be duplicated as a candidate alternative"
-                )
-            assessment = comparison_engine.robustness(
-                candidate,
-                baseline_context,
-            )
-            alternatives.append(
+            ),
+            *tuple(
                 AlternativeUse(
-                    identifier=candidate_identifier,
-                    kind=AlternativeKind.QUALIFIED_CANDIDATE,
-                    expected_return=assessment.evidence_adjusted_return,
-                    implementation_cost_return=0.0,
-                    evidence_quality=1.0,
-                    liquidity_score=1.0,
-                    current_weight=0.0,
+                    identifier=f"holding:{position.symbol}",
+                    kind=AlternativeKind.CURRENT_HOLDING,
+                    expected_return=holding_context[position.symbol].expected_return,
+                    implementation_cost_return=(
+                        holding_context[position.symbol].implementation_cost_return
+                    ),
+                    evidence_quality=holding_context[
+                        position.symbol
+                    ].evidence_quality,
+                    liquidity_score=holding_context[position.symbol].liquidity_score,
+                    current_weight=round(
+                        position.market_value / portfolio_snapshot.nav,
+                        8,
+                    ),
                 )
-            )
-        opportunity_context = OpportunitySetContext(
-            identifier=publication.opportunity_context_identifier,
-            as_of=decision_time,
-            alternatives=tuple(alternatives),
+                for position in portfolio_snapshot.positions
+            ),
         )
+        raw_snapshot = publication.opportunity_queue_payload.get(
+            "opportunity_context_snapshot"
+        )
+        if not isinstance(raw_snapshot, dict):
+            raise ProductionContextError(
+                "screening publication lacks an exact immutable opportunity snapshot"
+            )
+        try:
+            publication_snapshot = load_opportunity_snapshot(
+                raw_snapshot,
+                candidates=candidate_map,
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ProductionContextError(
+                f"immutable opportunity snapshot is invalid: {error}"
+            ) from error
+        if publication_snapshot.snapshot_kind != PUBLICATION_SNAPSHOT_KIND:
+            raise ProductionContextError(
+                "screening publication contains the wrong opportunity snapshot kind"
+            )
+        if (
+            publication_snapshot.screening_publication_identifier
+            != publication.identifier
+        ):
+            raise ProductionContextError(
+                "opportunity snapshot does not belong to the screening publication"
+            )
+        if (
+            publication_snapshot.context.identifier
+            != publication.opportunity_context_identifier
+            or publication_snapshot.context.as_of != decision_time
+        ):
+            raise ProductionContextError(
+                "opportunity snapshot does not match the production cycle boundary"
+            )
+        snapshot_baseline = tuple(
+            item
+            for item in publication_snapshot.context.alternatives
+            if item.kind is not AlternativeKind.QUALIFIED_CANDIDATE
+        )
+        if snapshot_baseline != expected_baseline:
+            raise ProductionContextError(
+                "opportunity snapshot baseline differs from exact portfolio evidence"
+            )
+        snapshot_qualified = tuple(
+            item.candidate.identifier
+            for item in publication_snapshot.queue.ranked
+        )
+        if snapshot_qualified != qualified_ids:
+            raise ProductionContextError(
+                "opportunity snapshot queue differs from the published qualified order"
+            )
+        opportunity_context = publication_snapshot.context
         manifest = self._manifest(
             evidence=evidence,
             publication_identifier=publication.identifier,
@@ -319,6 +316,12 @@ class RepositoryProductionCanonicalCIOContextProvider(_StoredContextProvider):
             portfolio=portfolio,
             code_version=self.code_version,
             manifest=manifest,
+            opportunity_snapshot_hash=(
+                publication_snapshot.content_hash
+            ),
+            publication_code_version=(
+                publication_snapshot.code_version
+            ),
         )
 
 

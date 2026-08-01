@@ -40,15 +40,29 @@ def _decision(candidate, *, prior_context=None, analysis_lane="acquisition"):
     )
 
 
+def _hysteresis(candidate, *, progressive_lane=False, prior_context=None):
+    cio = ChiefInvestmentOfficer()
+    return cio._apply_hysteresis(
+        candidate,
+        action=CIOAction.BUY,
+        position_weight=0.03,
+        reason="Candidate qualifies for acquisition.",
+        prior_context=prior_context,
+        profile=cio.policy_matrix.resolve(candidate),
+        progressive_lane=progressive_lane,
+        emergency=False,
+    )
+
+
 def test_standard_first_cycle_entry_follows_one_cycle_policy() -> None:
     candidate = _candidate("STANDARD")
 
-    decision = _decision(candidate)
+    action, target, _reason, applied, cycles = _hysteresis(candidate)
 
-    assert decision.action is CIOAction.BUY
-    assert decision.persistence_cycles == 1
-    assert not decision.hysteresis_applied
-    assert decision.deferred_action is None
+    assert action is CIOAction.BUY
+    assert target == pytest.approx(0.03)
+    assert cycles == 1
+    assert not applied
 
 
 def test_speculative_first_cycle_entry_honors_two_cycle_policy() -> None:
@@ -62,29 +76,32 @@ def test_speculative_first_cycle_entry_honors_two_cycle_policy() -> None:
         ),
     )
 
-    first = _decision(candidate)
+    action, target, _reason, applied, cycles = _hysteresis(candidate)
 
-    assert first.action is CIOAction.WATCH
-    assert first.hysteresis_applied
-    assert first.deferred_action is CIOAction.BUY
-    assert first.persistence_cycles == 1
+    assert action is CIOAction.WATCH
+    assert target is None
+    assert applied
+    assert cycles == 1
 
     prior = PriorDecisionContext(
         candidate_identifier=candidate.identifier,
-        prior_decision_identifier=first.identifier,
-        prior_action=first.action,
+        prior_decision_identifier="cio-decision:prior",
+        prior_action=CIOAction.WATCH,
         prior_target_weight=None,
         decided_at=candidate.as_of - timedelta(days=1),
         thesis_state=ThesisState.CANDIDATE,
         consecutive_supportive_cycles=1,
         consecutive_opposing_cycles=0,
     )
-    second = _decision(candidate, prior_context=prior)
+    action, target, _reason, applied, cycles = _hysteresis(
+        candidate,
+        prior_context=prior,
+    )
 
-    assert second.action is CIOAction.BUY
-    assert not second.hysteresis_applied
-    assert second.deferred_action is None
-    assert second.persistence_cycles == 2
+    assert action is CIOAction.BUY
+    assert target == pytest.approx(0.03)
+    assert not applied
+    assert cycles == 2
 
 
 def test_progressive_lane_remains_immediate_and_risk_capped() -> None:
@@ -98,12 +115,15 @@ def test_progressive_lane_remains_immediate_and_risk_capped() -> None:
         ),
     )
 
-    decision = _decision(candidate, analysis_lane="participation")
+    action, target, _reason, applied, cycles = _hysteresis(
+        candidate,
+        progressive_lane=True,
+    )
 
-    assert decision.action in {CIOAction.BUY, CIOAction.WATCH}
-    if decision.action is CIOAction.BUY:
-        assert not decision.hysteresis_applied
-        assert decision.persistence_cycles == 1
+    assert action is CIOAction.BUY
+    assert target == pytest.approx(0.03)
+    assert not applied
+    assert cycles == 1
 
 
 def test_opportunity_snapshot_round_trip_is_exact_and_hash_guarded() -> None:

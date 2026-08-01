@@ -47,7 +47,10 @@ def test_production_publication_and_cio_consume_hash_guarded_snapshots(tmp_path)
     screening = SQLiteFullUniverseScreeningStore(
         settings.full_universe_screening_database
     )
-    publication = screening.publication(result.screening_cycle_identifier)
+    screening_cycle_identifier = result.screening_publication_identifier.replace(
+        "publication:", "screening:", 1
+    )
+    publication = screening.publication(screening_cycle_identifier)
     assert publication is not None
     candidates = tuple(
         candidate_from_payload(payload) for payload in publication.candidate_payloads
@@ -70,7 +73,7 @@ def test_production_publication_and_cio_consume_hash_guarded_snapshots(tmp_path)
     cycle_result = _executor(settings, tmp_path).run(as_of=decision_time)
     journal = SQLiteCIOJournal(settings.journal_database)
     event = journal.latest(
-        aggregate_identifier=result.screening_cycle_identifier,
+        aggregate_identifier=screening_cycle_identifier,
         event_type=CIOJournalEventType.OPPORTUNITY_DECISION_SNAPSHOT,
     )
     assert event is not None
