@@ -1,0 +1,1 @@
+Trigger the resolved CIO integration after the canonical market authority controller was merged to main.
