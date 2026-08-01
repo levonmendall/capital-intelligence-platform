@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import app_impl
+import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
 import secure_app
 import ui_experience_refinement
@@ -14,6 +15,7 @@ def main() -> None:
     opportunity_scan_resilience.install()
     ui_refinement.install(app_impl, secure_app)
     ui_experience_refinement.install(app_impl)
+    opportunity_funnel_ui_refinement.install(app_impl)
     create_streamlit_application()
 
 
