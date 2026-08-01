@@ -193,7 +193,14 @@ class IndependentSpecialistService(_IndependentSpecialistService):
             reasons.append(reason)
             categories.append(EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE)
 
-        if asset_class in _EQUITY_CLASSES and context.company is None:
+        if (
+            asset_class in _EQUITY_CLASSES
+            and context.company is None
+            and not any(
+                "company analysis is missing" in reason.lower()
+                for reason in reasons
+            )
+        ):
             add(
                 "point-in-time normalized company analysis is missing for an equity"
             )
