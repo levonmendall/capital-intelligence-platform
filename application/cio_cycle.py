@@ -431,6 +431,7 @@ class CanonicalCIOCycle:
         portfolio: CyclePortfolioState,
         prior_decision_contexts: tuple[PriorDecisionContext, ...] = (),
         active_theses: tuple[LivingThesis, ...] = (),
+        authoritative_opportunity_queue: OpportunityQueue | None = None,
         code_version: str | None = None,
     ) -> CanonicalCIOCycleResult:
         cycle_identifier = _required_text(identifier, field_name="identifier")
@@ -473,38 +474,65 @@ class CanonicalCIOCycle:
             raise TypeError("active_theses must contain LivingThesis values")
         if len(prior_map) != len(prior_decision_contexts):
             raise ValueError("prior decision contexts must be unique by candidate")
-        generated_ranking = self._ranking_inputs(
-            candidates,
-            portfolio,
-            minimum_cash_weight=(
-                self.construction_engine.policy.minimum_cash_weight
-            ),
-        )
-        supplied_ranking = {
-            item.candidate_identifier: item
-            for item in opportunity_context.ranking_inputs
-        }
-        supplied_ranking.update(
-            {
+        if authoritative_opportunity_queue is None:
+            generated_ranking = self._ranking_inputs(
+                candidates,
+                portfolio,
+                minimum_cash_weight=(
+                    self.construction_engine.policy.minimum_cash_weight
+                ),
+            )
+            supplied_ranking = {
                 item.candidate_identifier: item
-                for item in generated_ranking
-                if item.candidate_identifier not in supplied_ranking
+                for item in opportunity_context.ranking_inputs
             }
-        )
-        opportunity_context = replace(
-            opportunity_context,
-            ranking_inputs=tuple(supplied_ranking.values()),
-        )
+            supplied_ranking.update(
+                {
+                    item.candidate_identifier: item
+                    for item in generated_ranking
+                    if item.candidate_identifier not in supplied_ranking
+                }
+            )
+            opportunity_context = replace(
+                opportunity_context,
+                ranking_inputs=tuple(supplied_ranking.values()),
+            )
+            queue = self.opportunity_engine.build_queue(
+                candidates,
+                opportunity_context,
+            )
+        else:
+            if not isinstance(authoritative_opportunity_queue, OpportunityQueue):
+                raise TypeError(
+                    "authoritative_opportunity_queue must be OpportunityQueue or None"
+                )
+            if (
+                authoritative_opportunity_queue.context_identifier
+                != opportunity_context.identifier
+            ):
+                raise ValueError(
+                    "authoritative opportunity queue does not match the context"
+                )
+            represented = {
+                *(
+                    item.candidate.identifier
+                    for item in authoritative_opportunity_queue.ranked
+                ),
+                *(
+                    item.candidate_identifier
+                    for item in authoritative_opportunity_queue.rejected
+                ),
+            }
+            if represented != {item.identifier for item in candidates}:
+                raise ValueError(
+                    "authoritative opportunity queue candidate coverage is invalid"
+                )
+            queue = authoritative_opportunity_queue
         context_map = {
             item.candidate_identifier: item for item in specialist_contexts
         }
         if len(context_map) != len(specialist_contexts):
             raise ValueError("specialist candidate contexts must be unique")
-
-        queue = self.opportunity_engine.build_queue(
-            candidates,
-            opportunity_context,
-        )
         self._journal_candidates_and_queue(
             candidates=candidates,
             queue=queue,
@@ -648,6 +676,21 @@ class CanonicalCIOCycle:
             briefing=briefing,
         )
 
+
+    @classmethod
+    def prepare_ranking_inputs(
+        cls,
+        candidates: tuple[CandidateDecisionRecord, ...],
+        portfolio: CyclePortfolioState,
+        *,
+        minimum_cash_weight: float = 0.02,
+    ) -> tuple[OpportunityRankingInput, ...]:
+        """Return the exact portfolio-aware inputs frozen before CIO review."""
+        return cls._ranking_inputs(
+            candidates,
+            portfolio,
+            minimum_cash_weight=minimum_cash_weight,
+        )
 
     @classmethod
     def _ranking_inputs(
@@ -970,7 +1013,16 @@ class CanonicalCIOCycle:
             existing = existing_by_asset.get(symbol)
             thesis: LivingThesis | None = None
             if existing is None:
-                if decision.action in {CIOAction.BUY, CIOAction.INCREASE} and implemented > current + 0.000001:
+                if (
+                    decision.action in {CIOAction.BUY, CIOAction.INCREASE}
+                    and implemented > current + 0.000001
+                ) or (
+                    current > 0.000001
+                    and decision.action is CIOAction.HOLD
+                ):
+                    # A pre-existing canonical holding may enter this decision epoch
+                    # without a reconstructable thesis. A deferred HOLD must create
+                    # one immutable continuity thesis before evaluation is captured.
                     thesis = LivingThesis.from_decision(candidate, decision)
             else:
                 if decision.action is CIOAction.EXIT and implemented > 0.000001:

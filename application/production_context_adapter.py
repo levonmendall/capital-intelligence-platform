@@ -451,6 +451,12 @@ class RepositoryProductionCanonicalCIOContextProvider:
             portfolio=base_context.portfolio,
             code_version=base_context.code_version,
             manifest=manifest,
+            opportunity_snapshot_hash=(
+                base_context.opportunity_snapshot_hash
+            ),
+            publication_code_version=(
+                base_context.publication_code_version
+            ),
             knowledge_cutoff=cutoff,
             process_version=self.process_version,
             eligible_universe_publication_identifier=universe.identifier,

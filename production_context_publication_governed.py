@@ -27,6 +27,10 @@ from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from evaluation.opportunity_outcomes import SQLiteOpportunityOutcomeStore
 from opportunity import AlternativeKind, AlternativeUse, OpportunityEngine, OpportunitySetContext
 from opportunity.competitive import prepare_competitive_opportunity_set
+from opportunity.snapshot import (
+    PUBLICATION_SNAPSHOT_KIND,
+    build_opportunity_snapshot,
+)
 from operations.direct_global_markets import load_direct_global_market_universe
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryResult,
@@ -759,6 +763,16 @@ def prepare_governed_production_context_for_cycle(
     build_result = replace(build_result, candidates=competitive.candidates)
     opportunity_context = competitive.context
     queue = competitive.queue
+    opportunity_context_snapshot = build_opportunity_snapshot(
+        snapshot_kind=PUBLICATION_SNAPSHOT_KIND,
+        context=opportunity_context,
+        queue=queue,
+        engine=opportunity_engine,
+        created_at=decision_as_of,
+        screening_publication_identifier=(
+            screening_publication_identifier
+        ),
+    )
     try:
         outcome_store.append_screening_decisions(
             queue=queue,
@@ -821,6 +835,7 @@ def prepare_governed_production_context_for_cycle(
         "candidate_alternative_identifiers": list(
             competitive.candidate_alternative_identifiers
         ),
+        "opportunity_context_snapshot": opportunity_context_snapshot,
     }
     screening_publication = FullUniverseScreeningPublication(
         identifier=screening_publication_identifier,
