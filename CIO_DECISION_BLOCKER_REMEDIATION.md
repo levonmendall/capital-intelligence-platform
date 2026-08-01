@@ -44,6 +44,8 @@ Regression coverage establishes that:
 - implementation costs are not deducted twice; and
 - a valid post-investment GOVT candidate reaches all six specialists, receives a persisted CIO decision, and is recorded in the persistent-cash funnel as reaching specialist analysis and CIO consideration.
 
+The focused opportunity, publication, production-executor, specialist, CIO-trace, and persistent-cash regression suite passed before the clean implementation commit was produced.
+
 ## Persistent state and migration
 
 No historical record, CIO journal event, portfolio snapshot, or screening publication is rewritten. The change applies prospectively when a new production context is published.
