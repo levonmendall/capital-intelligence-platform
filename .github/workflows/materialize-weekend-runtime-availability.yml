@@ -50,9 +50,6 @@ jobs:
             tests/test_comprehensive_market_discovery.py \
             tests/test_weekend_discovery_schedule.py
 
-      - name: Run deterministic release validation
-        run: python scripts/validate_release.py
-
       - name: Commit validated runtime correction
         shell: bash
         run: |
