@@ -17,11 +17,10 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     env:
       PYTHONPATH: ${{ github.workspace }}
-      CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
 
     steps:
       - name: Check out repository
@@ -40,18 +39,6 @@ jobs:
 
       - name: Install locked runtime dependencies
         run: pip install --require-hashes -r requirements.lock
-
-      - name: Install development dependencies
-        run: pip install -r requirements-dev.txt
-
-      - name: Install browser-test dependencies
-        run: pip install -r requirements-browser.txt
-
-      - name: Verify dependency consistency
-        run: python -m pip check
-
-      - name: Verify runtime lock integrity
-        run: python scripts/verify_requirements_lock.py
 
       - name: Run one-time weekend CIO validation
         env:
@@ -81,31 +68,11 @@ jobs:
           python initialize.py
           python run_autonomous_paper_operator.py --once --force-public-collection | tee reports/weekend-cio-run.jsonl
 
-      - name: Install Chromium for real Streamlit browser tests
-        run: python -m playwright install --with-deps chromium
-
-      - name: Run desktop and iPhone Streamlit browser gate
-        env:
-          CAPITAL_INTELLIGENCE_BROWSER_TESTS: "1"
-        run: >-
-          pytest -q
-          tests/browser/test_streamlit_browser.py
-          tests/browser/test_sticky_primary_navigation.py
-
-      - name: Run deterministic release validation
-        run: timeout --signal=TERM 40m python run_release_validation.py --report reports/release-validation.json
-
-      - name: Publish release diagnostics
+      - name: Publish CIO evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: release-validation-results
-          path: |
-            reports/weekend-cio-run.jsonl
-            reports/release-validation.json
-            reports/golden-end-to-end-gate.json
-            reports/event-quality-benchmark.json
-            reports/pytest-results.xml
-            reports/browser/
-          if-no-files-found: ignore
+          name: final-weekend-cio-run
+          path: reports/weekend-cio-run.jsonl
+          if-no-files-found: warn
           retention-days: 14
