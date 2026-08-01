@@ -65,7 +65,8 @@ def load_active_paper_universe_for_publication(
         )
     detail = "; ".join(failures) or "no active-universe path was configured"
     raise ValueError(
-        "certified active paper universe is unavailable or mismatched: " + detail
+        "the certified active paper universe is unavailable or does not match "
+        f"the eligible-universe publication: {detail}"
     )
 
 
