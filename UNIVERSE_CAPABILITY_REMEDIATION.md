@@ -45,7 +45,7 @@ The regression suite publishes a decision-complete production context through th
 - produce a committee/CIO information trace; and
 - appear in the persistent-cash funnel as having reached specialist analysis and CIO consideration.
 
-The focused remediation suite passed before the implementation commit was produced. The clean implementation commit must also pass the repository's normal browser, deterministic release-validation, and security workflows before merge.
+The focused remediation suite and the fixed-pilot scope regression suite passed before the final implementation commit was produced. The clean implementation commit must also pass the repository's normal browser, deterministic release-validation, historical-backfill, and security workflows before merge.
 
 This confirms candidate reachability through the production code path. It does not claim that a completed cycle on the private Render persistent disk has already observed the same event. Live-cycle frequencies require the deployed diagnostic release and access to, or an export of, the Render institutional journal.
 
