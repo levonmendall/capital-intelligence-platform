@@ -37,7 +37,7 @@ from render_nonblocking_data import (
     load_public_event_snapshot_nonblocking,
     prewarm_render_data,
 )
-from secure_app import DeploymentContext
+from secure_app import DeploymentContext, create_streamlit_application
 
 
 _LOGGER = logging.getLogger("capital_intelligence.render_surfaces")
@@ -203,7 +203,7 @@ def main() -> None:
     prepare_render_data_runtime()
     prepare_render_surface_runtime()
     ui_refinement.install(app_impl, secure_app)
-    secure_app.create_streamlit_application(
+    create_streamlit_application(
         deployment=deployment_context_from_environment()
     )
 
