@@ -1,17 +1,16 @@
 name: Temporary committee correction controller
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - tools/committee-correction-main-trigger.txt
+  pull_request_review:
+    types:
+      - submitted
 
 permissions:
   contents: write
 
 jobs:
   apply-and-validate:
+    if: github.event.pull_request.number == 324
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
