@@ -21,13 +21,14 @@ _INSTALLED_STATE_KEY = "_capital_intelligence_ui_experience_refinement_installed
 
 _EXPERIENCE_CSS = """
 <style>
-/* Streamlit reserves a tall mobile header even after its controls are hidden.
-   Remove the unused region so the application begins with its own navigation. */
+/* Streamlit reserves a tall header and main-container inset even after its
+   controls are hidden. Remove both so the product starts with its own rail. */
 [data-testid="stHeader"] {
     display: none !important;
 }
 
-.block-container {
+.block-container,
+[data-testid="stMainBlockContainer"] {
     padding-top: max(.38rem, env(safe-area-inset-top, 0px)) !important;
 }
 
@@ -137,7 +138,8 @@ div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) .nav-brand-mark {
 }
 
 @media (max-width: 760px) {
-    .block-container {
+    .block-container,
+    [data-testid="stMainBlockContainer"] {
         padding-top: max(.28rem, env(safe-area-inset-top, 0px)) !important;
     }
 
@@ -182,10 +184,6 @@ div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) .nav-brand-mark {
 }
 </style>
 """
-
-
-def _clean(value: object) -> str:
-    return " ".join(str(value or "").split())
 
 
 def _freshness_counts(entries: Sequence[object]) -> tuple[int, int, int]:
