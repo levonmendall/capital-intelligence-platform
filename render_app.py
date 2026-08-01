@@ -20,6 +20,7 @@ import live_operating_console
 import operating_intelligence_ui
 import operating_status
 import secure_app
+import ui_experience_refinement
 import ui_refinement
 from render_nonblocking_data import (
     get_mandate_details_nonblocking,
@@ -203,6 +204,7 @@ def main() -> None:
     prepare_render_data_runtime()
     prepare_render_surface_runtime()
     ui_refinement.install(app_impl, secure_app)
+    ui_experience_refinement.install(app_impl)
     create_streamlit_application(
         deployment=deployment_context_from_environment()
     )
