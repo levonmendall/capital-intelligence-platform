@@ -14,6 +14,7 @@ from cio import (
     CandidateInstrument,
     ChiefInvestmentOfficer,
     EvidenceQuality,
+    EvidenceVetoCategory,
     IndependentSpecialistPacket,
     PriorDecisionContext,
     RecommendationUniversePolicy,
@@ -120,6 +121,7 @@ def _analysis(
     position: SpecialistPosition = SpecialistPosition.SUPPORTIVE,
     confidence: float = 0.80,
     vetoes: tuple[str, ...] = (),
+    veto_categories: tuple[EvidenceVetoCategory, ...] = (),
     blocks: tuple[str, ...] = (),
     weight: float | None = None,
     funding: str | None = None,
@@ -141,6 +143,7 @@ def _analysis(
         limitations=(),
         change_conditions=(f"new {role.value} evidence",),
         veto_reasons=vetoes,
+        veto_categories=veto_categories,
         implementation_blocks=blocks,
         recommended_position_weight=weight,
         funding_source=funding,
@@ -150,6 +153,7 @@ def _analysis(
 def _packet(
     *,
     evidence_vetoes: tuple[str, ...] = (),
+    evidence_veto_categories: tuple[EvidenceVetoCategory, ...] = (),
     implementation_blocks: tuple[str, ...] = (),
     opposed_role: SpecialistRole | None = None,
     opposed_confidence: float = 0.80,
@@ -170,6 +174,11 @@ def _packet(
                 confidence=(opposed_confidence if role is opposed_role else 0.82),
                 vetoes=(
                     evidence_vetoes
+                    if role is SpecialistRole.EVIDENCE_GOVERNANCE
+                    else ()
+                ),
+                veto_categories=(
+                    evidence_veto_categories
                     if role is SpecialistRole.EVIDENCE_GOVERNANCE
                     else ()
                 ),
@@ -378,6 +387,9 @@ def test_evidence_veto_reduces_an_existing_holding_instead_of_preserving_risk() 
         universe,
         _packet(
             evidence_vetoes=("filing timestamp cannot be reproduced",),
+            evidence_veto_categories=(
+                EvidenceVetoCategory.INTEGRITY_EMERGENCY,
+            ),
             weight=0.08,
         ),
     )
@@ -386,7 +398,7 @@ def test_evidence_veto_reduces_an_existing_holding_instead_of_preserving_risk() 
     assert decision.recommended_position_weight == pytest.approx(0.04)
 
 
-def test_positive_holding_is_reduced_when_a_superior_alternative_exists() -> None:
+def test_positive_holding_is_reduced_after_superior_alternative_persists() -> None:
     candidate = _candidate(
         current_weight=0.08,
         base_return=0.08,
@@ -396,14 +408,32 @@ def test_positive_holding_is_reduced_when_a_superior_alternative_exists() -> Non
     )
     universe = RecommendationUniversePolicy().evaluate(candidate.instrument)
 
-    decision = ChiefInvestmentOfficer().synthesize(
+    first = ChiefInvestmentOfficer().synthesize(
         candidate,
         universe,
         _packet(weight=0.08),
     )
 
     assert candidate.net_expected_return > 0.0
-    assert decision.action in {CIOAction.REDUCE, CIOAction.EXIT}
+    assert first.action is CIOAction.HOLD
+    assert first.deferred_action in {CIOAction.REDUCE, CIOAction.EXIT}
+    prior = PriorDecisionContext(
+        candidate_identifier=candidate.identifier,
+        prior_decision_identifier=first.identifier,
+        prior_action=first.action,
+        prior_target_weight=None,
+        decided_at=AS_OF - timedelta(days=1),
+        thesis_state=ThesisState.ACTIVE,
+        consecutive_supportive_cycles=0,
+        consecutive_opposing_cycles=1,
+    )
+    confirmed = ChiefInvestmentOfficer().synthesize(
+        candidate,
+        universe,
+        _packet(weight=0.08),
+        prior_context=prior,
+    )
+    assert confirmed.action in {CIOAction.REDUCE, CIOAction.EXIT}
 
 
 def test_adverse_specialist_reconciliation_can_block_preliminary_maximum_size() -> None:
