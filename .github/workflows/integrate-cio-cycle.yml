@@ -48,21 +48,25 @@ jobs:
 
           replace_single_conflict(
               "application/cio_cycle.py",
-              """        cycle_disposition = self.cycle_disposition_authority.decide(\n"
-              "            queue,\n"
-              "            as_of=portfolio.as_of,\n"
-              "        )\n",
+              (
+                  "        cycle_disposition = self.cycle_disposition_authority.decide(\n"
+                  "            queue,\n"
+                  "            as_of=portfolio.as_of,\n"
+                  "        )\n"
+              ),
           )
           replace_single_conflict(
               "application/production_context_contract.py",
-              """from opportunity.snapshot import (\n"
-              "    DECISION_SNAPSHOT_KIND,\n"
-              "    build_opportunity_snapshot,\n"
-              "    load_opportunity_snapshot,\n"
-              ")\n"
-              "from operations.active_paper_universe import (\n"
-              "    load_active_paper_universe_for_publication,\n"
-              ")\n",
+              (
+                  "from opportunity.snapshot import (\n"
+                  "    DECISION_SNAPSHOT_KIND,\n"
+                  "    build_opportunity_snapshot,\n"
+                  "    load_opportunity_snapshot,\n"
+                  ")\n"
+                  "from operations.active_paper_universe import (\n"
+                  "    load_active_paper_universe_for_publication,\n"
+                  ")\n"
+              ),
           )
 
           unresolved = []
