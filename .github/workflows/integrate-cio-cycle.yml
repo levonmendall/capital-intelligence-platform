@@ -26,64 +26,43 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          cycle_path = Path("application/cio_cycle.py")
-          cycle = cycle_path.read_text(encoding="utf-8")
-          cycle_conflict = """<<<<<<< HEAD
-          =======
-
-                  queue = self.opportunity_engine.build_queue(
-                      candidates,
-                      opportunity_context,
+          def replace_single_conflict(path: str, resolution: str) -> None:
+              source = Path(path)
+              lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+              starts = [i for i, line in enumerate(lines) if line.startswith("<<<<<<< ")]
+              separators = [i for i, line in enumerate(lines) if line.startswith("=======")]
+              ends = [i for i, line in enumerate(lines) if line.startswith(">>>>>>> ")]
+              if not (len(starts) == len(separators) == len(ends) == 1):
+                  raise SystemExit(
+                      f"expected exactly one conflict in {path}; "
+                      f"found starts={starts}, separators={separators}, ends={ends}"
                   )
-                  cycle_disposition = self.cycle_disposition_authority.decide(
-                      queue,
-                      as_of=portfolio.as_of,
-                  )
-          >>>>>>> origin/fix/cio-cycle-decision-integrity
-          """
-          cycle_resolution = """        cycle_disposition = self.cycle_disposition_authority.decide(
-                      queue,
-                      as_of=portfolio.as_of,
-                  )
-          """
-          if cycle_conflict not in cycle:
-              raise SystemExit("expected application/cio_cycle.py conflict was not found")
-          cycle_path.write_text(
-              cycle.replace(cycle_conflict, cycle_resolution),
-              encoding="utf-8",
-          )
-
-          contract_path = Path("application/production_context_contract.py")
-          contract = contract_path.read_text(encoding="utf-8")
-          contract_conflict = """<<<<<<< HEAD
-          from opportunity.snapshot import (
-              DECISION_SNAPSHOT_KIND,
-              build_opportunity_snapshot,
-              load_opportunity_snapshot,
-          )
-          from operations.free_paper_pilot import load_free_paper_pilot_universe
-          =======
-          from operations.active_paper_universe import (
-              load_active_paper_universe_for_publication,
-          )
-          >>>>>>> origin/fix/cio-cycle-decision-integrity
-          """
-          contract_resolution = """from opportunity.snapshot import (
-              DECISION_SNAPSHOT_KIND,
-              build_opportunity_snapshot,
-              load_opportunity_snapshot,
-          )
-          from operations.active_paper_universe import (
-              load_active_paper_universe_for_publication,
-          )
-          """
-          if contract_conflict not in contract:
-              raise SystemExit(
-                  "expected application/production_context_contract.py conflict was not found"
+              start, separator, end = starts[0], separators[0], ends[0]
+              if not start < separator < end:
+                  raise SystemExit(f"invalid conflict marker order in {path}")
+              replacement = resolution.splitlines(keepends=True)
+              source.write_text(
+                  "".join(lines[:start] + replacement + lines[end + 1 :]),
+                  encoding="utf-8",
               )
-          contract_path.write_text(
-              contract.replace(contract_conflict, contract_resolution),
-              encoding="utf-8",
+
+          replace_single_conflict(
+              "application/cio_cycle.py",
+              """        cycle_disposition = self.cycle_disposition_authority.decide(\n"
+              "            queue,\n"
+              "            as_of=portfolio.as_of,\n"
+              "        )\n",
+          )
+          replace_single_conflict(
+              "application/production_context_contract.py",
+              """from opportunity.snapshot import (\n"
+              "    DECISION_SNAPSHOT_KIND,\n"
+              "    build_opportunity_snapshot,\n"
+              "    load_opportunity_snapshot,\n"
+              ")\n"
+              "from operations.active_paper_universe import (\n"
+              "    load_active_paper_universe_for_publication,\n"
+              ")\n",
           )
 
           unresolved = []
@@ -99,6 +78,7 @@ jobs:
           if unresolved:
               raise SystemExit(f"unresolved merge markers remain: {unresolved}")
           PY
+          git add application/cio_cycle.py application/production_context_contract.py
           if git diff --name-only --diff-filter=U | grep -q .; then
             echo "Git still reports unresolved paths:"
             git diff --name-only --diff-filter=U
