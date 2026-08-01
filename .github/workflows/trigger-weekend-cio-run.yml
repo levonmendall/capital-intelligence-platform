@@ -1,0 +1,131 @@
+name: Trigger Weekend CIO Run
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/trigger-weekend-cio-run.yml
+
+permissions:
+  contents: read
+
+jobs:
+  cio-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_ENVIRONMENT: development
+      CAPITAL_INTELLIGENCE_DATA_DIR: ${{ runner.temp }}/capital-intelligence-cio-run
+      CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE: America/Los_Angeles
+      CAPITAL_INTELLIGENCE_SCHEDULER_HOUR: "7"
+      CAPITAL_INTELLIGENCE_SCHEDULER_TIMES: 07:00,10:00,12:45
+      CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE: automatic
+      CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP: "false"
+      CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_REQUIRED: "false"
+      CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED: "true"
+      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+      APCA_API_BASE_URL: https://paper-api.alpaca.markets
+      APCA_DATA_BASE_URL: https://data.alpaca.markets
+      APCA_DATA_FEED: iex
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      CAPITAL_INTELLIGENCE_EODHD_API_TOKEN: ${{ secrets.CAPITAL_INTELLIGENCE_EODHD_API_TOKEN }}
+      CAPITAL_INTELLIGENCE_DATABENTO_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_DATABENTO_API_KEY }}
+      SEC_USER_AGENT: Capital Intelligence Platform levonmendall2369@gmail.com
+
+    steps:
+      - name: Check out latest main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Initialize isolated canonical state
+        run: python initialize.py
+
+      - name: Run one CIO operator pass
+        shell: bash
+        run: |
+          mkdir -p reports
+          set -o pipefail
+          python run_autonomous_paper_operator.py --once --force-public-collection \
+            | tee reports/weekend-cio-run.jsonl
+
+      - name: Validate CIO result
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          log_path = Path("reports/weekend-cio-run.jsonl")
+          payload = None
+          for line in log_path.read_text(encoding="utf-8").splitlines():
+              line = line.strip()
+              if not line.startswith("{"):
+                  continue
+              try:
+                  candidate = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if isinstance(candidate, dict) and "cycle" in candidate:
+                  payload = candidate
+          if payload is None:
+              raise SystemExit("CIO operator did not emit a result payload")
+
+          context = payload.get("production_context_publication") or {}
+          cycle = payload.get("cycle") or {}
+          summary = {
+              "operator_status": payload.get("status"),
+              "context_state": context.get("state"),
+              "context_detail": context.get("detail"),
+              "cycle_status": cycle.get("status"),
+              "cycle_detail": cycle.get("detail"),
+              "cycle_key": cycle.get("cycle_key"),
+              "paper_execution": (payload.get("paper_execution") or {}).get("state"),
+              "paper_only": payload.get("paper_only"),
+              "real_money_authorized": payload.get("real_money_authorized"),
+          }
+
+          state_path = Path(os.environ["CAPITAL_INTELLIGENCE_DATA_DIR"]) / "production-context-publication-state.json"
+          if state_path.exists():
+              state = json.loads(state_path.read_text(encoding="utf-8"))
+              summary["comprehensive_discovery_lane_counts"] = state.get(
+                  "comprehensive_discovery_lane_counts"
+              )
+              summary["candidate_count"] = state.get("candidate_count")
+              summary["exclusion_count"] = state.get("exclusion_count")
+
+          Path("reports/weekend-cio-summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(summary, indent=2, sort_keys=True))
+
+          if context.get("state") not in {"ready", "reused"}:
+              raise SystemExit("Production context did not become ready")
+          if cycle.get("status") != "completed":
+              raise SystemExit("CIO cycle did not complete")
+          if payload.get("paper_only") is not True or payload.get("real_money_authorized") is not False:
+              raise SystemExit("Paper-only governance invariant failed")
+          PY
+
+      - name: Upload CIO run evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: weekend-cio-run
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 14
