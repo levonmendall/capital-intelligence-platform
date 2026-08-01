@@ -37,10 +37,6 @@ def test_stronger_holding_realigns_candidate_without_blocking_valid_review() -> 
 def test_cash_relative_success_probability_cannot_create_false_consistency_veto() -> None:
     engine = OpportunityEngine()
     context = _context(holding_return=0.15)
-    expected_baseline = engine._alternative_comparable_return(
-        context.alternatives[1],
-        cash_anchor=context.alternatives[0].net_expected_return,
-    )
     candidate = replace(
         _candidate(
             "ASYMMETRIC",
@@ -48,7 +44,7 @@ def test_cash_relative_success_probability_cannot_create_false_consistency_veto(
             bull=0.90,
             bear=-0.05,
             probability=0.90,
-            opportunity_cost=expected_baseline,
+            opportunity_cost=0.04,
         ),
         base_case_probability=0.40,
         bull_case_probability=0.45,
@@ -69,6 +65,7 @@ def test_cash_relative_success_probability_cannot_create_false_consistency_veto(
     )
 
     aligned = prepared.candidates[0]
+    assert aligned.opportunity_cost_return > candidate.opportunity_cost_return
     assert aligned.probability_of_success == pytest.approx(0.45)
     assert prepared.preliminary_queue.ranked
     assert not any(
