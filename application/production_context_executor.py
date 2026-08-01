@@ -7,12 +7,36 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from application import production_context_contract as contract
+from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from governance.market_participation import CanonicalMarketParticipationAuthority
 from operations.free_paper_pilot import load_free_paper_pilot_universe
 from screening import candidate_from_payload
 
 
 _AUTHORITY_BINDING_LOCK = threading.RLock()
+_ORIGINAL_MARKER = "_canonical_market_registry_original_from_universe"
+
+
+def _install_registry_bounded_authority() -> None:
+    """Ensure every production authority build applies the market registry first."""
+
+    existing = getattr(BoundedPilotCapabilityAuthority, _ORIGINAL_MARKER, None)
+    if existing is not None:
+        return
+    original = BoundedPilotCapabilityAuthority.from_universe.__func__
+    setattr(BoundedPilotCapabilityAuthority, _ORIGINAL_MARKER, original)
+
+    def from_registry(cls, universe, *, research_only: bool = False):
+        filtered = (
+            CanonicalMarketParticipationAuthority.load()
+            .decision_authority_universe(universe)
+        )
+        return original(cls, filtered, research_only=research_only)
+
+    BoundedPilotCapabilityAuthority.from_universe = classmethod(from_registry)
+
+
+_install_registry_bounded_authority()
 
 
 class _CachedContextProvider:
