@@ -52,7 +52,11 @@ from operations.direct_global_markets import (
     DirectGlobalMarketClient,
     DirectGlobalMarketUniverse,
 )
-from operations.free_paper_pilot import FreePaperPilotInstrument, FreePaperPilotUniverse
+from operations.free_paper_pilot import (
+    FreePaperPilotInstrument,
+    FreePaperPilotUniverse,
+    instrument_evaluation_scheduled,
+)
 from portfolio.state import CanonicalPortfolioSnapshot
 from providers.alpaca_paper import create_alpaca_paper_client
 from providers.fred import FREDProvider
@@ -120,14 +124,40 @@ def _default_probe(
     decision_as_of: datetime,
 ) -> Mapping[str, object]:
     as_of = _aware(decision_as_of, field_name="decision_as_of")
-    listed_instruments = tuple(item for item in universe.instruments if item.execution_asset_class not in DIRECT_EXECUTION_CLASSES)
-    direct_instruments = tuple(item for item in universe.instruments if item.execution_asset_class in DIRECT_EXECUTION_CLASSES)
+    scheduled_instruments = tuple(
+        item
+        for item in universe.instruments
+        if instrument_evaluation_scheduled(item, as_of)
+    )
+    scheduled_closed_symbols = tuple(
+        item.symbol
+        for item in universe.instruments
+        if item not in scheduled_instruments
+    )
+    listed_instruments = tuple(
+        item
+        for item in scheduled_instruments
+        if item.execution_asset_class not in DIRECT_EXECUTION_CLASSES
+    )
+    direct_instruments = tuple(
+        item
+        for item in scheduled_instruments
+        if item.execution_asset_class in DIRECT_EXECUTION_CLASSES
+    )
     bars: dict[str, object] = {}
     quotes: dict[str, object] = {}
-    client = create_alpaca_paper_client()
+    client = None
     if listed_instruments:
+        client = create_alpaca_paper_client()
         listed_symbols = tuple(item.symbol for item in listed_instruments)
-        bars.update(client.historical_bars(listed_symbols, start=as_of - timedelta(days=_HISTORY_DAYS), end=as_of, timeframe="1Day"))
+        bars.update(
+            client.historical_bars(
+                listed_symbols,
+                start=as_of - timedelta(days=_HISTORY_DAYS),
+                end=as_of,
+                timeframe="1Day",
+            )
+        )
         quotes.update(client.latest_quotes(listed_symbols))
     direct_market_errors: dict[str, str] = {}
     if direct_instruments:
@@ -157,10 +187,14 @@ def _default_probe(
             bars.update(symbol_bars)
             quotes.update(symbol_quotes)
     fred = FREDProvider()
-    macro = {series: fred.get_latest_value(series) for series in ("DGS10", "T10Y2Y", "VIXCLS", "DFF")}
+    macro = {
+        series: fred.get_latest_value(series)
+        for series in ("DGS10", "T10Y2Y", "VIXCLS", "DFF")
+    }
     company_facts: dict[str, object] = {}
     stock_instruments = tuple(
-        item for item in universe.instruments
+        item
+        for item in scheduled_instruments
         if item.execution_asset_class is CandidateAssetClass.US_EQUITY
         and item.instrument_type == "common_stock"
     )
@@ -177,7 +211,15 @@ def _default_probe(
                     limit=10_000,
                 )
             )
-    provider_clock = client.clock()
+    provider_clock = (
+        client.clock()
+        if client is not None
+        else {
+            "timestamp": as_of.isoformat(),
+            "is_open": False,
+            "source": "governed_collection_clock",
+        }
+    )
     return {
         "bars": bars,
         "quotes": quotes,
@@ -185,6 +227,7 @@ def _default_probe(
         "company_facts": company_facts,
         "provider_clock": provider_clock,
         "_direct_market_errors": direct_market_errors,
+        "_scheduled_closed_symbols": scheduled_closed_symbols,
     }
 
 
@@ -1354,6 +1397,19 @@ def build_paper_evidence(
         raise ProductionPaperEvidenceError(
             "direct-market error detail must be a mapping"
         )
+    raw_scheduled_closed_symbols = payload.get("_scheduled_closed_symbols", ())
+    if not isinstance(raw_scheduled_closed_symbols, Sequence) or isinstance(
+        raw_scheduled_closed_symbols,
+        (str, bytes),
+    ):
+        raise ProductionPaperEvidenceError(
+            "scheduled-closed symbol detail must be a sequence"
+        )
+    scheduled_closed_symbols = frozenset(
+        str(symbol).strip().upper()
+        for symbol in raw_scheduled_closed_symbols
+        if str(symbol).strip()
+    )
     direct_market_errors = {
         str(symbol).strip().upper(): str(detail).strip()
         for symbol, detail in raw_direct_market_errors.items()
@@ -1382,6 +1438,14 @@ def build_paper_evidence(
         raise ProductionPaperEvidenceError("company_facts must be a mapping")
     macro, macro_values, macro_ids = _macro_context(raw_macro, as_of=as_of)
     instrument_by_symbol = {item.symbol: item for item in universe.instruments}
+    unknown_scheduled_closed = sorted(
+        scheduled_closed_symbols - set(instrument_by_symbol)
+    )
+    if unknown_scheduled_closed:
+        raise ProductionPaperEvidenceError(
+            "scheduled-closed symbols are outside the governed paper universe: "
+            f"{unknown_scheduled_closed}"
+        )
     unknown_holdings = sorted(
         {item.symbol for item in portfolio.positions} - set(instrument_by_symbol)
     )
@@ -1399,6 +1463,22 @@ def build_paper_evidence(
     features_by_symbol: dict[str, ListedSecurityFeatures] = {}
     exclusions: list[tuple[str, tuple[str, ...]]] = []
     for instrument in universe.instruments:
+        if instrument.symbol in scheduled_closed_symbols:
+            if instrument.symbol in current_weights:
+                raise ProductionPaperEvidenceError(
+                    "mandatory holding evidence is unavailable while the instrument's "
+                    f"market is scheduled closed: {instrument.symbol}"
+                )
+            exclusions.append(
+                (
+                    instrument.instrument_identifier,
+                    (
+                        "Fresh evaluation is not scheduled because the instrument's "
+                        "market is closed for the weekend.",
+                    ),
+                )
+            )
+            continue
         try:
             features_by_symbol[instrument.symbol] = _features(
                 instrument.symbol,
@@ -1434,8 +1514,16 @@ def build_paper_evidence(
     candidate_evidence: list[ProductionCandidateEvidence] = []
     candidate_by_symbol: dict[str, CandidateDecisionRecord] = {}
     benchmark = features_by_symbol.get("VTI")
-    if benchmark is None:
-        raise ProductionPaperEvidenceError("VTI benchmark evidence is mandatory")
+    company_candidates_present = any(
+        instrument.symbol in features_by_symbol
+        and instrument.execution_asset_class is CandidateAssetClass.US_EQUITY
+        and instrument.instrument_type == "common_stock"
+        for instrument in universe.instruments
+    )
+    if company_candidates_present and benchmark is None:
+        raise ProductionPaperEvidenceError(
+            "VTI benchmark evidence is mandatory for active company-equity candidates"
+        )
     for instrument in universe.instruments:
         features = features_by_symbol.get(instrument.symbol)
         if features is None:
@@ -1445,6 +1533,10 @@ def build_paper_evidence(
                 instrument.execution_asset_class is CandidateAssetClass.US_EQUITY
                 and instrument.instrument_type == "common_stock"
             ):
+                if benchmark is None:
+                    raise ProductionPaperEvidenceError(
+                        "VTI benchmark evidence is mandatory for company-equity evidence"
+                    )
                 candidate, governed = _company_candidate_and_evidence(
                     instrument,
                     features,

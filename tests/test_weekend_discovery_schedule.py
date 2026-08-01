@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from cio import CandidateAssetClass
+from governance import TradingSessionModel
 from operations import comprehensive_market_discovery as comprehensive
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryConfig,
@@ -16,6 +17,14 @@ from operations.equity_discovery import (
     discover_us_equities,
     us_equity_discovery_scheduled,
 )
+from operations.free_paper_pilot import (
+    FreePaperPilotInstrument,
+    FreePaperPilotUniverse,
+    instrument_evaluation_scheduled,
+    weekday_market_evaluation_scheduled,
+)
+import production_paper_evidence as paper_evidence
+from production_paper_evidence import collect_paper_evidence
 
 
 # Weekend eligibility follows the America/New_York market calendar.
@@ -184,3 +193,112 @@ def test_weekend_us_equity_discovery_does_not_call_providers():
     assert result.observed_prices == ()
     assert result.exclusions == (("__lane__", "weekend_market_closed"),)
     assert result.security_master_snapshot_identifier.endswith(":closed")
+
+
+def _listed_instrument(
+    *,
+    symbol: str,
+    exposure: str,
+    maximum_weight: float,
+) -> FreePaperPilotInstrument:
+    return FreePaperPilotInstrument(
+        symbol=symbol,
+        instrument_identifier=f"instrument:us-etf:{symbol.lower()}",
+        name=symbol,
+        execution_asset_class=CandidateAssetClass.US_ETF,
+        economic_exposure=exposure,
+        venue="NYSEARCA",
+        country_code="US",
+        currency="USD",
+        instrument_type="fund",
+        maximum_weight=maximum_weight,
+    )
+
+
+def _weekend_evidence_universe() -> FreePaperPilotUniverse:
+    return FreePaperPilotUniverse(
+        identifier="weekend-evidence-test.v1",
+        objective="Verify scheduled-closed provider behavior.",
+        portfolio_code="COMPOUNDING",
+        reporting_currency="USD",
+        quote_provider="alpaca-paper-iex",
+        execution_mode="internal-simulated-fills-only",
+        minimum_cash_weight=0.05,
+        maximum_batch_turnover=0.20,
+        maximum_single_instrument_weight=0.45,
+        maximum_crypto_proxy_weight=0.05,
+        maximum_volatility_proxy_weight=0.02,
+        maximum_quote_age_minutes=5,
+        required_exposure_classes=("us_equity", "volatility"),
+        instruments=(
+            _listed_instrument(
+                symbol="VTI",
+                exposure="us_equity",
+                maximum_weight=0.45,
+            ),
+            _listed_instrument(
+                symbol="VIXY",
+                exposure="volatility",
+                maximum_weight=0.02,
+            ),
+        ),
+        limitations=("test-only",),
+    )
+
+
+def test_runtime_schedule_treats_only_24_7_instruments_as_weekend_active():
+    listed = _listed_instrument(
+        symbol="VTI",
+        exposure="us_equity",
+        maximum_weight=0.45,
+    )
+    crypto = FreePaperPilotInstrument(
+        symbol="BTCUSD",
+        instrument_identifier="instrument:crypto:btcusd",
+        name="Bitcoin",
+        execution_asset_class=CandidateAssetClass.CRYPTO,
+        economic_exposure="crypto",
+        venue="CRYPTO",
+        country_code="GLOBAL",
+        currency="USD",
+        settlement_currency="USD",
+        instrument_type="token",
+        maximum_weight=0.025,
+        provider_symbol="BTC-USD",
+        provider_kind="yahoo",
+        trading_session_model=TradingSessionModel.CONTINUOUS_24_7,
+    )
+
+    assert weekday_market_evaluation_scheduled(WEEKEND_AS_OF) is False
+    assert instrument_evaluation_scheduled(listed, WEEKEND_AS_OF) is False
+    assert instrument_evaluation_scheduled(crypto, WEEKEND_AS_OF) is True
+    assert instrument_evaluation_scheduled(listed, WEEKDAY_AS_OF) is True
+    assert instrument_evaluation_scheduled(crypto, WEEKDAY_AS_OF) is True
+
+
+def test_weekend_evidence_collection_skips_listed_provider_calls(monkeypatch):
+    class FakeFred:
+        @staticmethod
+        def get_latest_value(series):
+            return {"series": series, "date": "2026-07-31", "value": 4.0}
+
+    def provider_must_not_run():
+        raise AssertionError("Alpaca provider was called for scheduled-closed instruments")
+
+    monkeypatch.setattr(
+        paper_evidence,
+        "create_alpaca_paper_client",
+        provider_must_not_run,
+    )
+    monkeypatch.setattr(paper_evidence, "FREDProvider", FakeFred)
+
+    payload = collect_paper_evidence(
+        _weekend_evidence_universe(),
+        WEEKEND_AS_OF,
+    )
+
+    assert payload["bars"] == {}
+    assert payload["quotes"] == {}
+    assert set(payload["_scheduled_closed_symbols"]) == {"VTI", "VIXY"}
+    assert payload["provider_clock"]["source"] == "governed_collection_clock"
+

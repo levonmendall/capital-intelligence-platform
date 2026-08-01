@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 from cio import CandidateAssetClass
 from governance import AssetClassApprovalState, TradingSessionModel
@@ -52,6 +53,7 @@ DIRECT_EXECUTION_CLASSES = frozenset(
         CandidateAssetClass.OPTION,
     }
 )
+_MARKET_EVALUATION_TIMEZONE = ZoneInfo("America/New_York")
 
 
 def _text(value: object, *, field_name: str) -> str:
@@ -295,6 +297,29 @@ class FreePaperPilotInstrument:
             ),
             trading_session_model=self.trading_session_model,
         )
+
+
+def weekday_market_evaluation_scheduled(as_of: datetime) -> bool:
+    """Return whether weekday-only market evaluation is scheduled at ``as_of``."""
+
+    if not isinstance(as_of, datetime):
+        raise TypeError("as_of must be a datetime")
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("as_of must be timezone-aware")
+    return as_of.astimezone(_MARKET_EVALUATION_TIMEZONE).weekday() < 5
+
+
+def instrument_evaluation_scheduled(
+    instrument: FreePaperPilotInstrument,
+    as_of: datetime,
+) -> bool:
+    """Return whether fresh evidence is scheduled for one governed instrument."""
+
+    if not isinstance(instrument, FreePaperPilotInstrument):
+        raise TypeError("instrument must be a FreePaperPilotInstrument")
+    if weekday_market_evaluation_scheduled(as_of):
+        return True
+    return instrument.trading_session_model is TradingSessionModel.CONTINUOUS_24_7
 
 
 @dataclass(frozen=True, slots=True)
@@ -853,9 +878,11 @@ __all__ = [
     "default_alpaca_client",
     "active_paper_universe_path",
     "free_paper_pilot_universe_payload",
+    "instrument_evaluation_scheduled",
     "load_execution_paper_universe",
     "load_free_paper_pilot_universe",
     "validate_pilot_construction",
+    "weekday_market_evaluation_scheduled",
     "write_active_paper_universe",
     "write_pilot_profiles",
 ]
