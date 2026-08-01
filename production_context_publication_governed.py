@@ -168,6 +168,7 @@ def _reuse(
         context_identifier=context_identifier,
         instrument_count=int(state.get("instrument_count", instrument_count)),
         candidate_count=publication.candidate_count,
+        qualified_candidate_count=int(state.get("qualified_candidate_count", 0)),
         exclusion_count=publication.excluded_count,
     )
 
@@ -743,7 +744,7 @@ def prepare_governed_production_context_for_cycle(
         as_of=decision_as_of,
         alternatives=tuple(alternatives),
     )
-    capability_authority = BoundedPilotCapabilityAuthority.from_universe(base_universe)
+    capability_authority = BoundedPilotCapabilityAuthority.from_universe(universe)
     opportunity_engine = OpportunityEngine(
         universe_policy=RecommendationUniversePolicy(
             asset_class_authority=capability_authority,
@@ -754,8 +755,6 @@ def prepare_governed_production_context_for_cycle(
         build_result.candidates,
         baseline_opportunity_context,
     )
-    # Candidate evidence is immutable; only its point-in-time opportunity-cost field
-    # is reconciled to the same current cash/holding baseline consumed by qualification.
     build_result = replace(build_result, candidates=competitive.candidates)
     opportunity_context = competitive.context
     queue = competitive.queue
@@ -1006,6 +1005,7 @@ def prepare_governed_production_context_for_cycle(
         context_identifier=context_identifier,
         instrument_count=len(universe.instruments),
         candidate_count=len(candidate_results),
+        qualified_candidate_count=len(qualified_identifiers),
         exclusion_count=len(exclusion_results),
     )
 
