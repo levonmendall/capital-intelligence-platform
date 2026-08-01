@@ -658,7 +658,17 @@ def _catalog_from_eodhd(
             eodhd_suffix = f".{exchange}"
             if not provider_symbol.endswith(eodhd_suffix):
                 provider_symbol += eodhd_suffix
-            if "common stock" in raw_type or "preferred stock" in raw_type:
+            # EODHD's virtual CC exchange is authoritative for crypto. Its
+            # symbol-directory rows are intentionally typed as ``Currency``, so
+            # classifying by the generic row type first incorrectly routes every
+            # crypto pair into the FX parser and rejects it as a non-six-letter
+            # spot pair. Preserve the provider's venue semantics before applying
+            # generic type-based fallbacks.
+            if exchange == "CC":
+                asset_class = CandidateAssetClass.CRYPTO
+                instrument_type = "token"
+                economic_exposure = "crypto"
+            elif "common stock" in raw_type or "preferred stock" in raw_type:
                 if country == "US" or exchange in {"US", "NASDAQ", "NYSE", "AMEX"}:
                     continue
                 asset_class = CandidateAssetClass.INTERNATIONAL_EQUITY

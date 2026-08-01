@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 from cio import CandidateAssetClass
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryError,
+    ComprehensiveMarketDiscoveryConfig,
     ComprehensiveMarketDiscoveryPolicy,
     DiscoveryCatalogRecord,
+    _catalog_from_eodhd,
     DiscoveryMarketFeatures,
     discover_comprehensive_markets,
 )
@@ -81,6 +84,49 @@ def _market(records, _as_of, _policy):
         )
         for item in records
     }
+
+
+def test_eodhd_cc_currency_rows_are_classified_as_crypto():
+    class Provider:
+        def fetch_dataset(self, query):
+            assert query.provider_symbol == "CC"
+            return SimpleNamespace(
+                payload={
+                    "active": [
+                        {
+                            "Code": "BTC-USD",
+                            "Name": "Bitcoin",
+                            "Type": "Currency",
+                            "Currency": "USD",
+                            "Exchange": "CC",
+                        }
+                    ]
+                },
+                provider_record_id="eodhd-symbol-directory:CC",
+            )
+
+    catalogs = _catalog_from_eodhd(
+        as_of=AS_OF,
+        config=ComprehensiveMarketDiscoveryConfig(
+            eodhd_exchange_codes=("CC",),
+            futures_roots=(),
+            option_underlyings=(),
+            yahoo_exchange_suffixes=(),
+        ),
+        provider=Provider(),
+        policy=ComprehensiveMarketDiscoveryPolicy(),
+        requested_asset_classes=frozenset({CandidateAssetClass.CRYPTO}),
+    )
+
+    assert CandidateAssetClass.FX not in catalogs
+    assert len(catalogs[CandidateAssetClass.CRYPTO]) == 1
+    record = catalogs[CandidateAssetClass.CRYPTO][0]
+    assert record.symbol == "BTCUSD"
+    assert record.provider_symbol == "BTC-USD"
+    assert record.asset_class is CandidateAssetClass.CRYPTO
+    assert record.instrument_type == "token"
+    assert record.provider_kind == "yahoo"
+
 
 
 def test_discovers_all_six_lanes_and_retains_holdings():
