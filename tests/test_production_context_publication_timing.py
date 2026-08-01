@@ -9,6 +9,10 @@ from application import (
 )
 from cio.persistence import serialize_candidate_decision, serialize_opportunity_queue
 from opportunity import OpportunityEngine
+from opportunity.snapshot import (
+    PUBLICATION_SNAPSHOT_KIND,
+    build_opportunity_snapshot,
+)
 from portfolio.state import SQLiteCanonicalPortfolioStore
 from screening import (
     FullUniverseScreeningPublication,
@@ -29,12 +33,24 @@ def test_publication_may_complete_after_point_in_time_cutoff(
     tmp_path: Path,
 ) -> None:
     candidate = _candidate()
-    queue = OpportunityEngine().build_queue(
+    engine = OpportunityEngine()
+    opportunity_context = _screening_context()
+    queue = engine.build_queue(
         (candidate,),
-        _screening_context(),
+        opportunity_context,
+    )
+    publication_identifier = "publication:after-cutoff"
+    snapshot_payload = build_opportunity_snapshot(
+        snapshot_kind=PUBLICATION_SNAPSHOT_KIND,
+        context=opportunity_context,
+        queue=queue,
+        engine=engine,
+        created_at=KNOWLEDGE_CUTOFF + timedelta(minutes=5),
+        code_version="commit:timing",
+        screening_publication_identifier=publication_identifier,
     )
     publication = FullUniverseScreeningPublication(
-        identifier="publication:after-cutoff",
+        identifier=publication_identifier,
         cycle_identifier="screening:production",
         published_at=KNOWLEDGE_CUTOFF + timedelta(minutes=5),
         security_master_catalog_identifier="catalog:production",
@@ -47,10 +63,13 @@ def test_publication_may_complete_after_point_in_time_cutoff(
         excluded_count=0,
         candidate_payloads=(serialize_candidate_decision(candidate),),
         exclusions=(),
-        opportunity_queue_payload=serialize_opportunity_queue(
-            queue,
-            occurred_at=AS_OF,
-        ),
+        opportunity_queue_payload={
+            **serialize_opportunity_queue(
+                queue,
+                occurred_at=AS_OF,
+            ),
+            "opportunity_context_snapshot": snapshot_payload,
+        },
     )
     screening_store = SQLiteFullUniverseScreeningStore(
         tmp_path / "screening.db"
@@ -110,3 +129,4 @@ def test_publication_may_complete_after_point_in_time_cutoff(
         context.manifest.screening_publication_identifier
         == publication.identifier
     )
+    assert context.opportunity_snapshot_hash == snapshot_payload["content_hash"]
