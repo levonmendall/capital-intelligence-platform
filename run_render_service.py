@@ -10,8 +10,9 @@ The supervisor is intentionally fail-closed:
 * initialization must succeed before any child starts;
 * the public web, API, and CIO operator are critical processes;
 * loss of a critical process terminates the service so Render restarts it;
-* historical collection and backup loops are restarted with bounded delay without
-  taking the trading console down during a transient provider or backup error;
+* historical collection, backup, and readiness-monitoring loops are restarted with
+  bounded delay without taking the trading console down during a transient or
+  persistently blocked operational condition;
 * SIGTERM is forwarded to every child for an orderly deployment shutdown; and
 * no live-money authority is introduced.
 """
@@ -252,6 +253,8 @@ def managed_processes(
         ManagedProcess(
             name="composite-readiness-watchdog",
             command=(python, "run_composite_readiness_watchdog.py"),
+            critical=False,
+            restart_delay_seconds=300,
         ),
     )
 
