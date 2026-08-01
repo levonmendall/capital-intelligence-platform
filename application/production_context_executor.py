@@ -9,6 +9,11 @@ from types import SimpleNamespace
 from application import production_context_contract as contract
 from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from governance.market_participation import CanonicalMarketParticipationAuthority
+from opportunity import OpportunityEngine, OpportunityQueue, RankedOpportunity
+from opportunity.snapshot import (
+    PUBLICATION_SNAPSHOT_KIND,
+    load_opportunity_snapshot,
+)
 from operations.free_paper_pilot import load_free_paper_pilot_universe
 from screening import candidate_from_payload
 
@@ -55,7 +60,7 @@ class _CachedContextProvider:
         return self._context
 
 
-def _candidate_authority_universe(executor, *, context):
+def _publication_and_candidates(executor, *, context):
     publication = executor.screening_store.publication(
         context.screening_cycle_identifier
     )
@@ -66,6 +71,14 @@ def _candidate_authority_universe(executor, *, context):
     candidates = tuple(
         candidate_from_payload(payload)
         for payload in publication.candidate_payloads
+    )
+    return publication, candidates
+
+
+def _candidate_authority_universe(executor, *, context):
+    _publication, candidates = _publication_and_candidates(
+        executor,
+        context=context,
     )
     configured = load_free_paper_pilot_universe()
     discovered = tuple(
@@ -107,6 +120,121 @@ def _candidate_authority_universe(executor, *, context):
     )
 
 
+def _publication_snapshot(executor, *, context):
+    if getattr(context, "opportunity_snapshot_hash", None) is None:
+        return None
+    publication, candidates = _publication_and_candidates(
+        executor,
+        context=context,
+    )
+    raw_snapshot = publication.opportunity_queue_payload.get(
+        "opportunity_context_snapshot"
+    )
+    if not isinstance(raw_snapshot, dict):
+        raise RuntimeError(
+            "screening publication lacks an immutable opportunity snapshot"
+        )
+    candidate_map = {item.identifier: item for item in candidates}
+    snapshot = load_opportunity_snapshot(
+        raw_snapshot,
+        candidates=candidate_map,
+    )
+    if snapshot.snapshot_kind != PUBLICATION_SNAPSHOT_KIND:
+        raise RuntimeError("screening publication opportunity snapshot kind is invalid")
+    if snapshot.content_hash != context.opportunity_snapshot_hash:
+        raise RuntimeError(
+            "screening publication opportunity snapshot hash does not match context"
+        )
+    if snapshot.screening_publication_identifier != publication.identifier:
+        raise RuntimeError(
+            "screening publication opportunity snapshot belongs to another publication"
+        )
+    return snapshot
+
+
+def _rerank_persisted_membership(
+    engine: OpportunityEngine,
+    candidates,
+    decision_context,
+    publication_queue: OpportunityQueue,
+) -> OpportunityQueue:
+    """Apply portfolio diagnostics only to ordering, never qualification membership.
+
+    ``OpportunityRankingInput`` is explicitly an ordering contract. Re-running
+    qualification after publication can reinterpret an immutable candidate set and
+    silently eject a previously certified candidate. Preserve the publication's
+    qualified/rejected membership and qualifications, while recalculating only the
+    disclosed ranking components and order with current-cycle portfolio diagnostics.
+    """
+
+    candidate_map = {item.identifier: item for item in candidates}
+    represented = {
+        *(item.candidate.identifier for item in publication_queue.ranked),
+        *(item.candidate_identifier for item in publication_queue.rejected),
+    }
+    if represented != set(candidate_map):
+        raise ValueError(
+            "immutable publication queue does not cover the runtime candidate set"
+        )
+
+    rows = []
+    for persisted in publication_queue.ranked:
+        candidate = candidate_map[persisted.candidate.identifier]
+        qualification = persisted.qualification
+        robustness = engine.robustness(candidate, decision_context)
+        components = engine._components(  # package-internal ranking rule
+            candidate,
+            qualification,
+            robustness,
+            decision_context,
+        )
+        score = round(sum(item.contribution for item in components), 8)
+        rows.append(
+            (
+                candidate,
+                qualification,
+                components,
+                score,
+                robustness,
+            )
+        )
+
+    rows.sort(
+        key=lambda item: (
+            1 if item[1].mandatory_holding_review else 0,
+            item[3],
+            item[4].stressed_edge,
+            item[4].robust_edge,
+            item[4].annualized_geometric_return,
+            item[0].evidence_quality.score,
+            item[0].instrument.symbol,
+        ),
+        reverse=True,
+    )
+    ranked = tuple(
+        RankedOpportunity(
+            rank=index,
+            candidate=candidate,
+            qualification=qualification,
+            score=score,
+            components=components,
+        )
+        for index, (
+            candidate,
+            qualification,
+            components,
+            score,
+            _robustness,
+        ) in enumerate(rows, start=1)
+    )
+    return OpportunityQueue(
+        context_identifier=decision_context.identifier,
+        policy_version=publication_queue.policy_version,
+        ranked=ranked,
+        rejected=publication_queue.rejected,
+    )
+
+
 class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
     """Requalify using exact registry-certified paper authority."""
 
@@ -114,6 +242,7 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
         original_provider = self.context_provider
         context = original_provider.load_context(as_of=as_of)
         authority_universe = _candidate_authority_universe(self, context=context)
+        publication_snapshot = _publication_snapshot(self, context=context)
         expected_publication_identifier = (
             authority_universe.expected_publication_identifier
         )
@@ -131,9 +260,33 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
                 )
             return authority_universe
 
+        original_build_queue = OpportunityEngine.build_queue
+
+        def build_queue_with_immutable_membership(
+            engine,
+            candidates,
+            opportunity_context,
+        ):
+            if (
+                publication_snapshot is not None
+                and opportunity_context.identifier
+                == publication_snapshot.context.identifier
+                and opportunity_context.alternatives
+                == publication_snapshot.context.alternatives
+                and opportunity_context.ranking_inputs
+            ):
+                return _rerank_persisted_membership(
+                    engine,
+                    candidates,
+                    opportunity_context,
+                    publication_snapshot.queue,
+                )
+            return original_build_queue(engine, candidates, opportunity_context)
+
         with _AUTHORITY_BINDING_LOCK:
             original_loader = contract.load_active_paper_universe_for_publication
             contract.load_active_paper_universe_for_publication = load_exact_authority
+            OpportunityEngine.build_queue = build_queue_with_immutable_membership
             self.context_provider = _CachedContextProvider(
                 original_provider, context, as_of=as_of
             )
@@ -141,6 +294,7 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
                 return super().run(as_of=as_of)
             finally:
                 self.context_provider = original_provider
+                OpportunityEngine.build_queue = original_build_queue
                 contract.load_active_paper_universe_for_publication = original_loader
 
 
