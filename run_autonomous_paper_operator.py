@@ -16,7 +16,7 @@ import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from api.config import ApiSettings
 from api.repositories import JournalRepository, RepositoryUnavailableError
@@ -53,12 +53,43 @@ from public_live_collection_runtime import collect_public_live_information_if_du
 from run_scheduler import build_worker
 
 
-def _payloads(settings: ApiSettings) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def _payload_as_of(payload: Mapping[str, Any] | None) -> datetime | None:
+    if not isinstance(payload, Mapping):
+        return None
+    raw = str(payload.get("as_of", "")).strip()
+    if not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        return None
+    return value.astimezone(timezone.utc)
+
+
+def _payloads(
+    settings: ApiSettings,
+    *,
+    expected_as_of: datetime | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Return only artifacts belonging to the current completed CIO cycle."""
+
+    if expected_as_of is None:
+        return None, None
+    if expected_as_of.tzinfo is None or expected_as_of.utcoffset() is None:
+        raise ValueError("expected_as_of must be timezone-aware")
+    expected = expected_as_of.astimezone(timezone.utc)
     journal = JournalRepository(settings.journal_database, required=False)
-    return (
-        journal.latest_payload("portfolio_construction"),
-        journal.latest_payload("daily_cio_briefing"),
-    )
+    construction = journal.latest_payload("portfolio_construction")
+    briefing = journal.latest_payload("daily_cio_briefing")
+    if _payload_as_of(briefing) != expected:
+        briefing = None
+    if _payload_as_of(construction) != expected:
+        construction = None
+    if construction is not None and briefing is None:
+        construction = None
+    return construction, briefing
 
 
 def _invalidate_context_reuse_cache(settings: ApiSettings) -> None:
@@ -85,6 +116,55 @@ def _blocked_cycle(context_publication) -> WorkerRunResult:
         status="failed",
         detail=context_publication.detail,
     )
+
+
+def _funnel(
+    *,
+    context_publication,
+    briefing: Mapping[str, Any] | None,
+    construction: Mapping[str, Any] | None,
+    execution_state: str,
+) -> dict[str, object]:
+    eligible = int(
+        0
+        if context_publication is None
+        else getattr(context_publication, "instrument_count", 0)
+    )
+    candidates = int(
+        0
+        if context_publication is None
+        else getattr(context_publication, "candidate_count", 0)
+    )
+    qualified = int(
+        0
+        if context_publication is None
+        else getattr(context_publication, "qualified_candidate_count", 0)
+    )
+    decision_identifier = (
+        None
+        if not isinstance(briefing, Mapping)
+        else briefing.get("decision_identifier")
+    )
+    trades = (
+        ()
+        if not isinstance(construction, Mapping)
+        else tuple(construction.get("trades", ()) or ())
+    )
+    target_weights = (
+        ()
+        if not isinstance(construction, Mapping)
+        else tuple(construction.get("target_weights", ()) or ())
+    )
+    return {
+        "eligible_instruments": eligible,
+        "candidate_records": candidates,
+        "qualified_for_specialists": qualified,
+        "cio_decision_records": 1 if decision_identifier else 0,
+        "construction_available": construction is not None,
+        "proposed_trade_count": len(trades),
+        "nonzero_final_target_count": len(target_weights),
+        "paper_implementation_completed": execution_state == "completed",
+    }
 
 
 def _run_pass(
@@ -197,13 +277,27 @@ def _run_pass(
     cycle = event_cycle or scheduled_cycle
     context_publication = event_context or scheduled_context
     deliveries = worker.dispatch_pending()
+    cycle_attempted = context_publication is not None
+    cycle_completed = cycle.status == "completed"
+    expected_as_of = (
+        context_publication.decision_as_of
+        if cycle_attempted and cycle_completed and context_publication.ready
+        else None
+    )
     try:
-        construction, briefing = _payloads(settings)
+        construction, briefing = _payloads(
+            settings,
+            expected_as_of=expected_as_of,
+        )
     except RepositoryUnavailableError as error:
         construction, briefing = None, None
         journal_detail = str(error)
     else:
-        journal_detail = None
+        journal_detail = (
+            None
+            if not cycle_attempted or briefing is not None
+            else "No current-cycle CIO briefing is available for execution."
+        )
 
     execution_now = datetime.now(timezone.utc)
     mode = paper_execution_mode()
@@ -241,18 +335,21 @@ def _run_pass(
     context_ready = context_publication is None or context_publication.ready
     monitoring_ready = reassessment.state != "failed"
     learning_ready = after_close.state != "failed"
+    cycle_ready = not cycle_attempted or cycle_completed
+    status = (
+        "operating"
+        if (
+            operating_attempt
+            and public_collection.state != "failed"
+            and context_ready
+            and monitoring_ready
+            and learning_ready
+            and cycle_ready
+        )
+        else "degraded"
+    )
     return {
-        "status": (
-            "operating"
-            if (
-                operating_attempt
-                and public_collection.state != "failed"
-                and context_ready
-                and monitoring_ready
-                and learning_ready
-            )
-            else "degraded"
-        ),
+        "status": status,
         "evaluated_at": execution_now.isoformat(),
         "public_live_information": public_collection.to_dict(),
         "material_reassessment": reassessment.to_dict(),
@@ -281,7 +378,15 @@ def _run_pass(
             "status": cycle.status,
             "detail": cycle.detail,
             "snapshot_identifier": cycle.snapshot_identifier,
+            "attempted_this_pass": cycle_attempted,
+            "completed_this_pass": cycle_completed if cycle_attempted else None,
         },
+        "decision_funnel": _funnel(
+            context_publication=context_publication,
+            briefing=briefing,
+            construction=construction,
+            execution_state=attempt.state,
+        ),
         "delivery_count": len(deliveries),
         "journal_detail": journal_detail,
         "paper_execution": attempt.to_dict(),
@@ -412,7 +517,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(payload, sort_keys=True))
         force_public_collection = False
         if run_once:
-            return 0
+            return 0 if payload.get("status") == "operating" else 3
         time.sleep(poll_seconds)
 
 
