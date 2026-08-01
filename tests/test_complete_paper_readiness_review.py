@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cio.cycle_disposition import CIOCycleDispositionAuthority
 from cio_pending_transactions import build_pending_transaction_report
 from opportunity import OpportunityQueue
 from operations.free_paper_pilot import (
@@ -17,22 +18,30 @@ NOW = datetime(2026, 7, 29, 20, 0, tzinfo=timezone.utc)
 
 
 def test_empty_review_queue_reports_insufficient_evidence() -> None:
+    queue = OpportunityQueue(
+        context_identifier="opportunity:test",
+        policy_version="opportunity-test.v1",
+        ranked=(),
+        rejected=(),
+    )
+    disposition = CIOCycleDispositionAuthority().decide(queue, as_of=NOW)
+    assert disposition is not None
+
     briefing = DailyCIOBriefingBuilder().build(
         as_of=NOW,
-        queue=OpportunityQueue(
-            context_identifier="opportunity:test",
-            policy_version="opportunity-test.v1",
-            ranked=(),
-            rejected=(),
-        ),
+        queue=queue,
         decisions=(),
         construction=None,
         theses=(),
+        cycle_disposition=disposition,
     )
 
     assert briefing.status is DailyCIOStatus.INSUFFICIENT_EVIDENCE
-    assert "The comparative opportunity set is incomplete" in briefing.material_developments
-    assert briefing.portfolio_decision == "No portfolio action is permitted."
+    assert "CIO cycle classification" in briefing.material_developments[0]
+    assert briefing.portfolio_decision == (
+        "CIO decision: insufficient evidence. No portfolio action is permitted."
+    )
+    assert briefing.decision_identifier == disposition.identifier
 
 
 def test_safe_abstention_is_not_a_completed_comparative_decision() -> None:
