@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -45,7 +45,13 @@ def binding() -> EODHDInstrumentBinding:
     )
 
 
-def provider_for(payloads, *, policy=None, sleepers=None) -> EODHDProvider:
+def provider_for(
+    payloads,
+    *,
+    policy=None,
+    sleepers=None,
+    clock=None,
+) -> EODHDProvider:
     queue = list(payloads)
 
     def http_get(url, *, params, timeout):
@@ -56,7 +62,7 @@ def provider_for(payloads, *, policy=None, sleepers=None) -> EODHDProvider:
     return EODHDProvider(
         api_token="secret-token",
         bindings=EODHDBindingRegistry((binding(),)),
-        clock=lambda: NOW,
+        clock=clock or (lambda: NOW),
         http_get=http_get,
         sleeper=(sleepers.append if sleepers is not None else lambda _: None),
         retrieval_policy=policy,
@@ -178,6 +184,42 @@ def test_raw_fundamentals_snapshot_preserves_hash_and_limitations() -> None:
         payload["limitations"]
     )
     assert "secret-token" not in json.dumps(payload)
+
+
+def test_live_dataset_snapshot_records_actual_retrieval_availability() -> None:
+    retrieved_at = NOW + timedelta(seconds=90)
+    provider = provider_for(
+        [FakeResponse({"General": {"Code": "AAPL", "Exchange": "US"}})],
+        clock=lambda: retrieved_at,
+    )
+
+    snapshot = provider.fetch_dataset(
+        ProviderDatasetQuery(
+            dataset_type=ProviderDatasetType.FUNDAMENTALS,
+            provider_symbol="AAPL.US",
+            as_of=NOW,
+        )
+    )
+
+    assert snapshot.query.as_of == retrieved_at
+    assert snapshot.available_at == retrieved_at
+    assert any("requested cutoff" in item for item in snapshot.limitations)
+
+
+def test_historical_dataset_query_still_fails_closed_after_live_grace() -> None:
+    provider = provider_for(
+        [FakeResponse({"General": {"Code": "AAPL", "Exchange": "US"}})],
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match="snapshot was not available at query as_of"):
+        provider.fetch_dataset(
+            ProviderDatasetQuery(
+                dataset_type=ProviderDatasetType.FUNDAMENTALS,
+                provider_symbol="AAPL.US",
+                as_of=NOW - timedelta(minutes=6),
+            )
+        )
 
 
 def test_symbol_directory_remains_non_authoritative_history() -> None:

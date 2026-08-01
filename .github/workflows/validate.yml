@@ -53,34 +53,6 @@ jobs:
       - name: Verify runtime lock integrity
         run: python scripts/verify_requirements_lock.py
 
-      - name: Run one-time weekend CIO validation
-        env:
-          CAPITAL_INTELLIGENCE_ENVIRONMENT: development
-          CAPITAL_INTELLIGENCE_DATA_DIR: ${{ runner.temp }}/capital-intelligence-cio-run
-          CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE: America/Los_Angeles
-          CAPITAL_INTELLIGENCE_SCHEDULER_HOUR: "7"
-          CAPITAL_INTELLIGENCE_SCHEDULER_TIMES: "07:00"
-          CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE: automatic
-          CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP: "false"
-          CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_REQUIRED: "false"
-          CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED: "true"
-          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
-          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
-          APCA_API_BASE_URL: https://paper-api.alpaca.markets
-          APCA_DATA_BASE_URL: https://data.alpaca.markets
-          APCA_DATA_FEED: iex
-          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
-          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
-          CAPITAL_INTELLIGENCE_EODHD_API_TOKEN: ${{ secrets.CAPITAL_INTELLIGENCE_EODHD_API_TOKEN }}
-          DATABENTO_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
-          CAPITAL_INTELLIGENCE_DATABENTO_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_DATABENTO_API_KEY }}
-          SEC_USER_AGENT: Capital Intelligence Platform levonmendall2369@gmail.com
-        run: |
-          mkdir -p "$CAPITAL_INTELLIGENCE_DATA_DIR" reports
-          python initialize.py
-          python run_autonomous_paper_operator.py --once --force-public-collection | tee reports/weekend-cio-run.jsonl
-
       - name: Install Chromium for real Streamlit browser tests
         run: python -m playwright install --with-deps chromium
 
@@ -101,7 +73,6 @@ jobs:
         with:
           name: release-validation-results
           path: |
-            reports/weekend-cio-run.jsonl
             reports/release-validation.json
             reports/golden-end-to-end-gate.json
             reports/event-quality-benchmark.json
