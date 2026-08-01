@@ -34,6 +34,49 @@ def test_stronger_holding_realigns_candidate_without_blocking_valid_review() -> 
     assert prepared.queue.ranked[0].candidate.identifier == candidate.identifier
 
 
+def test_cash_relative_success_probability_cannot_create_false_consistency_veto() -> None:
+    engine = OpportunityEngine()
+    context = _context(holding_return=0.15)
+    expected_baseline = engine._alternative_comparable_return(
+        context.alternatives[1],
+        cash_anchor=context.alternatives[0].net_expected_return,
+    )
+    candidate = replace(
+        _candidate(
+            "ASYMMETRIC",
+            base=0.14,
+            bull=0.90,
+            bear=-0.05,
+            probability=0.90,
+            opportunity_cost=expected_baseline,
+        ),
+        base_case_probability=0.40,
+        bull_case_probability=0.45,
+        bear_case_probability=0.15,
+    )
+
+    stale = engine.qualify(candidate, context)
+    assert not stale.qualified
+    assert any(
+        "inconsistent with the disclosed scenarios" in reason
+        for reason in stale.reasons
+    )
+
+    prepared = prepare_competitive_opportunity_set(
+        engine,
+        (candidate,),
+        context,
+    )
+
+    aligned = prepared.candidates[0]
+    assert aligned.probability_of_success == pytest.approx(0.45)
+    assert prepared.preliminary_queue.ranked
+    assert not any(
+        "inconsistent with the disclosed scenarios" in reason
+        for reason in prepared.preliminary_queue.ranked[0].qualification.reasons
+    )
+
+
 def test_unqualified_candidate_cannot_become_a_competing_capital_alternative() -> None:
     engine = OpportunityEngine()
     valid = _candidate("VALID")
