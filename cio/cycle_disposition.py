@@ -87,7 +87,9 @@ class CIOCycleDispositionAuthority:
                 for reason in rejection.reasons
                 if reason.strip()
             )
-        ) or ("No decision-complete candidate reached the CIO review queue",)
+        ) or (
+            "Complete candidate evidence is unavailable; no candidate reached CIO review",
+        )
         evidence_or_authority_block = any(
             term in reason.lower()
             for reason in reasons
