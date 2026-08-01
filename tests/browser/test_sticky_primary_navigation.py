@@ -19,11 +19,7 @@ def _scroll_and_measure_navigation(page) -> dict[str, object]:
           const row = document.querySelector(
             'div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark)'
           );
-          const wrapper = row
-            ? row.closest(
-                '[data-testid="stElementContainer"], .stElementContainer, .element-container'
-              )
-            : null;
+          const wrapper = row ? row.parentElement : null;
           if (!row || !wrapper) {
             return {
               wrapperFound: false,
