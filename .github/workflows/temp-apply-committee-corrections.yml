@@ -1,16 +1,14 @@
 name: Temporary committee correction controller
 
 on:
-  pull_request:
-    types:
-      - synchronize
+  schedule:
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: write
 
 jobs:
   apply-and-validate:
-    if: github.event.pull_request.number == 324
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
