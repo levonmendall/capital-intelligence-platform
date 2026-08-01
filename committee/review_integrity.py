@@ -40,7 +40,7 @@ def _unique(*groups: tuple[str, ...]) -> tuple[str, ...]:
 
 
 class IndependentSpecialistService(_IndependentSpecialistService):
-    """Preserve full specialist evidence and enforce role-complete coverage."""
+    """Preserve complete evidence and strengthen specialist-to-CIO handoff."""
 
     def analyze(self, candidate, context) -> IndependentSpecialistPacket:
         packet = super().analyze(candidate, context)
@@ -56,7 +56,7 @@ class IndependentSpecialistService(_IndependentSpecialistService):
             elif analysis.role is SpecialistRole.FUNDAMENTAL_VALUATION:
                 analysis = self._enrich_fundamental(analysis, context)
             elif analysis.role is SpecialistRole.EVIDENCE_GOVERNANCE:
-                analysis = self._enforce_coverage(
+                analysis = self._enforce_equity_coverage(
                     analysis,
                     candidate=candidate,
                     context=context,
@@ -182,16 +182,10 @@ class IndependentSpecialistService(_IndependentSpecialistService):
         )
 
     @staticmethod
-    def _enforce_coverage(analysis, *, candidate, context):
+    def _enforce_equity_coverage(analysis, *, candidate, context):
         asset_class = candidate.instrument.asset_class
         reasons = list(analysis.veto_reasons)
         categories = list(analysis.veto_categories)
-
-        def add(reason: str) -> None:
-            if reason in reasons:
-                return
-            reasons.append(reason)
-            categories.append(EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE)
 
         if (
             asset_class in _EQUITY_CLASSES
@@ -201,13 +195,10 @@ class IndependentSpecialistService(_IndependentSpecialistService):
                 for reason in reasons
             )
         ):
-            add(
+            reasons.append(
                 "point-in-time normalized company analysis is missing for an equity"
             )
-        if asset_class not in _EQUITY_CLASSES and context.asset_valuation is None:
-            add(
-                "independent asset-specific valuation analysis is missing for a non-equity candidate"
-            )
+            categories.append(EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE)
 
         if tuple(reasons) == analysis.veto_reasons:
             return analysis
@@ -221,14 +212,12 @@ class IndependentSpecialistService(_IndependentSpecialistService):
             risks=_unique(analysis.risks, tuple(reasons)),
             limitations=_unique(
                 analysis.limitations,
-                (
-                    "Required asset-class valuation coverage is incomplete",
-                ),
+                ("Required equity valuation coverage is incomplete",),
             ),
             change_conditions=_unique(
                 analysis.change_conditions,
                 (
-                    "Provide the required point-in-time company or asset-specific valuation packet",
+                    "Provide the required point-in-time company valuation packet",
                 ),
             ),
             veto_reasons=tuple(reasons),
