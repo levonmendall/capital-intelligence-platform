@@ -16,6 +16,7 @@ from cio import RecommendationUniversePolicy
 from cio.persistence import CIOJournalEventType
 from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from opportunity import OpportunityEngine
+from operations.free_paper_pilot import load_free_paper_pilot_universe
 from screening import candidate_from_payload
 
 
@@ -197,9 +198,8 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
         cycle = self.cycle
         if governed_context:
             existing_engine = self.cycle.opportunity_engine
-            capability_authority = BoundedPilotCapabilityAuthority.from_candidates(
-                candidates,
-                authority_identifier=publication.universe_snapshot_identifier,
+            capability_authority = BoundedPilotCapabilityAuthority.from_universe(
+                load_free_paper_pilot_universe()
             )
             runtime_engine = OpportunityEngine(
                 universe_policy=RecommendationUniversePolicy(

@@ -16,8 +16,8 @@ It does not lower an investment threshold, alter the canonical strategy, expand 
 
 2. **Point-in-time capability evaluation**
    - The opportunity engine evaluates universe and capability eligibility at the candidate decision timestamp.
-   - Production publication injects the exact bounded-pilot authority into the queue used by the canonical CIO cycle.
-   - The production executor reconstructs an equivalent exact authority from the persisted complete-universe publication before independently reconciling and running the queue.
+   - Production publication injects authority derived only from the fixed 15-instrument base pilot, not the post-discovery universe.
+   - The production executor independently reloads the same fixed base-pilot authority before reconciling and running the queue.
 
 3. **Historical replay parity**
    - Default replay loads the canonical paper-universe configuration instead of relying on a stale ETF whitelist.

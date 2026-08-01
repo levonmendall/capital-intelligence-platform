@@ -719,7 +719,7 @@ def prepare_governed_production_context_for_cycle(
         as_of=decision_as_of,
         alternatives=tuple(alternatives),
     )
-    capability_authority = BoundedPilotCapabilityAuthority.from_universe(universe)
+    capability_authority = BoundedPilotCapabilityAuthority.from_universe(base_universe)
     queue = OpportunityEngine(
         universe_policy=RecommendationUniversePolicy(
             asset_class_authority=capability_authority,
