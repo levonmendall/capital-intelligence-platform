@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from statistics import pstdev
 from typing import Any, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 from cio import CandidateAssetClass
 from operations.free_paper_pilot import FreePaperPilotInstrument
@@ -23,6 +24,7 @@ from providers.alpaca_paper import AlpacaPaperClient, create_alpaca_paper_client
 from providers.sec_edgar import SECEdgarProvider
 
 _ALLOWED_EXCHANGES = frozenset({"NYSE", "NASDAQ", "AMEX", "ARCA", "BATS", "NYSEARCA"})
+_US_EQUITY_DISCOVERY_TIMEZONE = ZoneInfo("America/New_York")
 _FUND_NAME_MARKERS = (
     " ETF",
     " FUND",
@@ -41,6 +43,13 @@ def _aware(value: datetime, *, field_name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
     return value.astimezone(timezone.utc)
+
+
+def us_equity_discovery_scheduled(as_of: datetime) -> bool:
+    """Return whether fresh U.S.-equity discovery is scheduled at ``as_of``."""
+
+    timestamp = _aware(as_of, field_name="as_of")
+    return timestamp.astimezone(_US_EQUITY_DISCOVERY_TIMEZONE).weekday() < 5
 
 
 def _number(value: object) -> float | None:
@@ -345,6 +354,33 @@ def discover_us_equities(
 
     timestamp = _aware(as_of, field_name="as_of")
     resolved = policy or EquityDiscoveryPolicy()
+    if not us_equity_discovery_scheduled(timestamp):
+        local_date = timestamp.astimezone(_US_EQUITY_DISCOVERY_TIMEZONE).date()
+        material = {
+            "as_of": timestamp.isoformat(),
+            "policy": resolved.version,
+            "schedule": "weekend_market_closed",
+        }
+        digest = hashlib.sha256(
+            json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return EquityDiscoveryResult(
+            identifier=(
+                f"equity-discovery:{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}:"
+                f"{digest[:16]}"
+            ),
+            as_of=timestamp,
+            policy_version=resolved.version,
+            screened_asset_count=0,
+            snapshot_covered_count=0,
+            deep_shortlist_count=0,
+            selected=(),
+            observed_prices=(),
+            exclusions=(("__lane__", "weekend_market_closed"),),
+            security_master_snapshot_identifier=(
+                f"schedule:us-equity:{local_date.isoformat()}:closed"
+            ),
+        )
     alpaca = client or create_alpaca_paper_client()
     sec = sec_provider or SECEdgarProvider()
     sec_map, sec_identifier = _sec_equity_map(sec)
@@ -516,4 +552,5 @@ __all__ = [
     "EquityDiscoveryPolicy",
     "EquityDiscoveryResult",
     "discover_us_equities",
+    "us_equity_discovery_scheduled",
 ]
