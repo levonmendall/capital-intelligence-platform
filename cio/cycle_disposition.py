@@ -170,7 +170,7 @@ class CIOCycleDispositionAuthority:
         )
         if not economically_complete:
             action = CIOAction.INSUFFICIENT_EVIDENCE
-            classification = "evidence_authority_or_unclassified_block"
+            classification = "evidence_or_authority_block"
             rationale = (
                 "The CIO cannot conclude that cash or current holdings are superior "
                 "because one or more qualification reasons are evidence, authority, "
