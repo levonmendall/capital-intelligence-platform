@@ -37,19 +37,27 @@ def certified_adapter_asset_valuation(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Give every certified ETF adapter test its required valuation packet."""
+    """Give every test reusing the certified ETF adapter its valuation packet."""
 
-    supported_modules = {
-        "tests.test_canonical_production_context_adapter",
-        "tests.test_committee_cio_information_trace",
-    }
-    if request.module.__name__ not in supported_modules:
+    adapter_module = sys.modules.get(
+        "tests.test_canonical_production_context_adapter"
+    )
+    if adapter_module is None:
         yield
         return
 
-    adapter_module = sys.modules[
-        "tests.test_canonical_production_context_adapter"
-    ]
+    adapter = getattr(adapter_module, "_adapter", None)
+    uses_adapter = (
+        request.module is adapter_module
+        or (
+            adapter is not None
+            and getattr(request.module, "_adapter", None) is adapter
+        )
+    )
+    if not uses_adapter:
+        yield
+        return
+
     original = adapter_module._candidate_evidence
 
     def candidate_evidence_with_asset_valuation(candidate):
