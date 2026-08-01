@@ -5,19 +5,35 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Callable
 
 import streamlit as st
 
 import app_impl
+import educational_market_briefing_ui
 import live_operating_console
 import operating_intelligence_ui
+import operating_status
 from render_nonblocking_data import (
+    get_mandate_details_nonblocking,
+    get_portfolio_totals_nonblocking,
+    get_trade_history_nonblocking,
+    load_cio_operating_status_nonblocking,
     load_dashboard_data_nonblocking,
+    load_decision_accountability_nonblocking,
+    load_diagnostic_environment_nonblocking,
+    load_journal_history_nonblocking,
+    load_journal_latest_nonblocking,
+    load_latest_theses_nonblocking,
     load_live_market_console_nonblocking,
+    load_opportunity_scan_nonblocking,
+    load_public_event_snapshot_nonblocking,
+    prewarm_render_data,
 )
 from secure_app import DeploymentContext, create_streamlit_application
 
@@ -37,6 +53,21 @@ def _synchronous_renderer(renderer: Callable[..., Any]) -> Callable[..., Any]:
     return getattr(renderer, "__wrapped__", renderer)
 
 
+def _log_slow_surface(surface_name: str, render_thread_id: int) -> None:
+    frame = sys._current_frames().get(render_thread_id)
+    stack = (
+        "render thread frame unavailable"
+        if frame is None
+        else "".join(traceback.format_stack(frame))
+    )
+    _LOGGER.warning(
+        "primary Streamlit surface render is still running after 8 seconds: %s\n"
+        "render_thread_stack:\n%s",
+        surface_name,
+        stack,
+    )
+
+
 def _guarded_renderer(
     surface_name: str,
     renderer: Callable[..., Any],
@@ -48,13 +79,12 @@ def _guarded_renderer(
     @functools.wraps(target, updated=())
     def guarded(*args: Any, **kwargs: Any) -> Any:
         started_at = time.monotonic()
+        render_thread_id = threading.get_ident()
         _LOGGER.info("primary Streamlit surface render started: %s", surface_name)
         slow_warning = threading.Timer(
             8.0,
-            lambda: _LOGGER.warning(
-                "primary Streamlit surface render is still running after 8 seconds: %s",
-                surface_name,
-            ),
+            _log_slow_surface,
+            args=(surface_name, render_thread_id),
         )
         slow_warning.daemon = True
         slow_warning.start()
@@ -89,20 +119,51 @@ def _guarded_renderer(
 
 
 def prepare_render_data_runtime() -> None:
-    """Keep external provider latency out of the Streamlit presentation thread."""
+    """Keep all provider, file, and operating-store latency off the UI thread."""
 
-    # app_impl imported these callables directly, while the concise presentation
-    # resolves them through operating_intelligence_ui.  Patch both lookup paths,
-    # plus the live-console module used by collapsed detail panels.
+    # app_impl resolves these globals when it creates session dependencies and
+    # renders the four surfaces. None of these display adapters can mutate or
+    # authorize the canonical operating stores.
+    app_impl._latest = load_journal_latest_nonblocking
+    app_impl._history = load_journal_history_nonblocking
+    app_impl._latest_theses = load_latest_theses_nonblocking
+    app_impl._diagnostic_environment = load_diagnostic_environment_nonblocking
+    app_impl.get_portfolio_totals = get_portfolio_totals_nonblocking
+    app_impl.get_mandate_details = get_mandate_details_nonblocking
+    app_impl.get_trade_history = get_trade_history_nonblocking
+    app_impl.load_cio_operating_status = load_cio_operating_status_nonblocking
     app_impl.load_live_market_console = load_live_market_console_nonblocking
     app_impl.load_dashboard_data = load_dashboard_data_nonblocking
+
+    # The concise educational surfaces resolve these functions through the
+    # operating_intelligence_ui module at call time.
+    operating_intelligence_ui.get_mandate_details = get_mandate_details_nonblocking
     operating_intelligence_ui.load_live_market_console = (
         load_live_market_console_nonblocking
     )
     operating_intelligence_ui.load_dashboard_data = load_dashboard_data_nonblocking
+    operating_intelligence_ui.load_public_event_snapshot = (
+        load_public_event_snapshot_nonblocking
+    )
+    operating_intelligence_ui.load_opportunity_scan = (
+        load_opportunity_scan_nonblocking
+    )
+    operating_intelligence_ui.load_decision_accountability = (
+        load_decision_accountability_nonblocking
+    )
+
+    # Other active presentation helpers import these modules directly.
+    educational_market_briefing_ui.load_public_event_snapshot = (
+        load_public_event_snapshot_nonblocking
+    )
+    operating_status.load_cio_operating_status = (
+        load_cio_operating_status_nonblocking
+    )
     live_operating_console.load_live_market_console = (
         load_live_market_console_nonblocking
     )
+
+    prewarm_render_data()
 
 
 def prepare_render_surface_runtime() -> None:
