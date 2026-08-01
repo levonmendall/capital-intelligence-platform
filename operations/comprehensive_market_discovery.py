@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import pstdev
 from typing import Any, Callable, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -36,6 +37,17 @@ from providers.eodhd import EODHDProvider, EODHDProviderError, build_eodhd_provi
 
 DEFAULT_DISCOVERY_CONFIG_PATH = Path("config/comprehensive_market_discovery.json")
 
+_DISCOVERY_CALENDAR_TIMEZONE = ZoneInfo("America/New_York")
+_DISCOVERY_LANES = (
+    CandidateAssetClass.INTERNATIONAL_EQUITY,
+    CandidateAssetClass.FX,
+    CandidateAssetClass.CRYPTO,
+    CandidateAssetClass.FUTURE,
+    CandidateAssetClass.FIXED_INCOME,
+    CandidateAssetClass.OPTION,
+)
+_WEEKEND_DISCOVERY_LANES = frozenset({CandidateAssetClass.CRYPTO})
+
 
 class ComprehensiveMarketDiscoveryError(RuntimeError):
     """Raised when the complete cross-market discovery publication is invalid."""
@@ -47,6 +59,21 @@ def _aware(value: datetime, *, field_name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
     return value.astimezone(timezone.utc)
+
+
+def scheduled_discovery_lanes(as_of: datetime) -> frozenset[CandidateAssetClass]:
+    """Return market families scheduled for fresh discovery at ``as_of``.
+
+    Saturday and Sunday discovery is limited to direct crypto, the governed 24/7
+    lane. Exchange-local and 24/5 lanes remain fully fail-closed on weekdays and
+    are marked scheduled-closed on weekends instead of being treated as provider
+    failures.
+    """
+
+    timestamp = _aware(as_of, field_name="as_of")
+    if timestamp.astimezone(_DISCOVERY_CALENDAR_TIMEZONE).weekday() >= 5:
+        return _WEEKEND_DISCOVERY_LANES
+    return frozenset(_DISCOVERY_LANES)
 
 
 def _text(value: object, *, field_name: str) -> str:
@@ -395,12 +422,30 @@ class DiscoveryLaneResult:
     selected: tuple[DiscoveredMarketInstrument, ...]
     exclusions: tuple[tuple[str, str], ...]
     source_identifiers: tuple[str, ...]
+    scheduled: bool = True
+    schedule_reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.catalog_count < 0 or self.deep_analyzed_count < 0 or self.deep_analyzed_count > self.catalog_count:
             raise ValueError("lane counts are invalid")
         if any(item.catalog.asset_class is not self.asset_class for item in self.selected):
             raise ValueError("lane contains a mismatched asset class")
+        if not isinstance(self.scheduled, bool):
+            raise TypeError("scheduled must be a bool")
+        if self.scheduled and self.schedule_reason is not None:
+            raise ValueError("scheduled lanes cannot carry a schedule_reason")
+        if not self.scheduled:
+            if not isinstance(self.schedule_reason, str) or not self.schedule_reason.strip():
+                raise ValueError("scheduled-closed lanes require a schedule_reason")
+            if (
+                self.catalog_count
+                or self.deep_analyzed_count
+                or self.selected
+                or self.source_identifiers
+            ):
+                raise ValueError(
+                    "scheduled-closed lanes cannot contain evaluated market data"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,6 +490,8 @@ class ComprehensiveMarketDiscoveryResult:
             "lanes": [
                 {
                     "asset_class": lane.asset_class.value,
+                    "scheduled": lane.scheduled,
+                    "schedule_reason": lane.schedule_reason,
                     "catalog_count": lane.catalog_count,
                     "deep_analyzed_count": lane.deep_analyzed_count,
                     "selected": [
@@ -555,18 +602,38 @@ def _catalog_from_eodhd(
     config: ComprehensiveMarketDiscoveryConfig,
     provider: EODHDProvider,
     policy: ComprehensiveMarketDiscoveryPolicy,
+    requested_asset_classes: frozenset[CandidateAssetClass] | None = None,
 ) -> Mapping[CandidateAssetClass, Sequence[DiscoveryCatalogRecord]]:
-    result: dict[CandidateAssetClass, list[DiscoveryCatalogRecord]] = {
-        item: []
-        for item in (
+    directory_lanes = frozenset(
+        {
             CandidateAssetClass.INTERNATIONAL_EQUITY,
             CandidateAssetClass.FX,
             CandidateAssetClass.CRYPTO,
             CandidateAssetClass.FIXED_INCOME,
-        )
+        }
+    )
+    requested = (
+        directory_lanes
+        if requested_asset_classes is None
+        else frozenset(requested_asset_classes) & directory_lanes
+    )
+    result: dict[CandidateAssetClass, list[DiscoveryCatalogRecord]] = {
+        item: [] for item in requested
     }
     suffix_map = config.yahoo_suffix_map
+    exchange_lanes = {
+        "CC": frozenset({CandidateAssetClass.CRYPTO}),
+        "FOREX": frozenset({CandidateAssetClass.FX}),
+        "BOND": frozenset({CandidateAssetClass.FIXED_INCOME}),
+        "GBOND": frozenset({CandidateAssetClass.FIXED_INCOME}),
+    }
     for exchange in config.eodhd_exchange_codes:
+        possible_lanes = exchange_lanes.get(
+            exchange,
+            frozenset({CandidateAssetClass.INTERNATIONAL_EQUITY}),
+        )
+        if not possible_lanes & requested:
+            continue
         snapshot = provider.fetch_dataset(
             ProviderDatasetQuery(
                 dataset_type=ProviderDatasetType.SYMBOL_DIRECTORY,
@@ -612,6 +679,8 @@ def _catalog_from_eodhd(
                 instrument_type = "bond"
                 economic_exposure = "government_bonds" if "treasury" in name.lower() or "government" in name.lower() else "investment_grade_credit"
             else:
+                continue
+            if asset_class not in requested:
                 continue
             yahoo_suffix = suffix_map.get(exchange, "")
             yahoo_symbol = code.upper() + yahoo_suffix
@@ -799,6 +868,7 @@ def default_catalog_probe(
     timestamp = _aware(as_of, field_name="as_of")
     resolved_config = config or load_comprehensive_market_discovery_config()
     resolved_policy = policy or ComprehensiveMarketDiscoveryPolicy()
+    active_lanes = scheduled_discovery_lanes(timestamp)
     provider = eodhd_provider or build_eodhd_provider()
     result = {
         key: list(value)
@@ -807,19 +877,24 @@ def default_catalog_probe(
             config=resolved_config,
             provider=provider,
             policy=resolved_policy,
+            requested_asset_classes=active_lanes,
         ).items()
     }
-    result[CandidateAssetClass.FUTURE] = list(
-        _futures_catalog(as_of=timestamp, config=resolved_config)
-    )
-    result[CandidateAssetClass.OPTION] = list(
-        _option_catalog(
-            as_of=timestamp,
-            config=resolved_config,
-            policy=resolved_policy,
-            databento_options_provider=databento_options_provider,
+    for asset_class in _DISCOVERY_LANES:
+        result.setdefault(asset_class, [])
+    if CandidateAssetClass.FUTURE in active_lanes:
+        result[CandidateAssetClass.FUTURE] = list(
+            _futures_catalog(as_of=timestamp, config=resolved_config)
         )
-    )
+    if CandidateAssetClass.OPTION in active_lanes:
+        result[CandidateAssetClass.OPTION] = list(
+            _option_catalog(
+                as_of=timestamp,
+                config=resolved_config,
+                policy=resolved_policy,
+                databento_options_provider=databento_options_provider,
+            )
+        )
     return result
 
 
@@ -1077,6 +1152,7 @@ def discover_comprehensive_markets(
 
     timestamp = _aware(as_of, field_name="as_of")
     resolved = policy or ComprehensiveMarketDiscoveryPolicy()
+    scheduled_lanes = scheduled_discovery_lanes(timestamp)
     catalogs = (catalog_probe or default_catalog_probe)(timestamp)
     if not isinstance(catalogs, Mapping):
         raise ComprehensiveMarketDiscoveryError("catalog probe must return a mapping")
@@ -1085,14 +1161,33 @@ def discover_comprehensive_markets(
     excluded = {str(item).strip().upper() for item in excluded_symbols if str(item).strip()}
     lanes: list[DiscoveryLaneResult] = []
     manifest_material: list[dict[str, object]] = []
-    for asset_class in (
-        CandidateAssetClass.INTERNATIONAL_EQUITY,
-        CandidateAssetClass.FX,
-        CandidateAssetClass.CRYPTO,
-        CandidateAssetClass.FUTURE,
-        CandidateAssetClass.FIXED_INCOME,
-        CandidateAssetClass.OPTION,
-    ):
+    for asset_class in _DISCOVERY_LANES:
+        if asset_class not in scheduled_lanes:
+            schedule_reason = "weekend_market_closed"
+            lanes.append(
+                DiscoveryLaneResult(
+                    asset_class=asset_class,
+                    catalog_count=0,
+                    deep_analyzed_count=0,
+                    selected=(),
+                    exclusions=(("__lane__", schedule_reason),),
+                    source_identifiers=(),
+                    scheduled=False,
+                    schedule_reason=schedule_reason,
+                )
+            )
+            manifest_material.append(
+                {
+                    "asset_class": asset_class.value,
+                    "scheduled": False,
+                    "schedule_reason": schedule_reason,
+                    "catalog": 0,
+                    "deep": 0,
+                    "selected": [],
+                    "sources": [],
+                }
+            )
+            continue
         raw = catalogs.get(asset_class, ())
         if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
             raise ComprehensiveMarketDiscoveryError(
@@ -1163,14 +1258,20 @@ def discover_comprehensive_markets(
         manifest_material.append(
             {
                 "asset_class": asset_class.value,
+                "scheduled": True,
+                "schedule_reason": None,
                 "catalog": len(records),
                 "deep": len(deep_records),
                 "selected": [item.catalog.symbol for item in final],
                 "sources": list(source_identifiers),
             }
         )
-    if any(not lane.selected for lane in lanes):
-        missing = tuple(lane.asset_class.value for lane in lanes if not lane.selected)
+    if any(lane.scheduled and not lane.selected for lane in lanes):
+        missing = tuple(
+            lane.asset_class.value
+            for lane in lanes
+            if lane.scheduled and not lane.selected
+        )
         raise ComprehensiveMarketDiscoveryError(
             "complete discovery cannot certify an empty requested lane: " + ", ".join(missing)
         )
@@ -1206,4 +1307,5 @@ __all__ = [
     "default_market_probe",
     "discover_comprehensive_markets",
     "load_comprehensive_market_discovery_config",
+    "scheduled_discovery_lanes",
 ]

@@ -39,6 +39,7 @@ from operations.equity_discovery import (
 from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     load_free_paper_pilot_universe,
+    weekday_market_evaluation_scheduled,
     write_active_paper_universe,
 )
 from portfolio.state import SQLiteCanonicalPortfolioStore
@@ -272,15 +273,36 @@ def prepare_governed_production_context_for_cycle(
     if reused is not None:
         return reused
 
-    try:
-        readiness = (readiness_probe or _default_readiness_probe)(base_universe)
-    except Exception as error:
-        return _blocked(
-            cycle_key=cycle_key,
-            scheduled_for=scheduled,
-            detail=f"Paper-universe provider certification failed: {type(error).__name__}",
-            instrument_count=len(universe.instruments),
-        )
+    weekday_readiness_required = (
+        weekday_market_evaluation_scheduled(scheduled)
+        or readiness_probe is not None
+    )
+    if weekday_readiness_required:
+        try:
+            readiness = (readiness_probe or _default_readiness_probe)(base_universe)
+        except Exception as error:
+            return _blocked(
+                cycle_key=cycle_key,
+                scheduled_for=scheduled,
+                detail=(
+                    "Paper-universe provider certification failed: "
+                    f"{type(error).__name__}"
+                ),
+                instrument_count=len(universe.instruments),
+            )
+    else:
+        readiness = {
+            "configuration_ready": True,
+            "execution_ready_now": False,
+            "market_open": False,
+            "account_status": "SCHEDULED_CLOSED",
+            "validated_symbols": (),
+            "quote_timestamps": (),
+            "blockers": (),
+            "warnings": (
+                "Weekday-only listed-market provider certification was not scheduled.",
+            ),
+        }
     configuration_ready = bool(
         _report_value(readiness, "configuration_ready", False)
     )
@@ -292,13 +314,17 @@ def prepare_governed_production_context_for_cycle(
         tuple(item)
         for item in _report_value(readiness, "quote_timestamps", ())
     )
-    expected_symbols = tuple(sorted(item.symbol for item in base_universe.instruments))
+    expected_symbols = (
+        tuple(sorted(item.symbol for item in base_universe.instruments))
+        if weekday_readiness_required
+        else ()
+    )
     quote_symbols = tuple(sorted(str(item[0]).upper() for item in quote_timestamps))
     if (
         not configuration_ready
         or tuple(sorted(validated_symbols)) != expected_symbols
         or quote_symbols != expected_symbols
-        or len(quote_timestamps) != len(base_universe.instruments)
+        or len(quote_timestamps) != len(expected_symbols)
     ):
         blockers = tuple(
             str(item) for item in _report_value(readiness, "blockers", ())
@@ -610,7 +636,16 @@ def prepare_governed_production_context_for_cycle(
             instrument_count=len(universe.instruments),
         )
 
-    latest_quote_date = max(quote_datetimes).date().isoformat()
+    latest_quote_date = (
+        max(quote_datetimes).date().isoformat()
+        if quote_datetimes
+        else (
+            "scheduled-closed:"
+            + decision_as_of.astimezone(
+                ZoneInfo(settings.scheduler_timezone)
+            ).date().isoformat()
+        )
+    )
     eligible = CertifiedEligibleUniversePublication(
         identifier=eligible_identifier,
         published_at=decision_as_of,
@@ -907,6 +942,8 @@ def prepare_governed_production_context_for_cycle(
         "comprehensive_discovery_manifest_fingerprint": comprehensive.manifest_fingerprint,
         "comprehensive_discovery_lane_counts": {
             lane.asset_class.value: {
+                "scheduled": lane.scheduled,
+                "schedule_reason": lane.schedule_reason,
                 "catalog": lane.catalog_count,
                 "deep": lane.deep_analyzed_count,
                 "selected": len(lane.selected),
@@ -936,6 +973,11 @@ def prepare_governed_production_context_for_cycle(
                 "selected_count": len(discovery.selected),
             }
         ),
+        "market_evaluation_schedule": (
+            "weekday_full"
+            if weekday_market_evaluation_scheduled(decision_as_of)
+            else "weekend_24_7_only"
+        ),
         "paper_only": True,
         "real_money_authorized": False,
     }
@@ -947,9 +989,17 @@ def prepare_governed_production_context_for_cycle(
         scheduled_for=scheduled,
         decision_as_of=decision_as_of,
         detail=(
-            "Certified strategic cross-asset wrappers and the daily broad U.S.-company "
-            "discovery lane, published complete candidate and exclusion screening, "
-            "marked the canonical portfolio, and persisted company-specific evidence."
+            (
+                "Certified strategic cross-asset wrappers and the daily broad U.S.-company "
+                "discovery lane, published complete candidate and exclusion screening, "
+                "marked the canonical portfolio, and persisted company-specific evidence."
+            )
+            if weekday_market_evaluation_scheduled(decision_as_of)
+            else (
+                "Published the weekend 24/7 market evaluation; weekday-only instruments "
+                "were retained in the governed universe and explicitly excluded as "
+                "scheduled closed."
+            )
         ),
         eligible_universe_identifier=eligible_identifier,
         screening_publication_identifier=screening_publication_identifier,
