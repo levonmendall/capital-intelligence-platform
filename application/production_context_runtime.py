@@ -31,6 +31,7 @@ from opportunity.snapshot import (
     PUBLICATION_SNAPSHOT_KIND,
     load_opportunity_snapshot,
 )
+from portfolio.production_scenarios import build_governed_portfolio_scenario_set
 from portfolio.state import SQLiteCanonicalPortfolioStore
 from screening import (
     ScreeningEventType,
@@ -201,13 +202,29 @@ class RepositoryProductionCanonicalCIOContextProvider(_StoredContextProvider):
                 ),
                 macro=candidate_evidence[candidate_identifier].macro,
                 market=candidate_evidence[candidate_identifier].market,
+                forecast=candidate_evidence[candidate_identifier].forecast,
                 company=candidate_evidence[candidate_identifier].company,
+                asset_valuation=(
+                    candidate_evidence[candidate_identifier].asset_valuation
+                ),
             )
             for candidate_identifier in qualified_ids
         )
         exposure_profiles = tuple(
             candidate_evidence[candidate_identifier].exposure_profile
             for candidate_identifier in qualified_ids
+        )
+        scenario_set = (
+            None
+            if not candidates
+            else build_governed_portfolio_scenario_set(
+                identifier=f"portfolio-scenarios:{publication.identifier}",
+                source_identifier=publication.identifier,
+                as_of=decision_time,
+                knowledge_cutoff=evidence.knowledge_cutoff,
+                candidates=candidates,
+                cash_expected_return=evidence.cash_expected_return,
+            )
         )
         portfolio = CyclePortfolioState(
             identifier=f"cycle-portfolio:{portfolio_snapshot.identifier}",
@@ -217,6 +234,7 @@ class RepositoryProductionCanonicalCIOContextProvider(_StoredContextProvider):
             cash_expected_return=evidence.cash_expected_return,
             positions=positions,
             exposure_profiles=exposure_profiles,
+            scenario_set=scenario_set,
         )
 
         expected_baseline = (
