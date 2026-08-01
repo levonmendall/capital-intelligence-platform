@@ -34,6 +34,17 @@ from committee.regime_governance import (
     build_regime_recommendation,
 )
 
+# Install the governed specialist adapter before callers import
+# ``committee.specialists.IndependentSpecialistService``. This preserves the
+# canonical import surface while strengthening evidence coverage and handoff.
+from committee import specialists as _specialists
+from committee.review_integrity import (
+    IndependentSpecialistService as _GovernedIndependentSpecialistService,
+)
+
+_specialists.IndependentSpecialistService = _GovernedIndependentSpecialistService
+
+
 __all__ = [
     "CIOAction",
     "CIODecision",
