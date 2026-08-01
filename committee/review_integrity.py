@@ -4,28 +4,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from cio.committee import (
-    EvidenceVetoCategory,
-    IndependentSpecialistPacket,
-)
-from cio.models import (
-    CandidateAssetClass,
-    SpecialistPosition,
-    SpecialistRole,
-)
+from cio.committee import IndependentSpecialistPacket
+from cio.models import SpecialistRole
 from committee.specialists import (
     CandidateSpecialistContext,
     IndependentSpecialistService as _IndependentSpecialistService,
 )
 from company import CompanyFactor
-
-
-_EQUITY_CLASSES = frozenset(
-    {
-        CandidateAssetClass.US_EQUITY,
-        CandidateAssetClass.INTERNATIONAL_EQUITY,
-    }
-)
 
 
 def _unique(*groups: tuple[str, ...]) -> tuple[str, ...]:
@@ -40,7 +25,7 @@ def _unique(*groups: tuple[str, ...]) -> tuple[str, ...]:
 
 
 class IndependentSpecialistService(_IndependentSpecialistService):
-    """Preserve full specialist evidence and enforce role-complete coverage."""
+    """Preserve full specialist evidence without changing canonical veto policy."""
 
     def analyze(self, candidate, context) -> IndependentSpecialistPacket:
         packet = super().analyze(candidate, context)
@@ -55,12 +40,6 @@ class IndependentSpecialistService(_IndependentSpecialistService):
                 analysis = self._enrich_market(analysis, context)
             elif analysis.role is SpecialistRole.FUNDAMENTAL_VALUATION:
                 analysis = self._enrich_fundamental(analysis, context)
-            elif analysis.role is SpecialistRole.EVIDENCE_GOVERNANCE:
-                analysis = self._enforce_coverage(
-                    analysis,
-                    candidate=candidate,
-                    context=context,
-                )
             enriched.append(analysis)
 
         return IndependentSpecialistPacket(
@@ -179,60 +158,6 @@ class IndependentSpecialistService(_IndependentSpecialistService):
                 analysis.evidence_origin_identifiers,
                 factor_evidence,
             ),
-        )
-
-    @staticmethod
-    def _enforce_coverage(analysis, *, candidate, context):
-        asset_class = candidate.instrument.asset_class
-        reasons = list(analysis.veto_reasons)
-        categories = list(analysis.veto_categories)
-
-        def add(reason: str) -> None:
-            if reason in reasons:
-                return
-            reasons.append(reason)
-            categories.append(EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE)
-
-        if (
-            asset_class in _EQUITY_CLASSES
-            and context.company is None
-            and not any(
-                "company analysis is missing" in reason.lower()
-                for reason in reasons
-            )
-        ):
-            add(
-                "point-in-time normalized company analysis is missing for an equity"
-            )
-        if asset_class not in _EQUITY_CLASSES and context.asset_valuation is None:
-            add(
-                "independent asset-specific valuation analysis is missing for a non-equity candidate"
-            )
-
-        if tuple(reasons) == analysis.veto_reasons:
-            return analysis
-
-        return replace(
-            analysis,
-            position=SpecialistPosition.OPPOSED,
-            conclusion=(
-                "The candidate evidence does not satisfy role-complete governance requirements."
-            ),
-            risks=_unique(analysis.risks, tuple(reasons)),
-            limitations=_unique(
-                analysis.limitations,
-                (
-                    "Required asset-class valuation coverage is incomplete",
-                ),
-            ),
-            change_conditions=_unique(
-                analysis.change_conditions,
-                (
-                    "Provide the required point-in-time company or asset-specific valuation packet",
-                ),
-            ),
-            veto_reasons=tuple(reasons),
-            veto_categories=tuple(categories),
         )
 
 
