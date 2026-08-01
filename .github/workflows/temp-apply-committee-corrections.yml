@@ -84,3 +84,101 @@ jobs:
           git add -A opportunity committee cio portfolio tests tools .github/workflows
           git commit -m "Apply committee review corrections"
           git push origin HEAD:fix/cio-cycle-decision-integrity
+
+  integrate-cio-cycle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/cio-cycle-decision-integrity
+          fetch-depth: 0
+      - name: Merge and resolve governance overlaps
+        run: |
+          git config user.name "capital-intelligence-bot"
+          git config user.email "capital-intelligence-bot@users.noreply.github.com"
+          git fetch origin fix/cio-cycle-decision-integrity
+          git merge --no-ff --no-commit origin/fix/cio-cycle-decision-integrity || true
+          rm -f cio-integration-conflicts.txt
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_single_conflict(path: str, resolution: str) -> None:
+              source = Path(path)
+              lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+              starts = [i for i, line in enumerate(lines) if line.startswith("<<<<<<< ")]
+              separators = [i for i, line in enumerate(lines) if line.startswith("=======")]
+              ends = [i for i, line in enumerate(lines) if line.startswith(">>>>>>> ")]
+              if not (len(starts) == len(separators) == len(ends) == 1):
+                  raise SystemExit(
+                      f"expected exactly one conflict in {path}; "
+                      f"found starts={starts}, separators={separators}, ends={ends}"
+                  )
+              start, separator, end = starts[0], separators[0], ends[0]
+              if not start < separator < end:
+                  raise SystemExit(f"invalid conflict marker order in {path}")
+              replacement = resolution.splitlines(keepends=True)
+              source.write_text(
+                  "".join(lines[:start] + replacement + lines[end + 1 :]),
+                  encoding="utf-8",
+              )
+
+          replace_single_conflict(
+              "application/cio_cycle.py",
+              (
+                  "        cycle_disposition = self.cycle_disposition_authority.decide(\n"
+                  "            queue,\n"
+                  "            as_of=portfolio.as_of,\n"
+                  "        )\n"
+              ),
+          )
+          replace_single_conflict(
+              "application/production_context_contract.py",
+              (
+                  "from opportunity.snapshot import (\n"
+                  "    DECISION_SNAPSHOT_KIND,\n"
+                  "    build_opportunity_snapshot,\n"
+                  "    load_opportunity_snapshot,\n"
+                  ")\n"
+                  "from operations.active_paper_universe import (\n"
+                  "    load_active_paper_universe_for_publication,\n"
+                  ")\n"
+              ),
+          )
+
+          excluded = {
+              ".github/workflows/integrate-cio-cycle.yml",
+              ".github/workflows/temp-apply-committee-corrections.yml",
+          }
+          unresolved = []
+          for path in Path(".").rglob("*"):
+              if (
+                  not path.is_file()
+                  or ".git" in path.parts
+                  or str(path) in excluded
+              ):
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (OSError, UnicodeDecodeError):
+                  continue
+              if "<<<<<<< " in text or ">>>>>>> " in text:
+                  unresolved.append(str(path))
+          if unresolved:
+              raise SystemExit(f"unresolved merge markers remain: {unresolved}")
+          PY
+          git add application/cio_cycle.py application/production_context_contract.py
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "Git still reports unresolved paths:"
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
+          rm -f tools/apply_cio_cycle_integrity_corrections.py.gz.b64
+          rm -f .github/workflows/apply-cio-cycle-integrity.yml
+          rm -f .github/workflows/apply-committee-review-corrections.yml
+          rm -f tools/apply_committee_review_corrections.py.gz.b64
+          rm -f tools/cio_integration_trigger.txt
+          rm -f cio-integration-conflicts.txt
+          rm -f .github/workflows/integrate-cio-cycle.yml
+          git add -A
+          git commit -m "Integrate CIO cycle corrections"
+          git push origin HEAD:integration/cio-cycle-decision-integrity
