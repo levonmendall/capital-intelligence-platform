@@ -73,3 +73,21 @@ def test_authenticated_controls_remain_available_but_deployment_is_admin_only(
 
     assert calls["identity"] == [member]
     assert calls["deployment"] == [(administrator, deployment)]
+
+
+def test_install_is_idempotent(monkeypatch) -> None:
+    app_impl, secure_app, calls = _modules()
+    fake_streamlit = SimpleNamespace(session_state={}, markdown=lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ui_refinement, "st", fake_streamlit)
+
+    ui_refinement.install(app_impl, secure_app)
+    installed_style = app_impl.apply_global_style
+    installed_identity = secure_app._render_identity_controls
+    installed_deployment = secure_app._render_deployment_controls
+
+    ui_refinement.install(app_impl, secure_app)
+
+    assert app_impl.apply_global_style is installed_style
+    assert secure_app._render_identity_controls is installed_identity
+    assert secure_app._render_deployment_controls is installed_deployment
+    assert calls["styles"] == []
