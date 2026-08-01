@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from cio.persistence import CIOJournalEventType, SQLiteCIOJournal
+from cio.robustness import RobustCandidateAssessor
 from portfolio.state import (
     CanonicalPortfolioPosition,
     CanonicalPortfolioSnapshot,
@@ -85,20 +86,35 @@ def test_valid_candidate_reaches_six_specialists_after_portfolio_is_invested(
         for item in result.opportunity_queue.ranked
         if item.candidate.instrument.symbol == "GOVT"
     )
-    assert govt.candidate.opportunity_cost_return > 0.0425
+    candidate = govt.candidate
+    assert candidate.opportunity_cost_return > 0.0425
     assert govt.qualification.baseline_alternative_identifier == "holding:VTI"
+    horizon_baseline = RobustCandidateAssessor.horizon_return(
+        candidate.opportunity_cost_return,
+        horizon_days=candidate.decision_horizon_days,
+    )
+    scenario_success = round(
+        sum(
+            item.probability
+            for item in candidate.scenario_distribution
+            if item.total_return - candidate.implementation_cost_return
+            > horizon_baseline
+        ),
+        8,
+    )
+    assert candidate.probability_of_success == scenario_success
     assert any(
-        item.candidate_identifier == govt.candidate.identifier
+        item.candidate_identifier == candidate.identifier
         for item in result.decisions
     )
 
     journal = SQLiteCIOJournal(settings.journal_database)
     packet = journal.latest(
-        aggregate_identifier=govt.candidate.identifier,
+        aggregate_identifier=candidate.identifier,
         event_type=CIOJournalEventType.SPECIALIST_PACKET,
     )
     decision = journal.latest(
-        aggregate_identifier=govt.candidate.identifier,
+        aggregate_identifier=candidate.identifier,
         event_type=CIOJournalEventType.CIO_DECISION,
     )
     diagnostic = journal.latest(
@@ -112,7 +128,7 @@ def test_valid_candidate_reaches_six_specialists_after_portfolio_is_invested(
     observation = next(
         item
         for item in diagnostic.payload["observations"]
-        if item["candidate_identifier"] == govt.candidate.identifier
+        if item["candidate_identifier"] == candidate.identifier
     )
     assert "six_specialist_analysis" in observation["reached_stages"]
     assert "cio_consideration" in observation["reached_stages"]
