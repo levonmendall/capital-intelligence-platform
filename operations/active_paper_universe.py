@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Mapping
 
@@ -11,6 +12,23 @@ from operations.free_paper_pilot import (
     _free_paper_pilot_universe_from_payload,
     active_paper_universe_path,
 )
+
+
+def _candidate_paths(path: str | Path | None) -> tuple[Path, ...]:
+    if path is not None:
+        return (Path(path).expanduser(),)
+    values = [active_paper_universe_path()]
+    portfolio_database = os.getenv(
+        "CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE",
+        "",
+    ).strip()
+    if portfolio_database:
+        values.append(
+            Path(portfolio_database).expanduser().with_name(
+                "active-paper-universe.json"
+            )
+        )
+    return tuple(dict.fromkeys(values))
 
 
 def load_active_paper_universe_for_publication(
@@ -28,30 +46,32 @@ def load_active_paper_universe_for_publication(
     resolved_identifier = str(publication_identifier).strip()
     if not resolved_identifier:
         raise ValueError("publication_identifier cannot be empty")
-    source = (
-        Path(path).expanduser()
-        if path is not None
-        else active_paper_universe_path()
+    failures: list[str] = []
+    for source in _candidate_paths(path):
+        try:
+            payload = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            failures.append(f"{source}: {type(error).__name__}")
+            continue
+        if not isinstance(payload, Mapping):
+            failures.append(f"{source}: payload is not a JSON object")
+            continue
+        persisted_identifier = str(
+            payload.get("eligible_universe_publication_identifier", "")
+        ).strip()
+        if persisted_identifier != resolved_identifier:
+            failures.append(f"{source}: publication identifier mismatch")
+            continue
+        universe_payload = payload.get("universe")
+        if not isinstance(universe_payload, Mapping):
+            failures.append(f"{source}: universe payload is unavailable")
+            continue
+        return _free_paper_pilot_universe_from_payload(universe_payload)
+    detail = "; ".join(failures) or "no active-universe path was configured"
+    raise ValueError(
+        "the certified active paper universe is unavailable or does not match "
+        f"the eligible-universe publication: {detail}"
     )
-    try:
-        payload = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError(
-            "the certified active paper universe is unavailable"
-        ) from error
-    if not isinstance(payload, Mapping):
-        raise ValueError("the active paper universe must be a JSON object")
-    persisted_identifier = str(
-        payload.get("eligible_universe_publication_identifier", "")
-    ).strip()
-    if persisted_identifier != resolved_identifier:
-        raise ValueError(
-            "the active paper universe does not match the certified eligible-universe publication"
-        )
-    universe_payload = payload.get("universe")
-    if not isinstance(universe_payload, Mapping):
-        raise ValueError("the active paper universe payload is unavailable")
-    return _free_paper_pilot_universe_from_payload(universe_payload)
 
 
 __all__ = ["load_active_paper_universe_for_publication"]
