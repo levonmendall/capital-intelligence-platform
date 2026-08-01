@@ -106,8 +106,12 @@ replace_once(
     "decision snapshot event assertion",
 )
 replace_once(
-    '        match="runtime opportunity ranking differs",\n',
-    '        match="opportunity snapshot queue differs",\n',
+    '''        ValueError,
+        match="runtime opportunity ranking differs",
+''',
+    '''        ProductionContextError,
+        match="opportunity snapshot queue differs",
+''',
     "drift failure expectation",
 )
 path.write_text(text, encoding="utf-8")
