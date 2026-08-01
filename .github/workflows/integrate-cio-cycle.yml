@@ -1,20 +1,14 @@
 name: Integrate CIO cycle corrections
 
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - ready_for_review
+  schedule:
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: write
 
 jobs:
   merge:
-    if: github.head_ref == 'integration/cio-cycle-decision-integrity'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
