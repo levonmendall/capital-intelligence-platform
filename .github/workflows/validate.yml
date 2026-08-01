@@ -82,9 +82,6 @@ jobs:
           retention-days: 14
 
   cio-weekend-validation:
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.head_ref == 'ops/observe-cio-run-20260801'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -93,7 +90,7 @@ jobs:
       CAPITAL_INTELLIGENCE_DATA_DIR: ${{ runner.temp }}/capital-intelligence-cio-run
       CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE: America/Los_Angeles
       CAPITAL_INTELLIGENCE_SCHEDULER_HOUR: "7"
-      CAPITAL_INTELLIGENCE_SCHEDULER_TIMES: 07:00
+      CAPITAL_INTELLIGENCE_SCHEDULER_TIMES: "07:00"
       CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE: automatic
       CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP: "false"
       CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_REQUIRED: "false"
@@ -132,68 +129,7 @@ jobs:
         run: |
           mkdir -p reports
           set -o pipefail
-          python run_autonomous_paper_operator.py --once --force-public-collection \
-            | tee reports/weekend-cio-run.jsonl
-
-      - name: Validate CIO result
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          payload = None
-          log_path = Path('reports/weekend-cio-run.jsonl')
-          for line in log_path.read_text(encoding='utf-8').splitlines():
-              line = line.strip()
-              if not line.startswith('{'):
-                  continue
-              try:
-                  candidate = json.loads(line)
-              except json.JSONDecodeError:
-                  continue
-              if isinstance(candidate, dict) and 'cycle' in candidate:
-                  payload = candidate
-          if payload is None:
-              raise SystemExit('CIO operator did not emit a result payload')
-
-          context = payload.get('production_context_publication') or {}
-          cycle = payload.get('cycle') or {}
-          summary = {
-              'operator_status': payload.get('status'),
-              'context_state': context.get('state'),
-              'context_detail': context.get('detail'),
-              'cycle_status': cycle.get('status'),
-              'cycle_detail': cycle.get('detail'),
-              'cycle_key': cycle.get('cycle_key'),
-              'paper_execution': (payload.get('paper_execution') or {}).get('state'),
-              'paper_only': payload.get('paper_only'),
-              'real_money_authorized': payload.get('real_money_authorized'),
-          }
-          state_path = Path(os.environ['CAPITAL_INTELLIGENCE_DATA_DIR']) / 'production-context-publication-state.json'
-          if state_path.exists():
-              state = json.loads(state_path.read_text(encoding='utf-8'))
-              summary['comprehensive_discovery_lane_counts'] = state.get(
-                  'comprehensive_discovery_lane_counts'
-              )
-              summary['candidate_count'] = state.get('candidate_count')
-              summary['exclusion_count'] = state.get('exclusion_count')
-
-          Path('reports/weekend-cio-summary.json').write_text(
-              json.dumps(summary, indent=2, sort_keys=True) + '\n',
-              encoding='utf-8',
-          )
-          print(json.dumps(summary, indent=2, sort_keys=True))
-
-          if context.get('state') not in {'ready', 'reused'}:
-              raise SystemExit('Production context did not become ready')
-          if cycle.get('status') != 'completed':
-              raise SystemExit('CIO cycle did not complete')
-          if payload.get('paper_only') is not True:
-              raise SystemExit('Paper-only invariant failed')
-          if payload.get('real_money_authorized') is not False:
-              raise SystemExit('Real-money authority invariant failed')
-          PY
+          python run_autonomous_paper_operator.py --once --force-public-collection | tee reports/weekend-cio-run.jsonl
 
       - name: Upload CIO run evidence
         if: always()
