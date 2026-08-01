@@ -37,6 +37,10 @@ def build_governed_portfolio_scenario_set(
     Common bear, base, and bull probabilities use only the probability mass
     disclosed by every candidate. Residual mass is allocated to idiosyncratic
     bear states rather than averaging incompatible candidate distributions.
+
+    Candidate scenarios are frozen at ``as_of``. A containing context may have
+    been assembled later, but its later publication cutoff cannot be attributed
+    to scenario inputs that were already fixed at the decision timestamp.
     """
 
     if not candidates:
@@ -176,10 +180,11 @@ def build_governed_portfolio_scenario_set(
             for version in tuple(candidate.model_versions)
         )
     )
+    scenario_knowledge_cutoff = min(knowledge_cutoff, as_of)
     return GovernedPortfolioScenarioSet(
         identifier=str(identifier),
         as_of=as_of,
-        knowledge_cutoff=knowledge_cutoff,
+        knowledge_cutoff=scenario_knowledge_cutoff,
         horizon_days=365,
         scenarios=tuple(scenario_values),
         source_identifier=str(source_identifier),
