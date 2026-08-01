@@ -1,16 +1,17 @@
-"""Build one common, point-in-time scenario set for production construction."""
+"""Build coherent point-in-time joint scenarios for production construction."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from math import exp, log1p
-from statistics import mean
-from typing import Iterable
 
 from portfolio.scenario_authority import (
     GovernedPortfolioScenario,
     GovernedPortfolioScenarioSet,
 )
+
+
+_EPSILON = 0.0000000001
 
 
 def _annualize(total_return: float, horizon_days: int) -> float:
@@ -22,13 +23,6 @@ def _annualize(total_return: float, horizon_days: int) -> float:
     return max(-1.0, exp(log1p(value) * (365.25 / horizon_days)) - 1.0)
 
 
-def _probability(values: Iterable[float]) -> float:
-    resolved = tuple(float(item) for item in values)
-    if not resolved:
-        raise ValueError("portfolio scenario probability inputs cannot be empty")
-    return mean(resolved)
-
-
 def build_governed_portfolio_scenario_set(
     *,
     identifier: str,
@@ -38,12 +32,11 @@ def build_governed_portfolio_scenario_set(
     candidates: tuple[object, ...],
     cash_expected_return: float,
 ) -> GovernedPortfolioScenarioSet:
-    """Normalize candidate bear/base/bull paths into a common annual horizon.
+    """Create shared macro states plus candidate-specific adverse states.
 
-    The builder does not invent expected returns. It converts each candidate's
-    disclosed point-in-time distribution to one common 365-day construction
-    horizon and uses the cross-sectional mean disclosed probabilities as the
-    common scenario weights.
+    Common bear, base, and bull probabilities use only the probability mass
+    disclosed by every candidate. Residual mass is allocated to idiosyncratic
+    bear states rather than averaging incompatible candidate distributions.
     """
 
     if not candidates:
@@ -57,61 +50,123 @@ def build_governed_portfolio_scenario_set(
     if len(symbols) != len(set(symbols)):
         raise ValueError("portfolio scenario candidates must be unique by symbol")
 
-    raw_probabilities = {
-        "bear": _probability(candidate.bear_case_probability for candidate in candidates),
-        "base": _probability(candidate.base_case_probability for candidate in candidates),
-        "bull": _probability(candidate.bull_case_probability for candidate in candidates),
-    }
-    probability_total = sum(raw_probabilities.values())
-    if probability_total <= 0.0:
-        raise ValueError("portfolio scenario probabilities must be positive")
     probabilities = {
-        name: value / probability_total
-        for name, value in raw_probabilities.items()
+        "bear": min(float(item.bear_case_probability) for item in candidates),
+        "base": min(float(item.base_case_probability) for item in candidates),
+        "bull": min(float(item.bull_case_probability) for item in candidates),
+    }
+    common_total = sum(probabilities.values())
+    if common_total <= 0.0 or common_total > 1.0 + _EPSILON:
+        raise ValueError("common scenario probability mass is invalid")
+    residual = max(0.0, 1.0 - common_total)
+
+    annualized = {
+        symbol: {
+            "bear": _annualize(
+                float(candidate.bear_case_return),
+                int(candidate.decision_horizon_days),
+            ),
+            "base": _annualize(
+                float(candidate.base_case_return),
+                int(candidate.decision_horizon_days),
+            ),
+            "bull": _annualize(
+                float(candidate.bull_case_return),
+                int(candidate.decision_horizon_days),
+            ),
+        }
+        for symbol, candidate in zip(symbols, candidates, strict=True)
     }
 
-    def returns(field_name: str) -> tuple[tuple[str, float], ...]:
+    def state_returns(state: str) -> tuple[tuple[str, float], ...]:
         return tuple(
             sorted(
-                (
-                    str(candidate.instrument.symbol).strip().upper(),
-                    round(
-                        _annualize(
-                            float(getattr(candidate, field_name)),
-                            int(candidate.decision_horizon_days),
-                        ),
-                        10,
-                    ),
-                )
-                for candidate in candidates
+                (symbol, round(values[state], 10))
+                for symbol, values in annualized.items()
             )
         )
 
-    scenario_values = (
+    scenario_values = [
         GovernedPortfolioScenario(
             name="common_bear",
             probability=probabilities["bear"],
             cash_return=float(cash_expected_return),
-            asset_returns=returns("bear_case_return"),
+            asset_returns=state_returns("bear"),
         ),
         GovernedPortfolioScenario(
             name="common_base",
             probability=probabilities["base"],
             cash_return=float(cash_expected_return),
-            asset_returns=returns("base_case_return"),
+            asset_returns=state_returns("base"),
         ),
         GovernedPortfolioScenario(
             name="common_bull",
             probability=probabilities["bull"],
             cash_return=float(cash_expected_return),
-            asset_returns=returns("bull_case_return"),
+            asset_returns=state_returns("bull"),
         ),
-    )
+    ]
+
+    if residual > _EPSILON:
+        weights = tuple(
+            max(
+                0.0,
+                float(candidate.bear_case_probability) - probabilities["bear"],
+            )
+            + max(
+                0.0,
+                float(candidate.base_case_probability) - probabilities["base"],
+            )
+            + max(
+                0.0,
+                float(candidate.bull_case_probability) - probabilities["bull"],
+            )
+            for candidate in candidates
+        )
+        total_weight = sum(weights)
+        if total_weight <= _EPSILON:
+            weights = tuple(1.0 for _ in candidates)
+            total_weight = float(len(candidates))
+
+        remaining = residual
+        for index, (symbol, weight) in enumerate(
+            zip(symbols, weights, strict=True)
+        ):
+            is_last = index == len(symbols) - 1
+            probability = (
+                remaining
+                if is_last
+                else residual * weight / total_weight
+            )
+            remaining = max(0.0, remaining - probability)
+            asset_returns = tuple(
+                sorted(
+                    (
+                        other_symbol,
+                        round(
+                            annualized[other_symbol][
+                                "bear" if other_symbol == symbol else "base"
+                            ],
+                            10,
+                        ),
+                    )
+                    for other_symbol in symbols
+                )
+            )
+            scenario_values.append(
+                GovernedPortfolioScenario(
+                    name=f"idiosyncratic_bear:{symbol}",
+                    probability=probability,
+                    cash_return=float(cash_expected_return),
+                    asset_returns=asset_returns,
+                )
+            )
+
     evidence_identifiers = tuple(
         dict.fromkeys(
-            identifier
+            evidence_identifier
             for candidate in candidates
-            for identifier in tuple(candidate.evidence_identifiers)
+            for evidence_identifier in tuple(candidate.evidence_identifiers)
         )
     )
     model_versions = tuple(
@@ -126,10 +181,10 @@ def build_governed_portfolio_scenario_set(
         as_of=as_of,
         knowledge_cutoff=knowledge_cutoff,
         horizon_days=365,
-        scenarios=scenario_values,
+        scenarios=tuple(scenario_values),
         source_identifier=str(source_identifier),
         model_versions=(
-            "production-common-scenario-normalization.v1",
+            "production-joint-scenario-normalization.v2",
             *(model_versions or ("candidate-model-version-unavailable",)),
         ),
         evidence_identifiers=(
