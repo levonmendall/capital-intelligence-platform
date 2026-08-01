@@ -8,7 +8,7 @@ screening evidence.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
@@ -18,7 +18,13 @@ from application.cio_cycle import (
     CanonicalCIOCycleResult,
     CyclePortfolioState,
 )
-from opportunity import OpportunitySetContext
+from cio.persistence import CIOJournalEventType
+from opportunity import OpportunityQueue, OpportunitySetContext
+from opportunity.snapshot import (
+    DECISION_SNAPSHOT_KIND,
+    build_opportunity_snapshot,
+    load_opportunity_snapshot,
+)
 from screening import (
     SQLiteFullUniverseScreeningStore,
     candidate_from_payload,
@@ -176,6 +182,8 @@ class ProductionCanonicalCIOContext:
     portfolio: CyclePortfolioState
     code_version: str = "unknown"
     manifest: ProductionContextManifest | None = None
+    opportunity_snapshot_hash: str | None = None
+    publication_code_version: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -203,6 +211,17 @@ class ProductionCanonicalCIOContext:
             raise ValueError(
                 "opportunity context and portfolio must share the decision timestamp"
             )
+        for field_name in (
+            "opportunity_snapshot_hash",
+            "publication_code_version",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(
+                    self,
+                    field_name,
+                    _required_text(value, field_name=field_name),
+                )
         if self.manifest is not None:
             if not isinstance(self.manifest, ProductionContextManifest):
                 raise TypeError(
@@ -300,17 +319,98 @@ class ProductionCanonicalCIOExecutor:
             raise RuntimeError(
                 "screening publication candidate count does not reconcile"
             )
-        ranked = tuple(
+        candidate_map = {item.identifier: item for item in candidates}
+        publication_ranked = tuple(
             dict(item)
             for item in publication.opportunity_queue_payload.get("ranked", ())
         )
-        qualified_identifiers = tuple(
+        publication_qualified_identifiers = tuple(
             _required_text(
                 item.get("candidate_identifier"),
                 field_name="qualified candidate identifier",
             )
-            for item in ranked
+            for item in publication_ranked
         )
+        decision_context = context.opportunity_context
+        authoritative_queue: OpportunityQueue | None = None
+        if context.opportunity_snapshot_hash is not None:
+            if self.cycle.journal is None:
+                raise RuntimeError(
+                    "exact opportunity authority requires the append-only CIO journal"
+                )
+            snapshot_event = self.cycle.journal.latest(
+                aggregate_identifier=context.screening_cycle_identifier,
+                event_type=CIOJournalEventType.OPPORTUNITY_DECISION_SNAPSHOT,
+            )
+            if snapshot_event is None:
+                if (
+                    context.publication_code_version not in {None, "unknown"}
+                    and context.code_version != "unknown"
+                    and context.publication_code_version != context.code_version
+                ):
+                    raise RuntimeError(
+                        "screening publication and CIO execution code versions differ; "
+                        "a new publication is required"
+                    )
+                ranking_inputs = self.cycle.prepare_ranking_inputs(
+                    candidates,
+                    context.portfolio,
+                    minimum_cash_weight=(
+                        self.cycle.construction_engine.policy.minimum_cash_weight
+                    ),
+                )
+                decision_context = replace(
+                    context.opportunity_context,
+                    ranking_inputs=ranking_inputs,
+                )
+                authoritative_queue = self.cycle.opportunity_engine.build_queue(
+                    candidates,
+                    decision_context,
+                )
+                snapshot_payload = build_opportunity_snapshot(
+                    snapshot_kind=DECISION_SNAPSHOT_KIND,
+                    context=decision_context,
+                    queue=authoritative_queue,
+                    engine=self.cycle.opportunity_engine,
+                    created_at=decision_time,
+                    code_version=context.code_version,
+                    parent_snapshot_hash=context.opportunity_snapshot_hash,
+                    screening_publication_identifier=publication.identifier,
+                )
+                self.cycle.journal.append(
+                    event_type=CIOJournalEventType.OPPORTUNITY_DECISION_SNAPSHOT,
+                    aggregate_identifier=context.screening_cycle_identifier,
+                    occurred_at=decision_time,
+                    payload=snapshot_payload,
+                    schema_version="opportunity-decision-snapshot.v1",
+                    event_identifier=(
+                        "event:opportunity-decision-snapshot:"
+                        + context.screening_cycle_identifier
+                    ),
+                )
+            else:
+                loaded = load_opportunity_snapshot(
+                    snapshot_event.payload,
+                    candidates=candidate_map,
+                )
+                if loaded.snapshot_kind != DECISION_SNAPSHOT_KIND:
+                    raise RuntimeError("persisted decision snapshot kind is invalid")
+                if loaded.parent_snapshot_hash != context.opportunity_snapshot_hash:
+                    raise RuntimeError(
+                        "persisted decision snapshot does not descend from the publication"
+                    )
+                if loaded.screening_publication_identifier != publication.identifier:
+                    raise RuntimeError(
+                        "persisted decision snapshot belongs to another publication"
+                    )
+                decision_context = loaded.context
+                authoritative_queue = loaded.queue
+        if authoritative_queue is None:
+            qualified_identifiers = publication_qualified_identifiers
+        else:
+            qualified_identifiers = tuple(
+                item.candidate.identifier for item in authoritative_queue.ranked
+            )
         context_identifiers = tuple(
             item.candidate_identifier for item in context.specialist_contexts
         )
@@ -335,7 +435,7 @@ class ProductionCanonicalCIOExecutor:
                 )
             if (
                 context.manifest.candidate_identifiers
-                != qualified_identifiers
+                != publication_qualified_identifiers
             ):
                 raise ValueError(
                     "production context manifest candidate order does not match "
@@ -357,11 +457,12 @@ class ProductionCanonicalCIOExecutor:
         return self.cycle.run(
             identifier=context.identifier,
             candidates=candidates,
-            opportunity_context=context.opportunity_context,
+            opportunity_context=decision_context,
             specialist_contexts=context.specialist_contexts,
             portfolio=context.portfolio,
             prior_decision_contexts=prior_contexts,
             active_theses=active_theses,
+            authoritative_opportunity_queue=authoritative_queue,
             code_version=context.code_version,
         )
 
