@@ -55,8 +55,12 @@ services:
         value: "true"
       - key: CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP
         value: "true"
+      # Provider validation still runs and persists its failed checks, but a
+      # transient or entitlement-specific provider issue must not take the
+      # authenticated console offline. REQUIRE_LIVE_PROVIDER remains the
+      # fail-closed boundary for CIO analysis and paper implementation.
       - key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_REQUIRED
-        value: "true"
+        value: "false"
       - key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_MAX_AGE_HOURS
         value: "168"
       - key: CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT
