@@ -134,6 +134,13 @@ def _layout_snapshot(page) -> dict[str, object]:
           const shellRect = navigationShell ? navigationShell.getBoundingClientRect() : null;
           const brandRect = brand ? brand.getBoundingClientRect() : null;
           const buttonRect = firstButton ? firstButton.getBoundingClientRect() : null;
+          const verticalOverlap = brandRect && buttonRect
+            ? Math.max(
+                0,
+                Math.min(brandRect.bottom, buttonRect.bottom) -
+                  Math.max(brandRect.top, buttonRect.top)
+              ) / Math.min(brandRect.height, buttonRect.height)
+            : 0;
           return {
             navigationCount: buttons.length,
             minimumNavigationHeight: heights.length ? Math.min(...heights) : 0,
@@ -151,7 +158,7 @@ def _layout_snapshot(page) -> dict[str, object]:
             headerVisible: Boolean(
               header && getComputedStyle(header).display !== 'none' && header.getBoundingClientRect().height > 1
             ),
-            brandNavigationTopDelta: brandRect && buttonRect ? Math.abs(brandRect.top - buttonRect.top) : 999,
+            brandNavigationVerticalOverlap: verticalOverlap,
           };
         }"""
     )
@@ -203,7 +210,9 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
         assert layout["sectionHeaderCount"] >= 1 or layout["statusRowCount"] >= 1
         if viewport_name == "iphone":
             assert layout["minimumNavigationHeight"] >= BASELINE["minimum_mobile_navigation_height_pixels"]
-            assert layout["brandNavigationTopDelta"] <= 8
+            # The logo is intentionally shorter than the 42px tap targets. Their
+            # vertical overlap verifies that both remain on one visual row.
+            assert layout["brandNavigationVerticalOverlap"] >= 0.6
         page.screenshot(path=report_directory / f"streamlit-{viewport_name}.png", full_page=True)
         (report_directory / f"streamlit-{viewport_name}-layout.json").write_text(
             json.dumps(layout, indent=2, sort_keys=True) + "\n", encoding="utf-8"
