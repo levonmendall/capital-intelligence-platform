@@ -20,6 +20,12 @@ BASELINE = json.loads(
         encoding="utf-8"
     )
 )
+SURFACE_BODY_TEXT = {
+    "Today": "Investment world today",
+    "Environment": "Economy and investing",
+    "Portfolio": "Portfolio posture",
+    "History": "Outcome status",
+}
 
 pytestmark = pytest.mark.skipif(
     os.getenv("CAPITAL_INTELLIGENCE_BROWSER_TESTS") != "1",
@@ -52,13 +58,21 @@ def live_streamlit(tmp_path_factory):
             "CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT": "false",
             "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED": "false",
             "CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE": "disabled",
+            "CAPITAL_INTELLIGENCE_RELEASE": "browser-render-entrypoint",
+            "RENDER_EXTERNAL_HOSTNAME": "capital-intelligence.test",
         }
     )
     process = subprocess.Popen(
         (
-            sys.executable, "-m", "streamlit", "run", "app.py",
-            "--server.address=127.0.0.1", f"--server.port={port}",
-            "--server.headless=true", "--server.fileWatcherType=none",
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            "render_app.py",
+            "--server.address=127.0.0.1",
+            f"--server.port={port}",
+            "--server.headless=true",
+            "--server.fileWatcherType=none",
             "--browser.gatherUsageStats=false",
         ),
         cwd=ROOT,
@@ -97,6 +111,13 @@ def _assert_public_boundary(page) -> None:
         assert page.get_by_text(label, exact=True).count() == 0
 
 
+def _assert_surface_body(page, surface: str) -> None:
+    page.get_by_text(SURFACE_BODY_TEXT[surface], exact=True).first.wait_for(
+        state="visible",
+        timeout=15_000,
+    )
+
+
 def _layout_snapshot(page) -> dict[str, object]:
     return page.evaluate(
         """() => {
@@ -107,6 +128,8 @@ def _layout_snapshot(page) -> dict[str, object]:
             minimumNavigationHeight: heights.length ? Math.min(...heights) : 0,
             horizontalOverflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
             headingVisible: Boolean(document.querySelector('.compact-surface-head h1')),
+            sectionHeaderCount: document.querySelectorAll('.section-header').length,
+            statusRowCount: document.querySelectorAll('.status-row').length,
           };
         }"""
     )
@@ -131,11 +154,13 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
         for surface in ("Today", "Environment", "Portfolio", "History"):
             navigation.get_by_role("radio", name=surface, exact=True).click()
             page.get_by_role("heading", name=surface, exact=True).wait_for()
+            _assert_surface_body(page, surface)
             _assert_public_boundary(page)
         layout = _layout_snapshot(page)
         assert layout["navigationCount"] == BASELINE["primary_surface_count"]
         assert layout["horizontalOverflow"] <= BASELINE["maximum_horizontal_overflow_pixels"]
         assert layout["headingVisible"] is True
+        assert layout["sectionHeaderCount"] >= 1 or layout["statusRowCount"] >= 1
         if viewport_name == "iphone":
             assert layout["minimumNavigationHeight"] >= BASELINE["minimum_mobile_navigation_height_pixels"]
         page.screenshot(path=report_directory / f"streamlit-{viewport_name}.png", full_page=True)
