@@ -19,6 +19,8 @@ import educational_market_briefing_ui
 import live_operating_console
 import operating_intelligence_ui
 import operating_status
+import secure_app
+import ui_refinement
 from render_nonblocking_data import (
     get_mandate_details_nonblocking,
     get_portfolio_totals_nonblocking,
@@ -200,7 +202,10 @@ def deployment_context_from_environment() -> DeploymentContext:
 def main() -> None:
     prepare_render_data_runtime()
     prepare_render_surface_runtime()
-    create_streamlit_application(deployment=deployment_context_from_environment())
+    ui_refinement.install(app_impl, secure_app)
+    create_streamlit_application(
+        deployment=deployment_context_from_environment()
+    )
 
 
 if __name__ == "__main__":
