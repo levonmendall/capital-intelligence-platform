@@ -14,6 +14,14 @@ from portfolio.scenario_authority import (
 _EPSILON = 0.0000000001
 
 
+def _aware(value: datetime, *, field_name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{field_name} must be a datetime")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must be timezone-aware")
+    return value
+
+
 def _annualize(total_return: float, horizon_days: int) -> float:
     value = float(total_return)
     if value <= -1.0:
@@ -37,7 +45,19 @@ def build_governed_portfolio_scenario_set(
     Common bear, base, and bull probabilities use only the probability mass
     disclosed by every candidate. Residual mass is allocated to idiosyncratic
     bear states rather than averaging incompatible candidate distributions.
+
+    Candidate scenario values are fixed at their decision ``as_of``. A later
+    production certification cutoff remains preserved in the surrounding evidence
+    snapshot, but it cannot make the scenario authority appear to know information
+    after its own decision timestamp.
     """
+
+    resolved_as_of = _aware(as_of, field_name="as_of")
+    resolved_cutoff = _aware(
+        knowledge_cutoff,
+        field_name="knowledge_cutoff",
+    )
+    scenario_cutoff = min(resolved_cutoff, resolved_as_of)
 
     if not candidates:
         raise ValueError("portfolio scenarios require at least one candidate")
@@ -178,8 +198,8 @@ def build_governed_portfolio_scenario_set(
     )
     return GovernedPortfolioScenarioSet(
         identifier=str(identifier),
-        as_of=as_of,
-        knowledge_cutoff=knowledge_cutoff,
+        as_of=resolved_as_of,
+        knowledge_cutoff=scenario_cutoff,
         horizon_days=365,
         scenarios=tuple(scenario_values),
         source_identifier=str(source_identifier),
