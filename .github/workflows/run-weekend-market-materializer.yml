@@ -41,6 +41,9 @@ jobs:
               raise RuntimeError('cannot extract materializer patch script') from error
           script_lines = []
           for line in lines[start:end]:
+              if not line:
+                  script_lines.append("")
+                  continue
               if not line.startswith('          '):
                   raise RuntimeError(f'unexpected materializer indentation: {line!r}')
               script_lines.append(line[10:])
