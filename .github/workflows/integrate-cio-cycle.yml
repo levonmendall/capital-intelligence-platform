@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   merge:
-    if: github.event.head_commit.message != 'Integrate CIO cycle corrections'
+    if: >-
+      github.event.head_commit.message != 'Integrate CIO cycle corrections' &&
+      github.event.head_commit.message != 'Record CIO integration conflicts'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,19 +25,31 @@ jobs:
           git config user.email "capital-intelligence-bot@users.noreply.github.com"
           git fetch origin fix/cio-cycle-decision-integrity
           if ! git merge --no-ff --no-commit origin/fix/cio-cycle-decision-integrity; then
-            echo 'CONFLICT_FILES_BEGIN'
-            git diff --name-only --diff-filter=U
-            echo 'CONFLICT_FILES_END'
-            for file in $(git diff --name-only --diff-filter=U); do
-              echo "===== $file ====="
-              grep -n -C 8 -E '^(<<<<<<<|=======|>>>>>>>)' "$file" || true
-            done
+            report=cio-integration-conflicts.txt
+            {
+              echo 'CIO INTEGRATION CONFLICT REPORT'
+              echo
+              echo 'Conflicted files:'
+              git diff --name-only --diff-filter=U
+              echo
+              for file in $(git diff --name-only --diff-filter=U); do
+                echo "===== $file ====="
+                grep -n -C 20 -E '^(<<<<<<<|=======|>>>>>>>)' "$file" || true
+                echo
+              done
+            } > "$report"
+            git merge --abort
+            git add "$report"
+            git commit -m "Record CIO integration conflicts"
+            git push origin HEAD:integration/cio-cycle-decision-integrity
             exit 1
           fi
           rm -f tools/apply_cio_cycle_integrity_corrections.py.gz.b64
           rm -f .github/workflows/apply-cio-cycle-integrity.yml
           rm -f .github/workflows/apply-committee-review-corrections.yml
           rm -f tools/apply_committee_review_corrections.py.gz.b64
+          rm -f tools/cio_integration_trigger.txt
+          rm -f cio-integration-conflicts.txt
           git add -A
           git commit -m "Integrate CIO cycle corrections"
           git push origin HEAD:integration/cio-cycle-decision-integrity
