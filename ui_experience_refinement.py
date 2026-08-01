@@ -158,7 +158,7 @@ div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) .nav-brand-mark {
     }
 
     div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) [data-testid="stButtonGroup"] button {
-        min-height: 2.62rem !important;
+        min-height: 2.68rem !important;
         padding-left: .28rem !important;
         padding-right: .28rem !important;
         font-size: clamp(.65rem, 2.75vw, .78rem) !important;
