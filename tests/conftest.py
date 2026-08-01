@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -36,21 +37,27 @@ def certified_adapter_asset_valuation(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Give the production ETF adapter its required certified valuation packet."""
+    """Give every certified ETF adapter test its required valuation packet."""
 
-    module = request.module
-    if module.__name__ != "tests.test_canonical_production_context_adapter":
+    supported_modules = {
+        "tests.test_canonical_production_context_adapter",
+        "tests.test_committee_cio_information_trace",
+    }
+    if request.module.__name__ not in supported_modules:
         yield
         return
 
-    original = module._candidate_evidence
+    adapter_module = sys.modules[
+        "tests.test_canonical_production_context_adapter"
+    ]
+    original = adapter_module._candidate_evidence
 
     def candidate_evidence_with_asset_valuation(candidate):
         evidence = original(candidate)
         return replace(
             evidence,
             asset_valuation=AssetValuationSpecialistContext(
-                as_of=module.AS_OF,
+                as_of=adapter_module.AS_OF,
                 asset_class=candidate.instrument.asset_class,
                 expected_return_impact=0.02,
                 confidence=0.90,
@@ -79,7 +86,7 @@ def certified_adapter_asset_valuation(
         )
 
     monkeypatch.setattr(
-        module,
+        adapter_module,
         "_candidate_evidence",
         candidate_evidence_with_asset_valuation,
     )
