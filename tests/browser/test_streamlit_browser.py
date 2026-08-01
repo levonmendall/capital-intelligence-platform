@@ -125,6 +125,15 @@ def _layout_snapshot(page) -> dict[str, object]:
           const heights = buttons.map((button) => button.getBoundingClientRect().height);
           const sidebar = document.querySelector('[data-testid="stSidebar"]');
           const buttonGroup = document.querySelector('[data-testid="stButtonGroup"]');
+          const navigationShell = document.querySelector(
+            'div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark)'
+          );
+          const brand = document.querySelector('.nav-brand-mark');
+          const firstButton = buttons[0] || null;
+          const header = document.querySelector('[data-testid="stHeader"]');
+          const shellRect = navigationShell ? navigationShell.getBoundingClientRect() : null;
+          const brandRect = brand ? brand.getBoundingClientRect() : null;
+          const buttonRect = firstButton ? firstButton.getBoundingClientRect() : null;
           return {
             navigationCount: buttons.length,
             minimumNavigationHeight: heights.length ? Math.min(...heights) : 0,
@@ -137,6 +146,12 @@ def _layout_snapshot(page) -> dict[str, object]:
               sidebar && getComputedStyle(sidebar).display !== 'none' && sidebar.getBoundingClientRect().width > 1
             ),
             navigationPosition: buttonGroup ? getComputedStyle(buttonGroup).position : '',
+            navigationShellPosition: navigationShell ? getComputedStyle(navigationShell).position : '',
+            navigationShellTop: shellRect ? shellRect.top : 999,
+            headerVisible: Boolean(
+              header && getComputedStyle(header).display !== 'none' && header.getBoundingClientRect().height > 1
+            ),
+            brandNavigationTopDelta: brandRect && buttonRect ? Math.abs(brandRect.top - buttonRect.top) : 999,
           };
         }"""
     )
@@ -163,6 +178,12 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
             page.get_by_role("heading", name=surface, exact=True).wait_for()
             _assert_surface_body(page, surface)
             _assert_public_boundary(page)
+            if surface in {"Today", "Environment", "Portfolio"}:
+                health = page.locator('.information-health[role="status"]')
+                health.wait_for(state="visible")
+                assert health.count() == 1
+            if surface == "Environment":
+                assert page.locator(".metric-grid.metric-environment").count() <= 2
             page.screenshot(
                 path=report_directory / f"streamlit-{viewport_name}-{surface.lower()}.png",
                 full_page=True,
@@ -173,10 +194,13 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
         assert layout["headingVisible"] is True
         assert layout["trustStripVisible"] is True
         assert layout["publicSidebarVisible"] is False
-        assert layout["navigationPosition"] == "sticky"
+        assert layout["navigationShellPosition"] == "sticky"
+        assert layout["navigationShellTop"] <= 32
+        assert layout["headerVisible"] is False
         assert layout["sectionHeaderCount"] >= 1 or layout["statusRowCount"] >= 1
         if viewport_name == "iphone":
             assert layout["minimumNavigationHeight"] >= BASELINE["minimum_mobile_navigation_height_pixels"]
+            assert layout["brandNavigationTopDelta"] <= 8
         page.screenshot(path=report_directory / f"streamlit-{viewport_name}.png", full_page=True)
         (report_directory / f"streamlit-{viewport_name}-layout.json").write_text(
             json.dumps(layout, indent=2, sort_keys=True) + "\n", encoding="utf-8"
