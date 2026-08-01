@@ -19,6 +19,7 @@ import educational_market_briefing_ui
 import live_operating_console
 import operating_intelligence_ui
 import operating_status
+import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
 import secure_app
 import ui_experience_refinement
@@ -207,6 +208,7 @@ def main() -> None:
     prepare_render_surface_runtime()
     ui_refinement.install(app_impl, secure_app)
     ui_experience_refinement.install(app_impl)
+    opportunity_funnel_ui_refinement.install(app_impl)
     create_streamlit_application(
         deployment=deployment_context_from_environment()
     )
