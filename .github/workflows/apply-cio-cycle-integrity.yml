@@ -4,18 +4,16 @@ on:
   push:
     branches:
       - fix/cio-cycle-decision-integrity
-  pull_request:
-    branches:
-      - main
+  pull_request_review:
     types:
-      - ready_for_review
+      - submitted
 
 permissions:
   contents: write
 
 jobs:
   patch-and-validate:
-    if: github.event_name == 'pull_request' || github.event.head_commit.message != 'Apply CIO cycle integrity corrections'
+    if: github.event_name == 'pull_request_review' || github.event.head_commit.message != 'Apply CIO cycle integrity corrections'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
