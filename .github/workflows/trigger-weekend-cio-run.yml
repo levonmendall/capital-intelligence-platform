@@ -1,7 +1,7 @@
 name: Trigger Weekend CIO Run
 
 on:
-  push:
+  pull_request:
     branches:
       - main
     paths:
@@ -36,10 +36,9 @@ jobs:
       SEC_USER_AGENT: Capital Intelligence Platform levonmendall2369@gmail.com
 
     steps:
-      - name: Check out latest main source
+      - name: Check out pull request source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: main
           persist-credentials: false
 
       - name: Set up Python
