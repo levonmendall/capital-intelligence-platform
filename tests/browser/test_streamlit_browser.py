@@ -123,6 +123,8 @@ def _layout_snapshot(page) -> dict[str, object]:
         """() => {
           const buttons = [...document.querySelectorAll('[data-testid="stButtonGroup"] button')];
           const heights = buttons.map((button) => button.getBoundingClientRect().height);
+          const sidebar = document.querySelector('[data-testid="stSidebar"]');
+          const buttonGroup = document.querySelector('[data-testid="stButtonGroup"]');
           return {
             navigationCount: buttons.length,
             minimumNavigationHeight: heights.length ? Math.min(...heights) : 0,
@@ -130,6 +132,11 @@ def _layout_snapshot(page) -> dict[str, object]:
             headingVisible: Boolean(document.querySelector('.compact-surface-head h1')),
             sectionHeaderCount: document.querySelectorAll('.section-header').length,
             statusRowCount: document.querySelectorAll('.status-row').length,
+            trustStripVisible: Boolean(document.querySelector('.surface-trust-strip')),
+            publicSidebarVisible: Boolean(
+              sidebar && getComputedStyle(sidebar).display !== 'none' && sidebar.getBoundingClientRect().width > 1
+            ),
+            navigationPosition: buttonGroup ? getComputedStyle(buttonGroup).position : '',
           };
         }"""
     )
@@ -156,10 +163,17 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
             page.get_by_role("heading", name=surface, exact=True).wait_for()
             _assert_surface_body(page, surface)
             _assert_public_boundary(page)
+            page.screenshot(
+                path=report_directory / f"streamlit-{viewport_name}-{surface.lower()}.png",
+                full_page=True,
+            )
         layout = _layout_snapshot(page)
         assert layout["navigationCount"] == BASELINE["primary_surface_count"]
         assert layout["horizontalOverflow"] <= BASELINE["maximum_horizontal_overflow_pixels"]
         assert layout["headingVisible"] is True
+        assert layout["trustStripVisible"] is True
+        assert layout["publicSidebarVisible"] is False
+        assert layout["navigationPosition"] == "sticky"
         assert layout["sectionHeaderCount"] >= 1 or layout["statusRowCount"] >= 1
         if viewport_name == "iphone":
             assert layout["minimumNavigationHeight"] >= BASELINE["minimum_mobile_navigation_height_pixels"]
