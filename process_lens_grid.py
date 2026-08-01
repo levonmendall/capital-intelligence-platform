@@ -15,6 +15,9 @@ PROCESS_LENS_STYLE = """
 <style>
 .process-lens-grid {
     box-sizing: border-box;
+    display: block !important;
+    grid-template-columns: none !important;
+    gap: 0 !important;
     margin: 1rem 0 1.35rem;
     padding: 1.15rem;
     border: 1px solid rgba(var(--surface-rgb), .2);
@@ -45,6 +48,8 @@ PROCESS_LENS_STYLE = """
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: .72rem;
     align-items: stretch;
+    width: 100%;
+    min-width: 0;
 }
 .process-lens-card {
     box-sizing: border-box;
@@ -143,7 +148,11 @@ def process_lens_markup(
 ) -> str:
     """Return one accessible, shared process-lens DOM tree."""
 
-    safe_variant = "".join(character for character in variant if character.isalnum() or character == "-")
+    safe_variant = "".join(
+        character
+        for character in variant
+        if character.isalnum() or character == "-"
+    )
     cards = "".join(
         f"""
         <article class="process-lens-card" role="listitem">
