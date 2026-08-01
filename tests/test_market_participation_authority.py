@@ -47,8 +47,7 @@ def test_capability_build_filters_dynamic_discovery_to_registry() -> None:
         universe.instruments[0],
         symbol="AAPL",
         instrument_identifier="instrument:us-equity:aapl",
-        name="Apple Inc.",
-        instrument_type="common_stock",
+        name="Unregistered discovered instrument",
     )
     dynamic = replace(
         universe,
