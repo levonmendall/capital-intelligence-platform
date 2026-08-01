@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any
 
 from cio import CIOAction, CIODecision
+from cio.cycle_disposition import CIOCycleDisposition
 from opportunity import OpportunityQueue
 from portfolio.construction_api import (
     ConstructionStatus,
@@ -201,6 +202,7 @@ class DailyCIOBriefingBuilder:
         decisions: tuple[CIODecision, ...],
         construction: PortfolioConstructionResult | None,
         theses: tuple[LivingThesis, ...],
+        cycle_disposition: CIOCycleDisposition | None = None,
     ) -> DailyCIOBriefing:
         _aware(as_of, field_name="as_of")
         if not isinstance(queue, OpportunityQueue):
@@ -220,82 +222,79 @@ class DailyCIOBriefingBuilder:
             isinstance(item, LivingThesis) for item in theses
         ):
             raise TypeError("theses must contain LivingThesis values")
+        if cycle_disposition is not None and not isinstance(
+            cycle_disposition,
+            CIOCycleDisposition,
+        ):
+            raise TypeError(
+                "cycle_disposition must be CIOCycleDisposition or None"
+            )
 
         if not queue.ranked:
-            rejection_reasons = tuple(
-                reason
-                for rejected in queue.rejected
-                for reason in rejected.reasons
-            )
-            evidence_limited_terms = (
-                "insufficient evidence",
-                "evidence quality",
-                "stale data",
-                "data is stale",
-                "missing",
-                "incomplete",
-                "analytical coverage",
-                "coverage is below",
-                "unavailable",
-                "uncertified",
-                "unapproved",
-            )
-            evidence_incomplete = not queue.rejected or any(
-                term in reason.lower()
-                for reason in rejection_reasons
-                for term in evidence_limited_terms
-            )
-            if evidence_incomplete:
+            if cycle_disposition is None:
                 return DailyCIOBriefing(
                     identifier=f"daily-cio:{as_of.isoformat()}",
                     as_of=as_of,
-                    status=DailyCIOStatus.INSUFFICIENT_EVIDENCE,
+                    status=DailyCIOStatus.UNAVAILABLE,
                     what_changed=(
-                        "The governed review did not produce a complete candidate evidence set."
+                        "The review queue is empty, but no cycle-level CIO decision record is available."
                     ),
                     why_it_matters=(
-                        "The CIO cannot conclude that cash or current holdings are superior when one or more eligible instruments were not supported by decision-complete evidence."
+                        "Screening cannot independently declare cash superior or label the cycle as insufficient evidence."
                     ),
-                    opportunity_or_risk=(
-                        "No portfolio action is authorized until comparative candidate evidence is complete."
-                    ),
+                    opportunity_or_risk="Cycle-level CIO synthesis is unavailable.",
                     portfolio_decision="No portfolio action is permitted.",
                     confidence=None,
                     evidence_that_changes_conclusion=(
-                        rejection_reasons
-                        or (
-                            "Produce certified candidate evidence for the complete governed review set",
-                        )
+                        "Issue the governed CIO cycle disposition",
                     ),
                     material_developments=(
-                        "The comparative opportunity set is incomplete",
+                        "The empty opportunity queue lacks final CIO authority",
                     ),
                     thesis_identifiers=tuple(
                         item.identifier for item in theses
                     ),
                 )
+            status = (
+                DailyCIOStatus.INSUFFICIENT_EVIDENCE
+                if cycle_disposition.action is CIOAction.INSUFFICIENT_EVIDENCE
+                else DailyCIOStatus.NO_SUPERIOR_OPPORTUNITY
+            )
+            incomplete = status is DailyCIOStatus.INSUFFICIENT_EVIDENCE
             return DailyCIOBriefing(
                 identifier=f"daily-cio:{as_of.isoformat()}",
                 as_of=as_of,
-                status=DailyCIOStatus.NO_SUPERIOR_OPPORTUNITY,
+                status=status,
                 what_changed=(
-                    "No candidate cleared the governed opportunity qualification process."
+                    "The CIO completed a cycle-level review without a candidate reaching individual synthesis."
                 ),
-                why_it_matters=(
-                    "Cash and current holdings remain preferable to the screened alternatives after evidence, cost, downside, liquidity, and opportunity-cost controls."
-                ),
+                why_it_matters=cycle_disposition.rationale,
                 opportunity_or_risk=(
-                    "No superior evidence-supported use of capital is available."
+                    "The complete opportunity set is not decision-ready."
+                    if incomplete
+                    else "No screened candidate clears the governed economic hurdles."
                 ),
-                portfolio_decision="No portfolio action is required.",
+                portfolio_decision=(
+                    "CIO decision: insufficient evidence. No portfolio action is permitted."
+                    if incomplete
+                    else "CIO decision: no superior opportunity. No portfolio action is required."
+                ),
                 confidence=None,
-                evidence_that_changes_conclusion=rejection_reasons,
-                material_developments=(
-                    "The governed review queue contains no qualified opportunity",
+                evidence_that_changes_conclusion=(
+                    cycle_disposition.contributing_reasons
                 ),
+                material_developments=(
+                    f"CIO cycle classification is {cycle_disposition.classification.replace('_', ' ')}",
+                ),
+                decision_identifier=cycle_disposition.identifier,
                 thesis_identifiers=tuple(
                     item.identifier for item in theses
                 ),
+            )
+
+        if cycle_disposition is not None:
+            raise ValueError(
+                "a cycle-level disposition cannot accompany a ranked opportunity queue"
             )
 
         primary = next(
