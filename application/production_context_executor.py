@@ -91,8 +91,18 @@ def _candidate_authority_universe(executor, *, context):
     authority = CanonicalMarketParticipationAuthority.load()
     authority.require_complete_allocatable_set(combined.values())
     instruments = authority.filter_paper_allocatable(combined.values())
+    expected_publication_identifier = str(
+        getattr(context, "eligible_universe_publication_identifier", "")
+    ).strip()
+    runtime_identifier = (
+        expected_publication_identifier
+        or f"runtime-market-authority:{context.screening_cycle_identifier}"
+    )
     return SimpleNamespace(
-        identifier=context.eligible_universe_publication_identifier,
+        identifier=runtime_identifier,
+        expected_publication_identifier=(
+            expected_publication_identifier or None
+        ),
         instruments=instruments,
     )
 
@@ -104,10 +114,18 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
         original_provider = self.context_provider
         context = original_provider.load_context(as_of=as_of)
         authority_universe = _candidate_authority_universe(self, context=context)
-        publication_identifier = authority_universe.identifier
+        expected_publication_identifier = (
+            authority_universe.expected_publication_identifier
+        )
 
         def load_exact_authority(requested_identifier: str):
-            if str(requested_identifier).strip() != publication_identifier:
+            requested = str(requested_identifier).strip()
+            if not requested:
+                raise ValueError("runtime authority publication identifier is empty")
+            if (
+                expected_publication_identifier is not None
+                and requested != expected_publication_identifier
+            ):
                 raise ValueError(
                     "runtime authority request does not match certified publication"
                 )
