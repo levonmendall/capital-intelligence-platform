@@ -47,9 +47,10 @@ jobs:
 
       - name: Apply persistence and immutable opportunity authority
         run: |
+          python scripts/prepare_persistence_snapshot_patch.py
           python scripts/apply_persistence_and_snapshot_authority.py
           git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
-          rm -f scripts/apply_persistence_and_snapshot_authority.py
+          rm -f scripts/apply_persistence_and_snapshot_authority.py scripts/prepare_persistence_snapshot_patch.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
