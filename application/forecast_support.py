@@ -890,10 +890,8 @@ class ForecastSupportingProductionContextProvider:
             if forecast_context is None:
                 updated_contexts.append(candidate_context)
                 continue
-            if candidate_context.forecast is not None:
-                raise ProductionContextError(
-                    "candidate already contains a forecast specialist context"
-                )
+            # Explicit forecast-support records are the higher-authority
+            # translation and may replace the baseline certified forecast packet.
             updated_contexts.append(
                 replace(candidate_context, forecast=forecast_context)
             )
