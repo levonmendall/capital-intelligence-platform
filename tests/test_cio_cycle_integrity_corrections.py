@@ -85,6 +85,20 @@ def test_common_portfolio_scenarios_cover_every_candidate():
     scenario_set.validate_coverage({"BTCUSD", "VTI"})
 
 
+def test_scenario_lineage_never_exceeds_the_decision_time():
+    scenario_set = build_governed_portfolio_scenario_set(
+        identifier="scenario-set:later-publication",
+        source_identifier="publication:later",
+        as_of=NOW,
+        knowledge_cutoff=NOW + timedelta(hours=1),
+        candidates=(_scenario_candidate("VTI", 0.08),),
+        cash_expected_return=0.04,
+    )
+
+    assert scenario_set.as_of == NOW
+    assert scenario_set.knowledge_cutoff == NOW
+
+
 def test_empty_queue_receives_explicit_cio_disposition():
     queue = OpportunityQueue(
         context_identifier="opportunity:test",
