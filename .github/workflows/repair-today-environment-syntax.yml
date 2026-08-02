@@ -1,0 +1,67 @@
+name: Repair Today and Environment syntax
+
+on:
+  push:
+    branches:
+      - agent/today-environment-investor-story
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/today-environment-investor-story
+      - name: Replace unsafe radar markup assembly
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("surface_content_refinement.py")
+          source = path.read_text(encoding="utf-8")
+          start_marker = "    st.markdown(\n        '<section class=\"research-radar\" aria-label=\"Research radar\">'"
+          end_marker = "    with st.expander(\"Research funnel detail\", expanded=False):"
+          start = source.index(start_marker, source.index("def _render_today_research_radar"))
+          end = source.index(end_marker, start)
+          replacement = '''    cells_markup = "".join(
+              "<div class=\\"radar-cell\\">"
+              f"<div class=\\"radar-label\\">{escape(label)}</div>"
+              f"<div class=\\"radar-value\\">{escape(value)}</div>"
+              f"<div class=\\"radar-note\\">{escape(note)}</div></div>"
+              for label, value, note in cells
+          )
+          radar_markup = (
+              '<section class="research-radar" aria-label="Research radar">'
+              '<div class="story-meta"><span class="story-rank">Research radar</span>'
+              f'<span>As of {escape(concise.ui.format_datetime(snapshot.as_of))}</span></div>'
+              '<h3>What the opportunity process is finding</h3>'
+              f'<div class="radar-grid">{cells_markup}</div>'
+              '<div class="radar-grid" style="margin-top:.65rem">'
+              '<div class="radar-cell"><div class="radar-label">Strongest alternative</div>'
+              f'<div class="radar-value">{escape(snapshot.strongest_alternative)}</div>'
+              f'<div class="radar-note">{escape(snapshot.strongest_stage)}</div></div>'
+              '<div class="radar-cell radar-wide">'
+              '<div class="radar-label">Main reason it did not advance</div>'
+              f'<div class="radar-value">{escape(snapshot.main_reason)}</div>'
+              '<div class="radar-note">Research status, not a portfolio instruction.</div></div>'
+              '</div></section>'
+          )
+          st.markdown(radar_markup, unsafe_allow_html=True)
+'''
+          updated = source[:start] + replacement + source[end:]
+          if updated == source:
+              raise SystemExit("radar markup replacement made no change")
+          path.write_text(updated, encoding="utf-8")
+          PY
+          python -m py_compile surface_content_refinement.py
+      - name: Commit repaired module and remove one-use workflow
+        run: |
+          rm .github/workflows/repair-today-environment-syntax.yml
+          git config user.name "capital-intelligence-bot"
+          git config user.email "capital-intelligence-bot@users.noreply.github.com"
+          git add surface_content_refinement.py .github/workflows/repair-today-environment-syntax.yml
+          git commit -m "Repair Today research radar markup"
+          git push origin HEAD:agent/today-environment-investor-story
