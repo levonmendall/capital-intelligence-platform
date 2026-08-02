@@ -57,12 +57,13 @@ def test_monitoring_combines_briefing_environment_and_existing_conditions() -> N
 def test_cio_report_starts_with_backdrop_change_and_monitoring() -> None:
     source = Path("cio_report_backdrop_refinement.py").read_text(encoding="utf-8")
 
-    backdrop = source.index('"Current market backdrop"')
-    changed = source.index('"What changed"', backdrop)
-    monitoring = source.index('"What the CIO is monitoring"', changed)
+    reordered = source.index("reordered = (")
+    backdrop = source.index('"Current market backdrop"', reordered)
+    changed_row = source.index("\n                changed,", backdrop)
+    monitoring = source.index('"What the CIO is monitoring"', changed_row)
     posture = source.index('"Current portfolio posture"', monitoring)
 
-    assert backdrop < changed < monitoring < posture
+    assert reordered < backdrop < changed_row < monitoring < posture
 
 
 def test_shared_installer_activates_market_first_cio_report() -> None:
