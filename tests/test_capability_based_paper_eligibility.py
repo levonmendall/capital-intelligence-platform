@@ -136,6 +136,7 @@ def test_expired_or_suspended_certification_removes_portfolio_authority(
     store.append(
         _certification(
             identifier="instrument-paper-certification:aapl:expired",
+            approved_at=AS_OF - timedelta(days=31),
             effective_at=AS_OF - timedelta(days=30),
             expires_at=AS_OF - timedelta(days=1),
         )
