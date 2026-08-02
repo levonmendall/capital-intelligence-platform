@@ -139,9 +139,13 @@ class RecommendationUniversePolicy:
             )
         if (
             self.market_participation_authority is None
-            and str(
-                getattr(self.asset_class_authority, "policy_version", "")
-            ).startswith("bounded-pilot-capability.")
+            and bool(
+                getattr(
+                    self.asset_class_authority,
+                    "require_market_participation_authority",
+                    False,
+                )
+            )
         ):
             from governance.market_participation import (
                 CanonicalMarketParticipationAuthority,
