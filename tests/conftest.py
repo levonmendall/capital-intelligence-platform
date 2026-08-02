@@ -6,13 +6,7 @@ from pathlib import Path
 import pytest
 
 import core.database as database
-from cio import CandidateAssetClass
 from core.seed import seed_mandates
-from governance.instrument_paper_eligibility import (
-    InstrumentPaperEligibilityCertification,
-    InstrumentPaperEligibilityState,
-    SQLiteInstrumentPaperEligibilityStore,
-)
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +46,13 @@ def governed_adapter_instrument_authority(
     if request.node.path.name != "test_canonical_production_context_adapter.py":
         yield None
         return
+
+    from cio import CandidateAssetClass
+    from governance.instrument_paper_eligibility import (
+        InstrumentPaperEligibilityCertification,
+        InstrumentPaperEligibilityState,
+        SQLiteInstrumentPaperEligibilityStore,
+    )
 
     as_of = datetime(2026, 7, 27, 11, tzinfo=timezone.utc)
     authority_path = tmp_path / "instrument-paper-eligibility.db"
