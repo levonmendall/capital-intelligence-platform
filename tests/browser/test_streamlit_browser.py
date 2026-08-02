@@ -172,6 +172,25 @@ def _layout_snapshot(page) -> dict[str, object]:
     )
 
 
+def test_render_entrypoint_install_chain(monkeypatch) -> None:
+    """Fail with a direct traceback when presentation installation breaks."""
+
+    import render_app
+
+    monkeypatch.setattr(render_app, "prepare_render_data_runtime", lambda: None)
+    monkeypatch.setattr(
+        render_app,
+        "create_streamlit_application",
+        lambda **_kwargs: None,
+    )
+    render_app.main()
+    assert getattr(
+        render_app.app_impl,
+        "_capital_intelligence_distinct_surface_content_installed",
+        False,
+    ) is True
+
+
 @pytest.mark.parametrize("viewport_name", ("desktop", "iphone"))
 def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport_name) -> None:
     playwright = pytest.importorskip("playwright.sync_api")
