@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: universal-investable-ownership-v2-apply
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
