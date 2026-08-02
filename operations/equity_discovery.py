@@ -83,11 +83,14 @@ def _period_return(closes: Sequence[float], periods: int) -> float:
 
 @dataclass(frozen=True, slots=True)
 class EquityDiscoveryPolicy:
-    version: str = "broad-us-equity-discovery.v1"
-    maximum_snapshot_assets: int = 15000
+    version: str = "broad-us-equity-discovery.v2-complete-qualified-universe"
+    # Retained as optional compatibility fields. ``None`` means the certified provider
+    # catalog and every eligible snapshot/deep-history candidate are processed.
+    maximum_snapshot_assets: int | None = None
     snapshot_batch_size: int = 200
-    deep_shortlist_count: int = 150
-    selected_candidate_count: int = 20
+    deep_shortlist_count: int | None = None
+    selected_candidate_count: int | None = None
+    deep_history_batch_size: int = 200
     minimum_price: float = 5.0
     minimum_daily_dollar_volume: float = 5_000_000.0
     minimum_history_bars: int = 252
@@ -99,17 +102,29 @@ class EquityDiscoveryPolicy:
         if not self.version.strip():
             raise ValueError("version cannot be empty")
         for name in (
-            "maximum_snapshot_assets",
             "snapshot_batch_size",
-            "deep_shortlist_count",
-            "selected_candidate_count",
+            "deep_history_batch_size",
             "minimum_history_bars",
             "deep_history_days",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
-        if self.deep_shortlist_count < self.selected_candidate_count:
+        for name in (
+            "maximum_snapshot_assets",
+            "deep_shortlist_count",
+            "selected_candidate_count",
+        ):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+            ):
+                raise ValueError(f"{name} must be a positive integer or None")
+        if (
+            self.deep_shortlist_count is not None
+            and self.selected_candidate_count is not None
+            and self.deep_shortlist_count < self.selected_candidate_count
+        ):
             raise ValueError("deep_shortlist_count must cover selected candidates")
         if not 0.0 < self.exploratory_position_weight <= self.scaled_position_weight <= 0.10:
             raise ValueError("equity discovery weights are invalid")
@@ -253,7 +268,7 @@ def _eligible_assets(
     sec_map: Mapping[str, tuple[str, str, str, str]],
     *,
     excluded_symbols: set[str],
-    maximum: int,
+    maximum: int | None,
 ) -> tuple[dict[str, Mapping[str, Any]], tuple[tuple[str, str], ...]]:
     eligible: dict[str, Mapping[str, Any]] = {}
     excluded: list[tuple[str, str]] = []
@@ -261,8 +276,6 @@ def _eligible_assets(
         symbol = str(asset.get("symbol", "")).strip().upper()
         if not symbol or symbol in excluded_symbols:
             continue
-        if len(eligible) >= maximum:
-            break
         name = str(asset.get("name", "")).strip()
         exchange = str(asset.get("exchange", "")).strip().upper()
         reason: str | None = None
@@ -270,8 +283,6 @@ def _eligible_assets(
             reason = "inactive"
         elif asset.get("tradable") is not True:
             reason = "not_tradable"
-        elif asset.get("fractionable") is not True:
-            reason = "not_fractionable"
         elif str(asset.get("class", "us_equity")).lower() not in {"us_equity", "equity"}:
             reason = "not_us_equity"
         elif exchange not in _ALLOWED_EXCHANGES:
@@ -411,18 +422,25 @@ def discover_us_equities(
     preliminary.sort(key=lambda item: (item[0], item[1]), reverse=True)
     held = {str(item).strip().upper() for item in held_symbols if str(item).strip()}
     tracked = {str(item).strip().upper() for item in tracked_symbols if str(item).strip()}
-    shortlist = [symbol for _score, symbol in preliminary[: resolved.deep_shortlist_count]]
+    # Ranking determines review order only.  Every candidate that passed the cheap
+    # eligibility, snapshot, price, and liquidity checks receives deep history.
+    shortlist = [symbol for _score, symbol in preliminary]
     for symbol in sorted(held | tracked):
         if symbol in assets and symbol not in shortlist:
             shortlist.append(symbol)
     if "VTI" not in shortlist:
         shortlist.append("VTI")
-    deep_bars = alpaca.historical_bars(
-        shortlist,
-        start=timestamp - timedelta(days=resolved.deep_history_days),
-        end=timestamp,
-        timeframe="1Day",
-    )
+    deep_bars: dict[str, object] = {}
+    for start in range(0, len(shortlist), resolved.deep_history_batch_size):
+        batch = shortlist[start : start + resolved.deep_history_batch_size]
+        deep_bars.update(
+            alpaca.historical_bars(
+                batch,
+                start=timestamp - timedelta(days=resolved.deep_history_days),
+                end=timestamp,
+                timeframe="1Day",
+            )
+        )
     benchmark = _bar_features(
         deep_bars.get("VTI", ()),
         as_of=timestamp,
@@ -515,14 +533,10 @@ def discover_us_equities(
         ),
         reverse=True,
     )
-    selected_symbols: list[DiscoveredEquity] = []
-    new_candidate_count = 0
-    for item in selected:
-        if item.symbol in held:
-            selected_symbols.append(item)
-        elif new_candidate_count < resolved.selected_candidate_count:
-            selected_symbols.append(item)
-            new_candidate_count += 1
+    # No candidate-count cutoff is applied after deep analysis.  Holdings and new
+    # opportunities share the same evidence path; ownership continuity affects only
+    # the per-instrument exploratory cap and review context.
+    selected_symbols = list(selected)
     selected_symbols.sort(key=lambda item: (item.score, item.symbol), reverse=True)
     material = {
         "as_of": timestamp.isoformat(),

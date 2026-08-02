@@ -30,28 +30,19 @@ from providers.alpaca_paper import (
 
 
 DEFAULT_UNIVERSE_PATH = Path("config/free_paper_pilot_universe.json")
+
+# Every classified public-market family may be represented in the governed paper
+# universe.  Provider and capability evidence determine whether a specific instrument
+# is executable; an asset-class whitelist does not.
 SUPPORTED_EXECUTION_CLASSES = frozenset(
-    {
-        CandidateAssetClass.US_EQUITY,
-        CandidateAssetClass.US_ETF,
-        CandidateAssetClass.CASH_EQUIVALENT,
-        CandidateAssetClass.INTERNATIONAL_EQUITY,
-        CandidateAssetClass.FIXED_INCOME,
-        CandidateAssetClass.FX,
-        CandidateAssetClass.CRYPTO,
-        CandidateAssetClass.FUTURE,
-        CandidateAssetClass.OPTION,
-    }
+    item for item in CandidateAssetClass if item is not CandidateAssetClass.OTHER
 )
-DIRECT_EXECUTION_CLASSES = frozenset(
-    {
-        CandidateAssetClass.INTERNATIONAL_EQUITY,
-        CandidateAssetClass.FIXED_INCOME,
-        CandidateAssetClass.FX,
-        CandidateAssetClass.CRYPTO,
-        CandidateAssetClass.FUTURE,
-        CandidateAssetClass.OPTION,
-    }
+# Backward-compatible export.  Directness is now an instrument/provider property, not
+# an asset-class property.  Callers should use ``uses_direct_market_provider``.
+DIRECT_EXECUTION_CLASSES = SUPPORTED_EXECUTION_CLASSES
+_DIRECT_PROVIDER_KINDS = frozenset({"yahoo", "yahoo_option", "eodhd", "databento"})
+_DERIVATIVE_INSTRUMENT_TYPES = frozenset(
+    {"future", "perpetual", "option", "forward", "swap", "warrant", "right"}
 )
 _MARKET_EVALUATION_TIMEZONE = ZoneInfo("America/New_York")
 
@@ -63,6 +54,12 @@ def _text(value: object, *, field_name: str) -> str:
     if not normalized:
         raise ValueError(f"{field_name} cannot be empty")
     return normalized
+
+
+def _optional_text(value: object, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _text(value, field_name=field_name)
 
 
 def _number(
@@ -82,8 +79,110 @@ def _number(
     return round(normalized, 12)
 
 
+def _positive_number(value: object, *, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{field_name} must be numeric")
+    normalized = float(value)
+    if normalized <= 0.0:
+        raise ValueError(f"{field_name} must be positive")
+    return round(normalized, 12)
+
+
+def _default_session(
+    asset_class: CandidateAssetClass,
+    instrument_type: str,
+) -> TradingSessionModel:
+    if asset_class is CandidateAssetClass.CRYPTO and instrument_type in {
+        "token", "stablecoin", "spot", "perpetual"
+    }:
+        return TradingSessionModel.CONTINUOUS_24_7
+    if asset_class is CandidateAssetClass.FX and instrument_type in {
+        "spot", "forward"
+    }:
+        return TradingSessionModel.CONTINUOUS_24_5
+    if asset_class is CandidateAssetClass.FIXED_INCOME and instrument_type not in {
+        "fund", "common_stock", "preferred_stock"
+    }:
+        return TradingSessionModel.DEALER_24_5
+    return TradingSessionModel.EXCHANGE_LOCAL
+
+
+def _default_capability_models(
+    asset_class: CandidateAssetClass,
+    instrument_type: str,
+    provider_kind: str,
+) -> tuple[str, str]:
+    if provider_kind == "alpaca":
+        return (
+            "alpaca-paper-broker-custody.v1",
+            "alpaca-paper-iex-simulated-fill.v1",
+        )
+    values = {
+        CandidateAssetClass.US_EQUITY: (
+            "broker-custodied-security-paper.v1",
+            "direct-us-security-simulated-fill.v1",
+        ),
+        CandidateAssetClass.US_ETF: (
+            "broker-custodied-security-paper.v1",
+            "direct-us-fund-simulated-fill.v1",
+        ),
+        CandidateAssetClass.CASH_EQUIVALENT: (
+            "cash-equivalent-paper-custody.v1",
+            "cash-equivalent-simulated-fill.v1",
+        ),
+        CandidateAssetClass.INTERNATIONAL_EQUITY: (
+            "global-security-paper-custody.v1",
+            "direct-global-equity-simulated-fill.v1",
+        ),
+        CandidateAssetClass.FIXED_INCOME: (
+            "book-entry-fixed-income-paper-custody.v2",
+            "direct-fixed-income-simulated-fill.v2",
+        ),
+        CandidateAssetClass.COMMODITY: (
+            "commodity-exposure-paper-custody.v1",
+            "direct-commodity-simulated-fill.v1",
+        ),
+        CandidateAssetClass.FX: (
+            "prime-broker-spot-fx-paper.v2",
+            "direct-fx-simulated-fill.v2",
+        ),
+        CandidateAssetClass.CRYPTO: (
+            "qualified-digital-asset-paper-custody.v2",
+            "direct-digital-asset-simulated-fill.v2",
+        ),
+        CandidateAssetClass.REAL_ESTATE: (
+            "real-estate-security-paper-custody.v1",
+            "direct-real-estate-security-simulated-fill.v1",
+        ),
+        CandidateAssetClass.FUTURE: (
+            "futures-clearing-paper.v2",
+            "dated-or-perpetual-future-simulated-fill.v2",
+        ),
+        CandidateAssetClass.OPTION: (
+            "options-clearing-paper.v2",
+            "defined-risk-option-simulated-fill.v2",
+        ),
+        CandidateAssetClass.VOLATILITY: (
+            "volatility-instrument-paper-custody.v1",
+            "volatility-instrument-simulated-fill.v1",
+        ),
+        CandidateAssetClass.ALTERNATIVE: (
+            "alternative-security-paper-custody.v1",
+            "alternative-instrument-simulated-fill.v1",
+        ),
+    }
+    return values[asset_class]
+
+
 @dataclass(frozen=True, slots=True)
 class FreePaperPilotInstrument:
+    """One capability-certified instrument in the exact paper execution universe.
+
+    The contract intentionally does not whitelist asset-class/instrument-type pairs.
+    The certified active-universe publication supplies the exact structure and model
+    lineage.  Provider adapters and downstream capability checks remain fail-closed.
+    """
+
     symbol: str
     instrument_identifier: str
     name: str
@@ -107,6 +206,18 @@ class FreePaperPilotInstrument:
     underlying_symbol: str | None = None
     strike: float | None = None
     option_right: str | None = None
+    approval_identifier: str | None = None
+    custody_settlement_identifier: str | None = None
+    execution_model_version: str | None = None
+    contract_model_version: str | None = None
+    margin_model_version: str | None = None
+    lifecycle_model_version: str | None = None
+    roll_model_version: str | None = None
+    gross_leverage: float = 1.0
+    unlevered: bool | None = None
+    spot_only: bool | None = None
+    defined_risk: bool = True
+    margin_required: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -125,89 +236,126 @@ class FreePaperPilotInstrument:
             elif field_name in {"economic_exposure", "instrument_type"}:
                 value = value.lower()
             object.__setattr__(self, field_name, value)
-        if self.execution_asset_class not in SUPPORTED_EXECUTION_CLASSES:
-            raise ValueError("paper instrument has an unsupported execution asset class")
-        direct = self.execution_asset_class in DIRECT_EXECUTION_CLASSES
+        if not isinstance(self.execution_asset_class, CandidateAssetClass):
+            raise TypeError("execution_asset_class must be CandidateAssetClass")
+        if self.execution_asset_class is CandidateAssetClass.OTHER:
+            raise ValueError(
+                "unclassified instruments cannot enter the paper execution universe"
+            )
+
+        provider_kind = _text(
+            str(self.provider_kind or "alpaca"), field_name="provider_kind"
+        ).lower()
+        object.__setattr__(self, "provider_kind", provider_kind)
+        direct = provider_kind != "alpaca"
         if direct:
-            allowed_types = {
-                CandidateAssetClass.INTERNATIONAL_EQUITY: {"common_stock", "preferred_stock", "fund"},
-                CandidateAssetClass.FIXED_INCOME: {"bond"},
-                CandidateAssetClass.FX: {"spot"},
-                CandidateAssetClass.CRYPTO: {"token", "stablecoin"},
-                CandidateAssetClass.FUTURE: {"future"},
-                CandidateAssetClass.OPTION: {"option"},
-            }[self.execution_asset_class]
-            if self.instrument_type not in allowed_types:
+            if provider_kind not in _DIRECT_PROVIDER_KINDS:
                 raise ValueError(
-                    f"{self.execution_asset_class.value} paper instrument type is unsupported"
+                    f"paper provider adapter {provider_kind!r} is not installed"
                 )
             if self.provider_symbol is None or not str(self.provider_symbol).strip():
                 raise ValueError("direct paper instruments require provider_symbol")
-            object.__setattr__(self, "provider_symbol", str(self.provider_symbol).strip())
-            provider_kind = str(self.provider_kind or "yahoo").strip().lower()
-            if provider_kind not in {"yahoo", "yahoo_option", "eodhd", "databento"}:
-                raise ValueError("unsupported direct market provider kind")
-            object.__setattr__(self, "provider_kind", provider_kind)
-            if self.provider_dataset is not None:
-                object.__setattr__(self, "provider_dataset", str(self.provider_dataset).strip())
-            if self.provider_stype_in is not None:
-                object.__setattr__(self, "provider_stype_in", str(self.provider_stype_in).strip().lower())
-            settlement = str(self.settlement_currency or self.currency).strip().upper()
-            object.__setattr__(self, "settlement_currency", settlement)
-            if not isinstance(self.trading_session_model, TradingSessionModel):
-                raise ValueError("direct paper instruments require a trading session model")
-            if self.execution_asset_class is CandidateAssetClass.CRYPTO:
-                if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_7:
-                    raise ValueError("direct crypto must use continuous 24/7 sessions")
-            elif self.execution_asset_class is CandidateAssetClass.FX:
-                if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_5:
-                    raise ValueError("direct FX must use continuous 24/5 sessions")
-            elif self.execution_asset_class is CandidateAssetClass.FIXED_INCOME:
-                if self.trading_session_model is not TradingSessionModel.DEALER_24_5:
-                    raise ValueError("direct bonds must use dealer 24/5 sessions")
-            dated_derivative = (
-                self.execution_asset_class is CandidateAssetClass.OPTION
-                or (
-                    self.execution_asset_class is CandidateAssetClass.FUTURE
-                    and "continuous" not in self.instrument_identifier.lower()
-                )
+            object.__setattr__(
+                self, "provider_symbol", str(self.provider_symbol).strip()
             )
-            if dated_derivative:
-                if self.expiration_at is None or not str(self.expiration_at).strip():
-                    raise ValueError("dated derivative instruments require expiration_at")
-                object.__setattr__(self, "expiration_at", str(self.expiration_at).strip())
-            if self.execution_asset_class is CandidateAssetClass.OPTION:
-                if self.underlying_symbol is None or not str(self.underlying_symbol).strip():
-                    raise ValueError("defined-risk options require underlying_symbol")
-                if self.option_right not in {"call", "put"}:
-                    raise ValueError("defined-risk options require call or put option_right")
-                if isinstance(self.strike, bool) or not isinstance(self.strike, (int, float)) or float(self.strike) <= 0:
-                    raise ValueError("defined-risk options require a positive strike")
-                object.__setattr__(self, "underlying_symbol", str(self.underlying_symbol).strip().upper())
-                object.__setattr__(self, "strike", float(self.strike))
+            if self.provider_dataset is not None:
+                object.__setattr__(
+                    self,
+                    "provider_dataset",
+                    _text(self.provider_dataset, field_name="provider_dataset"),
+                )
+            if self.provider_stype_in is not None:
+                object.__setattr__(
+                    self,
+                    "provider_stype_in",
+                    _text(
+                        self.provider_stype_in,
+                        field_name="provider_stype_in",
+                    ).lower(),
+                )
+            session = self.trading_session_model or _default_session(
+                self.execution_asset_class, self.instrument_type
+            )
+            if not isinstance(session, TradingSessionModel):
+                raise ValueError("direct paper instruments require a session model")
+            object.__setattr__(self, "trading_session_model", session)
         else:
-            object.__setattr__(self, "provider_kind", "alpaca")
+            # These are provider-adapter constraints, not asset-class scope policy.
             if self.country_code != "US" or self.currency != "USD":
-                raise ValueError("listed Alpaca paper instruments must be U.S.-listed and USD-denominated")
-            if self.instrument_type not in {"common_stock", "preferred_stock", "fund"}:
-                raise ValueError("listed paper instruments must be stocks or funds")
+                raise ValueError(
+                    "the Alpaca paper adapter supports U.S.-listed USD instruments"
+                )
+            object.__setattr__(
+                self, "provider_symbol", self.provider_symbol or self.symbol
+            )
             object.__setattr__(self, "settlement_currency", "USD")
-            object.__setattr__(self, "trading_session_model", TradingSessionModel.EXCHANGE_LOCAL)
+            object.__setattr__(
+                self,
+                "trading_session_model",
+                TradingSessionModel.EXCHANGE_LOCAL,
+            )
+
+        settlement = _text(
+            str(self.settlement_currency or self.currency),
+            field_name="settlement_currency",
+        ).upper()
+        object.__setattr__(self, "settlement_currency", settlement)
+
         if self.issuer_cik is not None:
             normalized_cik = str(self.issuer_cik).strip()
             if not normalized_cik.isdigit():
                 raise ValueError("issuer_cik must contain only digits")
             object.__setattr__(self, "issuer_cik", normalized_cik.zfill(10))
-        if isinstance(self.contract_multiplier, bool) or not isinstance(
-            self.contract_multiplier, (int, float)
-        ) or float(self.contract_multiplier) <= 0:
-            raise ValueError("contract_multiplier must be positive")
-        object.__setattr__(self, "contract_multiplier", float(self.contract_multiplier))
-        if isinstance(self.quote_spread_bps, bool) or not isinstance(
-            self.quote_spread_bps, (int, float)
-        ) or float(self.quote_spread_bps) <= 0:
-            raise ValueError("quote_spread_bps must be positive")
-        object.__setattr__(self, "quote_spread_bps", float(self.quote_spread_bps))
+
+        derivative = self.instrument_type in _DERIVATIVE_INSTRUMENT_TYPES
+        dated_derivative = (
+            self.instrument_type == "option"
+            or (
+                self.instrument_type == "future"
+                and "continuous" not in self.instrument_identifier.lower()
+            )
+        )
+        if dated_derivative:
+            if self.expiration_at is None or not str(self.expiration_at).strip():
+                raise ValueError("dated derivative instruments require expiration_at")
+            object.__setattr__(
+                self, "expiration_at", str(self.expiration_at).strip()
+            )
+        if self.instrument_type == "option":
+            if self.underlying_symbol is None or not str(self.underlying_symbol).strip():
+                raise ValueError("options require underlying_symbol")
+            if self.option_right not in {"call", "put"}:
+                raise ValueError("options require call or put option_right")
+            if (
+                isinstance(self.strike, bool)
+                or not isinstance(self.strike, (int, float))
+                or float(self.strike) <= 0
+            ):
+                raise ValueError("options require a positive strike")
+            object.__setattr__(
+                self,
+                "underlying_symbol",
+                str(self.underlying_symbol).strip().upper(),
+            )
+            object.__setattr__(self, "strike", float(self.strike))
+
+        object.__setattr__(
+            self,
+            "contract_multiplier",
+            _positive_number(
+                self.contract_multiplier, field_name="contract_multiplier"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "quote_spread_bps",
+            _positive_number(self.quote_spread_bps, field_name="quote_spread_bps"),
+        )
+        object.__setattr__(
+            self,
+            "gross_leverage",
+            _positive_number(self.gross_leverage, field_name="gross_leverage"),
+        )
         object.__setattr__(
             self,
             "maximum_weight",
@@ -218,33 +366,81 @@ class FreePaperPilotInstrument:
                 maximum=1.0,
             ),
         )
+        if self.unlevered is None:
+            object.__setattr__(self, "unlevered", self.gross_leverage <= 1.0)
+        elif not isinstance(self.unlevered, bool):
+            raise TypeError("unlevered must be bool or None")
+        if self.spot_only is None:
+            object.__setattr__(
+                self,
+                "spot_only",
+                self.instrument_type in {"spot", "token", "stablecoin"},
+            )
+        elif not isinstance(self.spot_only, bool):
+            raise TypeError("spot_only must be bool or None")
+        for field_name in ("defined_risk", "margin_required"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be bool")
+        for field_name in (
+            "approval_identifier",
+            "custody_settlement_identifier",
+            "execution_model_version",
+            "contract_model_version",
+            "margin_model_version",
+            "lifecycle_model_version",
+            "roll_model_version",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(
+                    self,
+                    field_name,
+                    _optional_text(value, field_name=field_name),
+                )
+
+        # A derivative must carry complete executable lifecycle models.  Missing values
+        # are filled with conservative paper defaults only for backward compatibility;
+        # certified publications can and should provide asset-specific versions.
+        if derivative:
+            if self.contract_model_version is None:
+                object.__setattr__(
+                    self,
+                    "contract_model_version",
+                    f"{self.instrument_type}-contract-paper.v1",
+                )
+            if self.margin_model_version is None:
+                object.__setattr__(
+                    self,
+                    "margin_model_version",
+                    "fully-funded-defined-risk-paper.v1",
+                )
+            if self.lifecycle_model_version is None:
+                object.__setattr__(
+                    self,
+                    "lifecycle_model_version",
+                    f"{self.instrument_type}-lifecycle-paper.v1",
+                )
+            if self.instrument_type in {"future", "perpetual"} and self.roll_model_version is None:
+                object.__setattr__(
+                    self,
+                    "roll_model_version",
+                    f"{self.instrument_type}-roll-paper.v1",
+                )
+
+    @property
+    def uses_direct_market_provider(self) -> bool:
+        return self.provider_kind != "alpaca"
+
+    @property
+    def uses_derivatives(self) -> bool:
+        return self.instrument_type in _DERIVATIVE_INSTRUMENT_TYPES
 
     def profile(self, *, universe_identifier: str) -> MultiAssetInstrumentProfile:
-        if self.execution_asset_class is CandidateAssetClass.FX:
-            custody = "prime-broker-spot-fx-paper.v2"
-            execution = "direct-spot-fx-simulated-fill.v2"
-        elif self.execution_asset_class is CandidateAssetClass.CRYPTO:
-            custody = "qualified-digital-asset-paper-custody.v2"
-            execution = "direct-spot-crypto-simulated-fill.v2"
-        elif self.execution_asset_class is CandidateAssetClass.FUTURE:
-            custody = "futures-clearing-fully-collateralized-paper.v2"
-            execution = "dated-future-simulated-fill.v2"
-        elif self.execution_asset_class is CandidateAssetClass.INTERNATIONAL_EQUITY:
-            custody = "global-security-paper-custody.v1"
-            execution = "direct-global-equity-simulated-fill.v1"
-        elif self.execution_asset_class is CandidateAssetClass.FIXED_INCOME:
-            custody = "book-entry-direct-bond-paper-custody.v1"
-            execution = "direct-bond-simulated-fill.v1"
-        elif self.execution_asset_class is CandidateAssetClass.OPTION:
-            custody = "options-clearing-long-premium-paper.v1"
-            execution = "defined-risk-option-simulated-fill.v1"
-        else:
-            custody = "alpaca-paper-broker-custody.v1"
-            execution = "alpaca-paper-iex-simulated-fill.v1"
-        derivative = self.execution_asset_class in {
-            CandidateAssetClass.FUTURE,
-            CandidateAssetClass.OPTION,
-        }
+        custody_default, execution_default = _default_capability_models(
+            self.execution_asset_class,
+            self.instrument_type,
+            self.provider_kind,
+        )
         return MultiAssetInstrumentProfile(
             symbol=self.symbol,
             instrument_identifier=self.instrument_identifier,
@@ -253,51 +449,30 @@ class FreePaperPilotInstrument:
             country_code=self.country_code,
             price_currency=self.currency,
             settlement_currency=self.settlement_currency or self.currency,
-            approval_identifier=f"core-policy:{universe_identifier}",
+            approval_identifier=(
+                self.approval_identifier
+                or f"paper-policy:{universe_identifier}:{self.symbol}"
+            ),
             approval_state=AssetClassApprovalState.PAPER_ELIGIBLE,
-            unlevered=True,
-            spot_only=self.execution_asset_class in {
-                CandidateAssetClass.FX,
-                CandidateAssetClass.CRYPTO,
-            },
-            custody_settlement_identifier=custody,
-            execution_model_version=execution,
+            unlevered=bool(self.unlevered),
+            spot_only=bool(self.spot_only),
+            custody_settlement_identifier=(
+                self.custody_settlement_identifier or custody_default
+            ),
+            execution_model_version=(
+                self.execution_model_version or execution_default
+            ),
             instrument_type=self.instrument_type,
-            gross_leverage=1.0,
-            defined_risk=True,
-            margin_required=False,
+            gross_leverage=self.gross_leverage,
+            defined_risk=self.defined_risk,
+            margin_required=self.margin_required,
             contract_multiplier=self.contract_multiplier,
-            contract_model_version=(
-                "dated-exchange-future-contract.v1"
-                if self.execution_asset_class is CandidateAssetClass.FUTURE
-                else "long-premium-option-contract.v1"
-                if self.execution_asset_class is CandidateAssetClass.OPTION
-                else None
-            ),
-            margin_model_version=(
-                "fully-collateralized-notional-no-margin-leverage.v1"
-                if self.execution_asset_class is CandidateAssetClass.FUTURE
-                else "premium-paid-upfront-no-margin-borrowing.v1"
-                if self.execution_asset_class is CandidateAssetClass.OPTION
-                else None
-            ),
-            lifecycle_model_version=(
-                "dated-future-expiry-settlement-lifecycle.v1"
-                if self.execution_asset_class is CandidateAssetClass.FUTURE
-                else "defined-risk-option-expiry-exercise-lifecycle.v1"
-                if self.execution_asset_class is CandidateAssetClass.OPTION
-                else "direct-bond-coupon-maturity-lifecycle.v1"
-                if self.execution_asset_class is CandidateAssetClass.FIXED_INCOME
-                else None
-            ),
-            roll_model_version=(
-                "dated-future-liquidity-and-expiry-roll.v1"
-                if self.execution_asset_class is CandidateAssetClass.FUTURE
-                else None
-            ),
+            contract_model_version=self.contract_model_version,
+            margin_model_version=self.margin_model_version,
+            lifecycle_model_version=self.lifecycle_model_version,
+            roll_model_version=self.roll_model_version,
             trading_session_model=self.trading_session_model,
         )
-
 
 def weekday_market_evaluation_scheduled(as_of: datetime) -> bool:
     """Return whether weekday-only market evaluation is scheduled at ``as_of``."""
@@ -388,13 +563,18 @@ class FreePaperPilotUniverse:
             raise ValueError("free paper pilot symbols must be unique")
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("free paper pilot instrument identifiers must be unique")
-        required = set(self.required_exposure_classes)
-        if required != set(exposures):
-            missing = sorted(required - set(exposures))
-            extra = sorted(set(exposures) - required)
+        required = {
+            _text(item, field_name="required_exposure_classes").lower()
+            for item in self.required_exposure_classes
+        }
+        missing = sorted(required - set(exposures))
+        if missing:
             raise ValueError(
-                f"free paper pilot exposure coverage must be exact: missing={missing} extra={extra}"
+                "free paper pilot is missing required baseline exposures: "
+                + ", ".join(missing)
             )
+        # Additional certified exposures are intentionally allowed.  The baseline list
+        # is a minimum coverage contract, not a static investment-universe whitelist.
         if any(
             item.maximum_weight > self.maximum_single_instrument_weight
             for item in self.instruments
@@ -408,9 +588,16 @@ class FreePaperPilotUniverse:
         )
         if any(item.maximum_weight > self.maximum_crypto_proxy_weight for item in crypto):
             raise ValueError("crypto instrument exceeds the pilot limit")
-        volatility = self.instrument_for_exposure("volatility")
-        if volatility.maximum_weight > self.maximum_volatility_proxy_weight:
-            raise ValueError("volatility proxy exceeds the pilot limit")
+        volatility = tuple(
+            item for item in self.instruments
+            if item.execution_asset_class is CandidateAssetClass.VOLATILITY
+            or item.economic_exposure == "volatility"
+        )
+        if any(
+            item.maximum_weight > self.maximum_volatility_proxy_weight
+            for item in volatility
+        ):
+            raise ValueError("volatility instrument exceeds the pilot limit")
 
     @property
     def symbol_map(self) -> dict[str, FreePaperPilotInstrument]:
@@ -509,6 +696,18 @@ def _free_paper_pilot_universe_from_payload(
             underlying_symbol=(None if item.get("underlying_symbol") in {None, ""} else str(item["underlying_symbol"])),
             strike=(None if item.get("strike") is None else float(item["strike"])),
             option_right=(None if item.get("option_right") in {None, ""} else str(item["option_right"])),
+            approval_identifier=(None if item.get("approval_identifier") in {None, ""} else str(item["approval_identifier"])),
+            custody_settlement_identifier=(None if item.get("custody_settlement_identifier") in {None, ""} else str(item["custody_settlement_identifier"])),
+            execution_model_version=(None if item.get("execution_model_version") in {None, ""} else str(item["execution_model_version"])),
+            contract_model_version=(None if item.get("contract_model_version") in {None, ""} else str(item["contract_model_version"])),
+            margin_model_version=(None if item.get("margin_model_version") in {None, ""} else str(item["margin_model_version"])),
+            lifecycle_model_version=(None if item.get("lifecycle_model_version") in {None, ""} else str(item["lifecycle_model_version"])),
+            roll_model_version=(None if item.get("roll_model_version") in {None, ""} else str(item["roll_model_version"])),
+            gross_leverage=float(item.get("gross_leverage", 1.0)),
+            unlevered=(None if item.get("unlevered") is None else bool(item["unlevered"])),
+            spot_only=(None if item.get("spot_only") is None else bool(item["spot_only"])),
+            defined_risk=bool(item.get("defined_risk", True)),
+            margin_required=bool(item.get("margin_required", False)),
         )
         for item in raw_instruments
         if isinstance(item, Mapping)
@@ -599,6 +798,18 @@ def free_paper_pilot_universe_payload(
                 "underlying_symbol": item.underlying_symbol,
                 "strike": item.strike,
                 "option_right": item.option_right,
+                "approval_identifier": item.approval_identifier,
+                "custody_settlement_identifier": item.custody_settlement_identifier,
+                "execution_model_version": item.execution_model_version,
+                "contract_model_version": item.contract_model_version,
+                "margin_model_version": item.margin_model_version,
+                "lifecycle_model_version": item.lifecycle_model_version,
+                "roll_model_version": item.roll_model_version,
+                "gross_leverage": item.gross_leverage,
+                "unlevered": item.unlevered,
+                "spot_only": item.spot_only,
+                "defined_risk": item.defined_risk,
+                "margin_required": item.margin_required,
             }
             for item in universe.instruments
         ],
@@ -638,32 +849,75 @@ def write_active_paper_universe(
     return path
 
 
+def load_current_active_paper_universe(
+    *,
+    active_path: str | Path | None = None,
+) -> tuple[str, FreePaperPilotUniverse]:
+    """Load the current certified execution universe without a static fallback."""
+
+    path = (
+        Path(active_path).expanduser()
+        if active_path is not None
+        else active_paper_universe_path()
+    )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise ValueError(
+            f"certified active paper universe is unavailable at {path}"
+        ) from error
+    except json.JSONDecodeError as error:
+        raise ValueError("certified active paper universe is invalid JSON") from error
+    if not isinstance(payload, Mapping):
+        raise ValueError("certified active paper universe must be a JSON object")
+    publication_identifier = str(
+        payload.get("eligible_universe_publication_identifier", "")
+    ).strip()
+    if not publication_identifier:
+        raise ValueError(
+            "certified active paper universe lacks its publication identifier"
+        )
+    universe_payload = payload.get("universe")
+    if not isinstance(universe_payload, Mapping):
+        raise ValueError("certified active paper universe payload is unavailable")
+    return (
+        publication_identifier,
+        _free_paper_pilot_universe_from_payload(universe_payload),
+    )
+
+
 def load_execution_paper_universe(
     construction: Mapping[str, Any],
     *,
     fallback_path: str | Path = DEFAULT_UNIVERSE_PATH,
     active_path: str | Path | None = None,
 ) -> FreePaperPilotUniverse:
-    """Resolve the exact daily universe used by an executable construction."""
+    """Resolve the exact certified universe used by an executable construction.
 
+    ``fallback_path`` is retained for call-site compatibility but is intentionally not
+    used.  Replacing a missing or mismatched dynamic universe with a static shortlist
+    would silently remove CIO-approved instruments and is therefore fail-closed.
+    """
+
+    del fallback_path
+    if not isinstance(construction, Mapping):
+        raise TypeError("construction must be a mapping")
     publication_identifier = str(
         construction.get("eligible_universe_publication_identifier", "")
     ).strip()
-    path = Path(active_path).expanduser() if active_path is not None else active_paper_universe_path()
-    if path.exists():
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            if (
-                isinstance(payload, Mapping)
-                and str(payload.get("eligible_universe_publication_identifier", "")).strip()
-                == publication_identifier
-                and isinstance(payload.get("universe"), Mapping)
-            ):
-                return _free_paper_pilot_universe_from_payload(payload["universe"])
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            pass
-    return load_free_paper_pilot_universe(fallback_path)
-
+    if not publication_identifier:
+        raise ValueError(
+            "construction lacks an eligible-universe publication identifier"
+        )
+    persisted_identifier, universe = load_current_active_paper_universe(
+        active_path=active_path
+    )
+    if persisted_identifier != publication_identifier:
+        raise ValueError(
+            "certified active paper universe does not match the construction "
+            "eligible-universe publication"
+        )
+    return universe
 
 def assess_free_paper_pilot_readiness(
     *,
@@ -684,48 +938,66 @@ def assess_free_paper_pilot_readiness(
     validated: list[str] = []
     quote_times: list[tuple[str, str]] = []
     execution_blocks: list[str] = []
-    account_status = "unavailable"
-    market_open = False
+    listed_instruments = tuple(
+        item for item in universe.instruments if not item.uses_direct_market_provider
+    )
+    direct_instruments = tuple(
+        item for item in universe.instruments if item.uses_direct_market_provider
+    )
+    account_status = "NOT_APPLICABLE" if not listed_instruments else "unavailable"
+    market_open = not listed_instruments and any(
+        instrument_evaluation_scheduled(item, now) for item in direct_instruments
+    )
 
-    try:
-        account = client.account()
-        account_status = str(account.get("status", "unavailable")).upper()
-        if account_status != "ACTIVE":
-            blockers.append("Alpaca paper account is not ACTIVE")
-        if account.get("trading_blocked") is True or account.get("account_blocked") is True:
-            blockers.append("Alpaca paper account is blocked")
-    except (AlpacaPaperProviderError, TypeError, ValueError) as error:
-        blockers.append(f"Alpaca paper account check failed: {error}")
+    if listed_instruments:
+        try:
+            account = client.account()
+            account_status = str(account.get("status", "unavailable")).upper()
+            if account_status != "ACTIVE":
+                blockers.append("Alpaca paper account is not ACTIVE")
+            if account.get("trading_blocked") is True or account.get("account_blocked") is True:
+                blockers.append("Alpaca paper account is blocked")
+        except (AlpacaPaperProviderError, TypeError, ValueError) as error:
+            blockers.append(f"Alpaca paper account check failed: {error}")
 
-    try:
-        clock = client.clock()
-        market_open = clock.get("is_open") is True
-        if not market_open:
-            warnings.append("The U.S. market is currently closed; configuration may be ready but execution is held.")
-    except (AlpacaPaperProviderError, TypeError, ValueError) as error:
-        blockers.append(f"Alpaca market clock check failed: {error}")
+        try:
+            clock = client.clock()
+            market_open = clock.get("is_open") is True
+            if not market_open:
+                warnings.append("The U.S. market is currently closed; configuration may be ready but execution is held.")
+        except (AlpacaPaperProviderError, TypeError, ValueError) as error:
+            blockers.append(f"Alpaca market clock check failed: {error}")
 
-    for instrument in universe.instruments:
+    for instrument in listed_instruments:
         try:
             asset = client.asset(instrument.symbol)
             if str(asset.get("status", "")).lower() != "active":
                 raise ValueError("asset is not active")
             if asset.get("tradable") is not True:
                 raise ValueError("asset is not tradable")
-            if asset.get("fractionable") is not True:
-                raise ValueError("asset is not fractionable")
             if str(asset.get("class", "us_equity")).lower() not in {
                 "us_equity",
                 "equity",
             }:
                 raise ValueError("asset is not a U.S. listed equity security")
+            # Fractionability changes lot sizing but is not an ownership criterion.
             validated.append(instrument.symbol)
         except (AlpacaPaperProviderError, TypeError, ValueError) as error:
             blockers.append(f"{instrument.symbol}: Alpaca asset validation failed: {error}")
 
-    if len(validated) == len(universe.instruments):
+    for instrument in direct_instruments:
         try:
-            quotes = client.latest_quotes(validated)
+            instrument.profile(universe_identifier=universe.identifier)
+            validated.append(instrument.symbol)
+        except (TypeError, ValueError) as error:
+            blockers.append(
+                f"{instrument.symbol}: direct capability validation failed: {error}"
+            )
+
+    if len(validated) == len(universe.instruments) and listed_instruments:
+        try:
+            listed_symbols = [item.symbol for item in listed_instruments]
+            quotes = client.latest_quotes(listed_symbols)
             quote_reference_time = now
             if dynamic_evaluation_time:
                 # Live provider timestamps are validated against Alpaca's own
@@ -750,7 +1022,7 @@ def assess_free_paper_pilot_readiness(
                 quote_reference_time = provider_timestamp
                 market_open = provider_clock.get("is_open") is True
             maximum_age = timedelta(minutes=universe.maximum_quote_age_minutes)
-            for symbol in validated:
+            for symbol in listed_symbols:
                 quote = quotes[symbol]
                 bid = float(quote["bp"])
                 ask = float(quote["ap"])
@@ -879,6 +1151,7 @@ __all__ = [
     "active_paper_universe_path",
     "free_paper_pilot_universe_payload",
     "instrument_evaluation_scheduled",
+    "load_current_active_paper_universe",
     "load_execution_paper_universe",
     "load_free_paper_pilot_universe",
     "validate_pilot_construction",

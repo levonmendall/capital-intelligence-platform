@@ -29,7 +29,6 @@ from governance.paper_decision_approval import (
     canonical_construction_sha256,
 )
 from operations.free_paper_pilot import (
-    DEFAULT_UNIVERSE_PATH,
     load_execution_paper_universe,
     validate_pilot_construction,
 )
@@ -326,16 +325,7 @@ def _materialize_execution_inputs(
     *,
     construction_hash: str,
 ) -> tuple[Path, Path]:
-    universe_path = Path(
-        os.getenv(
-            "CAPITAL_INTELLIGENCE_FREE_PAPER_PILOT_UNIVERSE",
-            str(DEFAULT_UNIVERSE_PATH),
-        )
-    ).expanduser()
-    universe = load_execution_paper_universe(
-        construction,
-        fallback_path=universe_path,
-    )
+    universe = load_execution_paper_universe(construction)
     validate_pilot_construction(construction, universe=universe)
     symbols = _trade_symbols(construction)
     profile_map = {item["symbol"]: item for item in universe.profiles_payload()}
@@ -511,19 +501,10 @@ def attempt_paper_execution(
         )
 
     # Validate the exact implementation before creating any authorization event.
-    universe_path = Path(
-        os.getenv(
-            "CAPITAL_INTELLIGENCE_FREE_PAPER_PILOT_UNIVERSE",
-            str(DEFAULT_UNIVERSE_PATH),
-        )
-    ).expanduser()
     try:
         validate_pilot_construction(
             construction,
-            universe=load_execution_paper_universe(
-                construction,
-                fallback_path=universe_path,
-            ),
+            universe=load_execution_paper_universe(construction),
         )
     except (OSError, TypeError, ValueError) as error:
         return PaperExecutionAttempt(

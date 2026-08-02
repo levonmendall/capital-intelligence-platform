@@ -8,7 +8,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
+from cio import RecommendationUniversePolicy
+from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from governance.market_participation import CanonicalMarketParticipationAuthority
+from opportunity import OpportunityEngine
 from operations.free_paper_pilot import (
     FreePaperPilotUniverse,
     _free_paper_pilot_universe_from_payload,
@@ -79,4 +82,56 @@ def load_active_paper_universe_for_publication(
     )
 
 
-__all__ = ["load_active_paper_universe_for_publication"]
+def build_active_recommendation_universe_policy(
+    universe: FreePaperPilotUniverse,
+) -> RecommendationUniversePolicy:
+    """Build recommendation authority from the exact supplied active universe.
+
+    The publication loader applies current market-participation and individual
+    certification authority before returning a production universe. This factory must
+    not independently reload and reinterpret that authority: doing so can silently
+    remove a newly certified publication member when the process-local authority store
+    differs from the publication timestamp. The exact supplied universe is therefore
+    the sole instrument-membership boundary for committee and CIO qualification.
+    Paper execution independently rechecks current capability authority and remains
+    fail-closed.
+    """
+
+    if not str(getattr(universe, "identifier", "")).strip() or not tuple(
+        getattr(universe, "instruments", ())
+    ):
+        raise TypeError(
+            "universe must expose a non-empty identifier and instrument collection"
+        )
+    authority = BoundedPilotCapabilityAuthority.from_universe(universe)
+    # The supplied active universe has already crossed the market-participation gate.
+    # Disable only the redundant process-local reload while retaining production
+    # identity, structure, exposure, venue, country, and leverage validation.
+    authority.require_market_participation_authority = False
+    return RecommendationUniversePolicy(asset_class_authority=authority)
+
+
+def build_active_opportunity_engine(
+    universe: FreePaperPilotUniverse,
+    *,
+    template: OpportunityEngine | None = None,
+) -> OpportunityEngine:
+    """Build an opportunity engine with mandatory active-universe capability authority."""
+
+    if template is not None and not isinstance(template, OpportunityEngine):
+        raise TypeError("template must be an OpportunityEngine or None")
+    return OpportunityEngine(
+        universe_policy=build_active_recommendation_universe_policy(universe),
+        qualification_policy=None if template is None else template.policy,
+        robustness_policy=(
+            None if template is None else template.robust_assessor.policy
+        ),
+        policy_matrix=None if template is None else template.policy_matrix,
+    )
+
+
+__all__ = [
+    "build_active_opportunity_engine",
+    "build_active_recommendation_universe_policy",
+    "load_active_paper_universe_for_publication",
+]

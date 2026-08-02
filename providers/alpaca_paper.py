@@ -1,9 +1,9 @@
-"""Free Alpaca paper-market adapters for the controlled listed-wrapper pilot.
+"""Free Alpaca paper-market adapters for capability-certified listed securities.
 
 The adapters expose account, asset, clock, IEX quote, and authenticated IEX
 historical-bar evidence only. They do not submit orders and cannot authorize
-real-money activity. The canonical paper executor remains the sole fill and
-portfolio-state authority.
+real-money activity. Economic asset class does not determine adapter eligibility;
+the active publication, U.S. listing, USD settlement, and provider tradability do.
 """
 
 from __future__ import annotations
@@ -31,11 +31,7 @@ DEFAULT_PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 DEFAULT_DATA_BASE_URL = "https://data.alpaca.markets"
 DEFAULT_DATA_FEED = "iex"
 SUPPORTED_PILOT_CLASSES = frozenset(
-    {
-        CandidateAssetClass.US_EQUITY,
-        CandidateAssetClass.US_ETF,
-        CandidateAssetClass.CASH_EQUIVALENT,
-    }
+    item for item in CandidateAssetClass if item is not CandidateAssetClass.OTHER
 )
 
 
@@ -429,7 +425,7 @@ class AlpacaPaperSessionProvider:
     ) -> InstrumentSession:
         if profile.asset_class not in SUPPORTED_PILOT_CLASSES:
             raise AlpacaPaperProviderError(
-                f"{profile.asset_class.value} is outside the free listed-wrapper pilot"
+                f"{profile.asset_class.value} is outside the classified listed-security taxonomy"
             )
         if session_model is not TradingSessionModel.EXCHANGE_LOCAL:
             raise AlpacaPaperProviderError(
@@ -483,7 +479,7 @@ class AlpacaPaperQuoteProvider:
         for profile in profiles:
             if profile.asset_class not in SUPPORTED_PILOT_CLASSES:
                 raise AlpacaPaperProviderError(
-                    f"{profile.symbol} is outside the free listed-wrapper pilot"
+                    f"{profile.symbol} is outside the classified listed-security taxonomy"
                 )
             if profile.price_currency != "USD" or profile.settlement_currency != "USD":
                 raise AlpacaPaperProviderError(
@@ -494,10 +490,9 @@ class AlpacaPaperQuoteProvider:
                 raise AlpacaPaperProviderError(f"{profile.symbol} is not active at Alpaca")
             if asset.get("tradable") is not True:
                 raise AlpacaPaperProviderError(f"{profile.symbol} is not tradable at Alpaca")
-            if asset.get("fractionable") is not True:
-                raise AlpacaPaperProviderError(
-                    f"{profile.symbol} is not fractionable and is excluded from the $250,000 pilot"
-                )
+            # Fractionability is an implementation characteristic, not ownership
+            # eligibility. The internal paper executor may use whole-share sizing or
+            # a certified lot model without excluding an otherwise tradable asset.
             symbols.append(profile.symbol)
 
         raw_quotes = self.client.latest_quotes(symbols)

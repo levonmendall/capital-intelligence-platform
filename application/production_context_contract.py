@@ -12,16 +12,14 @@ from application.production_cio import (
     ProductionCanonicalCIOExecutor as _BaseProductionCanonicalCIOExecutor,
 )
 from application.cio_cycle import CanonicalCIOCycle
-from cio import RecommendationUniversePolicy
 from cio.persistence import CIOJournalEventType
-from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
-from opportunity import OpportunityEngine
 from opportunity.snapshot import (
     DECISION_SNAPSHOT_KIND,
     build_opportunity_snapshot,
     load_opportunity_snapshot,
 )
 from operations.active_paper_universe import (
+    build_active_opportunity_engine,
     load_active_paper_universe_for_publication,
 )
 from screening import candidate_from_payload
@@ -205,18 +203,11 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
         cycle = self.cycle
         if governed_context:
             existing_engine = self.cycle.opportunity_engine
-            capability_authority = BoundedPilotCapabilityAuthority.from_universe(
+            runtime_engine = build_active_opportunity_engine(
                 load_active_paper_universe_for_publication(
                     context.eligible_universe_publication_identifier
-                )
-            )
-            runtime_engine = OpportunityEngine(
-                universe_policy=RecommendationUniversePolicy(
-                    asset_class_authority=capability_authority
                 ),
-                qualification_policy=existing_engine.policy,
-                robustness_policy=existing_engine.robust_assessor.policy,
-                policy_matrix=existing_engine.policy_matrix,
+                template=existing_engine,
             )
             cycle = CanonicalCIOCycle(
                 opportunity_engine=runtime_engine,

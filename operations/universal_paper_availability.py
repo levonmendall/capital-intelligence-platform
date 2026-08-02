@@ -364,15 +364,19 @@ def assess_universal_paper_availability(
             class_blockers.append(f"construction policy unavailable: {error}")
 
         types = set(capability.permitted_instrument_types)
+        capability_routed_types = "*" in types
         if asset_class in {CandidateAssetClass.FX, CandidateAssetClass.CRYPTO}:
-            if not types & {"spot", "token", "stablecoin", "fund"}:
+            if (
+                not capability_routed_types
+                and not types & {"spot", "token", "stablecoin", "fund"}
+            ):
                 class_blockers.append("unlevered spot or listed wrapper is missing")
             if capability.accounting_model != "unlevered_cash_spot":
                 class_blockers.append(
                     "direct FX and crypto require unlevered cash accounting"
                 )
         if asset_class is CandidateAssetClass.OPTION:
-            if types != {"option"}:
+            if not capability_routed_types and types != {"option"}:
                 class_blockers.append("option scope must contain only options")
             if capability.accounting_model != "long_premium_defined_risk":
                 class_blockers.append(

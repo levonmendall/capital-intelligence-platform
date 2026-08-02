@@ -1,6 +1,6 @@
 {
   "schema_version": "universal-paper-asset-class-scope.v1",
-  "identifier": "universal-paper-asset-class-scope.v1",
+  "identifier": "universal-paper-asset-class-scope.v2-capability-based-instruments",
   "objective": "Make every classified liquid public-market asset class mechanically available to the governed internal paper engine without creating live-order authority.",
   "operating_mode": "governed_internal_simulation",
   "portfolio_code": "COMPOUNDING",
@@ -12,102 +12,158 @@
   "asset_classes": [
     {
       "asset_class": "us_equity",
-      "permitted_instrument_types": ["common_stock", "preferred_stock"],
-      "permitted_session_models": ["exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local"
+      ],
       "accounting_model": "cash_security",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "us_etf",
-      "permitted_instrument_types": ["fund"],
-      "permitted_session_models": ["exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local"
+      ],
       "accounting_model": "cash_security",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "cash_equivalent",
-      "permitted_instrument_types": ["fund", "bond"],
-      "permitted_session_models": ["exchange_local", "dealer_24_5"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local",
+        "dealer_24_5"
+      ],
       "accounting_model": "cash_security",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "fixed_income",
-      "permitted_instrument_types": ["bond", "fund"],
-      "permitted_session_models": ["dealer_24_5", "exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "dealer_24_5",
+        "exchange_local"
+      ],
       "accounting_model": "cash_security",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "international_equity",
-      "permitted_instrument_types": ["common_stock", "preferred_stock", "fund"],
-      "permitted_session_models": ["exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local"
+      ],
       "accounting_model": "cash_security_with_fx_translation",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "commodity",
-      "permitted_instrument_types": ["spot", "fund", "future"],
-      "permitted_session_models": ["exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local"
+      ],
       "accounting_model": "cash_backed_or_fully_collateralized_notional",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "fx",
-      "permitted_instrument_types": ["spot", "fund"],
-      "permitted_session_models": ["continuous_24_5", "exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "continuous_24_5",
+        "exchange_local"
+      ],
       "accounting_model": "unlevered_cash_spot",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "crypto",
-      "permitted_instrument_types": ["token", "spot", "stablecoin", "fund"],
-      "permitted_session_models": ["continuous_24_7", "exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "continuous_24_7",
+        "exchange_local"
+      ],
       "accounting_model": "unlevered_cash_spot",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "real_estate",
-      "permitted_instrument_types": ["common_stock", "preferred_stock", "fund"],
-      "permitted_session_models": ["exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local"
+      ],
       "accounting_model": "cash_security",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "future",
-      "permitted_instrument_types": ["future", "perpetual"],
-      "permitted_session_models": ["exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local"
+      ],
       "accounting_model": "fully_collateralized_notional",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "option",
-      "permitted_instrument_types": ["option"],
-      "permitted_session_models": ["exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local"
+      ],
       "accounting_model": "long_premium_defined_risk",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "volatility",
-      "permitted_instrument_types": ["future", "option", "fund"],
-      "permitted_session_models": ["exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local"
+      ],
       "accounting_model": "long_premium_or_fully_collateralized_notional",
       "external_provider_activation_required": true
     },
     {
       "asset_class": "alternative",
-      "permitted_instrument_types": ["fund", "common_stock", "spot"],
-      "permitted_session_models": ["exchange_local"],
+      "permitted_instrument_types": [
+        "*"
+      ],
+      "permitted_session_models": [
+        "exchange_local"
+      ],
       "accounting_model": "cash_security",
       "external_provider_activation_required": true
     }
   ],
   "limitations": [
     "Availability means governed internal paper simulation, not live brokerage routing.",
-    "Direct FX and crypto remain unlevered spot only.",
-    "Options remain long-premium and defined-risk only.",
-    "Futures and volatility derivatives use a conservative fully collateralized notional model until certified margin accounting is active.",
-    "Short sales, naked options, leverage above 1.0, private assets, and unclassified instruments remain prohibited.",
+    "Instrument structure eligibility is supplied by the exact active-universe capability publication; the class registry does not impose a closed type whitelist.",
+    "Direct FX and crypto remain unlevered spot only under the current leverage policy.",
+    "Derivatives remain fully funded or otherwise defined-risk under certified contract, margin, lifecycle, and roll models.",
+    "Short sales, naked options, leverage above 1.0, private assets, and unclassified instruments remain prohibited by the current strategy and risk policy.",
     "Provider-backed paper eligibility still requires current licensed data, runtime bindings, certifications, instrument approvals, and point-in-time evidence."
   ]
 }

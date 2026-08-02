@@ -5,11 +5,13 @@ every market lane scheduled at the decision timestamp.
 
 The process is:
 
-1. Load the complete certified catalog.
+1. Load the complete certified provider catalogs and merge the optional
+   provider-neutral `capital-intelligence-certified-investable-catalog.v1`
+   publication.
 2. Apply lifecycle, metadata, freshness, provider-lineage, liquidity, and point-in-time
    evidence checks.
 3. Obtain substantive provider-enriched value, momentum, carry, and
-   improving-conditions evidence.
+   improving-conditions evidence wherever each factor is economically applicable.
 4. Deep-analyze every asset that remains eligible and evidence-complete.
 5. Forward every asset that passes the governed market and evidence checks into formal
    opportunity qualification.
@@ -40,6 +42,23 @@ retained only so older configuration files can still be read. They are not activ
 decision authorities. Discovery manifests explicitly record
 `candidate_count_limit_applied: false`.
 
+
+## No static asset-class or instrument-list authority
+
+The built-in exchange directories, futures roots, and option underlyings are bootstrap
+sources, not the boundary of the investment universe. A deployment can set
+`CAPITAL_INTELLIGENCE_CERTIFIED_INVESTABLE_CATALOG` to a complete, point-in-time,
+provider-neutral publication. Every classified record in that publication is merged
+into discovery and receives the same evidence and qualification process.
+
+The publication must attest `complete: true`, preserve stable instrument identities,
+and contain no future-known membership. Once configured, a missing, malformed, or
+incomplete publication fails closed; the system does not silently revert to a smaller
+static list. The former 25,000-directory-record compatibility setting has no active
+selection authority. A provider response that reaches the provider-contract
+completeness sentinel also fails closed rather than being treated as a complete
+universe.
+
 ## What can still exclude an asset
 
 Removing arbitrary count limits does not weaken the investment process. An asset can
@@ -62,26 +81,53 @@ Before comprehensive discovery runs, the provider pipeline must publish
 `CAPITAL_INTELLIGENCE_PROVIDER_PRESELECTION_PATH` to another governed publication.
 
 The publication must use schema
-`capital-intelligence-provider-preselection.v1` and contain, for every eligible
-new-opportunity candidate:
+`capital-intelligence-provider-preselection.v1`. For each governed factor, it must
+provide either:
 
-- a normalized score between zero and one for value, momentum, carry, and improving
-  conditions;
-- the underlying finite raw measurement and its units;
-- the measurement horizon;
-- provider identity and methodology version;
-- point-in-time observation and availability timestamps; and
-- one or more immutable provider evidence identifiers.
+- a substantive normalized score between zero and one, the underlying finite raw
+  measurement and units, measurement horizon, provider, methodology version,
+  point-in-time timestamp, and immutable evidence identifiers; or
+- `applicability: not_applicable`, together with a substantive rationale, provider,
+  applicability-method version, point-in-time timestamp, and immutable evidence
+  identifiers.
 
-The loader creates factor-specific lineage identifiers and carries them into the
-discovery manifest. A score without factor-specific provider lineage is unavailable.
-Missing, stale, future-known, malformed, or incomplete factor evidence makes the
-affected candidate ineligible. The system does not substitute a neutral score.
+At least one substantive factor must be scored for every new opportunity. A missing
+factor is not equivalent to a governed not-applicable determination. The loader creates
+separate `provider-factor:` and `provider-factor-not-applicable:` lineage identifiers
+and carries them into the discovery manifest. Missing, stale, future-known, malformed,
+or unprovenanced factor evidence makes the affected candidate ineligible. The system
+never substitutes a neutral score.
 
 Factor methodology remains asset-specific. Equity value can use normalized earnings or
-free-cash-flow yield, while bond, FX, crypto, futures, and option value and carry require
-their own governed models. A factor remains unavailable when an appropriate model or
-certified evidence source does not exist.
+free-cash-flow yield, while bond, FX, crypto, futures, option, volatility, and alternative
+instruments require their own governed models. A factor that is not economically
+meaningful is documented as not applicable rather than being used to exclude the asset.
+
+
+## Capability-based ownership and execution
+
+Every classified public-market family can appear in the active paper universe. The
+execution contract no longer contains an asset-class/instrument-type whitelist. The
+exact active universe records the provider adapter, instrument structure, session,
+custody and settlement identifier, execution model, contract and lifecycle models,
+leverage, and risk characteristics required for paper implementation.
+
+The production opportunity engine is always built from the exact active-universe
+capability authority. The paper executor must load the same eligible-universe
+publication used by construction. A missing or mismatched active publication fails
+closed and is never replaced by the historical 15-instrument static pilot list.
+
+Portfolio limits can still reduce or reject an allocation after CIO consideration.
+Those controls protect compounding; they do not remove the asset from analysis or CIO
+review.
+
+## Scalable portfolio search
+
+The construction optimizer no longer uses a fixed four-state beam. Its search width
+expands with the number of CIO-approved intents, uses exact subset-scale capacity for
+small sets, and preserves a governed workload ceiling for large sets. Every approved
+candidate is retained in the first search generation, while portfolio merit and risk
+constraints determine the final owned subset.
 
 ## Committee and CIO invariant
 

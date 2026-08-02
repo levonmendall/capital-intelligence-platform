@@ -1,13 +1,14 @@
 """Canonical market participation authority.
 
-Discovery, committee review, and paper ownership remain separate. The current
-registry instruments are bootstrap certifications, not a permanent closed list.
-Any classified liquid instrument may become paper-allocatable through a complete,
-active instrument capability certification.
+The registry certifies markets and the active paper-universe publication certifies
+specific executable instruments.  Exact legacy instrument lists remain supported,
+but they are no longer the only route to committee, CIO, construction, or paper
+allocation authority.
 """
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, is_dataclass, replace
 from datetime import datetime
@@ -17,7 +18,9 @@ from types import SimpleNamespace
 from typing import Iterable
 
 from cio.models import CandidateAssetClass
+from governance.bounded_pilot_scope import governed_asset_class_for_exposure
 from governance.coverage_certification import (
+    AllocationAuthority,
     MarketCoverage,
     MarketCoverageRegistry,
     load_market_coverage,
@@ -86,6 +89,9 @@ _MARKET_BY_ASSET_CLASS = {
     CandidateAssetClass.OPTION: "direct_options_volatility",
     CandidateAssetClass.VOLATILITY: "direct_options_volatility",
 }
+_DERIVATIVE_TYPES = frozenset(
+    {"future", "perpetual", "option", "forward", "swap", "warrant", "right"}
+)
 
 
 def _instrument_identifier(item: object) -> str:
@@ -93,6 +99,32 @@ def _instrument_identifier(item: object) -> str:
     if value is None:
         value = getattr(item, "instrument_id", "")
     return str(value).strip()
+
+
+def _execution_asset_class(item: object) -> CandidateAssetClass | None:
+    value = getattr(item, "execution_asset_class", None)
+    if value is None:
+        value = getattr(item, "asset_class", None)
+    if isinstance(value, CandidateAssetClass):
+        return value
+    try:
+        return CandidateAssetClass(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _governed_asset_class(item: object) -> CandidateAssetClass | None:
+    execution = _execution_asset_class(item)
+    if execution is None:
+        return None
+    return governed_asset_class_for_exposure(
+        str(getattr(item, "economic_exposure", "")),
+        fallback=execution,
+    )
+
+
+class CanonicalMarketParticipationAuthority:
+    """Resolve exact-list and active-capability paper authority independently."""
 
 
 def _instrument_asset_class(item: object) -> CandidateAssetClass | None:
@@ -158,21 +190,15 @@ class CanonicalMarketParticipationAuthority:
 
     @property
     def allocatable_instrument_identifiers(self) -> frozenset[str]:
-        """Return bootstrap identifiers retained for current-pilot compatibility."""
+        """Return legacy exact-list identifiers, not the dynamic active universe."""
 
         return frozenset(self._bootstrap_entry_by_instrument)
 
-    def paper_allocatable_identifiers(
-        self, *, evaluated_at: datetime | None = None
-    ) -> frozenset[str]:
-        identifiers = set(self.allocatable_instrument_identifiers)
-        if self.instrument_authority is not None and evaluated_at is not None:
-            identifiers.update(
-                self.instrument_authority.active_identifiers(
-                    evaluated_at=evaluated_at
-                )
-            )
-        return frozenset(identifiers)
+    def _entry_for_asset_class(
+        self, asset_class: CandidateAssetClass | None
+    ) -> MarketCoverage | None:
+        market = _MARKET_BY_ASSET_CLASS.get(asset_class)
+        return self._by_market.get(market) if market else None
 
     def assess(
         self,
@@ -182,6 +208,12 @@ class CanonicalMarketParticipationAuthority:
         instrument: object | None = None,
         evaluated_at: datetime | None = None,
     ) -> MarketParticipationAssessment:
+        """Assess registry scope without inventing instrument capability evidence.
+
+        Dynamic paper allocatability requires the full active-universe instrument
+        object and is therefore resolved by :meth:`filter_paper_allocatable`.
+        """
+
         identifier = str(instrument_identifier).strip()
         if not identifier:
             raise ValueError("instrument_identifier cannot be empty")
@@ -191,19 +223,14 @@ class CanonicalMarketParticipationAuthority:
                 instrument_identifier=identifier,
                 market=exact.market,
                 monitored=exact.monitored,
-                decision_certified=True,
+                decision_certified=exact.decision_certified,
                 paper_allocatable=True,
                 certification_identifier=exact.decision_certification_identifier,
                 limitations=exact.limitations,
                 registry_identifier=self.registry.identifier,
                 authority_kind="bootstrap_certification",
             )
-
-        resolved_asset_class = asset_class
-        if resolved_asset_class is None and instrument is not None:
-            resolved_asset_class = _instrument_asset_class(instrument)
-        market = _MARKET_BY_ASSET_CLASS.get(resolved_asset_class)
-        entry: MarketCoverage | None = self._by_market.get(market) if market else None
+        entry = self._entry_for_asset_class(asset_class)
         if entry is None:
             return MarketParticipationAssessment(
                 instrument_identifier=identifier,
@@ -249,36 +276,141 @@ class CanonicalMarketParticipationAuthority:
             instrument_identifier=identifier,
             market=entry.market,
             monitored=entry.monitored,
-            decision_certified=False,
+            decision_certified=entry.decision_certified,
             paper_allocatable=False,
-            certification_identifier=None,
-            limitations=limitations,
+            certification_identifier=entry.decision_certification_identifier,
+            limitations=entry.limitations,
             registry_identifier=self.registry.identifier,
         )
+
+    def _active_capability_entry(self, item: object) -> MarketCoverage | None:
+        entry = self._entry_for_asset_class(_governed_asset_class(item))
+        if (
+            entry is None
+            or not entry.decision_certified
+            or entry.allocation_authority
+            is not AllocationAuthority.ACTIVE_UNIVERSE_CAPABILITY
+        ):
+            return None
+        return entry
+
+    @staticmethod
+    def _complete_active_capability(
+        item: object,
+        *,
+        universe_identifier: str,
+    ) -> bool:
+        identifier = _instrument_identifier(item)
+        if not identifier:
+            return False
+        execution = _execution_asset_class(item)
+        if execution is None or execution is CandidateAssetClass.OTHER:
+            return False
+        profile_builder = getattr(item, "profile", None)
+        if not callable(profile_builder):
+            # A screening candidate is analysis evidence, not an execution capability
+            # publication.  Only the exact active-universe instrument contract can
+            # promote it to paper allocation.
+            return False
+        try:
+            profile = profile_builder(universe_identifier=universe_identifier)
+        except (TypeError, ValueError, KeyError):
+            return False
+        if str(getattr(profile, "instrument_identifier", "")).strip() != identifier:
+            return False
+        approval_state = getattr(getattr(profile, "approval_state", None), "value", None)
+        if approval_state != "paper_eligible":
+            return False
+        required_text = (
+            "approval_identifier",
+            "custody_settlement_identifier",
+            "execution_model_version",
+        )
+        if any(not str(getattr(profile, name, "") or "").strip() for name in required_text):
+            return False
+        if getattr(profile, "trading_session_model", None) is None:
+            return False
+        leverage = getattr(profile, "gross_leverage", None)
+        if (
+            isinstance(leverage, bool)
+            or not isinstance(leverage, (int, float))
+            or not math.isfinite(float(leverage))
+            or float(leverage) <= 0.0
+            or float(leverage) > 1.0 + 1e-9
+        ):
+            return False
+        instrument_type = str(getattr(profile, "instrument_type", "")).strip().lower()
+        if not instrument_type:
+            return False
+        if instrument_type in _DERIVATIVE_TYPES:
+            for name in (
+                "contract_model_version",
+                "margin_model_version",
+                "lifecycle_model_version",
+            ):
+                if not str(getattr(profile, name, "") or "").strip():
+                    return False
+            if instrument_type in {"future", "perpetual"} and not str(
+                getattr(profile, "roll_model_version", "") or ""
+            ).strip():
+                return False
+            if not bool(getattr(profile, "defined_risk", False)):
+                return False
+        return True
 
     def filter_paper_allocatable(
         self,
         instruments: Iterable[object],
         *,
+        universe_identifier: str | None = None,
         evaluated_at: datetime | None = None,
     ) -> tuple[object, ...]:
+        """Select every exact-listed or active-capability-certified instrument."""
+
+        values = tuple(instruments)
+        resolved_identifier = str(universe_identifier or "").strip()
+        if not resolved_identifier:
+            resolved_identifier = "active-paper-universe"
         selected: list[object] = []
-        for item in instruments:
+        for item in values:
             identifier = _instrument_identifier(item)
             if not identifier:
                 continue
-            assessment = self.assess(
-                instrument_identifier=identifier,
-                asset_class=_instrument_asset_class(item),
-                instrument=item,
-                evaluated_at=evaluated_at,
-            )
-            if assessment.paper_allocatable:
+            if identifier in self._bootstrap_entry_by_instrument:
+                selected.append(item)
+                continue
+            if self.instrument_authority is not None and evaluated_at is not None:
+                capability = self.instrument_authority.assess(
+                    item, evaluated_at=evaluated_at
+                )
+                if capability.paper_allocatable:
+                    selected.append(item)
+                    continue
+            if self._active_capability_entry(item) is None:
+                continue
+            if self._complete_active_capability(
+                item,
+                universe_identifier=resolved_identifier,
+            ):
                 selected.append(item)
         identifiers = tuple(_instrument_identifier(item) for item in selected)
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("paper authority contains duplicate instruments")
         return tuple(selected)
+
+    def paper_allocatable_identifiers(
+        self,
+        *,
+        evaluated_at: datetime | None = None,
+    ) -> frozenset[str]:
+        identifiers = set(self.allocatable_instrument_identifiers)
+        if self.instrument_authority is not None and evaluated_at is not None:
+            identifiers.update(
+                self.instrument_authority.active_identifiers(
+                    evaluated_at=evaluated_at
+                )
+            )
+        return frozenset(identifiers)
 
     def require_complete_allocatable_set(
         self,
@@ -286,13 +418,20 @@ class CanonicalMarketParticipationAuthority:
         *,
         evaluated_at: datetime | None = None,
     ) -> None:
+        """Require every active exact-instrument authority in the publication.
+
+        Bootstrap instruments remain required for compatibility. At an explicit
+        evaluation timestamp, every active individual capability certification is
+        also required, preventing certification records from silently diverging from
+        the published universe.
+        """
+
         available = {_instrument_identifier(item) for item in instruments}
         required = self.paper_allocatable_identifiers(evaluated_at=evaluated_at)
         missing = sorted(required - available)
         if missing:
             raise ValueError(
-                "certified paper-allocatable set is incomplete: "
-                + ", ".join(missing)
+                "certified paper-allocatable set is incomplete: " + ", ".join(missing)
             )
 
     def decision_authority_universe(
@@ -302,30 +441,32 @@ class CanonicalMarketParticipationAuthority:
         evaluated_at: datetime | None = None,
     ):
         instruments = tuple(getattr(universe, "instruments", ()))
-        self.require_complete_allocatable_set(
-            instruments, evaluated_at=evaluated_at
-        )
+        universe_identifier = str(getattr(universe, "identifier", "")).strip()
+        if not universe_identifier:
+            raise ValueError("paper universe identifier cannot be empty")
         selected = self.filter_paper_allocatable(
-            instruments, evaluated_at=evaluated_at
+            instruments,
+            universe_identifier=universe_identifier,
+            evaluated_at=evaluated_at,
         )
         if not selected:
             raise ValueError(
-                "no instrument currently satisfies paper-allocation authority"
+                "market registry and active capability publication contain no "
+                "paper-allocatable instruments"
             )
         limitations = tuple(
             dict.fromkeys(
                 (
                     *tuple(getattr(universe, "limitations", ())),
-                    "Portfolio authority is capability-based: bootstrap instruments and any additional instrument with a complete active certification may be owned.",
-                    "Missing, expired, suspended, stale, illiquid, or structurally mismatched certifications remain fail-closed.",
-                    "Capability certification changes paper eligibility only; the CIO, construction engine, and risk controls still determine whether and how much to own.",
+                    "Paper authority is capability-based: every selected instrument must be decision-certified and complete in the exact active-universe publication.",
+                    "Assets without complete identity, evidence, execution, custody, settlement, and lifecycle capability remain analysis-only.",
                 )
             )
         )
         if is_dataclass(universe):
             return replace(universe, instruments=selected, limitations=limitations)
         return SimpleNamespace(
-            identifier=str(getattr(universe, "identifier", "")).strip(),
+            identifier=universe_identifier,
             instruments=selected,
             limitations=limitations,
         )

@@ -1,6 +1,6 @@
 {
   "schema_version": "market-coverage-registry.v1",
-  "identifier": "market-coverage:compounding-capability-based:2026-08-01",
+  "identifier": "market-coverage:compounding-universal-capability:2026-08-01",
   "portfolio_code": "COMPOUNDING",
   "paper_allocation_policy": {
     "mode": "capability_based",
@@ -27,34 +27,136 @@
       "monitored": true,
       "decision_certification_identifier": "bounded-pilot-universe:free-paper-pilot.v1",
       "allocatable_instrument_identifiers": [
-        "instrument:us-etf:vti", "instrument:us-etf:vxus", "instrument:us-etf:govt",
-        "instrument:us-etf:lqd", "instrument:us-etf:hyg", "instrument:us-etf:sgov",
-        "instrument:us-etf:dbc", "instrument:us-etf:gld", "instrument:us-etf:uup",
-        "instrument:us-etf:ibit", "instrument:us-etf:vnq", "instrument:us-etf:dbmf",
-        "instrument:us-etf:wtpi", "instrument:us-etf:vixy", "instrument:us-etf:btal"
+        "instrument:us-etf:vti",
+        "instrument:us-etf:vxus",
+        "instrument:us-etf:govt",
+        "instrument:us-etf:lqd",
+        "instrument:us-etf:hyg",
+        "instrument:us-etf:sgov",
+        "instrument:us-etf:dbc",
+        "instrument:us-etf:gld",
+        "instrument:us-etf:uup",
+        "instrument:us-etf:ibit",
+        "instrument:us-etf:vnq",
+        "instrument:us-etf:dbmf",
+        "instrument:us-etf:wtpi",
+        "instrument:us-etf:vixy",
+        "instrument:us-etf:btal"
       ],
       "limitations": [
-        "These 15 listed U.S. fund instruments are bootstrap paper certifications, not the mature portfolio ceiling.",
-        "Additional liquid instruments may become paper-allocatable only through complete active instrument capability certification.",
-        "Economic exposure through a listed wrapper does not certify its underlying direct market."
-      ]
+        "These exact instruments remain a backward-compatible baseline, not an exclusive investment universe.",
+        "Additional instruments may become allocatable through a complete active-universe capability publication."
+      ],
+      "allocation_authority": "exact_instrument_list"
     },
     {
       "market": "us_macro_rates",
       "monitored": true,
       "decision_certification_identifier": "current-macro-evidence:fred:v1",
       "allocatable_instrument_identifiers": [],
-      "limitations": ["Macro evidence informs CIO context; ALFRED vintage history remains uncertified."]
+      "limitations": [
+        "Macro evidence informs CIO context; ALFRED vintage history remains uncertified."
+      ],
+      "allocation_authority": "none"
     },
-    {"market": "direct_us_equities", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each direct stock requires complete instrument capability certification before paper allocation."]},
-    {"market": "direct_international_equities", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each instrument requires certified global reference, filing, market, calendar, FX, accounting, cost, risk, and execution capabilities."]},
-    {"market": "direct_fixed_income_credit", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each bond requires certified terms, evaluated prices, accrued interest, calls, defaults, liquidity, accounting, settlement, and execution capabilities."]},
-    {"market": "direct_commodities_futures", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each instrument requires certified curves, contracts, rolls, margin or collateral, settlement, costs, accounting, execution, and risk controls."]},
-    {"market": "direct_spot_fx", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each pair requires certified executable quotes, calendars, fixing, availability, conversion costs, accounting, settlement, execution, and risk controls."]},
-    {"market": "direct_spot_crypto", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each asset requires certified venue corroboration, custody, outages, forks, listing history, accounting, execution, liquidity, and risk controls."]},
-    {"market": "direct_real_estate_alternatives", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each liquid listed or supported instrument requires complete capability certification before paper allocation."]},
-    {"market": "direct_options_volatility", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each contract requires certified identity, surface, calendar, margin or premium accounting, lifecycle, costs, execution, and defined-risk controls."]},
-    {"market": "public_events_information", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Events are educational evidence and never independently allocatable."]}
+    {
+      "market": "direct_us_equities",
+      "monitored": true,
+      "decision_certification_identifier": "active-universe-capability:complete-paper-stack.v1",
+      "allocatable_instrument_identifiers": [],
+      "limitations": [
+        "Allocation requires the exact active-universe publication to prove instrument identity, point-in-time evidence, valuation, liquidity, costs, execution, custody, settlement, thesis, and evaluation capability.",
+        "Provider observability or screening admission alone never grants paper authority."
+      ],
+      "allocation_authority": "active_universe_capability"
+    },
+    {
+      "market": "direct_international_equities",
+      "monitored": true,
+      "decision_certification_identifier": "active-universe-capability:complete-paper-stack.v1",
+      "allocatable_instrument_identifiers": [],
+      "limitations": [
+        "Allocation requires the exact active-universe publication to prove instrument identity, point-in-time evidence, valuation, liquidity, costs, execution, custody, settlement, thesis, and evaluation capability.",
+        "Provider observability or screening admission alone never grants paper authority."
+      ],
+      "allocation_authority": "active_universe_capability"
+    },
+    {
+      "market": "direct_fixed_income_credit",
+      "monitored": true,
+      "decision_certification_identifier": "active-universe-capability:complete-paper-stack.v1",
+      "allocatable_instrument_identifiers": [],
+      "limitations": [
+        "Allocation requires the exact active-universe publication to prove instrument identity, point-in-time evidence, valuation, liquidity, costs, execution, custody, settlement, thesis, and evaluation capability.",
+        "Provider observability or screening admission alone never grants paper authority."
+      ],
+      "allocation_authority": "active_universe_capability"
+    },
+    {
+      "market": "direct_commodities_futures",
+      "monitored": true,
+      "decision_certification_identifier": "active-universe-capability:complete-paper-stack.v1",
+      "allocatable_instrument_identifiers": [],
+      "limitations": [
+        "Allocation requires the exact active-universe publication to prove instrument identity, point-in-time evidence, valuation, liquidity, costs, execution, custody, settlement, thesis, and evaluation capability.",
+        "Provider observability or screening admission alone never grants paper authority."
+      ],
+      "allocation_authority": "active_universe_capability"
+    },
+    {
+      "market": "direct_spot_fx",
+      "monitored": true,
+      "decision_certification_identifier": "active-universe-capability:complete-paper-stack.v1",
+      "allocatable_instrument_identifiers": [],
+      "limitations": [
+        "Allocation requires the exact active-universe publication to prove instrument identity, point-in-time evidence, valuation, liquidity, costs, execution, custody, settlement, thesis, and evaluation capability.",
+        "Provider observability or screening admission alone never grants paper authority."
+      ],
+      "allocation_authority": "active_universe_capability"
+    },
+    {
+      "market": "direct_spot_crypto",
+      "monitored": true,
+      "decision_certification_identifier": "active-universe-capability:complete-paper-stack.v1",
+      "allocatable_instrument_identifiers": [],
+      "limitations": [
+        "Allocation requires the exact active-universe publication to prove instrument identity, point-in-time evidence, valuation, liquidity, costs, execution, custody, settlement, thesis, and evaluation capability.",
+        "Provider observability or screening admission alone never grants paper authority."
+      ],
+      "allocation_authority": "active_universe_capability"
+    },
+    {
+      "market": "direct_real_estate_alternatives",
+      "monitored": true,
+      "decision_certification_identifier": "active-universe-capability:complete-paper-stack.v1",
+      "allocatable_instrument_identifiers": [],
+      "limitations": [
+        "Allocation requires the exact active-universe publication to prove instrument identity, point-in-time evidence, valuation, liquidity, costs, execution, custody, settlement, thesis, and evaluation capability.",
+        "Provider observability or screening admission alone never grants paper authority."
+      ],
+      "allocation_authority": "active_universe_capability"
+    },
+    {
+      "market": "direct_options_volatility",
+      "monitored": true,
+      "decision_certification_identifier": "active-universe-capability:complete-paper-stack.v1",
+      "allocatable_instrument_identifiers": [],
+      "limitations": [
+        "Allocation requires the exact active-universe publication to prove instrument identity, point-in-time evidence, valuation, liquidity, costs, execution, custody, settlement, thesis, and evaluation capability.",
+        "Provider observability or screening admission alone never grants paper authority."
+      ],
+      "allocation_authority": "active_universe_capability"
+    },
+    {
+      "market": "public_events_information",
+      "monitored": true,
+      "decision_certification_identifier": null,
+      "allocatable_instrument_identifiers": [],
+      "limitations": [
+        "Events are educational evidence and never independently allocatable."
+      ],
+      "allocation_authority": "none"
+    }
   ],
   "real_money_authorized": false
 }

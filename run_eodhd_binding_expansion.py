@@ -143,7 +143,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output", required=True)
     parser.add_argument("--seed-bindings")
-    parser.add_argument("--max-per-exchange", type=int, default=25_000)
+    parser.add_argument(
+        "--max-per-exchange",
+        type=int,
+        help=(
+            "Deprecated compatibility option. Complete directories are always "
+            "processed; a lower value cannot truncate the certified catalog."
+        ),
+    )
     parser.add_argument("--include-delisted", action="store_true")
     parser.add_argument("--include-unknown-types", action="store_true")
     parser.add_argument("--as-of")
@@ -161,8 +168,8 @@ def _timestamp(value: str | None) -> datetime:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.max_per_exchange < 1:
-        raise SystemExit("--max-per-exchange must be positive")
+    if args.max_per_exchange is not None and args.max_per_exchange < 1:
+        raise SystemExit("--max-per-exchange must be positive when supplied")
     as_of = _timestamp(args.as_of)
     provider = build_eodhd_provider()
     generated: list[dict[str, str]] = _existing(args.seed_bindings)
@@ -174,7 +181,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     dataset_type=ProviderDatasetType.SYMBOL_DIRECTORY,
                     provider_symbol=exchange,
                     as_of=as_of,
-                    limit=args.max_per_exchange,
+                    # The provider contract requires a finite request sentinel, but
+                    # SYMBOL_DIRECTORY payloads are processed to exhaustion below.
+                    limit=1_000_000,
                 )
             )
             payload = snapshot.payload
@@ -187,7 +196,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             selected = active + (delisted if args.include_delisted else [])
             accepted = 0
             skipped = 0
-            for item in selected[: args.max_per_exchange]:
+            if len(selected) >= 1_000_000:
+                raise ValueError(
+                    f"{exchange} directory reached the completeness sentinel"
+                )
+            for item in selected:
                 if not isinstance(item, Mapping):
                     skipped += 1
                     continue

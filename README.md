@@ -23,8 +23,8 @@ The binding product and engineering contract is [GOVERNING_SPECIFICATION.md](GOV
 | Objective | Maximize long-term compounded portfolio returns after implementation costs |
 | Active portfolio | One portfolio: `COMPOUNDING` |
 | Initial paper capital | **$250,000 USD** |
-| Market scope | Required analysis across all supported liquid public-market families |
-| Allocation scope | Direct paper allocation only after instrument-level capability approval |
+| Market scope | Complete certified provider universe across all supported liquid public-market families; no candidate-count or static-lane cutoff |
+| Allocation scope | Capability-based paper ownership for every classified instrument with complete provider, evidence, execution, custody, settlement, and lifecycle support |
 | Decision authority | Six independent specialists plus one Chief Investment Officer |
 | Portfolio sizing | Construction and funding logic; CIO confidence is not a sizing input |
 | Product surfaces | Today, Environment, Portfolio, and History |
@@ -74,7 +74,7 @@ Market availability does not create recommendation authority.
 | Fail closed | Missing identity, data, valuation, liquidity, execution, custody, settlement, lifecycle, thesis, evaluation, or governance capability |
 | Never authorized here | Live trading, broker submission, or real-money authority |
 
-The active universe is provider-driven and point-in-time. A static symbol list, exchange listing, provider response, model score, or domestic wrapper is never sufficient approval by itself.
+The active universe is provider-driven and point-in-time. Built-in lists are bootstrap sources rather than investment boundaries. A complete certified catalog may add any classified instrument without a code-level asset-class or instrument-type whitelist. A static symbol list, exchange listing, provider response, model score, or domestic wrapper is never sufficient approval by itself.
 
 See [Governed multi-asset expansion](docs/MULTI_ASSET_EXPANSION.md).
 
@@ -170,7 +170,7 @@ The first six complete independent first-pass analysis against the same evidence
 The construction engine receives approved CIO intent and the actual canonical portfolio state. It:
 
 - applies exits and reductions before additions;
-- evaluates deterministic complete-portfolio candidates through beam search rather than accepting one greedy order;
+- evaluates complete-portfolio candidates through a workload-aware search that expands with the number of approved intents rather than using a fixed four-state beam or accepting one greedy order;
 - uses cash above the required reserve first;
 - reduces only explicitly funding-eligible holdings when replacement edge is sufficient;
 - tests funding transactionally and restores unnecessary sales;

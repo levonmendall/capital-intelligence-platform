@@ -30,8 +30,9 @@ def test_monitored_certified_and_allocatable_scopes_are_distinct() -> None:
     registry = load_market_coverage(MARKETS)
     direct_crypto = next(item for item in registry.markets if item.market == "direct_spot_crypto")
     pilot = next(item for item in registry.markets if item.market == "us_listed_pilot_wrappers")
-    assert direct_crypto.monitored and not direct_crypto.decision_certified
+    assert direct_crypto.monitored and direct_crypto.decision_certified
     assert direct_crypto.allocatable_instrument_identifiers == ()
+    assert direct_crypto.allocation_authority.value == "active_universe_capability"
     assert pilot.decision_certified
     assert len(pilot.allocatable_instrument_identifiers) == 15
     registry.require_allocatable(market="us_listed_pilot_wrappers", instrument_identifier="instrument:us-etf:ibit")

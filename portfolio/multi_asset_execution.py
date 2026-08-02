@@ -1241,13 +1241,29 @@ class MultiAssetPaperExecutionOrchestrator:
             raise MultiAssetExecutionError(
                 f"{profile.symbol} execution requires unlevered spot exposure"
             )
-        derivatives = {CandidateAssetClass.FUTURE, CandidateAssetClass.OPTION, CandidateAssetClass.VOLATILITY}
-        if trade.side is TradeSide.BUY and profile.asset_class in derivatives:
+        derivative_types = {
+            "future", "perpetual", "option", "forward", "swap", "warrant", "right"
+        }
+        derivative = (
+            profile.instrument_type in derivative_types
+            or profile.asset_class
+            in {
+                CandidateAssetClass.FUTURE,
+                CandidateAssetClass.OPTION,
+                CandidateAssetClass.VOLATILITY,
+            }
+        )
+        if trade.side is TradeSide.BUY and derivative:
             required = (profile.contract_model_version, profile.margin_model_version, profile.lifecycle_model_version)
             if any(item is None for item in required):
                 raise MultiAssetExecutionError(f"{profile.symbol} derivative execution profile is incomplete")
-            if profile.asset_class in {CandidateAssetClass.FUTURE, CandidateAssetClass.VOLATILITY} and profile.roll_model_version is None:
-                raise MultiAssetExecutionError(f"{profile.symbol} requires a certified roll model")
+            if (
+                profile.instrument_type in {"future", "perpetual"}
+                and profile.roll_model_version is None
+            ):
+                raise MultiAssetExecutionError(
+                    f"{profile.symbol} requires a certified roll model"
+                )
             if not profile.defined_risk:
                 raise MultiAssetExecutionError(f"{profile.symbol} requires defined paper risk")
 

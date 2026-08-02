@@ -1,8 +1,8 @@
 """Execute an exact user-approved construction through the free paper pilot.
 
 This command is deliberately limited to paper-only operation. It validates
-the live Alpaca paper account, free IEX quotes, the versioned listed-wrapper
-allowlist, cash and turnover limits, and exact user consent before delegating to
+the exact active-universe capability publication, provider sessions and quotes,
+cash and turnover limits, and exact user consent before delegating to
 the canonical internal paper-fill engine. It never submits an Alpaca order.
 """
 
@@ -17,10 +17,10 @@ from tempfile import TemporaryDirectory
 from typing import Any, Mapping, Sequence
 
 from operations.free_paper_pilot import (
-    DEFAULT_UNIVERSE_PATH,
+    active_paper_universe_path,
     assess_free_paper_pilot_readiness,
     default_alpaca_client,
-    load_free_paper_pilot_universe,
+    load_execution_paper_universe,
     validate_pilot_construction,
     write_pilot_profiles,
 )
@@ -43,7 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--decision-identifier", required=True)
     parser.add_argument("--as-of", required=True)
     parser.add_argument("--portfolio-code", default="COMPOUNDING")
-    parser.add_argument("--universe", default=str(DEFAULT_UNIVERSE_PATH))
+    parser.add_argument(
+        "--universe",
+        default=str(active_paper_universe_path()),
+        help="Exact certified active-paper-universe publication",
+    )
     parser.add_argument("--approval-database")
     parser.add_argument("--alert-database")
     return parser
@@ -62,15 +66,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError(
                 "construction is missing certified eligible-universe lineage; publish the pilot universe before running the CIO cycle"
             )
-        universe = load_free_paper_pilot_universe(args.universe)
+        universe = load_execution_paper_universe(
+            construction,
+            active_path=args.universe,
+        )
         validate_pilot_construction(construction, universe=universe)
         readiness = assess_free_paper_pilot_readiness(
             universe=universe,
             client=default_alpaca_client(),
             evaluated_at=as_of,
         )
-        if not readiness.execution_ready_now:
-            detail = "; ".join(readiness.blockers) or "U.S. market is closed"
+        traded_symbols = {
+            str(item.get("symbol", "")).strip().upper()
+            for item in construction.get("trades", ())
+            if isinstance(item, Mapping)
+        }
+        listed_trade = any(
+            item.symbol in traded_symbols and not item.uses_direct_market_provider
+            for item in universe.instruments
+        )
+        if not readiness.configuration_ready or (
+            listed_trade and not readiness.execution_ready_now
+        ):
+            detail = "; ".join(readiness.blockers) or (
+                "the listed-security market is closed"
+                if listed_trade
+                else "paper capability validation failed"
+            )
             raise ValueError(f"free paper pilot is not execution-ready: {detail}")
     except (OSError, TypeError, ValueError, RuntimeError) as error:
         print(
@@ -110,9 +132,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "--profiles",
                 str(profiles_path),
                 "--session-provider",
-                "providers.alpaca_paper:create_alpaca_paper_session_provider",
+                "operations.direct_global_markets:create_combined_paper_session_provider",
                 "--quote-provider",
-                "providers.alpaca_paper:create_alpaca_paper_quote_provider",
+                "operations.direct_global_markets:create_combined_paper_quote_provider",
                 *remaining,
             )
         )

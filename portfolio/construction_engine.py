@@ -485,6 +485,7 @@ class PortfolioConstructionEngine:
             ]
         ] = []
         comparison = dict(target)
+        beam_width = self.policy.resolved_optimizer_beam_width(len(positive))
 
         while beam:
             expansions: list[
@@ -604,7 +605,7 @@ class PortfolioConstructionEngine:
                     tuple(sorted(state[1].items())),
                 ),
                 reverse=True,
-            )[: self.policy.optimizer_beam_width]
+            )[:beam_width]
 
         if not completed:
             return

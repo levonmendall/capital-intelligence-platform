@@ -1,9 +1,13 @@
 """Exact capability authority for the configured governed paper universe.
 
-The configured universe remains an exact operational boundary, but production
-portfolio eligibility is now additionally resolved by the canonical market
-participation authority. Historical and synthetic candidate overlays remain research
-only and do not accidentally activate the production paper-certification database.
+The exact active paper universe is a versioned capability-certified instrument
+boundary. This adapter makes that exact boundary available to the canonical
+recommendation policy without granting authority to a symbol, venue, structure, or
+economic exposure that is not present in the configured universe.
+
+Historical use is explicitly a research-only current-policy overlay. It does not
+pretend that a 2026 governance approval existed at an earlier market-data cutoff and
+cannot promote policy or authorize execution.
 """
 
 from __future__ import annotations
@@ -78,7 +82,11 @@ class BoundedPilotInstrumentCapability:
 
 
 class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
-    """Authorize only exact instruments contained in one versioned paper universe."""
+    """Authorize exact instruments contained in one versioned active paper universe.
+
+    The historical class name is retained for compatibility; the authority is no
+    longer limited to the original static pilot symbols.
+    """
 
     def __init__(
         self,
@@ -89,10 +97,10 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
         require_market_participation_authority: bool = False,
     ) -> None:
         if not capabilities:
-            raise ValueError("bounded pilot capability authority requires instruments")
+            raise ValueError("active paper capability authority requires instruments")
         identifiers = tuple(item.instrument_identifier for item in capabilities)
         if len(identifiers) != len(set(identifiers)):
-            raise ValueError("bounded pilot capability identifiers must be unique")
+            raise ValueError("active paper capability identifiers must be unique")
         self._capabilities = {item.instrument_identifier: item for item in capabilities}
         self.universe_identifier = str(universe_identifier).strip()
         if not self.universe_identifier:
@@ -137,8 +145,11 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
                     country_code=str(getattr(item, "country_code")).upper(),
                     instrument_type=str(getattr(item, "instrument_type")).lower(),
                     approval_identifier=(
-                        f"paper-policy:{universe_identifier}:"
-                        f"{str(getattr(item, 'symbol')).upper()}"
+                        str(getattr(item, "approval_identifier", "") or "").strip()
+                        or (
+                            f"paper-policy:{universe_identifier}:"
+                            f"{str(getattr(item, 'symbol')).upper()}"
+                        )
                     ),
                     maximum_gross_leverage=_gross_leverage(
                         getattr(item, "leverage_multiplier", 1.0)
@@ -214,7 +225,7 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
                 approval_state=None,
                 policy_version=self.policy_version,
                 reasons=(
-                    "instrument is outside the exact configured bounded paper universe",
+                    "instrument is outside the exact certified active paper universe",
                 ),
             )
 
@@ -233,13 +244,8 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
             reasons.append(
                 "instrument structure does not match the bounded capability record"
             )
-        if (
-            abs(instrument.leverage_multiplier)
-            > capability.maximum_gross_leverage + 1e-9
-        ):
-            reasons.append(
-                "instrument leverage exceeds the exact configured capability boundary"
-            )
+        if abs(instrument.leverage_multiplier) > 1.0 + 1e-9:
+            reasons.append("active paper capability currently permits only unlevered exposure")
 
         if reasons:
             return AssetClassScopeAssessment(
@@ -255,7 +261,7 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
         mode = (
             "research-only current-policy overlay"
             if self.research_only
-            else "production bounded-pilot authority"
+            else "production active-universe authority"
         )
         return AssetClassScopeAssessment(
             instrument_id=instrument.instrument_id,

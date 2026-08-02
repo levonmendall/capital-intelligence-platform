@@ -64,6 +64,24 @@ def _configure(monkeypatch, tmp_path: Path, *, mode: str = "automatic") -> None:
     monkeypatch.setenv("APCA_API_KEY_ID", "paper-key")
     monkeypatch.setenv("APCA_API_SECRET_KEY", "paper-secret")
 
+    # Execution must use the exact certified universe referenced by construction;
+    # tests no longer rely on the historical static-universe fallback.
+    root = Path(__file__).resolve().parents[1]
+    universe = json.loads(
+        (root / "config" / "free_paper_pilot_universe.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    (tmp_path / "active-paper-universe.json").write_text(
+        json.dumps(
+            {
+                "eligible_universe_publication_identifier": "universe:test",
+                "universe": universe,
+            }
+        ),
+        encoding="utf-8",
+    )
+
 
 def _approve(tmp_path: Path, construction: dict, now: datetime) -> None:
     store = SQLitePaperDecisionApprovalStore(tmp_path / "paper_test_governance.db")
