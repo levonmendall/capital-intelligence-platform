@@ -1,0 +1,1 @@
+This file is a harmless branch-only trigger marker for the Phase 1 pull-request materializer. It will remain as documentation after the temporary workflow and materializer script remove themselves.
