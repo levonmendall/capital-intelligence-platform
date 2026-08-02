@@ -7,6 +7,7 @@ import decision_pulse_ui_refinement
 import environment_story_placement_refinement
 import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
+import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
 import ui_experience_refinement
@@ -15,6 +16,7 @@ from secure_app import create_streamlit_application
 
 
 def main() -> None:
+    public_event_recency_runtime.install()
     opportunity_scan_resilience.install()
     ui_refinement.install(app_impl, secure_app)
     ui_experience_refinement.install(app_impl)
