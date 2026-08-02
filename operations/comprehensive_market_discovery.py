@@ -25,6 +25,20 @@ from operations.market_discovery_preselection import (
 )
 
 
+# Preserve compatibility for existing provider-validation and regression code that
+# imports legacy private discovery helpers directly from this module.
+_catalog_from_eodhd = _legacy._catalog_from_eodhd
+
+
+def __getattr__(name: str):
+    try:
+        return getattr(_legacy, name)
+    except AttributeError as error:
+        raise AttributeError(
+            f"module 'operations.comprehensive_market_discovery' has no attribute {name!r}"
+        ) from error
+
+
 @dataclass(frozen=True, slots=True)
 class ComprehensiveMarketDiscoveryPolicy(_legacy.ComprehensiveMarketDiscoveryPolicy):
     version: str = "comprehensive-liquid-market-discovery.v2-sleeved"
