@@ -1,13 +1,9 @@
 """Exact capability authority for the configured governed paper universe.
 
-The bounded pilot configuration is already a versioned human-reviewed instrument
-boundary. This adapter makes that exact boundary available to the canonical
-recommendation policy without granting authority to a symbol, venue, structure, or
-economic exposure that is not present in the configured universe.
-
-Historical use is explicitly a research-only current-policy overlay. It does not
-pretend that a 2026 governance approval existed at an earlier market-data cutoff and
-cannot promote policy or authorize execution.
+The configured universe remains an exact operational boundary, but production
+portfolio eligibility is now additionally resolved by the canonical market
+participation authority. Historical and synthetic candidate overlays remain research
+only and do not accidentally activate the production paper-certification database.
 """
 
 from __future__ import annotations
@@ -72,6 +68,7 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
         *,
         universe_identifier: str,
         research_only: bool = False,
+        require_market_participation_authority: bool = False,
     ) -> None:
         if not capabilities:
             raise ValueError("bounded pilot capability authority requires instruments")
@@ -83,6 +80,13 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
         if not self.universe_identifier:
             raise ValueError("universe_identifier cannot be empty")
         self.research_only = bool(research_only)
+        self.require_market_participation_authority = bool(
+            require_market_participation_authority
+        )
+        if self.research_only and self.require_market_participation_authority:
+            raise ValueError(
+                "research-only capability overlays cannot require production paper authority"
+            )
         suffix = "research-current-policy" if self.research_only else "production"
         self.policy_version = (
             f"bounded-pilot-capability.v1:{suffix}:{self.universe_identifier}"
@@ -124,6 +128,7 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
             tuple(capabilities),
             universe_identifier=universe_identifier,
             research_only=research_only,
+            require_market_participation_authority=not research_only,
         )
 
     @classmethod
@@ -161,6 +166,7 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
             tuple(capabilities),
             universe_identifier=identifier,
             research_only=research_only,
+            require_market_participation_authority=False,
         )
 
     def assess(
@@ -243,6 +249,9 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
             "universe_identifier": self.universe_identifier,
             "covered_instrument_count": len(self._capabilities),
             "research_only": self.research_only,
+            "requires_market_participation_authority": (
+                self.require_market_participation_authority
+            ),
             "execution_authorized": False,
             "real_money_authorized": False,
             "instrument_identifiers": sorted(self._capabilities),
