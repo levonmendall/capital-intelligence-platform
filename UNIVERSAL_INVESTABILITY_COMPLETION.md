@@ -9,6 +9,7 @@ This change completes the governed transition from fixed instrument lists and pr
 - Deterministic governed preselection preserves broad discovery while bounding expensive evidence analysis.
 - Every classified asset uses applicable evidence requirements; legitimate not-applicable factors do not become false missing-evidence failures.
 - Production committee, CIO, construction, and paper execution use the exact active-universe and instrument-capability authority at the decision timestamp.
+- The canonical market-participation authority is loaded before runtime candidate reconstruction so certified position caps are applied consistently.
 - Paper execution cannot fall back to the former fixed pilot list.
 - Foreign-currency bonds and other classified liquid structures may progress only when all required identity, evidence, liquidity, cost, calendar, accounting, settlement, construction, risk, and paper-execution capabilities are certified.
 - Leveraged, short, margin, futures, options, and other complex structures remain fail-closed unless their exact structure is explicitly certified and permitted by current strategy and risk policy.
