@@ -1,9 +1,9 @@
 """Universal liquid-market recommendation policy with capability-based gates.
 
-Every classified liquid public-market family may compete for capital. Core U.S.
-securities retain direct policy eligibility; all other market families and complex
-wrappers require an explicit point-in-time approval of their complete paper
-operating capability stack.
+Every classified liquid public-market family may compete for capital. Production
+paper ownership may additionally require an exact point-in-time instrument
+certification, including for otherwise core U.S. securities. Research eligibility
+and portfolio ownership therefore remain separate.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
+from typing import Protocol
 
 from cio.models import CandidateAssetClass, CandidateInstrument
 from governance.asset_class_scope import (
@@ -19,6 +20,19 @@ from governance.asset_class_scope import (
     AssetClassApprovalState,
     AssetClassScopeAuthority,
 )
+
+
+class PaperInstrumentParticipationAuthority(Protocol):
+    """Exact-instrument paper authority consumed without a governance import cycle."""
+
+    def assess(
+        self,
+        *,
+        instrument_identifier: str,
+        asset_class: CandidateAssetClass | None = None,
+        instrument: object | None = None,
+        evaluated_at: datetime | None = None,
+    ) -> object: ...
 
 
 class UniverseDisposition(str, Enum):
@@ -93,6 +107,7 @@ class RecommendationUniversePolicy:
         "BATS",
     )
     asset_class_authority: AssetClassScopeAuthority | None = None
+    market_participation_authority: PaperInstrumentParticipationAuthority | None = None
 
     def __post_init__(self) -> None:
         if not self.version.strip():
@@ -122,6 +137,12 @@ class RecommendationUniversePolicy:
             raise TypeError(
                 "asset_class_authority must be an AssetClassScopeAuthority"
             )
+        if self.market_participation_authority is not None and not callable(
+            getattr(self.market_participation_authority, "assess", None)
+        ):
+            raise TypeError(
+                "market_participation_authority must provide assess()"
+            )
 
     def evaluate(
         self,
@@ -135,6 +156,46 @@ class RecommendationUniversePolicy:
         approval_identifier: str | None = None
         approval_state: AssetClassApprovalState | None = None
         asset_class_policy_version: str | None = None
+        paper_certification_identifier: str | None = None
+
+        if self.market_participation_authority is not None:
+            if as_of is None:
+                return UniverseAssessment(
+                    instrument_id=instrument.instrument_id,
+                    disposition=UniverseDisposition.INTELLIGENCE_ONLY,
+                    policy_version=self.version,
+                    reasons=(
+                        "instrument is intelligence-only because exact paper eligibility requires a point-in-time timestamp",
+                    ),
+                )
+            participation = self.market_participation_authority.assess(
+                instrument_identifier=instrument.instrument_id,
+                asset_class=instrument.asset_class,
+                instrument=instrument,
+                evaluated_at=as_of,
+            )
+            if not bool(getattr(participation, "paper_allocatable", False)):
+                limitations = tuple(
+                    str(item).strip()
+                    for item in tuple(getattr(participation, "limitations", ()))
+                    if str(item).strip()
+                )
+                return UniverseAssessment(
+                    instrument_id=instrument.instrument_id,
+                    disposition=UniverseDisposition.INTELLIGENCE_ONLY,
+                    policy_version=self.version,
+                    reasons=tuple(
+                        f"intelligence-only: {reason}" for reason in limitations
+                    )
+                    or (
+                        "intelligence-only: no active complete instrument paper-eligibility certification exists",
+                    ),
+                )
+            value = getattr(participation, "certification_identifier", None)
+            if value is not None and str(value).strip():
+                paper_certification_identifier = str(value).strip()
+                approval_identifier = paper_certification_identifier
+
         governed_asset_class = self._governed_asset_class(instrument)
         if governed_asset_class is not None:
             if self.asset_class_authority is None:
@@ -145,6 +206,7 @@ class RecommendationUniversePolicy:
                     reasons=(
                         "instrument is intelligence-only because its market or economic exposure lacks a configured capability authority",
                     ),
+                    asset_class_approval_identifier=approval_identifier,
                 )
             if as_of is None:
                 return UniverseAssessment(
@@ -154,6 +216,7 @@ class RecommendationUniversePolicy:
                     reasons=(
                         "instrument is intelligence-only because capability eligibility requires a point-in-time timestamp",
                     ),
+                    asset_class_approval_identifier=approval_identifier,
                     asset_class_policy_version=self.asset_class_authority.policy_version,
                 )
             governed_instrument = (
@@ -172,7 +235,9 @@ class RecommendationUniversePolicy:
                     instrument_id=instrument.instrument_id,
                     disposition=UniverseDisposition.INTELLIGENCE_ONLY,
                     policy_version=self.version,
-                    reasons=tuple(f"intelligence-only: {reason}" for reason in scope.reasons),
+                    reasons=tuple(
+                        f"intelligence-only: {reason}" for reason in scope.reasons
+                    ),
                     asset_class_approval_identifier=approval_identifier,
                     asset_class_approval_state=approval_state,
                     asset_class_policy_version=asset_class_policy_version,
@@ -185,6 +250,7 @@ class RecommendationUniversePolicy:
                     disposition=UniverseDisposition.INTELLIGENCE_ONLY,
                     policy_version=self.version,
                     reasons=scope_reasons,
+                    asset_class_approval_identifier=approval_identifier,
                 )
 
         qualification_reasons: list[str] = []
@@ -214,13 +280,19 @@ class RecommendationUniversePolicy:
                 asset_class_policy_version=asset_class_policy_version,
             )
 
+        capability_reason = (
+            "instrument satisfies scope, liquidity, freshness, coverage, and asset-class governance policy"
+            if paper_certification_identifier is None
+            else (
+                "instrument satisfies exact paper certification "
+                f"{paper_certification_identifier} plus scope, liquidity, freshness, coverage, and asset-class governance policy"
+            )
+        )
         return UniverseAssessment(
             instrument_id=instrument.instrument_id,
             disposition=UniverseDisposition.DIRECT_RECOMMENDATION,
             policy_version=self.version,
-            reasons=(
-                "instrument satisfies scope, liquidity, freshness, coverage, and asset-class governance policy",
-            ),
+            reasons=(capability_reason,),
             asset_class_approval_identifier=approval_identifier,
             asset_class_approval_state=approval_state,
             asset_class_policy_version=asset_class_policy_version,
@@ -300,6 +372,7 @@ class RecommendationUniversePolicy:
 
 
 __all__ = [
+    "PaperInstrumentParticipationAuthority",
     "RecommendationUniversePolicy",
     "UniverseAssessment",
     "UniverseDisposition",
