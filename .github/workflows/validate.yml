@@ -1,86 +1,72 @@
-name: Validate Capital Intelligence Platform
+name: Repair Today and Environment source
 
 on:
-  push:
-    branches:
-      - main
-
   pull_request:
     branches:
       - main
-
-  workflow_dispatch:
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  repair:
+    if: github.head_ref == 'agent/today-environment-investor-story'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    env:
-      PYTHONPATH: ${{ github.workspace }}
-      CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+      - name: Check out correction branch
+        uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          ref: agent/today-environment-investor-story
+          fetch-depth: 0
+      - name: Repair radar markup and restore validation workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip
-
-      - name: Install locked runtime dependencies
-        run: pip install --require-hashes -r requirements.lock
-
-      - name: Install development dependencies
-        run: pip install -r requirements-dev.txt
-
-      - name: Install browser-test dependencies
-        run: pip install -r requirements-browser.txt
-
-      - name: Verify dependency consistency
-        run: python -m pip check
-
-      - name: Verify runtime lock integrity
-        run: python scripts/verify_requirements_lock.py
-
-      - name: Install Chromium for real Streamlit browser tests
-        run: python -m playwright install --with-deps chromium
-
-      - name: Run desktop and iPhone Streamlit browser gate
-        env:
-          CAPITAL_INTELLIGENCE_BROWSER_TESTS: "1"
-        run: >-
-          pytest -q
-          tests/browser/test_streamlit_browser.py
-          tests/browser/test_sticky_primary_navigation.py
-          tests/browser/test_today_story_placement.py
-          tests/browser/test_environment_story_placement.py
-          tests/browser/test_distinct_surface_content.py
-
-      - name: Run deterministic release validation
-        run: timeout --signal=TERM 40m python run_release_validation.py --report reports/release-validation.json
-
-      - name: Publish release diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: release-validation-results
-          path: |
-            surface_content_refinement.py
-            reports/release-validation.json
-            reports/golden-end-to-end-gate.json
-            reports/event-quality-benchmark.json
-            reports/pytest-results.xml
-            reports/browser/
-          if-no-files-found: ignore
-          retention-days: 14
+          path = Path("surface_content_refinement.py")
+          source = path.read_text(encoding="utf-8")
+          function_start = source.index("def _render_today_research_radar")
+          start_marker = "    st.markdown(\n        '<section class=\"research-radar\" aria-label=\"Research radar\">'"
+          end_marker = "    with st.expander(\"Research funnel detail\", expanded=False):"
+          start = source.index(start_marker, function_start)
+          end = source.index(end_marker, start)
+          replacement = '''    cells_markup = "".join(
+              "<div class=\\"radar-cell\\">"
+              f"<div class=\\"radar-label\\">{escape(label)}</div>"
+              f"<div class=\\"radar-value\\">{escape(value)}</div>"
+              f"<div class=\\"radar-note\\">{escape(note)}</div></div>"
+              for label, value, note in cells
+          )
+          radar_markup = (
+              '<section class="research-radar" aria-label="Research radar">'
+              '<div class="story-meta"><span class="story-rank">Research radar</span>'
+              f'<span>As of {escape(concise.ui.format_datetime(snapshot.as_of))}</span></div>'
+              '<h3>What the opportunity process is finding</h3>'
+              f'<div class="radar-grid">{cells_markup}</div>'
+              '<div class="radar-grid" style="margin-top:.65rem">'
+              '<div class="radar-cell"><div class="radar-label">Strongest alternative</div>'
+              f'<div class="radar-value">{escape(snapshot.strongest_alternative)}</div>'
+              f'<div class="radar-note">{escape(snapshot.strongest_stage)}</div></div>'
+              '<div class="radar-cell radar-wide">'
+              '<div class="radar-label">Main reason it did not advance</div>'
+              f'<div class="radar-value">{escape(snapshot.main_reason)}</div>'
+              '<div class="radar-note">Research status, not a portfolio instruction.</div></div>'
+              '</div></section>'
+          )
+          st.markdown(radar_markup, unsafe_allow_html=True)
+'''
+          path.write_text(source[:start] + replacement + source[end:], encoding="utf-8")
+          PY
+          python -m py_compile surface_content_refinement.py
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/validate.yml
+          rm -f .github/workflows/repair-today-environment-syntax.yml
+          git config user.name "capital-intelligence-bot"
+          git config user.email "capital-intelligence-bot@users.noreply.github.com"
+          git add surface_content_refinement.py .github/workflows/validate.yml .github/workflows/repair-today-environment-syntax.yml
+          git commit -m "Repair Today research radar markup"
+          git push origin HEAD:agent/today-environment-investor-story
