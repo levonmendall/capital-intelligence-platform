@@ -54,6 +54,7 @@ class UniverseAssessment:
     asset_class_approval_identifier: str | None = None
     asset_class_approval_state: AssetClassApprovalState | None = None
     asset_class_policy_version: str | None = None
+    maximum_position_weight: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.instrument_id, str) or not self.instrument_id.strip():
@@ -83,6 +84,20 @@ class UniverseAssessment:
             or not self.asset_class_policy_version.strip()
         ):
             raise ValueError("asset_class_policy_version cannot be empty")
+        if self.maximum_position_weight is not None:
+            value = self.maximum_position_weight
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError("maximum_position_weight must be numeric or None")
+            normalized = float(value)
+            if not 0.0 < normalized <= 1.0:
+                raise ValueError(
+                    "maximum_position_weight must be above zero and at most 1.0"
+                )
+            object.__setattr__(
+                self,
+                "maximum_position_weight",
+                round(normalized, 8),
+            )
 
     @property
     def direct_recommendation_allowed(self) -> bool:
@@ -177,6 +192,7 @@ class RecommendationUniversePolicy:
         asset_class_policy_version: str | None = None
         paper_certification_identifier: str | None = None
         paper_authority_kind: str | None = None
+        paper_maximum_position_weight: float | None = None
 
         if self.market_participation_authority is not None:
             if as_of is None:
@@ -214,6 +230,13 @@ class RecommendationUniversePolicy:
             paper_authority_kind = str(
                 getattr(participation, "authority_kind", "")
             ).strip() or None
+            maximum_value = getattr(
+                participation,
+                "maximum_position_weight",
+                None,
+            )
+            if maximum_value is not None:
+                paper_maximum_position_weight = float(maximum_value)
             value = getattr(participation, "certification_identifier", None)
             if value is not None and str(value).strip():
                 paper_certification_identifier = str(value).strip()
@@ -230,6 +253,7 @@ class RecommendationUniversePolicy:
                         "instrument is intelligence-only because its market or economic exposure lacks a configured capability authority",
                     ),
                     asset_class_approval_identifier=approval_identifier,
+                    maximum_position_weight=paper_maximum_position_weight,
                 )
             if as_of is None:
                 return UniverseAssessment(
@@ -241,6 +265,7 @@ class RecommendationUniversePolicy:
                     ),
                     asset_class_approval_identifier=approval_identifier,
                     asset_class_policy_version=self.asset_class_authority.policy_version,
+                    maximum_position_weight=paper_maximum_position_weight,
                 )
             governed_instrument = (
                 instrument
@@ -264,6 +289,7 @@ class RecommendationUniversePolicy:
                     asset_class_approval_identifier=approval_identifier,
                     asset_class_approval_state=approval_state,
                     asset_class_policy_version=asset_class_policy_version,
+                    maximum_position_weight=paper_maximum_position_weight,
                 )
         else:
             scope_reasons = self._scope_reasons(instrument)
@@ -274,6 +300,7 @@ class RecommendationUniversePolicy:
                     policy_version=self.version,
                     reasons=scope_reasons,
                     asset_class_approval_identifier=approval_identifier,
+                    maximum_position_weight=paper_maximum_position_weight,
                 )
 
         qualification_reasons: list[str] = []
@@ -302,6 +329,7 @@ class RecommendationUniversePolicy:
                 asset_class_approval_identifier=approval_identifier,
                 asset_class_approval_state=approval_state,
                 asset_class_policy_version=asset_class_policy_version,
+                maximum_position_weight=paper_maximum_position_weight,
             )
 
         capability_reason = (
@@ -320,6 +348,7 @@ class RecommendationUniversePolicy:
             asset_class_approval_identifier=approval_identifier,
             asset_class_approval_state=approval_state,
             asset_class_policy_version=asset_class_policy_version,
+            maximum_position_weight=paper_maximum_position_weight,
         )
 
     def require_direct_recommendation(
