@@ -1,0 +1,52 @@
+name: Materialize EODHD Directory Resilience
+
+on:
+  push:
+    branches: [fix/eodhd-directory-resilience]
+    paths:
+      - ".github/workflows/materialize-eodhd-directory-resilience.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out hotfix branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: fix/eodhd-directory-resilience
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Materialize source and regression tests
+        run: python tools/materialize_eodhd_directory_resilience.py
+      - name: Install locked runtime dependencies
+        run: python -m pip install --require-hashes -r requirements.lock
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Compile repaired provider
+        run: python -m compileall -q providers/eodhd.py tests/test_eodhd_directory_resilience.py
+      - name: Run focused provider regressions
+        run: |
+          python -m pytest -q \
+            tests/test_eodhd_provider.py \
+            tests/test_eodhd_directory_resilience.py \
+            tests/test_comprehensive_market_discovery.py
+      - name: Check patch integrity
+        run: git diff --check
+      - name: Commit materialized repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "capital-intelligence-automation"
+          git config user.email "automation@users.noreply.github.com"
+          git add providers/eodhd.py tests/test_eodhd_directory_resilience.py
+          git rm tools/materialize_eodhd_directory_resilience.py
+          git rm .github/workflows/materialize-eodhd-directory-resilience.yml
+          git commit -m "Repair EODHD symbol-directory retrieval resilience"
+          git push origin HEAD:fix/eodhd-directory-resilience
