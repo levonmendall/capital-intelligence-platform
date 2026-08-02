@@ -398,18 +398,40 @@ class CanonicalMarketParticipationAuthority:
             raise ValueError("paper authority contains duplicate instruments")
         return tuple(selected)
 
-    def require_complete_allocatable_set(self, instruments: Iterable[object]) -> None:
-        """Compatibility audit for legacy exact-list instruments.
+    def paper_allocatable_identifiers(
+        self,
+        *,
+        evaluated_at: datetime | None = None,
+    ) -> frozenset[str]:
+        identifiers = set(self.allocatable_instrument_identifiers)
+        if self.instrument_authority is not None and evaluated_at is not None:
+            identifiers.update(
+                self.instrument_authority.active_identifiers(
+                    evaluated_at=evaluated_at
+                )
+            )
+        return frozenset(identifiers)
 
-        This method is no longer called by the canonical decision path.  A missing
-        legacy wrapper cannot block a complete active capability universe.
+    def require_complete_allocatable_set(
+        self,
+        instruments: Iterable[object],
+        *,
+        evaluated_at: datetime | None = None,
+    ) -> None:
+        """Require every active exact-instrument authority in the publication.
+
+        Bootstrap instruments remain required for compatibility. At an explicit
+        evaluation timestamp, every active individual capability certification is
+        also required, preventing certification records from silently diverging from
+        the published universe.
         """
 
         available = {_instrument_identifier(item) for item in instruments}
-        missing = sorted(self.allocatable_instrument_identifiers - available)
+        required = self.paper_allocatable_identifiers(evaluated_at=evaluated_at)
+        missing = sorted(required - available)
         if missing:
             raise ValueError(
-                "certified exact-list paper set is incomplete: " + ", ".join(missing)
+                "certified paper-allocatable set is incomplete: " + ", ".join(missing)
             )
 
     def decision_authority_universe(
