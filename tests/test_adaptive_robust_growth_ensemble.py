@@ -37,12 +37,13 @@ def test_discovery_failure_cannot_be_reported_as_no_opportunity() -> None:
     assert "conclusion is prohibited until broad U.S.-equity discovery completes" in source
 
 
-def test_cio_uses_ensemble_and_progressive_lanes() -> None:
+def test_cio_keeps_progressive_lanes_research_only_below_economic_hurdles() -> None:
     source = Path("cio/service.py").read_text(encoding="utf-8")
     assert "AdaptiveRobustGrowthEnsemble" in source
     assert 'progressive_lane = str(analysis_lane).lower()' in source
     assert "ensemble.minimum_target_weight" in source
     assert "effective_position_multiplier" in source
-    assert "if not progressive_lane:" in source
+    assert source.count("allow_soft_failures=False") == 2
+    assert "robustness.stressed_edge <= 0.0" in source
     assert "growth_cap = (" in source
     assert "if progressive_lane" in source

@@ -36,7 +36,7 @@ from cio.universe import UniverseAssessment
 class CIOSynthesisPolicy:
     """Versioned materiality, evidence, and abstention rules."""
 
-    version: str = "cio-synthesis.v7-growth"
+    version: str = "cio-synthesis.v8-economic-consistency"
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     minimum_net_expected_return: float = 0.05
@@ -184,7 +184,7 @@ class ChiefInvestmentOfficer:
             alternative_return=effective_alternative,
             maximum_weight=assessment_cap,
             policy_profile=profile,
-            allow_soft_failures=progressive_lane,
+            allow_soft_failures=False,
         )
         assessment_weight = (
             supported_weight
@@ -497,8 +497,7 @@ class ChiefInvestmentOfficer:
             )
 
         if (
-            not progressive_lane
-            and robustness.effective_probability_of_success
+            robustness.effective_probability_of_success
             < profile.minimum_probability_of_success
         ):
             if current_weight > 0.0:
@@ -513,8 +512,7 @@ class ChiefInvestmentOfficer:
                 "The reconciled probability of outperforming the best alternative is below policy.",
             )
         if (
-            not progressive_lane
-            and robustness.evidence_adjusted_return
+            robustness.evidence_adjusted_return
             < profile.minimum_net_expected_return
         ):
             if current_weight > 0.0:
@@ -536,7 +534,7 @@ class ChiefInvestmentOfficer:
                 None,
                 "The reconciled downside exceeds the acquisition limit.",
             )
-        if not progressive_lane and opportunity_edge < profile.minimum_opportunity_edge:
+        if opportunity_edge < profile.minimum_opportunity_edge:
             if current_weight > 0.0:
                 return (
                     CIOAction.HOLD,
@@ -547,6 +545,19 @@ class ChiefInvestmentOfficer:
                 CIOAction.NO_SUPERIOR_OPPORTUNITY,
                 None,
                 "The candidate does not offer a material cost-adjusted advantage over the recorded alternative.",
+            )
+
+        if robustness.stressed_edge <= 0.0:
+            if current_weight > 0.0:
+                return (
+                    CIOAction.HOLD,
+                    None,
+                    "The holding is preserved, but adverse probability stress removes its positive edge and blocks additional capital.",
+                )
+            return (
+                CIOAction.NO_SUPERIOR_OPPORTUNITY,
+                None,
+                "The candidate does not retain a positive economic edge after adverse scenario-probability stress.",
             )
 
         if portfolio.recommended_position_weight is None:
@@ -597,7 +608,7 @@ class ChiefInvestmentOfficer:
             alternative_return=effective_alternative,
             maximum_weight=growth_cap,
             policy_profile=profile,
-            allow_soft_failures=progressive_lane,
+            allow_soft_failures=False,
         )
         if robust_cap <= 0.0:
             reason = (

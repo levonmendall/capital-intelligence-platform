@@ -32,7 +32,7 @@ def _clamp(value: float) -> float:
 class OpportunityQualificationPolicy:
     """Versioned committee-attention and opportunity-ranking rules."""
 
-    version: str = "opportunity-qualification.v6-growth"
+    version: str = "opportunity-qualification.v7-economic-consistency"
     minimum_net_expected_return: float = 0.03
     minimum_probability_of_success: float = 0.52
     minimum_evidence_score: float = 0.70
@@ -474,7 +474,7 @@ class OpportunityEngine:
                     baseline_opportunity_cost=baseline_opportunity_cost,
                     resolved_policy_profile=profile.identifier,
                     reasons=(
-                        f"{lane.value} lane: hard evidence, liquidity, downside, cost, and integrity controls passed",
+                        f"{lane.value} research lane: hard evidence, liquidity, downside, cost, and integrity controls passed; this lane is non-authoritative and cannot receive positive canonical capital until all economic qualification and robustness controls clear",
                         *tuple(dict.fromkeys(soft_reasons)),
                     ),
                     analysis_lane=lane,
