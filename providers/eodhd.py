@@ -49,10 +49,40 @@ from data.provider_dataset import (
 EODHD_API_BASE = "https://eodhd.com/api"
 EODHD_SOURCE_VERSION = "eodhd-rest.v1"
 _LIVE_DATASET_QUERY_GRACE = timedelta(minutes=5)
+_ACTIVE_ONLY_SYMBOL_DIRECTORIES = frozenset({"CC", "FOREX", "BOND", "GBOND"})
+_DIRECTORY_REQUEST_TIMEOUT_SECONDS = 90
+_DEFAULT_DIRECTORY_CACHE_MAX_AGE_HOURS = 72.0
 
 
 class EODHDProviderError(ProviderDatasetError):
     """Raised when EODHD cannot return a valid governed response."""
+
+
+class EODHDRetrievalFailure(EODHDProviderError):
+    """Credential-safe classified retrieval failure used by resilience controls."""
+
+    def __init__(
+        self,
+        *,
+        resource: str,
+        category: str,
+        retryable: bool,
+        status_code: int | None = None,
+    ) -> None:
+        self.resource = resource
+        self.category = category
+        self.retryable = retryable
+        self.status_code = status_code
+        detail = (
+            f"HTTP {status_code}"
+            if status_code is not None
+            else category.replace("_", " ")
+        )
+        retry_state = "retryable" if retryable else "non-retryable"
+        super().__init__(
+            f"unable to retrieve {resource} from EODHD "
+            f"({detail}; {retry_state})"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +190,8 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
         http_get: Callable[..., Any] | None = None,
         sleeper: Callable[[float], None] | None = None,
         retrieval_policy: EODHDRetrievalPolicy | None = None,
+        directory_cache_dir: str | Path | None = None,
+        directory_cache_max_age: timedelta | None = None,
     ) -> None:
         self.api_token = (
             api_token
@@ -172,6 +204,33 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
         self._http_get = http_get or requests.get
         self._sleeper = sleeper or time_module.sleep
         self._policy = retrieval_policy or EODHDRetrievalPolicy()
+        configured_cache_dir = (
+            directory_cache_dir
+            or os.getenv("CAPITAL_INTELLIGENCE_EODHD_DIRECTORY_CACHE_DIR")
+        )
+        if configured_cache_dir is None:
+            configured_cache_dir = (
+                Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database"))
+                / "provider_cache"
+                / "eodhd_symbol_directories"
+            )
+        self._directory_cache_dir = Path(configured_cache_dir).expanduser()
+        if directory_cache_max_age is None:
+            try:
+                cache_hours = float(
+                    os.getenv(
+                        "CAPITAL_INTELLIGENCE_EODHD_DIRECTORY_CACHE_MAX_AGE_HOURS",
+                        str(_DEFAULT_DIRECTORY_CACHE_MAX_AGE_HOURS),
+                    )
+                )
+            except ValueError as error:
+                raise ValueError(
+                    "EODHD directory cache maximum age must be numeric"
+                ) from error
+            directory_cache_max_age = timedelta(hours=cache_hours)
+        if directory_cache_max_age <= timedelta(0):
+            raise ValueError("directory_cache_max_age must be positive")
+        self._directory_cache_max_age = directory_cache_max_age
 
     @property
     def name(self) -> str:
@@ -216,6 +275,9 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
         retrieved_at = self._now()
         snapshot_query = query
         live_retrieval_limitations: tuple[str, ...] = ()
+        quality_state = DataQualityState.LIVE
+        observed_at_override: datetime | None = None
+        available_at_override: datetime | None = None
         if retrieved_at > query.as_of:
             retrieval_delay = retrieved_at - query.as_of
             if retrieval_delay <= _LIVE_DATASET_QUERY_GRACE:
@@ -240,21 +302,48 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
                 "provider exchange coverage requires independent reconciliation",
             )
         elif dataset_type is ProviderDatasetType.SYMBOL_DIRECTORY:
-            payload = {
-                "active": self._request(
-                    f"/exchange-symbol-list/{query.provider_symbol}",
-                    params={"delisted": 0},
-                    resource=f"active symbol directory {query.provider_symbol}",
-                ),
-                "delisted": self._request(
+            (
+                active_directory,
+                quality_state,
+                cached_at,
+                directory_limitations,
+            ) = self._active_symbol_directory(
+                query.provider_symbol,
+                retrieved_at=retrieved_at,
+            )
+            if cached_at is not None:
+                observed_at_override = cached_at
+                available_at_override = cached_at
+            delisted_directory: list[Any] = []
+            if query.provider_symbol not in _ACTIVE_ONLY_SYMBOL_DIRECTORIES:
+                raw_delisted = self._request(
                     f"/exchange-symbol-list/{query.provider_symbol}",
                     params={"delisted": 1},
                     resource=f"delisted symbol directory {query.provider_symbol}",
-                ),
+                    timeout=max(self.timeout, _DIRECTORY_REQUEST_TIMEOUT_SECONDS),
+                )
+                if not isinstance(raw_delisted, list):
+                    raise EODHDRetrievalFailure(
+                        resource=(
+                            f"delisted symbol directory {query.provider_symbol}"
+                        ),
+                        category="invalid_payload_shape",
+                        retryable=True,
+                    )
+                delisted_directory = raw_delisted
+            else:
+                directory_limitations = (
+                    *directory_limitations,
+                    "provider virtual-market directory is active-only; a delisted request is not applicable",
+                )
+            payload = {
+                "active": active_directory,
+                "delisted": delisted_directory,
             }
             limitations = (
                 "current and delisted symbol lists do not establish complete historical identifier lineage",
                 "venue and symbol changes require a separately certified security-master history",
+                *directory_limitations,
             )
         elif dataset_type is ProviderDatasetType.FUNDAMENTALS:
             payload = self._request(
@@ -309,17 +398,21 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
                 f"unsupported EODHD dataset type: {dataset_type.value}"
             )
         payload = self._bounded_payload(payload, query.limit)
-        observed_at = self._payload_observed_at(payload, fallback=retrieved_at)
-        if observed_at > retrieved_at:
-            observed_at = retrieved_at
+        available_at = available_at_override or retrieved_at
+        observed_at = observed_at_override or self._payload_observed_at(
+            payload,
+            fallback=available_at,
+        )
+        if observed_at > available_at:
+            observed_at = available_at
         return ProviderDatasetSnapshot(
             query=snapshot_query,
             provider=self.name,
             source_version=EODHD_SOURCE_VERSION,
             observed_at=observed_at,
-            available_at=retrieved_at,
+            available_at=available_at,
             retrieved_at=retrieved_at,
-            quality_state=DataQualityState.LIVE,
+            quality_state=quality_state,
             availability_basis=AvailabilityBasis.RETRIEVAL_PROXY,
             payload=payload,
             provider_record_id=(
@@ -328,6 +421,140 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
             ),
             limitations=tuple((*live_retrieval_limitations, *limitations)),
         )
+
+    def _active_symbol_directory(
+        self,
+        provider_symbol: str,
+        *,
+        retrieved_at: datetime,
+    ) -> tuple[list[Any], DataQualityState, datetime | None, tuple[str, ...]]:
+        resource = f"active symbol directory {provider_symbol}"
+        try:
+            payload = self._request(
+                f"/exchange-symbol-list/{provider_symbol}",
+                resource=resource,
+                timeout=max(self.timeout, _DIRECTORY_REQUEST_TIMEOUT_SECONDS),
+            )
+            if not isinstance(payload, list):
+                raise EODHDRetrievalFailure(
+                    resource=resource,
+                    category="invalid_payload_shape",
+                    retryable=True,
+                )
+            cache_written = self._write_directory_cache(
+                provider_symbol,
+                payload,
+                retrieved_at=retrieved_at,
+            )
+            limitations = (
+                ()
+                if cache_written
+                else (
+                    "live directory was retrieved but the resilience cache could not be refreshed",
+                )
+            )
+            return payload, DataQualityState.LIVE, None, limitations
+        except EODHDRetrievalFailure as error:
+            if not error.retryable:
+                raise
+            cached = self._load_directory_cache(
+                provider_symbol,
+                evaluated_at=retrieved_at,
+            )
+            if cached is None:
+                raise
+            cached_at, payload = cached
+            age = retrieved_at - cached_at
+            return (
+                payload,
+                DataQualityState.CACHED,
+                cached_at,
+                (
+                    f"live {resource} failed; using the last successful directory cached "
+                    f"{age.total_seconds() / 3600.0:.1f} hours earlier",
+                    str(error),
+                    "cached directory evidence cannot independently authorize a no-superior-opportunity conclusion",
+                ),
+            )
+
+    def _directory_cache_path(self, provider_symbol: str) -> Path:
+        safe_symbol = "".join(
+            character
+            for character in provider_symbol.strip().upper()
+            if character.isalnum() or character in {"-", "_"}
+        )
+        if not safe_symbol:
+            raise ValueError("provider_symbol cannot be empty")
+        return self._directory_cache_dir / f"{safe_symbol}.json"
+
+    def _write_directory_cache(
+        self,
+        provider_symbol: str,
+        payload: list[Any],
+        *,
+        retrieved_at: datetime,
+    ) -> bool:
+        path = self._directory_cache_path(provider_symbol)
+        material = {
+            "schema_version": "eodhd-symbol-directory-cache.v1",
+            "provider_symbol": provider_symbol.strip().upper(),
+            "retrieved_at": retrieved_at.isoformat(),
+            "payload": payload,
+        }
+        temporary = path.with_suffix(f".tmp-{os.getpid()}")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary.write_text(
+                json.dumps(
+                    material,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ),
+                encoding="utf-8",
+            )
+            temporary.replace(path)
+        except (OSError, TypeError, ValueError):
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
+        return True
+
+    def _load_directory_cache(
+        self,
+        provider_symbol: str,
+        *,
+        evaluated_at: datetime,
+    ) -> tuple[datetime, list[Any]] | None:
+        path = self._directory_cache_path(provider_symbol)
+        try:
+            material = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(material, dict):
+                return None
+            if material.get("schema_version") != "eodhd-symbol-directory-cache.v1":
+                return None
+            if str(material.get("provider_symbol", "")).strip().upper() != (
+                provider_symbol.strip().upper()
+            ):
+                return None
+            cached_at = datetime.fromisoformat(
+                str(material["retrieved_at"]).replace("Z", "+00:00")
+            )
+            if cached_at.tzinfo is None or cached_at.utcoffset() is None:
+                return None
+            age = evaluated_at - cached_at
+            if age < timedelta(0) or age > self._directory_cache_max_age:
+                return None
+            payload = material.get("payload")
+            if not isinstance(payload, list) or not all(
+                isinstance(item, dict) for item in payload
+            ):
+                return None
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return cached_at, payload
 
     def _fetch_bars(
         self,
@@ -529,6 +756,7 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
         *,
         params: Mapping[str, object] | None = None,
         resource: str,
+        timeout: int | None = None,
     ) -> Any:
         if not self.api_token:
             raise EODHDProviderError(
@@ -538,43 +766,123 @@ class EODHDProvider(CanonicalMarketDataProvider, ProviderDatasetProvider):
         parameters["api_token"] = self.api_token
         parameters.setdefault("fmt", "json")
         url = EODHD_API_BASE + path
-        last_error: Exception | None = None
+        last_failure: EODHDRetrievalFailure | None = None
+        last_cause: Exception | None = None
         for attempt in range(1, self._policy.max_attempts + 1):
+            failure: EODHDRetrievalFailure | None = None
+            cause: Exception | None = None
             try:
                 response = self._http_get(
                     url,
                     params=parameters,
-                    timeout=self.timeout,
+                    timeout=(self.timeout if timeout is None else timeout),
                 )
-                status_code = int(getattr(response, "status_code", 0))
-                if status_code in self._policy.retry_statuses:
-                    raise EODHDProviderError(
-                        f"temporary EODHD HTTP {status_code} for {resource}"
-                    )
-                if status_code < 200 or status_code >= 300:
-                    raise EODHDProviderError(
-                        f"EODHD HTTP {status_code} for {resource}"
-                    )
-                payload = response.json()
-                if isinstance(payload, dict) and payload.get("error"):
-                    raise EODHDProviderError(
-                        f"EODHD rejected {resource}: {payload.get('error')}"
-                    )
-                if not isinstance(payload, (dict, list)):
-                    raise EODHDProviderError(
-                        f"EODHD returned non-JSON data for {resource}"
-                    )
-                return payload
-            except (requests.RequestException, ValueError, EODHDProviderError) as error:
-                last_error = error
-                if attempt >= self._policy.max_attempts:
-                    break
-                self._sleeper(
-                    float(self._policy.backoff_seconds) * (2 ** (attempt - 1))
+            except requests.Timeout as error:
+                cause = error
+                failure = EODHDRetrievalFailure(
+                    resource=resource,
+                    category="timeout",
+                    retryable=True,
                 )
-        raise EODHDProviderError(
-            f"unable to retrieve {resource} from EODHD"
-        ) from last_error
+            except requests.ConnectionError as error:
+                cause = error
+                failure = EODHDRetrievalFailure(
+                    resource=resource,
+                    category="connection_error",
+                    retryable=True,
+                )
+            except requests.RequestException as error:
+                cause = error
+                failure = EODHDRetrievalFailure(
+                    resource=resource,
+                    category="network_error",
+                    retryable=True,
+                )
+            else:
+                try:
+                    status_code = int(getattr(response, "status_code", 0))
+                except (TypeError, ValueError) as error:
+                    cause = error
+                    failure = EODHDRetrievalFailure(
+                        resource=resource,
+                        category="invalid_http_response",
+                        retryable=True,
+                    )
+                else:
+                    if status_code in self._policy.retry_statuses:
+                        failure = EODHDRetrievalFailure(
+                            resource=resource,
+                            category="temporary_http_status",
+                            retryable=True,
+                            status_code=status_code,
+                        )
+                    elif status_code in {401, 403}:
+                        failure = EODHDRetrievalFailure(
+                            resource=resource,
+                            category="authentication_or_entitlement",
+                            retryable=False,
+                            status_code=status_code,
+                        )
+                    elif status_code < 200 or status_code >= 300:
+                        failure = EODHDRetrievalFailure(
+                            resource=resource,
+                            category="http_status",
+                            retryable=False,
+                            status_code=status_code,
+                        )
+                    else:
+                        try:
+                            payload = response.json()
+                        except (TypeError, ValueError) as error:
+                            cause = error
+                            failure = EODHDRetrievalFailure(
+                                resource=resource,
+                                category="invalid_json",
+                                retryable=True,
+                            )
+                        else:
+                            if isinstance(payload, dict) and payload.get("error"):
+                                provider_error = str(payload.get("error", "")).lower()
+                                retryable = any(
+                                    marker in provider_error
+                                    for marker in (
+                                        "rate",
+                                        "limit",
+                                        "tempor",
+                                        "timeout",
+                                        "unavailable",
+                                    )
+                                )
+                                failure = EODHDRetrievalFailure(
+                                    resource=resource,
+                                    category="provider_rejection",
+                                    retryable=retryable,
+                                )
+                            elif not isinstance(payload, (dict, list)):
+                                failure = EODHDRetrievalFailure(
+                                    resource=resource,
+                                    category="invalid_payload_shape",
+                                    retryable=True,
+                                )
+                            else:
+                                return payload
+            if failure is None:  # pragma: no cover - defensive completeness
+                failure = EODHDRetrievalFailure(
+                    resource=resource,
+                    category="unknown_retrieval_failure",
+                    retryable=True,
+                )
+            last_failure = failure
+            last_cause = cause
+            if not failure.retryable or attempt >= self._policy.max_attempts:
+                break
+            self._sleeper(
+                float(self._policy.backoff_seconds) * (2 ** (attempt - 1))
+            )
+        assert last_failure is not None
+        if last_cause is not None:
+            raise last_failure from last_cause
+        raise last_failure
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -701,6 +1009,7 @@ __all__ = [
     "EODHDInstrumentBinding",
     "EODHDProvider",
     "EODHDProviderError",
+    "EODHDRetrievalFailure",
     "EODHDRetrievalPolicy",
     "build_eodhd_provider",
     "load_eodhd_bindings",
