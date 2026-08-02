@@ -37,35 +37,39 @@ def certified_adapter_asset_valuation(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Give every test reusing the certified ETF adapter its valuation packet."""
+    """Give certified ETF production fixtures their required valuation packet."""
 
     adapter_module = sys.modules.get(
         "tests.test_canonical_production_context_adapter"
     )
-    if adapter_module is None:
-        yield
-        return
+    target_module = None
 
-    adapter = getattr(adapter_module, "_adapter", None)
-    uses_adapter = (
-        request.module is adapter_module
-        or (
-            adapter is not None
-            and getattr(request.module, "_adapter", None) is adapter
+    if request.module.__name__ == "tests.test_production_context_assembly":
+        target_module = request.module
+    elif adapter_module is not None:
+        adapter = getattr(adapter_module, "_adapter", None)
+        uses_adapter = (
+            request.module is adapter_module
+            or (
+                adapter is not None
+                and getattr(request.module, "_adapter", None) is adapter
+            )
         )
-    )
-    if not uses_adapter:
+        if uses_adapter:
+            target_module = adapter_module
+
+    if target_module is None:
         yield
         return
 
-    original = adapter_module._candidate_evidence
+    original = target_module._candidate_evidence
 
     def candidate_evidence_with_asset_valuation(candidate):
         evidence = original(candidate)
         return replace(
             evidence,
             asset_valuation=AssetValuationSpecialistContext(
-                as_of=adapter_module.AS_OF,
+                as_of=target_module.AS_OF,
                 asset_class=candidate.instrument.asset_class,
                 expected_return_impact=0.02,
                 confidence=0.90,
@@ -94,7 +98,7 @@ def certified_adapter_asset_valuation(
         )
 
     monkeypatch.setattr(
-        adapter_module,
+        target_module,
         "_candidate_evidence",
         candidate_evidence_with_asset_valuation,
     )
