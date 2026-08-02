@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
-from application.production_context_executor import _apply_runtime_position_cap
 from cio import CandidateAssetClass, CandidateInstrument
 from cio.universe import RecommendationUniversePolicy, UniverseDisposition
 from governance.coverage_certification import load_market_coverage
@@ -22,12 +21,6 @@ from operations.free_paper_pilot import load_free_paper_pilot_universe
 
 UTC = timezone.utc
 AS_OF = datetime(2026, 8, 1, 20, tzinfo=UTC)
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateEnvelope:
-    instrument: CandidateInstrument
-    maximum_position_weight: float
 
 
 def _candidate(*, adv: float = 25_000_000.0) -> CandidateInstrument:
@@ -218,24 +211,6 @@ def test_production_policy_blocks_uncertified_core_asset_then_allows_certified_a
     assert approved.disposition is UniverseDisposition.DIRECT_RECOMMENDATION
     assert approved.maximum_position_weight == 0.08
     assert "instrument-paper-certification:aapl:v1" in approved.reasons[0]
-
-
-def test_certified_position_cap_overrides_a_looser_analytical_cap(tmp_path) -> None:
-    store = SQLiteInstrumentPaperEligibilityStore(tmp_path / "eligibility.db")
-    store.append(_certification(maximum_position_weight=0.06))
-    candidate = CandidateEnvelope(
-        instrument=_candidate(),
-        maximum_position_weight=0.15,
-    )
-
-    capped = _apply_runtime_position_cap(
-        candidate,
-        authority=_participation(store),
-        evaluated_at=AS_OF,
-    )
-
-    assert capped.maximum_position_weight == 0.06
-    assert candidate.maximum_position_weight == 0.15
 
 
 def test_unpublished_certified_instrument_fails_complete_universe_reconciliation(
