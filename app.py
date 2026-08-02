@@ -9,7 +9,6 @@ import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
 import secure_app
 import surface_content_refinement
-import today_story_placement_refinement
 import ui_experience_refinement
 import ui_refinement
 from secure_app import create_streamlit_application
@@ -21,7 +20,6 @@ def main() -> None:
     ui_experience_refinement.install(app_impl)
     decision_pulse_ui_refinement.install(app_impl)
     opportunity_funnel_ui_refinement.install(app_impl)
-    today_story_placement_refinement.install(app_impl)
     surface_content_refinement.install(app_impl)
     environment_story_placement_refinement.install(app_impl)
     create_streamlit_application()
