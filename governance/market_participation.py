@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass, is_dataclass, replace
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,11 +25,21 @@ from governance.coverage_certification import (
     MarketCoverageRegistry,
     load_market_coverage,
 )
+from governance.instrument_paper_eligibility import (
+    InstrumentPaperEligibilityAuthority,
+    SQLiteInstrumentPaperEligibilityStore,
+)
 
 DEFAULT_MARKET_COVERAGE_PATH = Path(
     os.getenv(
         "CAPITAL_INTELLIGENCE_MARKET_COVERAGE_REGISTRY",
         "config/market_coverage_registry.v1.json",
+    )
+).expanduser()
+DEFAULT_INSTRUMENT_PAPER_ELIGIBILITY_PATH = Path(
+    os.getenv(
+        "CAPITAL_INTELLIGENCE_INSTRUMENT_PAPER_ELIGIBILITY_DATABASE",
+        "database/instrument-paper-eligibility.db",
     )
 ).expanduser()
 
@@ -49,6 +60,8 @@ class MarketParticipationAssessment:
     certification_identifier: str | None
     limitations: tuple[str, ...]
     registry_identifier: str
+    maximum_position_weight: float | None = None
+    authority_kind: str = "market_registry"
 
     @property
     def highest_stage(self) -> MarketParticipationStage | None:
@@ -108,12 +121,35 @@ def _governed_asset_class(item: object) -> CandidateAssetClass | None:
 class CanonicalMarketParticipationAuthority:
     """Resolve exact-list and active-capability paper authority independently."""
 
-    def __init__(self, registry: MarketCoverageRegistry) -> None:
+
+def _instrument_asset_class(item: object) -> CandidateAssetClass | None:
+    value = getattr(item, "asset_class", None)
+    if value is None:
+        value = getattr(item, "execution_asset_class", None)
+    return value if isinstance(value, CandidateAssetClass) else None
+
+
+class CanonicalMarketParticipationAuthority:
+    """Enforce observed, certified, and paper-allocatable scopes separately."""
+
+    def __init__(
+        self,
+        registry: MarketCoverageRegistry,
+        *,
+        instrument_authority: InstrumentPaperEligibilityAuthority | None = None,
+    ) -> None:
         if not isinstance(registry, MarketCoverageRegistry):
             raise TypeError("registry must be a MarketCoverageRegistry")
+        if instrument_authority is not None and not isinstance(
+            instrument_authority, InstrumentPaperEligibilityAuthority
+        ):
+            raise TypeError(
+                "instrument_authority must be InstrumentPaperEligibilityAuthority"
+            )
         self.registry = registry
+        self.instrument_authority = instrument_authority
         self._by_market = {item.market: item for item in registry.markets}
-        self._allocatable_entry_by_instrument = {
+        self._bootstrap_entry_by_instrument = {
             identifier: item
             for item in registry.markets
             for identifier in item.allocatable_instrument_identifiers
@@ -123,8 +159,29 @@ class CanonicalMarketParticipationAuthority:
     def load(
         cls,
         path: str | Path = DEFAULT_MARKET_COVERAGE_PATH,
+        *,
+        capability_database_path: str | Path | None = None,
     ) -> "CanonicalMarketParticipationAuthority":
-        return cls(load_market_coverage(path))
+        resolved_database: Path | None = None
+        if capability_database_path is not None:
+            resolved_database = Path(capability_database_path).expanduser()
+        else:
+            configured = os.getenv(
+                "CAPITAL_INTELLIGENCE_INSTRUMENT_PAPER_ELIGIBILITY_DATABASE", ""
+            ).strip()
+            if configured:
+                resolved_database = Path(configured).expanduser()
+            elif DEFAULT_INSTRUMENT_PAPER_ELIGIBILITY_PATH.exists():
+                resolved_database = DEFAULT_INSTRUMENT_PAPER_ELIGIBILITY_PATH
+        instrument_authority = None
+        if resolved_database is not None:
+            instrument_authority = InstrumentPaperEligibilityAuthority(
+                SQLiteInstrumentPaperEligibilityStore(resolved_database)
+            )
+        return cls(
+            load_market_coverage(path),
+            instrument_authority=instrument_authority,
+        )
 
     @property
     def allocatable_instrument_identifiers(self) -> frozenset[str]:
@@ -143,6 +200,8 @@ class CanonicalMarketParticipationAuthority:
         *,
         instrument_identifier: str,
         asset_class: CandidateAssetClass | None = None,
+        instrument: object | None = None,
+        evaluated_at: datetime | None = None,
     ) -> MarketParticipationAssessment:
         """Assess registry scope without inventing instrument capability evidence.
 
@@ -153,7 +212,7 @@ class CanonicalMarketParticipationAuthority:
         identifier = str(instrument_identifier).strip()
         if not identifier:
             raise ValueError("instrument_identifier cannot be empty")
-        exact = self._allocatable_entry_by_instrument.get(identifier)
+        exact = self._bootstrap_entry_by_instrument.get(identifier)
         if exact is not None:
             return MarketParticipationAssessment(
                 instrument_identifier=identifier,
@@ -164,6 +223,7 @@ class CanonicalMarketParticipationAuthority:
                 certification_identifier=exact.decision_certification_identifier,
                 limitations=exact.limitations,
                 registry_identifier=self.registry.identifier,
+                authority_kind="bootstrap_certification",
             )
         entry = self._entry_for_asset_class(asset_class)
         if entry is None:
@@ -177,6 +237,36 @@ class CanonicalMarketParticipationAuthority:
                 limitations=("Instrument is outside the classified market registry.",),
                 registry_identifier=self.registry.identifier,
             )
+
+        if (
+            self.instrument_authority is not None
+            and instrument is not None
+            and evaluated_at is not None
+        ):
+            capability = self.instrument_authority.assess(
+                instrument, evaluated_at=evaluated_at
+            )
+            if capability.paper_allocatable:
+                return MarketParticipationAssessment(
+                    instrument_identifier=identifier,
+                    market=entry.market,
+                    monitored=entry.monitored,
+                    decision_certified=True,
+                    paper_allocatable=True,
+                    certification_identifier=capability.certification_identifier,
+                    limitations=tuple(
+                        dict.fromkeys((*entry.limitations, *capability.reasons))
+                    ),
+                    registry_identifier=self.registry.identifier,
+                    maximum_position_weight=capability.maximum_position_weight,
+                    authority_kind="instrument_capability_certification",
+                )
+            limitations = tuple(
+                dict.fromkeys((*entry.limitations, *capability.reasons))
+            )
+        else:
+            limitations = entry.limitations
+
         return MarketParticipationAssessment(
             instrument_identifier=identifier,
             market=entry.market,
@@ -309,7 +399,12 @@ class CanonicalMarketParticipationAuthority:
                 "certified exact-list paper set is incomplete: " + ", ".join(missing)
             )
 
-    def decision_authority_universe(self, universe):
+    def decision_authority_universe(
+        self,
+        universe,
+        *,
+        evaluated_at: datetime | None = None,
+    ):
         instruments = tuple(getattr(universe, "instruments", ()))
         universe_identifier = str(getattr(universe, "identifier", "")).strip()
         if not universe_identifier:
@@ -343,6 +438,7 @@ class CanonicalMarketParticipationAuthority:
 
 __all__ = [
     "CanonicalMarketParticipationAuthority",
+    "DEFAULT_INSTRUMENT_PAPER_ELIGIBILITY_PATH",
     "DEFAULT_MARKET_COVERAGE_PATH",
     "MarketParticipationAssessment",
     "MarketParticipationStage",

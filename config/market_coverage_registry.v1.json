@@ -2,6 +2,25 @@
   "schema_version": "market-coverage-registry.v1",
   "identifier": "market-coverage:compounding-universal-capability:2026-08-01",
   "portfolio_code": "COMPOUNDING",
+  "paper_allocation_policy": {
+    "mode": "capability_based",
+    "bootstrap_instruments_are_permanent_ceiling": false,
+    "required_capabilities": [
+      "market_data",
+      "identity",
+      "evidence",
+      "valuation",
+      "trading_calendar",
+      "transaction_costs",
+      "liquidity",
+      "accounting_treatment",
+      "execution_model",
+      "portfolio_construction",
+      "custody_settlement",
+      "risk_controls"
+    ],
+    "real_money_authorized": false
+  },
   "markets": [
     {
       "market": "us_listed_pilot_wrappers",

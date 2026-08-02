@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from typing import Any
 
 from cio.models import CandidateAssetClass, CandidateInstrument
@@ -51,6 +52,15 @@ def governed_asset_class_for_exposure(
     return _EXPOSURE_ASSET_CLASSES.get(str(exposure).strip().lower(), fallback)
 
 
+def _gross_leverage(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError("paper-universe leverage multiplier must be numeric")
+    normalized = abs(float(value))
+    if not isfinite(normalized) or normalized <= 0.0:
+        raise ValueError("paper-universe leverage multiplier must be finite and nonzero")
+    return round(normalized, 8)
+
+
 @dataclass(frozen=True, slots=True)
 class BoundedPilotInstrumentCapability:
     instrument_identifier: str
@@ -61,6 +71,14 @@ class BoundedPilotInstrumentCapability:
     country_code: str
     instrument_type: str
     approval_identifier: str
+    maximum_gross_leverage: float = 1.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "maximum_gross_leverage",
+            _gross_leverage(self.maximum_gross_leverage),
+        )
 
 
 class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
@@ -76,6 +94,7 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
         *,
         universe_identifier: str,
         research_only: bool = False,
+        require_market_participation_authority: bool = False,
     ) -> None:
         if not capabilities:
             raise ValueError("active paper capability authority requires instruments")
@@ -87,6 +106,13 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
         if not self.universe_identifier:
             raise ValueError("universe_identifier cannot be empty")
         self.research_only = bool(research_only)
+        self.require_market_participation_authority = bool(
+            require_market_participation_authority
+        )
+        if self.research_only and self.require_market_participation_authority:
+            raise ValueError(
+                "research-only capability overlays cannot require production paper authority"
+            )
         suffix = "research-current-policy" if self.research_only else "production"
         self.policy_version = (
             f"bounded-pilot-capability.v1:{suffix}:{self.universe_identifier}"
@@ -125,12 +151,16 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
                             f"{str(getattr(item, 'symbol')).upper()}"
                         )
                     ),
+                    maximum_gross_leverage=_gross_leverage(
+                        getattr(item, "leverage_multiplier", 1.0)
+                    ),
                 )
             )
         return cls(
             tuple(capabilities),
             universe_identifier=universe_identifier,
             research_only=research_only,
+            require_market_participation_authority=not research_only,
         )
 
     @classmethod
@@ -162,12 +192,14 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
                     approval_identifier=(
                         f"screening-policy:{identifier}:{instrument.instrument_id}"
                     ),
+                    maximum_gross_leverage=abs(instrument.leverage_multiplier),
                 )
             )
         return cls(
             tuple(capabilities),
             universe_identifier=identifier,
             research_only=research_only,
+            require_market_participation_authority=False,
         )
 
     def assess(
@@ -240,7 +272,7 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
             policy_version=self.policy_version,
             reasons=(
                 "exact instrument identity, exposure, venue, country, structure, "
-                f"and leverage match the {mode}",
+                f"and certified leverage match the {mode}",
             ),
         )
 
@@ -250,6 +282,9 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
             "universe_identifier": self.universe_identifier,
             "covered_instrument_count": len(self._capabilities),
             "research_only": self.research_only,
+            "requires_market_participation_authority": (
+                self.require_market_participation_authority
+            ),
             "execution_authorized": False,
             "real_money_authorized": False,
             "instrument_identifiers": sorted(self._capabilities),

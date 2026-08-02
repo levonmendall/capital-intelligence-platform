@@ -1,8 +1,9 @@
-"""Runtime executor binding CIO authority to registry-certified instruments."""
+"""Runtime executor binding CIO authority to capability-certified instruments."""
 
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +11,12 @@ from types import SimpleNamespace
 from application import production_context_contract as contract
 from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from governance.market_participation import CanonicalMarketParticipationAuthority
-from opportunity import OpportunityEngine, OpportunityQueue, RankedOpportunity
+from opportunity import (
+    AnalysisLane,
+    OpportunityEngine,
+    OpportunityQueue,
+    RankedOpportunity,
+)
 from opportunity.snapshot import (
     PUBLICATION_SNAPSHOT_KIND,
     load_opportunity_snapshot,
@@ -21,10 +27,18 @@ from screening import candidate_from_payload
 
 _AUTHORITY_BINDING_LOCK = threading.RLock()
 _ORIGINAL_MARKER = "_canonical_market_registry_original_from_universe"
+_CAPABILITY_LIMITATION_PREFIX = "Portfolio authority is capability-based:"
+
+
+def _authority_already_applied(universe) -> bool:
+    return any(
+        str(item).startswith(_CAPABILITY_LIMITATION_PREFIX)
+        for item in tuple(getattr(universe, "limitations", ()))
+    )
 
 
 def _install_registry_bounded_authority() -> None:
-    """Ensure every production authority build applies the market registry first."""
+    """Ensure every production authority build applies portfolio eligibility first."""
 
     existing = getattr(BoundedPilotCapabilityAuthority, _ORIGINAL_MARKER, None)
     if existing is not None:
@@ -33,10 +47,18 @@ def _install_registry_bounded_authority() -> None:
     setattr(BoundedPilotCapabilityAuthority, _ORIGINAL_MARKER, original)
 
     def from_registry(cls, universe, *, research_only: bool = False):
-        filtered = (
-            CanonicalMarketParticipationAuthority.load()
-            .decision_authority_universe(universe)
-        )
+        if _authority_already_applied(universe):
+            filtered = universe
+        else:
+            filtered = (
+                CanonicalMarketParticipationAuthority.load()
+                .decision_authority_universe(
+                    universe,
+                    evaluated_at=getattr(
+                        universe, "authority_evaluated_at", None
+                    ),
+                )
+            )
         return original(cls, filtered, research_only=research_only)
 
     BoundedPilotCapabilityAuthority.from_universe = classmethod(from_registry)
@@ -118,6 +140,36 @@ def _candidate_authority_universe(executor, *, context):
     )
 
 
+def _apply_runtime_position_cap(
+    candidate,
+    *,
+    authority: CanonicalMarketParticipationAuthority,
+    evaluated_at: datetime,
+):
+    """Apply an exact certified cap before CIO sizing and construction.
+
+    The immutable screening record is not rewritten. The production decision object
+    receives the stricter of its analytical cap and the current instrument
+    certification cap. Missing or non-allocatable certifications remain unchanged so
+    the research lane can still evaluate them, while the universe assessment blocks
+    positive capital actions.
+    """
+
+    assessment = authority.assess(
+        instrument_identifier=candidate.instrument.instrument_id,
+        asset_class=candidate.instrument.asset_class,
+        instrument=candidate.instrument,
+        evaluated_at=evaluated_at,
+    )
+    certified_cap = assessment.maximum_position_weight
+    if not assessment.paper_allocatable or certified_cap is None:
+        return candidate
+    resolved_cap = min(candidate.maximum_position_weight, certified_cap)
+    if abs(resolved_cap - candidate.maximum_position_weight) <= 1e-12:
+        return candidate
+    return replace(candidate, maximum_position_weight=resolved_cap)
+
+
 def _publication_snapshot(executor, *, context):
     if getattr(context, "opportunity_snapshot_hash", None) is None:
         return None
@@ -156,13 +208,13 @@ def _rerank_persisted_membership(
     decision_context,
     publication_queue: OpportunityQueue,
 ) -> OpportunityQueue:
-    """Apply portfolio diagnostics only to ordering, never qualification membership.
+    """Preserve economic qualification while refreshing exact ownership authority.
 
-    ``OpportunityRankingInput`` is explicitly an ordering contract. Re-running
-    qualification after publication can reinterpret an immutable candidate set and
-    silently eject a previously certified candidate. Preserve the publication's
-    qualified/rejected membership and qualifications, while recalculating only the
-    disclosed ranking components and order with current-cycle portfolio diagnostics.
+    Portfolio diagnostics may change ordering but not immutable publication
+    membership. Exact paper authority is different: it must be re-evaluated at the
+    decision boundary. A still-meritorious but non-certified candidate remains in the
+    committee queue as exploration, while its refreshed strict universe assessment
+    prevents the CIO from authorizing new or increased exposure.
     """
 
     candidate_map = {item.identifier: item for item in candidates}
@@ -178,9 +230,36 @@ def _rerank_persisted_membership(
     rows = []
     for persisted in publication_queue.ranked:
         candidate = candidate_map[persisted.candidate.identifier]
-        qualification = persisted.qualification
+        strict_universe = engine.universe_policy.evaluate(
+            candidate.instrument,
+            as_of=decision_context.as_of,
+        )
+        qualification = replace(
+            persisted.qualification,
+            universe=strict_universe,
+            analysis_lane=(
+                persisted.qualification.analysis_lane
+                if strict_universe.direct_recommendation_allowed
+                else AnalysisLane.EXPLORATION
+            ),
+            reasons=tuple(
+                dict.fromkeys(
+                    (
+                        *persisted.qualification.reasons,
+                        *(
+                            ()
+                            if strict_universe.direct_recommendation_allowed
+                            else (
+                                "runtime ownership authority permits research review but prohibits new or increased exposure",
+                                *strict_universe.reasons,
+                            )
+                        ),
+                    )
+                )
+            ),
+        )
         robustness = engine.robustness(candidate, decision_context)
-        components = engine._components(  # package-internal ranking rule
+        components = engine._components(
             candidate,
             qualification,
             robustness,
@@ -234,7 +313,7 @@ def _rerank_persisted_membership(
 
 
 class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
-    """Requalify using exact registry-certified paper authority."""
+    """Requalify using exact current capability-based paper authority."""
 
     def run(self, *, as_of: datetime):
         original_provider = self.context_provider
@@ -276,6 +355,15 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
             return authority_universe
 
         original_build_queue = OpportunityEngine.build_queue
+        original_candidate_loader = contract.candidate_from_payload
+
+        def candidate_from_payload_with_position_cap(payload):
+            candidate = original_candidate_loader(payload)
+            return _apply_runtime_position_cap(
+                candidate,
+                authority=market_authority,
+                evaluated_at=as_of,
+            )
 
         def build_queue_with_immutable_membership(
             engine,
@@ -301,6 +389,7 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
         with _AUTHORITY_BINDING_LOCK:
             original_loader = contract.load_active_paper_universe_for_publication
             contract.load_active_paper_universe_for_publication = load_exact_authority
+            contract.candidate_from_payload = candidate_from_payload_with_position_cap
             OpportunityEngine.build_queue = build_queue_with_immutable_membership
             self.context_provider = _CachedContextProvider(
                 original_provider, context, as_of=as_of
@@ -310,7 +399,10 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
             finally:
                 self.context_provider = original_provider
                 OpportunityEngine.build_queue = original_build_queue
+                contract.candidate_from_payload = original_candidate_loader
                 contract.load_active_paper_universe_for_publication = original_loader
 
 
-__all__ = ["ProductionCanonicalCIOExecutor"]
+__all__ = [
+    "ProductionCanonicalCIOExecutor",
+]
