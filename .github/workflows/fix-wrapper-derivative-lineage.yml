@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/universal-investable-ownership
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
