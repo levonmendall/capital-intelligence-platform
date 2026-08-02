@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from typing import Any
 
 from cio.models import CandidateAssetClass, CandidateInstrument
@@ -47,6 +48,15 @@ def governed_asset_class_for_exposure(
     return _EXPOSURE_ASSET_CLASSES.get(str(exposure).strip().lower(), fallback)
 
 
+def _gross_leverage(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError("paper-universe leverage multiplier must be numeric")
+    normalized = abs(float(value))
+    if not isfinite(normalized) or normalized <= 0.0:
+        raise ValueError("paper-universe leverage multiplier must be finite and nonzero")
+    return round(normalized, 8)
+
+
 @dataclass(frozen=True, slots=True)
 class BoundedPilotInstrumentCapability:
     instrument_identifier: str
@@ -57,6 +67,14 @@ class BoundedPilotInstrumentCapability:
     country_code: str
     instrument_type: str
     approval_identifier: str
+    maximum_gross_leverage: float = 1.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "maximum_gross_leverage",
+            _gross_leverage(self.maximum_gross_leverage),
+        )
 
 
 class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
@@ -122,6 +140,9 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
                         f"paper-policy:{universe_identifier}:"
                         f"{str(getattr(item, 'symbol')).upper()}"
                     ),
+                    maximum_gross_leverage=_gross_leverage(
+                        getattr(item, "leverage_multiplier", 1.0)
+                    ),
                 )
             )
         return cls(
@@ -160,6 +181,7 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
                     approval_identifier=(
                         f"screening-policy:{identifier}:{instrument.instrument_id}"
                     ),
+                    maximum_gross_leverage=abs(instrument.leverage_multiplier),
                 )
             )
         return cls(
@@ -211,8 +233,13 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
             reasons.append(
                 "instrument structure does not match the bounded capability record"
             )
-        if abs(instrument.leverage_multiplier) > 1.0 + 1e-9:
-            reasons.append("bounded pilot capability permits only unlevered exposure")
+        if (
+            abs(instrument.leverage_multiplier)
+            > capability.maximum_gross_leverage + 1e-9
+        ):
+            reasons.append(
+                "instrument leverage exceeds the exact configured capability boundary"
+            )
 
         if reasons:
             return AssetClassScopeAssessment(
@@ -239,7 +266,7 @@ class BoundedPilotCapabilityAuthority(AssetClassScopeAuthority):
             policy_version=self.policy_version,
             reasons=(
                 "exact instrument identity, exposure, venue, country, structure, "
-                f"and leverage match the {mode}",
+                f"and certified leverage match the {mode}",
             ),
         )
 
