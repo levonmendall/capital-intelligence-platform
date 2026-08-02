@@ -31,6 +31,72 @@ jobs:
       - name: Materialize Phase 2 source
         run: python scripts/materialize_committee_cio_v2_phase2.py
 
+      - name: Align canonical-cycle fixtures with applicable evidence
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/test_canonical_cio_cycle.py")
+          text = path.read_text(encoding="utf-8")
+          old_import = '''from committee.specialists import (
+              MacroSpecialistContext,
+              MarketSpecialistContext,
+          )
+          '''
+          new_import = '''from committee.specialists import (
+              AssetValuationSpecialistContext,
+              MacroSpecialistContext,
+              MarketSpecialistContext,
+          )
+          '''
+          if text.count(old_import) != 1:
+              raise SystemExit("canonical-cycle specialist import changed")
+          text = text.replace(old_import, new_import, 1)
+          old_context = '''        company=None,
+              )
+          '''
+          new_context = '''        company=None,
+                  asset_valuation=(
+                      None
+                      if candidate.instrument.asset_class in {
+                          CandidateAssetClass.US_EQUITY,
+                          CandidateAssetClass.INTERNATIONAL_EQUITY,
+                      }
+                      else AssetValuationSpecialistContext(
+                          as_of=AS_OF,
+                          asset_class=candidate.instrument.asset_class,
+                          expected_return_impact=0.02,
+                          confidence=0.85,
+                          valuation_evidence=(
+                              "Independent point-in-time valuation and return-driver evidence is complete",
+                          ),
+                          contradictory_evidence=(
+                              "Valuation relationships may change before implementation",
+                          ),
+                          critical_assumptions=(
+                              "The asset-specific return drivers remain representative",
+                          ),
+                          risks=("The valuation estimate remains uncertain",),
+                          limitations=("The valuation is point-in-time",),
+                          change_conditions=(
+                              "Reassess after material valuation or return-driver changes",
+                          ),
+                          evidence_identifiers=(
+                              f"valuation:{candidate.instrument.symbol.lower()}:cycle",
+                          ),
+                      )
+                  ),
+              )
+          '''
+          if text.count(old_context) != 1:
+              raise SystemExit("canonical-cycle context fixture changed")
+          path.write_text(
+              text.replace(old_context, new_context, 1),
+              encoding="utf-8",
+          )
+          PY
+
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
