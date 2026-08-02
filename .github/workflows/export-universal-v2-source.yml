@@ -1,0 +1,27 @@
+name: Export universal v2 source
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: feature/universal-investable-ownership-v2
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-investable-ownership-v2-source
+          path: |
+            .
+            !.git
+          include-hidden-files: true
+          retention-days: 1
