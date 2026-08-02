@@ -64,10 +64,31 @@ This work is tracked in issue #347 and must be delivered as ordered, independent
 - Add a non-authoritative value-chain graph, theme-stage classifier, bottleneck detector, measurable transmission evidence, investable exposure mapping and competing causal paths.
 - The engine may nominate and enrich candidates but cannot decide, size, construct, authorize or execute.
 
-### PR 10 — Monetary policy and cross-asset transmission
+### PR 10 — Monetary policy, currencies and cross-asset transmission
 
 - Add policy-regime classification, central-bank reaction-function evidence, policy motive, transmission channels, cross-market confirmation and market-implied-expectation comparison.
-- Preserve probabilistic, conditional reasoning; never hard-code `QE = risk-on`, `inflation = risk-off`, or `peak rates = buy duration`.
+- Add a dedicated currency and global-liquidity layer covering:
+  - trade-weighted and bilateral currency strength;
+  - nominal and real rate differentials;
+  - carry, hedging cost and cross-currency basis;
+  - reserve-currency and collateral demand;
+  - dollar funding stress and global liquidity conditions;
+  - real effective exchange-rate valuation;
+  - intervention risk and policy divergence.
+- Distinguish the cause of currency strength or weakness. For example, dollar appreciation caused by stronger U.S. growth, Federal Reserve tightening, safe-haven demand, foreign weakness or a funding shortage must not be treated as the same regime.
+- Translate currency conditions into explicit effects on:
+  - other currencies and foreign purchasing power;
+  - emerging-market debt, equities and refinancing risk;
+  - commodities priced in U.S. dollars;
+  - multinational revenue translation, margins and competitiveness;
+  - hedged and unhedged international equity and bond returns;
+  - U.S. inflation through import prices;
+  - gold, crypto and other global-liquidity-sensitive assets;
+  - credit spreads, capital flows and external-balance stress.
+- Require market confirmation from rates, credit, commodities, capital flows, volatility and relative asset performance.
+- Compare every currency conclusion with what forwards, options, yield curves and cross-currency markets already price.
+- Preserve probabilistic, conditional reasoning; never hard-code `QE = risk-on`, `inflation = risk-off`, `peak rates = buy duration`, or `dollar strength = sell all risk assets`.
+- Currency analysis remains evidence for the existing Macro, Market, Cross-Asset Forecast, Fundamental/Valuation and Portfolio/Risk specialists. It cannot independently decide, size, construct, authorize or execute.
 
 ### PR 11 — Joint-candidate portfolio analysis
 
@@ -94,4 +115,4 @@ This work is tracked in issue #347 and must be delivered as ordered, independent
 
 ## Completion standard
 
-The program is complete only when every positive allocation has complete applicable evidence and a positive robust economic advantage over its governing alternative, correlated evidence cannot create false consensus, uncertainty is not double-counted, causal macro and thematic evidence is available to the existing specialists, construction results are fully reconciled, and calibration can distinguish useful controls from duplicated conservatism.
+The program is complete only when every positive allocation has complete applicable evidence and a positive robust economic advantage over its governing alternative, correlated evidence cannot create false consensus, uncertainty is not double-counted, causal macro, currency and thematic evidence is available to the existing specialists, construction results are fully reconciled, and calibration can distinguish useful controls from duplicated conservatism.
