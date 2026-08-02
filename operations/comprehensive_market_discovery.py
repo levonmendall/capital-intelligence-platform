@@ -1,7 +1,10 @@
-"""Merit-based comprehensive discovery with a 200-candidate deep-analysis budget.
+"""Merit-based comprehensive discovery with provider-enriched factor sleeves.
 
 The original provider/catalog implementation is retained verbatim in the adjacent
 legacy module. This module replaces only the pre-committee selection architecture.
+The canonical runtime requires substantive, point-in-time provider evidence for value,
+momentum, carry, and improving conditions before a new asset can consume one of the
+200 deep-analysis slots in its market lane.
 """
 
 from __future__ import annotations
@@ -23,6 +26,12 @@ from operations.market_discovery_preselection import (
     default_catalog_screening_signals,
     evaluate_cutoff_outcomes,
 )
+from operations.provider_enriched_preselection import (
+    DEFAULT_PROVIDER_PRESELECTION_PATH,
+    REQUIRED_PROVIDER_FACTORS,
+    provider_enriched_catalog_screening_signals,
+    validate_provider_enriched_signals,
+)
 
 
 # Preserve compatibility for existing provider-validation and regression code that
@@ -41,11 +50,15 @@ def __getattr__(name: str):
 
 @dataclass(frozen=True, slots=True)
 class ComprehensiveMarketDiscoveryPolicy(_legacy.ComprehensiveMarketDiscoveryPolicy):
-    version: str = "comprehensive-liquid-market-discovery.v2-sleeved"
+    version: str = "comprehensive-liquid-market-discovery.v3-provider-enriched"
     maximum_deep_candidates_per_lane: int = 200
     preselection_shadow_candidates_per_lane: int = 20
     preselection_freshness_days: int = 3
     preselection_minimum_liquidity_score: float = 0.0
+    provider_preselection_path: str = str(DEFAULT_PROVIDER_PRESELECTION_PATH)
+    required_provider_preselection_factors: tuple[str, ...] = (
+        REQUIRED_PROVIDER_FACTORS
+    )
 
     def __post_init__(self) -> None:
         _legacy.ComprehensiveMarketDiscoveryPolicy.__post_init__(self)
@@ -60,12 +73,30 @@ class ComprehensiveMarketDiscoveryPolicy(_legacy.ComprehensiveMarketDiscoveryPol
             raise ValueError(
                 "preselection_minimum_liquidity_score must be between 0 and 1"
             )
+        if not isinstance(self.provider_preselection_path, str) or not (
+            self.provider_preselection_path.strip()
+        ):
+            raise ValueError("provider_preselection_path cannot be empty")
+        factors = tuple(self.required_provider_preselection_factors)
+        if not factors or len(set(factors)) != len(factors):
+            raise ValueError(
+                "required_provider_preselection_factors must be unique and non-empty"
+            )
+        unsupported = tuple(
+            item for item in factors if item not in REQUIRED_PROVIDER_FACTORS
+        )
+        if unsupported:
+            raise ValueError(
+                "unsupported provider preselection factors: "
+                + ", ".join(unsupported)
+            )
 
 
 @dataclass(frozen=True, slots=True)
 class DiscoveryLaneResult(_legacy.DiscoveryLaneResult):
     continuity_count: int = 0
     preselection: PreselectionPlan | None = None
+    preselection_evidence: tuple[tuple[str, tuple[str, ...]], ...] = ()
     cutoff_observations: tuple[CutoffObservation, ...] = ()
     cutoff_outcomes: tuple[CutoffOutcomeEvaluation, ...] = ()
 
@@ -73,6 +104,9 @@ class DiscoveryLaneResult(_legacy.DiscoveryLaneResult):
         _legacy.DiscoveryLaneResult.__post_init__(self)
         if self.continuity_count < 0 or self.continuity_count > self.deep_analyzed_count:
             raise ValueError("continuity_count is outside the deep-analysis cohort")
+        evidence_symbols = tuple(symbol for symbol, _ in self.preselection_evidence)
+        if len(set(evidence_symbols)) != len(evidence_symbols):
+            raise ValueError("preselection evidence contains duplicate symbols")
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +124,10 @@ class ComprehensiveMarketDiscoveryResult(_legacy.ComprehensiveMarketDiscoveryRes
                         if lane.preselection is None
                         else lane.preselection.to_dict()
                     ),
+                    "preselection_evidence": {
+                        symbol: list(identifiers)
+                        for symbol, identifiers in lane.preselection_evidence
+                    },
                     "cutoff_observations": [
                         item.to_dict() for item in lane.cutoff_observations
                     ],
@@ -123,7 +161,13 @@ def discover_comprehensive_markets(
     prior_cutoff_observations: Sequence[CutoffObservation] = (),
     policy: ComprehensiveMarketDiscoveryPolicy | None = None,
 ) -> ComprehensiveMarketDiscoveryResult:
-    """Scan complete catalogs, then nominate 200 merit-balanced candidates per lane."""
+    """Scan complete catalogs, then nominate 200 merit-balanced candidates per lane.
+
+    The uninjected canonical path consumes the persisted provider-enriched factor
+    publication and fails closed when substantive factor evidence is missing. Explicit
+    catalog/market probes without a preselection probe remain a deterministic fixture
+    seam for tests and rehearsals; they do not describe the production authority path.
+    """
 
     timestamp = _legacy._aware(as_of, field_name="as_of")
     resolved = policy or ComprehensiveMarketDiscoveryPolicy()
@@ -133,6 +177,20 @@ def discover_comprehensive_markets(
         raise _legacy.ComprehensiveMarketDiscoveryError(
             "catalog probe must return a mapping"
         )
+    fixture_preselection = (
+        preselection_probe is None
+        and (catalog_probe is not None or market_probe is not None)
+    )
+    active_preselection_probe = (
+        preselection_probe
+        or (
+            default_catalog_screening_signals
+            if fixture_preselection
+            else provider_enriched_catalog_screening_signals
+        )
+    )
+    require_provider_factor_lineage = not fixture_preselection
+
     held = {str(item).strip().upper() for item in held_symbols if str(item).strip()}
     tracked = {
         str(item).strip().upper() for item in tracked_symbols if str(item).strip()
@@ -167,6 +225,7 @@ def discover_comprehensive_markets(
                     "deep": 0,
                     "selected": [],
                     "sources": [],
+                    "provider_enriched_preselection_required": False,
                 }
             )
             continue
@@ -189,12 +248,16 @@ def discover_comprehensive_markets(
         continuity = tuple(item for item in records if item.symbol in state_symbols)
         ordinary = tuple(item for item in records if item.symbol not in state_symbols)
 
-        signals = (preselection_probe or default_catalog_screening_signals)(
-            ordinary, timestamp, resolved
-        )
+        signals = active_preselection_probe(ordinary, timestamp, resolved)
         if not isinstance(signals, Mapping):
             raise _legacy.ComprehensiveMarketDiscoveryError(
                 f"{asset_class.value} preselection probe must return a mapping"
+            )
+        if require_provider_factor_lineage:
+            signals = validate_provider_enriched_signals(
+                ordinary,
+                signals,
+                required_factors=resolved.required_provider_preselection_factors,
             )
         plan = build_preselection_plan(
             ordinary,
@@ -279,6 +342,17 @@ def discover_comprehensive_markets(
             current_prices=current_prices,
             as_of=timestamp,
         )
+        measured_symbols = tuple(
+            dict.fromkeys((*plan.selected_symbols, *plan.shadow_symbols))
+        )
+        preselection_evidence = tuple(
+            (
+                symbol,
+                tuple(signals[symbol].evidence_identifiers),
+            )
+            for symbol in measured_symbols
+            if symbol in signals
+        )
         source_identifiers = tuple(
             dict.fromkeys(item.catalog.source_identifier for item in final)
         )
@@ -292,6 +366,7 @@ def discover_comprehensive_markets(
                 source_identifiers=source_identifiers,
                 continuity_count=len(continuity),
                 preselection=plan,
+                preselection_evidence=preselection_evidence,
                 cutoff_observations=observations,
                 cutoff_outcomes=outcomes,
             )
@@ -304,7 +379,14 @@ def discover_comprehensive_markets(
                 "catalog": len(records),
                 "deep": len(deep_records),
                 "continuity": len(continuity),
+                "provider_enriched_preselection_required": (
+                    require_provider_factor_lineage
+                ),
                 "preselection": plan.to_dict(),
+                "preselection_evidence": {
+                    symbol: list(identifiers)
+                    for symbol, identifiers in preselection_evidence
+                },
                 "cutoff_outcomes": [item.to_dict() for item in outcomes],
                 "selected": [item.catalog.symbol for item in final],
                 "sources": list(source_identifiers),
@@ -349,6 +431,8 @@ __all__ = tuple(
             "CutoffOutcomeEvaluation",
             "PreselectionPlan",
             "PreselectionProbe",
+            "REQUIRED_PROVIDER_FACTORS",
+            "provider_enriched_catalog_screening_signals",
         )
     )
 )
