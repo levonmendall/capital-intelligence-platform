@@ -22,6 +22,7 @@ from cio import (
 )
 from cio.persistence import SQLiteCIOJournal
 from committee.specialists import (
+    AssetValuationSpecialistContext,
     MacroSpecialistContext,
     MarketSpecialistContext,
 )
@@ -204,6 +205,36 @@ def _context(candidate: CandidateDecisionRecord) -> CandidateCycleContext:
             entry_conditions=("Review if trend turns negative",),
         ),
         company=None,
+        asset_valuation=(
+            None
+            if candidate.instrument.asset_class in {
+                CandidateAssetClass.US_EQUITY,
+                CandidateAssetClass.INTERNATIONAL_EQUITY,
+            }
+            else AssetValuationSpecialistContext(
+                as_of=AS_OF,
+                asset_class=candidate.instrument.asset_class,
+                expected_return_impact=0.02,
+                confidence=0.85,
+                valuation_evidence=(
+                    "Independent point-in-time valuation and return-driver evidence is complete",
+                ),
+                contradictory_evidence=(
+                    "Valuation relationships may change before implementation",
+                ),
+                critical_assumptions=(
+                    "The asset-specific return drivers remain representative",
+                ),
+                risks=("The valuation estimate remains uncertain",),
+                limitations=("The valuation is point-in-time",),
+                change_conditions=(
+                    "Reassess after material valuation or return-driver changes",
+                ),
+                evidence_identifiers=(
+                    f"valuation:{candidate.instrument.symbol.lower()}:cycle",
+                ),
+            )
+        ),
     )
 
 

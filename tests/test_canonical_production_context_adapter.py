@@ -29,6 +29,7 @@ from cio.persistence import (
     serialize_opportunity_queue,
 )
 from committee.specialists import (
+    AssetValuationSpecialistContext,
     MacroSpecialistContext,
     MarketSpecialistContext,
 )
@@ -108,6 +109,33 @@ def _candidate_evidence(candidate) -> ProductionCandidateEvidence:
             entry_conditions=("Broad participation remains intact",),
         ),
         company=None,
+        asset_valuation=AssetValuationSpecialistContext(
+            as_of=AS_OF,
+            asset_class=candidate.instrument.asset_class,
+            expected_return_impact=0.02,
+            confidence=0.90,
+            valuation_evidence=(
+                "Point-in-time ETF holdings, earnings, valuation, and return-driver evidence is complete",
+            ),
+            contradictory_evidence=(
+                "Underlying valuation relationships may change before implementation",
+            ),
+            critical_assumptions=(
+                "The fund continues to represent its disclosed broad-market exposure",
+            ),
+            risks=(
+                "Tracking, composition, and valuation relationships can change",
+            ),
+            limitations=(
+                "The asset-specific valuation packet is point-in-time",
+            ),
+            change_conditions=(
+                "Reassess after a material holdings, valuation, or methodology change",
+            ),
+            evidence_identifiers=(
+                "evidence:asset-valuation:spy",
+            ),
+        ),
         exposure_profile=CandidateExposureProfile(
             candidate_identifier=candidate.identifier,
             sector="Broad Market",
@@ -116,6 +144,7 @@ def _candidate_evidence(candidate) -> ProductionCandidateEvidence:
         ),
         fundamental_evidence_identifiers=(
             "evidence:fundamental:spy",
+            "evidence:asset-valuation:spy",
         ),
         fundamental_model_version="etf-fundamental.v1",
         lineage=_lineage(
@@ -123,6 +152,7 @@ def _candidate_evidence(candidate) -> ProductionCandidateEvidence:
             "evidence:macro:growth",
             "evidence:market:spy",
             "evidence:fundamental:spy",
+            "evidence:asset-valuation:spy",
         ),
     )
 

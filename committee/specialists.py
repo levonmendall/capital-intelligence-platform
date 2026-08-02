@@ -17,6 +17,10 @@ from cio import (
     SpecialistPosition,
     SpecialistRole,
 )
+from committee.evidence_applicability import (
+    ApplicableAnalysis,
+    ApplicableEvidenceMatrix,
+)
 from company import CompanyAnalysis, CompanyFactor
 
 
@@ -555,7 +559,7 @@ class CandidateSpecialistContext:
 
 @dataclass(frozen=True, slots=True)
 class SpecialistGovernancePolicy:
-    version: str = "specialist-governance.v2"
+    version: str = "specialist-governance.v3-applicable-evidence"
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     maximum_market_data_age_hours: float = 24.0
@@ -600,8 +604,13 @@ class IndependentSpecialistService:
     def __init__(
         self,
         policy: SpecialistGovernancePolicy | None = None,
+        *,
+        applicability_matrix: ApplicableEvidenceMatrix | None = None,
     ) -> None:
         self.policy = policy or SpecialistGovernancePolicy()
+        self.applicability_matrix = (
+            applicability_matrix or ApplicableEvidenceMatrix()
+        )
 
     def analyze(
         self,
@@ -974,13 +983,52 @@ class IndependentSpecialistService:
     ) -> SpecialistAnalysis:
         company = context.company
         asset_valuation = context.asset_valuation
-        equity_candidate = candidate.instrument.asset_class in {
-            CandidateAssetClass.US_EQUITY,
-            CandidateAssetClass.INTERNATIONAL_EQUITY,
-        }
-        if company is None and asset_valuation is not None:
-            if asset_valuation.asset_class is not candidate.instrument.asset_class:
-                raise ValueError("asset valuation class does not match candidate")
+        applicability = self.applicability_matrix.assess(
+            candidate,
+            company_present=company is not None,
+            asset_valuation_class=(
+                None if asset_valuation is None else asset_valuation.asset_class
+            ),
+        )
+        if not applicability.complete:
+            return SpecialistAnalysis(
+                candidate_identifier=candidate.identifier,
+                role=SpecialistRole.FUNDAMENTAL_VALUATION,
+                completed_at=self._completed(context, 4),
+                independent_first_pass=True,
+                position=SpecialistPosition.ABSTAIN,
+                conclusion=(
+                    "Required applicable business, valuation, or return-driver "
+                    "evidence is unavailable."
+                ),
+                expected_return_impact=0.0,
+                confidence=0.0,
+                supporting_evidence=(
+                    f"Applicable evidence policy={applicability.policy_version}",
+                    f"Required analysis={applicability.rule.required_analysis.value}",
+                ),
+                contradictory_evidence=applicability.reasons,
+                critical_assumptions=(
+                    "The applicable independent return-driver packet must be complete "
+                    "before a positive portfolio action",
+                ),
+                risks=(
+                    "The candidate return estimate cannot be independently verified",
+                    *applicability.reasons,
+                ),
+                limitations=(
+                    "Applicable analysis is incomplete and cannot be treated as an "
+                    "ordinary neutral specialist view",
+                ),
+                change_conditions=(
+                    "Provide point-in-time independent applicable business, valuation, "
+                    "and return-driver evidence",
+                ),
+                evidence_origin_identifiers=candidate.evidence_identifiers,
+            )
+        if applicability.rule.required_analysis is ApplicableAnalysis.ASSET_VALUATION:
+            if asset_valuation is None:
+                raise AssertionError("complete asset-valuation assessment lacks packet")
             return SpecialistAnalysis(
                 candidate_identifier=candidate.identifier,
                 role=SpecialistRole.FUNDAMENTAL_VALUATION,
@@ -992,7 +1040,10 @@ class IndependentSpecialistService:
                 ),
                 expected_return_impact=asset_valuation.expected_return_impact,
                 confidence=asset_valuation.confidence,
-                supporting_evidence=asset_valuation.valuation_evidence,
+                supporting_evidence=(
+                    f"Applicable evidence policy={applicability.policy_version}",
+                    *asset_valuation.valuation_evidence,
+                ),
                 contradictory_evidence=asset_valuation.contradictory_evidence,
                 critical_assumptions=asset_valuation.critical_assumptions,
                 risks=asset_valuation.risks,
@@ -1001,38 +1052,7 @@ class IndependentSpecialistService:
                 evidence_origin_identifiers=asset_valuation.evidence_identifiers,
             )
         if company is None:
-            requirement = (
-                "point-in-time company quality and valuation analysis"
-                if equity_candidate
-                else "independent asset-specific valuation analysis"
-            )
-            return SpecialistAnalysis(
-                candidate_identifier=candidate.identifier,
-                role=SpecialistRole.FUNDAMENTAL_VALUATION,
-                completed_at=self._completed(context, 4),
-                independent_first_pass=True,
-                position=SpecialistPosition.ABSTAIN,
-                conclusion=f"Required {requirement} is unavailable.",
-                expected_return_impact=0.0,
-                confidence=0.0,
-                supporting_evidence=(
-                    "The candidate record discloses the missing independent valuation packet",
-                ),
-                contradictory_evidence=(),
-                critical_assumptions=(
-                    "Independent valuation evidence is required before a recommendation",
-                ),
-                risks=(
-                    "The candidate return estimate cannot be independently verified",
-                ),
-                limitations=(
-                    "No independent company or asset-specific valuation packet was supplied",
-                ),
-                change_conditions=(
-                    "Provide point-in-time independent valuation and return-driver evidence",
-                ),
-                evidence_origin_identifiers=candidate.evidence_identifiers,
-            )
+            raise AssertionError("complete company-analysis assessment lacks packet")
         if company.symbol != candidate.instrument.symbol:
             raise ValueError("company analysis symbol does not match candidate")
         quality = company.factor(CompanyFactor.QUALITY)
@@ -1159,12 +1179,18 @@ class IndependentSpecialistService:
             vetoes.append(reason)
             veto_categories.append(category)
 
-        if (
-            candidate.instrument.asset_class is CandidateAssetClass.US_EQUITY
-            and context.company is None
-        ):
+        applicability = self.applicability_matrix.assess(
+            candidate,
+            company_present=context.company is not None,
+            asset_valuation_class=(
+                None
+                if context.asset_valuation is None
+                else context.asset_valuation.asset_class
+            ),
+        )
+        for reason in applicability.reasons:
             add_veto(
-                "point-in-time normalized company analysis is missing for a U.S. equity",
+                reason,
                 EvidenceVetoCategory.OPERATIONAL_UNAVAILABLE,
             )
         if quality.score < self.policy.minimum_evidence_score:
@@ -1203,6 +1229,8 @@ class IndependentSpecialistService:
             else SpecialistPosition.SUPPORTIVE
         )
         evidence = (
+            f"applicable evidence policy={applicability.policy_version}",
+            f"required analysis={applicability.rule.required_analysis.value}",
             f"reliability={quality.reliability:.3f}",
             f"freshness={quality.freshness:.3f}",
             f"relevance={quality.relevance:.3f}",
