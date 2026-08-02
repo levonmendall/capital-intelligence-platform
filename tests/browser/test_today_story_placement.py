@@ -4,7 +4,11 @@ import os
 
 import pytest
 
-from tests.browser.test_streamlit_browser import BASELINE, live_streamlit
+from tests.browser.test_streamlit_browser import (
+    BASELINE,
+    _assert_public_boundary,
+    live_streamlit,
+)
 
 
 pytestmark = pytest.mark.skipif(
@@ -47,6 +51,7 @@ def test_today_is_a_ranked_responsive_investor_briefing(
         browser = runtime.chromium.launch(headless=True)
         page = browser.new_page(viewport=viewport, device_scale_factor=1)
         page.goto(live_streamlit, wait_until="networkidle")
+        _assert_public_boundary(page)
 
         navigation = page.locator('[data-testid="stButtonGroup"]').get_by_role(
             "radiogroup"
