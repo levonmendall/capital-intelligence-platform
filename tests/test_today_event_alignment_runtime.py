@@ -155,8 +155,8 @@ def test_repeated_all_asset_block_and_repeated_lesson_are_removed() -> None:
     assert "volatility strategies" not in combined
     assert "Most directly exposed:" in primary
     assert "Investor lesson" not in secondary
-    assert "Why it matters:" in secondary
-    assert "How markets may react:" in secondary
+    assert '<div class="ci-label">Why it matters</div>' in secondary
+    assert '<div class="ci-label">How markets may react</div>' in secondary
 
 
 def test_active_entrypoints_install_event_alignment() -> None:

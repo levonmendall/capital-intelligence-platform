@@ -25,6 +25,7 @@ import opportunity_scan_resilience
 import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
+import today_development_card_format_runtime
 import today_event_alignment_runtime
 import ui_experience_refinement
 import ui_refinement
@@ -213,6 +214,9 @@ def main() -> None:
         educational_market_briefing_ui,
         operating_intelligence_ui,
         environment_story_placement_refinement,
+    )
+    today_development_card_format_runtime.install(
+        environment_story_placement_refinement
     )
     opportunity_scan_resilience.install()
     ui_refinement.install(app_impl, secure_app)
