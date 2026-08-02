@@ -335,6 +335,7 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
             # cannot receive dynamic paper authority. Preserve their analysis-only
             # test path without inventing a static execution fallback.
             return super().run(as_of=as_of)
+        market_authority = CanonicalMarketParticipationAuthority.load()
         authority_universe = _candidate_authority_universe(self, context=context)
         publication_snapshot = _publication_snapshot(self, context=context)
         expected_publication_identifier = (
