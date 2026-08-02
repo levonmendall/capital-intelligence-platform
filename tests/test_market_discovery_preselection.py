@@ -41,7 +41,7 @@ def _provider_factor_evidence(symbol):
     )
 
 
-def test_default_capacity_is_200_and_sleeves_ignore_catalog_order():
+def test_default_discovery_has_no_candidate_count_limit_and_sleeves_ignore_catalog_order():
     now = datetime(2026, 8, 1, tzinfo=timezone.utc)
     records = tuple(record(f"A{i:03d}") for i in range(12))
     signals = {
@@ -67,7 +67,7 @@ def test_default_capacity_is_200_and_sleeves_ignore_catalog_order():
         freshness_days=3,
         minimum_liquidity_score=0,
     )
-    assert ComprehensiveMarketDiscoveryPolicy().maximum_deep_candidates_per_lane == 200
+    assert ComprehensiveMarketDiscoveryPolicy().maximum_deep_candidates_per_lane is None
     assert len(plan.selected_symbols) == 6
     catalog_first_six = tuple(item.symbol for item in tuple(reversed(records))[:6])
     assert plan.selected_symbols != catalog_first_six
@@ -78,7 +78,7 @@ def test_default_capacity_is_200_and_sleeves_ignore_catalog_order():
     }
 
 
-def test_continuity_is_additive_to_200_slots():
+def test_every_eligible_asset_is_analyzed_and_forwarded_despite_legacy_count_settings():
     now = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
     ordinary = tuple(
         DiscoveryCatalogRecord(
@@ -159,15 +159,24 @@ def test_continuity_is_additive_to_200_slots():
         catalog_probe=catalog_probe,
         market_probe=market_probe,
         preselection_probe=preselection_probe,
+        policy=ComprehensiveMarketDiscoveryPolicy(
+            maximum_deep_candidates_per_lane=1,
+            selected_crypto_assets=1,
+        ),
     )
     lane = next(x for x in result.lanes if x.asset_class is CandidateAssetClass.CRYPTO)
     assert lane.continuity_count == 1
-    assert len(lane.preselection.selected_symbols) == 200
-    assert lane.deep_analyzed_count == 201
-    assert len(lane.preselection_evidence) == (
-        len(lane.preselection.selected_symbols)
-        + len(lane.preselection.shadow_symbols)
+    assert len(lane.preselection.selected_symbols) == 205
+    assert lane.preselection.shadow_symbols == ()
+    assert lane.deep_analyzed_count == 206
+    assert len(lane.selected) == 206
+    assert len(lane.preselection_evidence) == 205
+    lane_payload = next(
+        item
+        for item in result.to_dict()["lanes"]
+        if item["asset_class"] == CandidateAssetClass.CRYPTO.value
     )
+    assert lane_payload["candidate_count_limit_applied"] is False
 
 
 def test_cutoff_measurement_compares_shadow_with_selected():

@@ -1,24 +1,66 @@
-# Merit-Based Market Discovery
+# Complete Certified-Universe Investment Review
 
-Each scheduled lane reads its complete configured catalog, applies cheap metadata,
-freshness, lifecycle, and basic-liquidity checks, and forms independent quality, value,
-momentum, carry, diversification, and improving-condition sleeves. Sleeves are merged
-round-robin and deduplicated before the 200-candidate deep-analysis limit is applied.
+The canonical discovery process screens the complete certified investment universe for
+every market lane scheduled at the decision timestamp.
 
-Current holdings and tracked instruments are handled through a separate continuity
-allocation, so they never consume the 200 new-opportunity slots. A below-cutoff shadow
-cohort and baseline prices are published, allowing later cycles to compare its returns
-with the selected cohort.
+The process is:
 
-## Provider-enriched factors are mandatory
+1. Load the complete certified catalog.
+2. Apply lifecycle, metadata, freshness, provider-lineage, liquidity, and point-in-time
+   evidence checks.
+3. Obtain substantive provider-enriched value, momentum, carry, and
+   improving-conditions evidence.
+4. Deep-analyze every asset that remains eligible and evidence-complete.
+5. Forward every asset that passes the governed market and evidence checks into formal
+   opportunity qualification.
+6. Send every formally qualified candidate through all six independent specialists and
+   then to the CIO.
+7. Allow portfolio construction to determine feasible sizing only after the CIO has
+   considered the candidate.
 
-The canonical runtime no longer permits the value, momentum, carry, or
-improving-conditions sleeves to be populated from catalog completeness, symbol order,
-spread metadata, deterministic tie-breaking, or another synthetic proxy.
+## No candidate-count cutoff
+
+Scores and sleeve rankings determine review order and provide an auditable explanation
+of relative merit. They do not create a top-N shortlist.
+
+The canonical runtime does not apply:
+
+- the former 200-candidate deep-analysis limit;
+- the former 20- or 24-instrument per-lane shortlist limits;
+- a committee-attention quota;
+- a CIO-review quota; or
+- a portfolio-construction quota that can prevent prior CIO consideration.
+
+Current holdings and tracked instruments remain part of the continuity path, but they
+are not granted exclusive access to a bounded opportunity allocation. Every ordinary
+asset that passes the same governed checks is analyzed as well.
+
+Inherited `maximum_deep_candidates_per_lane` and `selected_*` configuration values are
+retained only so older configuration files can still be read. They are not active
+decision authorities. Discovery manifests explicitly record
+`candidate_count_limit_applied: false`.
+
+## What can still exclude an asset
+
+Removing arbitrary count limits does not weaken the investment process. An asset can
+still be excluded when it is not certified, is outside the approved market scope, has
+incomplete or stale evidence, lacks factor provenance, fails lifecycle or instrument
+integrity checks, lacks sufficient history, falls below the liquidity floor, has
+unavailable point-in-time market evidence, or fails formal opportunity qualification.
+
+The system does not lower return, evidence, liquidity, downside, cost, cash-hurdle, or
+portfolio-risk standards merely to increase the number of candidates.
+
+## Provider-enriched factors remain mandatory
+
+The canonical runtime does not populate value, momentum, carry, or
+improving-conditions scores from catalog completeness, symbol order, spread metadata,
+deterministic tie-breaking, or another synthetic proxy.
 
 Before comprehensive discovery runs, the provider pipeline must publish
 `database/provider-enriched-preselection.json` or set
 `CAPITAL_INTELLIGENCE_PROVIDER_PRESELECTION_PATH` to another governed publication.
+
 The publication must use schema
 `capital-intelligence-provider-preselection.v1` and contain, for every eligible
 new-opportunity candidate:
@@ -31,83 +73,34 @@ new-opportunity candidate:
 - point-in-time observation and availability timestamps; and
 - one or more immutable provider evidence identifiers.
 
-The loader creates factor-specific lineage identifiers and carries them into the lane
-manifest. A score without factor-specific provider lineage is treated as unavailable.
-A missing, stale, future-known, malformed, or incomplete publication makes the affected
-candidate ineligible before the 200-candidate cutoff. The system does not substitute a
-neutral score and does not lower an investment threshold to preserve candidate count.
+The loader creates factor-specific lineage identifiers and carries them into the
+discovery manifest. A score without factor-specific provider lineage is unavailable.
+Missing, stale, future-known, malformed, or incomplete factor evidence makes the
+affected candidate ineligible. The system does not substitute a neutral score.
 
-A minimal publication has this shape:
-
-```json
-{
-  "schema_version": "capital-intelligence-provider-preselection.v1",
-  "available_at": "2026-08-01T14:59:00+00:00",
-  "source_identifiers": ["provider-publication:example:1"],
-  "signals": {
-    "ABC": {
-      "observed_at": "2026-08-01T14:58:00+00:00",
-      "eligible": true,
-      "liquidity_score": 0.95,
-      "quality_score": 0.82,
-      "indicative_price": 100.0,
-      "source_identifiers": ["provider-signal:ABC"],
-      "factors": {
-        "value": {
-          "score": 0.78,
-          "raw_value": 0.071,
-          "units": "earnings-yield",
-          "horizon_days": 365,
-          "provider": "licensed-provider",
-          "methodology_version": "equity-value.v1",
-          "observed_at": "2026-08-01T14:55:00+00:00",
-          "evidence_identifiers": ["fundamentals:ABC:2026Q2"]
-        },
-        "momentum": {
-          "score": 0.69,
-          "raw_value": 0.124,
-          "units": "total-return",
-          "horizon_days": 126,
-          "provider": "licensed-provider",
-          "methodology_version": "cross-sectional-momentum.v1",
-          "observed_at": "2026-08-01T14:55:00+00:00",
-          "evidence_identifiers": ["prices:ABC:2026-08-01"]
-        },
-        "carry": {
-          "score": 0.61,
-          "raw_value": 0.032,
-          "units": "annualized-yield",
-          "horizon_days": 365,
-          "provider": "licensed-provider",
-          "methodology_version": "asset-specific-carry.v1",
-          "observed_at": "2026-08-01T14:55:00+00:00",
-          "evidence_identifiers": ["income:ABC:2026-08-01"]
-        },
-        "improving_conditions": {
-          "score": 0.84,
-          "raw_value": 0.19,
-          "units": "standardized-change",
-          "horizon_days": 90,
-          "provider": "licensed-provider",
-          "methodology_version": "improving-conditions.v1",
-          "observed_at": "2026-08-01T14:55:00+00:00",
-          "evidence_identifiers": ["revisions:ABC:2026-08-01"]
-        }
-      }
-    }
-  }
-}
-```
-
-The factor methodology is asset-specific. Equity value can use normalized earnings or
+Factor methodology remains asset-specific. Equity value can use normalized earnings or
 free-cash-flow yield, while bond, FX, crypto, futures, and option value and carry require
-their own governed models. A factor must remain unavailable when an appropriate model or
-licensed evidence source does not exist.
+their own governed models. A factor remains unavailable when an appropriate model or
+certified evidence source does not exist.
 
-Explicit catalog and market probes without a preselection probe remain available only
-as deterministic fixture seams for tests and rehearsals. They are not the canonical
-production authority path.
+## Committee and CIO invariant
 
-Discovery remains nomination-only. It cannot qualify, size, authorize, execute, or
-promote an investment. The existing evidence, specialist, CIO, construction, and
-paper-only controls remain binding after preselection.
+The formal opportunity queue has complete candidate coverage: every supplied candidate
+is represented as either qualified or rejected with reasons. There is no ranked-queue
+slice.
+
+For every qualified queue item, the canonical CIO cycle:
+
+- creates the six-specialist packet;
+- records the specialist evidence, concerns, vetoes, and portfolio recommendation;
+- sends the complete packet to the CIO;
+- records the CIO decision; and
+- only then performs portfolio construction across all actionable decisions.
+
+Portfolio constraints may reduce an approved target or leave it at zero, but they do not
+erase the fact that the candidate received specialist and CIO consideration.
+
+Discovery remains nomination-only. It cannot independently qualify, size, authorize,
+execute, or promote an investment. CIO-only authority, fail-closed evidence handling,
+the cash hurdle, independent construction, append-only lineage, and paper-only execution
+remain binding.

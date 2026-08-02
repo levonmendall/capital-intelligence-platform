@@ -1,10 +1,13 @@
-"""Merit-based comprehensive discovery with provider-enriched factor sleeves.
+"""Complete certified-universe discovery with provider-enriched factor evidence.
 
-The original provider/catalog implementation is retained verbatim in the adjacent
-legacy module. This module replaces only the pre-committee selection architecture.
-The canonical runtime requires substantive, point-in-time provider evidence for value,
-momentum, carry, and improving conditions before a new asset can consume one of the
-200 deep-analysis slots in its market lane.
+The original provider/catalog implementation is retained in the adjacent legacy
+module. This module replaces only the pre-committee selection architecture.
+
+The canonical runtime screens every instrument in each scheduled certified catalog.
+Provider-enriched value, momentum, carry, and improving-condition evidence remains
+mandatory, but no rank, lane, shortlist, or deep-analysis count limit may prevent an
+otherwise eligible and evidence-complete asset from reaching the formal opportunity,
+six-specialist, and CIO decision path.
 """
 
 from __future__ import annotations
@@ -50,9 +53,17 @@ def __getattr__(name: str):
 
 @dataclass(frozen=True, slots=True)
 class ComprehensiveMarketDiscoveryPolicy(_legacy.ComprehensiveMarketDiscoveryPolicy):
-    version: str = "comprehensive-liquid-market-discovery.v3-provider-enriched"
-    maximum_deep_candidates_per_lane: int = 200
-    preselection_shadow_candidates_per_lane: int = 20
+    """Govern discovery quality without imposing candidate-count cutoffs.
+
+    ``maximum_deep_candidates_per_lane`` and the inherited ``selected_*`` values remain
+    readable for backward-compatible configuration parsing, but the canonical runtime
+    does not apply them. Eligibility, evidence completeness, liquidity, lifecycle, and
+    point-in-time market checks are the only pre-committee exclusion authorities.
+    """
+
+    version: str = "comprehensive-liquid-market-discovery.v4-complete-qualified-universe"
+    maximum_deep_candidates_per_lane: int | None = None
+    preselection_shadow_candidates_per_lane: int = 0
     preselection_freshness_days: int = 3
     preselection_minimum_liquidity_score: float = 0.0
     provider_preselection_path: str = str(DEFAULT_PROVIDER_PRESELECTION_PATH)
@@ -61,7 +72,38 @@ class ComprehensiveMarketDiscoveryPolicy(_legacy.ComprehensiveMarketDiscoveryPol
     )
 
     def __post_init__(self) -> None:
-        _legacy.ComprehensiveMarketDiscoveryPolicy.__post_init__(self)
+        # Reuse the legacy validation for every inherited quality, lifecycle, history,
+        # sizing, and source-bound field. A harmless value is supplied for the retired
+        # deep-candidate count field because ``None`` now means no count cutoff.
+        _legacy.ComprehensiveMarketDiscoveryPolicy(
+            version=self.version,
+            maximum_directory_records_per_source=self.maximum_directory_records_per_source,
+            maximum_deep_candidates_per_lane=1,
+            selected_global_equities=self.selected_global_equities,
+            selected_fx_pairs=self.selected_fx_pairs,
+            selected_crypto_assets=self.selected_crypto_assets,
+            selected_futures_contracts=self.selected_futures_contracts,
+            selected_bonds=self.selected_bonds,
+            selected_options=self.selected_options,
+            minimum_history_bars=self.minimum_history_bars,
+            history_days=self.history_days,
+            minimum_price=self.minimum_price,
+            minimum_daily_dollar_volume=self.minimum_daily_dollar_volume,
+            option_minimum_days_to_expiry=self.option_minimum_days_to_expiry,
+            option_maximum_days_to_expiry=self.option_maximum_days_to_expiry,
+            maximum_global_equity_weight=self.maximum_global_equity_weight,
+            maximum_fx_weight=self.maximum_fx_weight,
+            maximum_crypto_weight=self.maximum_crypto_weight,
+            maximum_future_weight=self.maximum_future_weight,
+            maximum_bond_weight=self.maximum_bond_weight,
+            maximum_option_weight=self.maximum_option_weight,
+        )
+        if self.maximum_deep_candidates_per_lane is not None:
+            value = self.maximum_deep_candidates_per_lane
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(
+                    "maximum_deep_candidates_per_lane must be a positive integer or None"
+                )
         for name in (
             "preselection_shadow_candidates_per_lane",
             "preselection_freshness_days",
@@ -119,6 +161,7 @@ class ComprehensiveMarketDiscoveryResult(_legacy.ComprehensiveMarketDiscoveryRes
             lane_payload.update(
                 {
                     "continuity_count": lane.continuity_count,
+                    "candidate_count_limit_applied": False,
                     "preselection": (
                         None
                         if lane.preselection is None
@@ -161,18 +204,24 @@ def discover_comprehensive_markets(
     prior_cutoff_observations: Sequence[CutoffObservation] = (),
     policy: ComprehensiveMarketDiscoveryPolicy | None = None,
 ) -> ComprehensiveMarketDiscoveryResult:
-    """Scan complete catalogs, then nominate 200 merit-balanced candidates per lane.
+    """Screen complete catalogs and forward every eligible evidence-complete asset.
 
     The uninjected canonical path consumes the persisted provider-enriched factor
     publication and fails closed when substantive factor evidence is missing. Explicit
     catalog/market probes without a preselection probe remain a deterministic fixture
     seam for tests and rehearsals; they do not describe the production authority path.
+
+    Candidate scores determine review order only. They never create a top-N cutoff.
     """
 
     timestamp = _legacy._aware(as_of, field_name="as_of")
     resolved = policy or ComprehensiveMarketDiscoveryPolicy()
     scheduled_lanes = _legacy.scheduled_discovery_lanes(timestamp)
-    catalogs = (catalog_probe or _legacy.default_catalog_probe)(timestamp)
+    catalogs = (
+        catalog_probe(timestamp)
+        if catalog_probe is not None
+        else _legacy.default_catalog_probe(timestamp, policy=resolved)
+    )
     if not isinstance(catalogs, Mapping):
         raise _legacy.ComprehensiveMarketDiscoveryError(
             "catalog probe must return a mapping"
@@ -225,6 +274,7 @@ def discover_comprehensive_markets(
                     "deep": 0,
                     "selected": [],
                     "sources": [],
+                    "candidate_count_limit_applied": False,
                     "provider_enriched_preselection_required": False,
                 }
             )
@@ -259,11 +309,14 @@ def discover_comprehensive_markets(
                 signals,
                 required_factors=resolved.required_provider_preselection_factors,
             )
+
+        # Capacity equals the full ordinary catalog. The sleeve model still orders and
+        # explains candidates, but it cannot exclude an eligible asset by rank or count.
         plan = build_preselection_plan(
             ordinary,
             signals,
             as_of=timestamp,
-            capacity=resolved.maximum_deep_candidates_per_lane,
+            capacity=max(1, len(ordinary)),
             shadow_limit=resolved.preselection_shadow_candidates_per_lane,
             freshness_days=resolved.preselection_freshness_days,
             minimum_liquidity_score=resolved.preselection_minimum_liquidity_score,
@@ -274,7 +327,6 @@ def discover_comprehensive_markets(
             for symbol in plan.selected_symbols
             if symbol in ordinary_by_symbol
         )
-        # Continuity is additive; it does not consume the 200 opportunity slots.
         deep_records = tuple(dict.fromkeys((*continuity, *nominated)))
         features = (market_probe or _legacy.default_market_probe)(
             deep_records, timestamp, resolved
@@ -313,16 +365,9 @@ def discover_comprehensive_markets(
             )
 
         selected.sort(key=lambda item: (item.score, item.catalog.symbol), reverse=True)
-        retained_selected = [item for item in selected if item.retained_for_state]
-        ordinary_selected = [item for item in selected if not item.retained_for_state]
-        final = tuple(
-            dict.fromkeys(
-                (
-                    *retained_selected,
-                    *ordinary_selected[: resolved.selected_limit(asset_class)],
-                )
-            )
-        )
+        # Ordering is informational only. Every asset that passed the governed checks is
+        # forwarded; inherited selected_* limits are not decision authorities.
+        final = tuple(selected)
 
         current_prices = {
             symbol: item_features.price for symbol, item_features in features.items()
@@ -379,6 +424,7 @@ def discover_comprehensive_markets(
                 "catalog": len(records),
                 "deep": len(deep_records),
                 "continuity": len(continuity),
+                "candidate_count_limit_applied": False,
                 "provider_enriched_preselection_required": (
                     require_provider_factor_lineage
                 ),
@@ -407,6 +453,7 @@ def discover_comprehensive_markets(
         {
             "as_of": timestamp.isoformat(),
             "policy": resolved.version,
+            "candidate_count_limit_applied": False,
             "lanes": manifest_material,
         }
     )
