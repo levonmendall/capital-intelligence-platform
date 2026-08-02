@@ -39,3 +39,10 @@ def test_existing_portfolio_controls_are_preserved_after_new_opening() -> None:
     assert "original(dependencies, principal=principal)" in source
     assert "Paper implementation and controls" not in source
     assert "Construction and implementation" not in source
+
+
+def test_shared_entrypoint_installer_activates_portfolio_first_layer() -> None:
+    source = Path("opportunity_funnel_ui_refinement.py").read_text(encoding="utf-8")
+
+    assert "import portfolio_first_ui_refinement" in source
+    assert "portfolio_first_ui_refinement.install(app_impl)" in source
