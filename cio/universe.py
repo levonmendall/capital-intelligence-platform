@@ -137,6 +137,21 @@ class RecommendationUniversePolicy:
             raise TypeError(
                 "asset_class_authority must be an AssetClassScopeAuthority"
             )
+        if (
+            self.market_participation_authority is None
+            and str(
+                getattr(self.asset_class_authority, "policy_version", "")
+            ).startswith("bounded-pilot-capability.")
+        ):
+            from governance.market_participation import (
+                CanonicalMarketParticipationAuthority,
+            )
+
+            object.__setattr__(
+                self,
+                "market_participation_authority",
+                CanonicalMarketParticipationAuthority.load(),
+            )
         if self.market_participation_authority is not None and not callable(
             getattr(self.market_participation_authority, "assess", None)
         ):
