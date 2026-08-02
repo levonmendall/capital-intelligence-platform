@@ -18,6 +18,7 @@ def test_final_storytelling_layer_owns_both_surfaces() -> None:
 
     assert "app_impl._render_today = render_today" in source
     assert "app_impl._render_environment = render_environment" in source
+    assert "today_story_placement_refinement" not in render_source
     assert (
         render_source.index("surface_content_refinement.install(app_impl)")
         < render_source.index("environment_story_placement_refinement.install(app_impl)")
