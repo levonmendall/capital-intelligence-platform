@@ -106,7 +106,15 @@ def live_streamlit(tmp_path_factory):
 
 
 def _assert_public_boundary(page) -> None:
-    page.get_by_text(BASELINE["required_public_text"], exact=True).wait_for()
+    required = page.get_by_text(BASELINE["required_public_text"], exact=True)
+    try:
+        required.wait_for(timeout=10_000)
+    except Exception as error:
+        body = page.locator("body").inner_text(timeout=5_000)
+        raise AssertionError(
+            "The Streamlit script became healthy but did not render the public boundary. "
+            f"Visible page text:\n{body[:6000]}"
+        ) from error
     for label in BASELINE["prohibited_public_controls"]:
         assert page.get_by_text(label, exact=True).count() == 0
 
@@ -186,7 +194,9 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
             _assert_surface_body(page, surface)
             _assert_public_boundary(page)
             if surface in {"Today", "Environment", "Portfolio"}:
-                health = page.locator('.information-health[role="status"]')
+                health = page.locator(
+                    '.information-health[role="status"], .story-source-health[role="status"]'
+                )
                 health.wait_for(state="visible")
                 assert health.count() == 1
             if surface == "Environment":
@@ -202,16 +212,11 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
         assert layout["trustStripVisible"] is True
         assert layout["publicSidebarVisible"] is False
         assert layout["navigationShellPosition"] == "sticky"
-        # Streamlit retains a framework-level application inset even when its
-        # visible header is hidden. Keep that inset bounded rather than requiring
-        # the product rail to occupy the browser chrome.
         assert layout["navigationShellTop"] <= 96
         assert layout["headerVisible"] is False
         assert layout["sectionHeaderCount"] >= 1 or layout["statusRowCount"] >= 1
         if viewport_name == "iphone":
             assert layout["minimumNavigationHeight"] >= BASELINE["minimum_mobile_navigation_height_pixels"]
-            # The logo is intentionally shorter than the 42px tap targets. Their
-            # vertical overlap verifies that both remain on one visual row.
             assert layout["brandNavigationVerticalOverlap"] >= 0.6
         page.screenshot(path=report_directory / f"streamlit-{viewport_name}.png", full_page=True)
         (report_directory / f"streamlit-{viewport_name}-layout.json").write_text(
