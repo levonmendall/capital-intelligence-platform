@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from cio import CandidateAssetClass, CandidateInstrument
+from cio.universe import RecommendationUniversePolicy, UniverseDisposition
+from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from governance.coverage_certification import load_market_coverage
 from governance.instrument_paper_eligibility import (
     InstrumentPaperEligibilityAuthority,
@@ -80,6 +82,25 @@ def _certification(**overrides) -> InstrumentPaperEligibilityCertification:
     }
     values.update(overrides)
     return InstrumentPaperEligibilityCertification(**values)
+
+
+def _production_universe_authority() -> BoundedPilotCapabilityAuthority:
+    candidate = _candidate()
+    universe = SimpleNamespace(
+        identifier="production-capability-test",
+        instruments=(
+            SimpleNamespace(
+                instrument_identifier=candidate.instrument_id,
+                symbol=candidate.symbol,
+                execution_asset_class=candidate.asset_class,
+                economic_exposure="us_equity",
+                venue=candidate.venue,
+                country_code=candidate.country_code,
+                instrument_type=candidate.instrument_type,
+            ),
+        ),
+    )
+    return BoundedPilotCapabilityAuthority.from_universe(universe)
 
 
 def test_complete_active_certification_makes_liquid_instrument_allocatable(
@@ -184,6 +205,31 @@ def test_capability_certification_expands_portfolio_beyond_bootstrap_fifteen(
         instrument=_candidate(),
         evaluated_at=AS_OF,
     ).authority_kind == "instrument_capability_certification"
+
+
+def test_production_policy_blocks_uncertified_core_asset_then_allows_certified_asset(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "eligibility.db"
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_INSTRUMENT_PAPER_ELIGIBILITY_DATABASE",
+        str(path),
+    )
+    capability = _production_universe_authority()
+
+    blocked = RecommendationUniversePolicy(
+        asset_class_authority=capability
+    ).evaluate(_candidate(), as_of=AS_OF)
+    assert blocked.disposition is UniverseDisposition.INTELLIGENCE_ONLY
+
+    SQLiteInstrumentPaperEligibilityStore(path).append(_certification())
+    approved = RecommendationUniversePolicy(
+        asset_class_authority=_production_universe_authority()
+    ).evaluate(_candidate(), as_of=AS_OF)
+
+    assert approved.disposition is UniverseDisposition.DIRECT_RECOMMENDATION
+    assert "instrument-paper-certification:aapl:v1" in approved.reasons[0]
 
 
 def test_unpublished_certified_instrument_fails_complete_universe_reconciliation(
