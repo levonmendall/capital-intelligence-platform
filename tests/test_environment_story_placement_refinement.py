@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,108 +7,70 @@ import environment_story_placement_refinement as refinement
 
 
 class _FakeStreamlit:
-    def __init__(self, calls: list[tuple[object, ...]]) -> None:
-        self.calls = calls
+    def fragment(self, *, run_every: str):
+        assert run_every == "30s"
 
-    def html(self, value: str) -> None:
-        self.calls.append(("html", value))
+        def decorate(function):
+            return function
 
-    @contextmanager
-    def expander(self, label: str, *args: object, **kwargs: object):
-        self.calls.append(("expander", label, args, kwargs))
-        yield
+        return decorate
 
 
-def _app(calls: list[tuple[object, ...]]) -> SimpleNamespace:
-    streamlit = _FakeStreamlit(calls)
-
-    def render_header(page: str) -> None:
-        calls.append(("header", page))
-
-    def render_story(page: str, steps: object) -> None:
-        calls.append(("story", page, tuple(steps)))
-
+def _app() -> SimpleNamespace:
     return SimpleNamespace(
-        render_app_header=render_header,
-        surface_story=render_story,
-        st=streamlit,
+        _render_today=lambda dependencies: ("old-today", dependencies),
+        _render_environment=lambda dependencies: ("old-environment", dependencies),
     )
 
 
-def test_environment_story_matches_today_two_by_two_mobile_grid() -> None:
-    calls: list[tuple[object, ...]] = []
-    app = _app(calls)
+def test_install_replaces_both_primary_storytelling_surfaces(monkeypatch) -> None:
+    app = _app()
+    old_today = app._render_today
+    old_environment = app._render_environment
+    monkeypatch.setattr(refinement, "st", _FakeStreamlit())
 
     refinement.install(app)
-    app.render_app_header("Environment")
 
-    assert calls[0] == ("header", "Environment")
-    assert calls[1][0] == "html"
-    markup = str(calls[1][1])
-    assert (
-        'class="surface-story story-environment process-lens-grid '
-        'process-lens-environment"'
-    ) in markup
-    assert 'class="process-lens-cards"' in markup
-    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in markup
-    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in markup
-    assert "aspect-ratio: 1 / 1" in markup
-    assert "overflow-x: auto" not in markup
-    assert markup.count('class="process-lens-card"') == 4
-    for label in ("Measure", "Classify", "Confirm", "Monitor"):
-        assert f'class="process-lens-card-title">{label}</div>' in markup
+    assert app._render_today is not old_today
+    assert app._render_environment is not old_environment
+    assert callable(app._render_today)
+    assert callable(app._render_environment)
+    assert getattr(app, refinement._INSTALLED_KEY) is True
 
 
-def test_environment_legacy_dropdown_and_duplicate_story_are_suppressed() -> None:
-    calls: list[tuple[object, ...]] = []
-    app = _app(calls)
+def test_install_is_idempotent(monkeypatch) -> None:
+    app = _app()
+    monkeypatch.setattr(refinement, "st", _FakeStreamlit())
 
     refinement.install(app)
-    with app.st.expander("How the Environment surface works"):
-        pass
-    app.surface_story("Environment", (("Duplicate", "Do not show"),))
-
-    assert calls == []
-
-
-def test_other_surface_stories_and_expanders_are_unchanged() -> None:
-    calls: list[tuple[object, ...]] = []
-    app = _app(calls)
-
+    first_today = app._render_today
+    first_environment = app._render_environment
     refinement.install(app)
-    app.render_app_header("Today")
-    app.surface_story("Today", (("Observe", "Current information"),))
-    with app.st.expander("Cross-asset market detail", expanded=False):
-        pass
 
-    assert calls[0] == ("header", "Today")
-    assert calls[1] == (
-        "story",
-        "Today",
-        (("Observe", "Current information"),),
+    assert app._render_today is first_today
+    assert app._render_environment is first_environment
+
+
+def test_module_replaces_repetitive_process_grid_with_distinct_storytelling() -> None:
+    source = Path("environment_story_placement_refinement.py").read_text(
+        encoding="utf-8"
     )
-    assert calls[2][0:2] == ("expander", "Cross-asset market detail")
+
+    assert "process-lens-grid" not in source
+    assert "What is moving the investment conversation" in source
+    assert "What happened" in source
+    assert "Why it matters" in source
+    assert "How markets may react" in source
+    assert "Environment // structural conditions" in source
+    assert "How this backdrop reaches markets" in source
+    assert "What would change the view" in source
 
 
-def test_install_is_idempotent() -> None:
-    calls: list[tuple[object, ...]] = []
-    app = _app(calls)
-
-    refinement.install(app)
-    first_header = app.render_app_header
-    first_story = app.surface_story
-    first_expander = app.st.expander
-    refinement.install(app)
-
-    assert app.render_app_header is first_header
-    assert app.surface_story is first_story
-    assert app.st.expander is first_expander
-
-
-def test_local_and_render_entrypoints_install_after_surface_content() -> None:
+def test_local_and_render_entrypoints_use_only_final_storytelling_layer() -> None:
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
         assert "import environment_story_placement_refinement" in source
+        assert "today_story_placement_refinement" not in source
         assert source.index("surface_content_refinement.install(app_impl)") < source.index(
             "environment_story_placement_refinement.install(app_impl)"
         )
