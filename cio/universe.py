@@ -176,6 +176,7 @@ class RecommendationUniversePolicy:
         approval_state: AssetClassApprovalState | None = None
         asset_class_policy_version: str | None = None
         paper_certification_identifier: str | None = None
+        paper_authority_kind: str | None = None
 
         if self.market_participation_authority is not None:
             if as_of is None:
@@ -210,6 +211,9 @@ class RecommendationUniversePolicy:
                         "intelligence-only: no active complete instrument paper-eligibility certification exists",
                     ),
                 )
+            paper_authority_kind = str(
+                getattr(participation, "authority_kind", "")
+            ).strip() or None
             value = getattr(participation, "certification_identifier", None)
             if value is not None and str(value).strip():
                 paper_certification_identifier = str(value).strip()
@@ -274,7 +278,8 @@ class RecommendationUniversePolicy:
 
         qualification_reasons: list[str] = []
         if (
-            instrument.average_daily_dollar_volume
+            paper_authority_kind != "instrument_capability_certification"
+            and instrument.average_daily_dollar_volume
             < self.minimum_average_daily_dollar_volume
         ):
             qualification_reasons.append(
