@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - feature/universal-investable-ownership-v2
-  pull_request:
-    branches:
-      - main
 
 concurrency:
   group: universal-investable-ownership-v2-apply
