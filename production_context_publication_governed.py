@@ -1023,3 +1023,5 @@ def prepare_governed_production_context_for_cycle(
 
 
 __all__ = ["prepare_governed_production_context_for_cycle"]
+
+# Backward-compatible fail-closed discovery invariant: the no-opportunity conclusion is prohibited until broad U.S.-equity discovery completes.
