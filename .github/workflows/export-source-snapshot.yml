@@ -1,0 +1,25 @@
+name: Export source snapshot
+
+on:
+  push:
+    branches:
+      - feature/universal-investable-ownership
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-investable-ownership-source
+          path: |
+            .
+            !.git
+          include-hidden-files: true
+          retention-days: 1
