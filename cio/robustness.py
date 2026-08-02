@@ -26,7 +26,7 @@ def _finite(value: object, *, field_name: str) -> float:
 
 @dataclass(frozen=True, slots=True)
 class RobustDecisionPolicy:
-    version: str = "robust-decision.v3"
+    version: str = "robust-decision.v4-economic-consistency"
     reference_position_weight: float = 0.05
     minimum_reference_weight: float = 0.01
     evidence_shrinkage_floor: float = 0.10
@@ -226,8 +226,6 @@ class RobustCandidateAssessor:
                 "evidence-adjusted geometric return does not clear the best alternative by the required margin"
             )
         stressed_floor = self.policy.minimum_stressed_edge
-        if policy_profile is not None:
-            stressed_floor = min(stressed_floor, -0.001)
         if stressed_edge < stressed_floor:
             reasons.append(
                 "the candidate loses its opportunity edge after an adverse scenario-probability shift"
@@ -287,10 +285,9 @@ class RobustCandidateAssessor:
     ) -> float:
         """Return the largest target that passes the applicable robustness policy.
 
-        Full acquisitions require every robustness control. Participation and
-        exploration may treat edge, stress, uncertainty, and probability-of-loss
-        shortfalls as sizing inputs. Scenario integrity and worst-case portfolio
-        loss remain hard portfolio-survival constraints.
+        Canonical positive allocations require every robustness control. The
+        allow_soft_failures parameter remains only for backward-compatible research
+        diagnostics and must not be enabled by CIO allocation paths.
         """
 
         if not isinstance(candidate, CandidateDecisionRecord):

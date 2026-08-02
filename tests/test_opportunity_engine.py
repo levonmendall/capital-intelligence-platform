@@ -252,6 +252,7 @@ def test_soft_return_hurdles_route_safe_candidates_to_progressive_lanes(
         AnalysisLane.PARTICIPATION,
         AnalysisLane.EXPLORATION,
     }
+    assert any("research lane" in reason for reason in qualification.reasons)
     assert any(reason_fragment in reason for reason in qualification.reasons)
 
 
