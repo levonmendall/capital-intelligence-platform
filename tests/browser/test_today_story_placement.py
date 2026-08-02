@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.parametrize("viewport_name", ("desktop", "iphone"))
-def test_today_story_is_fully_visible_before_investment_world_section(
+def test_today_is_a_ranked_responsive_investor_briefing(
     live_streamlit,
     viewport_name,
 ) -> None:
@@ -32,64 +32,51 @@ def test_today_story_is_fully_visible_before_investment_world_section(
         navigation.get_by_role("radio", name="Today", exact=True).click()
         page.get_by_role("heading", name="Today", exact=True).wait_for()
 
-        story = page.locator(".story-today.process-lens-grid")
-        story.wait_for(state="visible")
-        grid = story.locator(".process-lens-cards")
-        cards = grid.locator(".process-lens-card")
-        investment_world = page.get_by_text("Investment world today", exact=True).first
-        investment_world.wait_for(state="visible")
+        hero = page.locator(".ci-today")
+        hero.wait_for(state="visible")
+        page.get_by_text("What is moving the investment conversation", exact=True).wait_for()
+        page.get_by_text("Research radar", exact=True).first.wait_for()
 
-        story_box = story.bounding_box()
-        investment_box = investment_world.bounding_box()
-        assert story_box is not None
-        assert investment_box is not None
-        assert story_box["y"] < investment_box["y"]
+        assert page.locator(".story-today.process-lens-grid").count() == 0
         assert page.get_by_text("How the Today surface works", exact=True).count() == 0
-        assert cards.count() == 4
+        assert page.get_by_text("CIO RESPONSE", exact=False).count() == 0
+        assert page.get_by_text("PORTFOLIO EFFECT", exact=False).count() == 0
 
-        layout = grid.evaluate(
-            """element => {
-                const style = getComputedStyle(element);
-                const parent = element.getBoundingClientRect();
-                const boxes = Array.from(element.querySelectorAll('.process-lens-card'))
-                    .map(card => card.getBoundingClientRect());
-                return {
-                    display: style.display,
-                    columns: style.gridTemplateColumns,
-                    overflowX: style.overflowX,
-                    scrollWidth: element.scrollWidth,
-                    clientWidth: element.clientWidth,
-                    parentLeft: parent.left,
-                    parentRight: parent.right,
-                    boxes: boxes.map(box => ({
+        layout = page.evaluate(
+            """() => {
+                const hero = document.querySelector('.ci-today').getBoundingClientRect();
+                const grids = Array.from(document.querySelectorAll(
+                    '.ci-three,.ci-story-grid,.ci-pair,.ci-radar'
+                )).map(element => {
+                    const box = element.getBoundingClientRect();
+                    const style = getComputedStyle(element);
+                    return {
+                        display: style.display,
+                        columns: style.gridTemplateColumns,
                         left: box.left,
                         right: box.right,
-                        top: box.top,
-                        bottom: box.bottom,
-                        width: box.width,
-                        height: box.height
-                    }))
+                        scrollWidth: element.scrollWidth,
+                        clientWidth: element.clientWidth
+                    };
+                });
+                return {
+                    viewportWidth: window.innerWidth,
+                    documentWidth: document.documentElement.scrollWidth,
+                    heroLeft: hero.left,
+                    heroRight: hero.right,
+                    grids
                 };
             }"""
         )
-        assert layout["display"] == "grid"
-        assert layout["overflowX"] != "auto"
-        assert layout["scrollWidth"] <= layout["clientWidth"] + 2
-        assert all(
-            box["left"] >= layout["parentLeft"] - 1
-            and box["right"] <= layout["parentRight"] + 1
-            for box in layout["boxes"]
-        )
+        assert layout["documentWidth"] <= layout["viewportWidth"] + 2
+        assert layout["heroLeft"] >= -1
+        assert layout["heroRight"] <= layout["viewportWidth"] + 1
+        assert all(grid["display"] == "grid" for grid in layout["grids"])
+        assert all(grid["scrollWidth"] <= grid["clientWidth"] + 2 for grid in layout["grids"])
 
         if viewport_name == "iphone":
-            tops = [round(box["top"]) for box in layout["boxes"]]
-            assert len(set(tops)) == 2
-            assert abs(layout["boxes"][0]["width"] - layout["boxes"][0]["height"]) <= 3
-            assert abs(layout["boxes"][3]["width"] - layout["boxes"][3]["height"]) <= 3
-        else:
-            tops = [round(box["top"]) for box in layout["boxes"]]
-            assert len(set(tops)) == 1
-
-        for label in ("Observe", "Explain", "Resolve", "Act"):
-            assert story.get_by_text(label, exact=True).count() == 1
+            assert all(
+                len([value for value in grid["columns"].split(" ") if value]) == 1
+                for grid in layout["grids"]
+            )
         browser.close()

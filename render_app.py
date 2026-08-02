@@ -24,7 +24,6 @@ import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
 import secure_app
 import surface_content_refinement
-import today_story_placement_refinement
 import ui_experience_refinement
 import ui_refinement
 from render_nonblocking_data import (
@@ -211,7 +210,6 @@ def main() -> None:
     ui_refinement.install(app_impl, secure_app)
     ui_experience_refinement.install(app_impl)
     opportunity_funnel_ui_refinement.install(app_impl)
-    today_story_placement_refinement.install(app_impl)
     surface_content_refinement.install(app_impl)
     environment_story_placement_refinement.install(app_impl)
     prepare_render_surface_runtime()
