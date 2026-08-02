@@ -1,9 +1,10 @@
-"""Fail-closed resolution of the registry-certified active paper universe."""
+"""Fail-closed resolution of the capability-certified active paper universe."""
 
 from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
@@ -33,8 +34,15 @@ def load_active_paper_universe_for_publication(
     publication_identifier: str,
     *,
     path: str | Path | None = None,
+    evaluated_at: datetime | None = None,
 ) -> FreePaperPilotUniverse:
-    """Load the exact publication and apply the canonical market registry."""
+    """Load the exact publication and apply current capability certifications.
+
+    The persisted publication remains the complete candidate source. Bootstrap
+    registry instruments and additional actively certified instruments may survive
+    the ownership gate. An instrument missing from the publication cannot be
+    introduced by the certification database.
+    """
 
     resolved_identifier = str(publication_identifier).strip()
     if not resolved_identifier:
@@ -61,7 +69,8 @@ def load_active_paper_universe_for_publication(
             continue
         universe = _free_paper_pilot_universe_from_payload(universe_payload)
         return CanonicalMarketParticipationAuthority.load().decision_authority_universe(
-            universe
+            universe,
+            evaluated_at=evaluated_at,
         )
     detail = "; ".join(failures) or "no active-universe path was configured"
     raise ValueError(

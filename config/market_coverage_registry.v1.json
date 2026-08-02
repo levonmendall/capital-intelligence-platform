@@ -1,7 +1,26 @@
 {
   "schema_version": "market-coverage-registry.v1",
-  "identifier": "market-coverage:compounding-pilot:2026-07-31",
+  "identifier": "market-coverage:compounding-capability-based:2026-08-01",
   "portfolio_code": "COMPOUNDING",
+  "paper_allocation_policy": {
+    "mode": "capability_based",
+    "bootstrap_instruments_are_permanent_ceiling": false,
+    "required_capabilities": [
+      "market_data",
+      "identity",
+      "evidence",
+      "valuation",
+      "trading_calendar",
+      "transaction_costs",
+      "liquidity",
+      "accounting_treatment",
+      "execution_model",
+      "portfolio_construction",
+      "custody_settlement",
+      "risk_controls"
+    ],
+    "real_money_authorized": false
+  },
   "markets": [
     {
       "market": "us_listed_pilot_wrappers",
@@ -15,7 +34,8 @@
         "instrument:us-etf:wtpi", "instrument:us-etf:vixy", "instrument:us-etf:btal"
       ],
       "limitations": [
-        "Allocation is limited to these 15 listed U.S. fund instruments and their instrument-level caps.",
+        "These 15 listed U.S. fund instruments are bootstrap paper certifications, not the mature portfolio ceiling.",
+        "Additional liquid instruments may become paper-allocatable only through complete active instrument capability certification.",
         "Economic exposure through a listed wrapper does not certify its underlying direct market."
       ]
     },
@@ -26,14 +46,14 @@
       "allocatable_instrument_identifiers": [],
       "limitations": ["Macro evidence informs CIO context; ALFRED vintage history remains uncertified."]
     },
-    {"market": "direct_us_equities", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Broad direct stock allocation is outside the current bounded pilot."]},
-    {"market": "direct_international_equities", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Global reference, filing, market, and execution providers are not certified."]},
-    {"market": "direct_fixed_income_credit", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Direct terms, evaluated prices, accrued interest, calls, defaults, and liquidity are not certified."]},
-    {"market": "direct_commodities_futures", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Curves, contracts, rolls, margin, settlement, and execution inputs are blocked."]},
-    {"market": "direct_spot_fx", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Executable FX, fixing, availability, and conversion-cost certification is blocked."]},
-    {"market": "direct_spot_crypto", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Crypto venue corroboration, custody, outages, forks, and historical listing boundaries are blocked."]},
-    {"market": "direct_real_estate_alternatives", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Only listed pilot wrappers are currently bounded for implementation."]},
-    {"market": "direct_options_volatility", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Contract, surface, margin, lifecycle, and execution certifications are blocked."]},
+    {"market": "direct_us_equities", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each direct stock requires complete instrument capability certification before paper allocation."]},
+    {"market": "direct_international_equities", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each instrument requires certified global reference, filing, market, calendar, FX, accounting, cost, risk, and execution capabilities."]},
+    {"market": "direct_fixed_income_credit", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each bond requires certified terms, evaluated prices, accrued interest, calls, defaults, liquidity, accounting, settlement, and execution capabilities."]},
+    {"market": "direct_commodities_futures", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each instrument requires certified curves, contracts, rolls, margin or collateral, settlement, costs, accounting, execution, and risk controls."]},
+    {"market": "direct_spot_fx", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each pair requires certified executable quotes, calendars, fixing, availability, conversion costs, accounting, settlement, execution, and risk controls."]},
+    {"market": "direct_spot_crypto", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each asset requires certified venue corroboration, custody, outages, forks, listing history, accounting, execution, liquidity, and risk controls."]},
+    {"market": "direct_real_estate_alternatives", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each liquid listed or supported instrument requires complete capability certification before paper allocation."]},
+    {"market": "direct_options_volatility", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Each contract requires certified identity, surface, calendar, margin or premium accounting, lifecycle, costs, execution, and defined-risk controls."]},
     {"market": "public_events_information", "monitored": true, "decision_certification_identifier": null, "allocatable_instrument_identifiers": [], "limitations": ["Events are educational evidence and never independently allocatable."]}
   ],
   "real_money_authorized": false
