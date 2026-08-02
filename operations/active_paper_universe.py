@@ -85,12 +85,16 @@ def load_active_paper_universe_for_publication(
 def build_active_recommendation_universe_policy(
     universe: FreePaperPilotUniverse,
 ) -> RecommendationUniversePolicy:
-    """Return the only recommendation policy permitted for an active paper universe.
+    """Build recommendation authority from the exact supplied active universe.
 
-    This central factory prevents production callers from accidentally constructing a
-    default non-core intelligence-only policy. Every classified instrument in the exact
-    active publication is evaluated against the publication-derived capability
-    authority.
+    The publication loader applies current market-participation and individual
+    certification authority before returning a production universe. This factory must
+    not independently reload and reinterpret that authority: doing so can silently
+    remove a newly certified publication member when the process-local authority store
+    differs from the publication timestamp. The exact supplied universe is therefore
+    the sole instrument-membership boundary for committee and CIO qualification.
+    Paper execution independently rechecks current capability authority and remains
+    fail-closed.
     """
 
     if not str(getattr(universe, "identifier", "")).strip() or not tuple(
@@ -99,16 +103,12 @@ def build_active_recommendation_universe_policy(
         raise TypeError(
             "universe must expose a non-empty identifier and instrument collection"
         )
-    certified_universe = (
-        CanonicalMarketParticipationAuthority.load().decision_authority_universe(
-            universe
-        )
-    )
-    return RecommendationUniversePolicy(
-        asset_class_authority=BoundedPilotCapabilityAuthority.from_universe(
-            certified_universe
-        )
-    )
+    authority = BoundedPilotCapabilityAuthority.from_universe(universe)
+    # The supplied active universe has already crossed the market-participation gate.
+    # Disable only the redundant process-local reload while retaining production
+    # identity, structure, exposure, venue, country, and leverage validation.
+    authority.require_market_participation_authority = False
+    return RecommendationUniversePolicy(asset_class_authority=authority)
 
 
 def build_active_opportunity_engine(
