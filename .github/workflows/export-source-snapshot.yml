@@ -23,8 +23,8 @@ jobs:
         run: |
           set -euo pipefail
           PATCH_DIR=".github/universal-investable-ownership-patch"
-          if [[ ! -d "$PATCH_DIR" ]]; then
-            echo "No implementation patch is present."
+          if [[ ! -f "$PATCH_DIR/READY" ]]; then
+            echo "Implementation patch is not complete yet."
             exit 0
           fi
           cat "$PATCH_DIR"/chunk-* | base64 --decode | bzip2 --decompress > /tmp/universal.patch
