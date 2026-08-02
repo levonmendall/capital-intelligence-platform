@@ -16,6 +16,12 @@ from committee.cio import (
     UniverseDisposition,
 )
 from committee.consensus import CommitteeConsensus
+from committee.evidence_applicability import (
+    ApplicableAnalysis,
+    ApplicableEvidenceAssessment,
+    ApplicableEvidenceMatrix,
+    ApplicableEvidenceRule,
+)
 from committee.decision_discipline import (
     DissentDisposition,
     DissentRegister,
@@ -46,6 +52,10 @@ _specialists.IndependentSpecialistService = _GovernedIndependentSpecialistServic
 
 
 __all__ = [
+    "ApplicableAnalysis",
+    "ApplicableEvidenceAssessment",
+    "ApplicableEvidenceMatrix",
+    "ApplicableEvidenceRule",
     "CIOAction",
     "CIODecision",
     "CIOSynthesisPolicy",
