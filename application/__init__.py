@@ -28,10 +28,8 @@ from application.production_cio import (
     ProductionCanonicalCIOContextProvider,
     ProductionContextManifest,
 )
-from application.production_context_contract import (
-    ProductionCanonicalCIOContext,
-    ProductionCanonicalCIOExecutor,
-)
+from application.production_context_contract import ProductionCanonicalCIOContext
+from application.production_context_executor import ProductionCanonicalCIOExecutor
 from application.production_context import (
     EvidenceCertificationState,
     GovernedEvidenceLineage,
