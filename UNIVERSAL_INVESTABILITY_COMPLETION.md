@@ -14,6 +14,7 @@ This change completes the governed transition from fixed instrument lists and pr
 - Leveraged, short, margin, futures, options, and other complex structures remain fail-closed unless their exact structure is explicitly certified and permitted by current strategy and risk policy.
 - Portfolio construction search scales beyond the former four-state beam without weakening qualification or portfolio constraints.
 - Discovery failure cannot be represented as no opportunity; broad U.S.-equity discovery remains a protected fail-closed invariant within the wider universal process.
+- Bootstrap instruments are resolved through the canonical bootstrap authority map while newly certified instruments use the active capability publication.
 
 ## Preserved authority
 
