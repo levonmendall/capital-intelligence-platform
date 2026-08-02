@@ -14,6 +14,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
 
+import cio_report_backdrop_refinement
 import concise_operating_intelligence_ui as concise
 import live_operating_console
 import portfolio_first_ui_refinement
@@ -258,6 +259,7 @@ def install(app_impl: ModuleType) -> None:
     app_impl.render_live_market_status = render_live_market_status
     live_operating_console.render_live_market_status = render_live_market_status
     portfolio_first_ui_refinement.install(app_impl)
+    cio_report_backdrop_refinement.install(portfolio_first_ui_refinement)
     setattr(app_impl, _INSTALLED_STATE_KEY, True)
 
 
