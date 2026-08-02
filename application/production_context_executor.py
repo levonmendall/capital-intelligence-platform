@@ -97,7 +97,12 @@ def _publication_and_candidates(executor, *, context):
     return publication, candidates
 
 
-def _candidate_authority_universe(executor, *, context):
+def _candidate_authority_universe(
+    executor,
+    *,
+    context,
+    authority: CanonicalMarketParticipationAuthority,
+):
     _publication, candidates = _publication_and_candidates(
         executor,
         context=context,
@@ -134,7 +139,6 @@ def _candidate_authority_universe(executor, *, context):
         item.instrument_identifier: item
         for item in (*configured.instruments, *discovered)
     }
-    authority = CanonicalMarketParticipationAuthority.load()
     authority.require_complete_allocatable_set(
         combined.values(), evaluated_at=evaluated_at
     )
@@ -161,6 +165,36 @@ def _candidate_authority_universe(executor, *, context):
             "CIO, construction, risk, and paper execution controls remain independently fail-closed.",
         ),
     )
+
+
+def _apply_runtime_position_cap(
+    candidate,
+    *,
+    authority: CanonicalMarketParticipationAuthority,
+    evaluated_at: datetime,
+):
+    """Apply an exact certified cap before CIO sizing and construction.
+
+    The immutable screening record is not rewritten. The production decision object
+    receives the stricter of its analytical cap and the current instrument
+    certification cap. Missing or non-allocatable certifications remain unchanged so
+    the research lane can still evaluate them, while the universe assessment blocks
+    positive capital actions.
+    """
+
+    assessment = authority.assess(
+        instrument_identifier=candidate.instrument.instrument_id,
+        asset_class=candidate.instrument.asset_class,
+        instrument=candidate.instrument,
+        evaluated_at=evaluated_at,
+    )
+    certified_cap = assessment.maximum_position_weight
+    if not assessment.paper_allocatable or certified_cap is None:
+        return candidate
+    resolved_cap = min(candidate.maximum_position_weight, certified_cap)
+    if abs(resolved_cap - candidate.maximum_position_weight) <= 1e-12:
+        return candidate
+    return replace(candidate, maximum_position_weight=resolved_cap)
 
 
 def _publication_snapshot(executor, *, context):
@@ -311,7 +345,12 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
     def run(self, *, as_of: datetime):
         original_provider = self.context_provider
         context = original_provider.load_context(as_of=as_of)
-        authority_universe = _candidate_authority_universe(self, context=context)
+        market_authority = CanonicalMarketParticipationAuthority.load()
+        authority_universe = _candidate_authority_universe(
+            self,
+            context=context,
+            authority=market_authority,
+        )
         publication_snapshot = _publication_snapshot(self, context=context)
         expected_publication_identifier = (
             authority_universe.expected_publication_identifier
@@ -331,6 +370,15 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
             return authority_universe
 
         original_build_queue = OpportunityEngine.build_queue
+        original_candidate_loader = contract.candidate_from_payload
+
+        def candidate_from_payload_with_position_cap(payload):
+            candidate = original_candidate_loader(payload)
+            return _apply_runtime_position_cap(
+                candidate,
+                authority=market_authority,
+                evaluated_at=as_of,
+            )
 
         def build_queue_with_immutable_membership(
             engine,
@@ -356,6 +404,7 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
         with _AUTHORITY_BINDING_LOCK:
             original_loader = contract.load_active_paper_universe_for_publication
             contract.load_active_paper_universe_for_publication = load_exact_authority
+            contract.candidate_from_payload = candidate_from_payload_with_position_cap
             OpportunityEngine.build_queue = build_queue_with_immutable_membership
             self.context_provider = _CachedContextProvider(
                 original_provider, context, as_of=as_of
@@ -365,7 +414,10 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
             finally:
                 self.context_provider = original_provider
                 OpportunityEngine.build_queue = original_build_queue
+                contract.candidate_from_payload = original_candidate_loader
                 contract.load_active_paper_universe_for_publication = original_loader
 
 
-__all__ = ["ProductionCanonicalCIOExecutor"]
+__all__ = [
+    "ProductionCanonicalCIOExecutor",
+]
