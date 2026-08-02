@@ -1,3 +1,5 @@
+"""Regression coverage for fail-closed EODHD directory resilience."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
