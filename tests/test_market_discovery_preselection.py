@@ -164,7 +164,10 @@ def test_continuity_is_additive_to_200_slots():
     assert lane.continuity_count == 1
     assert len(lane.preselection.selected_symbols) == 200
     assert lane.deep_analyzed_count == 201
-    assert len(lane.preselection_evidence) == 200
+    assert len(lane.preselection_evidence) == (
+        len(lane.preselection.selected_symbols)
+        + len(lane.preselection.shadow_symbols)
+    )
 
 
 def test_cutoff_measurement_compares_shadow_with_selected():
