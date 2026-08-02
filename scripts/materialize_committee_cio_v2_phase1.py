@@ -182,6 +182,7 @@ def main() -> None:
         """from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from cio import CIOAction, CandidateAssetClass, ChiefInvestmentOfficer
 from opportunity import AnalysisLane, OpportunityEngine
@@ -241,8 +242,8 @@ def test_cio_source_has_no_progressive_soft_failure_allocation_path() -> None:
     source = Path("cio/service.py").read_text(encoding="utf-8")
     assert "allow_soft_failures=progressive_lane" not in source
     assert source.count("allow_soft_failures=False") == 2
-    assert "not progressive_lane\n            and robustness.evidence_adjusted_return" not in source
     assert "not progressive_lane and opportunity_edge" not in source
+    assert "robustness.stressed_edge <= 0.0" in source
 """,
         encoding="utf-8",
     )
