@@ -13,8 +13,31 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _layout(locator):
+    return locator.evaluate(
+        """element => {
+            const style = getComputedStyle(element);
+            const parent = element.getBoundingClientRect();
+            const children = Array.from(element.children).map(child => {
+                const box = child.getBoundingClientRect();
+                return {left: box.left, right: box.right, top: box.top, width: box.width};
+            });
+            return {
+                display: style.display,
+                columns: style.gridTemplateColumns,
+                overflowX: style.overflowX,
+                scrollWidth: element.scrollWidth,
+                clientWidth: element.clientWidth,
+                left: parent.left,
+                right: parent.right,
+                children
+            };
+        }"""
+    )
+
+
 @pytest.mark.parametrize("viewport_name", ("desktop", "iphone"))
-def test_today_story_is_fully_visible_before_investment_world_section(
+def test_today_is_a_ranked_responsive_investor_briefing(
     live_streamlit,
     viewport_name,
 ) -> None:
@@ -32,64 +55,57 @@ def test_today_story_is_fully_visible_before_investment_world_section(
         navigation.get_by_role("radio", name="Today", exact=True).click()
         page.get_by_role("heading", name="Today", exact=True).wait_for()
 
-        story = page.locator(".story-today.process-lens-grid")
-        story.wait_for(state="visible")
-        grid = story.locator(".process-lens-cards")
-        cards = grid.locator(".process-lens-card")
-        investment_world = page.get_by_text("Investment world today", exact=True).first
-        investment_world.wait_for(state="visible")
+        editorial = page.locator(".today-editorial")
+        radar = page.locator(".research-radar")
+        editorial.wait_for(state="visible")
+        radar.wait_for(state="visible")
 
-        story_box = story.bounding_box()
-        investment_box = investment_world.bounding_box()
-        assert story_box is not None
-        assert investment_box is not None
-        assert story_box["y"] < investment_box["y"]
-        assert page.get_by_text("How the Today surface works", exact=True).count() == 0
-        assert cards.count() == 4
+        editorial_box = editorial.bounding_box()
+        radar_box = radar.bounding_box()
+        assert editorial_box is not None
+        assert radar_box is not None
+        assert editorial_box["y"] < radar_box["y"]
 
-        layout = grid.evaluate(
-            """element => {
-                const style = getComputedStyle(element);
-                const parent = element.getBoundingClientRect();
-                const boxes = Array.from(element.querySelectorAll('.process-lens-card'))
-                    .map(card => card.getBoundingClientRect());
-                return {
-                    display: style.display,
-                    columns: style.gridTemplateColumns,
-                    overflowX: style.overflowX,
-                    scrollWidth: element.scrollWidth,
-                    clientWidth: element.clientWidth,
-                    parentLeft: parent.left,
-                    parentRight: parent.right,
-                    boxes: boxes.map(box => ({
-                        left: box.left,
-                        right: box.right,
-                        top: box.top,
-                        bottom: box.bottom,
-                        width: box.width,
-                        height: box.height
-                    }))
-                };
-            }"""
+        assert page.locator(".process-lens-grid").count() == 0
+        assert page.get_by_text(
+            "What is moving the investment conversation", exact=True
+        ).count() == 1
+        assert page.get_by_text(
+            "What the opportunity process is finding", exact=True
+        ).count() == 1
+        assert page.get_by_text("CIO response", exact=False).count() == 0
+        assert page.get_by_text("Portfolio effect", exact=False).count() == 0
+        assert page.get_by_text("Portfolio value", exact=True).count() == 0
+        assert page.get_by_text("Available cash", exact=True).count() == 0
+
+        grids = page.locator(
+            ".story-explanation-grid, .today-secondary-grid, "
+            ".today-watch-panel, .radar-grid"
         )
-        assert layout["display"] == "grid"
-        assert layout["overflowX"] != "auto"
-        assert layout["scrollWidth"] <= layout["clientWidth"] + 2
-        assert all(
-            box["left"] >= layout["parentLeft"] - 1
-            and box["right"] <= layout["parentRight"] + 1
-            for box in layout["boxes"]
+        for index in range(grids.count()):
+            layout = _layout(grids.nth(index))
+            assert layout["overflowX"] != "auto"
+            assert layout["scrollWidth"] <= layout["clientWidth"] + 2
+            assert all(
+                child["left"] >= layout["left"] - 1
+                and child["right"] <= layout["right"] + 1
+                for child in layout["children"]
+            )
+
+        explanation = page.locator(".story-explanation-grid")
+        if explanation.count():
+            layout = _layout(explanation.first)
+            column_count = len([value for value in layout["columns"].split(" ") if value])
+            if viewport_name == "iphone":
+                assert column_count == 1
+            else:
+                assert column_count == 3
+
+        document_width = page.evaluate(
+            """() => ({
+                scrollWidth: document.documentElement.scrollWidth,
+                clientWidth: document.documentElement.clientWidth
+            })"""
         )
-
-        if viewport_name == "iphone":
-            tops = [round(box["top"]) for box in layout["boxes"]]
-            assert len(set(tops)) == 2
-            assert abs(layout["boxes"][0]["width"] - layout["boxes"][0]["height"]) <= 3
-            assert abs(layout["boxes"][3]["width"] - layout["boxes"][3]["height"]) <= 3
-        else:
-            tops = [round(box["top"]) for box in layout["boxes"]]
-            assert len(set(tops)) == 1
-
-        for label in ("Observe", "Explain", "Resolve", "Act"):
-            assert story.get_by_text(label, exact=True).count() == 1
+        assert document_width["scrollWidth"] <= document_width["clientWidth"] + 2
         browser.close()
