@@ -16,6 +16,7 @@ import streamlit as st
 
 import app_impl
 import educational_market_briefing_ui
+import environment_driver_education_runtime
 import environment_story_placement_refinement
 import live_operating_console
 import operating_intelligence_ui
@@ -216,6 +217,9 @@ def main() -> None:
         environment_story_placement_refinement,
     )
     today_development_card_format_runtime.install(
+        environment_story_placement_refinement
+    )
+    environment_driver_education_runtime.install(
         environment_story_placement_refinement
     )
     opportunity_scan_resilience.install()
