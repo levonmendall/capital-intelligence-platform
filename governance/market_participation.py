@@ -95,11 +95,16 @@ _DERIVATIVE_TYPES = frozenset(
 
 
 def _instrument_identifier(item: object) -> str:
-    return str(getattr(item, "instrument_identifier", "")).strip()
+    value = getattr(item, "instrument_identifier", None)
+    if value is None:
+        value = getattr(item, "instrument_id", "")
+    return str(value).strip()
 
 
 def _execution_asset_class(item: object) -> CandidateAssetClass | None:
     value = getattr(item, "execution_asset_class", None)
+    if value is None:
+        value = getattr(item, "asset_class", None)
     if isinstance(value, CandidateAssetClass):
         return value
     try:
@@ -358,6 +363,7 @@ class CanonicalMarketParticipationAuthority:
         instruments: Iterable[object],
         *,
         universe_identifier: str | None = None,
+        evaluated_at: datetime | None = None,
     ) -> tuple[object, ...]:
         """Select every exact-listed or active-capability-certified instrument."""
 
@@ -373,6 +379,13 @@ class CanonicalMarketParticipationAuthority:
             if identifier in self._bootstrap_entry_by_instrument:
                 selected.append(item)
                 continue
+            if self.instrument_authority is not None and evaluated_at is not None:
+                capability = self.instrument_authority.assess(
+                    item, evaluated_at=evaluated_at
+                )
+                if capability.paper_allocatable:
+                    selected.append(item)
+                    continue
             if self._active_capability_entry(item) is None:
                 continue
             if self._complete_active_capability(
@@ -412,6 +425,7 @@ class CanonicalMarketParticipationAuthority:
         selected = self.filter_paper_allocatable(
             instruments,
             universe_identifier=universe_identifier,
+            evaluated_at=evaluated_at,
         )
         if not selected:
             raise ValueError(
