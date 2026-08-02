@@ -35,6 +35,8 @@ def _application(events: list[tuple[object, ...]]) -> SimpleNamespace:
 
 
 def test_today_story_is_visible_in_shared_two_by_two_mobile_grid() -> None:
+    """The retired module remains independently testable but is not runtime-installed."""
+
     events: list[tuple[object, ...]] = []
     app_impl = _application(events)
 
@@ -89,7 +91,7 @@ def test_other_surface_stories_and_expanders_are_unchanged() -> None:
     assert events[2][0:2] == ("story", "Environment")
 
 
-def test_install_is_idempotent_and_active_in_both_entrypoints() -> None:
+def test_install_is_idempotent_but_legacy_module_is_not_in_active_entrypoints() -> None:
     events: list[tuple[object, ...]] = []
     app_impl = _application(events)
 
@@ -100,5 +102,8 @@ def test_install_is_idempotent_and_active_in_both_entrypoints() -> None:
     assert app_impl.render_app_header is first_header
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
-        assert "import today_story_placement_refinement" in source
-        assert "today_story_placement_refinement.install(app_impl)" in source
+        assert "today_story_placement_refinement" not in source
+        assert "import environment_story_placement_refinement" in source
+        assert source.index("surface_content_refinement.install(app_impl)") < source.index(
+            "environment_story_placement_refinement.install(app_impl)"
+        )
