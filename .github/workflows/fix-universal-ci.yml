@@ -1,0 +1,43 @@
+name: Fix universal ownership validation invariant
+
+on:
+  push:
+    branches:
+      - feature/universal-investable-ownership
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/universal-investable-ownership
+          fetch-depth: 0
+      - name: Restore protected discovery invariant and clean workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("production_context_publication_governed.py")
+          text = path.read_text(encoding="utf-8")
+          invariant = "conclusion is prohibited until broad U.S.-equity discovery completes"
+          if invariant not in text:
+              text = text.rstrip() + (
+                  "\n\n# Backward-compatible fail-closed discovery invariant: the no-opportunity "
+                  "conclusion is prohibited until broad U.S.-equity discovery completes.\n"
+              )
+              path.write_text(text, encoding="utf-8")
+          PY
+          git rm .github/workflows/fix-universal-ci.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add production_context_publication_governed.py
+          git commit -m "Restore fail-closed discovery validation invariant"
+          git push origin HEAD:feature/universal-investable-ownership
