@@ -22,6 +22,7 @@ import operating_intelligence_ui
 import operating_status
 import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
+import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
 import ui_experience_refinement
@@ -205,6 +206,7 @@ def deployment_context_from_environment() -> DeploymentContext:
 
 
 def main() -> None:
+    public_event_recency_runtime.install(educational_market_briefing_ui)
     prepare_render_data_runtime()
     opportunity_scan_resilience.install()
     ui_refinement.install(app_impl, secure_app)
