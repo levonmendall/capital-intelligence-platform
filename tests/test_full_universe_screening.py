@@ -22,7 +22,12 @@ from data import (
     TradingCalendar,
 )
 from operations import FullUniverseCycleStatus, SQLiteOperationalSLOStore
-from opportunity import AlternativeKind, AlternativeUse, OpportunitySetContext
+from opportunity import (
+    AnalysisLane,
+    AlternativeKind,
+    AlternativeUse,
+    OpportunitySetContext,
+)
 from screening import (
     CandidateScreeningDecision,
     FullUniverseScreeningError,
@@ -309,18 +314,25 @@ def test_complete_cycle_publishes_only_after_every_constituent(tmp_path) -> None
 
     result = orchestrator.run(_request(), _context())
 
-    assert result.publication.eligible_instrument_count == 2
-    assert result.publication.screened_instrument_count == 2
-    assert result.publication.candidate_count == 1
+    assert result.publication.eligible_instrument_count == 3
+    assert result.publication.screened_instrument_count == 3
+    assert result.publication.candidate_count == 2
     assert result.publication.excluded_count == 1
-    assert tuple(item.instrument.symbol for item in result.candidates) == ("AAA",)
-    assert tuple(item.candidate.instrument.symbol for item in result.opportunity_queue.ranked) == (
-        "AAA",
+    assert {item.instrument.symbol for item in result.candidates} == {"AAA", "BTCUSD"}
+    assert {
+        item.candidate.instrument.symbol for item in result.opportunity_queue.ranked
+    } == {"AAA", "BTCUSD"}
+    crypto = next(
+        item
+        for item in result.opportunity_queue.ranked
+        if item.candidate.instrument.symbol == "BTCUSD"
     )
+    assert crypto.qualification.analysis_lane is AnalysisLane.EXPLORATION
+    assert not crypto.qualification.universe.direct_recommendation_allowed
     assert store.publication(_request().identifier) == result.publication
     cycle = slo_store.cycles(limit=1)[0]
     assert cycle.status is FullUniverseCycleStatus.COMPLETED
-    assert cycle.eligible_instrument_count == cycle.screened_instrument_count == 2
+    assert cycle.eligible_instrument_count == cycle.screened_instrument_count == 3
     assert journal.events(event_type=CIOJournalEventType.CANDIDATE_DECISION)
     assert journal.events(event_type=CIOJournalEventType.OPPORTUNITY_QUEUE)
     assert store.verify_integrity() is True
@@ -340,7 +352,7 @@ def test_partition_retry_is_recorded_and_succeeds(tmp_path) -> None:
         item for item in attempts if int(item.payload["partition_index"]) == 1
     ]
     assert [item.payload["status"] for item in bbb_attempts] == ["failed", "completed"]
-    assert result.publication.screened_instrument_count == 2
+    assert result.publication.screened_instrument_count == 3
 
 
 def test_failed_cycle_never_publishes_or_reaches_cio_journal(tmp_path) -> None:
@@ -376,8 +388,8 @@ def test_rerun_resumes_prior_results_without_rescreening_them(tmp_path) -> None:
     result = resumed.run(_request(), _context())
 
     assert "instrument:aaa" not in healthy.calls
-    assert healthy.calls == ["instrument:bbb"]
-    assert result.publication.screened_instrument_count == 2
+    assert healthy.calls == ["instrument:bbb", "instrument:crypto"]
+    assert result.publication.screened_instrument_count == 3
 
 
 def test_persisted_publication_replays_without_active_provider_and_repairs_journal(
@@ -431,16 +443,35 @@ def test_persisted_publication_replays_without_active_provider_and_repairs_journ
     assert slo_store.cycles(limit=1)[0].status is FullUniverseCycleStatus.COMPLETED
 
 
-def test_missing_metrics_fail_closed_before_publication(tmp_path) -> None:
+def test_missing_metrics_quarantine_instrument_and_continue(tmp_path) -> None:
     orchestrator, store, slo_store, journal = _orchestrator(
         tmp_path,
         metrics=_metrics(omit="instrument:bbb"),
     )
 
-    with pytest.raises(FullUniverseScreeningError, match="missing metrics"):
-        orchestrator.run(_request(), _context())
+    result = orchestrator.run(_request(), _context())
 
-    assert store.publication(_request().identifier) is None
+    assert result.publication.eligible_instrument_count == 2
+    assert result.publication.screened_instrument_count == 2
+    assert result.publication.candidate_count == 2
+    assert result.publication.excluded_count == 0
+    assert {item.instrument.symbol for item in result.candidates} == {"AAA", "BTCUSD"}
+    assert store.publication(_request().identifier) == result.publication
+    assert journal.count() > 0
+    assert slo_store.cycles(limit=1)[0].status is FullUniverseCycleStatus.COMPLETED
+
+
+def test_explicit_complete_metric_coverage_still_fails_closed(tmp_path) -> None:
+    orchestrator, store, slo_store, journal = _orchestrator(
+        tmp_path,
+        metrics=_metrics(omit="instrument:bbb"),
+    )
+    request = _request(require_complete_metric_coverage=True)
+
+    with pytest.raises(FullUniverseScreeningError, match="missing metrics"):
+        orchestrator.run(request, _context())
+
+    assert store.publication(request.identifier) is None
     assert journal.count() == 0
     assert slo_store.cycles(limit=1)[0].status is FullUniverseCycleStatus.FAILED
 

@@ -1,12 +1,15 @@
 """Governed complete-universe screening orchestration."""
 
+from screening.mature_market import (
+    FullUniverseScreeningOrchestrator,
+    FullUniverseScreeningRequest,
+    MatureMarketUniverseBuilder,
+)
 from screening.orchestration import (
     CandidateScreeningDecision,
     CandidateScreeningProvider,
     FullUniverseScreeningError,
-    FullUniverseScreeningOrchestrator,
     FullUniverseScreeningPublication,
-    FullUniverseScreeningRequest,
     FullUniverseScreeningRun,
     InstrumentScreeningResult,
     SQLiteFullUniverseScreeningStore,
@@ -26,6 +29,7 @@ __all__ = [
     "FullUniverseScreeningRequest",
     "FullUniverseScreeningRun",
     "InstrumentScreeningResult",
+    "MatureMarketUniverseBuilder",
     "SQLiteFullUniverseScreeningStore",
     "ScreeningDisposition",
     "ScreeningEvent",
