@@ -187,7 +187,7 @@ class CanonicalMarketParticipationAuthority:
     def allocatable_instrument_identifiers(self) -> frozenset[str]:
         """Return legacy exact-list identifiers, not the dynamic active universe."""
 
-        return frozenset(self._allocatable_entry_by_instrument)
+        return frozenset(self._bootstrap_entry_by_instrument)
 
     def _entry_for_asset_class(
         self, asset_class: CandidateAssetClass | None
@@ -370,7 +370,7 @@ class CanonicalMarketParticipationAuthority:
             identifier = _instrument_identifier(item)
             if not identifier:
                 continue
-            if identifier in self._allocatable_entry_by_instrument:
+            if identifier in self._bootstrap_entry_by_instrument:
                 selected.append(item)
                 continue
             if self._active_capability_entry(item) is None:
