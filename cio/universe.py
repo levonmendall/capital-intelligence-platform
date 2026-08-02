@@ -240,8 +240,8 @@ class RecommendationUniversePolicy:
             )
         return assessment
 
-    @staticmethod
     def _governed_asset_class(
+        self,
         instrument: CandidateInstrument,
     ) -> CandidateAssetClass | None:
         exposure = instrument.economic_exposure_class
@@ -249,12 +249,32 @@ class RecommendationUniversePolicy:
             return exposure
         if instrument.asset_class in UNIVERSAL_GOVERNED_ASSET_CLASSES:
             return instrument.asset_class
+        if instrument.asset_class in {
+            CandidateAssetClass.US_EQUITY,
+            CandidateAssetClass.US_ETF,
+        } and (
+            instrument.country_code != "US"
+            or instrument.venue not in self.us_venues
+        ):
+            return CandidateAssetClass.INTERNATIONAL_EQUITY
+        if instrument.asset_class is CandidateAssetClass.CASH_EQUIVALENT and (
+            not instrument.is_us_treasury
+            or instrument.effective_duration_years is None
+            or instrument.effective_duration_years > self.maximum_treasury_duration_years
+        ):
+            # Non-core cash instruments are not categorically excluded; they use the
+            # governed fixed-income capability path instead of the short-Treasury
+            # automatic core path.
+            return CandidateAssetClass.FIXED_INCOME
         complex_wrapper = (
             instrument.asset_class in CORE_POLICY_ASSET_CLASSES
             and (
                 instrument.uses_derivatives
                 or abs(instrument.leverage_multiplier) > 1.0 + 1e-9
-                or instrument.instrument_type in {"future", "perpetual", "option"}
+                or instrument.instrument_type in {
+                    "future", "perpetual", "option", "forward", "swap",
+                    "warrant", "right",
+                }
                 or (instrument.replication_method or "").lower()
                 in {"synthetic", "swap", "derivative"}
             )

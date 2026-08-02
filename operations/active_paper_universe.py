@@ -7,7 +7,10 @@ import os
 from pathlib import Path
 from typing import Mapping
 
+from cio import RecommendationUniversePolicy
+from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from governance.market_participation import CanonicalMarketParticipationAuthority
+from opportunity import OpportunityEngine
 from operations.free_paper_pilot import (
     FreePaperPilotUniverse,
     _free_paper_pilot_universe_from_payload,
@@ -70,4 +73,56 @@ def load_active_paper_universe_for_publication(
     )
 
 
-__all__ = ["load_active_paper_universe_for_publication"]
+def build_active_recommendation_universe_policy(
+    universe: FreePaperPilotUniverse,
+) -> RecommendationUniversePolicy:
+    """Return the only recommendation policy permitted for an active paper universe.
+
+    This central factory prevents production callers from accidentally constructing a
+    default non-core intelligence-only policy. Every classified instrument in the exact
+    active publication is evaluated against the publication-derived capability
+    authority.
+    """
+
+    if not str(getattr(universe, "identifier", "")).strip() or not tuple(
+        getattr(universe, "instruments", ())
+    ):
+        raise TypeError(
+            "universe must expose a non-empty identifier and instrument collection"
+        )
+    certified_universe = (
+        CanonicalMarketParticipationAuthority.load().decision_authority_universe(
+            universe
+        )
+    )
+    return RecommendationUniversePolicy(
+        asset_class_authority=BoundedPilotCapabilityAuthority.from_universe(
+            certified_universe
+        )
+    )
+
+
+def build_active_opportunity_engine(
+    universe: FreePaperPilotUniverse,
+    *,
+    template: OpportunityEngine | None = None,
+) -> OpportunityEngine:
+    """Build an opportunity engine with mandatory active-universe capability authority."""
+
+    if template is not None and not isinstance(template, OpportunityEngine):
+        raise TypeError("template must be an OpportunityEngine or None")
+    return OpportunityEngine(
+        universe_policy=build_active_recommendation_universe_policy(universe),
+        qualification_policy=None if template is None else template.policy,
+        robustness_policy=(
+            None if template is None else template.robust_assessor.policy
+        ),
+        policy_matrix=None if template is None else template.policy_matrix,
+    )
+
+
+__all__ = [
+    "build_active_opportunity_engine",
+    "build_active_recommendation_universe_policy",
+    "load_active_paper_universe_for_publication",
+]

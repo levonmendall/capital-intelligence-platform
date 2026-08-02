@@ -141,7 +141,7 @@ The analysis universe must be built from a provider-driven, point-in-time securi
 
 All-market analysis is mandatory; direct allocation is conditional. An instrument may become a direct paper recommendation target only when the complete point-in-time capability stack is approved: identity, licensed data, valuation, expected return, liquidity, risk, transaction costs, execution, custody, settlement, thesis monitoring, outcome evaluation, and governance lineage.
 
-No classified liquid public-market family is categorically excluded from governed paper allocation. An unavailable or unapproved capability keeps the affected instrument evidence-only, research-only, or ineligible. It must never be treated as absent evidence for the purpose of claiming that the remaining market is the best use of capital.
+No classified liquid public-market family is categorically excluded from governed paper allocation. Code-level asset-class, instrument-type, symbol-count, or static-lane whitelists cannot define ownership eligibility. Eligibility is capability-based: an unavailable or unapproved provider, identity, evidence, valuation, liquidity, execution, custody, settlement, contract, lifecycle, or evaluation capability keeps the affected instrument evidence-only, research-only, or ineligible. It must never be treated as absent evidence for the purpose of claiming that the remaining market is the best use of capital.
 
 Complex wrappers are governed by their underlying economic exposure and implementation structure; a domestic listing cannot bypass leverage, derivative, custody, settlement, or lifecycle controls.
 

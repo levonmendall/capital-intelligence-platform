@@ -48,7 +48,6 @@ from committee.specialists import (
     MarketSpecialistContext,
 )
 from operations.direct_global_markets import (
-    DIRECT_EXECUTION_CLASSES,
     DirectGlobalMarketClient,
     DirectGlobalMarketUniverse,
 )
@@ -137,12 +136,12 @@ def _default_probe(
     listed_instruments = tuple(
         item
         for item in scheduled_instruments
-        if item.execution_asset_class not in DIRECT_EXECUTION_CLASSES
+        if not item.uses_direct_market_provider
     )
     direct_instruments = tuple(
         item
         for item in scheduled_instruments
-        if item.execution_asset_class in DIRECT_EXECUTION_CLASSES
+        if item.uses_direct_market_provider
     )
     bars: dict[str, object] = {}
     quotes: dict[str, object] = {}
@@ -741,17 +740,14 @@ def _candidate_and_evidence(
     candidate_identifier = f"candidate:paper-pilot:{as_of.strftime('%Y%m%dT%H%M%S%fZ')}:{instrument.symbol}"
     market_ids = features.evidence_identifiers
     evidence_ids = tuple(dict.fromkeys((*market_ids, *macro_identifiers)))
-    direct_market = instrument.execution_asset_class in DIRECT_EXECUTION_CLASSES
+    direct_market = instrument.uses_direct_market_provider
     security_master_prefix = "direct-market-universe" if direct_market else "alpaca-paper-assets"
     security_record_prefix = "direct-market-instrument" if direct_market else "alpaca-paper-asset"
-    replication_method = {
-        CandidateAssetClass.INTERNATIONAL_EQUITY: "direct-global-equity-paper",
-        CandidateAssetClass.FIXED_INCOME: "direct-bond-paper",
-        CandidateAssetClass.FX: "direct-spot-fx-paper",
-        CandidateAssetClass.CRYPTO: "direct-spot-crypto-paper",
-        CandidateAssetClass.FUTURE: "direct-dated-fully-collateralized-future-paper",
-        CandidateAssetClass.OPTION: "direct-long-premium-defined-risk-option-paper",
-    }.get(instrument.execution_asset_class, "us-listed-economic-exposure-wrapper")
+    replication_method = (
+        f"direct-{instrument.execution_asset_class.value}-{instrument.instrument_type}-paper"
+        if direct_market
+        else "us-listed-economic-exposure-wrapper"
+    )
     model_versions = ((_DIRECT_MARKET_EVIDENCE_VERSION,) if direct_market else (_MODEL_VERSION,))
     horizon_days = 365
     if instrument.expiration_at:
@@ -790,8 +786,8 @@ def _candidate_and_evidence(
                 instrument.economic_exposure,
                 instrument.execution_asset_class,
             ),
-            leverage_multiplier=1.0,
-            uses_derivatives=(instrument.execution_asset_class in {CandidateAssetClass.FUTURE, CandidateAssetClass.OPTION} or instrument.economic_exposure in {"managed_futures", "option_strategies", "volatility"}),
+            leverage_multiplier=instrument.gross_leverage,
+            uses_derivatives=instrument.uses_derivatives,
             replication_method=replication_method,
         ),
         current_price=features.current_price,
@@ -1497,7 +1493,7 @@ def build_paper_evidence(
                 ) from error
             detail = f"Certified listed-wrapper evidence is incomplete: {error}"
             if (
-                instrument.execution_asset_class in DIRECT_EXECUTION_CLASSES
+                instrument.uses_direct_market_provider
                 and instrument.symbol in direct_market_errors
             ):
                 detail = (

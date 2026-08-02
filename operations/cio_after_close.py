@@ -17,8 +17,8 @@ from operations.cio_material_reassessment import (
 )
 from operations.equity_discovery import discover_us_equities
 from operations.free_paper_pilot import (
-    DEFAULT_UNIVERSE_PATH,
-    load_free_paper_pilot_universe,
+    active_paper_universe_path,
+    load_current_active_paper_universe,
 )
 
 
@@ -48,14 +48,16 @@ class AfterCloseOpportunityReviewer:
         outcome_store_path: str | Path,
         timezone_name: str,
         review_time: str = "13:15",
-        universe_path: str | Path = DEFAULT_UNIVERSE_PATH,
+        universe_path: str | Path | None = None,
         discovery_probe: Callable[..., object] = discover_us_equities,
     ) -> None:
         self.state_path = Path(state_path).expanduser()
         self.outcome_store_path = Path(outcome_store_path).expanduser()
         self.timezone = ZoneInfo(timezone_name)
         self.review_time = parse_clock(review_time)
-        self.universe_path = Path(universe_path).expanduser()
+        self.universe_path = Path(
+            universe_path or active_paper_universe_path()
+        ).expanduser()
         self.discovery_probe = discovery_probe
 
     def run_if_due(self, *, now: datetime) -> AfterCloseLearningResult:
@@ -89,7 +91,9 @@ class AfterCloseOpportunityReviewer:
             tracked = store.unresolved_symbols(as_of=timestamp)
             resolved = 0
             if tracked:
-                base = load_free_paper_pilot_universe(self.universe_path)
+                _publication_identifier, base = load_current_active_paper_universe(
+                    active_path=self.universe_path
+                )
                 discovery = self.discovery_probe(
                     as_of=timestamp,
                     held_symbols=(),

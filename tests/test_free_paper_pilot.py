@@ -62,7 +62,7 @@ def _http_get(url: str, **kwargs: Any) -> _Response:
                 "symbol": symbol,
                 "status": "active",
                 "tradable": True,
-                "fractionable": True,
+                "fractionable": False,
                 "class": "us_equity",
             }
         )
@@ -143,7 +143,7 @@ def test_live_broker_endpoint_is_rejected_for_free_pilot(monkeypatch) -> None:
         AlpacaPaperSettings.from_env()
 
 
-def test_readiness_validates_account_assets_and_current_iex_quotes() -> None:
+def test_readiness_validates_account_assets_and_current_iex_quotes_without_requiring_fractional_trading() -> None:
     universe = load_free_paper_pilot_universe(
         ROOT / "config" / "free_paper_pilot_universe.json"
     )

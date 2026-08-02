@@ -35,6 +35,14 @@ class CoverageLevel(str, Enum):
     ALLOCATABLE = "allocatable"
 
 
+class AllocationAuthority(str, Enum):
+    """How a decision-certified market may grant paper-allocation authority."""
+
+    NONE = "none"
+    EXACT_INSTRUMENT_LIST = "exact_instrument_list"
+    ACTIVE_UNIVERSE_CAPABILITY = "active_universe_capability"
+
+
 @dataclass(frozen=True, slots=True)
 class MarketCoverage:
     market: str
@@ -42,6 +50,7 @@ class MarketCoverage:
     decision_certification_identifier: str | None
     allocatable_instrument_identifiers: tuple[str, ...]
     limitations: tuple[str, ...]
+    allocation_authority: AllocationAuthority = AllocationAuthority.EXACT_INSTRUMENT_LIST
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "market", _text(self.market, "market"))
@@ -53,6 +62,15 @@ class MarketCoverage:
                 "decision_certification_identifier",
                 _text(self.decision_certification_identifier, "decision_certification_identifier"),
             )
+        if not isinstance(self.allocation_authority, AllocationAuthority):
+            try:
+                object.__setattr__(
+                    self,
+                    "allocation_authority",
+                    AllocationAuthority(str(self.allocation_authority)),
+                )
+            except ValueError as error:
+                raise ValueError("allocation_authority is unsupported") from error
         for field in ("allocatable_instrument_identifiers", "limitations"):
             value = getattr(self, field)
             if not isinstance(value, tuple) or not all(isinstance(item, str) and item.strip() for item in value):
@@ -63,6 +81,18 @@ class MarketCoverage:
             raise ValueError("decision-certified markets must be monitored")
         if self.allocatable_instrument_identifiers and not self.decision_certification_identifier:
             raise ValueError("allocatable instruments require decision certification")
+        if (
+            self.allocation_authority is AllocationAuthority.ACTIVE_UNIVERSE_CAPABILITY
+            and not self.decision_certification_identifier
+        ):
+            raise ValueError(
+                "active-universe capability authority requires decision certification"
+            )
+        if (
+            self.allocation_authority is AllocationAuthority.NONE
+            and self.allocatable_instrument_identifiers
+        ):
+            raise ValueError("non-allocatable markets cannot list allocatable instruments")
 
     @property
     def decision_certified(self) -> bool:
@@ -113,6 +143,7 @@ class MarketCoverageRegistry:
                     "decision_certified": item.decision_certified,
                     "decision_certification_identifier": item.decision_certification_identifier,
                     "allocatable_instrument_identifiers": list(item.allocatable_instrument_identifiers),
+                    "allocation_authority": item.allocation_authority.value,
                     "limitations": list(item.limitations),
                 }
                 for item in self.markets
@@ -282,6 +313,16 @@ def load_market_coverage(path: str | Path) -> MarketCoverageRegistry:
                 decision_certification_identifier=item.get("decision_certification_identifier"),
                 allocatable_instrument_identifiers=tuple(item.get("allocatable_instrument_identifiers", ())),
                 limitations=tuple(item.get("limitations", ())),
+                allocation_authority=AllocationAuthority(
+                    item.get(
+                        "allocation_authority",
+                        (
+                            "exact_instrument_list"
+                            if item.get("allocatable_instrument_identifiers")
+                            else "none"
+                        ),
+                    )
+                ),
             )
             for item in payload["markets"]
         ),
@@ -340,5 +381,5 @@ __all__ = [
     "CoverageLevel", "HistoricalCertificationBoundary", "HistoricalCertificationDomain",
     "HistoricalCertificationReport", "HistoricalCertificationState", "HistoricalEvidenceReference",
     "MarketCoverage", "MarketCoverageRegistry", "SQLiteCoverageCertificationStore",
-    "certify_historical_cutoff", "load_historical_boundaries", "load_market_coverage",
+    "AllocationAuthority", "certify_historical_cutoff", "load_historical_boundaries", "load_market_coverage",
 ]

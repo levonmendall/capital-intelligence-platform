@@ -1,11 +1,12 @@
 """Fail-closed provider-enriched factor inputs for market preselection.
 
 The merit-sleeve selector must not manufacture value, momentum, carry, or
-improving-condition scores from catalog ordering or metadata.  The canonical runtime
-therefore consumes a point-in-time provider publication containing raw measurements,
-methodology versions, and source lineage for every substantive factor.  Missing,
-stale, future-known, or unprovenanced factors make the affected instrument ineligible
-for new-opportunity nomination; they never create a neutral or synthetic score.
+improving-condition scores from catalog ordering or metadata. The canonical runtime
+therefore consumes point-in-time provider evidence for every factor that is applicable
+to an instrument. A provider may explicitly mark a factor not applicable only with a
+governed rationale, methodology, timestamp, and immutable evidence lineage. Missing,
+stale, future-known, unprovenanced, or silently omitted factors make the affected
+instrument ineligible; they never create a neutral or synthetic score.
 """
 
 from __future__ import annotations
@@ -41,6 +42,8 @@ _SCORE_FIELD_BY_FACTOR = {
     "carry": "carry_score",
     "improving_conditions": "improving_conditions_score",
 }
+_FACTOR_APPLICABILITY_SCORED = "scored"
+_FACTOR_APPLICABILITY_NOT_APPLICABLE = "not_applicable"
 
 
 class ProviderEnrichedPreselectionError(RuntimeError):
@@ -156,6 +159,7 @@ def _factor_identifier(
     provider: str,
     methodology_version: str,
     payload: Mapping[str, object],
+    applicability: str = _FACTOR_APPLICABILITY_SCORED,
 ) -> str:
     digest = hashlib.sha256(
         json.dumps(
@@ -165,10 +169,12 @@ def _factor_identifier(
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
-    return (
-        f"provider-factor:{factor}:{provider.lower()}:"
-        f"{methodology_version}:{digest}"
+    prefix = (
+        "provider-factor-not-applicable"
+        if applicability == _FACTOR_APPLICABILITY_NOT_APPLICABLE
+        else "provider-factor"
     )
+    return f"{prefix}:{factor}:{provider.lower()}:{methodology_version}:{digest}"
 
 
 def _load(path: Path) -> Mapping[str, object]:
@@ -208,7 +214,13 @@ def validate_provider_enriched_signals(
     *,
     required_factors: Sequence[str] = REQUIRED_PROVIDER_FACTORS,
 ) -> Mapping[str, CatalogScreeningSignal]:
-    """Require every substantive score and factor-specific provider lineage."""
+    """Require scored or explicitly-not-applicable evidence for every factor.
+
+    The required factor set is a governance coverage set, not a demand that every
+    instrument receive every score. Each factor must either contain a substantive score
+    with provider lineage or a provider-certified ``not_applicable`` determination. At
+    least one substantive factor must be scored for every new opportunity.
+    """
 
     normalized = {
         str(symbol).strip().upper(): signal for symbol, signal in signals.items()
@@ -225,23 +237,35 @@ def validate_provider_enriched_signals(
             )
             continue
         reasons: list[str] = []
+        substantive_count = 0
         for factor in required_factors:
             field_name = _SCORE_FIELD_BY_FACTOR.get(str(factor))
             if field_name is None:
                 raise ProviderEnrichedPreselectionError(
                     f"unsupported provider factor {factor!r}"
                 )
-            if getattr(signal, field_name) is None:
-                reasons.append(f"provider_factor_{factor}_unavailable")
-            prefix = f"provider-factor:{factor}:"
-            if not any(
-                identifier.startswith(prefix)
+            value = getattr(signal, field_name)
+            scored_prefix = f"provider-factor:{factor}:"
+            not_applicable_prefix = f"provider-factor-not-applicable:{factor}:"
+            scored_lineage = any(
+                identifier.startswith(scored_prefix)
                 for identifier in signal.evidence_identifiers
-            ):
-                reasons.append(f"provider_factor_{factor}_unprovenanced")
-        result[symbol] = (
-            signal if not reasons else _unavailable(signal, *reasons)
-        )
+            )
+            not_applicable_lineage = any(
+                identifier.startswith(not_applicable_prefix)
+                for identifier in signal.evidence_identifiers
+            )
+            if value is not None:
+                substantive_count += 1
+                if not scored_lineage:
+                    reasons.append(f"provider_factor_{factor}_unprovenanced")
+                if not_applicable_lineage:
+                    reasons.append(f"provider_factor_{factor}_applicability_conflict")
+            elif not not_applicable_lineage:
+                reasons.append(f"provider_factor_{factor}_unavailable")
+        if substantive_count < 1:
+            reasons.append("provider_substantive_factor_set_empty")
+        result[symbol] = signal if not reasons else _unavailable(signal, *reasons)
     return result
 
 
@@ -357,23 +381,10 @@ def provider_enriched_catalog_screening_signals(
             if not isinstance(block, Mapping):
                 errors.append(f"provider_factor_{factor}_unavailable")
                 continue
+            applicability = str(
+                block.get("applicability", _FACTOR_APPLICABILITY_SCORED)
+            ).strip().lower()
             try:
-                score = _score(
-                    block.get("score"),
-                    field_name=f"signals.{symbol}.factors.{factor}.score",
-                )
-                _raw_value(
-                    block.get("raw_value"),
-                    field_name=f"signals.{symbol}.factors.{factor}.raw_value",
-                )
-                _text(
-                    block.get("units"),
-                    field_name=f"signals.{symbol}.factors.{factor}.units",
-                )
-                _positive_integer(
-                    block.get("horizon_days"),
-                    field_name=f"signals.{symbol}.factors.{factor}.horizon_days",
-                )
                 provider = _text(
                     block.get("provider"),
                     field_name=f"signals.{symbol}.factors.{factor}.provider",
@@ -398,6 +409,41 @@ def provider_enriched_catalog_screening_signals(
                         f"signals.{symbol}.factors.{factor}.evidence_identifiers"
                     ),
                 )
+                if applicability == _FACTOR_APPLICABILITY_NOT_APPLICABLE:
+                    _text(
+                        block.get("rationale"),
+                        field_name=(
+                            f"signals.{symbol}.factors.{factor}.rationale"
+                        ),
+                    )
+                    if block.get("score") is not None:
+                        raise ProviderEnrichedPreselectionError(
+                            "not-applicable factors cannot carry a score"
+                        )
+                    score = None
+                elif applicability == _FACTOR_APPLICABILITY_SCORED:
+                    score = _score(
+                        block.get("score"),
+                        field_name=f"signals.{symbol}.factors.{factor}.score",
+                    )
+                    _raw_value(
+                        block.get("raw_value"),
+                        field_name=f"signals.{symbol}.factors.{factor}.raw_value",
+                    )
+                    _text(
+                        block.get("units"),
+                        field_name=f"signals.{symbol}.factors.{factor}.units",
+                    )
+                    _positive_integer(
+                        block.get("horizon_days"),
+                        field_name=(
+                            f"signals.{symbol}.factors.{factor}.horizon_days"
+                        ),
+                    )
+                else:
+                    raise ProviderEnrichedPreselectionError(
+                        "factor applicability must be scored or not_applicable"
+                    )
             except ProviderEnrichedPreselectionError:
                 errors.append(f"provider_factor_{factor}_invalid")
                 continue
@@ -410,6 +456,7 @@ def provider_enriched_catalog_screening_signals(
                     provider=provider,
                     methodology_version=methodology,
                     payload=block,
+                    applicability=applicability,
                 )
             )
 

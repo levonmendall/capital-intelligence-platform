@@ -188,3 +188,65 @@ def test_future_known_provider_publication_is_rejected(tmp_path):
         reason.startswith("provider_enriched_preselection_publication_invalid")
         for reason in signal.exclusion_reasons
     )
+
+
+def test_explicit_not_applicable_factor_is_accepted_with_governed_lineage(tmp_path):
+    as_of = datetime(2026, 8, 1, 15, tzinfo=timezone.utc)
+    available_at = as_of - timedelta(minutes=1)
+    factors = dict(_publication(available_at=available_at)["signals"]["ABC"]["factors"])
+    factors["carry"] = {
+        "applicability": "not_applicable",
+        "rationale": "This non-yielding instrument has no economically meaningful carry measure.",
+        "provider": "TEST_PROVIDER",
+        "methodology_version": "factor-applicability.v1",
+        "observed_at": (available_at - timedelta(minutes=2)).isoformat(),
+        "evidence_identifiers": ["provider-record:carry-applicability:ABC"],
+    }
+    path = tmp_path / "provider-preselection.json"
+    path.write_text(
+        json.dumps(_publication(available_at=available_at, factors=factors)),
+        encoding="utf-8",
+    )
+
+    signal = provider_enriched_catalog_screening_signals(
+        (_record(),),
+        as_of,
+        ComprehensiveMarketDiscoveryPolicy(provider_preselection_path=str(path)),
+    )["ABC"]
+
+    assert signal.eligible is True
+    assert signal.carry_score is None
+    assert any(
+        item.startswith("provider-factor-not-applicable:carry:")
+        for item in signal.evidence_identifiers
+    )
+
+
+def test_all_factors_cannot_be_declared_not_applicable(tmp_path):
+    as_of = datetime(2026, 8, 1, 15, tzinfo=timezone.utc)
+    available_at = as_of - timedelta(minutes=1)
+    factors = {
+        name: {
+            "applicability": "not_applicable",
+            "rationale": f"No applicable {name} model.",
+            "provider": "TEST_PROVIDER",
+            "methodology_version": "factor-applicability.v1",
+            "observed_at": (available_at - timedelta(minutes=2)).isoformat(),
+            "evidence_identifiers": [f"provider-record:{name}-applicability:ABC"],
+        }
+        for name in REQUIRED_PROVIDER_FACTORS
+    }
+    path = tmp_path / "provider-preselection.json"
+    path.write_text(
+        json.dumps(_publication(available_at=available_at, factors=factors)),
+        encoding="utf-8",
+    )
+
+    signal = provider_enriched_catalog_screening_signals(
+        (_record(),),
+        as_of,
+        ComprehensiveMarketDiscoveryPolicy(provider_preselection_path=str(path)),
+    )["ABC"]
+
+    assert signal.eligible is False
+    assert "provider_substantive_factor_set_empty" in signal.exclusion_reasons

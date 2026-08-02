@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
@@ -35,6 +36,11 @@ from opportunity import OpportunityEngine
 from opportunity.snapshot import (
     PUBLICATION_SNAPSHOT_KIND,
     build_opportunity_snapshot,
+)
+from operations.free_paper_pilot import (
+    FreePaperPilotInstrument,
+    load_free_paper_pilot_universe,
+    write_active_paper_universe,
 )
 from portfolio.state import SQLiteCanonicalPortfolioStore
 from screening import (
@@ -297,6 +303,28 @@ def _adapter(
         tmp_path / "portfolio.db"
     )
     _persist_portfolio(portfolio_store)
+    base_universe = load_free_paper_pilot_universe()
+    spy = FreePaperPilotInstrument(
+        symbol=candidate.instrument.symbol,
+        instrument_identifier=candidate.instrument.instrument_id,
+        name=candidate.instrument.name,
+        execution_asset_class=candidate.instrument.asset_class,
+        economic_exposure="us_equity",
+        venue=candidate.instrument.venue,
+        country_code=candidate.instrument.country_code,
+        currency="USD",
+        instrument_type="fund",
+        maximum_weight=candidate.maximum_position_weight,
+    )
+    write_active_paper_universe(
+        replace(
+            base_universe,
+            identifier="active:canonical-adapter",
+            instruments=(*base_universe.instruments, spy),
+        ),
+        eligible_universe_publication_identifier="universe:canonical-adapter",
+        destination=tmp_path / "active-paper-universe.json",
+    )
     context_store = SQLiteProductionContextStore(tmp_path / "context.db")
     context_store.append(
         _context_snapshot(

@@ -34,8 +34,10 @@ from providers.databento_options import (
     DatabentoOptionsProvider,
 )
 from providers.eodhd import EODHDProvider, EODHDProviderError, build_eodhd_provider
+from providers.alpaca_paper import AlpacaPaperClient, create_alpaca_paper_client
 
 DEFAULT_DISCOVERY_CONFIG_PATH = Path("config/comprehensive_market_discovery.json")
+_PROVIDER_DIRECTORY_CERTIFICATION_LIMIT = 1_000_000
 
 _DISCOVERY_CALENDAR_TIMEZONE = ZoneInfo("America/New_York")
 _DISCOVERY_LANES = (
@@ -137,7 +139,7 @@ def _period_return(closes: Sequence[float], periods: int) -> float:
 @dataclass(frozen=True, slots=True)
 class ComprehensiveMarketDiscoveryPolicy:
     version: str = "comprehensive-liquid-market-discovery.v1"
-    maximum_directory_records_per_source: int = 25_000
+    maximum_directory_records_per_source: int | None = None
     maximum_deep_candidates_per_lane: int = 80
     selected_global_equities: int = 20
     selected_fx_pairs: int = 20
@@ -161,8 +163,15 @@ class ComprehensiveMarketDiscoveryPolicy:
     def __post_init__(self) -> None:
         if not self.version.strip():
             raise ValueError("version cannot be empty")
+        if self.maximum_directory_records_per_source is not None and (
+            isinstance(self.maximum_directory_records_per_source, bool)
+            or not isinstance(self.maximum_directory_records_per_source, int)
+            or self.maximum_directory_records_per_source < 1
+        ):
+            raise ValueError(
+                "maximum_directory_records_per_source must be a positive integer or None"
+            )
         for field_name in (
-            "maximum_directory_records_per_source",
             "maximum_deep_candidates_per_lane",
             "selected_global_equities",
             "selected_fx_pairs",
@@ -214,7 +223,7 @@ class ComprehensiveMarketDiscoveryPolicy:
             CandidateAssetClass.FUTURE: self.selected_futures_contracts,
             CandidateAssetClass.FIXED_INCOME: self.selected_bonds,
             CandidateAssetClass.OPTION: self.selected_options,
-        }[asset_class]
+        }.get(asset_class, 1_000_000)
 
     def maximum_weight(self, asset_class: CandidateAssetClass) -> float:
         return {
@@ -224,7 +233,14 @@ class ComprehensiveMarketDiscoveryPolicy:
             CandidateAssetClass.FUTURE: self.maximum_future_weight,
             CandidateAssetClass.FIXED_INCOME: self.maximum_bond_weight,
             CandidateAssetClass.OPTION: self.maximum_option_weight,
-        }[asset_class]
+            CandidateAssetClass.COMMODITY: self.maximum_future_weight,
+            CandidateAssetClass.REAL_ESTATE: self.maximum_global_equity_weight,
+            CandidateAssetClass.VOLATILITY: self.maximum_option_weight,
+            CandidateAssetClass.ALTERNATIVE: self.maximum_global_equity_weight,
+            CandidateAssetClass.US_EQUITY: self.maximum_global_equity_weight,
+            CandidateAssetClass.US_ETF: self.maximum_global_equity_weight,
+            CandidateAssetClass.CASH_EQUIVALENT: self.maximum_bond_weight,
+        }.get(asset_class, self.maximum_global_equity_weight)
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +257,7 @@ class DiscoveryCatalogRecord:
     instrument_type: str
     provider_kind: str
     source_identifier: str
+    instrument_identifier: str | None = None
     contract_multiplier: float = 1.0
     quote_spread_bps: float = 5.0
     expiration_at: datetime | None = None
@@ -277,15 +294,19 @@ class DiscoveryCatalogRecord:
             elif field_name in {"economic_exposure", "instrument_type", "provider_kind"}:
                 value = value.lower()
             object.__setattr__(self, field_name, value)
-        if self.asset_class not in {
-            CandidateAssetClass.INTERNATIONAL_EQUITY,
-            CandidateAssetClass.FX,
-            CandidateAssetClass.CRYPTO,
-            CandidateAssetClass.FUTURE,
-            CandidateAssetClass.FIXED_INCOME,
-            CandidateAssetClass.OPTION,
-        }:
-            raise ValueError("catalog record is outside comprehensive discovery lanes")
+        if self.instrument_identifier is not None:
+            object.__setattr__(
+                self,
+                "instrument_identifier",
+                _text(
+                    self.instrument_identifier,
+                    field_name="instrument_identifier",
+                ),
+            )
+        if self.asset_class is CandidateAssetClass.OTHER:
+            raise ValueError(
+                "unclassified catalog records cannot enter governed discovery"
+            )
         if self.expiration_at is not None:
             object.__setattr__(
                 self,
@@ -307,7 +328,11 @@ class DiscoveryCatalogRecord:
                 or self.option_right not in {"call", "put"}
             ):
                 raise ValueError("option catalog records require complete defined-risk terms")
-        if self.asset_class is CandidateAssetClass.FUTURE and self.expiration_at is None:
+        if (
+            self.asset_class is CandidateAssetClass.FUTURE
+            and self.instrument_type == "future"
+            and self.expiration_at is None
+        ):
             raise ValueError("dated futures catalog records require expiration_at")
         if self.contract_multiplier <= 0.0 or self.quote_spread_bps <= 0.0:
             raise ValueError("contract multiplier and quote spread must be positive")
@@ -376,18 +401,29 @@ class DiscoveredMarketInstrument:
         maximum = policy.maximum_weight(item.asset_class)
         if currently_owned:
             maximum = max(maximum, min(0.10, maximum * 2.0))
-        session = {
-            CandidateAssetClass.INTERNATIONAL_EQUITY: TradingSessionModel.EXCHANGE_LOCAL,
-            CandidateAssetClass.FX: TradingSessionModel.CONTINUOUS_24_5,
-            CandidateAssetClass.CRYPTO: TradingSessionModel.CONTINUOUS_24_7,
-            CandidateAssetClass.FUTURE: TradingSessionModel.CONTINUOUS_24_5,
-            CandidateAssetClass.FIXED_INCOME: TradingSessionModel.DEALER_24_5,
-            CandidateAssetClass.OPTION: TradingSessionModel.EXCHANGE_LOCAL,
-        }[item.asset_class]
+        session = (
+            TradingSessionModel.CONTINUOUS_24_7
+            if (
+                item.asset_class is CandidateAssetClass.CRYPTO
+                or (
+                    item.instrument_type == "perpetual"
+                    and item.economic_exposure == "crypto"
+                )
+            )
+            else TradingSessionModel.CONTINUOUS_24_5
+            if (
+                item.asset_class is CandidateAssetClass.FX
+                or item.instrument_type in {"forward", "swap"}
+            )
+            else TradingSessionModel.DEALER_24_5
+            if item.asset_class is CandidateAssetClass.FIXED_INCOME
+            else TradingSessionModel.EXCHANGE_LOCAL
+        )
         return FreePaperPilotInstrument(
             symbol=item.symbol,
             instrument_identifier=(
-                f"instrument:{item.asset_class.value}:{_slug(item.venue)}:{_slug(item.symbol)}"
+                item.instrument_identifier
+                or f"instrument:{item.asset_class.value}:{_slug(item.venue)}:{_slug(item.symbol)}"
             ),
             name=item.name,
             execution_asset_class=item.asset_class,
@@ -605,12 +641,7 @@ def _catalog_from_eodhd(
     requested_asset_classes: frozenset[CandidateAssetClass] | None = None,
 ) -> Mapping[CandidateAssetClass, Sequence[DiscoveryCatalogRecord]]:
     directory_lanes = frozenset(
-        {
-            CandidateAssetClass.INTERNATIONAL_EQUITY,
-            CandidateAssetClass.FX,
-            CandidateAssetClass.CRYPTO,
-            CandidateAssetClass.FIXED_INCOME,
-        }
+        item for item in CandidateAssetClass if item is not CandidateAssetClass.OTHER
     )
     requested = (
         directory_lanes
@@ -630,7 +661,14 @@ def _catalog_from_eodhd(
     for exchange in config.eodhd_exchange_codes:
         possible_lanes = exchange_lanes.get(
             exchange,
-            frozenset({CandidateAssetClass.INTERNATIONAL_EQUITY}),
+            frozenset(
+                {
+                    CandidateAssetClass.INTERNATIONAL_EQUITY,
+                    CandidateAssetClass.REAL_ESTATE,
+                    CandidateAssetClass.ALTERNATIVE,
+                    CandidateAssetClass.COMMODITY,
+                }
+            ),
         )
         if not possible_lanes & requested:
             continue
@@ -639,10 +677,19 @@ def _catalog_from_eodhd(
                 dataset_type=ProviderDatasetType.SYMBOL_DIRECTORY,
                 provider_symbol=exchange,
                 as_of=as_of,
-                limit=policy.maximum_directory_records_per_source,
+                # This provider-contract maximum is a completeness sentinel, not a
+                # selection cutoff. Hitting it fails closed instead of certifying a
+                # silently truncated investment universe.
+                limit=_PROVIDER_DIRECTORY_CERTIFICATION_LIMIT,
             )
         )
-        for item in _directory_records(snapshot.payload):
+        directory_records = _directory_records(snapshot.payload)
+        if len(directory_records) >= _PROVIDER_DIRECTORY_CERTIFICATION_LIMIT:
+            raise ComprehensiveMarketDiscoveryError(
+                f"provider directory {exchange} reached the completeness sentinel; "
+                "use provider pagination or a certified complete catalog export"
+            )
+        for item in directory_records:
             code = _directory_text(item, "Code", "code", "Symbol", "symbol")
             name = _directory_text(item, "Name", "name") or code
             raw_type = (_directory_text(item, "Type", "type") or "").lower()
@@ -674,6 +721,30 @@ def _catalog_from_eodhd(
                 asset_class = CandidateAssetClass.INTERNATIONAL_EQUITY
                 instrument_type = "preferred_stock" if "preferred" in raw_type else "common_stock"
                 economic_exposure = "international_equity"
+            elif any(
+                marker in raw_type
+                for marker in ("reit", "real estate investment trust")
+            ):
+                asset_class = CandidateAssetClass.REAL_ESTATE
+                instrument_type = "reit"
+                economic_exposure = "real_estate"
+            elif any(
+                marker in raw_type
+                for marker in (
+                    "etf", "fund", "closed-end", "investment trust", "unit trust"
+                )
+            ):
+                asset_class = CandidateAssetClass.INTERNATIONAL_EQUITY
+                instrument_type = "fund"
+                economic_exposure = "international_equity"
+            elif "warrant" in raw_type or "right" in raw_type:
+                asset_class = CandidateAssetClass.ALTERNATIVE
+                instrument_type = "warrant" if "warrant" in raw_type else "right"
+                economic_exposure = "special_situations"
+            elif "commodity" in raw_type or "metal" in raw_type:
+                asset_class = CandidateAssetClass.COMMODITY
+                instrument_type = "spot"
+                economic_exposure = "broad_commodities"
             elif "currency" in raw_type or "forex" in raw_type:
                 asset_class = CandidateAssetClass.FX
                 instrument_type = "spot"
@@ -683,8 +754,6 @@ def _catalog_from_eodhd(
                 instrument_type = "token"
                 economic_exposure = "crypto"
             elif "bond" in raw_type:
-                if currency != "USD":
-                    continue
                 asset_class = CandidateAssetClass.FIXED_INCOME
                 instrument_type = "bond"
                 economic_exposure = "government_bonds" if "treasury" in name.lower() or "government" in name.lower() else "investment_grade_credit"
@@ -1002,6 +1071,7 @@ def default_market_probe(
     http_get: Callable[..., Any] = requests.get,
     eodhd_provider: EODHDProvider | None = None,
     databento_options_provider: DatabentoOptionsProvider | None = None,
+    alpaca_client: AlpacaPaperClient | None = None,
 ) -> Mapping[str, DiscoveryMarketFeatures]:
     timestamp = _aware(as_of, field_name="as_of")
     provider = eodhd_provider or build_eodhd_provider()
@@ -1010,6 +1080,24 @@ def default_market_probe(
         item for item in records if item.asset_class is CandidateAssetClass.OPTION
     )
     option_histories: Mapping[str, tuple[object, ...]] = {}
+    alpaca_records = tuple(item for item in records if item.provider_kind == "alpaca")
+    alpaca_histories: dict[str, Sequence[Mapping[str, object]]] = {}
+    if alpaca_records:
+        client = alpaca_client or create_alpaca_paper_client()
+        alpaca_symbols = tuple(item.provider_symbol for item in alpaca_records)
+        for start in range(0, len(alpaca_symbols), 200):
+            batch = alpaca_symbols[start : start + 200]
+            try:
+                histories = client.historical_bars(
+                    batch,
+                    start=timestamp - timedelta(days=policy.history_days),
+                    end=timestamp,
+                    timeframe="1Day",
+                )
+            except (OSError, TypeError, ValueError):
+                histories = {}
+            for symbol, values in histories.items():
+                alpaca_histories[str(symbol).strip().upper()] = values
     if option_records and options_provider.configured:
         try:
             option_instruments = tuple(
@@ -1066,6 +1154,22 @@ def default_market_probe(
                 option_evidence = (
                     f"databento-opra-bars:{record.symbol}:{_hash(option_material)}",
                 )
+        elif record.provider_kind == "alpaca":
+            raw_rows = alpaca_histories.get(record.provider_symbol.upper(), ())
+            parsed_rows: list[dict[str, object]] = []
+            for raw in raw_rows:
+                if not isinstance(raw, Mapping):
+                    continue
+                observed = _timestamp(raw.get("t"))
+                close = _number(raw.get("c"))
+                volume = _number(raw.get("v"))
+                if observed is None or observed > timestamp or close <= 0.0:
+                    continue
+                parsed_rows.append(
+                    {"t": observed, "c": close, "v": max(0.0, volume)}
+                )
+            rows = tuple(parsed_rows)
+            option_price = 0.0
         elif record.provider_kind == "yahoo":
             rows = _yahoo_rows(
                 record,
@@ -1195,6 +1299,7 @@ def discover_comprehensive_markets(
                     "deep": 0,
                     "selected": [],
                     "sources": [],
+                    "candidate_count_limit_applied": False,
                 }
             )
             continue
@@ -1213,11 +1318,9 @@ def discover_comprehensive_markets(
         retained = [item for item in records if item.symbol in state_symbols]
         ordinary = [item for item in records if item.symbol not in state_symbols]
         ordinary.sort(key=lambda item: (item.source_identifier, item.symbol))
-        deep_records = tuple(
-            dict.fromkeys(
-                (*retained, *ordinary[: resolved.maximum_deep_candidates_per_lane])
-            )
-        )
+        # Compatibility implementation also processes the complete eligible catalog.
+        # Legacy count fields remain readable but have no selection authority.
+        deep_records = tuple(dict.fromkeys((*retained, *ordinary)))
         features = (market_probe or default_market_probe)(deep_records, timestamp, resolved)
         selected: list[DiscoveredMarketInstrument] = []
         exclusions: list[tuple[str, str]] = []
@@ -1244,14 +1347,9 @@ def discover_comprehensive_markets(
                 )
             )
         selected.sort(key=lambda item: (item.score, item.catalog.symbol), reverse=True)
-        retained_selected = [item for item in selected if item.retained_for_state]
-        ordinary_selected = [item for item in selected if not item.retained_for_state]
-        limit = resolved.selected_limit(asset_class)
-        final = tuple(
-            dict.fromkeys(
-                (*retained_selected, *ordinary_selected[:limit])
-            )
-        )
+        # Ordering is informational only; every instrument passing evidence, price,
+        # history, and liquidity checks remains in the result.
+        final = tuple(selected)
         source_identifiers = tuple(
             dict.fromkeys(item.catalog.source_identifier for item in final)
         )
@@ -1274,6 +1372,7 @@ def discover_comprehensive_markets(
                 "deep": len(deep_records),
                 "selected": [item.catalog.symbol for item in final],
                 "sources": list(source_identifiers),
+                "candidate_count_limit_applied": False,
             }
         )
     if any(lane.scheduled and not lane.selected for lane in lanes):
@@ -1289,6 +1388,7 @@ def discover_comprehensive_markets(
         {
             "as_of": timestamp.isoformat(),
             "policy": resolved.version,
+            "candidate_count_limit_applied": False,
             "lanes": manifest_material,
         }
     )

@@ -21,16 +21,15 @@ from application.eligible_universe import (
     EligibleUniverseCertificationState,
     SQLiteCertifiedEligibleUniverseStore,
 )
-from cio import RecommendationUniversePolicy
 from cio.persistence import serialize_candidate_decision, serialize_opportunity_queue
-from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from evaluation.opportunity_outcomes import SQLiteOpportunityOutcomeStore
-from opportunity import AlternativeKind, AlternativeUse, OpportunityEngine, OpportunitySetContext
+from opportunity import AlternativeKind, AlternativeUse, OpportunitySetContext
 from opportunity.competitive import prepare_competitive_opportunity_set
 from opportunity.snapshot import (
     PUBLICATION_SNAPSHOT_KIND,
     build_opportunity_snapshot,
 )
+from operations.active_paper_universe import build_active_opportunity_engine
 from operations.direct_global_markets import load_direct_global_market_universe
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryResult,
@@ -505,7 +504,7 @@ def prepare_governed_production_context_for_cycle(
                 dict.fromkeys(
                     (*base_universe.limitations,
                      "Individual U.S. equities enter through broad SEC/Alpaca discovery and begin with a 1% exploratory cap.",
-                     "International equities, complete FX and crypto catalogs, dated futures chains, direct bonds, and long-premium defined-risk options enter through comprehensive point-in-time discovery.",
+                     "Every classified instrument in the complete certified catalog can enter through comprehensive point-in-time discovery when its provider, evidence, and paper capability stack are complete.",
                      "Discovery can nominate instruments but cannot choose an action, size a position, construct a portfolio, authorize execution, or enable real money.")
                 )
             ),
@@ -517,7 +516,7 @@ def prepare_governed_production_context_for_cycle(
             decision_as_of=decision_as_of,
             detail=(
                 "Complete opportunity search is unavailable; a no-superior-opportunity "
-                "conclusion is prohibited until broad U.S.-equity discovery completes and six-lane global discovery completes: "
+                "conclusion is prohibited until broad U.S.-security discovery and complete certified-universe discovery finish: "
                 f"{type(error).__name__}: {error}"
             ),
             instrument_count=len(base_universe.instruments),
@@ -748,12 +747,10 @@ def prepare_governed_production_context_for_cycle(
         as_of=decision_as_of,
         alternatives=tuple(alternatives),
     )
-    capability_authority = BoundedPilotCapabilityAuthority.from_universe(universe)
-    opportunity_engine = OpportunityEngine(
-        universe_policy=RecommendationUniversePolicy(
-            asset_class_authority=capability_authority,
-        )
-    )
+    opportunity_engine = build_active_opportunity_engine(universe)
+    capability_authority = opportunity_engine.universe_policy.asset_class_authority
+    if capability_authority is None:  # pragma: no cover - factory invariant
+        raise RuntimeError("active opportunity engine lacks capability authority")
     competitive = prepare_competitive_opportunity_set(
         opportunity_engine,
         build_result.candidates,

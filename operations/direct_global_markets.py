@@ -1,6 +1,8 @@
-"""Direct futures, spot-FX, and spot-crypto evidence and paper quote adapters.
+"""Capability-routed direct-market evidence and paper quote adapters.
 
-The module is intentionally paper-only. It retrieves public point-in-time market
+The module is intentionally paper-only. It serves every instrument in the exact active
+universe that is assigned to an installed direct provider adapter, independent of asset
+class. It retrieves public point-in-time market
 evidence, translates it into the canonical candidate and execution contracts, and
 never submits an order or authorizes real money.
 """
@@ -19,7 +21,10 @@ import requests
 
 from cio import CandidateAssetClass
 from governance import TradingSessionModel
-from operations.free_paper_pilot import FreePaperPilotInstrument
+from operations.free_paper_pilot import (
+    FreePaperPilotInstrument,
+    load_current_active_paper_universe,
+)
 from portfolio.multi_asset_controls import MultiAssetInstrumentProfile
 from portfolio.multi_asset_execution import (
     InstrumentSession,
@@ -36,17 +41,6 @@ from providers.alpaca_paper import (
 DEFAULT_DIRECT_UNIVERSE_PATH = Path("config/direct_global_market_universe.json")
 DEFAULT_CHART_BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
 DEFAULT_EODHD_BASE_URL = "https://eodhd.com/api"
-DIRECT_EXECUTION_CLASSES = frozenset(
-    {
-        CandidateAssetClass.INTERNATIONAL_EQUITY,
-        CandidateAssetClass.FIXED_INCOME,
-        CandidateAssetClass.FX,
-        CandidateAssetClass.CRYPTO,
-        CandidateAssetClass.FUTURE,
-        CandidateAssetClass.OPTION,
-    }
-)
-
 
 class DirectGlobalMarketError(RuntimeError):
     """Raised when direct-market evidence is unavailable or invalid."""
@@ -94,11 +88,10 @@ class DirectGlobalMarketUniverse:
             raise ValueError("direct-market universe identifiers cannot be empty")
         if not self.instruments:
             raise ValueError("direct-market universe requires instruments")
-        if any(
-            item.execution_asset_class not in DIRECT_EXECUTION_CLASSES
-            for item in self.instruments
-        ):
-            raise ValueError("direct-market universe contains an unsupported direct discovery class")
+        if any(not item.uses_direct_market_provider for item in self.instruments):
+            raise ValueError(
+                "direct-market universe contains an instrument assigned to the listed broker adapter"
+            )
         symbols = tuple(item.symbol for item in self.instruments)
         if len(symbols) != len(set(symbols)):
             raise ValueError("direct-market symbols must be unique")
@@ -549,9 +542,9 @@ class DirectPaperSessionProvider:
         as_of: datetime,
     ) -> InstrumentSession:
         instrument = self.client._instrument(profile.symbol)
-        if profile.asset_class not in DIRECT_EXECUTION_CLASSES:
+        if profile.symbol not in self.client.universe.symbol_map:
             raise DirectGlobalMarketError(
-                f"{profile.symbol} is outside the governed direct discovery classes"
+                f"{profile.symbol} is outside the certified direct-market universe"
             )
         status = (
             InstrumentSessionStatus.OPEN
@@ -582,9 +575,9 @@ class DirectPaperQuoteProvider:
         raw = self.client.latest_quotes(tuple(item.symbol for item in profiles))
         result: dict[str, MultiAssetQuote] = {}
         for profile in profiles:
-            if profile.asset_class not in DIRECT_EXECUTION_CLASSES:
+            if profile.symbol not in self.client.universe.symbol_map:
                 raise DirectGlobalMarketError(
-                    f"{profile.symbol} is outside direct-market paper execution"
+                    f"{profile.symbol} is outside the certified direct-market universe"
                 )
             item = raw[profile.symbol]
             observed = min(
@@ -619,9 +612,19 @@ class DirectPaperQuoteProvider:
 
 
 class CombinedPaperSessionProvider:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        direct_universe: DirectGlobalMarketUniverse | None = None,
+    ) -> None:
         self.alpaca = AlpacaPaperSessionProvider(create_alpaca_paper_client())
-        self.direct = DirectPaperSessionProvider()
+        self.direct = (
+            None
+            if direct_universe is None
+            else DirectPaperSessionProvider(DirectGlobalMarketClient(direct_universe))
+        )
+        self.direct_symbols = frozenset(
+            () if direct_universe is None else direct_universe.symbol_map
+        )
 
     def session(
         self,
@@ -630,19 +633,35 @@ class CombinedPaperSessionProvider:
         session_model: TradingSessionModel,
         as_of: datetime,
     ) -> InstrumentSession:
-        if profile.asset_class in SUPPORTED_PILOT_CLASSES:
-            return self.alpaca.session(
+        if profile.symbol in self.direct_symbols:
+            if self.direct is None:  # pragma: no cover - defensive invariant
+                raise DirectGlobalMarketError("direct session provider is unavailable")
+            return self.direct.session(
                 profile, session_model=session_model, as_of=as_of
             )
-        return self.direct.session(
+        if profile.asset_class not in SUPPORTED_PILOT_CLASSES:
+            raise DirectGlobalMarketError(
+                f"{profile.symbol} has no certified paper session adapter"
+            )
+        return self.alpaca.session(
             profile, session_model=session_model, as_of=as_of
         )
 
 
 class CombinedPaperQuoteProvider:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        direct_universe: DirectGlobalMarketUniverse | None = None,
+    ) -> None:
         self.alpaca = AlpacaPaperQuoteProvider(create_alpaca_paper_client())
-        self.direct = DirectPaperQuoteProvider()
+        self.direct = (
+            None
+            if direct_universe is None
+            else DirectPaperQuoteProvider(DirectGlobalMarketClient(direct_universe))
+        )
+        self.direct_symbols = frozenset(
+            () if direct_universe is None else direct_universe.symbol_map
+        )
 
     def quotes(
         self,
@@ -650,16 +669,16 @@ class CombinedPaperQuoteProvider:
         *,
         as_of: datetime,
     ) -> Mapping[str, MultiAssetQuote]:
-        listed = tuple(
-            item for item in profiles if item.asset_class in SUPPORTED_PILOT_CLASSES
-        )
         direct = tuple(
-            item for item in profiles if item.asset_class in DIRECT_EXECUTION_CLASSES
+            item for item in profiles if item.symbol in self.direct_symbols
+        )
+        listed = tuple(
+            item for item in profiles if item.symbol not in self.direct_symbols
         )
         unsupported = tuple(
-            item.symbol for item in profiles
+            item.symbol
+            for item in listed
             if item.asset_class not in SUPPORTED_PILOT_CLASSES
-            and item.asset_class not in DIRECT_EXECUTION_CLASSES
         )
         if unsupported:
             raise DirectGlobalMarketError(
@@ -669,16 +688,33 @@ class CombinedPaperQuoteProvider:
         if listed:
             result.update(self.alpaca.quotes(listed, as_of=as_of))
         if direct:
+            if self.direct is None:  # pragma: no cover - defensive invariant
+                raise DirectGlobalMarketError("direct quote provider is unavailable")
             result.update(self.direct.quotes(direct, as_of=as_of))
         return result
 
 
+def _active_direct_universe() -> DirectGlobalMarketUniverse | None:
+    publication_identifier, universe = load_current_active_paper_universe()
+    instruments = tuple(
+        item for item in universe.instruments if item.uses_direct_market_provider
+    )
+    if not instruments:
+        return None
+    return DirectGlobalMarketUniverse(
+        identifier=f"active-direct:{universe.identifier}",
+        provider_identifier=f"eligible-universe:{publication_identifier}",
+        instruments=instruments,
+        limitations=universe.limitations,
+    )
+
+
 def create_combined_paper_session_provider() -> CombinedPaperSessionProvider:
-    return CombinedPaperSessionProvider()
+    return CombinedPaperSessionProvider(_active_direct_universe())
 
 
 def create_combined_paper_quote_provider() -> CombinedPaperQuoteProvider:
-    return CombinedPaperQuoteProvider()
+    return CombinedPaperQuoteProvider(_active_direct_universe())
 
 
 __all__ = [
@@ -686,7 +722,6 @@ __all__ = [
     "CombinedPaperSessionProvider",
     "DEFAULT_DIRECT_UNIVERSE_PATH",
     "DEFAULT_EODHD_BASE_URL",
-    "DIRECT_EXECUTION_CLASSES",
     "DirectGlobalMarketClient",
     "DirectGlobalMarketError",
     "DirectGlobalMarketUniverse",

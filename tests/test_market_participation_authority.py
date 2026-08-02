@@ -24,8 +24,8 @@ def test_registry_separates_observed_from_allocatable_markets() -> None:
         asset_class=CandidateAssetClass.CRYPTO,
     )
     assert vti.decision_certified and vti.paper_allocatable
-    assert stock.monitored and not stock.decision_certified
-    assert crypto.monitored and not crypto.paper_allocatable
+    assert stock.monitored and stock.decision_certified and not stock.paper_allocatable
+    assert crypto.monitored and crypto.decision_certified and not crypto.paper_allocatable
 
 
 def test_registry_allocatable_set_matches_fixed_pilot() -> None:
@@ -39,7 +39,7 @@ def test_registry_allocatable_set_matches_fixed_pilot() -> None:
     )
 
 
-def test_capability_build_filters_dynamic_discovery_to_registry() -> None:
+def test_capability_build_admits_complete_dynamic_active_instrument() -> None:
     import application.production_context_executor  # installs the production adapter
 
     universe = load_free_paper_pilot_universe()
@@ -58,11 +58,11 @@ def test_capability_build_filters_dynamic_discovery_to_registry() -> None:
     authority = BoundedPilotCapabilityAuthority.from_universe(dynamic)
     payload = authority.coverage_payload()
 
-    assert payload["covered_instrument_count"] == 15
-    assert "instrument:us-equity:aapl" not in payload["instrument_identifiers"]
+    assert payload["covered_instrument_count"] == 16
+    assert "instrument:us-equity:aapl" in payload["instrument_identifiers"]
 
 
-def test_runtime_authority_filters_unregistered_candidate(monkeypatch) -> None:
+def test_runtime_authority_fails_closed_without_exact_active_publication(monkeypatch) -> None:
     import application.production_context_executor as executor_module
 
     candidate = SimpleNamespace(
@@ -79,6 +79,13 @@ def test_runtime_authority_filters_unregistered_candidate(monkeypatch) -> None:
     monkeypatch.setattr(
         executor_module, "candidate_from_payload", lambda _payload: candidate
     )
+    monkeypatch.setattr(
+        executor_module,
+        "load_active_paper_universe_for_publication",
+        lambda _identifier, **_kwargs: (_ for _ in ()).throw(
+            ValueError("exact active publication unavailable")
+        ),
+    )
     context = SimpleNamespace(
         screening_cycle_identifier="screening:test",
         eligible_universe_publication_identifier="eligible:test",
@@ -90,11 +97,7 @@ def test_runtime_authority_filters_unregistered_candidate(monkeypatch) -> None:
             )
         )
     )
-    authority_universe = executor_module._candidate_authority_universe(
-        fake, context=context
-    )
-    identifiers = {
-        item.instrument_identifier for item in authority_universe.instruments
-    }
-    assert "instrument:crypto:btc-usd" not in identifiers
-    assert len(identifiers) == 15
+    import pytest
+
+    with pytest.raises(ValueError, match="exact active publication"):
+        executor_module._candidate_authority_universe(fake, context=context)

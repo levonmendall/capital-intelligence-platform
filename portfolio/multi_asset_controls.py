@@ -26,6 +26,11 @@ from portfolio.construction_models import (
 )
 
 
+_DERIVATIVE_INSTRUMENT_TYPES = frozenset(
+    {"future", "perpetual", "option", "forward", "swap", "warrant", "right"}
+)
+
+
 class MultiAssetConstructionError(RuntimeError):
     """Raised when an expanded-market construction boundary is incomplete."""
 
@@ -223,13 +228,29 @@ class GovernedMultiAssetConstructionEngine:
         if self.policy.require_unlevered_spot and profile.asset_class in {CandidateAssetClass.CRYPTO, CandidateAssetClass.FX}:
             if not profile.unlevered or not profile.spot_only or profile.gross_leverage > 1.0 + 1e-9:
                 raise MultiAssetConstructionError(f"{profile.symbol} must be unlevered spot exposure")
-        derivatives = {CandidateAssetClass.FUTURE, CandidateAssetClass.OPTION, CandidateAssetClass.VOLATILITY}
-        if profile.asset_class in derivatives:
+        derivative = (
+            profile.instrument_type in _DERIVATIVE_INSTRUMENT_TYPES
+            or profile.asset_class
+            in {
+                CandidateAssetClass.FUTURE,
+                CandidateAssetClass.OPTION,
+                CandidateAssetClass.VOLATILITY,
+            }
+        )
+        if derivative:
             missing = [
-                name for name in ("contract_model_version", "margin_model_version", "lifecycle_model_version")
+                name
+                for name in (
+                    "contract_model_version",
+                    "margin_model_version",
+                    "lifecycle_model_version",
+                )
                 if getattr(profile, name) is None
             ]
-            if profile.asset_class in {CandidateAssetClass.FUTURE, CandidateAssetClass.VOLATILITY} and profile.roll_model_version is None:
+            if (
+                profile.instrument_type in {"future", "perpetual"}
+                or profile.asset_class is CandidateAssetClass.FUTURE
+            ) and profile.roll_model_version is None:
                 missing.append("roll_model_version")
             if missing:
                 raise MultiAssetConstructionError(f"{profile.symbol} derivative profile is incomplete: {', '.join(missing)}")

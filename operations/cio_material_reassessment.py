@@ -15,7 +15,6 @@ from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     active_paper_universe_path,
     default_alpaca_client,
-    load_free_paper_pilot_universe,
 )
 
 
@@ -162,6 +161,8 @@ class MaterialCIOReassessmentEngine:
         self.active_universe_path = Path(
             active_universe_path or active_paper_universe_path()
         ).expanduser()
+        # Retained for call-site compatibility only. A stale static universe must not
+        # replace the exact active capability publication.
         self.fallback_universe_path = Path(fallback_universe_path).expanduser()
 
     def _guarded(self, now: datetime) -> bool:
@@ -184,24 +185,26 @@ class MaterialCIOReassessmentEngine:
 
     def _instruments(self) -> tuple[tuple[str, str], ...]:
         payload = load_json(self.active_universe_path)
+        publication_identifier = str(
+            payload.get("eligible_universe_publication_identifier", "")
+        ).strip()
         universe = payload.get("universe")
         items = universe.get("instruments") if isinstance(universe, Mapping) else None
-        if isinstance(items, list):
-            result = tuple(
-                (
-                    str(item.get("symbol", "")).upper(),
-                    str(item.get("instrument_type", "fund")).lower(),
-                )
-                for item in items
-                if isinstance(item, Mapping)
-                and str(item.get("symbol", "")).strip()
+        if not publication_identifier or not isinstance(items, list):
+            raise ValueError(
+                "the exact certified active paper universe is unavailable for reassessment"
             )
-            if result:
-                return result
-        fallback = load_free_paper_pilot_universe(self.fallback_universe_path)
-        return tuple(
-            (item.symbol, item.instrument_type) for item in fallback.instruments
+        result = tuple(
+            (
+                str(item.get("symbol", "")).upper(),
+                str(item.get("instrument_type", "fund")).lower(),
+            )
+            for item in items
+            if isinstance(item, Mapping) and str(item.get("symbol", "")).strip()
         )
+        if not result:
+            raise ValueError("the certified active paper universe contains no instruments")
+        return result
 
     @staticmethod
     def _public_state(collection: object | None) -> tuple[str | None, int]:

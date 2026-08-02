@@ -4,10 +4,12 @@ The original provider/catalog implementation is retained in the adjacent legacy
 module. This module replaces only the pre-committee selection architecture.
 
 The canonical runtime screens every instrument in each scheduled certified catalog.
-Provider-enriched value, momentum, carry, and improving-condition evidence remains
-mandatory, but no rank, lane, shortlist, or deep-analysis count limit may prevent an
-otherwise eligible and evidence-complete asset from reaching the formal opportunity,
-six-specialist, and CIO decision path.
+Provider-enriched factor evidence remains mandatory when applicable, but explicit,
+provider-certified not-applicable determinations are permitted. No rank, static lane,
+shortlist, or deep-analysis count limit may prevent an otherwise eligible and
+evidence-complete asset from reaching the formal opportunity, six-specialist, and CIO
+decision path. A provider-neutral complete catalog may add any classified investable
+instrument without a code-level asset-class whitelist.
 """
 
 from __future__ import annotations
@@ -18,6 +20,10 @@ from typing import Callable, Mapping, Sequence
 
 from cio import CandidateAssetClass
 from operations import comprehensive_market_discovery_legacy as _legacy
+from operations.certified_investable_catalog import (
+    CertifiedInvestableCatalogError,
+    load_certified_investable_catalog,
+)
 from operations.comprehensive_market_discovery_legacy import *  # noqa: F401,F403
 from operations.market_discovery_preselection import (
     CatalogScreeningSignal,
@@ -40,6 +46,124 @@ from operations.provider_enriched_preselection import (
 # Preserve compatibility for existing provider-validation and regression code that
 # imports legacy private discovery helpers directly from this module.
 _catalog_from_eodhd = _legacy._catalog_from_eodhd
+
+
+def _optional_timestamp(value: object) -> datetime | None:
+    if value in (None, ""):
+        return None
+    parsed = _legacy._timestamp(value)
+    if parsed is None:
+        raise _legacy.ComprehensiveMarketDiscoveryError(
+            "certified catalog expiration_at must be a timezone-aware timestamp"
+        )
+    return parsed
+
+
+def _certified_catalog_record(
+    payload: Mapping[str, object],
+) -> _legacy.DiscoveryCatalogRecord:
+    """Normalize one provider-neutral certified catalog record."""
+
+    try:
+        asset_class = CandidateAssetClass(str(payload["asset_class"]))
+        provider_instrument_id = payload.get("provider_instrument_id")
+        if provider_instrument_id is not None:
+            provider_instrument_id = int(provider_instrument_id)
+        strike = payload.get("strike")
+        if strike is not None:
+            strike = float(strike)
+        return _legacy.DiscoveryCatalogRecord(
+            symbol=str(payload["symbol"]),
+            provider_symbol=str(payload.get("provider_symbol") or payload["symbol"]),
+            name=str(payload.get("name") or payload["symbol"]),
+            asset_class=asset_class,
+            economic_exposure=str(
+                payload.get("economic_exposure") or asset_class.value
+            ),
+            venue=str(payload["venue"]),
+            country_code=str(payload.get("country_code") or "GLOBAL"),
+            currency=str(payload.get("currency") or "USD"),
+            settlement_currency=str(
+                payload.get("settlement_currency")
+                or payload.get("currency")
+                or "USD"
+            ),
+            instrument_type=str(payload["instrument_type"]),
+            provider_kind=str(payload["provider_kind"]),
+            source_identifier=str(
+                payload.get("source_identifier")
+                or payload.get("instrument_identifier")
+            ),
+            instrument_identifier=str(payload["instrument_identifier"]),
+            contract_multiplier=float(payload.get("contract_multiplier", 1.0)),
+            quote_spread_bps=float(payload.get("quote_spread_bps", 5.0)),
+            expiration_at=_optional_timestamp(payload.get("expiration_at")),
+            underlying_symbol=(
+                None
+                if payload.get("underlying_symbol") in (None, "")
+                else str(payload["underlying_symbol"])
+            ),
+            strike=strike,
+            option_right=(
+                None
+                if payload.get("option_right") in (None, "")
+                else str(payload["option_right"]).strip().lower()
+            ),
+            provider_dataset=(
+                None
+                if payload.get("provider_dataset") in (None, "")
+                else str(payload["provider_dataset"])
+            ),
+            provider_stype_in=(
+                None
+                if payload.get("provider_stype_in") in (None, "")
+                else str(payload["provider_stype_in"])
+            ),
+            provider_instrument_id=provider_instrument_id,
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise _legacy.ComprehensiveMarketDiscoveryError(
+            "certified catalog contains an invalid instrument record"
+        ) from error
+
+
+def _merge_certified_catalog(
+    catalogs: Mapping[CandidateAssetClass, Sequence[_legacy.DiscoveryCatalogRecord]],
+    *,
+    as_of: datetime,
+) -> Mapping[CandidateAssetClass, tuple[_legacy.DiscoveryCatalogRecord, ...]]:
+    merged: dict[CandidateAssetClass, list[_legacy.DiscoveryCatalogRecord]] = {
+        key: list(value) for key, value in catalogs.items()
+    }
+    try:
+        external = load_certified_investable_catalog(as_of=as_of)
+    except CertifiedInvestableCatalogError as error:
+        raise _legacy.ComprehensiveMarketDiscoveryError(str(error)) from error
+    for payload in external:
+        record = _certified_catalog_record(payload)
+        merged.setdefault(record.asset_class, []).append(record)
+    return {
+        asset_class: _legacy._deduplicate(tuple(records))
+        for asset_class, records in merged.items()
+    }
+
+
+def _dynamic_discovery_lanes(
+    catalogs: Mapping[CandidateAssetClass, Sequence[_legacy.DiscoveryCatalogRecord]],
+) -> tuple[CandidateAssetClass, ...]:
+    required = set(_legacy._DISCOVERY_LANES)
+    required.update(
+        asset_class
+        for asset_class, records in catalogs.items()
+        if asset_class is not CandidateAssetClass.OTHER and bool(records)
+    )
+    return tuple(item for item in CandidateAssetClass if item in required)
+
+
+def _lane_is_scheduled(asset_class: CandidateAssetClass, timestamp: datetime) -> bool:
+    if timestamp.astimezone(_legacy._DISCOVERY_CALENDAR_TIMEZONE).weekday() < 5:
+        return True
+    return asset_class is CandidateAssetClass.CRYPTO
 
 
 def __getattr__(name: str):
@@ -207,7 +331,7 @@ def discover_comprehensive_markets(
     """Screen complete catalogs and forward every eligible evidence-complete asset.
 
     The uninjected canonical path consumes the persisted provider-enriched factor
-    publication and fails closed when substantive factor evidence is missing. Explicit
+    publication and fails closed when applicable factor evidence is missing. Explicit
     catalog/market probes without a preselection probe remain a deterministic fixture
     seam for tests and rehearsals; they do not describe the production authority path.
 
@@ -216,11 +340,13 @@ def discover_comprehensive_markets(
 
     timestamp = _legacy._aware(as_of, field_name="as_of")
     resolved = policy or ComprehensiveMarketDiscoveryPolicy()
-    scheduled_lanes = _legacy.scheduled_discovery_lanes(timestamp)
     catalogs = (
         catalog_probe(timestamp)
         if catalog_probe is not None
-        else _legacy.default_catalog_probe(timestamp, policy=resolved)
+        else _merge_certified_catalog(
+            _legacy.default_catalog_probe(timestamp, policy=resolved),
+            as_of=timestamp,
+        )
     )
     if not isinstance(catalogs, Mapping):
         raise _legacy.ComprehensiveMarketDiscoveryError(
@@ -250,8 +376,9 @@ def discover_comprehensive_markets(
     lanes: list[DiscoveryLaneResult] = []
     manifest_material: list[dict[str, object]] = []
 
-    for asset_class in _legacy._DISCOVERY_LANES:
-        if asset_class not in scheduled_lanes:
+    discovery_lanes = _dynamic_discovery_lanes(catalogs)
+    for asset_class in discovery_lanes:
+        if not _lane_is_scheduled(asset_class, timestamp):
             reason = "weekend_market_closed"
             lanes.append(
                 DiscoveryLaneResult(
@@ -480,6 +607,7 @@ __all__ = tuple(
             "PreselectionProbe",
             "REQUIRED_PROVIDER_FACTORS",
             "provider_enriched_catalog_screening_signals",
+            "load_certified_investable_catalog",
         )
     )
 )

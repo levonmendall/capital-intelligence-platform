@@ -227,100 +227,87 @@ class AssetClassCapabilityProfile:
             )
 
     def _validate_asset_specific_structure(self) -> None:
+        """Validate declared capabilities without an instrument-type whitelist.
+
+        ``allowed_instrument_types`` is itself part of the human-reviewed capability
+        approval.  This layer enforces the operating model implied by that declaration
+        but does not require a code change for every newly certified public instrument
+        structure.
+        """
+
         types = set(self.allowed_instrument_types)
-        listed_types = {"common_stock", "preferred_stock", "fund"}
-        derivative_types = {"future", "perpetual", "option"}
+        derivative_types = {
+            "future", "perpetual", "option", "forward", "swap"
+        }
+        listed_types = {
+            "common_stock", "preferred_stock", "fund", "reit", "trust",
+            "partnership", "warrant", "right",
+        }
 
-        if self.asset_class is CandidateAssetClass.CRYPTO:
-            if types <= {"token", "spot", "stablecoin"}:
-                if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_7:
-                    raise ValueError("direct crypto requires the continuous 24/7 session model")
-                if self.custody_settlement_model is not CustodySettlementModel.QUALIFIED_DIGITAL_ASSET_CUSTODY:
-                    raise ValueError("direct crypto requires qualified digital-asset custody")
-            elif types <= {"fund"}:
-                self._require_listed_security_structure("listed crypto funds")
-            else:
-                raise ValueError("one crypto approval cannot mix direct tokens and listed wrappers")
-            return
-
-        if self.asset_class is CandidateAssetClass.FX:
-            if types <= {"spot"}:
-                if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_5:
-                    raise ValueError("spot FX requires the continuous 24/5 session model")
-                if self.custody_settlement_model is not CustodySettlementModel.PRIME_BROKER_SPOT_FX:
-                    raise ValueError("spot FX requires the prime-broker spot-FX model")
-            elif types <= {"fund"}:
-                self._require_listed_security_structure("listed currency funds")
-            else:
-                raise ValueError("one FX approval cannot mix spot pairs and listed wrappers")
-            return
-
-        if self.asset_class in {
-            CandidateAssetClass.INTERNATIONAL_EQUITY,
-            CandidateAssetClass.REAL_ESTATE,
-            CandidateAssetClass.ALTERNATIVE,
+        if self.asset_class is CandidateAssetClass.CRYPTO and types <= {
+            "token", "spot", "stablecoin", "perpetual", "future"
         }:
-            if not types <= listed_types | {"spot"}:
-                raise ValueError(f"{self.asset_class.value} contains an unsupported instrument structure")
+            if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_7:
+                raise ValueError(
+                    "direct digital assets require the continuous 24/7 session model"
+                )
+            if self.custody_settlement_model not in {
+                CustodySettlementModel.QUALIFIED_DIGITAL_ASSET_CUSTODY,
+                CustodySettlementModel.COLLATERALIZED_DERIVATIVE,
+                CustodySettlementModel.FUTURES_CLEARING,
+            }:
+                raise ValueError(
+                    "direct digital assets require certified digital custody or derivatives clearing"
+                )
+
+        if self.asset_class is CandidateAssetClass.FX and types <= {
+            "spot", "forward", "swap"
+        }:
+            if self.trading_session_model is not TradingSessionModel.CONTINUOUS_24_5:
+                raise ValueError("direct FX requires the continuous 24/5 session model")
+            if self.custody_settlement_model not in {
+                CustodySettlementModel.PRIME_BROKER_SPOT_FX,
+                CustodySettlementModel.COLLATERALIZED_DERIVATIVE,
+            }:
+                raise ValueError("direct FX requires prime-broker or derivative settlement")
+
+        if self.asset_class is CandidateAssetClass.FIXED_INCOME and not types <= {
+            "fund", "common_stock", "preferred_stock"
+        }:
+            if self.trading_session_model not in {
+                TradingSessionModel.EXCHANGE_LOCAL,
+                TradingSessionModel.DEALER_24_5,
+            }:
+                raise ValueError(
+                    "direct fixed income requires exchange or dealer-market sessions"
+                )
+            if self.custody_settlement_model not in {
+                CustodySettlementModel.BROKER_CUSTODIED_SECURITY,
+                CustodySettlementModel.CENTRAL_SECURITIES_DEPOSITORY,
+                CustodySettlementModel.COLLATERALIZED_DERIVATIVE,
+            }:
+                raise ValueError(
+                    "direct fixed income requires broker, depository, or derivative settlement"
+                )
+
+        if types & derivative_types:
+            permitted = {
+                CustodySettlementModel.FUTURES_CLEARING,
+                CustodySettlementModel.OPTIONS_CLEARING,
+                CustodySettlementModel.COLLATERALIZED_DERIVATIVE,
+                CustodySettlementModel.PRIME_BROKER_SPOT_FX,
+                CustodySettlementModel.QUALIFIED_DIGITAL_ASSET_CUSTODY,
+            }
+            if self.custody_settlement_model not in permitted:
+                raise ValueError(
+                    "derivative structures require a certified clearing or collateral model"
+                )
+
+        if types <= listed_types and self.asset_class not in {
+            CandidateAssetClass.CRYPTO,
+            CandidateAssetClass.FX,
+        }:
             self._require_listed_security_structure(self.asset_class.value)
-            return
-
-        if self.asset_class is CandidateAssetClass.FIXED_INCOME:
-            if types <= {"fund"}:
-                self._require_listed_security_structure("listed fixed-income funds")
-            elif types <= {"bond"}:
-                if self.trading_session_model not in {TradingSessionModel.EXCHANGE_LOCAL, TradingSessionModel.DEALER_24_5}:
-                    raise ValueError("fixed income requires exchange or dealer-market sessions")
-                if self.custody_settlement_model not in {CustodySettlementModel.BROKER_CUSTODIED_SECURITY, CustodySettlementModel.CENTRAL_SECURITIES_DEPOSITORY}:
-                    raise ValueError("fixed income requires broker or central-depository settlement")
-            else:
-                raise ValueError("one fixed-income approval cannot mix bonds and listed funds")
-            return
-
-        if self.asset_class is CandidateAssetClass.COMMODITY:
-            if types <= {"fund", "spot"}:
-                self._require_listed_security_structure("listed or custodied commodity exposure")
-            elif types <= {"future"}:
-                self._require_derivative_structure(
-                    "commodity futures",
-                    {CustodySettlementModel.FUTURES_CLEARING, CustodySettlementModel.COLLATERALIZED_DERIVATIVE},
-                )
-            else:
-                raise ValueError("one commodity approval cannot mix cash wrappers and futures")
-            return
-
-        if self.asset_class is CandidateAssetClass.FUTURE:
-            if not types <= {"future", "perpetual"}:
-                raise ValueError("future approvals may contain only future or perpetual contracts")
-            self._require_derivative_structure(
-                "futures",
-                {CustodySettlementModel.FUTURES_CLEARING, CustodySettlementModel.COLLATERALIZED_DERIVATIVE},
-            )
-            return
-
-        if self.asset_class is CandidateAssetClass.OPTION:
-            if not types <= {"option"}:
-                raise ValueError("option approvals may contain only listed option contracts")
-            self._require_derivative_structure(
-                "options",
-                {CustodySettlementModel.OPTIONS_CLEARING, CustodySettlementModel.COLLATERALIZED_DERIVATIVE},
-            )
-            return
-
-        if self.asset_class is CandidateAssetClass.VOLATILITY:
-            if types <= {"fund"}:
-                self._require_listed_security_structure("listed volatility funds")
-            elif types <= derivative_types:
-                self._require_derivative_structure(
-                    "volatility derivatives",
-                    {
-                        CustodySettlementModel.FUTURES_CLEARING,
-                        CustodySettlementModel.OPTIONS_CLEARING,
-                        CustodySettlementModel.COLLATERALIZED_DERIVATIVE,
-                    },
-                )
-            else:
-                raise ValueError("one volatility approval cannot mix listed funds and derivatives")
 
     def _require_listed_security_structure(self, label: str) -> None:
         if self.trading_session_model is not TradingSessionModel.EXCHANGE_LOCAL:
@@ -352,7 +339,9 @@ class AssetClassCapabilityProfile:
             "execution_certification_identifier",
             "custody_settlement_identifier",
         ]
-        derivative_types = set(self.allowed_instrument_types) & {"future", "perpetual", "option"}
+        derivative_types = set(self.allowed_instrument_types) & {
+            "future", "perpetual", "option", "forward", "swap", "warrant", "right"
+        }
         if derivative_types:
             fields.extend(("contract_model_version", "margin_model_version", "lifecycle_model_version"))
         if derivative_types & {"future", "perpetual"}:

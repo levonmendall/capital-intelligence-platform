@@ -4,45 +4,26 @@
 
 - Portfolio: one `COMPOUNDING` paper portfolio, USD, $250,000 starting capital.
 - Canonical implementation: internal simulated fills persisted through governed execution and reconciliation.
-- Alpaca: separate paper-account transport and round-trip validation; not the canonical portfolio ledger.
+- Instrument scope: every classified liquid public-market instrument may be evaluated and may become paper allocatable through the exact certified active-universe capability publication.
+- Bootstrap universe: the original 15 U.S.-listed instruments remain available for startup, smoke tests, and regression coverage; they are not an ownership whitelist.
 - Live money: prohibited. No component has real-money authority.
-- Pilot universe: 15 bounded U.S.-listed instruments (`VTI`, `VXUS`, `GOVT`, `LQD`, `HYG`, `SGOV`, `DBC`, `GLD`, `UUP`, `IBIT`, `VNQ`, `DBMF`, `WTPI`, `VIXY`, `BTAL`) with explicit caps and IEX limitations.
 
 ## Readiness assessment
 
-| Gate | State | Reason |
+| Gate | State | Boundary |
 |---|---|---|
-| CIO-only action | Implemented in domain contracts | Must be protected by golden tests |
-| Portfolio construction after decision | Implemented | Requires full-path certification |
-| Paper-only transport | Implemented by policy/config | Needs endpoint/account prohibition chaos tests |
-| Singular execution authority | **Not ready** | Headless operator and Streamlit worker coexist |
-| Reconciliation before canonical state | Implemented foundation | Restart/partial-fill chaos coverage incomplete |
-| Data readiness | Fail-closed foundation | Broad all-market providers remain blocked; pilot must be labeled bounded |
-| Production composite readiness | **Not ready** | Render checks Streamlit only |
-| Deterministic archives | **Not ready** | `st_mtime` ordering remains |
-| PIT historical certification | **Not ready** | Material domains incomplete |
-| Formal experiment | **Not ready** | Launch policy is not a frozen experimental protocol |
-| Multi-week soak | Not launched under versioned protocol | PR12 |
+| CIO-only action | Implemented | Six specialists remain advisory; only the CIO issues portfolio actions |
+| Complete-universe opportunity process | Implemented in architecture | No candidate-count or shortlist ceiling; production providers must prove complete point-in-time coverage |
+| Capability-based paper ownership | Implemented in architecture | Exact identity, evidence, execution, custody, settlement, currency, lifecycle, and risk capability must be current |
+| Exact execution universe | Implemented | Missing or mismatched active publication fails closed; there is no static execution fallback |
+| Portfolio construction after CIO decision | Implemented | Dynamic search remains subject to cash, risk, liquidity, cost, turnover, concentration, and downside controls |
+| Reconciliation before canonical state | Implemented foundation | Restart, partial-fill, corruption, and recovery exercises remain operating requirements |
+| Provider/data readiness | Fail closed | Each asset remains unavailable until its required licensed point-in-time domains are complete |
+| Production composite readiness | Not equivalent to live-money approval | Current operational, deployment, backup, SLO, and incident gates must remain green |
+| Out-of-sample validation | In progress | No proven-alpha or performance claim is permitted |
 
-## Formal experiment requirements
+## Formal experiment boundary
 
-PR12 must freeze a versioned protocol before results are interpreted: hypothesis, start/end criteria, universe, providers, decision schedule, thresholds, costs, capital/cash rules, failure handling, metrics, benchmark, attribution, missing-data policy, change-control, minimum weeks/cycles, and a rule that results can only generate a reviewed proposal—not directly change thresholds or claim performance.
+The original `config/paper_experiment_protocol.v1.json` froze the earlier 15-instrument pilot. It is preserved as an immutable historical protocol and cannot be used to evaluate the universal active-universe build after this scope change. A new experiment registration must freeze the exact code, provider capabilities, active-universe publication rules, costs, benchmark, schedule, failure policy, and metrics before new results are interpreted.
 
-## Launch decision
-
-Continue engineering and deterministic paper rehearsals. Do not call the platform production paper-trading ready and do not begin performance claims until PR1-PR11 gates pass and PR12 records an approved experiment version.
-# Formal paper experiment
-
-`config/paper_experiment_protocol.v1.json` pre-registers a 42-calendar-day,
-30-operating-cycle soak test for exactly one $250,000 `COMPOUNDING` paper
-portfolio. It freezes the 15-instrument pilot, providers, cost model, benchmark,
-schedule, metrics, missing-data policy, failure scenarios, and change control.
-Any drift terminates the registration rather than splicing results.
-
-The experiment is **not launched yet**. The private CLI registration command
-requires evidence that PR1-PR11 passed, the real desktop/iPhone browser gate
-passed, the human-approved event benchmark remains certified, and the exact
-40-character Render deployed SHA equals the experiment code SHA. Until then, registration
-fails closed. Even a completed experiment remains awaiting human review and
-cannot automatically change thresholds, promote policy, support performance
-claims, or authorize real money.
+Any completed paper experiment remains descriptive evidence awaiting human review. It cannot automatically change thresholds, promote policy, support performance claims, authorize live money, or bypass current capability and reconciliation controls.

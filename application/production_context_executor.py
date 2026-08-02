@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 from application import production_context_contract as contract
@@ -14,7 +15,7 @@ from opportunity.snapshot import (
     PUBLICATION_SNAPSHOT_KIND,
     load_opportunity_snapshot,
 )
-from operations.free_paper_pilot import load_free_paper_pilot_universe
+from operations.active_paper_universe import load_active_paper_universe_for_publication
 from screening import candidate_from_payload
 
 
@@ -75,48 +76,45 @@ def _publication_and_candidates(executor, *, context):
     return publication, candidates
 
 
+
+def _active_universe_path(executor) -> Path | None:
+    provider = getattr(executor, "context_provider", None)
+    visited: set[int] = set()
+    while provider is not None and id(provider) not in visited:
+        visited.add(id(provider))
+        store = getattr(provider, "portfolio_store", None)
+        path = getattr(store, "path", None)
+        if path is not None:
+            return Path(path).expanduser().with_name("active-paper-universe.json")
+        provider = getattr(provider, "_delegate", None) or getattr(
+            provider, "_stored_provider", None
+        )
+    return None
+
 def _candidate_authority_universe(executor, *, context):
     _publication, candidates = _publication_and_candidates(
         executor,
         context=context,
     )
-    configured = load_free_paper_pilot_universe()
-    discovered = tuple(
-        SimpleNamespace(
-            instrument_identifier=candidate.instrument.instrument_id,
-            symbol=candidate.instrument.symbol,
-            execution_asset_class=candidate.instrument.asset_class,
-            economic_exposure=(
-                candidate.instrument.economic_exposure_class.value
-                if candidate.instrument.economic_exposure_class is not None
-                else candidate.instrument.asset_class.value
-            ),
-            venue=candidate.instrument.venue,
-            country_code=candidate.instrument.country_code,
-            instrument_type=candidate.instrument.instrument_type,
-        )
-        for candidate in candidates
-    )
-    combined = {
-        item.instrument_identifier: item
-        for item in (*configured.instruments, *discovered)
-    }
-    authority = CanonicalMarketParticipationAuthority.load()
-    authority.require_complete_allocatable_set(combined.values())
-    instruments = authority.filter_paper_allocatable(combined.values())
     expected_publication_identifier = str(
         getattr(context, "eligible_universe_publication_identifier", "")
     ).strip()
-    runtime_identifier = (
-        expected_publication_identifier
-        or f"runtime-market-authority:{context.screening_cycle_identifier}"
+    if not expected_publication_identifier:
+        raise RuntimeError(
+            "runtime authority requires the exact eligible-universe publication identifier"
+        )
+    active = load_active_paper_universe_for_publication(
+        expected_publication_identifier,
+        path=_active_universe_path(executor),
     )
+    # Research-only screening candidates may intentionally lack execution capability.
+    # The exact active publication remains the sole source of paper authority; the
+    # screening payload cannot manufacture an executable instrument.
     return SimpleNamespace(
-        identifier=runtime_identifier,
-        expected_publication_identifier=(
-            expected_publication_identifier or None
-        ),
-        instruments=instruments,
+        identifier=active.identifier,
+        expected_publication_identifier=expected_publication_identifier,
+        instruments=active.instruments,
+        limitations=active.limitations,
     )
 
 
@@ -241,6 +239,23 @@ class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
     def run(self, *, as_of: datetime):
         original_provider = self.context_provider
         context = original_provider.load_context(as_of=as_of)
+        governed_context = (
+            str(
+                getattr(
+                    context,
+                    "eligible_universe_publication_identifier",
+                    "unknown",
+                )
+            ).strip()
+            not in {"", "unknown"}
+            and str(getattr(context, "process_version", "unknown")).strip()
+            not in {"", "unknown"}
+        )
+        if not governed_context:
+            # Legacy/rehearsal contexts have no execution publication and therefore
+            # cannot receive dynamic paper authority. Preserve their analysis-only
+            # test path without inventing a static execution fallback.
+            return super().run(as_of=as_of)
         authority_universe = _candidate_authority_universe(self, context=context)
         publication_snapshot = _publication_snapshot(self, context=context)
         expected_publication_identifier = (

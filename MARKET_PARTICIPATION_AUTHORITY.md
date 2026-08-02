@@ -3,17 +3,24 @@
 The platform keeps three scopes separate:
 
 1. **Observed** — a market or instrument may be discovered, monitored, explained, and retained in screening lineage.
-2. **Decision certified** — an exact instrument may enter the six-specialist and CIO path only through explicit registry authority.
-3. **Paper allocatable** — an exact instrument may receive a paper target only when explicitly listed as allocatable.
+2. **Decision certified** — an exact instrument may enter the six-specialist and CIO path only when its market family and point-in-time analytical capability are certified.
+3. **Paper allocatable** — an exact instrument may receive a paper target only when the current active-universe publication proves its execution, custody, settlement, currency, lifecycle, and risk capability.
 
-The machine authority is `config/market_coverage_registry.v1.json`.
+The market-family authority is `config/market_coverage_registry.v1.json`. The exact instrument authority is the current certified active-paper-universe publication.
 
 ## Current scope
 
-The 15 named U.S.-listed pilot instruments are decision certified and paper allocatable. They provide governed exposure to U.S. and international equities, government and corporate credit, short Treasuries, commodities, gold, foreign exchange, crypto, real estate, managed futures, option strategies, volatility, and market-neutral alternatives.
+Every classified liquid public-market family may be analyzed and may become paper allocatable. The 15 named U.S.-listed pilot instruments remain a bootstrap and regression baseline, not an exclusive whitelist.
 
-Broad individual U.S. stocks, direct international equities, direct fixed income, direct commodities and futures, spot FX, spot crypto, direct alternatives, and individual options remain observed but are not decision certified or paper allocatable.
+A dynamically discovered instrument may become decision certified and paper allocatable when:
 
-Discovery or provider availability alone cannot promote an instrument. The active-universe loader and production CIO executor filter runtime authority to the exact registry-listed set. Missing registry instruments, publication mismatch, malformed state, or unregistered candidates fail closed or remain intelligence-only.
+- its stable identity, venue, jurisdiction, currency, and instrument structure are known;
+- its market family is decision certified;
+- its evidence, valuation, expected-return, liquidity, cost, and risk models are complete;
+- its execution, custody, settlement, session, and currency-translation capabilities are current;
+- derivatives also have complete contract, margin, lifecycle, roll, and defined-risk controls where applicable; and
+- the exact instrument appears in the current certified active-universe publication.
 
-No strategy, threshold, specialist authority, CIO authority, construction limit, paper-only boundary, or real-money permission changes.
+Discovery or provider availability alone cannot promote an instrument. Missing, stale, mismatched, or malformed capability state fails closed or remains research-only. The runtime cannot replace the current active universe with the original static pilot during execution.
+
+No strategy, return threshold, specialist authority, CIO authority, portfolio-risk control, paper-only boundary, or real-money permission changes.

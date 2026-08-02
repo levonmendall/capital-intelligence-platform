@@ -136,7 +136,9 @@ class PortfolioConstructionPolicy:
     maximum_expected_shortfall: float = -0.12
     maximum_stressed_drawdown: float = -0.20
     maximum_liquidity_adjusted_loss: float = -0.22
-    optimizer_beam_width: int = 4
+    optimizer_beam_width: int | None = None
+    optimizer_exact_intent_limit: int = 8
+    optimizer_maximum_states: int = 2048
     maximum_daily_volume_participation: float = 0.10
     execution_days: int = 3
     sector_limits: tuple[ExposureLimit, ...] = ()
@@ -183,12 +185,24 @@ class PortfolioConstructionPolicy:
             if value >= 0.0:
                 raise ValueError(f"{field_name} must be negative")
             object.__setattr__(self, field_name, value)
-        if isinstance(self.optimizer_beam_width, bool) or not isinstance(
-            self.optimizer_beam_width, int
+        if self.optimizer_beam_width is not None:
+            if isinstance(self.optimizer_beam_width, bool) or not isinstance(
+                self.optimizer_beam_width, int
+            ):
+                raise TypeError("optimizer_beam_width must be an integer or None")
+            if self.optimizer_beam_width < 1:
+                raise ValueError("optimizer_beam_width must be positive")
+        for field_name in (
+            "optimizer_exact_intent_limit",
+            "optimizer_maximum_states",
         ):
-            raise TypeError("optimizer_beam_width must be an integer")
-        if self.optimizer_beam_width < 1:
-            raise ValueError("optimizer_beam_width must be positive")
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{field_name} must be an integer")
+            if value < 1:
+                raise ValueError(f"{field_name} must be positive")
+        if self.optimizer_maximum_states < 2:
+            raise ValueError("optimizer_maximum_states must be at least 2")
         if self.minimum_cash_weight >= 1.0:
             raise ValueError("minimum_cash_weight must be below 1.0")
         if self.maximum_position_weight <= 0.0:
@@ -221,6 +235,27 @@ class PortfolioConstructionPolicy:
             names = tuple(item.name for item in values)
             if len(names) != len(set(names)):
                 raise ValueError(f"{field_name} names must be unique")
+
+    def resolved_optimizer_beam_width(self, intent_count: int) -> int:
+        """Return a workload-aware search width for the current decision set.
+
+        Small decision sets receive exact subset-scale capacity. Larger sets expand
+        with the number of CIO-approved intents instead of being truncated to a fixed
+        four-state beam. An explicit compatibility override remains available, but it
+        can never reduce the first generation below the number of candidate intents.
+        """
+
+        if isinstance(intent_count, bool) or not isinstance(intent_count, int):
+            raise TypeError("intent_count must be an integer")
+        if intent_count < 1:
+            return 1
+        if self.optimizer_beam_width is not None:
+            requested = max(self.optimizer_beam_width, intent_count)
+        elif intent_count <= self.optimizer_exact_intent_limit:
+            requested = 2**intent_count
+        else:
+            requested = max(64, intent_count * 8)
+        return min(self.optimizer_maximum_states, requested)
 
     def sector_limit(self, sector: str) -> float:
         return next(
