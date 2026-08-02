@@ -16,6 +16,7 @@ import streamlit as st
 
 import concise_operating_intelligence_ui as concise
 import live_operating_console
+import portfolio_first_ui_refinement
 
 
 _INSTALLED_STATE_KEY = "_capital_intelligence_opportunity_funnel_ui_installed"
@@ -256,6 +257,7 @@ def install(app_impl: ModuleType) -> None:
     app_impl.render_today_opportunity_scan = render_today_opportunity_scan
     app_impl.render_live_market_status = render_live_market_status
     live_operating_console.render_live_market_status = render_live_market_status
+    portfolio_first_ui_refinement.install(app_impl)
     setattr(app_impl, _INSTALLED_STATE_KEY, True)
 
 
