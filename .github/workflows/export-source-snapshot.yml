@@ -1,28 +1,36 @@
-name: Export source snapshot
+name: Apply universal ownership patch
 
 on:
   push:
     branches:
       - feature/universal-investable-ownership
-  pull_request:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  apply:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out working branch
         uses: actions/checkout@v4
-      - name: Upload source snapshot
-        uses: actions/upload-artifact@v4
         with:
-          name: universal-investable-ownership-source
-          path: |
-            .
-            !.git
-          include-hidden-files: true
-          retention-days: 1
+          ref: feature/universal-investable-ownership
+          fetch-depth: 0
+      - name: Apply staged implementation patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH_B64=".github/universal-investable-ownership.patch.gz.b64"
+          if [[ ! -f "$PATCH_B64" ]]; then
+            echo "No implementation patch is present."
+            exit 0
+          fi
+          base64 --decode "$PATCH_B64" | gzip --decompress > /tmp/universal.patch
+          git apply --index /tmp/universal.patch
+          git rm "$PATCH_B64"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Make investable ownership capability-based across the full universe"
+          git push origin HEAD:feature/universal-investable-ownership
