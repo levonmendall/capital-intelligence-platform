@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 
 from application import production_context_contract as contract
 from governance.bounded_pilot_scope import BoundedPilotCapabilityAuthority
 from governance.market_participation import CanonicalMarketParticipationAuthority
-from opportunity import OpportunityEngine, OpportunityQueue, RankedOpportunity
+from opportunity import (
+    AnalysisLane,
+    OpportunityEngine,
+    OpportunityQueue,
+    RankedOpportunity,
+)
 from opportunity.snapshot import (
     PUBLICATION_SNAPSHOT_KIND,
     load_opportunity_snapshot,
@@ -195,13 +201,13 @@ def _rerank_persisted_membership(
     decision_context,
     publication_queue: OpportunityQueue,
 ) -> OpportunityQueue:
-    """Apply portfolio diagnostics only to ordering, never qualification membership.
+    """Preserve economic qualification while refreshing exact ownership authority.
 
-    ``OpportunityRankingInput`` is explicitly an ordering contract. Re-running
-    qualification after publication can reinterpret an immutable candidate set and
-    silently eject a previously certified candidate. Preserve the publication's
-    qualified/rejected membership and qualifications, while recalculating only the
-    disclosed ranking components and order with current-cycle portfolio diagnostics.
+    Portfolio diagnostics may change ordering but not immutable publication
+    membership. Exact paper authority is different: it must be re-evaluated at the
+    decision boundary. A still-meritorious but non-certified candidate remains in the
+    committee queue as exploration, while its refreshed strict universe assessment
+    prevents the CIO from authorizing new or increased exposure.
     """
 
     candidate_map = {item.identifier: item for item in candidates}
@@ -217,7 +223,34 @@ def _rerank_persisted_membership(
     rows = []
     for persisted in publication_queue.ranked:
         candidate = candidate_map[persisted.candidate.identifier]
-        qualification = persisted.qualification
+        strict_universe = engine.universe_policy.evaluate(
+            candidate.instrument,
+            as_of=decision_context.as_of,
+        )
+        qualification = replace(
+            persisted.qualification,
+            universe=strict_universe,
+            analysis_lane=(
+                persisted.qualification.analysis_lane
+                if strict_universe.direct_recommendation_allowed
+                else AnalysisLane.EXPLORATION
+            ),
+            reasons=tuple(
+                dict.fromkeys(
+                    (
+                        *persisted.qualification.reasons,
+                        *(
+                            ()
+                            if strict_universe.direct_recommendation_allowed
+                            else (
+                                "runtime ownership authority permits research review but prohibits new or increased exposure",
+                                *strict_universe.reasons,
+                            )
+                        ),
+                    )
+                )
+            ),
+        )
         robustness = engine.robustness(candidate, decision_context)
         components = engine._components(  # package-internal ranking rule
             candidate,
