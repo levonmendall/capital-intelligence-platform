@@ -1,4 +1,4 @@
-"""Runtime executor binding CIO authority to registry-certified instruments."""
+"""Runtime executor binding CIO authority to capability-certified instruments."""
 
 from __future__ import annotations
 
@@ -20,10 +20,18 @@ from screening import candidate_from_payload
 
 _AUTHORITY_BINDING_LOCK = threading.RLock()
 _ORIGINAL_MARKER = "_canonical_market_registry_original_from_universe"
+_CAPABILITY_LIMITATION_PREFIX = "Portfolio authority is capability-based:"
+
+
+def _authority_already_applied(universe) -> bool:
+    return any(
+        str(item).startswith(_CAPABILITY_LIMITATION_PREFIX)
+        for item in tuple(getattr(universe, "limitations", ()))
+    )
 
 
 def _install_registry_bounded_authority() -> None:
-    """Ensure every production authority build applies the market registry first."""
+    """Ensure every production authority build applies portfolio eligibility first."""
 
     existing = getattr(BoundedPilotCapabilityAuthority, _ORIGINAL_MARKER, None)
     if existing is not None:
@@ -32,10 +40,18 @@ def _install_registry_bounded_authority() -> None:
     setattr(BoundedPilotCapabilityAuthority, _ORIGINAL_MARKER, original)
 
     def from_registry(cls, universe, *, research_only: bool = False):
-        filtered = (
-            CanonicalMarketParticipationAuthority.load()
-            .decision_authority_universe(universe)
-        )
+        if _authority_already_applied(universe):
+            filtered = universe
+        else:
+            filtered = (
+                CanonicalMarketParticipationAuthority.load()
+                .decision_authority_universe(
+                    universe,
+                    evaluated_at=getattr(
+                        universe, "authority_evaluated_at", None
+                    ),
+                )
+            )
         return original(cls, filtered, research_only=research_only)
 
     BoundedPilotCapabilityAuthority.from_universe = classmethod(from_registry)
@@ -81,6 +97,7 @@ def _candidate_authority_universe(executor, *, context):
         context=context,
     )
     configured = load_free_paper_pilot_universe()
+    evaluated_at = getattr(context, "as_of", None)
     discovered = tuple(
         SimpleNamespace(
             instrument_identifier=candidate.instrument.instrument_id,
@@ -94,6 +111,16 @@ def _candidate_authority_universe(executor, *, context):
             venue=candidate.instrument.venue,
             country_code=candidate.instrument.country_code,
             instrument_type=candidate.instrument.instrument_type,
+            average_daily_dollar_volume=getattr(
+                candidate.instrument,
+                "average_daily_dollar_volume",
+                None,
+            ),
+            leverage_multiplier=getattr(
+                candidate.instrument,
+                "leverage_multiplier",
+                1.0,
+            ),
         )
         for candidate in candidates
     )
@@ -102,8 +129,12 @@ def _candidate_authority_universe(executor, *, context):
         for item in (*configured.instruments, *discovered)
     }
     authority = CanonicalMarketParticipationAuthority.load()
-    authority.require_complete_allocatable_set(combined.values())
-    instruments = authority.filter_paper_allocatable(combined.values())
+    authority.require_complete_allocatable_set(
+        combined.values(), evaluated_at=evaluated_at
+    )
+    instruments = authority.filter_paper_allocatable(
+        combined.values(), evaluated_at=evaluated_at
+    )
     expected_publication_identifier = str(
         getattr(context, "eligible_universe_publication_identifier", "")
     ).strip()
@@ -116,7 +147,13 @@ def _candidate_authority_universe(executor, *, context):
         expected_publication_identifier=(
             expected_publication_identifier or None
         ),
+        authority_evaluated_at=evaluated_at,
         instruments=instruments,
+        limitations=(
+            _CAPABILITY_LIMITATION_PREFIX
+            + " bootstrap instruments and any additional instrument with a complete active certification may be owned.",
+            "CIO, construction, risk, and paper execution controls remain independently fail-closed.",
+        ),
     )
 
 
@@ -236,7 +273,7 @@ def _rerank_persisted_membership(
 
 
 class ProductionCanonicalCIOExecutor(contract.ProductionCanonicalCIOExecutor):
-    """Requalify using exact registry-certified paper authority."""
+    """Requalify using exact current capability-based paper authority."""
 
     def run(self, *, as_of: datetime):
         original_provider = self.context_provider
