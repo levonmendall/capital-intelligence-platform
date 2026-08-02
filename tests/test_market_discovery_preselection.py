@@ -15,6 +15,7 @@ from operations.market_discovery_preselection import (
     build_preselection_plan,
     evaluate_cutoff_outcomes,
 )
+from operations.provider_enriched_preselection import REQUIRED_PROVIDER_FACTORS
 
 
 def record(symbol):
@@ -30,6 +31,13 @@ def record(symbol):
         economic_exposure="crypto",
         quote_spread_bps=5.0,
         expiration_at=None,
+    )
+
+
+def _provider_factor_evidence(symbol):
+    return tuple(
+        f"provider-factor:{factor}:test:{factor}.v1:{symbol}"
+        for factor in REQUIRED_PROVIDER_FACTORS
     )
 
 
@@ -116,6 +124,7 @@ def test_continuity_is_additive_to_200_slots():
             carry_score=.5,
             improving_conditions_score=(i + 1) / 300,
             indicative_price=100 + i,
+            evidence_identifiers=_provider_factor_evidence(item.symbol),
         )
         for i, item in enumerate(ordinary)
     }
@@ -155,6 +164,10 @@ def test_continuity_is_additive_to_200_slots():
     assert lane.continuity_count == 1
     assert len(lane.preselection.selected_symbols) == 200
     assert lane.deep_analyzed_count == 201
+    assert len(lane.preselection_evidence) == (
+        len(lane.preselection.selected_symbols)
+        + len(lane.preselection.shadow_symbols)
+    )
 
 
 def test_cutoff_measurement_compares_shadow_with_selected():
