@@ -101,12 +101,13 @@ def _candidate_authority_universe(
     executor,
     *,
     context,
-    authority: CanonicalMarketParticipationAuthority,
+    authority: CanonicalMarketParticipationAuthority | None = None,
 ):
     _publication, candidates = _publication_and_candidates(
         executor,
         context=context,
     )
+    resolved_authority = authority or CanonicalMarketParticipationAuthority.load()
     configured = load_free_paper_pilot_universe()
     evaluated_at = getattr(context, "as_of", None)
     discovered = tuple(
@@ -139,10 +140,10 @@ def _candidate_authority_universe(
         item.instrument_identifier: item
         for item in (*configured.instruments, *discovered)
     }
-    authority.require_complete_allocatable_set(
+    resolved_authority.require_complete_allocatable_set(
         combined.values(), evaluated_at=evaluated_at
     )
-    instruments = authority.filter_paper_allocatable(
+    instruments = resolved_authority.filter_paper_allocatable(
         combined.values(), evaluated_at=evaluated_at
     )
     expected_publication_identifier = str(
@@ -286,7 +287,7 @@ def _rerank_persisted_membership(
             ),
         )
         robustness = engine.robustness(candidate, decision_context)
-        components = engine._components(  # package-internal ranking rule
+        components = engine._components(
             candidate,
             qualification,
             robustness,
