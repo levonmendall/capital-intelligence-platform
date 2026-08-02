@@ -1,6 +1,7 @@
 """Formal Capital Intelligence opportunity qualification and ranking."""
 
-from opportunity.engine import OpportunityEngine, OpportunityQualificationPolicy
+from opportunity.engine import OpportunityQualificationPolicy
+from opportunity.governed_engine import OpportunityEngine
 from opportunity.models import (
     AnalysisLane,
     AlternativeKind,
