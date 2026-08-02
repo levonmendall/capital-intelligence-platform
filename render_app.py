@@ -25,6 +25,7 @@ import opportunity_scan_resilience
 import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
+import today_event_alignment_runtime
 import ui_experience_refinement
 import ui_refinement
 from render_nonblocking_data import (
@@ -208,6 +209,11 @@ def deployment_context_from_environment() -> DeploymentContext:
 def main() -> None:
     public_event_recency_runtime.install(educational_market_briefing_ui)
     prepare_render_data_runtime()
+    today_event_alignment_runtime.install(
+        educational_market_briefing_ui,
+        operating_intelligence_ui,
+        environment_story_placement_refinement,
+    )
     opportunity_scan_resilience.install()
     ui_refinement.install(app_impl, secure_app)
     ui_experience_refinement.install(app_impl)
