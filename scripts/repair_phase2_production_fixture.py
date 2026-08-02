@@ -14,6 +14,23 @@ def replace_once(path: str, old: str, new: str) -> None:
     target.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+def replace_exact_count(
+    path: str,
+    old: str,
+    new: str,
+    *,
+    expected: int,
+) -> None:
+    target = Path(path)
+    text = target.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count != expected:
+        raise SystemExit(
+            f"{path}: expected {expected} matches, found {count}: {old[:120]!r}"
+        )
+    target.write_text(text.replace(old, new), encoding="utf-8")
+
+
 def main() -> None:
     path = "tests/test_canonical_production_context_adapter.py"
     replace_once(
@@ -66,7 +83,7 @@ def main() -> None:
         exposure_profile=CandidateExposureProfile(
 """,
     )
-    replace_once(
+    replace_exact_count(
         path,
         """            "evidence:fundamental:spy",
         ),
@@ -75,6 +92,7 @@ def main() -> None:
             "evidence:asset-valuation:spy",
         ),
 """,
+        expected=2,
     )
 
 
