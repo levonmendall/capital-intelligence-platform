@@ -146,6 +146,17 @@ def _unique(values: Iterable[object], *, limit: int | None = None) -> tuple[str,
     return tuple(result)
 
 
+def _count_label(value: object) -> str:
+    """Format governed funnel counts without depending on private helpers."""
+
+    if isinstance(value, bool) or value is None:
+        return "Unavailable"
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return "Unavailable"
+
+
 def _market_session(snapshot: Mapping[str, object]) -> str:
     state = snapshot.get("market_open")
     return "Open" if state is True else "Closed" if state is False else "Unavailable"
@@ -362,6 +373,7 @@ def _install_story_styles() -> None:
 .radar-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem}
 .radar-cell{min-width:0;padding:.72rem;border-radius:14px;background:rgba(255,255,255,.025);
   border:1px solid rgba(138,157,188,.1)}
+.radar-wide{grid-column:span 2}
 .radar-label{font-size:.64rem;text-transform:uppercase;letter-spacing:.09em;color:#7f8da3;
   font-weight:800}.radar-value{font-size:.92rem;color:#e9f0fa;font-weight:760;margin-top:.28rem;
   line-height:1.35}.radar-note{font-size:.72rem;color:#8e9db2;line-height:1.42;margin-top:.24rem}
@@ -411,6 +423,7 @@ def _install_story_styles() -> None:
   .today-session{justify-content:flex-start;margin-top:.7rem}
   .today-secondary-grid,.today-watch-panel,.environment-learning{grid-template-columns:1fr}
   .environment-driver-grid,.market-map,.radar-grid{grid-template-columns:1fr}
+  .radar-wide{grid-column:auto}
   .today-story-card,.environment-driver,.market-map-card{min-width:0}
   .story-explanation{padding:.72rem}
   .today-primary-title{font-size:1.32rem}
@@ -530,17 +543,17 @@ def _render_today_research_radar() -> None:
     cells = (
         (
             "Research coverage",
-            concise.base._count_label(snapshot.broad_assets_screened),
+            _count_label(snapshot.broad_assets_screened),
             "Assets observed by the broad scan.",
         ),
         (
             "Evidence-complete candidates",
-            concise.base._count_label(snapshot.governed_candidates),
+            _count_label(snapshot.governed_candidates),
             "Candidates with governed evidence.",
         ),
         (
             "Reached CIO queue",
-            concise.base._count_label(snapshot.opportunities_reaching_cio),
+            _count_label(snapshot.opportunities_reaching_cio),
             "Qualified alternatives reaching decision review.",
         ),
     )
@@ -560,7 +573,7 @@ def _render_today_research_radar() -> None:
         '<div class="radar-cell"><div class="radar-label">Strongest alternative</div>'
         f'<div class="radar-value">{escape(snapshot.strongest_alternative)}</div>'
         f'<div class="radar-note">{escape(snapshot.strongest_stage)}</div></div>'
-        '<div class="radar-cell" style="grid-column:span 2">'
+        '<div class="radar-cell radar-wide">'
         '<div class="radar-label">Main reason it did not advance</div>'
         f'<div class="radar-value">{escape(snapshot.main_reason)}</div>'
         '<div class="radar-note">Research status, not a portfolio instruction.</div></div>'
@@ -572,27 +585,27 @@ def _render_today_research_radar() -> None:
             (
                 (
                     "Broad assets screened",
-                    concise.base._count_label(snapshot.broad_assets_screened),
+                    _count_label(snapshot.broad_assets_screened),
                     "Complete eligible-universe scan",
                 ),
                 (
                     "Market snapshots",
-                    concise.base._count_label(snapshot.snapshot_covered),
+                    _count_label(snapshot.snapshot_covered),
                     "Usable initial evidence",
                 ),
                 (
                     "Companies deepened",
-                    concise.base._count_label(snapshot.companies_deepened),
+                    _count_label(snapshot.companies_deepened),
                     "Full company analysis",
                 ),
                 (
                     "Governed candidates",
-                    concise.base._count_label(snapshot.governed_candidates),
+                    _count_label(snapshot.governed_candidates),
                     "Complete candidate evidence",
                 ),
                 (
                     "Reached CIO queue",
-                    concise.base._count_label(snapshot.opportunities_reaching_cio),
+                    _count_label(snapshot.opportunities_reaching_cio),
                     "Qualified opportunities",
                 ),
             ),
