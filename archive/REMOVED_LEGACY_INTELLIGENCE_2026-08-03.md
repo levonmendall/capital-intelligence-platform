@@ -18,4 +18,5 @@ Git history is the source archive. No executable copy is kept under `archive/`.
 
 This cleanup does not alter thresholds, market scope, specialist count, CIO authority,
 construction authority, evidence governance, paper execution, or the prohibition on
-live money.
+live money. The final branch remains subject to the complete release-validation,
+browser/mobile, historical/provider/paper-readiness, and security gates before merge.
