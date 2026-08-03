@@ -71,6 +71,20 @@ def test_asml_sized_trailing_legacy_suffix_is_bounded_and_usable() -> None:
     assert records[-1].accession_number == "0000320193-26-000584"
 
 
+def test_suncor_sized_trailing_legacy_suffix_is_bounded_and_usable() -> None:
+    records = ResilientSECEdgarProvider._filing_records(
+        _payload(
+            row_count=993,
+            invalid_indexes=set(range(982, 993)),
+        ),
+        cik="0000311337",
+        retrieved_at=RETRIEVED_AT,
+    )
+
+    assert len(records) == 982
+    assert records[-1].accession_number == "0000320193-26-000981"
+
+
 def test_same_invalid_count_scattered_through_history_remains_fail_closed() -> None:
     with pytest.raises(
         SECEdgarProviderError,
@@ -78,25 +92,25 @@ def test_same_invalid_count_scattered_through_history_remains_fail_closed() -> N
     ):
         ResilientSECEdgarProvider._filing_records(
             _payload(
-                row_count=591,
-                invalid_indexes={100, 200, 300, 400, 500, 590},
+                row_count=993,
+                invalid_indexes={100, 200, 300, 400, 500, 600, 700, 800, 900, 950, 992},
             ),
-            cik="0000937966",
+            cik="0000311337",
             retrieved_at=RETRIEVED_AT,
         )
 
 
-def test_trailing_legacy_suffix_over_absolute_cap_remains_fail_closed() -> None:
+def test_trailing_legacy_suffix_over_two_percent_remains_fail_closed() -> None:
     with pytest.raises(
         SECEdgarProviderError,
         match="excessive invalid filing rows",
     ):
         ResilientSECEdgarProvider._filing_records(
             _payload(
-                row_count=591,
-                invalid_indexes=set(range(580, 591)),
+                row_count=993,
+                invalid_indexes=set(range(973, 993)),
             ),
-            cik="0000937966",
+            cik="0000311337",
             retrieved_at=RETRIEVED_AT,
         )
 

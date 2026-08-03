@@ -16,9 +16,8 @@ from providers.sec_edgar import SECEdgarProvider, SECEdgarProviderError
 
 
 _LOGGER = logging.getLogger("capital_intelligence.providers.sec_edgar")
-_ROW_POLICY_VERSION = "sec-edgar-filing-row-isolation.v2"
+_ROW_POLICY_VERSION = "sec-edgar-filing-row-isolation.v3"
 _MINIMUM_TRAILING_POLICY_ROWS = 100
-_MAXIMUM_TRAILING_INVALID_ROWS = 10
 
 
 class ResilientSECEdgarProvider(SECEdgarProvider):
@@ -116,10 +115,7 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
         trailing_suffix = bool(invalid_indexes) and invalid_indexes == list(
             range(row_count - len(invalid_indexes), row_count)
         )
-        trailing_allowed = min(
-            _MAXIMUM_TRAILING_INVALID_ROWS,
-            max(ordinary_allowed, row_count // 50),
-        )
+        trailing_allowed = max(ordinary_allowed, row_count // 50)
         trailing_policy_applies = (
             row_count >= _MINIMUM_TRAILING_POLICY_ROWS and trailing_suffix
         )
@@ -128,9 +124,9 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
         )
 
         # Ordinary malformed rows remain capped at one percent. A large filing
-        # history may additionally omit a contiguous oldest-row suffix, bounded at
-        # two percent and never more than ten rows. Recent, scattered, or middle-row
-        # corruption does not receive the trailing-history allowance.
+        # history may additionally omit a contiguous oldest-row suffix capped at two
+        # percent. Recent, scattered, or middle-row corruption does not receive the
+        # trailing-history allowance.
         if not records or len(invalid_indexes) > allowed_invalid:
             sample = ", ".join(str(value) for value in invalid_indexes[:10])
             raise SECEdgarProviderError(
