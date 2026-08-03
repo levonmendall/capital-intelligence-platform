@@ -14,9 +14,9 @@ from enum import Enum
 from math import isfinite
 from typing import Any, Iterable, Mapping
 
+from cio.committee import SpecialistAnalysis
 from cio.models import (
     ScenarioAdjustment,
-    SpecialistAnalysis,
     SpecialistPosition,
     SpecialistRole,
 )

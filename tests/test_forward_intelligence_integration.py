@@ -20,11 +20,12 @@ from tests.test_canonical_cio_cycle import _candidate, _context
 from tests.test_canonical_production_context_adapter import _candidate_evidence
 
 
-def _bundle(candidate):
+def _bundle(candidate, *, as_of=None):
+    point_in_time = candidate.as_of if as_of is None else as_of
     business = StrategicBusinessEngine().analyze(
         StrategicBusinessObservation(
             identifier="business:integration",
-            as_of=candidate.as_of,
+            as_of=point_in_time,
             revenue_exposure=0.70,
             demand_growth=0.70,
             pricing_power=0.50,
@@ -43,7 +44,7 @@ def _bundle(candidate):
     trend = MarketTrendEngine().analyze(
         MarketTrendObservation(
             identifier="trend:integration",
-            as_of=candidate.as_of,
+            as_of=point_in_time,
             absolute_trend=0.70,
             relative_trend=0.60,
             breadth=0.70,
@@ -60,7 +61,7 @@ def _bundle(candidate):
     return build_forward_intelligence_bundle(
         identifier=f"forward:{candidate.identifier}",
         candidate_identifier=candidate.identifier,
-        as_of=candidate.as_of,
+        as_of=point_in_time,
         business=business,
         trend=trend,
     )
@@ -104,7 +105,7 @@ def test_existing_six_specialists_consume_forward_intelligence() -> None:
 def test_production_candidate_round_trip_preserves_forward_bundle() -> None:
     candidate = _candidate("ROUNDTRIP")
     base = _candidate_evidence(candidate)
-    bundle = _bundle(candidate)
+    bundle = _bundle(candidate, as_of=base.as_of)
     lineage = replace(
         base.lineage,
         evidence_identifiers=tuple(

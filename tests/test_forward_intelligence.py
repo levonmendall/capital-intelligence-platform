@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from cio.models import SpecialistAnalysis, SpecialistPosition, SpecialistRole
+from cio.committee import SpecialistAnalysis
+from cio.models import SpecialistPosition, SpecialistRole
 from intelligence.forward import (
     AssetPolicySensitivity,
     CurrencyExposure,
