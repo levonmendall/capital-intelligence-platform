@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 30
     env:
       PYTHONPATH: ${{ github.workspace }}
+      PHASE_IDENTIFIER: committee-cio-v2-phase4-accountability
     steps:
       - name: Check out phase branch
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
