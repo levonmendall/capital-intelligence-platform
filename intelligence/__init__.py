@@ -40,10 +40,6 @@ _EXPORTS = {
         "intelligence.cio_guidance",
         "ChangeCondition",
     ),
-    "ChiefInvestmentOfficer": (
-        "intelligence.cio",
-        "ChiefInvestmentOfficer",
-    ),
     "CIOBriefing": (
         "intelligence.briefing",
         "CIOBriefing",
@@ -127,10 +123,6 @@ _EXPORTS = {
     "GovernanceStatus": (
         "intelligence.governance",
         "GovernanceStatus",
-    ),
-    "GuidanceSynthesizer": (
-        "intelligence.cio",
-        "GuidanceSynthesizer",
     ),
     "InstitutionalRegimePipeline": (
         "intelligence.regime_pipeline",
