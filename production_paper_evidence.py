@@ -11,6 +11,9 @@ from dataclasses import replace
 
 import production_paper_evidence_impl as _implementation
 from providers.alpaca_paper_resilient import create_complete_alpaca_paper_client
+from providers.sec_company_facts_availability import (
+    install_company_facts_availability_boundary,
+)
 from providers.sec_edgar_resilient import ResilientSECEdgarProvider
 
 _DERIVATIVE_WRAPPER_EXPOSURES = frozenset(
@@ -39,6 +42,7 @@ for _name, _value in vars(_implementation).items():
     globals()[_name] = _value
 
 
+install_company_facts_availability_boundary()
 create_alpaca_paper_client = create_complete_alpaca_paper_client
 SECEdgarProvider = ResilientSECEdgarProvider
 
