@@ -2,9 +2,9 @@
 
 The discovery lane scans the authenticated Alpaca U.S.-equity master list,
 intersects it with the official SEC ticker/exchange identity file, ranks the
-complete eligible set from batched IEX snapshots, and deepens the strongest
-names with point-in-time daily bars. Discovery can nominate candidates but has
-no CIO, construction, execution, or real-money authority.
+complete eligible set from batched IEX snapshots, and deepens every objectively
+qualified name in bounded point-in-time history batches. Discovery can nominate
+candidates but has no CIO, construction, execution, or real-money authority.
 """
 
 from __future__ import annotations
@@ -83,17 +83,17 @@ def _period_return(closes: Sequence[float], periods: int) -> float:
 
 @dataclass(frozen=True, slots=True)
 class EquityDiscoveryPolicy:
-    """Versioned broad-screen and decision-evidence resource policy."""
+    """Versioned complete-screen and streaming-evidence resource policy."""
 
-    version: str = "broad-us-equity-discovery.v3-bounded-decision-evidence"
+    version: str = "broad-us-equity-discovery.v4-complete-streaming-evidence"
     maximum_snapshot_assets: int | None = None
     snapshot_batch_size: int = 200
-    # Every eligible symbol is snapshot-screened. The strongest 400 then receive
-    # multi-horizon history, which is more than six times the default decision cohort.
-    deep_shortlist_count: int | None = 400
-    # Sixty-four new companies can represent 64% of NAV at the 1% exploratory cap;
-    # strategic wrappers, current holdings, and the required cash reserve remain separate.
-    selected_candidate_count: int | None = 64
+    # None means ranking controls processing order only; every objective-qualified
+    # symbol receives multi-horizon history.
+    deep_shortlist_count: int | None = None
+    # None means every company with complete deep evidence advances to the full
+    # candidate-evidence lane. Final qualification remains governed downstream.
+    selected_candidate_count: int | None = None
     # Deep-history payloads are processed and released in bounded batches.
     deep_history_batch_size: int = 25
     minimum_price: float = 5.0
@@ -464,7 +464,7 @@ def discover_us_equities(
     sec_provider: SECEdgarProvider | None = None,
     policy: EquityDiscoveryPolicy | None = None,
 ) -> EquityDiscoveryResult:
-    """Screen the broad list and return the decision-evidence company cohort."""
+    """Screen the complete broad list and return every evidence-complete company."""
 
     timestamp = _aware(as_of, field_name="as_of")
     resolved = policy or EquityDiscoveryPolicy()
@@ -574,6 +574,7 @@ def discover_us_equities(
     benchmark_return = (
         0.0 if benchmark is None else _period_return(benchmark[0], 252)
     )
+    del benchmark_payload
 
     selected: list[DiscoveredEquity] = []
     observed_prices: list[tuple[str, float, str]] = []
