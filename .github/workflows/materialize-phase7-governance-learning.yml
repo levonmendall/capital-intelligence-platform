@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/materialize-phase7-governance-learning.yml
       - scripts/materialize_phase7_governance_learning.py
+      - scripts/repair_phase7_materializer.py
       - cio/policy_authority.py
       - cio/evidence_outage.py
       - evaluation/decision_value.py
@@ -25,7 +26,7 @@ jobs:
     timeout-minutes: 40
     env:
       PYTHONPATH: ${{ github.workspace }}
-      MATERIALIZATION_REVISION: "2"
+      MATERIALIZATION_REVISION: "3"
     steps:
       - name: Check out phase branch
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
@@ -40,7 +41,9 @@ jobs:
           cache: pip
 
       - name: Apply reviewed Phase 7 integration
-        run: python scripts/materialize_phase7_governance_learning.py
+        run: |
+          python scripts/repair_phase7_materializer.py
+          python scripts/materialize_phase7_governance_learning.py
 
       - name: Install locked runtime and test dependencies
         run: |
@@ -65,6 +68,7 @@ jobs:
           git add opportunity/engine.py application/cio_cycle.py evaluation/__init__.py evaluation/decision_value.py
           git add tests/test_policy_outage_and_decision_value.py
           git rm scripts/materialize_phase7_governance_learning.py
+          git rm scripts/repair_phase7_materializer.py
           git rm .github/workflows/materialize-phase7-governance-learning.yml
           git commit -m "Integrate canonical policy outage aging and advisory decision learning"
           git push origin HEAD:feature/committee-cio-v2-phase7-governance-learning
