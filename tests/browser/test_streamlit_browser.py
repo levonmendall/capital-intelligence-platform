@@ -23,7 +23,7 @@ BASELINE = json.loads(
 SURFACE_BODY_TEXT = {
     "Today": "Investment world today",
     "Environment": "Economy and investing",
-    "Portfolio": "Portfolio posture",
+    "Portfolio": "Capital structure",
     "History": "Outcome status",
 }
 
@@ -118,6 +118,32 @@ def _assert_surface_body(page, surface: str) -> None:
     )
 
 
+def _assert_portfolio_opening_hierarchy(page) -> None:
+    capital_structure = page.get_by_text("Capital structure", exact=True).first
+    current_report = page.get_by_text("Current CIO report", exact=False).first
+    capital_structure.wait_for(state="visible", timeout=15_000)
+    current_report.wait_for(state="visible", timeout=15_000)
+
+    capital_box = capital_structure.bounding_box()
+    report_box = current_report.bounding_box()
+    assert capital_box is not None
+    assert report_box is not None
+    assert capital_box["y"] < report_box["y"]
+
+    report_summary = page.locator('[data-testid="stExpander"] summary').filter(
+        has_text="Current CIO report"
+    ).first
+    report_summary.wait_for(state="visible", timeout=15_000)
+    report_container = report_summary.locator("xpath=..")
+    assert report_container.get_attribute("open") is None
+
+    # Freshness warnings and timestamps belong inside the collapsed CIO report,
+    # never before capital structure on the Portfolio opening.
+    assert page.locator('.information-health[role="status"]').count() == 0
+    assert page.get_by_text("Portfolio record timestamps", exact=True).count() == 0
+    assert page.get_by_text("Portfolio posture", exact=True).count() == 0
+
+
 def _layout_snapshot(page) -> dict[str, object]:
     return page.evaluate(
         """() => {
@@ -185,10 +211,12 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
             page.get_by_role("heading", name=surface, exact=True).wait_for()
             _assert_surface_body(page, surface)
             _assert_public_boundary(page)
-            if surface in {"Today", "Environment", "Portfolio"}:
+            if surface in {"Today", "Environment"}:
                 health = page.locator('.information-health[role="status"]')
                 health.wait_for(state="visible")
                 assert health.count() == 1
+            if surface == "Portfolio":
+                _assert_portfolio_opening_hierarchy(page)
             if surface == "Environment":
                 assert page.locator(".metric-grid.metric-environment").count() <= 2
             page.screenshot(
