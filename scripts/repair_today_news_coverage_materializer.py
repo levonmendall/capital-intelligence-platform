@@ -1,4 +1,4 @@
-"""Repair deterministic assertions and rerun-safe Today presentation bindings."""
+"""Repair deterministic assertions in the one-use Today materializer."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def replace_file(relative: str, old: str, new: str, *, expected: int = 1) -> Non
     count = source.count(old)
     if count != expected:
         raise RuntimeError(
-            f"{relative}: rerun-safety target changed: expected {expected}, found {count}"
+            f"{relative}: deterministic test target changed: expected {expected}, found {count}"
         )
     path.write_text(source.replace(old, new), encoding="utf-8")
 
@@ -59,99 +59,28 @@ replace_exact(
 )
 materializer_path.write_text(text, encoding="utf-8")
 
-# Streamlit reruns reinstall presentation layers in a fixed order. Boolean-only
-# installation guards allowed a later layer to be restored while the guard stayed
-# true, leaving the old secondary story renderer active. Rebind each layer from its
-# original callable on every install so navigation and reruns cannot silently undo
-# the intended explanatory format.
+# The event-alignment test relies on the active entrypoint order: event-specific
+# interpretation first, full-width secondary-card formatting second. Install both
+# explicitly so the test is isolated from pytest file ordering.
 replace_file(
-    "today_event_alignment_runtime.py",
-    '''_INSTALLED_KEY = "_capital_intelligence_today_event_alignment_installed"
-_EVENT_UI: ModuleType | None = None
+    "tests/test_today_event_alignment_runtime.py",
+    '''import public_event_recency_runtime
+import today_event_alignment_runtime as alignment
 ''',
-    '''_INSTALLED_KEY = "_capital_intelligence_today_event_alignment_installed"
-_ORIGINAL_CALLABLE_ATTRIBUTE = "_capital_intelligence_today_event_alignment_original"
-_EVENT_UI: ModuleType | None = None
-
-
-def _base_callable(value: object) -> object:
-    original = getattr(value, _ORIGINAL_CALLABLE_ATTRIBUTE, None)
-    return original if callable(original) else value
-
-
-def _mark_patch(replacement: object, current: object) -> object:
-    setattr(replacement, _ORIGINAL_CALLABLE_ATTRIBUTE, _base_callable(current))
-    return replacement
+    '''import public_event_recency_runtime
+import today_development_card_format_runtime as card_format
+import today_event_alignment_runtime as alignment
 ''',
 )
 replace_file(
-    "today_event_alignment_runtime.py",
-    '''def _patch_story(story: ModuleType) -> None:
-    if getattr(story, _INSTALLED_KEY, False):
-        return
-
-    original_lesson = story._lesson
+    "tests/test_today_event_alignment_runtime.py",
+    '''def _install() -> None:
+    public_event_recency_runtime.install(event_ui)
+    alignment.install(event_ui, operating_ui, story)
 ''',
-    '''def _patch_story(story: ModuleType) -> None:
-    original_lesson = _base_callable(story._lesson)
-    if not callable(original_lesson):
-        raise TypeError("Today story lesson renderer must be callable")
-''',
-)
-replace_file(
-    "today_event_alignment_runtime.py",
-    '''    story._lesson = lesson
-    story._tags = tags
-    story._primary = primary
-    story._secondary = secondary
-    setattr(story, _INSTALLED_KEY, True)
-''',
-    '''    story._lesson = _mark_patch(lesson, story._lesson)
-    story._tags = _mark_patch(tags, story._tags)
-    story._primary = _mark_patch(primary, story._primary)
-    story._secondary = _mark_patch(secondary, story._secondary)
-    setattr(story, _INSTALLED_KEY, True)
-''',
-)
-
-replace_file(
-    "today_development_card_format_runtime.py",
-    '''_INSTALLED_KEY = "_capital_intelligence_secondary_story_format_installed"
-''',
-    '''_INSTALLED_KEY = "_capital_intelligence_secondary_story_format_installed"
-_ORIGINAL_CALLABLE_ATTRIBUTE = "_capital_intelligence_secondary_story_format_original"
-
-
-def _base_callable(value: object) -> object:
-    original = getattr(value, _ORIGINAL_CALLABLE_ATTRIBUTE, None)
-    return original if callable(original) else value
-
-
-def _mark_patch(replacement: object, current: object) -> object:
-    setattr(replacement, _ORIGINAL_CALLABLE_ATTRIBUTE, _base_callable(current))
-    return replacement
-''',
-)
-replace_file(
-    "today_development_card_format_runtime.py",
-    '''    if getattr(story, _INSTALLED_KEY, False):
-        return
-
-    original_styles = story._styles
-''',
-    '''    original_styles = _base_callable(story._styles)
-    if not callable(original_styles):
-        raise TypeError("Today story style renderer must be callable")
-''',
-)
-replace_file(
-    "today_development_card_format_runtime.py",
-    '''    story._styles = styles
-    story._secondary = secondary
-    setattr(story, _INSTALLED_KEY, True)
-''',
-    '''    story._styles = _mark_patch(styles, story._styles)
-    story._secondary = _mark_patch(secondary, story._secondary)
-    setattr(story, _INSTALLED_KEY, True)
+    '''def _install() -> None:
+    public_event_recency_runtime.install(event_ui)
+    alignment.install(event_ui, operating_ui, story)
+    card_format.install(story)
 ''',
 )
