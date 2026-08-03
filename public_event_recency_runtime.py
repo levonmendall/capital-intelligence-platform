@@ -21,6 +21,9 @@ from types import ModuleType
 from typing import Any, Mapping
 
 
+_INSTALLED_STATE_KEY = "_capital_intelligence_public_event_recency_installed"
+
+
 def _parse_time(value: object) -> datetime | None:
     if isinstance(value, datetime):
         parsed = value
@@ -79,7 +82,7 @@ def _recent_public_event_snapshot(event_ui: ModuleType):
 
 
 def install(event_ui: ModuleType | None = None) -> None:
-    """Install the corrected clock in local and Render presentation paths."""
+    """Install the corrected clock once in local and Render presentation paths."""
 
     if event_ui is None:
         import educational_market_briefing_ui as event_ui_module
@@ -87,17 +90,23 @@ def install(event_ui: ModuleType | None = None) -> None:
         event_ui = event_ui_module
 
     event_ui._record_time = source_event_time
+    if getattr(event_ui, _INSTALLED_STATE_KEY, False):
+        return
 
     nonblocking = sys.modules.get("render_nonblocking_data")
-    if not isinstance(nonblocking, ModuleType):
-        return
-    loader = getattr(nonblocking, "_PUBLIC_EVENTS", None)
-    if loader is None:
-        return
-    loader._supplier = lambda: _recent_public_event_snapshot(event_ui)
-    reset = getattr(loader, "reset", None)
-    if callable(reset):
-        reset()
+    if isinstance(nonblocking, ModuleType):
+        loader = getattr(nonblocking, "_PUBLIC_EVENTS", None)
+        if loader is not None:
+            loader._supplier = lambda: _recent_public_event_snapshot(event_ui)
+            reset = getattr(loader, "reset", None)
+            if callable(reset):
+                reset()
+
+    # Streamlit re-executes the entrypoint for every navigation interaction.
+    # Mark the adapter installed so those reruns do not repeatedly clear the
+    # already-warmed public-event cache and briefly replace retained stories
+    # with the empty background-refresh fallback.
+    setattr(event_ui, _INSTALLED_STATE_KEY, True)
 
 
 __all__ = ["install", "source_event_time"]
