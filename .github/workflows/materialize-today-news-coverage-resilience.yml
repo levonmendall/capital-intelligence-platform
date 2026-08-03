@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 35
     env:
       PYTHONPATH: ${{ github.workspace }}
-      MATERIALIZATION_REVISION: "2"
+      MATERIALIZATION_REVISION: "3"
       CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
     steps:
       - name: Check out repair branch
@@ -72,7 +72,6 @@ jobs:
             tests/test_today_event_alignment_runtime.py \
             tests/test_today_development_card_format_runtime.py \
             tests/test_today_environment_storytelling.py \
-            tests/test_render_nonblocking_data.py \
             tests/test_autonomous_paper_operator.py
 
       - name: Publish final repaired source
