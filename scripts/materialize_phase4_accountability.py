@@ -184,6 +184,11 @@ from portfolio.decision_reconciliation import (
         """    assert journal.count() == 9
 """,
     )
+    replace_once(
+        "tests/test_cio_persistence.py",
+        "cio-synthesis.v8-economic-consistency",
+        "cio-synthesis.v9-independent-evidence",
+    )
 
 
 if __name__ == "__main__":
