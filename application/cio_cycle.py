@@ -39,6 +39,7 @@ from opportunity import (
     OpportunityRankingInput,
 )
 from portfolio.construction_api import (
+    ConstructionDecisionReconciliation,
     ConstructionIntent,
     ConstructionMode,
     ConstructionStatus,
@@ -49,6 +50,7 @@ from portfolio.construction_api import (
     PortfolioConstructionResult,
     PortfolioScenario,
     TradeSide,
+    reconcile_construction_decisions,
 )
 from portfolio.derivative_lifecycle import DerivativeLifecycleProfile
 from portfolio.scenario_authority import (
@@ -351,6 +353,9 @@ class CanonicalCIOCycleResult:
     opportunity_queue: OpportunityQueue
     decisions: tuple[CIODecision, ...]
     construction: PortfolioConstructionResult | None
+    construction_reconciliations: tuple[
+        ConstructionDecisionReconciliation, ...
+    ]
     theses: tuple[LivingThesis, ...]
     evaluation_snapshots: tuple[DecisionEvidenceSnapshot, ...]
     briefing: DailyCIOBriefing
@@ -375,6 +380,18 @@ class CanonicalCIOCycleResult:
         ):
             raise TypeError(
                 "construction must be PortfolioConstructionResult or None"
+            )
+        if not isinstance(self.construction_reconciliations, tuple) or not all(
+            isinstance(item, ConstructionDecisionReconciliation)
+            for item in self.construction_reconciliations
+        ):
+            raise TypeError(
+                "construction_reconciliations must contain "
+                "ConstructionDecisionReconciliation values"
+            )
+        if len(self.construction_reconciliations) != len(self.decisions):
+            raise ValueError(
+                "each CIO decision must have one construction reconciliation"
             )
         if not isinstance(self.theses, tuple) or not all(
             isinstance(item, LivingThesis) for item in self.theses
@@ -642,6 +659,32 @@ class CanonicalCIOCycle:
                 construction,
                 code_version=code_version or "unknown",
             )
+        construction_reconciliations = reconcile_construction_decisions(
+            decisions=tuple(decisions),
+            candidates=tuple(
+                ranked_by_candidate[item.candidate_identifier].candidate
+                for item in decisions
+            ),
+            construction=construction,
+        )
+        if self.journal is not None:
+            for item in construction_reconciliations:
+                self.journal.append(
+                    event_type=(
+                        CIOJournalEventType.CONSTRUCTION_RECONCILIATION
+                    ),
+                    aggregate_identifier=item.candidate_identifier,
+                    occurred_at=portfolio.as_of,
+                    payload={
+                        **item.to_dict(),
+                        "cycle_identifier": cycle_identifier,
+                        "code_version": code_version or "unknown",
+                    },
+                    schema_version="construction-reconciliation.v1",
+                    event_identifier=(
+                        f"event:construction-reconciliation:{item.decision_identifier}"
+                    ),
+                )
         theses = self._create_theses(
             decisions=tuple(decisions),
             ranked_by_candidate=ranked_by_candidate,
@@ -691,6 +734,7 @@ class CanonicalCIOCycle:
             opportunity_queue=queue,
             decisions=tuple(decisions),
             construction=construction,
+            construction_reconciliations=construction_reconciliations,
             theses=theses,
             evaluation_snapshots=snapshots,
             briefing=briefing,
