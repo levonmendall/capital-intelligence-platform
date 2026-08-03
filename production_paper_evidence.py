@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import production_paper_evidence_impl as _implementation
+from providers.sec_edgar_resilient import ResilientSECEdgarProvider
 
 _DERIVATIVE_WRAPPER_EXPOSURES = frozenset(
     {"managed_futures", "option_strategies", "volatility"}
@@ -25,6 +26,7 @@ _WRAPPED_NAMES = frozenset(
         "collect_paper_evidence",
         "build_paper_evidence",
         "_candidate_and_evidence",
+        "SECEdgarProvider",
     }
 )
 
@@ -33,6 +35,9 @@ for _name, _value in vars(_implementation).items():
     if _name.startswith("__") or _name in _WRAPPED_NAMES:
         continue
     globals()[_name] = _value
+
+
+SECEdgarProvider = ResilientSECEdgarProvider
 
 
 def _synchronize_runtime_bindings() -> None:
@@ -45,6 +50,7 @@ def _synchronize_runtime_bindings() -> None:
             _implementation.__dict__[name] = globals()[name]
     _implementation._default_probe = _default_probe
     _implementation._candidate_and_evidence = _candidate_and_evidence
+    _implementation.SECEdgarProvider = SECEdgarProvider
 
 
 def _default_probe(*args, **kwargs):
@@ -83,4 +89,5 @@ def build_paper_evidence(*args, **kwargs):
 
 _implementation._default_probe = _default_probe
 _implementation._candidate_and_evidence = _candidate_and_evidence
+_implementation.SECEdgarProvider = SECEdgarProvider
 __all__ = tuple(getattr(_implementation, "__all__", ()))
