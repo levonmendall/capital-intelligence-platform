@@ -1,0 +1,71 @@
+name: Materialize Today General News Fallback
+
+on:
+  push:
+    branches:
+      - fix/today-news-coverage-resilience
+    paths:
+      - scripts/materialize_today_general_news_fallback.py
+      - .github/workflows/materialize-today-general-news-fallback.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/materialize_today_general_news_fallback.py
+      - .github/workflows/materialize-today-general-news-fallback.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-today-general-news-fallback
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          ref: fix/today-news-coverage-resilience
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Apply reviewed general-news fallback
+        run: python scripts/materialize_today_general_news_fallback.py
+
+      - name: Install locked runtime and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+
+      - name: Validate Today admission and explanation
+        run: |
+          python -m compileall -q today_event_alignment_runtime.py tests/test_today_news_coverage_resilience.py
+          git diff --check
+          pytest -q \
+            tests/test_today_news_coverage_resilience.py \
+            tests/test_today_event_alignment_runtime.py \
+            tests/test_today_story_retention_runtime.py \
+            tests/test_educational_market_briefing.py
+
+      - name: Publish final source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f scripts/materialize_today_general_news_fallback.py
+          git rm -f .github/workflows/materialize-today-general-news-fallback.yml
+          git add -A
+          git commit -m "Show current source-qualified news before transmission is resolved"
+          git push origin HEAD:fix/today-news-coverage-resilience
