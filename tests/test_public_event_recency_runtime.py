@@ -64,7 +64,10 @@ def test_recent_publication_remains_visible() -> None:
     assert items[0].published_at == now - timedelta(hours=2)
 
 
-def test_render_background_snapshot_uses_source_time(monkeypatch, tmp_path) -> None:
+def test_render_background_snapshot_keeps_bounded_source_timed_history(
+    monkeypatch,
+    tmp_path,
+) -> None:
     import render_nonblocking_data
 
     now = datetime.now(timezone.utc)
@@ -98,7 +101,13 @@ def test_render_background_snapshot_uses_source_time(monkeypatch, tmp_path) -> N
     recency.install(event_ui)
     snapshot = render_nonblocking_data._PUBLIC_EVENTS._supplier()
 
-    assert [record["identifier"] for record in snapshot.records] == ["recent"]
+    assert [record["identifier"] for record in snapshot.records] == [
+        "recent",
+        "old",
+    ]
+    assert [item.title for item in event_ui.build_today_items(snapshot.records, now=now)] == [
+        "Event recent"
+    ]
 
 
 def test_both_streamlit_entrypoints_install_the_recency_fix() -> None:
