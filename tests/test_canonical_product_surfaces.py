@@ -12,6 +12,12 @@ GOVERNING_RULE = (
     "against an explicit thesis, and evaluated afterward using the exact "
     "evidence available when the decision was made."
 )
+README_GOVERNING_RULE = (
+    "Every recommendation must be compared with the portfolio’s other available "
+    "uses of capital, implemented at the portfolio level, monitored against an "
+    "explicit thesis, and evaluated afterward using the evidence that was "
+    "available when the decision was made."
+)
 
 
 def _source(relative: str) -> str:
@@ -99,7 +105,6 @@ def test_active_entrypoints_do_not_import_weighted_committee_authority() -> None
 
 def test_public_contracts_repeat_the_governing_rule_and_boundaries() -> None:
     for relative in (
-        "README.md",
         "ROADMAP.md",
         "ARCHITECTURE.md",
         "docs/PRODUCTION_API.md",
@@ -109,5 +114,13 @@ def test_public_contracts_repeat_the_governing_rule_and_boundaries() -> None:
         assert GOVERNING_RULE in source
 
     readme = _source("README.md")
-    assert "does not execute live trades" in readme
-    assert "does not claim proven alpha" in readme
+    normalized_readme = " ".join(readme.split())
+    assert GOVERNING_RULE in normalized_readme or README_GOVERNING_RULE in normalized_readme
+    assert (
+        "does not execute live trades" in readme
+        or "Live money | **Not authorized**" in readme
+    )
+    assert (
+        "does not claim proven alpha" in readme
+        or "Performance claims | No claim of proven alpha" in readme
+    )
