@@ -1,4 +1,4 @@
-"""Regression coverage for isolated malformed SEC filing rows."""
+"""Regression coverage for scope-aware malformed SEC filing rows."""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 import pytest
 
 import production_paper_evidence as paper_evidence
-from providers.sec_edgar import SECEdgarProviderError
+from data import FilingQuery
+from providers.sec_edgar import (
+    SEC_COMPANY_FACTS_URL,
+    SEC_SUBMISSIONS_URL,
+    SECEdgarProviderError,
+)
 from providers.sec_edgar_resilient import ResilientSECEdgarProvider
 
 
@@ -15,10 +20,22 @@ CIK = "0000320193"
 RETRIEVED_AT = datetime(2026, 8, 3, 15, 30, tzinfo=timezone.utc)
 
 
+class _FakeResponse:
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> object:
+        return self._payload
+
+
 def _payload(
     *,
     invalid_indexes: set[int],
     row_count: int = 3,
+    forms: list[str] | None = None,
 ) -> dict[str, object]:
     acceptance = ["2026-07-31T16:30:00-04:00"] * row_count
     for index in invalid_indexes:
@@ -33,7 +50,7 @@ def _payload(
                 "filingDate": ["2026-07-31"] * row_count,
                 "reportDate": ["2026-06-30"] * row_count,
                 "acceptanceDateTime": acceptance,
-                "form": ["10-K"] * row_count,
+                "form": forms or ["10-K"] * row_count,
                 "primaryDocument": [
                     f"filing-{index}.htm"
                     for index in range(row_count)
@@ -85,10 +102,97 @@ def test_suncor_sized_trailing_legacy_suffix_is_bounded_and_usable() -> None:
     assert records[-1].accession_number == "0000320193-26-000981"
 
 
+def test_qqq_legacy_fund_rows_do_not_block_corporate_form_query() -> None:
+    forms = ["10-K"] * 242 + ["497"] * 12
+    records = ResilientSECEdgarProvider._filing_records(
+        _payload(
+            row_count=254,
+            invalid_indexes=set(range(242, 254)),
+            forms=forms,
+        ),
+        cik="0001067839",
+        retrieved_at=RETRIEVED_AT,
+        forms=("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"),
+    )
+
+    assert len(records) == 242
+    assert all(record.form == "10-K" for record in records)
+
+
+def test_same_qqq_sized_corruption_in_requested_forms_remains_fail_closed() -> None:
+    with pytest.raises(
+        SECEdgarProviderError,
+        match="excessive invalid in-scope filing rows",
+    ):
+        ResilientSECEdgarProvider._filing_records(
+            _payload(
+                row_count=254,
+                invalid_indexes=set(range(242, 254)),
+            ),
+            cik="0001067839",
+            retrieved_at=RETRIEVED_AT,
+            forms=("10-K",),
+        )
+
+
+def test_company_fact_collection_scopes_submissions_before_parsing() -> None:
+    submissions_url = SEC_SUBMISSIONS_URL.format(cik=CIK)
+    facts_url = SEC_COMPANY_FACTS_URL.format(cik=CIK)
+    submissions = _payload(
+        row_count=2,
+        invalid_indexes={1},
+        forms=["10-K", "497"],
+    )
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                    "units": {
+                        "USD": [
+                            {
+                                "start": "2026-01-01",
+                                "end": "2026-06-30",
+                                "val": 100,
+                                "accn": "0000320193-26-000000",
+                                "fy": 2026,
+                                "fp": "FY",
+                                "form": "10-K",
+                                "filed": "2026-07-31",
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    payloads = {submissions_url: submissions, facts_url: facts}
+
+    def http_get(url: str, **_kwargs: object) -> _FakeResponse:
+        return _FakeResponse(payloads[url])
+
+    provider = ResilientSECEdgarProvider(
+        user_agent="Capital Intelligence test@example.com",
+        clock=lambda: RETRIEVED_AT,
+        http_get=http_get,
+    )
+    result = provider.fetch_company_facts(
+        FilingQuery(
+            cik=CIK,
+            as_of=RETRIEVED_AT,
+            forms=("10-K",),
+            limit=100,
+        )
+    )
+
+    assert len(result) == 1
+    assert result[0].accession_number == "0000320193-26-000000"
+    assert result[0].form == "10-K"
+
+
 def test_same_invalid_count_scattered_through_history_remains_fail_closed() -> None:
     with pytest.raises(
         SECEdgarProviderError,
-        match="excessive invalid filing rows",
+        match="excessive invalid in-scope filing rows",
     ):
         ResilientSECEdgarProvider._filing_records(
             _payload(
@@ -103,7 +207,7 @@ def test_same_invalid_count_scattered_through_history_remains_fail_closed() -> N
 def test_trailing_legacy_suffix_over_two_percent_remains_fail_closed() -> None:
     with pytest.raises(
         SECEdgarProviderError,
-        match="excessive invalid filing rows",
+        match="excessive invalid in-scope filing rows",
     ):
         ResilientSECEdgarProvider._filing_records(
             _payload(
@@ -118,7 +222,7 @@ def test_trailing_legacy_suffix_over_two_percent_remains_fail_closed() -> None:
 def test_material_row_corruption_in_small_payload_remains_fail_closed() -> None:
     with pytest.raises(
         SECEdgarProviderError,
-        match="excessive invalid filing rows",
+        match="excessive invalid in-scope filing rows",
     ):
         ResilientSECEdgarProvider._filing_records(
             _payload(invalid_indexes={1, 2}),
