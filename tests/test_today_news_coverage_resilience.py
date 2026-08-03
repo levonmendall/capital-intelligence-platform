@@ -64,7 +64,7 @@ def test_today_accepts_current_source_qualified_news_without_channel_tags() -> N
     items = event_ui.build_today_items((_record("broad", now - timedelta(hours=1)),), now=now)
 
     assert [item.title for item in items] == ["Headline broad"]
-    assert items[0].summary == "The public source reported this development without additional concise detail."
+    assert items[0].summary == "A current public source reported: Headline broad."
 
 
 def test_empty_record_file_is_coverage_degradation_not_quiet_day(tmp_path) -> None:
