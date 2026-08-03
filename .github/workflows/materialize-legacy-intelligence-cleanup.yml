@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 30
     env:
       PYTHONPATH: ${{ github.workspace }}
+      MATERIALIZATION_REVISION: "2"
       CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
     steps:
       - name: Check out cleanup branch
@@ -58,11 +59,11 @@ jobs:
           python - <<'PY'
           import cio
           import intelligence
-          from intelligence.recommendation import Recommendation
+          from intelligence.recommendation import InvestmentRecommendation
           assert hasattr(cio, "ChiefInvestmentOfficer")
           assert "ChiefInvestmentOfficer" not in intelligence.__all__
           assert "GuidanceSynthesizer" not in intelligence.__all__
-          assert Recommendation is not None
+          assert InvestmentRecommendation is not None
           PY
           pytest -q \
             tests/test_canonical_cio.py \
