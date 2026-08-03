@@ -24,6 +24,7 @@ import operating_intelligence_ui
 import operating_status
 import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
+import portfolio_first_ui_refinement
 import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
@@ -51,6 +52,7 @@ from secure_app import DeploymentContext, create_streamlit_application
 
 
 _LOGGER = logging.getLogger("capital_intelligence.render_surfaces")
+_RENDER_SYNC_TARGET_ATTRIBUTE = "_capital_intelligence_render_sync_target"
 _RENDER_SURFACE_NAMES = (
     "_render_today",
     "_render_environment",
@@ -60,9 +62,67 @@ _RENDER_SURFACE_NAMES = (
 
 
 def _synchronous_renderer(renderer: Callable[..., Any]) -> Callable[..., Any]:
-    """Return the original callable beneath a Streamlit fragment wrapper."""
+    """Return the explicit Render target or the callable beneath a fragment."""
 
+    explicit_target = getattr(renderer, _RENDER_SYNC_TARGET_ATTRIBUTE, None)
+    if callable(explicit_target):
+        return explicit_target
     return getattr(renderer, "__wrapped__", renderer)
+
+
+def _portfolio_first_sync_renderer(
+    renderer: Callable[..., Any],
+) -> Callable[..., Any]:
+    """Preserve the Portfolio-first hierarchy after Render removes fragments.
+
+    The Portfolio-first Streamlit fragment intentionally wraps the original
+    Portfolio renderer so the remaining governed controls can be reused below
+    the new opening. Streamlit copies the wrapped function's ``__wrapped__``
+    attribute onto the fragment wrapper, so generic unwrapping resolves to the
+    old renderer and silently skips the new opening. This explicit synchronous
+    bridge calls the Portfolio-first helpers directly and retains the original
+    renderer only for the lower, de-duplicated controls.
+    """
+
+    original = getattr(renderer, "__wrapped__", renderer)
+
+    def render_portfolio(
+        dependencies: object,
+        *,
+        principal: object | None,
+    ) -> None:
+        construction = app_impl._latest("portfolio_construction")
+        briefing = app_impl._latest("daily_cio_briefing")
+        mandate = dependencies.get_mandate_details(
+            app_impl.CANONICAL_PORTFOLIO_CODE
+        )
+        if mandate is None:
+            st.warning("The canonical paper portfolio is unavailable.")
+            return
+
+        st.markdown(
+            portfolio_first_ui_refinement._CSS,
+            unsafe_allow_html=True,
+        )
+        _nav, _cash, deployed = portfolio_first_ui_refinement._capital_structure(
+            app_impl,
+            mandate=mandate,
+        )
+        portfolio_first_ui_refinement._render_cio_report(
+            app_impl,
+            briefing=briefing,
+            construction=construction,
+            mandate=mandate,
+            deployed=deployed,
+        )
+        portfolio_first_ui_refinement._render_remaining_portfolio(
+            app_impl,
+            original,
+            dependencies,
+            principal=principal,
+        )
+
+    return render_portfolio
 
 
 def _log_slow_surface(surface_name: str, render_thread_id: int) -> None:
@@ -185,6 +245,12 @@ def prepare_render_surface_runtime() -> None:
         renderer = getattr(app_impl, attribute_name)
         if getattr(renderer, "_capital_intelligence_guarded_surface", False):
             continue
+        if attribute_name == "_render_portfolio":
+            setattr(
+                renderer,
+                _RENDER_SYNC_TARGET_ATTRIBUTE,
+                _portfolio_first_sync_renderer(renderer),
+            )
         guarded = _guarded_renderer(attribute_name.removeprefix("_render_"), renderer)
         if not getattr(guarded, "_capital_intelligence_fragment_removed", False):
             _LOGGER.warning(

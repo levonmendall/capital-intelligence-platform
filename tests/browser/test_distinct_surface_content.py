@@ -33,7 +33,8 @@ def test_primary_surfaces_have_distinct_information_ownership(
         page.get_by_text("What is moving the investment conversation", exact=True).wait_for()
         page.get_by_text("Research radar", exact=True).first.wait_for()
         assert page.get_by_text("How this backdrop reaches markets", exact=True).count() == 0
-        assert page.get_by_text("Portfolio posture", exact=True).count() == 0
+        assert page.get_by_text("Capital structure", exact=True).count() == 0
+        assert page.get_by_text("Current CIO report", exact=False).count() == 0
         assert page.get_by_text("Detailed decision trail", exact=True).count() == 0
 
         navigation.get_by_role("radio", name="Environment", exact=True).click()
@@ -41,11 +42,14 @@ def test_primary_surfaces_have_distinct_information_ownership(
         page.get_by_text("How this backdrop reaches markets", exact=True).wait_for()
         assert page.get_by_text("What is moving the investment conversation", exact=True).count() == 0
         assert page.get_by_text("Research radar", exact=True).count() == 0
-        assert page.get_by_text("Portfolio posture", exact=True).count() == 0
+        assert page.get_by_text("Capital structure", exact=True).count() == 0
+        assert page.get_by_text("Current CIO report", exact=False).count() == 0
         assert page.get_by_text("Detailed decision trail", exact=True).count() == 0
 
         navigation.get_by_role("radio", name="Portfolio", exact=True).click()
-        page.get_by_text("Portfolio posture", exact=True).wait_for()
+        page.get_by_text("Capital structure", exact=True).wait_for()
+        page.get_by_text("Current CIO report", exact=False).first.wait_for()
+        assert page.get_by_text("Portfolio posture", exact=True).count() == 0
         assert page.get_by_text("What is moving the investment conversation", exact=True).count() == 0
         assert page.get_by_text("How this backdrop reaches markets", exact=True).count() == 0
         assert page.get_by_text("Detailed decision trail", exact=True).count() == 0
@@ -54,5 +58,6 @@ def test_primary_surfaces_have_distinct_information_ownership(
         page.get_by_text("Detailed decision trail", exact=True).wait_for()
         assert page.get_by_text("What is moving the investment conversation", exact=True).count() == 0
         assert page.get_by_text("How this backdrop reaches markets", exact=True).count() == 0
-        assert page.get_by_text("Portfolio posture", exact=True).count() == 0
+        assert page.get_by_text("Capital structure", exact=True).count() == 0
+        assert page.get_by_text("Current CIO report", exact=False).count() == 0
         browser.close()
