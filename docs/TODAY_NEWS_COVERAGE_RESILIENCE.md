@@ -19,7 +19,13 @@ listing, and routine administrative noise. It admits a current source-qualified 
 when a provider omitted impact-channel metadata or when the exact investment
 transmission is still unresolved. In the latter case it reports the development,
 identifies what remains unknown, and avoids inventing a directional market conclusion.
-The Environment surface remains restricted to economic impact channels.
+
+Raw IMF, World Bank, Treasury, CFTC, and EIA table observations are economic evidence,
+not news headlines. They remain available to the Environment and research layers, but
+they cannot fill Today merely because the application retrieved them recently. Today
+uses source publication time first, event time second, and collection time only when a
+source provides neither. A corrected current record also evicts an older cached version
+that had been mislabeled as fresh.
 
 ## Empty-state truthfulness
 

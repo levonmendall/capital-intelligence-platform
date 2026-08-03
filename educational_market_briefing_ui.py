@@ -64,6 +64,26 @@ _ECONOMIC_CHANNELS = frozenset(
     }
 )
 _EXCLUDED_TAGS = frozenset({"sanctions-list", "fixture"})
+_NON_NEWS_DATASET_TAGS = frozenset(
+    {
+        "data-observation",
+        "historical-economic-observation",
+        "world-bank-indicator",
+        "imf-datamapper",
+        "treasury-fiscal-data",
+        "eia-series-observation",
+        "cftc-positioning-observation",
+    }
+)
+_NON_NEWS_DATASET_PROVIDERS = frozenset(
+    {
+        "imf datamapper real gdp growth",
+        "world bank global growth indicators",
+        "u.s. treasury fiscal data debt to the penny",
+        "u.s. energy information administration spot petroleum data",
+        "cftc disaggregated commitments of traders",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,8 +189,18 @@ def _provenance(record: Mapping[str, Any]) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _is_non_news_dataset_observation(record: Mapping[str, Any]) -> bool:
+    provider = _clean_text(_provenance(record).get("provider")).lower()
+    return (
+        provider in _NON_NEWS_DATASET_PROVIDERS
+        or bool(_NON_NEWS_DATASET_TAGS & _tags(record))
+    )
+
+
 def _record_time(record: Mapping[str, Any]) -> datetime | None:
-    for field_name in ("available_at", "published_at", "event_at"):
+    # Publication/event time determines whether information is current. Collection
+    # time is only a last-resort fallback and must never renew an old observation.
+    for field_name in ("published_at", "event_at", "available_at"):
         parsed = _parse_datetime(record.get(field_name))
         if parsed is not None:
             return parsed
@@ -226,6 +256,11 @@ def _displayable(
     if _EXCLUDED_TAGS & _tags(record):
         return False
     if topic.lower().startswith("ofac sanctions listing:"):
+        return False
+    if (
+        allowed_channels == _MARKET_CHANNELS
+        and _is_non_news_dataset_observation(record)
+    ):
         return False
 
     channels = set(_channels(record))
