@@ -1,6 +1,9 @@
 """Connect Environment readings to their market transmission.
 
 Presentation only: current reading -> economic signal -> market channel -> assets.
+The cross-asset map separates structural education from the current backdrop's
+likely near-term support or pressure. It does not claim that macro conditions
+caused every intraday market move.
 """
 
 from __future__ import annotations
@@ -112,6 +115,52 @@ def _liquidity_takeaway(score: float | None, coverage: str) -> str:
     )
 
 
+def _state_bias(state: str, *, positive: str, negative: str) -> float:
+    normalized = state.strip().lower()
+    if normalized == positive.lower():
+        return 1.0
+    if normalized == negative.lower():
+        return -1.0
+    return 0.0
+
+
+def _rate_bias(policy: float | None, curve: float | None) -> float:
+    if policy is None:
+        return 0.0
+    if policy < 2.0:
+        bias = 0.8
+    elif policy <= 4.5:
+        bias = -0.35
+    else:
+        bias = -1.0
+    if curve is not None and curve < -0.15:
+        bias -= 0.25
+    elif curve is not None and curve > 0.15:
+        bias += 0.1
+    return max(min(bias, 1.0), -1.0)
+
+
+def _bias_label(score: float) -> str:
+    if score >= 0.75:
+        return "Supportive"
+    if score >= 0.2:
+        return "Cautiously supportive"
+    if score <= -0.75:
+        return "Pressured"
+    if score <= -0.2:
+        return "Cautiously pressured"
+    return "Mixed"
+
+
+def _bias_tone(label: str) -> str:
+    normalized = label.lower()
+    if "supportive" in normalized:
+        return "positive"
+    if "pressured" in normalized:
+        return "negative"
+    return "mixed"
+
+
 def _driver_rows(
     story: ModuleType,
     dashboard: object,
@@ -148,6 +197,7 @@ def _driver_rows(
             "metric": "Unemployment rate · inverse growth signal",
             "value": f"{unemployment:.1f}%" if unemployment is not None else "Unavailable",
             "state": growth_state,
+            "bias": _state_bias(growth_state, positive="Supportive", negative="Soft"),
             "takeaway": _growth_takeaway(unemployment),
             "channel": "Labor demand → spending and earnings",
             "sensitive": "Cyclical equities, small caps, consumer sectors, and credit.",
@@ -158,6 +208,11 @@ def _driver_rows(
             "metric": "Inflation rate",
             "value": f"{inflation:.2f}%" if inflation is not None else "Unavailable",
             "state": inflation_state,
+            "bias": _state_bias(
+                inflation_state,
+                positive="Disinflationary",
+                negative="Elevated pressure",
+            ),
             "takeaway": _inflation_takeaway(inflation),
             "channel": "Prices → policy expectations and margins",
             "sensitive": "Bonds, growth equities, commodities, and inflation hedges.",
@@ -172,6 +227,7 @@ def _driver_rows(
                 else "Unavailable"
             ),
             "state": rate_state,
+            "bias": _rate_bias(policy, curve),
             "takeaway": _rates_takeaway(policy, curve),
             "channel": "Financing cost → bond prices and valuations",
             "sensitive": "Treasuries, long-duration equities, housing, banks, and the dollar.",
@@ -182,6 +238,7 @@ def _driver_rows(
             "metric": "Credit-and-volatility financial-conditions composite",
             "value": f"{liquidity:+.2f}" if liquidity is not None else "Unavailable",
             "state": liquidity_state,
+            "bias": _state_bias(liquidity_state, positive="Supportive", negative="Restrictive"),
             "takeaway": _liquidity_takeaway(liquidity, coverage),
             "channel": "Funding conditions → spreads and risk appetite",
             "sensitive": "Credit spreads, smaller companies, volatility, and crowded positions.",
@@ -194,6 +251,19 @@ def _cross_asset_rows(drivers: Sequence[Mapping[str, object]]) -> tuple[dict[str
     by_name = {str(driver["name"]): driver for driver in drivers}
     growth, inflation = by_name["Growth"], by_name["Inflation"]
     rates, liquidity = by_name["Rates"], by_name["Liquidity"]
+
+    growth_bias = float(growth.get("bias", 0.0))
+    inflation_bias = float(inflation.get("bias", 0.0))
+    rate_bias = float(rates.get("bias", 0.0))
+    liquidity_bias = float(liquidity.get("bias", 0.0))
+
+    equity_label = _bias_label(
+        0.9 * growth_bias + 0.7 * rate_bias + 0.5 * liquidity_bias + 0.2 * inflation_bias
+    )
+    bond_label = _bias_label(0.9 * inflation_bias + rate_bias)
+    credit_label = _bias_label(0.8 * growth_bias + 0.8 * liquidity_bias + 0.2 * rate_bias)
+    currency_label = "Mixed cross-currents"
+
     return (
         {
             "name": "Equities",
@@ -202,6 +272,14 @@ def _cross_asset_rows(drivers: Sequence[Mapping[str, object]]) -> tuple[dict[str
                 f"Growth is {str(growth['state']).lower()}, rates show a {str(rates['state']).lower()} "
                 f"signal, and liquidity is {str(liquidity['state']).lower()}. Earnings support helps, "
                 "while expensive financing or tighter liquidity can limit valuation upside."
+            ),
+            "today_label": equity_label,
+            "today_tone": _bias_tone(equity_label),
+            "today_copy": (
+                f"The current combination of {str(growth['state']).lower()} growth, "
+                f"{str(liquidity['state']).lower()} liquidity, and the present rate backdrop is "
+                "supporting the earnings side of equities while limiting how much investors may pay "
+                "for distant cash flows. Cyclicals can hold up better than highly rate-sensitive shares."
             ),
         },
         {
@@ -212,6 +290,13 @@ def _cross_asset_rows(drivers: Sequence[Mapping[str, object]]) -> tuple[dict[str
                 f"{str(rates['state']).lower()} signal. Falling inflation or lower expected rates "
                 "generally supports bond prices; renewed inflation pressure generally hurts them."
             ),
+            "today_label": bond_label,
+            "today_tone": _bias_tone(bond_label),
+            "today_copy": (
+                f"With inflation currently {str(inflation['state']).lower()} and financing costs still "
+                "meaningful, the backdrop is more challenging for longer-duration bonds. Bond prices "
+                "would receive clearer support from softer inflation or lower expected policy rates."
+            ),
         },
         {
             "name": "Credit",
@@ -221,6 +306,14 @@ def _cross_asset_rows(drivers: Sequence[Mapping[str, object]]) -> tuple[dict[str
                 f"{str(liquidity['state']).lower()}. Strong earnings and easy funding can compress "
                 "spreads; weaker activity or tighter funding raises default and refinancing risk."
             ),
+            "today_label": credit_label,
+            "today_tone": _bias_tone(credit_label),
+            "today_copy": (
+                f"The {str(growth['state']).lower()} growth signal is helping corporate cash-flow and "
+                f"default expectations today, while {str(liquidity['state']).lower()} liquidity limits "
+                "how aggressively spreads can tighten. Lower-quality and refinancing-sensitive issuers "
+                "remain the most exposed."
+            ),
         },
         {
             "name": "Dollar & commodities",
@@ -228,6 +321,14 @@ def _cross_asset_rows(drivers: Sequence[Mapping[str, object]]) -> tuple[dict[str
             "copy": (
                 "Higher relative rates can support a currency. Strong growth can support commodity "
                 "demand, while inflation and physical supply determine the commodity response."
+            ),
+            "today_label": currency_label,
+            "today_tone": _bias_tone(currency_label),
+            "today_copy": (
+                f"The rate backdrop can support the dollar, while {str(growth['state']).lower()} growth "
+                f"and {str(inflation['state']).lower()} inflation can keep parts of the commodity complex "
+                "firm. Energy, metals, and the currency can still diverge because physical supply and "
+                "relative central-bank policy matter independently."
             ),
         },
     )
@@ -243,7 +344,9 @@ def _render_environment(story: ModuleType, app: ModuleType, dependencies: object
 .ci-driver-takeaway{margin:.72rem 0;padding:.72rem .76rem;border:1px solid rgba(82,227,164,.16);border-left:3px solid #52e3a4;border-radius:12px;background:rgba(82,227,164,.045)}
 .ci-driver-takeaway-label{font-size:.61rem;font-weight:850;letter-spacing:.09em;text-transform:uppercase;color:#52e3a4;margin-bottom:.34rem}
 .ci-driver-takeaway-copy{font-size:.73rem;line-height:1.52;color:#c2cedc}.ci-driver-path{margin-top:.58rem;font-size:.67rem;line-height:1.45;color:#91a2b7}.ci-driver-path strong{color:#dfe8f2}
-.ci-driver-feeds,.ci-market-drivers{display:flex;gap:.34rem;flex-wrap:wrap;margin-top:.55rem}.ci-driver-feed,.ci-market-driver{padding:.25rem .48rem;border-radius:999px;border:1px solid rgba(82,227,164,.18);background:rgba(82,227,164,.05);color:#9ddfc5;font-size:.58rem;font-weight:780}
+.ci-driver-feeds,.ci-market-drivers,.ci-market-evidence{display:flex;gap:.34rem;flex-wrap:wrap;margin-top:.55rem}.ci-driver-feed,.ci-market-driver,.ci-market-evidence-chip{padding:.25rem .48rem;border-radius:999px;border:1px solid rgba(82,227,164,.18);background:rgba(82,227,164,.05);color:#9ddfc5;font-size:.58rem;font-weight:780}
+.ci-market-today{margin-top:.78rem;padding:.72rem .78rem;border:1px solid rgba(90,217,255,.17);border-left:3px solid #5ad9ff;border-radius:12px;background:rgba(90,217,255,.045)}
+.ci-market-today-top{display:flex;align-items:center;justify-content:space-between;gap:.55rem;flex-wrap:wrap}.ci-market-today-label{font-size:.61rem;font-weight:850;letter-spacing:.09em;text-transform:uppercase;color:#5ad9ff}.ci-market-bias{padding:.24rem .48rem;border-radius:999px;font-size:.58rem;font-weight:820;letter-spacing:.025em;border:1px solid}.ci-market-bias-positive{color:#9de6c8;background:rgba(82,227,164,.08);border-color:rgba(82,227,164,.24)}.ci-market-bias-negative{color:#ffc6a7;background:rgba(255,149,92,.08);border-color:rgba(255,149,92,.24)}.ci-market-bias-mixed{color:#d7c9ff;background:rgba(166,139,255,.08);border-color:rgba(166,139,255,.24)}.ci-market-today-copy{margin-top:.46rem;font-size:.71rem;line-height:1.52;color:#c3cfdd}
 </style>
         """,
         unsafe_allow_html=True,
@@ -322,15 +425,27 @@ def _render_environment(story: ModuleType, app: ModuleType, dependencies: object
             f'<span class="ci-market-driver">{escape(part.strip())}</span>'
             for part in row["drivers"].split("+")
         )
-        + f'</div><div class="ci-market-copy">{escape(row["copy"])}</div></article>'
+        + f'</div><div class="ci-market-copy">{escape(row["copy"])}</div>'
+        + '<div class="ci-market-today"><div class="ci-market-today-top">'
+        + '<span class="ci-market-today-label">Affecting markets today</span>'
+        + f'<span class="ci-market-bias ci-market-bias-{escape(row["today_tone"])}">{escape(row["today_label"])}</span>'
+        + f'</div><div class="ci-market-today-copy">{escape(row["today_copy"])}</div></div></article>'
         for row in _cross_asset_rows(drivers)
     )
     st.markdown(
         '<section class="ci-transmission"><div class="ci-meta"><span class="ci-rank">Cross-asset map</span></div>'
         '<h3 style="color:#f3f8fd;margin:.35rem 0 .35rem">How this backdrop reaches markets</h3>'
-        '<div class="ci-copy" style="margin-bottom:.72rem"><strong>Where the four readings meet:</strong> '
+        '<div class="ci-copy" style="margin-bottom:.5rem"><strong>Where the four readings meet:</strong> '
         'the labels below point back to the driver cards above, so each market conclusion shows which '
         'economic readings produced it.</div>'
+        '<div class="ci-copy" style="margin-bottom:.55rem"><strong>Affecting markets today:</strong> '
+        'the highlighted block in each card summarizes the near-term support or pressure implied by the '
+        'current backdrop. It is an interpretation of current conditions, not proof that macro data caused '
+        'every intraday price move.</div>'
+        '<div class="ci-market-evidence">'
+        f'<span class="ci-market-evidence-chip">Session {escape(story._session(market).lower())}</span>'
+        f'<span class="ci-market-evidence-chip">{escape(story._coverage(market))} live quotes</span>'
+        '</div>'
         f'<div class="ci-market-grid">{market_cards}</div></section>',
         unsafe_allow_html=True,
     )
@@ -351,7 +466,8 @@ def _render_environment(story: ModuleType, app: ModuleType, dependencies: object
     st.caption(
         f"Economic readings: {story._clean(getattr(dashboard, 'data_source', 'Unavailable'))} · evaluated "
         f"{story._format_time(getattr(readings, 'evaluated_at', None))}. Environment explains structural "
-        "conditions; daily developments remain in Today and portfolio action remains in Portfolio."
+        "conditions and the current backdrop's market implications; daily developments remain in Today "
+        "and portfolio action remains in Portfolio."
     )
 
 
@@ -368,4 +484,4 @@ def install(story: ModuleType) -> None:
     setattr(story, _INSTALLED_KEY, True)
 
 
-__all__ = ["_cross_asset_rows", "_driver_rows", "install"]
+__all__ = ["_bias_label", "_cross_asset_rows", "_driver_rows", "install"]
