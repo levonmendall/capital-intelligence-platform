@@ -1,0 +1,37 @@
+name: Export Full Codebase Audit
+
+on:
+  push:
+    branches:
+      - audit/full-codebase-redundancy-20260803
+    paths:
+      - .github/workflows/export-full-codebase-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Package tracked source
+        run: |
+          git ls-files -z | xargs -0 zip -q codebase-audit-source.zip
+          git rev-parse HEAD > codebase-audit-head.txt
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: codebase-audit-source
+          path: |
+            codebase-audit-source.zip
+            codebase-audit-head.txt
+          retention-days: 1
+          if-no-files-found: error
