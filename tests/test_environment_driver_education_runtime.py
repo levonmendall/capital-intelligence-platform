@@ -154,6 +154,7 @@ def test_renderer_language_visibly_connects_cards_and_cross_asset_map() -> None:
     assert "Affecting markets today" in source
     assert "near-term support or pressure implied by the" in source
     assert "current backdrop" in source
-    assert "not proof that macro data caused every intraday price move" in source
+    assert "not proof that macro data caused" in source
+    assert "every intraday price move" in source
     assert "Session " in source
     assert "live quotes" in source
