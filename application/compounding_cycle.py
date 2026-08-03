@@ -15,10 +15,14 @@ from application.cio_cycle import CanonicalCIOCycle, CanonicalCIOCycleResult
 from cio.compounding_authority import CompoundingChiefInvestmentOfficer
 from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from portfolio.compounding_allocation import (
+    AllocationRange,
     CompoundingPortfolioAlternativeEngine,
     CompoundingPortfolioAlternativeSet,
     PortfolioPosture,
     PortfolioPostureEngine,
+    PortfolioRegime,
+    PortfolioSleeve,
+    RegimeTransition,
     SQLiteCompoundingAllocationStore,
 )
 
@@ -56,6 +60,53 @@ class CompoundingCanonicalCIOCycleResult(CanonicalCIOCycleResult):
         object.__setattr__(self, "portfolio_alternatives", portfolio_alternatives)
 
 
+def _neutral_posture(as_of) -> PortfolioPosture:
+    """Represent unavailable posture evidence without blocking the no-candidate cycle."""
+
+    return PortfolioPosture(
+        identifier=f"portfolio-posture:{as_of.isoformat()}:unavailable",
+        as_of=as_of,
+        regime=PortfolioRegime.BALANCED_TRANSITION,
+        confidence=0.0,
+        risk_score=0.0,
+        productive_risk=AllocationRange(0.0, 0.50),
+        defensive_income=AllocationRange(0.0, 0.50),
+        dollar_liquidity=AllocationRange(0.20, 1.0),
+        inflation_real_assets=AllocationRange(0.0, 0.25),
+        diversifiers=AllocationRange(0.0, 0.25),
+        preferred_sleeves=(),
+        discouraged_sleeves=(),
+        transitions=(
+            RegimeTransition(
+                PortfolioRegime.BALANCED_TRANSITION,
+                0.50,
+                "No qualified specialist context exists, so the current state remains explicitly uncertain.",
+                ("complete specialist context",),
+            ),
+            RegimeTransition(
+                PortfolioRegime.RISK_ON_DISINFLATION,
+                0.25,
+                "A supportive state remains possible but is not established without complete evidence.",
+                ("growth", "inflation", "liquidity"),
+            ),
+            RegimeTransition(
+                PortfolioRegime.RISK_OFF_RECESSION,
+                0.25,
+                "A defensive state remains possible but is not established without complete evidence.",
+                ("credit", "financial stress", "breadth"),
+            ),
+        ),
+        evidence=(
+            "No qualified candidate specialist context was available for portfolio-posture inference",
+        ),
+        contradictory_evidence=(),
+        change_conditions=(
+            "Recalculate when at least one complete qualified specialist context becomes available",
+        ),
+        model_version="compounding-portfolio-posture.v1-unavailable",
+    )
+
+
 class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
     """Run the canonical cycle with portfolio posture and staged participation."""
 
@@ -70,7 +121,13 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
         journal=None,
         **kwargs,
     ) -> None:
-        authority = policy_authority or CanonicalDecisionPolicyAuthority()
+        opportunity_engine = kwargs.get("opportunity_engine")
+        authority = (
+            policy_authority
+            or getattr(cio, "policy_authority", None)
+            or getattr(opportunity_engine, "policy_authority", None)
+            or CanonicalDecisionPolicyAuthority()
+        )
         resolved_cio = cio or CompoundingChiefInvestmentOfficer(
             policy_authority=authority
         )
@@ -102,9 +159,13 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
             raise TypeError("specialist_contexts must be supplied as a tuple")
         if portfolio is None:
             raise TypeError("portfolio must be supplied")
-        posture = self.posture_engine.assess(
-            as_of=portfolio.as_of,
-            specialist_contexts=specialist_contexts,
+        posture = (
+            self.posture_engine.assess(
+                as_of=portfolio.as_of,
+                specialist_contexts=specialist_contexts,
+            )
+            if specialist_contexts
+            else _neutral_posture(portfolio.as_of)
         )
         directives = self.posture_engine.directives(candidates, posture)
         compounding_cio = (
@@ -123,6 +184,9 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
         qualified_candidates = tuple(
             item.candidate for item in base_result.opportunity_queue.ranked
         )
+        qualified_identifiers = {
+            candidate.identifier for candidate in qualified_candidates
+        }
         alternatives = self.alternative_engine.build(
             cycle_identifier=str(identifier),
             posture=posture,
@@ -130,8 +194,7 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
             directives=tuple(
                 item
                 for item in directives
-                if item.candidate_identifier
-                in {candidate.identifier for candidate in qualified_candidates}
+                if item.candidate_identifier in qualified_identifiers
             ),
             portfolio=portfolio,
             construction=base_result.construction,
