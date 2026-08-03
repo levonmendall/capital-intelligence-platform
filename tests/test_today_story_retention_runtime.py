@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import ModuleType
 
 import educational_market_briefing_ui as event_ui
 import public_event_recency_runtime
@@ -166,6 +167,48 @@ def test_empty_refresh_reuses_persistent_story_cache(monkeypatch, tmp_path) -> N
     payload = json.loads(cache_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "today-story-retention.v1"
     assert payload["records"][0]["identifier"] == "cached"
+
+
+def test_install_rebinds_after_streamlit_restores_base_adapters() -> None:
+    app = ModuleType("app_impl")
+    events = ModuleType("event_ui")
+    operating = ModuleType("operating_ui")
+    story = ModuleType("story_ui")
+
+    def builder(records, *, now=None, limit=3):
+        del records, now, limit
+        return ()
+
+    def event_loader():
+        return object()
+
+    def operating_loader():
+        return object()
+
+    events.build_today_items = builder
+    operating.build_today_items = builder
+    events.load_public_event_snapshot = event_loader
+    operating.load_public_event_snapshot = operating_loader
+
+    retention.install(app, events, operating, story)
+    first_builder = events.build_today_items
+    first_event_loader = events.load_public_event_snapshot
+
+    # Simulate the assignments performed earlier in the next Streamlit run.
+    events.build_today_items = builder
+    operating.build_today_items = builder
+    events.load_public_event_snapshot = event_loader
+    operating.load_public_event_snapshot = operating_loader
+
+    retention.install(app, events, operating, story)
+
+    assert events.build_today_items is not builder
+    assert events.build_today_items is not first_builder
+    assert events.load_public_event_snapshot is not event_loader
+    assert events.load_public_event_snapshot is not first_event_loader
+    assert retention._base_callable(events.build_today_items) is builder
+    assert retention._base_callable(events.load_public_event_snapshot) is event_loader
+    assert retention._base_callable(operating.load_public_event_snapshot) is operating_loader
 
 
 def test_entrypoints_install_retention_after_final_today_renderer() -> None:
