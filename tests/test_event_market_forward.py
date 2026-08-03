@@ -39,6 +39,7 @@ def _record(
         PortfolioImpactChannel.GEOPOLITICAL,
         PortfolioImpactChannel.SUPPLY,
     ),
+    tags: tuple[str, ...] = ("ceasefire", "shipping restored"),
     canonical_event_identifier: str = "event:ceasefire",
     supersedes_identifiers: tuple[str, ...] = (),
 ) -> DecisionInformationRecord:
@@ -68,7 +69,7 @@ def _record(
         instruments=(),
         geographies=("Middle East",),
         sectors=("Energy", "Transport"),
-        tags=("ceasefire", "shipping restored"),
+        tags=tags,
         impact_channels=channels,
         reliability=reliability,
         relevance=relevance,
@@ -212,6 +213,7 @@ def test_opposing_drivers_remain_mixed() -> None:
             PortfolioImpactChannel.GROWTH,
             PortfolioImpactChannel.DEMAND,
         ),
+        tags=("rate cut", "recession"),
         canonical_event_identifier="event:mixed-policy-growth",
     )
     cluster = _cluster(record, confirmation=0.8)
@@ -257,6 +259,7 @@ def test_unfamiliar_material_event_is_unresolved_not_directional() -> None:
         topic="Novel material infrastructure event",
         summary="A new mechanism affects critical infrastructure without a known market transmission.",
         channels=(PortfolioImpactChannel.OPERATIONAL,),
+        tags=("novel infrastructure",),
         canonical_event_identifier="event:novel-infrastructure",
     )
     cluster = _cluster(record, confirmation=0.8)
