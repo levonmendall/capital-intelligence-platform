@@ -1,0 +1,67 @@
+name: Materialize Optional Comprehensive Discovery Isolation
+
+on:
+  push:
+    branches:
+      - fix/isolate-unentitled-global-discovery
+    paths:
+      - .github/workflows/materialize-optional-comprehensive-discovery-isolation.yml
+      - scripts/materialize_optional_comprehensive_discovery_isolation.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out fix branch
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: fix/isolate-unentitled-global-discovery
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Apply production discovery isolation
+        run: python scripts/materialize_optional_comprehensive_discovery_isolation.py
+
+      - name: Install locked runtime and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+
+      - name: Run focused discovery and production regressions
+        run: >-
+          pytest -q
+          tests/test_optional_comprehensive_discovery_isolation.py
+          tests/test_production_context_publication_runtime.py
+          tests/test_comprehensive_market_discovery.py
+          tests/test_return_opportunity_expansion.py
+
+      - name: Compile changed runtime
+        run: >-
+          python -m py_compile
+          production_context_publication_governed.py
+          tests/test_optional_comprehensive_discovery_isolation.py
+
+      - name: Publish final source and remove temporary materializer
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add production_context_publication_governed.py
+          git add tests/test_optional_comprehensive_discovery_isolation.py
+          git add docs/PRODUCTION_DISCOVERY_FAILURE_ISOLATION.md
+          git rm scripts/materialize_optional_comprehensive_discovery_isolation.py
+          git rm .github/workflows/materialize-optional-comprehensive-discovery-isolation.yml
+          git commit -m "Isolate optional global discovery entitlement failures"
+          git push origin HEAD:fix/isolate-unentitled-global-discovery
