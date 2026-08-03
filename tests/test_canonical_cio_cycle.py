@@ -280,7 +280,7 @@ def test_successful_etf_cycle_reaches_cio_construction_thesis_and_briefing(tmp_p
     assert result.briefing.decision_identifier == result.decisions[0].identifier
     assert result.briefing.confidence == result.decisions[0].final_confidence
     assert journal.verify_integrity()
-    assert journal.count() == 8
+    assert journal.count() == 9
 
 
 def test_empty_qualified_queue_produces_no_superior_opportunity() -> None:
