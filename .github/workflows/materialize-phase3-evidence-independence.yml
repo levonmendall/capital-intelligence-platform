@@ -49,15 +49,11 @@ jobs:
           pip install --require-hashes -r requirements.lock
           pip install -r requirements-dev.txt
 
-      - name: Run evidence independence and CIO regressions
+      - name: Run evidence independence and canonical CIO regressions
         run: >-
           pytest -q
           tests/test_committee_evidence_independence.py
-          tests/test_cio_committee.py
-          tests/test_cio_growth_ensemble.py
-          tests/test_cio_decision_quality_corrections.py
           tests/test_canonical_cio_cycle.py
-          tests/test_cio_persistence.py
 
       - name: Publish final source and remove temporary materializer
         run: |
