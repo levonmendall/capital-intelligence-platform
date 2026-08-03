@@ -44,6 +44,7 @@ from company import (
     FinancialHistory,
     NormalizedAnnualFinancials,
 )
+from intelligence.forward import ForwardIntelligenceBundle
 from opportunity import (
     AlternativeKind,
     AlternativeUse,
@@ -261,6 +262,7 @@ class ProductionCandidateEvidence:
     lineage: GovernedEvidenceLineage
     forecast: CrossAssetForecastSpecialistContext | None = None
     asset_valuation: AssetValuationSpecialistContext | None = None
+    forward_intelligence: ForwardIntelligenceBundle | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("identifier", "candidate_identifier"):
@@ -338,6 +340,23 @@ class ProductionCandidateEvidence:
                 )
             if self.asset_valuation.as_of != self.as_of:
                 raise ValueError("asset valuation evidence must share candidate as_of")
+        if self.forward_intelligence is not None:
+            if not isinstance(self.forward_intelligence, ForwardIntelligenceBundle):
+                raise TypeError(
+                    "forward_intelligence must be ForwardIntelligenceBundle or None"
+                )
+            if self.forward_intelligence.candidate_identifier != self.candidate_identifier:
+                raise ValueError("forward intelligence does not match candidate")
+            if self.forward_intelligence.as_of != self.as_of:
+                raise ValueError("forward intelligence must share candidate as_of")
+            missing = set(self.forward_intelligence.evidence_identifiers).difference(
+                self.lineage.evidence_identifiers
+            )
+            if missing:
+                raise ValueError(
+                    "forward-intelligence evidence is absent from governed lineage: "
+                    + ", ".join(sorted(missing))
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -954,6 +973,9 @@ class RepositoryProductionCanonicalCIOContextProvider:
                 asset_valuation=(
                     candidate_evidence[candidate_identifier].asset_valuation
                 ),
+                forward_intelligence=(
+                    candidate_evidence[candidate_identifier].forward_intelligence
+                ),
             )
             for candidate_identifier in qualified_ids
         )
@@ -1123,6 +1145,15 @@ class RepositoryProductionCanonicalCIOContextProvider:
                         item.fundamental_model_version,
                     )
                     for item in evidence.candidate_evidence
+                }
+                | {
+                    (
+                        f"forward_intelligence:{item.candidate_identifier}",
+                        version,
+                    )
+                    for item in evidence.candidate_evidence
+                    if item.forward_intelligence is not None
+                    for version in item.forward_intelligence.model_versions
                 }
             )
         )
@@ -1723,6 +1754,11 @@ def _candidate_to_dict(
             if value.asset_valuation is None
             else _asset_valuation_to_dict(value.asset_valuation)
         ),
+        "forward_intelligence": (
+            None
+            if value.forward_intelligence is None
+            else value.forward_intelligence.to_dict()
+        ),
         "exposure_profile": _profile_to_dict(value.exposure_profile),
         "fundamental_evidence_identifiers": list(
             value.fundamental_evidence_identifiers
@@ -1738,6 +1774,7 @@ def _candidate_from_dict(
     company_payload = payload.get("company")
     forecast_payload = payload.get("forecast")
     asset_valuation_payload = payload.get("asset_valuation")
+    forward_intelligence_payload = payload.get("forward_intelligence")
     return ProductionCandidateEvidence(
         identifier=str(payload["identifier"]),
         candidate_identifier=str(payload["candidate_identifier"]),
@@ -1776,6 +1813,13 @@ def _candidate_from_dict(
             None
             if asset_valuation_payload is None
             else _asset_valuation_from_dict(dict(asset_valuation_payload))
+        ),
+        forward_intelligence=(
+            None
+            if forward_intelligence_payload is None
+            else ForwardIntelligenceBundle.from_dict(
+                dict(forward_intelligence_payload)
+            )
         ),
     )
 

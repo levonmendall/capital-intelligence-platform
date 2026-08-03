@@ -31,6 +31,7 @@ from committee.specialists import (
 )
 from company import CompanyAnalysis
 from evaluation import DecisionEvidenceSnapshot
+from intelligence.forward import ForwardIntelligenceBundle
 from evaluation.persistence import append_construction, append_evidence_snapshot
 from opportunity import (
     OpportunityEngine,
@@ -305,6 +306,7 @@ class CandidateCycleContext:
     forecast: CrossAssetForecastSpecialistContext | None = None
     company: CompanyAnalysis | None = None
     asset_valuation: AssetValuationSpecialistContext | None = None
+    forward_intelligence: ForwardIntelligenceBundle | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -342,6 +344,15 @@ class CandidateCycleContext:
             raise TypeError(
                 "asset_valuation must be AssetValuationSpecialistContext or None"
             )
+        if self.forward_intelligence is not None:
+            if not isinstance(self.forward_intelligence, ForwardIntelligenceBundle):
+                raise TypeError(
+                    "forward_intelligence must be ForwardIntelligenceBundle or None"
+                )
+            if self.forward_intelligence.candidate_identifier != self.candidate_identifier:
+                raise ValueError("forward intelligence does not match candidate")
+            if self.forward_intelligence.as_of > self.analysis_completed_at:
+                raise ValueError("forward intelligence cannot be from the future")
 
 
 @dataclass(frozen=True, slots=True)
@@ -616,6 +627,7 @@ class CanonicalCIOCycle:
                 forecast=base_context.forecast,
                 company=base_context.company,
                 asset_valuation=base_context.asset_valuation,
+                forward_intelligence=base_context.forward_intelligence,
                 historical_learning=historical_learning,
             )
             packet = self.specialist_service.analyze(
