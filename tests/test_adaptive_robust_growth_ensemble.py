@@ -29,11 +29,13 @@ def test_pilot_defaults_to_participation_not_cash() -> None:
     assert "compounded growth" in payload["objective"].lower()
 
 
-def test_discovery_failure_cannot_be_reported_as_no_opportunity() -> None:
+def test_required_discovery_failures_cannot_be_reported_as_no_opportunity() -> None:
     source = Path("production_context_publication_governed.py").read_text(
         encoding="utf-8"
     )
-    assert "Complete opportunity search is unavailable" in source
+    assert "Broad U.S.-security opportunity discovery is unavailable" in source
+    assert "Required certified comprehensive market discovery is unavailable" in source
+    assert "comprehensive_discovery_required" in source
     assert "conclusion is prohibited until broad U.S.-equity discovery completes" in source
 
 
