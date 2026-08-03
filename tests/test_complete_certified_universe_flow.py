@@ -16,7 +16,7 @@ from cio import (
     CandidateInstrument,
     EvidenceQuality,
 )
-from cio.persistence import SQLiteCIOJournal
+from cio.persistence import CIOJournalEventType, SQLiteCIOJournal
 from committee.specialists import MacroSpecialistContext, MarketSpecialistContext
 from opportunity import AlternativeKind, AlternativeUse, OpportunitySetContext
 from portfolio.construction_api import PortfolioAsset, PortfolioConstructionPolicy
@@ -223,10 +223,9 @@ def test_every_qualified_candidate_reaches_six_specialists_and_cio(tmp_path) -> 
         item.candidate_identifier for item in result.decisions
     } == {item.identifier for item in candidates}
 
-    specialist_packets = tuple(
-        event
-        for event in journal.events()
-        if event.event_type.value == "specialist_packet"
+    specialist_packets = journal.events(
+        event_type=CIOJournalEventType.SPECIALIST_PACKET,
+        limit=len(candidates),
     )
     assert len(specialist_packets) == len(candidates)
     assert all(len(event.payload["analyses"]) == 6 for event in specialist_packets)
