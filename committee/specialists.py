@@ -22,6 +22,7 @@ from committee.evidence_applicability import (
     ApplicableEvidenceMatrix,
 )
 from company import CompanyAnalysis, CompanyFactor
+from intelligence.forward import ForwardIntelligenceBundle
 
 
 def _required_text(value: object, *, field_name: str) -> str:
@@ -485,6 +486,7 @@ class CandidateSpecialistContext:
     forecast: CrossAssetForecastSpecialistContext | None = None
     company: CompanyAnalysis | None = None
     asset_valuation: AssetValuationSpecialistContext | None = None
+    forward_intelligence: ForwardIntelligenceBundle | None = None
     historical_learning: HistoricalLearningContext | None = None
 
     def __post_init__(self) -> None:
@@ -546,6 +548,15 @@ class CandidateSpecialistContext:
             raise ValueError(
                 "asset valuation analysis cannot be newer than completion time"
             )
+        if self.forward_intelligence is not None:
+            if not isinstance(self.forward_intelligence, ForwardIntelligenceBundle):
+                raise TypeError(
+                    "forward_intelligence must be ForwardIntelligenceBundle or None"
+                )
+            if self.forward_intelligence.candidate_identifier != self.candidate_identifier:
+                raise ValueError("forward intelligence does not match candidate")
+            if self.forward_intelligence.as_of > self.analysis_completed_at:
+                raise ValueError("forward intelligence cannot be from the future")
         if self.historical_learning is not None:
             if not isinstance(self.historical_learning, HistoricalLearningContext):
                 raise TypeError(
@@ -635,6 +646,11 @@ class IndependentSpecialistService:
             self._portfolio(candidate, context),
             self._evidence(candidate, context),
         )
+        if context.forward_intelligence is not None:
+            analyses = tuple(
+                context.forward_intelligence.enrich_analysis(item)
+                for item in analyses
+            )
         if context.historical_learning is not None:
             analyses = tuple(
                 self._historically_calibrate(item, context.historical_learning)
