@@ -65,6 +65,11 @@ services:
         value: "168"
       - key: CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT
         value: "true"
+      # The product represents the CIO process as all-market. Comprehensive
+      # discovery must therefore complete; a degraded limited-scope fallback
+      # cannot publish a final CIO evaluation or decision.
+      - key: CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY
+        value: "true"
       - key: CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE
         value: automatic
       - key: CAPITAL_INTELLIGENCE_PAPER_REPORT_TIMEZONE
