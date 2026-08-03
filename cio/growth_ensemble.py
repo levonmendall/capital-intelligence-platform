@@ -121,23 +121,34 @@ class AdaptiveRobustGrowthEnsemble:
             if item.position is not SpecialistPosition.ABSTAIN
         )
         coverage = len(active) / len(analyses)
-        weight_total = sum(max(0.05, item.confidence) for item in active)
+        independence = specialists.evidence_independence
+        role_weight_total = sum(
+            independence.weight_for(item.role) for item in active
+        )
+        weight_total = sum(
+            max(0.05, item.confidence) * independence.weight_for(item.role)
+            for item in active
+        )
         alignment = (
             0.0
             if weight_total <= 0.0
             else sum(
-                self._position_signal(item.position) * max(0.05, item.confidence)
+                self._position_signal(item.position)
+                * max(0.05, item.confidence)
+                * independence.weight_for(item.role)
                 for item in active
             ) / weight_total
         )
         supportive = (
             0.0
-            if not active
+            if role_weight_total <= 0.0
             else sum(
-                item.position is SpecialistPosition.SUPPORTIVE for item in active
-            ) / len(active)
+                independence.weight_for(item.role)
+                for item in active
+                if item.position is SpecialistPosition.SUPPORTIVE
+            ) / role_weight_total
         )
-        confidence = self._geometric_mean(item.confidence for item in active)
+        confidence = independence.independent_confidence
         dispersion = (
             0.0
             if len(active) < 2
@@ -164,22 +175,37 @@ class AdaptiveRobustGrowthEnsemble:
         uncertainty = max(0.25, 1.0 - min(0.75, dispersion))
         raw_multiplier = (
             0.20 * reliability
-            + 0.25 * agreement
-            + 0.20 * supportive
+            + 0.20 * agreement
+            + 0.15 * supportive
             + 0.15 * confidence
             + 0.20 * edge_strength
+            + 0.10 * independence.independence_ratio
         ) * uncertainty
         raw_multiplier = max(0.15, min(1.0, raw_multiplier))
 
-        if current >= 0.03 and alignment >= 0.20:
+        effective = independence.effective_role_count
+        if current >= 0.03 and alignment >= 0.20 and effective >= 2.0:
             stage = GrowthStage.ESTABLISHED
-        elif lane == "participation" and coverage >= self.policy.minimum_engine_coverage:
+        elif (
+            lane == "participation"
+            and coverage >= self.policy.minimum_engine_coverage
+            and effective >= 3.0
+        ):
             stage = GrowthStage.STRATEGIC
-        elif alignment >= 0.45 and supportive >= 0.75 and robustness.robust_edge > 0.0:
+        elif (
+            alignment >= 0.45
+            and supportive >= 0.75
+            and robustness.robust_edge > 0.0
+            and effective >= 3.0
+        ):
             stage = GrowthStage.QUALIFIED
-        elif alignment >= 0.10 and supportive >= 0.50:
+        elif alignment >= 0.10 and supportive >= 0.50 and effective >= 2.0:
             stage = GrowthStage.VALIDATE
-        elif lane in {"exploration", "participation"} and alignment > -0.35:
+        elif (
+            lane in {"exploration", "participation"}
+            and alignment > -0.35
+            and effective >= 1.0
+        ):
             stage = GrowthStage.EXPLORE
         else:
             stage = GrowthStage.OBSERVE
@@ -216,8 +242,10 @@ class AdaptiveRobustGrowthEnsemble:
 
         explanation = (
             f"{stage.value.title()} stage from {len(active)}/{len(analyses)} active "
-            f"return engines; supportive={supportive:.0%}, alignment={alignment:+.2f}, "
-            f"confidence={confidence:.0%}, robust edge={robustness.robust_edge:+.2%}. "
+            f"return engines and {independence.effective_role_count:.2f} effective independent engines; "
+            f"supportive={supportive:.0%}, alignment={alignment:+.2f}, "
+            f"confidence={confidence:.0%}, independence={independence.independence_ratio:.0%}, "
+            f"robust edge={robustness.robust_edge:+.2%}. "
             "Uncertainty changes position size before it eliminates participation."
         )
         return GrowthEnsembleAssessment(
