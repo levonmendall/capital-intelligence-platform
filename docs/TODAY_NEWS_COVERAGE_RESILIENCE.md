@@ -1,7 +1,7 @@
 # Today news coverage resilience
 
-The Today surface now treats an empty event record set as a coverage defect, not as
-proof that the investment news cycle was quiet.
+The Today surface treats an empty event record set as a coverage defect, not as proof
+that the investment news cycle was quiet.
 
 ## Collection continuity
 
@@ -14,17 +14,27 @@ proof that the investment news cycle was quiet.
 
 ## Display admission
 
-The Today educational surface still rejects stale, future-dated, fixture, raw OFAC
-listing, and routine administrative noise. It admits a current source-qualified headline
-when a provider omitted impact-channel metadata or when the exact investment
-transmission is still unresolved. In the latter case it reports the development,
-identifies what remains unknown, and avoids inventing a directional market conclusion.
-The Environment surface remains restricted to economic impact channels.
+The Today educational surface rejects stale, future-dated, fixture, raw OFAC listing,
+and routine administrative noise. It admits a current source-qualified headline when a
+provider omitted impact-channel metadata or when the exact investment transmission is
+still unresolved. In the latter case it reports the development, identifies what remains
+unknown, and avoids inventing a directional market conclusion.
+
+Raw IMF, World Bank, Treasury, CFTC, and EIA table observations are economic evidence,
+not news headlines. They remain available to the Environment and research layers, but
+they cannot fill Today merely because the application retrieved them recently. Today
+uses source publication time first, event time second, and collection time only when a
+source provides neither. A corrected current record also evicts an older cached version
+that had been mislabeled as fresh.
+
+The regression suite explicitly reproduces the false-fresh GDP examples from 1984,
+2007, and 2024 while proving that a genuine current source-qualified market headline
+continues to appear even when its impact-channel metadata is incomplete.
 
 ## Empty-state truthfulness
 
 When no usable current records exist, the UI reports incomplete coverage and keeps the
-collection/filtering condition visible. It no longer says that no story deserved
+collection/filtering condition visible. It does not claim that no story deserved
 attention. Historical retention is capped at 36 hours and never renews publication age.
 If all upstream sources are unavailable, the application reports the outage rather than
 fabricating a headline or relabeling stale information as current.

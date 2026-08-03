@@ -53,6 +53,8 @@ def _parse_timestamp(value: object, *, fallback: datetime) -> datetime:
     raw = str(value).strip()
     if not raw:
         return fallback
+    if len(raw) == 4 and raw.isdigit():
+        raw = f"{raw}-01-01"
     compact_formats = ("%Y%m%dT%H%M%SZ", "%Y%m%d%H%M%S", "%Y-%m-%d")
     for pattern in compact_formats:
         try:
@@ -532,7 +534,11 @@ class PublicLiveInformationProvider:
                 published_at=item.get("report_date_as_yyyy_mm_dd"),
                 source_identifier=item.get("id") or _hash_payload(item),
                 entities=(str(item.get("contract_market_name", "CFTC")),),
-                tags=(str(item.get("commodity_name", "commodity")),),
+                tags=(
+                    "data-observation",
+                    "cftc-positioning-observation",
+                    str(item.get("commodity_name", "commodity")),
+                ),
             )
             for item in rows
             if isinstance(item, Mapping)
@@ -620,6 +626,7 @@ class PublicLiveInformationProvider:
                 published_at=item.get("record_date"),
                 source_identifier=f"{source.identifier}:{item.get('record_date', _hash_payload(item))}",
                 geographies=("United States",),
+                tags=("data-observation", "treasury-fiscal-data"),
             )
             for item in rows
             if isinstance(item, Mapping)
@@ -636,9 +643,14 @@ class PublicLiveInformationProvider:
                 topic=f"World Bank indicator {item.get('indicator', {}).get('value', '')}",
                 summary=f"{item.get('country', {}).get('value', '')}: {item.get('value')} ({item.get('date')})",
                 event_at=item.get("date"),
-                published_at=retrieved_at,
+                published_at=item.get("date"),
                 source_identifier=f"{item.get('countryiso3code')}:{item.get('indicator', {}).get('id')}:{item.get('date')}",
                 geographies=(str(item.get("country", {}).get("value", "global")),),
+                tags=(
+                    "data-observation",
+                    "historical-economic-observation",
+                    "world-bank-indicator",
+                ),
             )
             for item in rows
             if isinstance(item, Mapping) and item.get("value") is not None
@@ -656,9 +668,10 @@ class PublicLiveInformationProvider:
                 topic=f"EIA energy update: {item.get('series-description') or item.get('series')}",
                 summary="; ".join(f"{key}={value}" for key, value in list(item.items())[:8]),
                 event_at=item.get("period"),
-                published_at=retrieved_at,
+                published_at=item.get("period"),
                 source_identifier=f"{item.get('series')}:{item.get('period')}",
                 geographies=("United States",),
+                tags=("data-observation", "eia-series-observation"),
             )
             for item in rows
             if isinstance(item, Mapping)

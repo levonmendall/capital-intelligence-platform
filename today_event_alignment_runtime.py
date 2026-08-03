@@ -696,6 +696,8 @@ def build_today_items(
             continue
         if {"fixture", "sanctions-list"} & _tag_set(raw):
             continue
+        if event_ui._is_non_news_dataset_observation(raw):
+            continue
         interpretation = _interpret(raw)
         if interpretation is None:
             continue

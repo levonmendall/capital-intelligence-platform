@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import educational_market_briefing_ui as event_ui
+import today_event_alignment_runtime as alignment
 import today_story_retention_runtime as retention
 from public_live_record_history import merge_public_event_records
 
@@ -61,7 +62,7 @@ def test_rolling_history_survives_a_thin_collection_without_renewing_age(tmp_pat
 def test_today_accepts_current_source_qualified_news_without_channel_tags() -> None:
     now = datetime(2026, 8, 3, 18, 0, tzinfo=timezone.utc)
 
-    items = event_ui.build_today_items((_record("broad", now - timedelta(hours=1)),), now=now)
+    items = alignment.build_today_items((_record("broad", now - timedelta(hours=1)),), now=now)
 
     assert [item.title for item in items] == ["Headline broad"]
     assert items[0].summary == "A current public source reported: Headline broad."

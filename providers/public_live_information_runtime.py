@@ -470,7 +470,7 @@ class GovernedPublicLiveInformationProvider(PublicLiveInformationProvider):
                         f"fire radiative power {frp}."
                     ),
                     event_at=observed,
-                    published_at=retrieved_at,
+                    published_at=observed,
                     source_identifier=source_id,
                     entities=("NASA FIRMS",),
                     geographies=(f"{latitude},{longitude}",),
@@ -517,11 +517,16 @@ class GovernedPublicLiveInformationProvider(PublicLiveInformationProvider):
                             topic=f"IMF {indicator}: {country}",
                             summary=f"{country} {indicator} value {value} for {year}.",
                             event_at=str(year),
-                            published_at=retrieved_at,
+                            published_at=str(year),
                             source_identifier=f"{indicator}:{country}:{year}",
                             entities=("International Monetary Fund",),
                             geographies=(str(country),),
-                            tags=(str(indicator), "imf-datamapper"),
+                            tags=(
+                                "data-observation",
+                                "historical-economic-observation",
+                                str(indicator),
+                                "imf-datamapper",
+                            ),
                         )
                     )
         return output

@@ -96,13 +96,18 @@ def merge_public_event_records(
     previous = _existing_records(Path(path))
 
     # Current normalized metadata wins when the same event appears in both sets.
+    # A current corrected record also suppresses an older cached version even when
+    # the corrected timestamp proves the event is outside the rolling window.
+    current_keys = {_record_key(record) for record in current}
     chosen: dict[str, tuple[datetime, dict[str, Any]]] = {}
     for is_current, records in ((True, current), (False, previous)):
         for record in records:
+            key = _record_key(record)
+            if not is_current and key in current_keys:
+                continue
             observed_at = _record_time(record, fallback=now if is_current else None)
             if observed_at is None or observed_at > now or observed_at < cutoff:
                 continue
-            key = _record_key(record)
             if key in chosen:
                 continue
             chosen[key] = (observed_at, dict(record))
