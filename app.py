@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import app_impl
 import decision_pulse_ui_refinement
+import environment_actionable_learning_refinement
 import environment_driver_education_runtime
 import environment_story_placement_refinement
 import opportunity_funnel_ui_refinement
@@ -23,6 +24,9 @@ def main() -> None:
     today_event_alignment_runtime.install()
     today_development_card_format_runtime.install()
     environment_driver_education_runtime.install(
+        environment_story_placement_refinement
+    )
+    environment_actionable_learning_refinement.install(
         environment_story_placement_refinement
     )
     opportunity_scan_resilience.install()
