@@ -1,4 +1,4 @@
-"""Research-only gate contribution attribution tests."""
+"""Research-only decision-stage contribution tests."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def _metric(report, stage: GateContributionStage):
     return next(item for item in report.metrics if item.stage is stage)
 
 
-def test_exact_gate_components_reconcile_to_existing_evaluation(tmp_path) -> None:
+def test_exact_stage_components_reconcile_to_existing_evaluation(tmp_path) -> None:
     _, _, result = _cycle(tmp_path)
     snapshot = result.evaluation_snapshots[0]
     evaluation = PointInTimeDecisionEvaluator().evaluate(
@@ -85,15 +85,15 @@ def test_construction_reduction_is_costly_when_reduced_candidate_outperforms(
     assert sizing.constrained_weight == pytest.approx(0.05)
 
 
-def test_evidence_veto_distinguishes_protection_from_missed_opportunity(
+def test_cio_abstention_distinguishes_protection_from_costly_restraint(
     tmp_path,
 ) -> None:
     _, _, result = _cycle(tmp_path)
     original = result.evaluation_snapshots[0]
     protected_snapshot = replace(
         original,
-        identifier="evaluation-snapshot:veto-protected",
-        decision_identifier="decision:veto-protected",
+        identifier="evaluation-snapshot:abstention-protected",
+        decision_identifier="decision:abstention-protected",
         action=CIOAction.INSUFFICIENT_EVIDENCE,
         recommended_position_weight=None,
         implemented_position_weight=0.0,
@@ -101,8 +101,8 @@ def test_evidence_veto_distinguishes_protection_from_missed_opportunity(
     )
     costly_snapshot = replace(
         protected_snapshot,
-        identifier="evaluation-snapshot:veto-costly",
-        decision_identifier="decision:veto-costly",
+        identifier="evaluation-snapshot:abstention-costly",
+        decision_identifier="decision:abstention-costly",
     )
     protected = PointInTimeDecisionEvaluator().evaluate(
         protected_snapshot,
@@ -134,25 +134,23 @@ def test_evidence_veto_distinguishes_protection_from_missed_opportunity(
         ),
         as_of=AS_OF + timedelta(days=367),
     )
-    veto = _metric(report, GateContributionStage.EVIDENCE_VETO)
     abstention = _metric(report, GateContributionStage.CIO_ABSTENTION)
 
-    assert veto.activation_count == 2
-    assert veto.protected_count == 1
-    assert veto.costly_count == 1
+    assert abstention.activation_count == 2
     assert abstention.protected_count == 1
     assert abstention.costly_count == 1
+    assert abstention.exact_portfolio_contribution == 0.0
     assert {
         item.effect
         for item in report.observations
-        if item.stage is GateContributionStage.EVIDENCE_VETO
+        if item.stage is GateContributionStage.CIO_ABSTENTION
     } == {
         GateContributionEffect.PROTECTED_CAPITAL,
         GateContributionEffect.COSTLY_RESTRAINT,
     }
 
 
-def test_gate_contribution_rejects_duplicate_decision_history(tmp_path) -> None:
+def test_stage_contribution_rejects_duplicate_decision_history(tmp_path) -> None:
     _, _, result = _cycle(tmp_path)
     snapshot = result.evaluation_snapshots[0]
     evaluation = PointInTimeDecisionEvaluator().evaluate(
