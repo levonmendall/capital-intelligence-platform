@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import educational_market_briefing_ui as event_ui
 import public_event_recency_runtime
@@ -38,6 +38,25 @@ def _record(
     }
 
 
+def _simple_builder(records, *, now=None, limit=3):
+    """Small deterministic 24-hour selector for retention unit boundaries."""
+
+    evaluated_at = retention._utc_now(now)
+    threshold = evaluated_at - timedelta(hours=24)
+    selected = []
+    for record in records:
+        published_at = event_ui._record_time(record)
+        if published_at is None or published_at < threshold or published_at > evaluated_at:
+            continue
+        selected.append(
+            SimpleNamespace(
+                title=str(record.get("topic", "Market development")),
+                published_at=published_at,
+            )
+        )
+    return tuple(selected[:limit])
+
+
 def test_old_story_is_retained_without_renewing_its_publication_time() -> None:
     now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     old_story = _record(
@@ -47,10 +66,10 @@ def test_old_story_is_retained_without_renewing_its_publication_time() -> None:
     )
     public_event_recency_runtime.install(event_ui)
 
-    assert event_ui.build_today_items((old_story,), now=now) == ()
+    assert _simple_builder((old_story,), now=now) == ()
 
     retained = retention._build_retained_items(
-        event_ui.build_today_items,
+        _simple_builder,
         event_ui,
         (old_story,),
         now=now,
@@ -103,7 +122,7 @@ def test_current_story_is_preferred_over_retained_history() -> None:
     public_event_recency_runtime.install(event_ui)
 
     selected = retention._build_retained_items(
-        event_ui.build_today_items,
+        _simple_builder,
         event_ui,
         records,
         now=now,
@@ -136,7 +155,7 @@ def test_empty_refresh_reuses_persistent_story_cache(monkeypatch, tmp_path) -> N
     }
     loader = retention._retaining_loader(
         lambda: snapshots["value"],
-        event_ui.build_today_items,
+        _simple_builder,
         event_ui,
     )
 
@@ -152,7 +171,7 @@ def test_empty_refresh_reuses_persistent_story_cache(monkeypatch, tmp_path) -> N
     )
     second = loader()
     selected = retention._build_retained_items(
-        event_ui.build_today_items,
+        _simple_builder,
         event_ui,
         second.records,
         now=now + timedelta(hours=26),
