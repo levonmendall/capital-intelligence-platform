@@ -1,7 +1,7 @@
 """Bounded row isolation for official SEC EDGAR filing submissions.
 
-The SEC submissions endpoint uses parallel arrays. A single malformed historical row
-must not discard hundreds of valid filings or abort the entire cross-market evidence
+The SEC submissions endpoint uses parallel arrays. A malformed historical row must
+not discard hundreds of valid filings or abort the entire cross-market evidence
 collection. Structural payload failures and material row corruption remain fail-closed.
 """
 
@@ -16,7 +16,9 @@ from providers.sec_edgar import SECEdgarProvider, SECEdgarProviderError
 
 
 _LOGGER = logging.getLogger("capital_intelligence.providers.sec_edgar")
-_ROW_POLICY_VERSION = "sec-edgar-filing-row-isolation.v1"
+_ROW_POLICY_VERSION = "sec-edgar-filing-row-isolation.v2"
+_MINIMUM_TRAILING_POLICY_ROWS = 100
+_MAXIMUM_TRAILING_INVALID_ROWS = 10
 
 
 class ResilientSECEdgarProvider(SECEdgarProvider):
@@ -110,16 +112,32 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
             except (TypeError, ValueError):
                 invalid_indexes.append(index)
 
-        # Permit an isolated bad row, but do not normalize a materially corrupted
-        # SEC submission into apparently complete evidence. The tolerance is one
-        # percent of the payload, with a minimum allowance of one row.
-        allowed_invalid = max(1, row_count // 100)
+        ordinary_allowed = max(1, row_count // 100)
+        trailing_suffix = bool(invalid_indexes) and invalid_indexes == list(
+            range(row_count - len(invalid_indexes), row_count)
+        )
+        trailing_allowed = min(
+            _MAXIMUM_TRAILING_INVALID_ROWS,
+            max(ordinary_allowed, row_count // 50),
+        )
+        trailing_policy_applies = (
+            row_count >= _MINIMUM_TRAILING_POLICY_ROWS and trailing_suffix
+        )
+        allowed_invalid = (
+            trailing_allowed if trailing_policy_applies else ordinary_allowed
+        )
+
+        # Ordinary malformed rows remain capped at one percent. A large filing
+        # history may additionally omit a contiguous oldest-row suffix, bounded at
+        # two percent and never more than ten rows. Recent, scattered, or middle-row
+        # corruption does not receive the trailing-history allowance.
         if not records or len(invalid_indexes) > allowed_invalid:
             sample = ", ".join(str(value) for value in invalid_indexes[:10])
             raise SECEdgarProviderError(
                 "SEC submissions contain excessive invalid filing rows for "
                 f"{cik}: invalid={len(invalid_indexes)}, total={row_count}, "
-                f"allowed={allowed_invalid}, indexes={sample or 'none'}."
+                f"allowed={allowed_invalid}, trailing_suffix={trailing_suffix}, "
+                f"indexes={sample or 'none'}."
             )
 
         if invalid_indexes:
@@ -130,6 +148,8 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
                     "invalid_filing_count": len(invalid_indexes),
                     "filing_row_count": row_count,
                     "invalid_filing_indexes": invalid_indexes[:10],
+                    "trailing_suffix": trailing_suffix,
+                    "allowed_invalid_filing_count": allowed_invalid,
                     "policy_version": cls.row_policy_version,
                     "real_money_authorized": False,
                 },
