@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -42,19 +43,20 @@ def _fact() -> CompanyFact:
 def test_spool_round_trips_company_facts_and_is_append_only(
     tmp_path,
 ) -> None:
+    fact = _fact()
     spool = SQLitePaperEvidenceSpool(tmp_path / "evidence.db")
-    spool.append("company_facts", "AAA", (_fact(),), recorded_at=AS_OF)
+    spool.append("company_facts", "AAA", (fact,), recorded_at=AS_OF)
 
     facts = spool.mapping("company_facts", tuple_result=True)
     assert isinstance(facts, SQLiteEvidenceMapping)
-    assert facts["AAA"] == (_fact(),)
+    assert facts["AAA"] == (fact,)
 
-    spool.append("company_facts", "AAA", (_fact(),), recorded_at=AS_OF)
+    spool.append("company_facts", "AAA", (fact,), recorded_at=AS_OF)
     with pytest.raises(ValueError, match="different content"):
         spool.append(
             "company_facts",
             "AAA",
-            (_fact().__class__(**{**_fact().__dict__, "value": 2_000_000.0}),),
+            (replace(fact, value=2_000_000.0),),
             recorded_at=AS_OF,
         )
 
