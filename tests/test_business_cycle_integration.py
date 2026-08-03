@@ -4,48 +4,10 @@ from fastapi.testclient import TestClient
 
 from api import ApiSettings, create_app
 from intelligence.business_cycle import BusinessCycleEngine
-from intelligence.engine_cycle import AnalyticalEngineCycleExecutor
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.global_liquidity import GlobalLiquidityEngine
 from tests.test_business_cycle_engine import AS_OF, FakeBusinessCycleProvider
 from tests.test_global_liquidity_engine import FakeLiquidityProvider
-
-
-class _CanonicalExecutor:
-    def __init__(self) -> None:
-        self.calls = []
-
-    def run(self, *, as_of):
-        self.calls.append(as_of)
-        return {"snapshot_identifier": "daily:1"}
-
-
-def test_multi_engine_cycle_persists_results_without_changing_canonical_result(
-    tmp_path,
-) -> None:
-    canonical = _CanonicalExecutor()
-    store = SQLiteAnalyticalEngineStore(tmp_path / "engines.db")
-    wrapper = AnalyticalEngineCycleExecutor(
-        canonical,
-        (
-            GlobalLiquidityEngine(
-                FakeLiquidityProvider(),
-                clock=lambda: AS_OF,
-            ),
-            BusinessCycleEngine(
-                FakeBusinessCycleProvider(),
-                clock=lambda: AS_OF,
-            ),
-        ),
-        store,
-    )
-
-    result = wrapper.run(as_of=AS_OF)
-
-    assert result == {"snapshot_identifier": "daily:1"}
-    assert canonical.calls == [AS_OF]
-    assert store.latest("global_liquidity") is not None
-    assert store.latest("business_cycle") is not None
 
 
 def test_business_cycle_api_is_read_only_and_returns_latest_result(

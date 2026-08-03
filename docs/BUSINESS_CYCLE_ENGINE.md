@@ -69,39 +69,22 @@ Missing series reduce weighted coverage and confidence. Stale evidence lowers
 quality. Contradictory labor, demand, production, and leading evidence remains
 visible in the result.
 
-## Personal CIO integration
+## Committee and CIO use
 
-The latest result at or before the daily decision time is added to:
-
-- **Why does it matter?** through a plain-language cycle explanation;
-- **How does it affect my portfolio?** through the first governed transmission
-  channel;
-- review conditions; and
-- evidence lineage.
-
-Business-cycle context does not independently change the existing formal action
-or no-action outcome in PR28. It informs the investor without bypassing the
-committee, mandate, objective, or material-change policy.
+The business-cycle result is persisted as point-in-time analytical evidence and is
+available to the existing specialist and CIO process. It cannot independently create,
+size, authorize, construct, or execute an investment action.
 
 ## Scheduling and persistence
 
-The durable scheduler runs both:
+Current production scheduling is owned by the canonical headless operating path. The
+retired `LiquidityAwareCycleExecutor` and `AnalyticalEngineCycleExecutor` wrappers are
+not part of the supported runtime and have been removed. Individual analytical engines,
+their append-only stores, read-only API routes, and governed normalization, synthesis,
+and evidence-governance records remain supported.
 
-1. Global Liquidity; and
-2. Business Cycle
-
-beside the canonical daily cycle. Both results are persisted to the append-only
-`database/analytical_engines.db` store before selective alert planning completes.
-
-The existing PR27 `LiquidityAwareCycleExecutor` remains available as a
-compatibility wrapper, while new scheduling uses the reusable
-`AnalyticalEngineCycleExecutor` for multiple engines.
-
-The analytical engine database is already:
-
-- included in encrypted backups;
-- exposed as an optional readiness component; and
-- protected by append-only update and delete triggers.
+The analytical engine database remains included in encrypted backups, exposed as an
+optional readiness component, and protected by append-only update and delete triggers.
 
 ## API
 
