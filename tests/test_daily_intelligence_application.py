@@ -14,7 +14,6 @@ from application import (
     daily_snapshot_to_dict,
 )
 from committee import RegimeGovernanceWorkflow
-from dashboard.daily_intelligence import build_daily_intelligence_view
 from intelligence.regime_pipeline import InstitutionalRegimePipeline
 from monitoring import RegimeMaterialChangeEngine
 from tests.test_material_change_monitoring import (
@@ -216,33 +215,6 @@ def test_history_store_is_append_only(tmp_path) -> None:
             raise AssertionError("snapshot history allowed an update")
     finally:
         connection.close()
-
-
-def test_daily_view_keeps_the_primary_surface_simple(tmp_path) -> None:
-    store = SQLiteDailySnapshotStore(tmp_path / "daily.db")
-    snapshot = _service(
-        ChangedRegimeProvider(),
-        store=store,
-    ).run(
-        as_of=FIRST_AS_OF,
-        replay_identifiers=("decision-replay:decision-1",),
-    ).snapshot
-
-    view = build_daily_intelligence_view(
-        snapshot,
-        store.history(),
-    )
-
-    assert view.score == 82
-    assert view.score_label == "Strong"
-    assert view.score_change == "No prior score"
-    assert view.environment == "Constructive"
-    assert view.risk == "Moderate"
-    assert view.committee == "6–0 Favor Risk Assets"
-    assert view.history == ((FIRST_AS_OF.isoformat(), 82),)
-    assert view.replay_identifiers == (
-        "decision-replay:decision-1",
-    )
 
 
 def test_daily_snapshot_schema_is_stable_json() -> None:

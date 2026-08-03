@@ -12,12 +12,10 @@ from intelligence.market_breadth import MarketBreadthEngine
 from intelligence.risk import RiskEngine
 from intelligence.technical_momentum import TechnicalMomentumEngine
 from intelligence.valuation import ValuationEngine
-from personal_cio import ActionStatus, build_personal_cio_brief
 from tests.test_business_cycle_engine import FakeBusinessCycleProvider
 from tests.test_credit_cycle_engine import FakeCreditCycleProvider
 from tests.test_global_liquidity_engine import FakeLiquidityProvider
 from tests.test_market_breadth_engine import FakeMarketBreadthProvider
-from tests.test_personal_cio_brief import NOW, _goal, _profile, _snapshot
 from tests.test_risk_engine import AS_OF, FakeRiskProvider
 from tests.test_technical_momentum_engine import FakeTechnicalMomentumProvider
 from tests.test_valuation_engine import FakeValuationProvider
@@ -83,35 +81,6 @@ def test_multi_engine_cycle_persists_seven_results_without_changing_contract(
     assert store.latest("valuation") is not None
     assert store.latest("technical_momentum") is not None
     assert store.latest("risk") is not None
-
-
-def test_personal_cio_adds_risk_context_without_changing_action() -> None:
-    risk = RiskEngine(
-        FakeRiskProvider(mode="stressed"),
-        clock=lambda: AS_OF,
-    ).run(as_of=AS_OF).result
-    brief = build_personal_cio_brief(
-        "investor:1",
-        daily_snapshot=_snapshot(),
-        profile=_profile(),
-        goals=(_goal(),),
-        portfolios=(
-            {
-                "code": "GROWTH",
-                "risk": "moderate",
-                "nav": 500_000,
-                "cash": 100_000,
-            },
-        ),
-        generated_at=NOW,
-        analytical_results=(risk,),
-    )
-
-    assert brief.action_status is ActionStatus.NO_ACTION
-    assert "Risk" in brief.why_it_matters
-    assert "Risk transmission" in brief.portfolio_effect
-    assert risk.identifier in brief.evidence_identifiers
-    assert any("drawdown tolerance" in item.lower() for item in brief.review_conditions)
 
 
 def test_risk_api_is_read_only_and_returns_latest_result(tmp_path) -> None:

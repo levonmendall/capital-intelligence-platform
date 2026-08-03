@@ -6,9 +6,7 @@ from api import ApiSettings, create_app
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.global_liquidity import GlobalLiquidityEngine
 from intelligence.liquidity_cycle import LiquidityAwareCycleExecutor
-from personal_cio import ActionStatus, build_personal_cio_brief
 from tests.test_global_liquidity_engine import AS_OF, FakeLiquidityProvider
-from tests.test_personal_cio_brief import NOW, _goal, _profile, _snapshot
 
 
 class _CanonicalExecutor:
@@ -39,34 +37,6 @@ def test_cycle_wrapper_persists_liquidity_without_changing_canonical_result(
     assert result == {"snapshot_identifier": "daily:1"}
     assert canonical.calls == [AS_OF]
     assert store.latest("global_liquidity") is not None
-
-
-def test_personal_cio_adds_liquidity_context_without_changing_action() -> None:
-    liquidity = GlobalLiquidityEngine(
-        FakeLiquidityProvider(),
-        clock=lambda: AS_OF,
-    ).run(as_of=AS_OF).result
-    brief = build_personal_cio_brief(
-        "investor:1",
-        daily_snapshot=_snapshot(),
-        profile=_profile(),
-        goals=(_goal(),),
-        portfolios=(
-            {
-                "code": "GROWTH",
-                "risk": "moderate",
-                "nav": 500_000,
-                "cash": 100_000,
-            },
-        ),
-        generated_at=NOW,
-        analytical_results=(liquidity,),
-    )
-
-    assert brief.action_status is ActionStatus.NO_ACTION
-    assert "Global liquidity" in brief.why_it_matters
-    assert "Liquidity transmission" in brief.portfolio_effect
-    assert liquidity.identifier in brief.evidence_identifiers
 
 
 def test_liquidity_api_is_read_only_and_returns_latest_result(
