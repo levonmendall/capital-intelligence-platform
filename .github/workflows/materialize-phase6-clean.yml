@@ -1,0 +1,74 @@
+name: Materialize Clean Phase 6 Risk Intelligence
+
+on:
+  push:
+    branches:
+      - feature/committee-cio-v2-phase6-risk-intelligence-clean
+    paths:
+      - .github/workflows/materialize-phase6-clean.yml
+      - scripts/materialize_phase6_risk_intelligence_clean.py
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out clean branch
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: feature/committee-cio-v2-phase6-risk-intelligence-clean
+          fetch-depth: 0
+
+      - name: Copy reviewed independent Phase 6 source
+        run: |
+          git fetch origin feature/committee-cio-v2-phase6-risk-intelligence
+          git checkout origin/feature/committee-cio-v2-phase6-risk-intelligence -- \
+            portfolio/risk_intelligence.py \
+            tests/test_risk_intelligence.py \
+            tests/test_risk_intelligence_cycle.py \
+            docs/PHASE6_RISK_INTELLIGENCE.md
+
+      - name: Apply Phase 6 integration to current main
+        run: python scripts/materialize_phase6_risk_intelligence_clean.py
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+
+      - name: Run risk, forward-intelligence and canonical regressions
+        run: >-
+          pytest -q
+          tests/test_risk_intelligence.py
+          tests/test_risk_intelligence_cycle.py
+          tests/test_forward_intelligence.py
+          tests/test_forward_intelligence_integration.py
+          tests/test_canonical_cio_cycle.py
+          tests/test_cio_persistence.py
+
+      - name: Publish clean Phase 6 source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add application/cio_cycle.py cio/persistence.py portfolio/risk_intelligence.py
+          git add tests/test_risk_intelligence.py tests/test_risk_intelligence_cycle.py tests/test_canonical_cio_cycle.py docs/PHASE6_RISK_INTELLIGENCE.md
+          git rm scripts/materialize_phase6_risk_intelligence_clean.py
+          git rm .github/workflows/materialize-phase6-clean.yml
+          git commit -m "Integrate candidate tail liquidity thesis and joint risk intelligence"
+          git push origin HEAD:feature/committee-cio-v2-phase6-risk-intelligence-clean
