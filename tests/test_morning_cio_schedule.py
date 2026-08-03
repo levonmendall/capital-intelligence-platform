@@ -65,7 +65,7 @@ def test_render_refreshes_public_information_before_cio_reviews() -> None:
     ) in source
     assert (
         "- key: CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_INTERVAL_SECONDS\n"
-        "        value: \"1800\""
+        "        value: \"900\""
     ) in source
     assert "autoDeployTrigger: checksPass" in source
     assert "dockerCommand: python run_render_service.py" in source
