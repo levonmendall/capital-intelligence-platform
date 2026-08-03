@@ -20,10 +20,6 @@ _EXPORTS = {
         "intelligence.analytical_engine",
         "AnalyticalEngineResult",
     ),
-    "AnalyticalEngineCycleExecutor": (
-        "intelligence.engine_cycle",
-        "AnalyticalEngineCycleExecutor",
-    ),
     "BASIS_POINTS": (
         "intelligence.synthesis_weights",
         "BASIS_POINTS",
@@ -135,10 +131,6 @@ _EXPORTS = {
     "IssueSeverity": (
         "intelligence.governance",
         "IssueSeverity",
-    ),
-    "LiquidityAwareCycleExecutor": (
-        "intelligence.liquidity_cycle",
-        "LiquidityAwareCycleExecutor",
     ),
     "MarketBreadthEngine": (
         "intelligence.market_breadth",
