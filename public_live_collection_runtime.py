@@ -20,6 +20,7 @@ from providers.public_live_information import load_public_live_source_catalog
 from providers.public_live_information_extended import (
     ImpactfulPublicLiveInformationProvider,
 )
+from public_live_record_history import merge_public_event_records
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,15 +281,35 @@ def collect_public_live_information_if_due(
             catalog = load_public_live_source_catalog(catalog_path)
             factory = provider_factory or ImpactfulPublicLiveInformationProvider
             report = factory(catalog).collect(include_optional=True)
+            failed_source_count = sum(
+                1 for item in report.sources if not item.succeeded
+            )
+            successful_source_count = sum(
+                1 for item in report.sources if item.succeeded
+            )
+            current_records = [item.to_dict() for item in report.records]
+            rolling_records = merge_public_event_records(
+                records_path,
+                current_records,
+                evaluated_at=report.evaluated_at,
+            )
             report_payload = {
                 **report.to_dict(include_records=False),
                 "decision_evidence_authority": False,
             }
             records_payload = {
-                "schema_version": "public-live-information-record-set.v1",
+                "schema_version": "public-live-information-record-set.v2",
                 "catalog_identifier": report.catalog_identifier,
                 "evaluated_at": report.evaluated_at.isoformat(),
-                "records": [item.to_dict() for item in report.records],
+                "records": rolling_records,
+                "coverage": {
+                    "required_sources_ready": bool(report.required_sources_ready),
+                    "successful_source_count": successful_source_count,
+                    "source_count": len(report.sources),
+                    "failed_source_count": failed_source_count,
+                    "current_record_count": len(current_records),
+                    "rolling_record_count": len(rolling_records),
+                },
                 "decision_evidence_authority": False,
                 "full_article_text_stored": False,
                 "secret_values_disclosed": False,
@@ -297,9 +318,6 @@ def collect_public_live_information_if_due(
             _write_json(report_path, report_payload)
             _write_json(records_path, records_payload)
 
-            failed_source_count = sum(
-                1 for item in report.sources if not item.succeeded
-            )
             if not report.required_sources_ready:
                 exit_code = 3
                 state = "degraded"

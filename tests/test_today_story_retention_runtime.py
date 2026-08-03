@@ -57,11 +57,11 @@ def _simple_builder(records, *, now=None, limit=3):
     return tuple(selected[:limit])
 
 
-def test_old_story_is_retained_without_renewing_its_publication_time() -> None:
+def test_recent_prior_story_is_retained_without_renewing_its_publication_time() -> None:
     now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
     old_story = _record(
         identifier="prior",
-        published_at=now - timedelta(days=3),
+        published_at=now - timedelta(hours=30),
         available_at=now - timedelta(minutes=5),
     )
     public_event_recency_runtime.install(event_ui)
@@ -77,12 +77,12 @@ def test_old_story_is_retained_without_renewing_its_publication_time() -> None:
     )
 
     assert [item.title for item in retained] == ["Event prior"]
-    assert retained[0].published_at == now - timedelta(days=3)
+    assert retained[0].published_at == now - timedelta(hours=30)
 
 
 def test_aligned_federal_reserve_story_is_retained() -> None:
     now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
-    published_at = now - timedelta(days=3)
+    published_at = now - timedelta(hours=30)
     story = _record(
         identifier="retained-fed-story",
         published_at=published_at,

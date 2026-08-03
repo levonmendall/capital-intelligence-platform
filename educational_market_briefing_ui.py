@@ -85,6 +85,7 @@ class PublicEventSnapshot:
     evaluated_at: datetime | None
     state: str
     detail: str
+    coverage: Mapping[str, Any] | None = None
 
 
 def daily_briefing_date(now: datetime | None = None) -> str:
@@ -217,9 +218,8 @@ def _displayable(
     allowed_channels: frozenset[str],
 ) -> bool:
     topic = _clean_text(record.get("topic"))
-    summary = _clean_text(record.get("summary"))
     available_at = _record_time(record)
-    if not topic or not summary or available_at is None:
+    if not topic or available_at is None:
         return False
     if available_at > now or now - available_at > _RECENT_WINDOW:
         return False
@@ -227,7 +227,27 @@ def _displayable(
         return False
     if topic.lower().startswith("ofac sanctions listing:"):
         return False
-    return bool(set(_channels(record)) & allowed_channels)
+
+    channels = set(_channels(record))
+    if channels & allowed_channels:
+        return True
+
+    # Today is an educational awareness surface, not the CIO evidence gate. A
+    # current, source-qualified headline must not disappear merely because a
+    # provider omitted an impact-channel tag. Environment remains channel-specific.
+    if allowed_channels == _MARKET_CHANNELS:
+        source_type = _clean_text(_provenance(record).get("source_type")).lower()
+        return source_type in {
+            "official",
+            "regulatory",
+            "issuer",
+            "newswire",
+            "journalism",
+            "research",
+            "market",
+            "alternative",
+        }
+    return False
 
 
 def _topic_key(record: Mapping[str, Any]) -> str:
@@ -361,7 +381,7 @@ def _to_item(record: Mapping[str, Any]) -> EducationalBriefingItem:
     published_at = _record_time(record) or datetime.now(timezone.utc)
     channels = _channels(record)
     title = _truncate(record.get("topic"), limit=112)
-    summary = _truncate(record.get("summary"), limit=240)
+    summary = _truncate(record.get("summary") or record.get("topic"), limit=240)
     if summary.lower() == title.lower():
         summary = "The public source reported this development without additional concise detail."
     portfolio_lens, affected_investments, what_to_watch = _investment_effects(channels)
@@ -559,11 +579,31 @@ def _read_public_event_file(path_value: str, modified_ns: int) -> PublicEventSna
         else ()
     )
     evaluated_at = _parse_datetime(payload.get("evaluated_at"))
+    raw_coverage = payload.get("coverage")
+    coverage = raw_coverage if isinstance(raw_coverage, Mapping) else {}
+    failed_sources = int(coverage.get("failed_source_count", 0) or 0)
+    required_ready = coverage.get("required_sources_ready")
+    if not records:
+        state = "degraded"
+        detail = (
+            "The current headline collection produced no usable records. This is a "
+            "coverage condition, not evidence that the news cycle was quiet."
+        )
+    elif required_ready is False or failed_sources > 0:
+        state = "degraded"
+        detail = (
+            "Recent source-qualified developments are available, but headline "
+            "coverage is incomplete because one or more sources failed."
+        )
+    else:
+        state = "available"
+        detail = "Recent governed public-event metadata is available."
     return PublicEventSnapshot(
         records,
         evaluated_at,
-        "available",
-        "Governed public-event metadata is available.",
+        state,
+        detail,
+        coverage,
     )
 
 

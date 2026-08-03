@@ -25,6 +25,7 @@ _INSTALLED_STATE_KEY = "_capital_intelligence_today_story_retention_installed"
 _ORIGINAL_CALLABLE_ATTRIBUTE = "_capital_intelligence_today_story_retention_original"
 _SCHEMA_VERSION = "today-story-retention.v1"
 _MAX_CACHED_RECORDS = 250
+_MAX_RETENTION_AGE = timedelta(hours=36)
 
 
 def _utc_now(value: datetime | None = None) -> datetime:
@@ -103,7 +104,7 @@ def _build_retained_items(
     if current:
         return current
     latest = _latest_record_time(event_ui, candidates, now=evaluated_at)
-    if latest is None:
+    if latest is None or evaluated_at - latest > _MAX_RETENTION_AGE:
         return ()
     # Reuse the governed ranking, quality, channel, clustering, and provider
     # diversity controls by anchoring selection to the last recorded event.
@@ -132,9 +133,10 @@ def _ordered_records(
     now: datetime,
 ) -> tuple[Mapping[str, Any], ...]:
     timed: list[tuple[datetime, Mapping[str, Any]]] = []
+    cutoff = now - _MAX_RETENTION_AGE
     for record in _records(records):
         observed_at = _record_time(event_ui, record)
-        if observed_at is None or observed_at > now:
+        if observed_at is None or observed_at > now or observed_at < cutoff:
             continue
         timed.append((observed_at, record))
     timed.sort(key=lambda item: item[0], reverse=True)
@@ -342,21 +344,27 @@ def _retained_today_renderer(
             f'<span class="ci-chip">{escape(story_ui._coverage(market))} governed quotes</span>'
             f'<span class="ci-chip">{escape(story_ui._age_label(getattr(snapshot, "evaluated_at", None)))}</span>'
             + ('<span class="ci-chip">No new qualifying stories</span>' if retained else "")
+            + (
+                '<span class="ci-chip">Coverage incomplete</span>'
+                if str(getattr(snapshot, "state", "available")) != "available"
+                else ""
+            )
             + "</div></div>"
         )
         if items:
             hero += story_ui._primary(items[0])
         else:
             detail = story_ui._clean(getattr(snapshot, "detail", "")) or (
-                "No material, source-qualified event cleared the last-24-hour controls."
+                "The current public-news collection did not return a usable story."
             )
             hero += (
                 '<div class="ci-primary"><div class="ci-meta"><span class="ci-rank">'
-                "Quiet-day conclusion</span></div>"
-                '<div class="ci-title">No new story earned investor attention.</div>'
-                '<div class="ci-box"><div class="ci-label">Why this is useful</div>'
-                f'<p>{escape(detail)} A quiet result is more trustworthy than filling the page '
-                "with repetitive or low-quality headlines.</p></div></div>"
+                "Coverage status</span></div>"
+                '<div class="ci-title">Current headline coverage is incomplete.</div>'
+                '<div class="ci-box"><div class="ci-label">What this means</div>'
+                f'<p>{escape(detail)} The application will not treat an empty record set as '
+                "proof that nothing happened. Collection and filtering diagnostics remain "
+                "visible while the feed refreshes.</p></div></div>"
             )
         st.markdown(hero + "</section>", unsafe_allow_html=True)
 

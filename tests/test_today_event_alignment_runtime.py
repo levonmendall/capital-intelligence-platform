@@ -7,6 +7,7 @@ import educational_market_briefing_ui as event_ui
 import environment_story_placement_refinement as story
 import operating_intelligence_ui as operating_ui
 import public_event_recency_runtime
+import today_development_card_format_runtime as card_format
 import today_event_alignment_runtime as alignment
 
 
@@ -53,6 +54,7 @@ def _record(
 def _install() -> None:
     public_event_recency_runtime.install(event_ui)
     alignment.install(event_ui, operating_ui, story)
+    card_format.install(story)
 
 
 def test_routine_meeting_notice_is_not_presented_as_a_market_event() -> None:
