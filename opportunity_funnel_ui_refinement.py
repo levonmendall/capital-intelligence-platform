@@ -16,6 +16,7 @@ import streamlit as st
 
 import cio_report_backdrop_refinement
 import concise_operating_intelligence_ui as concise
+import current_cio_report_trigger_refinement
 import live_operating_console
 import portfolio_first_ui_refinement
 
@@ -260,6 +261,7 @@ def install(app_impl: ModuleType) -> None:
     live_operating_console.render_live_market_status = render_live_market_status
     portfolio_first_ui_refinement.install(app_impl)
     cio_report_backdrop_refinement.install(portfolio_first_ui_refinement)
+    current_cio_report_trigger_refinement.install(portfolio_first_ui_refinement)
     setattr(app_impl, _INSTALLED_STATE_KEY, True)
 
 
