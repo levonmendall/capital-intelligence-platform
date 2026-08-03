@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import educational_market_briefing_ui as event_ui
 import public_event_recency_runtime as recency
@@ -64,7 +66,10 @@ def test_recent_publication_remains_visible() -> None:
     assert items[0].published_at == now - timedelta(hours=2)
 
 
-def test_render_background_snapshot_uses_source_time(monkeypatch, tmp_path) -> None:
+def test_render_background_snapshot_keeps_bounded_source_timed_history(
+    monkeypatch,
+    tmp_path,
+) -> None:
     import render_nonblocking_data
 
     now = datetime.now(timezone.utc)
@@ -98,7 +103,30 @@ def test_render_background_snapshot_uses_source_time(monkeypatch, tmp_path) -> N
     recency.install(event_ui)
     snapshot = render_nonblocking_data._PUBLIC_EVENTS._supplier()
 
-    assert [record["identifier"] for record in snapshot.records] == ["recent"]
+    assert [record["identifier"] for record in snapshot.records] == [
+        "recent",
+        "old",
+    ]
+    assert [item.title for item in event_ui.build_today_items(snapshot.records, now=now)] == [
+        "Event recent"
+    ]
+
+
+def test_streamlit_reruns_do_not_reset_the_warmed_event_loader(monkeypatch) -> None:
+    reset_calls: list[str] = []
+    fake_loader = SimpleNamespace(reset=lambda: reset_calls.append("reset"))
+    fake_nonblocking = ModuleType("render_nonblocking_data")
+    fake_nonblocking._PUBLIC_EVENTS = fake_loader
+    fake_event_ui = ModuleType("educational_market_briefing_ui")
+    monkeypatch.setitem(sys.modules, "render_nonblocking_data", fake_nonblocking)
+
+    recency.install(fake_event_ui)
+    installed_supplier = fake_loader._supplier
+    recency.install(fake_event_ui)
+
+    assert reset_calls == ["reset"]
+    assert fake_loader._supplier is installed_supplier
+    assert fake_event_ui._record_time is recency.source_event_time
 
 
 def test_both_streamlit_entrypoints_install_the_recency_fix() -> None:

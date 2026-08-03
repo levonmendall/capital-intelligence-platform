@@ -30,6 +30,7 @@ import secure_app
 import surface_content_refinement
 import today_development_card_format_runtime
 import today_event_alignment_runtime
+import today_story_retention_runtime
 import ui_experience_refinement
 import ui_refinement
 from render_nonblocking_data import (
@@ -298,6 +299,12 @@ def main() -> None:
     opportunity_funnel_ui_refinement.install(app_impl)
     surface_content_refinement.install(app_impl)
     environment_story_placement_refinement.install(app_impl)
+    today_story_retention_runtime.install(
+        app_impl,
+        educational_market_briefing_ui,
+        operating_intelligence_ui,
+        environment_story_placement_refinement,
+    )
     prepare_render_surface_runtime()
     create_streamlit_application(
         deployment=deployment_context_from_environment()
