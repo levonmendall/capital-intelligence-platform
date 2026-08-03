@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 30
     env:
       PYTHONPATH: ${{ github.workspace }}
+      MATERIALIZATION_REVISION: "2"
       CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
     steps:
       - name: Check out cleanup branch
