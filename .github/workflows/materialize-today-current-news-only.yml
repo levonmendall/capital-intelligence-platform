@@ -6,12 +6,14 @@ on:
       - fix/today-current-news-not-historical-data
     paths:
       - scripts/materialize_today_current_news_only.py
+      - scripts/repair_today_current_news_test_binding.py
       - .github/workflows/materialize-today-current-news-only.yml
   pull_request:
     branches:
       - main
     paths:
       - scripts/materialize_today_current_news_only.py
+      - scripts/repair_today_current_news_test_binding.py
       - .github/workflows/materialize-today-current-news-only.yml
   workflow_dispatch:
 
@@ -28,6 +30,7 @@ jobs:
     timeout-minutes: 35
     env:
       PYTHONPATH: ${{ github.workspace }}
+      MATERIALIZATION_REVISION: "2"
       CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
     steps:
       - name: Check out repair branch
@@ -44,6 +47,9 @@ jobs:
 
       - name: Apply reviewed Today current-news repair
         run: python scripts/materialize_today_current_news_only.py
+
+      - name: Make regression binding deterministic
+        run: python scripts/repair_today_current_news_test_binding.py
 
       - name: Install locked runtime and test dependencies
         run: |
@@ -73,6 +79,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm -f scripts/materialize_today_current_news_only.py
+          git rm -f scripts/repair_today_current_news_test_binding.py
           git rm -f .github/workflows/materialize-today-current-news-only.yml
           git add -A
           git commit -m "Keep historical data observations out of Today news"
