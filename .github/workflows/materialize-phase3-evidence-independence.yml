@@ -9,6 +9,9 @@ on:
       - scripts/materialize_phase3_evidence_independence.py
       - cio/evidence_independence.py
       - tests/test_committee_evidence_independence.py
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
