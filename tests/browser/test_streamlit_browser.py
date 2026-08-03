@@ -44,36 +44,44 @@ def _port() -> int:
 def _seed_retained_today_story(root: Path) -> None:
     evaluated_at = datetime.now(timezone.utc)
     published_at = evaluated_at - timedelta(days=3)
-    payload = {
+    record = {
+        "identifier": "browser-retained-fed-story",
+        "canonical_event_identifier": "browser-retained-fed-story",
+        "topic": RETAINED_STORY_TITLE,
+        "summary": (
+            "The Federal Reserve held its policy rate steady and said future "
+            "decisions depend on inflation and labor-market evidence."
+        ),
+        "event_at": published_at.isoformat(),
+        "published_at": published_at.isoformat(),
+        "available_at": evaluated_at.isoformat(),
+        "impact_channels": ["policy", "discount_rate", "liquidity"],
+        "tags": [],
+        "reliability": 0.99,
+        "relevance": 0.95,
+        "materiality": 0.9,
+        "independence": 0.95,
+        "provenance": {
+            "provider": "Federal Reserve",
+            "source_type": "official",
+        },
+    }
+    source_payload = {
         "schema_version": "public-live-information-record-set.v1",
         "evaluated_at": evaluated_at.isoformat(),
-        "records": [
-            {
-                "identifier": "browser-retained-fed-story",
-                "canonical_event_identifier": "browser-retained-fed-story",
-                "topic": RETAINED_STORY_TITLE,
-                "summary": (
-                    "The Federal Reserve held its policy rate steady and said future "
-                    "decisions depend on inflation and labor-market evidence."
-                ),
-                "event_at": published_at.isoformat(),
-                "published_at": published_at.isoformat(),
-                "available_at": evaluated_at.isoformat(),
-                "impact_channels": ["policy", "discount_rate", "liquidity"],
-                "tags": [],
-                "reliability": 0.99,
-                "relevance": 0.95,
-                "materiality": 0.9,
-                "independence": 0.95,
-                "provenance": {
-                    "provider": "Federal Reserve",
-                    "source_type": "official",
-                },
-            }
-        ],
+        "records": [record],
+    }
+    retention_payload = {
+        "schema_version": "today-story-retention.v1",
+        "cached_at": evaluated_at.isoformat(),
+        "records": [record],
     }
     (root / "public-live-information-records.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        json.dumps(source_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (root / "today-story-retention.json").write_text(
+        json.dumps(retention_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
