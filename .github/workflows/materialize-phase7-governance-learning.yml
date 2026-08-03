@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 40
     env:
       PYTHONPATH: ${{ github.workspace }}
-      MATERIALIZATION_REVISION: "1"
+      MATERIALIZATION_REVISION: "2"
     steps:
       - name: Check out phase branch
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
