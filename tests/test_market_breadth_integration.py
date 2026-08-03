@@ -9,12 +9,10 @@ from intelligence.engine_cycle import AnalyticalEngineCycleExecutor
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.global_liquidity import GlobalLiquidityEngine
 from intelligence.market_breadth import MarketBreadthEngine
-from personal_cio import ActionStatus, build_personal_cio_brief
 from tests.test_business_cycle_engine import FakeBusinessCycleProvider
 from tests.test_credit_cycle_engine import FakeCreditCycleProvider
 from tests.test_global_liquidity_engine import FakeLiquidityProvider
 from tests.test_market_breadth_engine import AS_OF, FakeMarketBreadthProvider
-from tests.test_personal_cio_brief import NOW, _goal, _profile, _snapshot
 
 
 class _CanonicalExecutor:
@@ -62,34 +60,6 @@ def test_multi_engine_cycle_persists_four_results_without_changing_contract(
     assert store.latest("business_cycle") is not None
     assert store.latest("credit_cycle") is not None
     assert store.latest("market_breadth") is not None
-
-
-def test_personal_cio_adds_breadth_context_without_changing_action() -> None:
-    market_breadth = MarketBreadthEngine(
-        FakeMarketBreadthProvider(),
-        clock=lambda: AS_OF,
-    ).run(as_of=AS_OF).result
-    brief = build_personal_cio_brief(
-        "investor:1",
-        daily_snapshot=_snapshot(),
-        profile=_profile(),
-        goals=(_goal(),),
-        portfolios=(
-            {
-                "code": "GROWTH",
-                "risk": "moderate",
-                "nav": 500_000,
-                "cash": 100_000,
-            },
-        ),
-        generated_at=NOW,
-        analytical_results=(market_breadth,),
-    )
-
-    assert brief.action_status is ActionStatus.NO_ACTION
-    assert "Market breadth" in brief.why_it_matters
-    assert "Breadth transmission" in brief.portfolio_effect
-    assert market_breadth.identifier in brief.evidence_identifiers
 
 
 def test_market_breadth_api_is_read_only_and_returns_latest_result(

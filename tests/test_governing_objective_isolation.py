@@ -32,7 +32,7 @@ def test_personal_goal_types_do_not_enter_active_decision_services() -> None:
             )
 
 
-def test_goal_routers_are_compatibility_only() -> None:
+def test_goal_routers_are_removed_from_active_api() -> None:
     route_exports = Path("api/routes/__init__.py").read_text(encoding="utf-8")
     app_source = Path("api/app.py").read_text(encoding="utf-8")
 

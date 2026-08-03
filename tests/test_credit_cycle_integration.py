@@ -8,11 +8,9 @@ from intelligence.credit_cycle import CreditCycleEngine
 from intelligence.engine_cycle import AnalyticalEngineCycleExecutor
 from intelligence.engine_store import SQLiteAnalyticalEngineStore
 from intelligence.global_liquidity import GlobalLiquidityEngine
-from personal_cio import ActionStatus, build_personal_cio_brief
 from tests.test_business_cycle_engine import FakeBusinessCycleProvider
 from tests.test_credit_cycle_engine import AS_OF, FakeCreditCycleProvider
 from tests.test_global_liquidity_engine import FakeLiquidityProvider
-from tests.test_personal_cio_brief import NOW, _goal, _profile, _snapshot
 
 
 class _CanonicalExecutor:
@@ -55,34 +53,6 @@ def test_multi_engine_cycle_persists_three_results_without_changing_contract(
     assert store.latest("global_liquidity") is not None
     assert store.latest("business_cycle") is not None
     assert store.latest("credit_cycle") is not None
-
-
-def test_personal_cio_adds_credit_context_without_changing_action() -> None:
-    credit_cycle = CreditCycleEngine(
-        FakeCreditCycleProvider(),
-        clock=lambda: AS_OF,
-    ).run(as_of=AS_OF).result
-    brief = build_personal_cio_brief(
-        "investor:1",
-        daily_snapshot=_snapshot(),
-        profile=_profile(),
-        goals=(_goal(),),
-        portfolios=(
-            {
-                "code": "GROWTH",
-                "risk": "moderate",
-                "nav": 500_000,
-                "cash": 100_000,
-            },
-        ),
-        generated_at=NOW,
-        analytical_results=(credit_cycle,),
-    )
-
-    assert brief.action_status is ActionStatus.NO_ACTION
-    assert "Credit cycle" in brief.why_it_matters
-    assert "Credit-cycle transmission" in brief.portfolio_effect
-    assert credit_cycle.identifier in brief.evidence_identifiers
 
 
 def test_credit_cycle_api_is_read_only_and_returns_latest_result(
