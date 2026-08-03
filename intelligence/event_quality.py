@@ -1,7 +1,10 @@
 """Deterministic event quality, clustering, and portfolio-impact evidence.
 
-This module prioritizes educational information and may request a canonical CIO
-review.  It cannot create a CIO decision, construction, order, or fill.
+The module separates broad causal-analysis admission from strict CIO escalation.
+A meaningful event may be analyzed before markets confirm it, while CIO review
+still requires sufficient source authority or corroboration, novelty,
+materiality, and market confirmation. It cannot create a CIO decision,
+construction, order, or fill.
 """
 
 from __future__ import annotations
@@ -19,10 +22,15 @@ from typing import Any, Iterable, Mapping, Sequence
 _STOP_WORDS = frozenset(
     {"a", "an", "and", "as", "at", "for", "from", "in", "of", "on", "the", "to", "with"}
 )
+_BLOCKED_QUALITY_STATES = frozenset({"disputed", "unverified", "missing"})
 
 
 def _text(value: object) -> str:
     return " ".join(str(value or "").split())
+
+
+def _enum_text(value: object) -> str:
+    return _text(getattr(value, "value", value)).lower()
 
 
 def _tokens(value: object) -> frozenset[str]:
@@ -79,18 +87,36 @@ def _similar(left: Mapping[str, Any], right: Mapping[str, Any], threshold: float
     if not left_tokens or not right_tokens:
         return False
     similarity = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
-    left_entities, right_entities = set(_items(left.get("entities"))), set(_items(right.get("entities")))
-    entity_compatible = not left_entities or not right_entities or bool(left_entities & right_entities)
+    left_entities = set(_items(left.get("entities")))
+    right_entities = set(_items(right.get("entities")))
+    entity_compatible = (
+        not left_entities or not right_entities or bool(left_entities & right_entities)
+    )
     return entity_compatible and similarity >= threshold
 
 
 @dataclass(frozen=True, slots=True)
 class EventQualityPolicy:
-    version: str = "event-quality.v1"
+    version: str = "event-quality.v2-analysis-separation"
     semantic_similarity_threshold: float = 0.45
+
+    # Broad analysis admission. Novelty, corroboration, and market movement are
+    # intentionally not required at this stage.
+    minimum_analysis_reliability: float = 0.35
+    minimum_analysis_relevance: float = 0.20
+    minimum_analysis_materiality: float = 0.20
+
+    # Strict specialist/CIO escalation.
     minimum_independent_sources: int = 2
+    minimum_authoritative_reliability: float = 0.70
+    authoritative_source_types: tuple[str, ...] = (
+        "official",
+        "regulatory",
+        "issuer",
+    )
     minimum_materiality: float = 0.50
     minimum_novelty: float = 0.50
+    update_novelty: float = 0.75
     minimum_market_confirmation: float = 0.10
 
 
@@ -114,7 +140,10 @@ class EventClusterAssessment:
     eligible_for_cio_context: bool
     explanation: str
     policy_version: str
-    schema_version: str = "event-cluster-assessment.v1"
+    eligible_for_analysis: bool = False
+    authoritative_source: bool = False
+    source_sufficient: bool = False
+    schema_version: str = "event-cluster-assessment.v2"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -133,6 +162,9 @@ class EventClusterAssessment:
             "corroboration": self.corroboration,
             "market_confirmation": self.market_confirmation,
             "quality_score": self.quality_score,
+            "eligible_for_analysis": self.eligible_for_analysis,
+            "authoritative_source": self.authoritative_source,
+            "source_sufficient": self.source_sufficient,
             "eligible_for_cio_context": self.eligible_for_cio_context,
             "explanation": self.explanation,
             "policy_version": self.policy_version,
@@ -166,7 +198,8 @@ def assess_event_clusters(
     owned = set(owned_instruments)
     mapping = exposure_map or {}
     confirmations = market_confirmation or {}
-    results = []
+    results: list[tuple[EventClusterAssessment, Mapping[str, Any]]] = []
+
     for group in groups:
         representative = max(
             group,
@@ -197,22 +230,75 @@ def assess_event_clusters(
                 }
             )
         )
-        entities = tuple(sorted({value for item in group for value in _items(item.get("entities"))}))
-        instruments = tuple(sorted({value for item in group for value in _items(item.get("instruments"))}))
-        channels = tuple(sorted({value for item in group for value in _items(item.get("impact_channels"))}))
+        entities = tuple(
+            sorted({value for item in group for value in _items(item.get("entities"))})
+        )
+        instruments = tuple(
+            sorted({value for item in group for value in _items(item.get("instruments"))})
+        )
+        channels = tuple(
+            sorted(
+                {
+                    value
+                    for item in group
+                    for value in _items(item.get("impact_channels"))
+                }
+            )
+        )
         exposures = set(instruments) & owned
         for key in (*entities, *instruments, *channels):
-            exposures.update(str(value) for value in mapping.get(key, ()) if str(value) in owned)
-        novelty = 0.0 if semantic_key in prior else 1.0
+            exposures.update(
+                str(value)
+                for value in mapping.get(key, ())
+                if str(value) in owned
+            )
+
+        explicit_update = any(
+            bool(_items(item.get("supersedes_identifiers")))
+            or bool(item.get("event_update"))
+            for item in group
+        )
+        novelty = (
+            1.0
+            if semantic_key not in prior
+            else effective.update_novelty
+            if explicit_update
+            else 0.0
+        )
         materiality = max(_ratio(item.get("materiality")) for item in group)
-        corroboration = min(len(providers) / effective.minimum_independent_sources, 1.0)
+        reliability = max(_ratio(item.get("reliability")) for item in group)
+        relevance = max(_ratio(item.get("relevance")) for item in group)
+        disputed = any(
+            _enum_text(_provenance(item).get("quality_state"))
+            in _BLOCKED_QUALITY_STATES
+            for item in group
+        )
+        authoritative_source = any(
+            _enum_text(_provenance(item).get("source_type"))
+            in effective.authoritative_source_types
+            and _ratio(item.get("reliability"))
+            >= effective.minimum_authoritative_reliability
+            and _enum_text(_provenance(item).get("quality_state"))
+            not in _BLOCKED_QUALITY_STATES
+            for item in group
+        )
+        source_sufficient = (
+            len(providers) >= effective.minimum_independent_sources
+            or authoritative_source
+        )
+        corroboration = (
+            1.0
+            if authoritative_source
+            else min(len(providers) / effective.minimum_independent_sources, 1.0)
+        )
         confirmation = max(
-            (confirmations.get(key, 0.0) for key in (semantic_key, *instruments, *channels)),
+            (
+                confirmations.get(key, 0.0)
+                for key in (semantic_key, *instruments, *channels)
+            ),
             default=0.0,
         )
         confirmation = _ratio(confirmation)
-        reliability = max(_ratio(item.get("reliability")) for item in group)
-        relevance = max(_ratio(item.get("relevance")) for item in group)
         score = round(
             0.25 * reliability
             + 0.20 * relevance
@@ -222,21 +308,28 @@ def assess_event_clusters(
             + 0.10 * confirmation,
             6,
         )
-        disputed = any(
-            _text(_provenance(item).get("quality_state")).lower() in {"disputed", "unverified", "missing"}
-            for item in group
-        )
-        eligible = (
+
+        eligible_for_analysis = (
             not disputed
-            and len(providers) >= effective.minimum_independent_sources
+            and reliability >= effective.minimum_analysis_reliability
+            and relevance >= effective.minimum_analysis_relevance
+            and materiality >= effective.minimum_analysis_materiality
+        )
+        eligible_for_cio_context = (
+            eligible_for_analysis
+            and source_sufficient
             and materiality >= effective.minimum_materiality
             and novelty >= effective.minimum_novelty
             and confirmation >= effective.minimum_market_confirmation
         )
         explanation = (
-            "Worth CIO review: independent sources corroborate a new material event, markets confirm it, and portfolio exposures are mapped."
-            if eligible
-            else "Monitor only: novelty, corroboration, materiality, market confirmation, or evidence quality is not yet sufficient for CIO review."
+            "Worth CIO review: source authority or independent corroboration, novelty, materiality, and market confirmation meet escalation policy."
+            if eligible_for_cio_context
+            else (
+                "Evaluate and monitor: baseline evidence is sufficient for causal analysis, but one or more CIO-escalation requirements are not met."
+                if eligible_for_analysis
+                else "Monitor intake only: baseline reliability, relevance, materiality, or evidence quality is insufficient for causal analysis."
+            )
         )
         material = "|".join(sorted(_record_identifier(item) for item in group))
         identifier = "event-cluster:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
@@ -244,7 +337,9 @@ def assess_event_clusters(
             identifier=identifier,
             semantic_key=semantic_key,
             representative_identifier=_record_identifier(representative),
-            record_identifiers=tuple(sorted(_record_identifier(item) for item in group)),
+            record_identifiers=tuple(
+                sorted(_record_identifier(item) for item in group)
+            ),
             source_identifiers=source_ids,
             independent_source_count=len(providers),
             entities=entities,
@@ -256,12 +351,22 @@ def assess_event_clusters(
             corroboration=corroboration,
             market_confirmation=confirmation,
             quality_score=score,
-            eligible_for_cio_context=eligible,
+            eligible_for_cio_context=eligible_for_cio_context,
             explanation=explanation,
             policy_version=effective.version,
+            eligible_for_analysis=eligible_for_analysis,
+            authoritative_source=authoritative_source,
+            source_sufficient=source_sufficient,
         )
         results.append((assessment, representative))
-    return tuple(sorted(results, key=lambda item: (item[0].quality_score, item[0].identifier), reverse=True))
+
+    return tuple(
+        sorted(
+            results,
+            key=lambda item: (item[0].quality_score, item[0].identifier),
+            reverse=True,
+        )
+    )
 
 
 class SQLiteEventClusterStore:
@@ -279,9 +384,11 @@ class SQLiteEventClusterStore:
                     payload_json TEXT NOT NULL,
                     payload_hash TEXT NOT NULL
                 );
-                CREATE TRIGGER IF NOT EXISTS event_clusters_no_update BEFORE UPDATE ON event_cluster_assessments
+                CREATE TRIGGER IF NOT EXISTS event_clusters_no_update
+                BEFORE UPDATE ON event_cluster_assessments
                 BEGIN SELECT RAISE(ABORT, 'event cluster lineage is append-only'); END;
-                CREATE TRIGGER IF NOT EXISTS event_clusters_no_delete BEFORE DELETE ON event_cluster_assessments
+                CREATE TRIGGER IF NOT EXISTS event_clusters_no_delete
+                BEFORE DELETE ON event_cluster_assessments
                 BEGIN SELECT RAISE(ABORT, 'event cluster lineage is append-only'); END;
                 """
             )
@@ -289,19 +396,31 @@ class SQLiteEventClusterStore:
     def append(self, assessment: EventClusterAssessment, *, recorded_at: datetime) -> None:
         if recorded_at.tzinfo is None or recorded_at.utcoffset() is None:
             raise ValueError("recorded_at must be timezone-aware")
-        payload = json.dumps(assessment.to_dict(), sort_keys=True, separators=(",", ":"))
+        payload = json.dumps(
+            assessment.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         with sqlite3.connect(self.path) as connection:
             existing = connection.execute(
-                "SELECT payload_hash FROM event_cluster_assessments WHERE identifier = ?", (assessment.identifier,)
+                "SELECT payload_hash FROM event_cluster_assessments WHERE identifier = ?",
+                (assessment.identifier,),
             ).fetchone()
             if existing is not None:
                 if existing[0] != digest:
-                    raise ValueError("cluster identifier already exists with different content")
+                    raise ValueError(
+                        "cluster identifier already exists with different content"
+                    )
                 return
             connection.execute(
                 "INSERT INTO event_cluster_assessments VALUES (?, ?, ?, ?)",
-                (assessment.identifier, recorded_at.astimezone(timezone.utc).isoformat(), payload, digest),
+                (
+                    assessment.identifier,
+                    recorded_at.astimezone(timezone.utc).isoformat(),
+                    payload,
+                    digest,
+                ),
             )
 
 
@@ -335,7 +454,10 @@ def evaluate_benchmark(path: str | Path) -> dict[str, Any]:
     recall = tp / (tp + fn) if tp + fn else 0.0
     thresholds = payload["acceptance_thresholds"]
     review_state = payload.get("human_review", {}).get("state", "missing")
-    passed = precision >= thresholds["minimum_precision"] and recall >= thresholds["minimum_recall"]
+    passed = (
+        precision >= thresholds["minimum_precision"]
+        and recall >= thresholds["minimum_recall"]
+    )
     return {
         "schema_version": "event-quality-benchmark-report.v1",
         "benchmark_version": payload["version"],
@@ -344,7 +466,12 @@ def evaluate_benchmark(path: str | Path) -> dict[str, Any]:
         "metrics_passed": passed,
         "precision": precision,
         "recall": recall,
-        "confusion": {"true_positive": tp, "false_positive": fp, "false_negative": fn, "true_negative": tn},
+        "confusion": {
+            "true_positive": tp,
+            "false_positive": fp,
+            "false_negative": fn,
+            "true_negative": tn,
+        },
         "authorizes_portfolio_change": False,
         "real_money_authorized": False,
     }
