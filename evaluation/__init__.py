@@ -20,6 +20,14 @@ from evaluation.decision_quality import (
     DecisionQualityReview,
     ProcessVerdict,
 )
+from evaluation.gate_contribution import (
+    GateContributionAnalyzer,
+    GateContributionEffect,
+    GateContributionMetric,
+    GateContributionObservation,
+    GateContributionReport,
+    GateContributionStage,
+)
 from evaluation.opportunity_outcomes import (
     OpportunityOutcomeSummary,
     SQLiteOpportunityOutcomeStore,
@@ -95,6 +103,12 @@ __all__ = [
     "EvaluationOutcome",
     "EvaluationProcessVerdict",
     "EvidenceReference",
+    "GateContributionAnalyzer",
+    "GateContributionEffect",
+    "GateContributionMetric",
+    "GateContributionObservation",
+    "GateContributionReport",
+    "GateContributionStage",
     "MultiAssetEvaluationError",
     "MultiAssetEvaluationEventType",
     "MultiAssetEvaluationIntegrityError",
