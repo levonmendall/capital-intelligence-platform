@@ -15,6 +15,7 @@ from cio import (
     IndependentSpecialistPacket,
     PriorDecisionContext,
 )
+from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from cio.cycle_disposition import (
     CIOCycleDisposition,
     CIOCycleDispositionAuthority,
@@ -378,6 +379,7 @@ class CanonicalCIOCycleResult:
     theses: tuple[LivingThesis, ...]
     evaluation_snapshots: tuple[DecisionEvidenceSnapshot, ...]
     briefing: DailyCIOBriefing
+    policy_authority_identifier: str
     cycle_disposition: CIOCycleDisposition | None = None
 
     def __post_init__(self) -> None:
@@ -445,6 +447,8 @@ class CanonicalCIOCycleResult:
             raise ValueError(
                 "each CIO decision must have one point-in-time evaluation snapshot"
             )
+        if not isinstance(self.policy_authority_identifier, str) or not self.policy_authority_identifier.strip():
+            raise ValueError("policy_authority_identifier cannot be empty")
         if not isinstance(self.briefing, DailyCIOBriefing):
             raise TypeError("briefing must be DailyCIOBriefing")
         if self.briefing.as_of != self.as_of:
@@ -471,12 +475,24 @@ class CanonicalCIOCycle:
         historical_learning_resolver: HistoricalLearningResolver | None = None,
         risk_intelligence_engine: CandidateRiskIntelligenceEngine | None = None,
         joint_candidate_engine: JointCandidateIntelligenceEngine | None = None,
+        policy_authority: CanonicalDecisionPolicyAuthority | None = None,
     ) -> None:
-        self.opportunity_engine = opportunity_engine or OpportunityEngine()
+        self.policy_authority = policy_authority or CanonicalDecisionPolicyAuthority()
+        self.opportunity_engine = opportunity_engine or OpportunityEngine(
+            policy_authority=self.policy_authority
+        )
         self.specialist_service = (
             specialist_service or IndependentSpecialistService()
         )
-        self.cio = cio or ChiefInvestmentOfficer()
+        self.cio = cio or ChiefInvestmentOfficer(
+            policy_authority=self.policy_authority
+        )
+        self.policy_authority.assert_same_authority(
+            self.opportunity_engine.policy_authority
+        )
+        self.policy_authority.assert_same_authority(
+            self.cio.policy_authority
+        )
         self.construction_engine = construction_engine or PortfolioConstructionEngine(
             construction_policy
         )
@@ -900,6 +916,7 @@ class CanonicalCIOCycle:
             theses=theses,
             evaluation_snapshots=snapshots,
             briefing=briefing,
+            policy_authority_identifier=self.policy_authority.identifier,
             cycle_disposition=cycle_disposition,
         )
 

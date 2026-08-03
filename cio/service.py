@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from cio.committee import EvidenceVetoCategory, IndependentSpecialistPacket
+from cio.evidence_outage import (
+    EvidenceOutageAssessment,
+    EvidenceOutageAuthority,
+    EvidenceOutageDisposition,
+)
 from cio.growth_ensemble import (
     AdaptiveRobustGrowthEnsemble,
     GrowthEnsembleAssessment,
@@ -19,6 +24,7 @@ from cio.models import (
     ReturnReconciliation,
     SpecialistPosition,
 )
+from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from cio.policy_matrix import DecisionPolicyMatrix, DecisionPolicyProfile
 from cio.reconciliation import (
     SpecialistReconciliationPolicy,
@@ -98,13 +104,26 @@ class ChiefInvestmentOfficer:
         robustness_policy: RobustDecisionPolicy | None = None,
         reconciliation_policy: SpecialistReconciliationPolicy | None = None,
         policy_matrix: DecisionPolicyMatrix | None = None,
+        policy_authority: CanonicalDecisionPolicyAuthority | None = None,
         growth_ensemble: AdaptiveRobustGrowthEnsemble | None = None,
+        evidence_outage_authority: EvidenceOutageAuthority | None = None,
     ) -> None:
         self.policy = policy or CIOSynthesisPolicy()
         self.robust_assessor = RobustCandidateAssessor(robustness_policy)
         self.reconciler = SpecialistReturnReconciler(reconciliation_policy)
-        self.policy_matrix = policy_matrix or DecisionPolicyMatrix()
+        if policy_authority is not None and policy_matrix is not None:
+            if policy_authority.matrix is not policy_matrix:
+                raise ValueError(
+                    "policy_matrix and policy_authority cannot identify different authorities"
+                )
+        self.policy_authority = policy_authority or CanonicalDecisionPolicyAuthority(
+            matrix=policy_matrix or DecisionPolicyMatrix()
+        )
+        self.policy_matrix = self.policy_authority.matrix
         self.growth_ensemble = growth_ensemble or AdaptiveRobustGrowthEnsemble()
+        self.evidence_outage_authority = (
+            evidence_outage_authority or EvidenceOutageAuthority()
+        )
 
     def synthesize(
         self,
@@ -137,7 +156,7 @@ class ChiefInvestmentOfficer:
                 raise TypeError("prior_context must be PriorDecisionContext")
             if prior_context.candidate_identifier != candidate.identifier:
                 raise ValueError("prior decision context does not match candidate")
-        profile = self.policy_matrix.resolve(candidate)
+        profile = self.policy_authority.resolve(candidate)
         effective_alternative = (
             candidate.opportunity_cost_return
             if capital_comparison is None
@@ -211,6 +230,13 @@ class ChiefInvestmentOfficer:
         evidence_vetoes = specialists.evidence_vetoes
         implementation_blocks = specialists.implementation_blocks
         portfolio = specialists.portfolio_recommendation
+        outage_assessment = self.evidence_outage_authority.assess(
+            candidate,
+            prior_context,
+            operational_only_veto=(
+                specialists.has_operational_only_evidence_veto
+            ),
+        )
         action, position_weight, reason = self._select_action(
             candidate,
             universe=universe,
@@ -222,6 +248,7 @@ class ChiefInvestmentOfficer:
             profile=profile,
             analysis_lane=analysis_lane,
             ensemble=ensemble,
+            outage_assessment=outage_assessment,
         )
         selected_action = action
         action, position_weight, reason, hysteresis_applied, persistence_cycles = (
@@ -248,11 +275,17 @@ class ChiefInvestmentOfficer:
         )
         if historical_learning.status.value != "not_applicable":
             reason = f"{reason} {historical_learning.summary}"
+        if outage_assessment.disposition is not EvidenceOutageDisposition.NOT_APPLICABLE:
+            reason = f"{reason} Evidence outage control: {outage_assessment.reason}"
         final_confidence = self._confidence(
             candidate,
             specialists=specialists,
             has_dissent=dissent is not None,
             reconciliation=reconciliation,
+        )
+        final_confidence = min(
+            final_confidence,
+            outage_assessment.confidence_ceiling,
         )
         funding_source = (
             portfolio.funding_source
@@ -328,7 +361,11 @@ class ChiefInvestmentOfficer:
             monitoring_indicators=tuple(
                 dict.fromkeys(
                     candidate.monitoring_indicators
-                    + ("historical_learning_calibration",)
+                    + (
+                        "historical_learning_calibration",
+                        "canonical_policy_authority_fingerprint",
+                        "evidence_outage_age",
+                    )
                 )
             ),
             review_at=candidate.review_at,
@@ -362,6 +399,7 @@ class ChiefInvestmentOfficer:
         profile: DecisionPolicyProfile,
         analysis_lane: str,
         ensemble: GrowthEnsembleAssessment,
+        outage_assessment: EvidenceOutageAssessment,
     ) -> tuple[CIOAction, float | None, str]:
         current_weight = candidate.current_portfolio_weight
         portfolio = specialists.portfolio_recommendation
@@ -378,10 +416,25 @@ class ChiefInvestmentOfficer:
             )
             if current_weight > 0.0:
                 if specialists.has_operational_only_evidence_veto:
+                    if outage_assessment.requires_reduction:
+                        target = self._conservative_reduction_target(
+                            current_weight=current_weight,
+                            proposed_weight=portfolio.recommended_position_weight,
+                        )
+                        return (
+                            CIOAction.REDUCE,
+                            target,
+                            "New or increased exposure is prohibited and the existing holding is reduced because the operational evidence outage exceeded its bounded observability window: "
+                            + outage_assessment.reason
+                            + "; "
+                            + detail,
+                        )
                     return (
                         CIOAction.HOLD,
                         None,
-                        "New or increased exposure is prohibited, but the existing holding is preserved while an operational evidence outage is repaired: "
+                        "New or increased exposure is prohibited, but the existing holding is preserved within the bounded operational outage window: "
+                        + outage_assessment.reason
+                        + "; "
                         + detail,
                     )
                 target = self._conservative_reduction_target(

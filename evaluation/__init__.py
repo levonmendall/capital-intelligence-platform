@@ -6,6 +6,13 @@ from evaluation.calibration import (
     DecisionCalibrationSuite,
     DecisionCalibrationSuiteBuilder,
 )
+from evaluation.decision_value import (
+    AdvisoryDecisionValueEvaluator,
+    AdvisoryDecisionValueMetric,
+    AdvisoryDecisionValueReport,
+    CalibrationSegment,
+    GateDecisionValueMetric,
+)
 from evaluation.decision_learning import (
     DecisionLearningEvaluator,
     DecisionLearningObservation,
@@ -80,10 +87,14 @@ from evaluation.walk_forward import (
 )
 
 __all__ = [
+    "AdvisoryDecisionValueEvaluator",
+    "AdvisoryDecisionValueMetric",
+    "AdvisoryDecisionValueReport",
     "AlternativeRealizedReturn",
     "CalibrationBucket",
     "CalibrationDimension",
     "CalibrationMetric",
+    "CalibrationSegment",
     "CapitalAlternativeSnapshot",
     "ConfidenceCalibrationReport",
     "ConfidenceCalibrator",
@@ -109,6 +120,7 @@ __all__ = [
     "GateContributionObservation",
     "GateContributionReport",
     "GateContributionStage",
+    "GateDecisionValueMetric",
     "MultiAssetEvaluationError",
     "MultiAssetEvaluationEventType",
     "MultiAssetEvaluationIntegrityError",

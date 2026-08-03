@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cio import CandidateDecisionRecord, RecommendationUniversePolicy
+from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from cio.policy_matrix import DecisionPolicyMatrix
 from cio.robustness import (
     RobustCandidateAssessment,
@@ -118,12 +119,21 @@ class OpportunityEngine:
         qualification_policy: OpportunityQualificationPolicy | None = None,
         robustness_policy: RobustDecisionPolicy | None = None,
         policy_matrix: DecisionPolicyMatrix | None = None,
+        policy_authority: CanonicalDecisionPolicyAuthority | None = None,
     ) -> None:
         self.universe_policy = universe_policy or RecommendationUniversePolicy()
         self.policy = qualification_policy or OpportunityQualificationPolicy()
         self._default_policy = OpportunityQualificationPolicy()
         self.robust_assessor = RobustCandidateAssessor(robustness_policy)
-        self.policy_matrix = policy_matrix or DecisionPolicyMatrix()
+        if policy_authority is not None and policy_matrix is not None:
+            if policy_authority.matrix is not policy_matrix:
+                raise ValueError(
+                    "policy_matrix and policy_authority cannot identify different authorities"
+                )
+        self.policy_authority = policy_authority or CanonicalDecisionPolicyAuthority(
+            matrix=policy_matrix or DecisionPolicyMatrix()
+        )
+        self.policy_matrix = self.policy_authority.matrix
 
     def build_queue(
         self,
