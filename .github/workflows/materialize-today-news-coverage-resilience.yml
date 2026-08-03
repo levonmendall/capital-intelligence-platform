@@ -6,12 +6,14 @@ on:
       - fix/today-news-coverage-resilience
     paths:
       - scripts/materialize_today_news_coverage_resilience.py
+      - scripts/repair_today_news_coverage_materializer.py
       - .github/workflows/materialize-today-news-coverage-resilience.yml
   pull_request:
     branches:
       - main
     paths:
       - scripts/materialize_today_news_coverage_resilience.py
+      - scripts/repair_today_news_coverage_materializer.py
       - .github/workflows/materialize-today-news-coverage-resilience.yml
   workflow_dispatch:
 
@@ -28,6 +30,7 @@ jobs:
     timeout-minutes: 35
     env:
       PYTHONPATH: ${{ github.workspace }}
+      MATERIALIZATION_REVISION: "2"
       CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
     steps:
       - name: Check out repair branch
@@ -41,6 +44,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+
+      - name: Repair one-use materializer
+        run: python scripts/repair_today_news_coverage_materializer.py
 
       - name: Apply reviewed Today coverage repair
         run: python scripts/materialize_today_news_coverage_resilience.py
@@ -74,6 +80,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm -f scripts/materialize_today_news_coverage_resilience.py
+          git rm -f scripts/repair_today_news_coverage_materializer.py
           git rm -f .github/workflows/materialize-today-news-coverage-resilience.yml
           git add -A
           git commit -m "Keep Today populated with resilient current news coverage"
