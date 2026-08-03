@@ -15,28 +15,29 @@ CIK = "0000320193"
 RETRIEVED_AT = datetime(2026, 8, 3, 15, 30, tzinfo=timezone.utc)
 
 
-def _payload(*, invalid_indexes: set[int]) -> dict[str, object]:
-    row_count = 3
-    acceptance = [
-        "2026-07-31T16:30:00-04:00",
-        "2025-10-31T16:30:00-04:00",
-        "2024-11-01T16:30:00-04:00",
-    ]
+def _payload(
+    *,
+    invalid_indexes: set[int],
+    row_count: int = 3,
+) -> dict[str, object]:
+    acceptance = ["2026-07-31T16:30:00-04:00"] * row_count
     for index in invalid_indexes:
         acceptance[index] = "not-a-timestamp"
     return {
         "filings": {
             "recent": {
                 "accessionNumber": [
-                    "0000320193-26-000001",
-                    "0000320193-25-000001",
-                    "0000320193-24-000001",
+                    f"0000320193-26-{index:06d}"
+                    for index in range(row_count)
                 ],
-                "filingDate": ["2026-07-31", "2025-10-31", "2024-11-01"],
-                "reportDate": ["2026-06-30", "2025-09-30", "2024-09-30"],
+                "filingDate": ["2026-07-31"] * row_count,
+                "reportDate": ["2026-06-30"] * row_count,
                 "acceptanceDateTime": acceptance,
-                "form": ["10-Q", "10-K", "10-K"],
-                "primaryDocument": ["q2.htm", "annual.htm", "prior.htm"],
+                "form": ["10-K"] * row_count,
+                "primaryDocument": [
+                    f"filing-{index}.htm"
+                    for index in range(row_count)
+                ],
             }
         }
     }
@@ -50,19 +51,63 @@ def test_one_malformed_historical_filing_does_not_discard_valid_rows() -> None:
     )
 
     assert [record.accession_number for record in records] == [
-        "0000320193-26-000001",
-        "0000320193-24-000001",
+        "0000320193-26-000000",
+        "0000320193-26-000002",
     ]
     assert all(record.retrieved_at == RETRIEVED_AT for record in records)
 
 
-def test_material_row_corruption_remains_fail_closed() -> None:
+def test_asml_sized_trailing_legacy_suffix_is_bounded_and_usable() -> None:
+    records = ResilientSECEdgarProvider._filing_records(
+        _payload(
+            row_count=591,
+            invalid_indexes=set(range(585, 591)),
+        ),
+        cik="0000937966",
+        retrieved_at=RETRIEVED_AT,
+    )
+
+    assert len(records) == 585
+    assert records[-1].accession_number == "0000320193-26-000584"
+
+
+def test_same_invalid_count_scattered_through_history_remains_fail_closed() -> None:
     with pytest.raises(
         SECEdgarProviderError,
         match="excessive invalid filing rows",
     ):
         ResilientSECEdgarProvider._filing_records(
-            _payload(invalid_indexes={0, 1}),
+            _payload(
+                row_count=591,
+                invalid_indexes={100, 200, 300, 400, 500, 590},
+            ),
+            cik="0000937966",
+            retrieved_at=RETRIEVED_AT,
+        )
+
+
+def test_trailing_legacy_suffix_over_absolute_cap_remains_fail_closed() -> None:
+    with pytest.raises(
+        SECEdgarProviderError,
+        match="excessive invalid filing rows",
+    ):
+        ResilientSECEdgarProvider._filing_records(
+            _payload(
+                row_count=591,
+                invalid_indexes=set(range(580, 591)),
+            ),
+            cik="0000937966",
+            retrieved_at=RETRIEVED_AT,
+        )
+
+
+def test_material_row_corruption_in_small_payload_remains_fail_closed() -> None:
+    with pytest.raises(
+        SECEdgarProviderError,
+        match="excessive invalid filing rows",
+    ):
+        ResilientSECEdgarProvider._filing_records(
+            _payload(invalid_indexes={1, 2}),
             cik=CIK,
             retrieved_at=RETRIEVED_AT,
         )
