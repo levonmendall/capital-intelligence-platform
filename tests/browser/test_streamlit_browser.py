@@ -43,7 +43,7 @@ def _port() -> int:
 
 def _seed_retained_today_story(root: Path) -> None:
     evaluated_at = datetime.now(timezone.utc)
-    published_at = evaluated_at - timedelta(days=3)
+    published_at = evaluated_at - timedelta(hours=30)
     record = {
         "identifier": "browser-retained-fed-story",
         "canonical_event_identifier": "browser-retained-fed-story",
