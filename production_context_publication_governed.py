@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from datetime import datetime, timedelta
 from math import isfinite
@@ -31,7 +32,11 @@ from opportunity.snapshot import (
 )
 from operations.active_paper_universe import build_active_opportunity_engine
 from operations.direct_global_markets import load_direct_global_market_universe
+from operations.certified_investable_catalog import (
+    configured_path as configured_certified_investable_catalog_path,
+)
 from operations.comprehensive_market_discovery import (
+    ComprehensiveMarketDiscoveryError,
     ComprehensiveMarketDiscoveryResult,
     discover_comprehensive_markets,
 )
@@ -46,6 +51,7 @@ from operations.free_paper_pilot import (
     write_active_paper_universe,
 )
 from portfolio.state import SQLiteCanonicalPortfolioStore
+from providers.eodhd import EODHDProviderError
 from production_paper_evidence import (
     EvidenceProbe,
     ProductionPaperEvidenceError,
@@ -98,6 +104,77 @@ def _blocked(
         detail=detail,
         instrument_count=instrument_count,
     )
+
+
+class _UnavailableComprehensiveDiscovery:
+    """Truthful non-authoritative record for an optional provider scope outage."""
+
+    policy_version = "comprehensive-market-discovery.optional-unavailable.v1"
+    lanes: tuple[()] = ()
+    scope_state = "optional_unavailable"
+
+    def __init__(self, *, as_of: datetime, error: Exception) -> None:
+        status_code = getattr(error, "status_code", None)
+        status = "none" if status_code is None else str(status_code)
+        self.identifier = (
+            "comprehensive-market-discovery:optional-unavailable:"
+            + _stamp(as_of)
+        )
+        self.manifest_fingerprint = (
+            f"optional-unavailable:{type(error).__name__}:{status}"
+        )
+        self.limitations = (
+            "Optional comprehensive global-market discovery was unavailable and did not expand the active certified paper universe.",
+            str(error),
+            "The completed opportunity search is scoped to strategic listed wrappers and broad Alpaca/SEC U.S.-security discovery.",
+            "This degraded scope cannot be represented as complete all-market production coverage.",
+        )
+
+    @staticmethod
+    def instruments_for_holdings(_held_symbols):
+        return ()
+
+
+def _comprehensive_discovery_required(
+    *,
+    probe: ComprehensiveDiscoveryProbe | None,
+    override: bool | None,
+) -> bool:
+    if override is not None:
+        if not isinstance(override, bool):
+            raise TypeError("comprehensive_discovery_required must be a bool or None")
+        return override
+    if probe is not None:
+        return True
+    if configured_certified_investable_catalog_path() is not None:
+        return True
+    return os.getenv(
+        "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY",
+        "",
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _discover_comprehensive_scope(
+    *,
+    as_of: datetime,
+    held_symbols: tuple[str, ...],
+    tracked_symbols: tuple[str, ...],
+    excluded_symbols: tuple[str, ...],
+    probe: ComprehensiveDiscoveryProbe | None,
+    required: bool,
+):
+    active_probe = probe or discover_comprehensive_markets
+    try:
+        return active_probe(
+            as_of=as_of,
+            held_symbols=held_symbols,
+            tracked_symbols=tracked_symbols,
+            excluded_symbols=excluded_symbols,
+        )
+    except (ComprehensiveMarketDiscoveryError, EODHDProviderError) as error:
+        if required:
+            raise
+        return _UnavailableComprehensiveDiscovery(as_of=as_of, error=error)
 
 
 def _reuse(
@@ -257,6 +334,7 @@ def prepare_governed_production_context_for_cycle(
     evidence_probe: EvidenceProbe | None = None,
     equity_discovery_probe: EquityDiscoveryProbe | None = None,
     comprehensive_discovery_probe: ComprehensiveDiscoveryProbe | None = None,
+    comprehensive_discovery_required: bool | None = None,
     clock: Clock | None = None,
 ) -> ProductionContextPublicationResult:
     """Publish cross-asset wrappers plus dynamically discovered company equities."""
@@ -455,16 +533,34 @@ def prepare_governed_production_context_for_cycle(
             excluded_symbols=tuple(base_symbols),
         )
         discovered = discovery.instruments_for_holdings(held_symbols)
-        fully_injected_publication = all(
-            item is not None
-            for item in (
-                readiness_probe,
-                cash_probe,
-                evidence_probe,
-                equity_discovery_probe,
-                clock,
-            )
+    except Exception as error:
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail=(
+                "Broad U.S.-security opportunity discovery is unavailable; a "
+                "no-superior-opportunity conclusion is prohibited: "
+                f"{type(error).__name__}: {error}"
+            ),
+            instrument_count=len(base_universe.instruments),
         )
+
+    fully_injected_publication = all(
+        item is not None
+        for item in (
+            readiness_probe,
+            cash_probe,
+            evidence_probe,
+            equity_discovery_probe,
+            clock,
+        )
+    )
+    comprehensive_required = _comprehensive_discovery_required(
+        probe=comprehensive_discovery_probe,
+        override=comprehensive_discovery_required,
+    )
+    try:
         if comprehensive_discovery_probe is None and fully_injected_publication:
             direct_universe = load_direct_global_market_universe()
 
@@ -473,6 +569,8 @@ def prepare_governed_production_context_for_cycle(
                 manifest_fingerprint = direct_universe.identifier
                 policy_version = direct_universe.schema_version
                 lanes = ()
+                limitations = ()
+                scope_state = "complete"
 
                 @staticmethod
                 def instruments_for_holdings(_held_symbols):
@@ -480,47 +578,67 @@ def prepare_governed_production_context_for_cycle(
 
             comprehensive = _InjectedComprehensiveDiscovery()
         else:
-            comprehensive = (comprehensive_discovery_probe or discover_comprehensive_markets)(
+            comprehensive = _discover_comprehensive_scope(
                 as_of=decision_as_of,
                 held_symbols=held_symbols,
                 tracked_symbols=tracked_symbols,
-                excluded_symbols=tuple((*base_symbols, *(item.symbol for item in discovered))),
+                excluded_symbols=tuple(
+                    (*base_symbols, *(item.symbol for item in discovered))
+                ),
+                probe=comprehensive_discovery_probe,
+                required=comprehensive_required,
             )
-        comprehensive_instruments = comprehensive.instruments_for_holdings(held_symbols)
-        universe = replace(
-            base_universe,
-            identifier=(
-                f"{base_universe.identifier}+{discovery.identifier}"
-                f"+{comprehensive.identifier}"
-            ),
-            objective=(
-                base_universe.objective
-                + " Daily broad U.S.-company and comprehensive global-market discovery compete for capital."
-            ),
-            instruments=tuple(
-                (*base_universe.instruments, *discovered, *comprehensive_instruments)
-            ),
-            limitations=tuple(
-                dict.fromkeys(
-                    (*base_universe.limitations,
-                     "Individual U.S. equities enter through broad SEC/Alpaca discovery and begin with a 1% exploratory cap.",
-                     "Every classified instrument in the complete certified catalog can enter through comprehensive point-in-time discovery when its provider, evidence, and paper capability stack are complete.",
-                     "Discovery can nominate instruments but cannot choose an action, size a position, construct a portfolio, authorize execution, or enable real money.")
-                )
-            ),
-        )
     except Exception as error:
         return _blocked(
             cycle_key=cycle_key,
             scheduled_for=scheduled,
             decision_as_of=decision_as_of,
             detail=(
-                "Complete opportunity search is unavailable; a no-superior-opportunity "
-                "conclusion is prohibited until broad U.S.-security discovery and complete certified-universe discovery finish: "
+                "Required certified comprehensive market discovery is unavailable; "
+                "the cycle remains fail-closed: "
                 f"{type(error).__name__}: {error}"
             ),
-            instrument_count=len(base_universe.instruments),
+            instrument_count=len(base_universe.instruments) + len(discovered),
         )
+
+    comprehensive_instruments = comprehensive.instruments_for_holdings(held_symbols)
+    comprehensive_scope_state = str(
+        getattr(comprehensive, "scope_state", "complete")
+    )
+    comprehensive_limitations = tuple(
+        str(item) for item in getattr(comprehensive, "limitations", ())
+    )
+    comprehensive_complete = comprehensive_scope_state == "complete"
+    universe = replace(
+        base_universe,
+        identifier=(
+            f"{base_universe.identifier}+{discovery.identifier}"
+            f"+{comprehensive.identifier}"
+        ),
+        objective=(
+            base_universe.objective
+            + (
+                " Daily broad U.S.-company and comprehensive global-market discovery compete for capital."
+                if comprehensive_complete
+                else " Daily broad U.S.-company discovery competes for capital; optional comprehensive global discovery did not expand this cycle's active certified scope."
+            )
+        ),
+        instruments=tuple(
+            (*base_universe.instruments, *discovered, *comprehensive_instruments)
+        ),
+        limitations=tuple(
+            dict.fromkeys(
+                (*base_universe.limitations,
+                 "Individual U.S. equities enter through broad SEC/Alpaca discovery and begin with a 1% exploratory cap.",
+                 *(
+                     ("Every classified instrument in the complete certified catalog can enter through comprehensive point-in-time discovery when its provider, evidence, and paper capability stack are complete.",)
+                     if comprehensive_complete
+                     else comprehensive_limitations
+                 ),
+                 "Discovery can nominate instruments but cannot choose an action, size a position, construct a portfolio, authorize execution, or enable real money.")
+            )
+        ),
+    )
 
     cash_expected_return = round(max(-1.0, min(1.0, cash_value / 100.0)), 8)
     try:
@@ -680,6 +798,7 @@ def prepare_governed_production_context_for_cycle(
                 ("sec_company_master", discovery.security_master_snapshot_identifier),
                 ("comprehensive_market_discovery", comprehensive.identifier),
                 ("comprehensive_market_manifest", comprehensive.manifest_fingerprint),
+                ("comprehensive_market_scope", comprehensive_scope_state),
             ))
         ),
         model_versions=(
@@ -951,6 +1070,9 @@ def prepare_governed_production_context_for_cycle(
         "instrument_count": len(universe.instruments),
         "comprehensive_discovery_identifier": comprehensive.identifier,
         "comprehensive_discovery_manifest_fingerprint": comprehensive.manifest_fingerprint,
+        "comprehensive_discovery_scope_state": comprehensive_scope_state,
+        "comprehensive_discovery_required": comprehensive_required,
+        "comprehensive_discovery_limitations": list(comprehensive_limitations),
         "comprehensive_discovery_lane_counts": {
             lane.asset_class.value: {
                 "scheduled": lane.scheduled,
@@ -1001,9 +1123,19 @@ def prepare_governed_production_context_for_cycle(
         decision_as_of=decision_as_of,
         detail=(
             (
-                "Certified strategic cross-asset wrappers and the daily broad U.S.-company "
-                "discovery lane, published complete candidate and exclusion screening, "
-                "marked the canonical portfolio, and persisted company-specific evidence."
+                (
+                    "Certified strategic cross-asset wrappers, broad U.S.-company discovery, "
+                    "and comprehensive global-market discovery; published complete candidate "
+                    "and exclusion screening, marked the canonical portfolio, and persisted "
+                    "company-specific evidence."
+                )
+                if comprehensive_complete
+                else (
+                    "Certified strategic cross-asset wrappers and completed broad U.S.-company "
+                    "discovery. Optional comprehensive global discovery was unavailable and "
+                    "did not expand the active certified scope; this cycle does not claim "
+                    "complete all-market coverage."
+                )
             )
             if weekday_market_evaluation_scheduled(decision_as_of)
             else (
