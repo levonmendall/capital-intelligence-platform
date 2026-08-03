@@ -60,6 +60,57 @@ def _payload(
     }
 
 
+def _facts_payload(
+    accessions: tuple[str, ...],
+    *,
+    form: str,
+) -> dict[str, object]:
+    return {
+        "facts": {
+            "us-gaap": {
+                "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                    "units": {
+                        "USD": [
+                            {
+                                "start": "2026-01-01",
+                                "end": "2026-06-30",
+                                "val": 100 + index,
+                                "accn": accession,
+                                "fy": 2026,
+                                "fp": "FY",
+                                "form": form,
+                                "filed": "2026-07-31",
+                            }
+                            for index, accession in enumerate(accessions)
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+
+def _provider(
+    *,
+    cik: str,
+    submissions: dict[str, object],
+    facts: dict[str, object],
+) -> ResilientSECEdgarProvider:
+    payloads = {
+        SEC_SUBMISSIONS_URL.format(cik=cik): submissions,
+        SEC_COMPANY_FACTS_URL.format(cik=cik): facts,
+    }
+
+    def http_get(url: str, **_kwargs: object) -> _FakeResponse:
+        return _FakeResponse(payloads[url])
+
+    return ResilientSECEdgarProvider(
+        user_agent="Capital Intelligence test@example.com",
+        clock=lambda: RETRIEVED_AT,
+        http_get=http_get,
+    )
+
+
 def test_one_malformed_historical_filing_does_not_discard_valid_rows() -> None:
     records = ResilientSECEdgarProvider._filing_records(
         _payload(invalid_indexes={1}),
@@ -136,45 +187,17 @@ def test_same_qqq_sized_corruption_in_requested_forms_remains_fail_closed() -> N
 
 
 def test_company_fact_collection_scopes_submissions_before_parsing() -> None:
-    submissions_url = SEC_SUBMISSIONS_URL.format(cik=CIK)
-    facts_url = SEC_COMPANY_FACTS_URL.format(cik=CIK)
     submissions = _payload(
         row_count=2,
         invalid_indexes={1},
         forms=["10-K", "497"],
     )
-    facts = {
-        "facts": {
-            "us-gaap": {
-                "RevenueFromContractWithCustomerExcludingAssessedTax": {
-                    "units": {
-                        "USD": [
-                            {
-                                "start": "2026-01-01",
-                                "end": "2026-06-30",
-                                "val": 100,
-                                "accn": "0000320193-26-000000",
-                                "fy": 2026,
-                                "fp": "FY",
-                                "form": "10-K",
-                                "filed": "2026-07-31",
-                            }
-                        ]
-                    }
-                }
-            }
-        }
-    }
-    payloads = {submissions_url: submissions, facts_url: facts}
-
-    def http_get(url: str, **_kwargs: object) -> _FakeResponse:
-        return _FakeResponse(payloads[url])
-
-    provider = ResilientSECEdgarProvider(
-        user_agent="Capital Intelligence test@example.com",
-        clock=lambda: RETRIEVED_AT,
-        http_get=http_get,
+    facts = _facts_payload(
+        ("0000320193-26-000000",),
+        form="10-K",
     )
+    provider = _provider(cik=CIK, submissions=submissions, facts=facts)
+
     result = provider.fetch_company_facts(
         FilingQuery(
             cik=CIK,
@@ -189,6 +212,88 @@ def test_company_fact_collection_scopes_submissions_before_parsing() -> None:
     assert result[0].form == "10-K"
 
 
+def test_stm_pre_xbrl_annual_rows_do_not_block_company_facts() -> None:
+    cik = "0000932787"
+    row_count = 963
+    forms = ["6-K"] * 931 + ["20-F"] * 32
+    submissions = _payload(
+        row_count=row_count,
+        invalid_indexes={959, 960, 961, 962},
+        forms=forms,
+    )
+    referenced_accession = "0000320193-26-000931"
+    facts = _facts_payload((referenced_accession,), form="20-F")
+    provider = _provider(cik=cik, submissions=submissions, facts=facts)
+
+    result = provider.fetch_company_facts(
+        FilingQuery(
+            cik=cik,
+            as_of=RETRIEVED_AT,
+            forms=("20-F", "20-F/A"),
+            limit=100,
+        )
+    )
+
+    assert len(result) == 1
+    assert result[0].accession_number == referenced_accession
+    assert result[0].form == "20-F"
+
+
+def test_stm_unreferenced_legacy_rows_remain_strict_for_filing_query() -> None:
+    cik = "0000932787"
+    forms = ["6-K"] * 931 + ["20-F"] * 32
+    submissions = _payload(
+        row_count=963,
+        invalid_indexes={959, 960, 961, 962},
+        forms=forms,
+    )
+    provider = _provider(cik=cik, submissions=submissions, facts={"facts": {}})
+
+    with pytest.raises(
+        SECEdgarProviderError,
+        match="excessive invalid in-scope filing rows",
+    ):
+        provider.fetch_filings(
+            FilingQuery(
+                cik=cik,
+                as_of=RETRIEVED_AT,
+                forms=("20-F", "20-F/A"),
+                limit=100,
+            )
+        )
+
+
+def test_excessive_malformed_fact_references_remain_fail_closed() -> None:
+    cik = "0000932787"
+    submissions = _payload(
+        row_count=3,
+        invalid_indexes={1, 2},
+        forms=["20-F", "20-F", "20-F"],
+    )
+    facts = _facts_payload(
+        (
+            "0000320193-26-000000",
+            "0000320193-26-000001",
+            "0000320193-26-000002",
+        ),
+        form="20-F",
+    )
+    provider = _provider(cik=cik, submissions=submissions, facts=facts)
+
+    with pytest.raises(
+        SECEdgarProviderError,
+        match="excessive invalid in-scope filing rows",
+    ):
+        provider.fetch_company_facts(
+            FilingQuery(
+                cik=cik,
+                as_of=RETRIEVED_AT,
+                forms=("20-F",),
+                limit=100,
+            )
+        )
+
+
 def test_same_invalid_count_scattered_through_history_remains_fail_closed() -> None:
     with pytest.raises(
         SECEdgarProviderError,
@@ -197,7 +302,19 @@ def test_same_invalid_count_scattered_through_history_remains_fail_closed() -> N
         ResilientSECEdgarProvider._filing_records(
             _payload(
                 row_count=993,
-                invalid_indexes={100, 200, 300, 400, 500, 600, 700, 800, 900, 950, 992},
+                invalid_indexes={
+                    100,
+                    200,
+                    300,
+                    400,
+                    500,
+                    600,
+                    700,
+                    800,
+                    900,
+                    950,
+                    992,
+                },
             ),
             cik="0000311337",
             retrieved_at=RETRIEVED_AT,
