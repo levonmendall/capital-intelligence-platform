@@ -2,8 +2,8 @@
 
 The discovery lane scans the authenticated Alpaca U.S.-equity master list,
 intersects it with the official SEC ticker/exchange identity file, ranks the
-complete eligible set from batched IEX snapshots, and deepens only the strongest
-names with point-in-time daily bars.  Discovery can nominate candidates but has
+complete eligible set from batched IEX snapshots, and deepens the strongest
+names with point-in-time daily bars. Discovery can nominate candidates but has
 no CIO, construction, execution, or real-money authority.
 """
 
@@ -83,14 +83,19 @@ def _period_return(closes: Sequence[float], periods: int) -> float:
 
 @dataclass(frozen=True, slots=True)
 class EquityDiscoveryPolicy:
-    version: str = "broad-us-equity-discovery.v2-complete-qualified-universe"
-    # Retained as optional compatibility fields. ``None`` means the certified provider
-    # catalog and every eligible snapshot/deep-history candidate are processed.
+    """Versioned broad-screen and decision-evidence resource policy."""
+
+    version: str = "broad-us-equity-discovery.v3-bounded-decision-evidence"
     maximum_snapshot_assets: int | None = None
     snapshot_batch_size: int = 200
-    deep_shortlist_count: int | None = None
-    selected_candidate_count: int | None = None
-    deep_history_batch_size: int = 200
+    # Every eligible symbol is snapshot-screened. The strongest 400 then receive
+    # multi-horizon history, which is more than six times the default decision cohort.
+    deep_shortlist_count: int | None = 400
+    # Sixty-four new companies can represent 64% of NAV at the 1% exploratory cap;
+    # strategic wrappers, current holdings, and the required cash reserve remain separate.
+    selected_candidate_count: int | None = 64
+    # Deep-history payloads are processed and released in bounded batches.
+    deep_history_batch_size: int = 25
     minimum_price: float = 5.0
     minimum_daily_dollar_volume: float = 5_000_000.0
     minimum_history_bars: int = 252
@@ -153,7 +158,12 @@ class DiscoveredEquity:
     bar_count: int
     evidence_identifiers: tuple[str, ...]
 
-    def instrument(self, *, currently_owned: bool, policy: EquityDiscoveryPolicy) -> FreePaperPilotInstrument:
+    def instrument(
+        self,
+        *,
+        currently_owned: bool,
+        policy: EquityDiscoveryPolicy,
+    ) -> FreePaperPilotInstrument:
         return FreePaperPilotInstrument(
             symbol=self.symbol,
             instrument_identifier=self.instrument_identifier,
@@ -241,7 +251,9 @@ class EquityDiscoveryResult:
         }
 
 
-def _sec_equity_map(provider: SECEdgarProvider) -> tuple[dict[str, tuple[str, str, str, str]], str]:
+def _sec_equity_map(
+    provider: SECEdgarProvider,
+) -> tuple[dict[str, tuple[str, str, str, str]], str]:
     snapshot = provider.fetch_security_master()
     instruments = {item.instrument_id: item for item in snapshot.instruments}
     result: dict[str, tuple[str, str, str, str]] = {}
@@ -252,7 +264,7 @@ def _sec_equity_map(provider: SECEdgarProvider) -> tuple[dict[str, tuple[str, st
         prefix = "SEC:CIK:"
         if not instrument.issuer_id.startswith(prefix):
             continue
-        cik = instrument.issuer_id[len(prefix):]
+        cik = instrument.issuer_id[len(prefix) :]
         result[listing.symbol] = (
             cik,
             instrument.name,
@@ -283,7 +295,10 @@ def _eligible_assets(
             reason = "inactive"
         elif asset.get("tradable") is not True:
             reason = "not_tradable"
-        elif str(asset.get("class", "us_equity")).lower() not in {"us_equity", "equity"}:
+        elif str(asset.get("class", "us_equity")).lower() not in {
+            "us_equity",
+            "equity",
+        }:
             reason = "not_us_equity"
         elif exchange not in _ALLOWED_EXCHANGES:
             reason = "unsupported_exchange"
@@ -295,10 +310,16 @@ def _eligible_assets(
             excluded.append((symbol, reason))
             continue
         eligible[symbol] = asset
+        if maximum is not None and len(eligible) >= maximum:
+            break
     return eligible, tuple(excluded)
 
 
-def _snapshot_row(snapshot: Mapping[str, Any], *, as_of: datetime) -> tuple[float, float, float, str] | None:
+def _snapshot_row(
+    snapshot: Mapping[str, Any],
+    *,
+    as_of: datetime,
+) -> tuple[float, float, float, str] | None:
     daily = snapshot.get("dailyBar")
     previous = snapshot.get("prevDailyBar")
     if not isinstance(daily, Mapping) or not isinstance(previous, Mapping):
@@ -318,8 +339,7 @@ def _snapshot_row(snapshot: Mapping[str, Any], *, as_of: datetime) -> tuple[floa
         or observed > as_of
     ):
         return None
-    daily_return = close / prior_close - 1.0
-    return close, close * volume, daily_return, observed.isoformat()
+    return close, close * volume, close / prior_close - 1.0, observed.isoformat()
 
 
 def _bar_features(
@@ -351,6 +371,89 @@ def _bar_features(
     return closes, volumes, ordered[-1][0]
 
 
+def _deep_candidate(
+    *,
+    symbol: str,
+    raw_bars: Sequence[Mapping[str, Any]],
+    assets: Mapping[str, Mapping[str, Any]],
+    sec_map: Mapping[str, tuple[str, str, str, str]],
+    snapshot_rows: Mapping[str, tuple[float, float, float, str]],
+    benchmark_return: float,
+    timestamp: datetime,
+    minimum_history_bars: int,
+) -> tuple[DiscoveredEquity, tuple[str, float, str]] | None:
+    features = _bar_features(
+        raw_bars,
+        as_of=timestamp,
+        minimum_bars=minimum_history_bars,
+    )
+    if features is None:
+        return None
+    closes, volumes, latest = features
+    daily = [
+        closes[index] / closes[index - 1] - 1.0
+        for index in range(1, len(closes))
+        if closes[index - 1] > 0.0
+    ]
+    volatility = pstdev(daily[-252:]) * math.sqrt(252.0) if len(daily) >= 2 else 0.0
+    peak = closes[0]
+    drawdown = 0.0
+    for close in closes:
+        peak = max(peak, close)
+        drawdown = min(drawdown, close / peak - 1.0)
+    one = _period_return(closes, 21)
+    three = _period_return(closes, 63)
+    six = _period_return(closes, 126)
+    twelve = _period_return(closes, 252)
+    relative = twelve - benchmark_return
+    momentum = 0.15 * one + 0.25 * three + 0.25 * six + 0.35 * twelve
+    consistency = sum(value > 0.0 for value in (one, three, six, twelve)) / 4.0
+    adv = sum(
+        closes[index] * volumes[index]
+        for index in range(max(0, len(closes) - 20), len(closes))
+    ) / min(20, len(closes))
+    snapshot = snapshot_rows.get(symbol)
+    daily_return = 0.0 if snapshot is None else snapshot[2]
+    liquidity = _clip((math.log10(max(adv, 1.0)) - 6.0) / 4.0, 0.0, 1.0)
+    score = (
+        0.30 * _clip(relative / 0.40, -1.0, 1.0)
+        + 0.25 * _clip(momentum / 0.40, -1.0, 1.0)
+        + 0.15 * _clip(daily_return / 0.10, -1.0, 1.0)
+        + 0.15 * liquidity
+        + 0.15 * consistency
+        - 0.08 * _clip(volatility / 1.0, 0.0, 1.0)
+        + 0.05 * _clip((drawdown + 0.60) / 0.60, 0.0, 1.0)
+    )
+    cik, name, venue, sec_instrument_id = sec_map[symbol]
+    price_source = (
+        f"alpaca-iex-discovery:{symbol}:{latest.isoformat()}:{len(closes)}"
+    )
+    candidate = DiscoveredEquity(
+        symbol=symbol,
+        name=name,
+        cik=cik,
+        venue=(str(assets[symbol].get("exchange", "")).strip().upper() or venue),
+        instrument_identifier=f"instrument:us-equity:{symbol.lower()}",
+        score=round(score, 8),
+        daily_return=round(daily_return, 8),
+        one_month_return=round(one, 8),
+        three_month_return=round(three, 8),
+        six_month_return=round(six, 8),
+        twelve_month_return=round(twelve, 8),
+        relative_strength=round(relative, 8),
+        annualized_volatility=round(volatility, 8),
+        maximum_drawdown=round(drawdown, 8),
+        average_daily_dollar_volume=round(adv, 8),
+        current_price=round(closes[-1], 8),
+        bar_count=len(closes),
+        evidence_identifiers=(
+            price_source,
+            f"sec-company-identity:{cik}:{symbol}:{sec_instrument_id}",
+        ),
+    )
+    return candidate, (symbol, round(closes[-1], 8), price_source)
+
+
 def discover_us_equities(
     *,
     as_of: datetime,
@@ -361,7 +464,7 @@ def discover_us_equities(
     sec_provider: SECEdgarProvider | None = None,
     policy: EquityDiscoveryPolicy | None = None,
 ) -> EquityDiscoveryResult:
-    """Return the strongest point-in-time company candidates from the broad U.S. list."""
+    """Screen the broad list and return the decision-evidence company cohort."""
 
     timestamp = _aware(as_of, field_name="as_of")
     resolved = policy or EquityDiscoveryPolicy()
@@ -392,17 +495,24 @@ def discover_us_equities(
                 f"schedule:us-equity:{local_date.isoformat()}:closed"
             ),
         )
+
     alpaca = client or create_alpaca_paper_client()
     sec = sec_provider or SECEdgarProvider()
     sec_map, sec_identifier = _sec_equity_map(sec)
     raw_assets = alpaca.assets(status="active", asset_class="us_equity")
-    blocked = {str(item).strip().upper() for item in excluded_symbols if str(item).strip()}
-    assets, exclusions = _eligible_assets(
+    blocked = {
+        str(item).strip().upper()
+        for item in excluded_symbols
+        if str(item).strip()
+    }
+    assets, structural_exclusions = _eligible_assets(
         raw_assets,
         sec_map,
         excluded_symbols=blocked,
         maximum=resolved.maximum_snapshot_assets,
     )
+    exclusions = list(structural_exclusions)
+
     snapshot_rows: dict[str, tuple[float, float, float, str]] = {}
     symbols = tuple(sorted(assets))
     for start in range(0, len(symbols), resolved.snapshot_batch_size):
@@ -414,118 +524,90 @@ def discover_us_equities(
 
     preliminary: list[tuple[float, str]] = []
     for symbol, (price, dollar_volume, daily_return, _observed) in snapshot_rows.items():
-        if price < resolved.minimum_price or dollar_volume < resolved.minimum_daily_dollar_volume:
+        if (
+            price < resolved.minimum_price
+            or dollar_volume < resolved.minimum_daily_dollar_volume
+        ):
             continue
-        liquidity = _clip((math.log10(max(dollar_volume, 1.0)) - 6.0) / 4.0, 0.0, 1.0)
+        liquidity = _clip(
+            (math.log10(max(dollar_volume, 1.0)) - 6.0) / 4.0,
+            0.0,
+            1.0,
+        )
         gain = _clip(daily_return / 0.10, -1.0, 1.0)
         preliminary.append((0.65 * gain + 0.35 * liquidity, symbol))
     preliminary.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    held = {str(item).strip().upper() for item in held_symbols if str(item).strip()}
-    tracked = {str(item).strip().upper() for item in tracked_symbols if str(item).strip()}
-    # Ranking determines review order only.  Every candidate that passed the cheap
-    # eligibility, snapshot, price, and liquidity checks receives deep history.
-    shortlist = [symbol for _score, symbol in preliminary]
-    for symbol in sorted(held | tracked):
+
+    held = {
+        str(item).strip().upper() for item in held_symbols if str(item).strip()
+    }
+    tracked = {
+        str(item).strip().upper() for item in tracked_symbols if str(item).strip()
+    }
+    protected = held | tracked
+    ranked_symbols = [symbol for _score, symbol in preliminary]
+    deep_limit = (
+        len(ranked_symbols)
+        if resolved.deep_shortlist_count is None
+        else resolved.deep_shortlist_count
+    )
+    shortlist = ranked_symbols[:deep_limit]
+    for symbol in sorted(protected):
         if symbol in assets and symbol not in shortlist:
             shortlist.append(symbol)
-    if "VTI" not in shortlist:
-        shortlist.append("VTI")
-    deep_bars: dict[str, object] = {}
-    for start in range(0, len(shortlist), resolved.deep_history_batch_size):
-        batch = shortlist[start : start + resolved.deep_history_batch_size]
-        deep_bars.update(
-            alpaca.historical_bars(
-                batch,
-                start=timestamp - timedelta(days=resolved.deep_history_days),
-                end=timestamp,
-                timeframe="1Day",
-            )
-        )
+    deep_symbols = set(shortlist)
+    for symbol in ranked_symbols:
+        if symbol not in deep_symbols:
+            exclusions.append((symbol, "outside_deep_evidence_cohort"))
+
+    benchmark_payload = alpaca.historical_bars(
+        ("VTI",),
+        start=timestamp - timedelta(days=resolved.deep_history_days),
+        end=timestamp,
+        timeframe="1Day",
+    )
     benchmark = _bar_features(
-        deep_bars.get("VTI", ()),
+        benchmark_payload.get("VTI", ()),
         as_of=timestamp,
         minimum_bars=resolved.minimum_history_bars,
     )
-    benchmark_return = 0.0 if benchmark is None else _period_return(benchmark[0], 252)
+    benchmark_return = (
+        0.0 if benchmark is None else _period_return(benchmark[0], 252)
+    )
 
     selected: list[DiscoveredEquity] = []
     observed_prices: list[tuple[str, float, str]] = []
-    for symbol in shortlist:
-        if symbol == "VTI" or symbol not in assets or symbol not in sec_map:
-            continue
-        features = _bar_features(
-            deep_bars.get(symbol, ()),
-            as_of=timestamp,
-            minimum_bars=resolved.minimum_history_bars,
+    for start in range(0, len(shortlist), resolved.deep_history_batch_size):
+        batch = tuple(shortlist[start : start + resolved.deep_history_batch_size])
+        batch_bars = alpaca.historical_bars(
+            batch,
+            start=timestamp - timedelta(days=resolved.deep_history_days),
+            end=timestamp,
+            timeframe="1Day",
         )
-        if features is None:
-            continue
-        closes, volumes, latest = features
-        daily = [
-            closes[index] / closes[index - 1] - 1.0
-            for index in range(1, len(closes))
-            if closes[index - 1] > 0.0
-        ]
-        volatility = pstdev(daily[-252:]) * math.sqrt(252.0) if len(daily) >= 2 else 0.0
-        peak = closes[0]
-        drawdown = 0.0
-        for close in closes:
-            peak = max(peak, close)
-            drawdown = min(drawdown, close / peak - 1.0)
-        one = _period_return(closes, 21)
-        three = _period_return(closes, 63)
-        six = _period_return(closes, 126)
-        twelve = _period_return(closes, 252)
-        relative = twelve - benchmark_return
-        momentum = 0.15 * one + 0.25 * three + 0.25 * six + 0.35 * twelve
-        consistency = sum(value > 0.0 for value in (one, three, six, twelve)) / 4.0
-        adv = sum(
-            closes[index] * volumes[index]
-            for index in range(max(0, len(closes) - 20), len(closes))
-        ) / min(20, len(closes))
-        snapshot = snapshot_rows.get(symbol)
-        daily_return = 0.0 if snapshot is None else snapshot[2]
-        liquidity = _clip((math.log10(max(adv, 1.0)) - 6.0) / 4.0, 0.0, 1.0)
-        score = (
-            0.30 * _clip(relative / 0.40, -1.0, 1.0)
-            + 0.25 * _clip(momentum / 0.40, -1.0, 1.0)
-            + 0.15 * _clip(daily_return / 0.10, -1.0, 1.0)
-            + 0.15 * liquidity
-            + 0.15 * consistency
-            - 0.08 * _clip(volatility / 1.0, 0.0, 1.0)
-            + 0.05 * _clip((drawdown + 0.60) / 0.60, 0.0, 1.0)
-        )
-        cik, name, venue, sec_instrument_id = sec_map[symbol]
-        price_source = f"alpaca-iex-discovery:{symbol}:{latest.isoformat()}:{len(closes)}"
-        observed_prices.append((symbol, round(closes[-1], 8), price_source))
-        selected.append(
-            DiscoveredEquity(
+        for symbol in batch:
+            if symbol not in assets or symbol not in sec_map:
+                continue
+            result = _deep_candidate(
                 symbol=symbol,
-                name=name,
-                cik=cik,
-                venue=(str(assets[symbol].get("exchange", "")).strip().upper() or venue),
-                instrument_identifier=f"instrument:us-equity:{symbol.lower()}",
-                score=round(score, 8),
-                daily_return=round(daily_return, 8),
-                one_month_return=round(one, 8),
-                three_month_return=round(three, 8),
-                six_month_return=round(six, 8),
-                twelve_month_return=round(twelve, 8),
-                relative_strength=round(relative, 8),
-                annualized_volatility=round(volatility, 8),
-                maximum_drawdown=round(drawdown, 8),
-                average_daily_dollar_volume=round(adv, 8),
-                current_price=round(closes[-1], 8),
-                bar_count=len(closes),
-                evidence_identifiers=(
-                    price_source,
-                    f"sec-company-identity:{cik}:{symbol}:{sec_instrument_id}",
-                ),
+                raw_bars=batch_bars.get(symbol, ()),
+                assets=assets,
+                sec_map=sec_map,
+                snapshot_rows=snapshot_rows,
+                benchmark_return=benchmark_return,
+                timestamp=timestamp,
+                minimum_history_bars=resolved.minimum_history_bars,
             )
-        )
+            if result is None:
+                exclusions.append((symbol, "insufficient_deep_history"))
+                continue
+            candidate, observed = result
+            selected.append(candidate)
+            observed_prices.append(observed)
+        del batch_bars
+
     selected.sort(
         key=lambda item: (
-            item.symbol in held,
             item.score,
             item.relative_strength,
             item.average_daily_dollar_volume,
@@ -533,30 +615,48 @@ def discover_us_equities(
         ),
         reverse=True,
     )
-    # No candidate-count cutoff is applied after deep analysis.  Holdings and new
-    # opportunities share the same evidence path; ownership continuity affects only
-    # the per-instrument exploratory cap and review context.
-    selected_symbols = list(selected)
-    selected_symbols.sort(key=lambda item: (item.score, item.symbol), reverse=True)
+    new_limit = (
+        len(selected)
+        if resolved.selected_candidate_count is None
+        else resolved.selected_candidate_count
+    )
+    chosen_new = [item for item in selected if item.symbol not in protected][:new_limit]
+    chosen_symbols = {item.symbol for item in chosen_new} | {
+        item.symbol for item in selected if item.symbol in protected
+    }
+    selected_symbols = [
+        item for item in selected if item.symbol in chosen_symbols
+    ]
+    for item in selected:
+        if item.symbol not in chosen_symbols:
+            exclusions.append((item.symbol, "outside_decision_evidence_cohort"))
+
     material = {
         "as_of": timestamp.isoformat(),
         "policy": resolved.version,
-        "symbols": [(item.symbol, item.score) for item in selected_symbols],
+        "screened": len(assets),
+        "snapshot_covered": len(snapshot_rows),
+        "deep_symbols": shortlist,
+        "selected": [(item.symbol, item.score) for item in selected_symbols],
+        "protected": sorted(protected),
         "sec": sec_identifier,
     }
     digest = hashlib.sha256(
         json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return EquityDiscoveryResult(
-        identifier=f"equity-discovery:{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}:{digest[:16]}",
+        identifier=(
+            f"equity-discovery:{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}:"
+            f"{digest[:16]}"
+        ),
         as_of=timestamp,
         policy_version=resolved.version,
         screened_asset_count=len(assets),
         snapshot_covered_count=len(snapshot_rows),
-        deep_shortlist_count=max(0, len(shortlist) - 1),
+        deep_shortlist_count=len(shortlist),
         selected=tuple(selected_symbols),
         observed_prices=tuple(sorted(observed_prices)),
-        exclusions=exclusions,
+        exclusions=tuple(exclusions),
         security_master_snapshot_identifier=sec_identifier,
     )
 
