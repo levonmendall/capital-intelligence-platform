@@ -164,6 +164,11 @@ class PriorDecisionContext:
     consecutive_opposing_cycles: int = 0
     last_material_change_at: datetime | None = None
     emergency_override: bool = False
+    last_complete_evidence_at: datetime | None = None
+    operational_outage_started_at: datetime | None = None
+    independent_substitute_evidence_available: bool = False
+    custody_settlement_observable: bool = True
+    lifecycle_observable: bool = True
 
     def __post_init__(self) -> None:
         for field_name in ("candidate_identifier", "prior_decision_identifier"):
@@ -198,6 +203,20 @@ class PriorDecisionContext:
                 raise ValueError(f"{field_name} cannot be negative")
         if not isinstance(self.emergency_override, bool):
             raise TypeError("emergency_override must be a bool")
+        for field_name in (
+            "last_complete_evidence_at",
+            "operational_outage_started_at",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                _aware(value, field_name=field_name)
+        for field_name in (
+            "independent_substitute_evidence_available",
+            "custody_settlement_observable",
+            "lifecycle_observable",
+        ):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be a bool")
 
 
 class ThesisState(str, Enum):
