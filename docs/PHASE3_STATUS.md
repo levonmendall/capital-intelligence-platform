@@ -1,3 +1,3 @@
 Implementation branch: `feature/committee-cio-v2-phase3`.
 
-The branch introduces dependency-aware evidence clustering and is awaiting deterministic materialization and full pull-request validation.
+Dependency-aware evidence clustering has been materialized. Focused evidence-independence and canonical CIO regressions passed. Full pull-request validation and security review remain authoritative before merge.
