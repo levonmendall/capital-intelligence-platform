@@ -1,59 +1,71 @@
-# Gate Contribution Analysis
+# Decision-Stage Contribution Analysis
 
 ## Purpose
 
 Capital Intelligence already preserves point-in-time decision snapshots, realized
-outcomes, selection/sizing/timing/cost attribution, missed opportunities, avoided
-losses, evidence vetoes, implementation blocks, and CIO-to-construction
-reconciliation.
+outcomes, missed opportunities, avoided losses, evidence vetoes, implementation
+blocks, and CIO-to-construction reconciliation. Phase 7 separately adds advisory
+value reporting for evidence vetoes, implementation blocks, and hysteresis.
 
-The remaining accountability question is longitudinal:
+`evaluation.gate_contribution` does not duplicate that work. It answers two
+remaining questions:
 
-> Which governed stages protected capital, added value, destroyed value, or
-> caused costly restraint across completed decisions?
+1. How much exact portfolio contribution came from CIO selection, construction
+   sizing, implementation timing, and implementation cost?
+2. Across completed CIO abstentions, how often did restraint protect capital or
+   prove costly relative to the original capital alternatives?
 
-`evaluation.gate_contribution` answers that question without creating a new
-investment engine.
-
-## Evidence boundary
+## Exact contribution boundary
 
 The analyzer accepts only completed pairs of:
 
 - `DecisionEvidenceSnapshot`; and
 - `PointInTimeDecisionEvaluation`.
 
-It does not reconstruct the decision, introduce a hindsight alternative, or
-change the original evaluation.
-
-The exact portfolio contribution view uses only the four components already
-reconciled by the point-in-time evaluator:
+It uses only the four contribution components already reconciled by the canonical
+point-in-time evaluator:
 
 1. CIO selection;
 2. construction sizing;
 3. implementation timing; and
 4. implementation cost.
 
-Those exact components must reconcile to the recorded net active contribution.
+Their longitudinal total must reconcile exactly to recorded net active portfolio
+contribution. The analyzer does not recalculate or reinterpret those components.
 
-## Veto and abstention boundary
+## CIO abstention boundary
 
-Evidence vetoes, implementation blocks, and CIO abstentions do not always have a
-defensible counterfactual portfolio weight. The analyzer therefore reports their
-realized return spread against the best original capital alternative rather than
-manufacturing a dollar or portfolio contribution.
+An abstention does not have a defensible counterfactual portfolio weight. The
+analyzer therefore does not manufacture a dollar or portfolio contribution for
+WATCH, INSUFFICIENT_EVIDENCE, NO_SUPERIOR_OPPORTUNITY, or NO_MATERIAL_CHANGE.
 
-Each restraint is classified as:
+It records only the realized return spread between the abstained candidate and
+the best capital alternative that was actually available at the original
+decision boundary, classifying the completed outcome as:
 
 - `protected_capital`;
 - `costly_restraint`; or
 - `neutral`.
 
-A later positive or negative outcome does not rewrite the original decision and
-does not prove that a disciplined process was correct or flawed.
+This classification does not rewrite the original decision and does not prove
+that a disciplined process was correct or flawed.
+
+## Non-overlap boundary
+
+This module intentionally does not evaluate the value of:
+
+- evidence vetoes;
+- implementation blocks; or
+- hysteresis.
+
+Those controls belong to the separate advisory decision-value evaluation. This
+module also does not add forecast calibration, missed-opportunity collection,
+policy resolution, evidence-outage aging, specialist analysis, or risk
+intelligence.
 
 ## Authority
 
-Gate contribution analysis is permanently:
+Decision-stage contribution analysis is permanently:
 
 - research-only;
 - unable to create candidates;
@@ -64,19 +76,19 @@ Gate contribution analysis is permanently:
 - unable to authorize paper or real-money execution.
 
 Historical findings may support a separately governed review. They cannot
-automatically weaken a gate merely because it previously prevented a profitable
-trade.
+automatically weaken a control merely because restraint previously prevented a
+profitable trade.
 
 ## Intended use
 
-The report can support:
+The report supports:
 
-- persistent-cash diagnosis;
-- gate-level avoided-loss and missed-opportunity review;
-- comparison of CIO selection with construction sizing;
-- implementation timing and cost monitoring;
-- model- and policy-version governance;
-- controlled shadow and paper evaluation.
+- separating CIO selection quality from construction sizing quality;
+- identifying implementation timing and cost drag;
+- evaluating CIO abstention outcomes;
+- persistent-cash accountability;
+- controlled shadow and paper evaluation;
+- model- and policy-version governance.
 
-It should be segmented by model version, decision-policy version, asset class,
+Reports should be segmented by model version, policy version, asset class,
 regime, and horizon before any governance conclusion is considered.
