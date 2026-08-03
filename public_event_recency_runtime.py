@@ -90,23 +90,24 @@ def install(event_ui: ModuleType | None = None) -> None:
         event_ui = event_ui_module
 
     event_ui._record_time = source_event_time
-    if getattr(event_ui, _INSTALLED_STATE_KEY, False):
-        return
 
     nonblocking = sys.modules.get("render_nonblocking_data")
-    if isinstance(nonblocking, ModuleType):
-        loader = getattr(nonblocking, "_PUBLIC_EVENTS", None)
-        if loader is not None:
-            loader._supplier = lambda: _recent_public_event_snapshot(event_ui)
-            reset = getattr(loader, "reset", None)
-            if callable(reset):
-                reset()
+    if not isinstance(nonblocking, ModuleType):
+        return
+    loader = getattr(nonblocking, "_PUBLIC_EVENTS", None)
+    if loader is None or getattr(loader, _INSTALLED_STATE_KEY, False):
+        return
+
+    loader._supplier = lambda: _recent_public_event_snapshot(event_ui)
+    reset = getattr(loader, "reset", None)
+    if callable(reset):
+        reset()
+    setattr(loader, _INSTALLED_STATE_KEY, True)
 
     # Streamlit re-executes the entrypoint for every navigation interaction.
-    # Mark the adapter installed so those reruns do not repeatedly clear the
-    # already-warmed public-event cache and briefly replace retained stories
-    # with the empty background-refresh fallback.
-    setattr(event_ui, _INSTALLED_STATE_KEY, True)
+    # Mark the loader—not only the event module—so those reruns do not repeatedly
+    # clear the already-warmed public-event cache and briefly replace retained
+    # stories with the empty background-refresh fallback.
 
 
 __all__ = ["install", "source_event_time"]
