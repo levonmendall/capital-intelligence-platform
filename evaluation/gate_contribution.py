@@ -1,11 +1,16 @@
-"""Research-only attribution of value and regret to governed decision stages.
+"""Research-only attribution to distinct governed decision stages.
 
-The analyzer consumes immutable point-in-time snapshots and completed evaluations.
-It does not reconstruct decisions, change policy, promote models, size portfolios, or
-authorize execution. Exact portfolio contribution is reported only for the
-selection, sizing, timing, and implementation-cost components already reconciled
-by :class:`PointInTimeDecisionEvaluation`. Veto and abstention stages are reported
-as realized return spreads because no counterfactual portfolio weight is known.
+This module complements, rather than duplicates, advisory gate-value reporting.
+It consumes immutable point-in-time decision snapshots and completed evaluations
+and provides two capabilities not otherwise present:
+
+* exact longitudinal aggregation of the already-reconciled CIO selection,
+  construction sizing, implementation timing, and implementation-cost effects;
+* explicit CIO-abstention accountability using realized return spreads without
+  inventing a counterfactual portfolio weight.
+
+It cannot reconstruct decisions, change policy, promote models, size portfolios,
+or authorize execution.
 """
 
 from __future__ import annotations
@@ -25,10 +30,8 @@ from evaluation.point_in_time import (
 
 
 class GateContributionStage(str, Enum):
-    """Governed stage whose realized effect is being measured."""
+    """Distinct stage whose realized contribution is being measured."""
 
-    EVIDENCE_VETO = "evidence_veto"
-    IMPLEMENTATION_BLOCK = "implementation_block"
     CIO_ABSTENTION = "cio_abstention"
     CIO_SELECTION = "cio_selection"
     CONSTRUCTION_SIZING = "construction_sizing"
@@ -37,7 +40,7 @@ class GateContributionStage(str, Enum):
 
 
 class GateContributionEffect(str, Enum):
-    """Ex-post effect classification without changing the original decision."""
+    """Ex-post effect classification without rewriting the original decision."""
 
     PROTECTED_CAPITAL = "protected_capital"
     COSTLY_RESTRAINT = "costly_restraint"
@@ -63,23 +66,25 @@ def _finite(value: object, *, field_name: str) -> float:
     return round(normalized, 10)
 
 
-def _positive_int(value: object, *, field_name: str, allow_zero: bool = False) -> int:
+def _count(value: object, *, field_name: str, positive: bool = False) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{field_name} must be an integer")
-    minimum = 0 if allow_zero else 1
+    minimum = 1 if positive else 0
     if value < minimum:
-        qualifier = "non-negative" if allow_zero else "positive"
+        qualifier = "positive" if positive else "non-negative"
         raise ValueError(f"{field_name} must be {qualifier}")
     return value
 
 
 @dataclass(frozen=True, slots=True)
 class GateContributionObservation:
-    """One decision-stage observation.
+    """One immutable decision-stage observation.
 
-    ``exact_portfolio_contribution`` is populated only when the existing
-    point-in-time evaluator provides an exactly reconciled portfolio component.
-    Veto and abstention observations instead use ``realized_return_spread``.
+    Exact portfolio contribution is populated for selection, sizing, timing, and
+    implementation cost because those values already reconcile inside the
+    canonical point-in-time evaluator. CIO abstention has no defensible
+    counterfactual weight, so it records only the realized return spread between
+    the best original alternative and the abstained candidate.
     """
 
     decision_identifier: str
@@ -125,9 +130,20 @@ class GateContributionObservation:
         if not 0.0 <= self.constrained_weight <= 1.0:
             raise ValueError("constrained_weight must be between 0 and 1")
         if not isinstance(self.reasons, tuple) or not self.reasons:
-            raise ValueError("reasons must contain at least one explanation")
+            raise ValueError("reasons require at least one explanation")
         if not all(isinstance(item, str) and item.strip() for item in self.reasons):
             raise TypeError("reasons must contain non-empty strings")
+        exact_stage = self.stage is not GateContributionStage.CIO_ABSTENTION
+        if exact_stage:
+            if self.exact_portfolio_contribution is None:
+                raise ValueError("exact stages require exact_portfolio_contribution")
+            if self.realized_return_spread is not None:
+                raise ValueError("exact stages cannot set realized_return_spread")
+        else:
+            if self.exact_portfolio_contribution is not None:
+                raise ValueError("CIO abstention cannot claim exact contribution")
+            if self.realized_return_spread is None:
+                raise ValueError("CIO abstention requires realized_return_spread")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -159,8 +175,12 @@ class GateContributionMetric:
     def __post_init__(self) -> None:
         if not isinstance(self.stage, GateContributionStage):
             raise TypeError("stage must be GateContributionStage")
-        for field_name in (
+        object.__setattr__(
+            self,
             "activation_count",
+            _count(self.activation_count, field_name="activation_count", positive=True),
+        )
+        for field_name in (
             "protected_count",
             "costly_count",
             "added_value_count",
@@ -170,11 +190,7 @@ class GateContributionMetric:
             object.__setattr__(
                 self,
                 field_name,
-                _positive_int(
-                    getattr(self, field_name),
-                    field_name=field_name,
-                    allow_zero=field_name != "activation_count",
-                ),
+                _count(getattr(self, field_name), field_name=field_name),
             )
         classified = (
             self.protected_count
@@ -234,7 +250,7 @@ class GateContributionReport:
     reconciled_exact_contribution: float
     metrics: tuple[GateContributionMetric, ...]
     observations: tuple[GateContributionObservation, ...]
-    policy_version: str = "gate-contribution-analysis.v1"
+    policy_version: str = "decision-stage-contribution.v1"
     research_only: bool = True
     automatic_policy_change: bool = False
     execution_authority: bool = False
@@ -244,12 +260,12 @@ class GateContributionReport:
         object.__setattr__(
             self,
             "decision_count",
-            _positive_int(self.decision_count, field_name="decision_count"),
+            _count(self.decision_count, field_name="decision_count", positive=True),
         )
         object.__setattr__(
             self,
             "observation_count",
-            _positive_int(self.observation_count, field_name="observation_count"),
+            _count(self.observation_count, field_name="observation_count", positive=True),
         )
         for field_name in (
             "total_net_active_contribution",
@@ -261,22 +277,20 @@ class GateContributionReport:
                 _finite(getattr(self, field_name), field_name=field_name),
             )
         if abs(
-            self.total_net_active_contribution
-            - self.reconciled_exact_contribution
+            self.total_net_active_contribution - self.reconciled_exact_contribution
         ) > 0.0000001:
             raise ValueError(
-                "exact gate contributions must reconcile to net active contribution"
+                "exact stage contributions must reconcile to net active contribution"
             )
         if not isinstance(self.metrics, tuple) or not self.metrics:
-            raise ValueError("metrics must contain at least one stage")
+            raise ValueError("metrics require at least one stage")
         if not all(isinstance(item, GateContributionMetric) for item in self.metrics):
             raise TypeError("metrics must contain GateContributionMetric values")
         stages = tuple(item.stage for item in self.metrics)
         if len(stages) != len(set(stages)):
-            raise ValueError("gate contribution metric stages must be unique")
+            raise ValueError("metric stages must be unique")
         if not isinstance(self.observations, tuple) or not all(
-            isinstance(item, GateContributionObservation)
-            for item in self.observations
+            isinstance(item, GateContributionObservation) for item in self.observations
         ):
             raise TypeError(
                 "observations must contain GateContributionObservation values"
@@ -288,11 +302,11 @@ class GateContributionReport:
         if not isinstance(self.policy_version, str) or not self.policy_version.strip():
             raise ValueError("policy_version cannot be empty")
         if not self.research_only:
-            raise ValueError("gate contribution analysis must remain research-only")
+            raise ValueError("stage contribution analysis must remain research-only")
         if self.automatic_policy_change:
-            raise ValueError("gate contribution analysis cannot change policy")
+            raise ValueError("stage contribution analysis cannot change policy")
         if self.execution_authority:
-            raise ValueError("gate contribution analysis cannot authorize execution")
+            raise ValueError("stage contribution analysis cannot authorize execution")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -311,7 +325,7 @@ class GateContributionReport:
 
 
 class GateContributionAnalyzer:
-    """Aggregate exact attribution and gate outcomes across matured decisions."""
+    """Aggregate exact attribution and CIO abstention outcomes."""
 
     _ABSTENTION_ACTIONS = {
         CIOAction.WATCH,
@@ -344,7 +358,7 @@ class GateContributionAnalyzer:
     ) -> GateContributionReport:
         _aware(as_of, field_name="as_of")
         if not isinstance(pairs, tuple) or not pairs:
-            raise ValueError("gate contribution analysis requires completed pairs")
+            raise ValueError("stage contribution analysis requires completed pairs")
         decision_ids: set[str] = set()
         observations: list[GateContributionObservation] = []
         total_net = 0.0
@@ -367,14 +381,13 @@ class GateContributionAnalyzer:
         exact_total = sum(
             item.exact_portfolio_contribution or 0.0 for item in observations
         )
-        metrics = self._metrics(tuple(observations))
         return GateContributionReport(
             as_of=as_of,
             decision_count=len(decision_ids),
             observation_count=len(observations),
             total_net_active_contribution=total_net,
             reconciled_exact_contribution=exact_total,
-            metrics=metrics,
+            metrics=self._metrics(tuple(observations)),
             observations=tuple(observations),
         )
 
@@ -393,12 +406,12 @@ class GateContributionAnalyzer:
             (
                 GateContributionStage.CONSTRUCTION_SIZING,
                 evaluation.attribution.sizing,
-                "difference between the CIO-recommended and constructed position weight",
+                "constructed weight versus the CIO-recommended position weight",
             ),
             (
                 GateContributionStage.IMPLEMENTATION_TIMING,
                 evaluation.attribution.timing,
-                "difference between decision-time and implementation-time return",
+                "decision-time return versus implementation-time return",
             ),
             (
                 GateContributionStage.IMPLEMENTATION_COST,
@@ -411,9 +424,7 @@ class GateContributionAnalyzer:
             if snapshot.recommended_position_weight is None
             else snapshot.recommended_position_weight
         )
-        constrained_weight = abs(
-            snapshot.implemented_position_weight - recommended
-        )
+        constrained_weight = abs(snapshot.implemented_position_weight - recommended)
         for stage, contribution, reason in exact:
             stage_weight = (
                 constrained_weight
@@ -434,51 +445,22 @@ class GateContributionAnalyzer:
                 )
             )
 
-        spread = evaluation.best_original_alternative_return - evaluation.candidate_return
-        if snapshot.evidence_vetoes:
-            values.append(
-                GateContributionObservation(
-                    decision_identifier=snapshot.decision_identifier,
-                    snapshot_identifier=snapshot.identifier,
-                    evaluation_identifier=evaluation.identifier,
-                    stage=GateContributionStage.EVIDENCE_VETO,
-                    effect=self._restraint_effect(evaluation.outcome, spread),
-                    exact_portfolio_contribution=None,
-                    realized_return_spread=spread,
-                    constrained_weight=max(
-                        recommended - snapshot.implemented_position_weight, 0.0
-                    ),
-                    reasons=tuple(snapshot.evidence_vetoes),
-                )
-            )
-        if snapshot.implementation_blocks:
-            values.append(
-                GateContributionObservation(
-                    decision_identifier=snapshot.decision_identifier,
-                    snapshot_identifier=snapshot.identifier,
-                    evaluation_identifier=evaluation.identifier,
-                    stage=GateContributionStage.IMPLEMENTATION_BLOCK,
-                    effect=self._restraint_effect(evaluation.outcome, spread),
-                    exact_portfolio_contribution=None,
-                    realized_return_spread=spread,
-                    constrained_weight=max(
-                        recommended - snapshot.implemented_position_weight, 0.0
-                    ),
-                    reasons=tuple(snapshot.implementation_blocks),
-                )
-            )
         if (
             snapshot.action in self._ABSTENTION_ACTIONS
             and snapshot.implemented_position_weight
             <= snapshot.current_portfolio_weight + self.flat_tolerance
         ):
+            spread = (
+                evaluation.best_original_alternative_return
+                - evaluation.candidate_return
+            )
             values.append(
                 GateContributionObservation(
                     decision_identifier=snapshot.decision_identifier,
                     snapshot_identifier=snapshot.identifier,
                     evaluation_identifier=evaluation.identifier,
                     stage=GateContributionStage.CIO_ABSTENTION,
-                    effect=self._restraint_effect(evaluation.outcome, spread),
+                    effect=self._abstention_effect(evaluation.outcome, spread),
                     exact_portfolio_contribution=None,
                     realized_return_spread=spread,
                     constrained_weight=0.0,
@@ -497,7 +479,7 @@ class GateContributionAnalyzer:
             return GateContributionEffect.DESTROYED_VALUE
         return GateContributionEffect.NEUTRAL
 
-    def _restraint_effect(
+    def _abstention_effect(
         self,
         outcome: EvaluationOutcome,
         realized_return_spread: float,
@@ -556,8 +538,7 @@ class GateContributionAnalyzer:
                         for item in values
                     ),
                     exact_portfolio_contribution=sum(
-                        item.exact_portfolio_contribution or 0.0
-                        for item in values
+                        item.exact_portfolio_contribution or 0.0 for item in values
                     ),
                     mean_realized_return_spread=(
                         None if not spreads else sum(spreads) / len(spreads)
