@@ -14,10 +14,12 @@ proof that the investment news cycle was quiet.
 
 ## Display admission
 
-The Today educational surface still rejects stale, future-dated, fixture, and raw OFAC
-listing noise. It now admits a current source-qualified headline when a provider omitted
-impact-channel metadata, then explains unresolved investment relevance neutrally. The
-Environment surface remains restricted to economic impact channels.
+The Today educational surface still rejects stale, future-dated, fixture, raw OFAC
+listing, and routine administrative noise. It admits a current source-qualified headline
+when a provider omitted impact-channel metadata or when the exact investment
+transmission is still unresolved. In the latter case it reports the development,
+identifies what remains unknown, and avoids inventing a directional market conclusion.
+The Environment surface remains restricted to economic impact channels.
 
 ## Empty-state truthfulness
 
