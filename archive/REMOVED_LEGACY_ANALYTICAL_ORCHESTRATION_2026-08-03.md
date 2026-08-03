@@ -10,4 +10,6 @@ synthesis, and governance records remain supported. Tests that exclusively exerc
 the removed wrappers were deleted from mixed integration files; active API tests were
 preserved.
 
-Git history is the source archive. No investment or execution authority changed.
+Git history is the source archive. No investment or execution authority changed. The
+final branch remains subject to complete release, desktop/iPhone browser, historical,
+provider, paper-readiness, and security validation before merge.
