@@ -7,41 +7,48 @@ collection after the optional EODHD/LSE failure was isolated. The first SEC repa
 showed that malformed individual filing rows could be excluded without discarding an
 otherwise valid official filing history.
 
-The next production run exposed the ASML pattern for CIK `0000937966`: six
-consecutive malformed rows at indexes 585 through 590 in a 591-row submission set.
-That established that a contiguous oldest-row suffix needed a distinct bounded policy.
+Subsequent retries exposed bounded trailing legacy patterns in ASML and Suncor filing
+histories. Those incidents established one-percent ordinary and two-percent contiguous
+oldest-suffix controls.
 
-A later retry reached Suncor Energy, CIK `0000311337`, and found eleven malformed
-oldest rows at indexes 982 through 992 in a 993-row submission set. Those rows were
-about 1.1 percent of the history and therefore remained inside the intended two-percent
-policy, but an arbitrary ten-row ceiling blocked them. The fixed count was removed so
-the policy is governed by data quality proportion and row location rather than issuer
-history length.
+The next retry reached Invesco QQQ Trust, Series 1, CIK `0001067839`. Twelve malformed
+oldest rows were present in a 254-row SEC submission set. That count exceeded the
+trailing percentage policy, but the production request was not asking for fund forms.
+It requested only corporate annual forms: `10-K`, `10-K/A`, `20-F`, `20-F/A`, `40-F`,
+and `40-F/A`.
+
+The deeper defect was therefore filter order. The provider parsed and validated every
+SEC submission row before applying the requested-form filter. Unrelated legacy fund
+forms could block a corporate-facts request even though they were not evidence for the
+query.
 
 ## Correction
 
-Production company evidence now applies two distinct bounded policies:
+Production company evidence now applies query scope before row validation:
 
-1. Structural failures remain blocking, including missing required columns and
-   misaligned SEC parallel arrays.
-2. Ordinary malformed rows remain limited to one percent of the row set, with a
-   minimum allowance of one row.
-3. A filing history containing at least 100 rows may exclude a contiguous malformed
-   suffix only when it is the oldest part of the SEC array.
-4. That trailing-history allowance is capped at two percent of the complete row set.
-5. Recent, scattered, or middle-of-history corruption does not receive the trailing
-   allowance.
-6. If no valid rows remain or either percentage boundary is exceeded, the provider
-   still fails closed.
-7. Every valid row retains its original accession number, acceptance time, filing
-   date, report date, form, document, retrieval time, and official archive URL.
-8. Isolated rows are logged with the CIK, count, indexes, suffix classification,
-   applied boundary, and policy version without logging filing contents or credentials.
+1. Required SEC columns and aligned parallel arrays remain structural prerequisites.
+2. A valid raw form is normalized first.
+3. Rows outside the filing forms requested by the point-in-time query are skipped
+   before acceptance, filing-date, report-date, accession, and document validation.
+4. A missing or invalid form cannot be proven out of scope and therefore remains
+   fail-closed.
+5. Ordinary malformed rows inside the requested form scope remain limited to one
+   percent, with a minimum allowance of one row.
+6. An in-scope filing history containing at least 100 rows may exclude a contiguous
+   malformed suffix only when it is the oldest part of the relevant SEC rows.
+7. That in-scope trailing-history allowance remains capped at two percent.
+8. Recent, scattered, middle-of-history, structural, or zero-usable-row corruption
+   inside the requested evidence scope still fails closed.
+9. Every retained row preserves its original accession number, acceptance time,
+   filing date, report date, form, document, retrieval time, and official archive URL.
+10. Diagnostics report complete and relevant row counts, requested forms, invalid
+    indexes, suffix classification, applied boundary, and policy version without
+    filing contents or credentials.
 
 ## Governance boundary
 
-This change does not fabricate a filing, infer a missing acceptance time, repair an SEC
-value, alter the decision cutoff, lower an investment threshold, create a candidate,
-authorize capital, change portfolio construction, or enable real money. It only keeps
-a percentage-bounded legacy suffix from destroying the valid point-in-time filing
-history that precedes it.
+This change does not broaden acceptable corruption, infer a missing acceptance time,
+repair an SEC value, fabricate a filing, alter the decision cutoff, lower an investment
+threshold, create a candidate, authorize capital, change portfolio construction, or
+enable real money. It prevents evidence outside the explicit filing-form query from
+vetoing the evidence that was actually requested.
