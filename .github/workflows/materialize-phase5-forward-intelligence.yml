@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/materialize-phase5-forward-intelligence.yml
       - scripts/materialize_phase5_forward_intelligence.py
+      - scripts/repair_phase5_imports.py
       - intelligence/forward.py
       - tests/test_forward_intelligence.py
       - tests/test_forward_intelligence_integration.py
@@ -42,7 +43,9 @@ jobs:
           cache: pip
 
       - name: Apply reviewed Phase 5 integration
-        run: python scripts/materialize_phase5_forward_intelligence.py
+        run: |
+          python scripts/materialize_phase5_forward_intelligence.py
+          python scripts/repair_phase5_imports.py
 
       - name: Install locked runtime and test dependencies
         run: |
@@ -63,8 +66,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add intelligence/__init__.py intelligence/forward.py committee/specialists.py application/cio_cycle.py application/production_context.py
-          git add tests/test_forward_intelligence.py tests/test_forward_intelligence_integration.py
+          git add tests/test_forward_intelligence.py tests/test_forward_intelligence_integration.py tests/test_canonical_cio_cycle.py
           git rm scripts/materialize_phase5_forward_intelligence.py
+          git rm scripts/repair_phase5_imports.py
           git rm .github/workflows/materialize-phase5-forward-intelligence.yml
           git commit -m "Integrate governed forward business macro theme and currency intelligence"
           git push origin HEAD:feature/committee-cio-v2-phase5-forward-intelligence
