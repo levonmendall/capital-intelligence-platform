@@ -1,0 +1,84 @@
+name: Materialize Dead Code Cleanup
+
+on:
+  push:
+    branches:
+      - cleanup/remove-dead-product-surfaces
+    paths:
+      - scripts/materialize_dead_code_cleanup.py
+      - .github/workflows/materialize-dead-code-cleanup.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/materialize_dead_code_cleanup.py
+      - .github/workflows/materialize-dead-code-cleanup.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-dead-code-cleanup
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      MATERIALIZATION_REVISION: "3"
+      CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
+    steps:
+      - name: Check out cleanup branch
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          ref: cleanup/remove-dead-product-surfaces
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Apply reviewed cleanup
+        run: python scripts/materialize_dead_code_cleanup.py
+
+      - name: Install locked runtime and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+
+      - name: Validate affected active contracts
+        run: |
+          python -m compileall -q .
+          git diff --check
+          pytest -q \
+            tests/test_business_cycle_integration.py \
+            tests/test_credit_cycle_integration.py \
+            tests/test_global_liquidity_integration.py \
+            tests/test_market_breadth_integration.py \
+            tests/test_risk_integration.py \
+            tests/test_technical_momentum_integration.py \
+            tests/test_valuation_integration.py \
+            tests/test_daily_intelligence_application.py \
+            tests/test_objectives_api.py \
+            tests/test_governing_objective_isolation.py \
+            tests/test_canonical_product_surfaces.py \
+            tests/test_environment_story_placement_refinement.py \
+            tests/test_today_environment_storytelling.py \
+            tests/test_streamlit_paper_execution_worker.py \
+            tests/test_paper_execution_leases.py
+
+      - name: Publish final cleanup source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f scripts/materialize_dead_code_cleanup.py
+          git rm -f .github/workflows/materialize-dead-code-cleanup.yml
+          git add -A
+          git commit -m "Remove discontinued and unreachable product surfaces"
+          git push origin HEAD:cleanup/remove-dead-product-surfaces
