@@ -1177,7 +1177,8 @@ class RepositoryProductionCanonicalCIOContextProvider:
         )
 
 
-def build_production_context_provider(
+def _build_production_context_provider(
+    provider_type: type[RepositoryProductionCanonicalCIOContextProvider],
     *,
     screening_database: str | Path | None = None,
     portfolio_database: str | Path | None = None,
@@ -1185,10 +1186,10 @@ def build_production_context_provider(
     portfolio_code: str | None = None,
     code_version: str | None = None,
 ) -> RepositoryProductionCanonicalCIOContextProvider:
-    """Build the repository-owned provider from explicit paths or environment."""
+    """Build any repository provider from one canonical store/path policy."""
 
     data_dir = Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database"))
-    return RepositoryProductionCanonicalCIOContextProvider(
+    return provider_type(
         screening_store=SQLiteFullUniverseScreeningStore(
             screening_database
             or os.getenv(
@@ -1213,6 +1214,26 @@ def build_production_context_provider(
         portfolio_code=portfolio_code
         or os.getenv("CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_CODE")
         or "COMPOUNDING",
+        code_version=code_version,
+    )
+
+
+def build_production_context_provider(
+    *,
+    screening_database: str | Path | None = None,
+    portfolio_database: str | Path | None = None,
+    context_database: str | Path | None = None,
+    portfolio_code: str | None = None,
+    code_version: str | None = None,
+) -> RepositoryProductionCanonicalCIOContextProvider:
+    """Build the repository-owned provider from explicit paths or environment."""
+
+    return _build_production_context_provider(
+        RepositoryProductionCanonicalCIOContextProvider,
+        screening_database=screening_database,
+        portfolio_database=portfolio_database,
+        context_database=context_database,
+        portfolio_code=portfolio_code,
         code_version=code_version,
     )
 

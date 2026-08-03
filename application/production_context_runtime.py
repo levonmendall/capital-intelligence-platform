@@ -9,7 +9,6 @@ from :mod:`application.production_context`.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -18,8 +17,8 @@ from application.production_cio import ProductionCanonicalCIOContext
 from application.production_context import (
     ProductionContextError,
     RepositoryProductionCanonicalCIOContextProvider as _StoredContextProvider,
-    SQLiteProductionContextStore,
     _aware,
+    _build_production_context_provider,
     _text,
 )
 from cio import CandidateAssetClass
@@ -32,10 +31,8 @@ from opportunity.snapshot import (
     load_opportunity_snapshot,
 )
 from portfolio.production_scenarios import build_governed_portfolio_scenario_set
-from portfolio.state import SQLiteCanonicalPortfolioStore
 from screening import (
     ScreeningEventType,
-    SQLiteFullUniverseScreeningStore,
     candidate_from_payload,
 )
 
@@ -353,30 +350,12 @@ def build_production_context_provider(
 ) -> RepositoryProductionCanonicalCIOContextProvider:
     """Build the executable repository provider from paths or environment."""
 
-    data_dir = Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database"))
-    return RepositoryProductionCanonicalCIOContextProvider(
-        screening_store=SQLiteFullUniverseScreeningStore(
-            screening_database
-            or os.getenv(
-                "CAPITAL_INTELLIGENCE_FULL_UNIVERSE_SCREENING_DATABASE"
-            )
-            or data_dir / "full_universe_screening.db"
-        ),
-        portfolio_store=SQLiteCanonicalPortfolioStore(
-            portfolio_database
-            or os.getenv(
-                "CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE"
-            )
-            or data_dir / "canonical_portfolio.db"
-        ),
-        context_store=SQLiteProductionContextStore(
-            context_database
-            or os.getenv("CAPITAL_INTELLIGENCE_PRODUCTION_CONTEXT_DATABASE")
-            or data_dir / "production_context.db"
-        ),
-        portfolio_code=portfolio_code
-        or os.getenv("CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_CODE")
-        or "COMPOUNDING",
+    return _build_production_context_provider(
+        RepositoryProductionCanonicalCIOContextProvider,
+        screening_database=screening_database,
+        portfolio_database=portfolio_database,
+        context_database=context_database,
+        portfolio_code=portfolio_code,
         code_version=code_version,
     )
 
