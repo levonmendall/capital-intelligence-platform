@@ -36,7 +36,7 @@ from cio.universe import UniverseAssessment
 class CIOSynthesisPolicy:
     """Versioned materiality, evidence, and abstention rules."""
 
-    version: str = "cio-synthesis.v8-economic-consistency"
+    version: str = "cio-synthesis.v9-independent-evidence"
     minimum_evidence_score: float = 0.70
     minimum_evidence_dimension: float = 0.50
     minimum_net_expected_return: float = 0.05
@@ -240,7 +240,12 @@ class ChiefInvestmentOfficer:
                 ),
             )
         )
-        reason = f"{reason} Growth ensemble: {ensemble.explanation}"
+        reason = (
+            f"{reason} Growth ensemble: {ensemble.explanation} "
+            f"Committee evidence resolves to {specialists.effective_directional_count:.2f} "
+            f"effective independent directional views from "
+            f"{len(specialists.directional_active)} active roles."
+        )
         if historical_learning.status.value != "not_applicable":
             reason = f"{reason} {historical_learning.summary}"
         final_confidence = self._confidence(
@@ -481,12 +486,16 @@ class ChiefInvestmentOfficer:
             if analysis.confidence
             >= self.policy.maximum_unresolved_dissent_confidence
         )
+        independent_opposition = specialists.independent_opposition_count(
+            self.policy.maximum_unresolved_dissent_confidence
+        )
         progressive_lane = str(analysis_lane).lower() in {
             "participation",
             "exploration",
         }
         if high_confidence_opposition and (
-            not progressive_lane or len(high_confidence_opposition) >= 2
+            (not progressive_lane and independent_opposition >= 1)
+            or independent_opposition >= 2
         ):
             roles = ", ".join(item.role.value for item in high_confidence_opposition)
             return (
@@ -760,33 +769,18 @@ class ChiefInvestmentOfficer:
         ensemble: GrowthEnsembleAssessment,
         progressive_lane: bool,
     ) -> float:
-        evidence_scale = min(1.0, robustness.evidence_reliability / 0.85)
-        probability_scale = min(
-            1.0,
-            reconciliation.probability_of_success
-            / max(profile.minimum_probability_of_success + 0.05, 0.60),
-        )
-        edge_scale = min(
-            1.0,
-            max(0.0, robustness.robust_edge)
-            / max(profile.minimum_opportunity_edge * 2.0, 0.02),
-        )
+        # RobustCandidateAssessor already incorporates evidence shrinkage,
+        # probability consistency, downside, edge and stress.  Do not charge the
+        # same uncertainty again through three independent minimum scales.
         if not progressive_lane:
-            scale = min(evidence_scale, probability_scale, edge_scale)
-            return round(max(0.0, robust_cap * scale), 8)
-        blended = (
-            evidence_scale * 0.35
-            + probability_scale * 0.25
-            + edge_scale * 0.20
-            + ensemble.target_multiplier * 0.20
-        )
-        target = robust_cap * max(0.15, min(1.0, blended))
+            return round(max(0.0, robust_cap), 8)
+        target = robust_cap * max(0.20, min(1.0, ensemble.target_multiplier))
         if ensemble.stage is not GrowthStage.OBSERVE:
             target = max(
                 target,
                 min(robust_cap, ensemble.minimum_target_weight),
             )
-        if ensemble.maximum_target_weight > 0.0:
+        if progressive_lane and ensemble.maximum_target_weight > 0.0:
             target = min(target, ensemble.maximum_target_weight)
         return round(max(0.0, target), 8)
 
@@ -798,17 +792,23 @@ class ChiefInvestmentOfficer:
         has_dissent: bool,
         reconciliation: ReturnReconciliation,
     ) -> float:
-        directional = specialists.directional_support_ratio
+        directional = specialists.independent_directional_support_ratio
+        independence = specialists.evidence_independence
         calculated = (
             candidate.evidence_quality.score * 0.35
             + specialists.evidence_confidence * 0.15
             + specialists.implementation_confidence * 0.10
-            + specialists.median_confidence * 0.15
+            + specialists.independent_confidence * 0.15
             + directional * 0.15
             + specialists.coverage_ratio * 0.10
         )
         origin_factor = min(1.0, reconciliation.evidence_origin_count / 4.0)
-        calculated *= 0.70 + 0.20 * origin_factor + 0.10 * specialists.coverage_ratio
+        calculated *= (
+            0.55
+            + 0.20 * origin_factor
+            + 0.15 * independence.independence_ratio
+            + 0.10 * specialists.coverage_ratio
+        )
         calculated = min(calculated, candidate.evidence_quality.ceiling)
         if has_dissent:
             calculated = min(calculated, 0.75)

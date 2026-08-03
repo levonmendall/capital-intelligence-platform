@@ -211,7 +211,7 @@ def test_specialist_and_decision_serializers_preserve_authority_and_dissent() ->
     )
     assert (
         decision_payload["policy_version"]
-        == "cio-synthesis.v8-economic-consistency"
+        == "cio-synthesis.v9-independent-evidence"
     )
 
 

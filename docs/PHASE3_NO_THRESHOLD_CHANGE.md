@@ -1,0 +1,1 @@
+Phase 3 does not lower any governed investment threshold. It changes only how correlated evidence contributes to confidence, persistence and sizing, while preserving all existing hard evidence, return, edge, probability, downside, liquidity, cost and construction controls.

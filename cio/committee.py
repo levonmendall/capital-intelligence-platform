@@ -7,6 +7,10 @@ from datetime import datetime
 from enum import Enum
 from statistics import median
 
+from cio.evidence_independence import (
+    EvidenceIndependenceAssessment,
+    assess_evidence_independence,
+)
 from cio.historical_learning import HistoricalLearningContext
 from cio.models import (
     CandidateDecisionRecord,
@@ -335,6 +339,32 @@ class IndependentSpecialistPacket:
             item
             for item in self.directional_analyses
             if item.position is not SpecialistPosition.ABSTAIN
+        )
+
+    @property
+    def evidence_independence(self) -> EvidenceIndependenceAssessment:
+        return assess_evidence_independence(self.directional_analyses)
+
+    @property
+    def effective_directional_count(self) -> float:
+        return self.evidence_independence.effective_role_count
+
+    @property
+    def evidence_independence_ratio(self) -> float:
+        return self.evidence_independence.independence_ratio
+
+    @property
+    def independent_directional_support_ratio(self) -> float:
+        return self.evidence_independence.independent_support_ratio
+
+    @property
+    def independent_confidence(self) -> float:
+        return self.evidence_independence.independent_confidence
+
+    def independent_opposition_count(self, minimum_confidence: float) -> int:
+        return self.evidence_independence.independent_opposition_count(
+            self.directional_analyses,
+            minimum_confidence=float(minimum_confidence),
         )
 
     @property

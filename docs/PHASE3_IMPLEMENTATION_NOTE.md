@@ -1,0 +1,1 @@
+Phase 3 materialization is deterministic and validated by focused committee, growth-ensemble, CIO, cycle and persistence regressions before the temporary materializer removes itself. Full repository, browser, provider, historical and security validation remain mandatory before merge.

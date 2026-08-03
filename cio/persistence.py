@@ -357,6 +357,13 @@ def serialize_specialist_packet(
         "implementation_confidence": packet.implementation_confidence,
         "abstaining_roles": [item.role.value for item in packet.abstentions],
         "median_confidence": packet.median_confidence,
+        "independent_confidence": packet.independent_confidence,
+        "effective_directional_count": packet.effective_directional_count,
+        "evidence_independence_ratio": packet.evidence_independence_ratio,
+        "independent_support_ratio": packet.independent_directional_support_ratio,
+        "independent_cluster_count": (
+            packet.evidence_independence.independent_cluster_count
+        ),
         "evidence_vetoes": list(packet.evidence_vetoes),
         "evidence_veto_categories": [
             item.value for item in packet.evidence_veto_categories
