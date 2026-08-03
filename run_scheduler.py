@@ -11,11 +11,11 @@ from dataclasses import replace
 from datetime import timedelta
 
 from api.config import ApiSettings
-from application import (
-    ProductionCanonicalCIOExecutor,
-    build_production_context_provider,
+from application import build_production_context_provider
+from application.compounding_cycle import CompoundingCanonicalCIOCycle
+from application.compounding_executor import (
+    CompoundingProductionCanonicalCIOExecutor,
 )
-from application.cio_cycle import CanonicalCIOCycle
 from cio.persistence import SQLiteCIOJournal
 from delivery import (
     AlertChannel,
@@ -89,8 +89,8 @@ def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
         settings.canonical_cycle_context_provider,
         settings=settings,
     )
-    executor = ProductionCanonicalCIOExecutor(
-        cycle=CanonicalCIOCycle(
+    executor = CompoundingProductionCanonicalCIOExecutor(
+        cycle=CompoundingCanonicalCIOCycle(
             journal=journal,
             construction_policy=_paper_pilot_construction_policy(),
         ),
