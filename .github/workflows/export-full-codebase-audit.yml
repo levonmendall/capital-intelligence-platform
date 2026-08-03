@@ -6,6 +6,9 @@ on:
       - audit/full-codebase-redundancy-20260803
     paths:
       - .github/workflows/export-full-codebase-audit.yml
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
