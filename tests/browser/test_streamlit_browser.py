@@ -118,6 +118,12 @@ def _assert_surface_body(page, surface: str) -> None:
     )
 
 
+def _assert_hidden_or_absent(locator) -> None:
+    assert locator.count() <= 1
+    if locator.count() == 1:
+        assert locator.first.is_visible() is False
+
+
 def _assert_portfolio_opening_hierarchy(page) -> None:
     capital_structure = page.get_by_text("Capital structure", exact=True).first
     current_report = page.get_by_text("Current CIO report", exact=False).first
@@ -137,10 +143,12 @@ def _assert_portfolio_opening_hierarchy(page) -> None:
     report_container = report_summary.locator("xpath=..")
     assert report_container.get_attribute("open") is None
 
-    # Freshness warnings and timestamps belong inside the collapsed CIO report,
-    # never before capital structure on the Portfolio opening.
-    assert page.locator('.information-health[role="status"]').count() == 0
-    assert page.get_by_text("Portfolio record timestamps", exact=True).count() == 0
+    # Freshness warnings and timestamps may exist in the report's hidden DOM,
+    # but they must not be visible before the user expands the CIO report.
+    _assert_hidden_or_absent(page.locator('.information-health[role="status"]'))
+    _assert_hidden_or_absent(
+        page.get_by_text("Portfolio record timestamps", exact=True)
+    )
     assert page.get_by_text("Portfolio posture", exact=True).count() == 0
 
 
