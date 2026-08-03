@@ -3,17 +3,23 @@ from pathlib import Path
 path = Path("scripts/materialize_phase7_governance_learning.py")
 text = path.read_text(encoding="utf-8")
 
-old_import = '''        """from cio.policy_matrix import DecisionPolicyMatrix, DecisionPolicyProfile
+old_import = '''    replace_once(
+        "opportunity/engine.py",
+        """from cio.policy_matrix import DecisionPolicyMatrix, DecisionPolicyProfile
 """,
         """from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from cio.policy_matrix import DecisionPolicyMatrix, DecisionPolicyProfile
 """,
+    )
 '''
-new_import = '''        """from cio.policy_matrix import DecisionPolicyMatrix
+new_import = '''    replace_once(
+        "opportunity/engine.py",
+        """from cio.policy_matrix import DecisionPolicyMatrix
 """,
         """from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from cio.policy_matrix import DecisionPolicyMatrix
 """,
+    )
 '''
 if text.count(old_import) != 1:
     raise SystemExit("Phase 7 opportunity import repair did not find exactly one target")
