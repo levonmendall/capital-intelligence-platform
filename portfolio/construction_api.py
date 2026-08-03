@@ -5,6 +5,11 @@ The engine produces non-executing trade proposals after CIO approval.
 """
 
 from portfolio.construction_engine import PortfolioConstructionEngine
+from portfolio.decision_reconciliation import (
+    ConstructionDecisionReconciliation,
+    ConstructionDisposition,
+    reconcile_construction_decisions,
+)
 from portfolio.derivative_lifecycle import (
     DerivativeLifecycleAssessment,
     DerivativeLifecycleAuthority,
@@ -33,6 +38,8 @@ from portfolio.construction_models import (
 )
 
 __all__ = [
+    "ConstructionDecisionReconciliation",
+    "ConstructionDisposition",
     "ConstructionIntent",
     "ConstructionMode",
     "ConstructionStatus",
@@ -54,4 +61,5 @@ __all__ = [
     "PortfolioScenarioMetrics",
     "TradeProposal",
     "TradeSide",
+    "reconcile_construction_decisions",
 ]
