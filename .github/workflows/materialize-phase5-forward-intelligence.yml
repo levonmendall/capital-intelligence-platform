@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 35
     env:
       PYTHONPATH: ${{ github.workspace }}
+      REPAIR_VERSION: "3"
     steps:
       - name: Check out phase branch
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
