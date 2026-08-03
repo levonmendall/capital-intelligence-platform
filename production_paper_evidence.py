@@ -2,7 +2,8 @@
 
 The complete implementation remains in ``production_paper_evidence_impl``. This
 facade preserves the historical module-level monkeypatch boundary used by tests and
-operations while restoring derivative-risk truth for listed implementation wrappers.
+operations while restoring derivative-risk truth and streaming full provider evidence
+through a disk-backed cycle spool.
 """
 
 from __future__ import annotations
@@ -10,6 +11,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 import production_paper_evidence_impl as _implementation
+from operations.paper_evidence_spool import (
+    close_spooled_paper_evidence,
+    collect_spooled_paper_evidence,
+)
 from providers.alpaca_paper_resilient import create_complete_alpaca_paper_client
 from providers.sec_company_facts_availability import (
     install_company_facts_availability_boundary,
@@ -61,9 +66,23 @@ def _synchronize_runtime_bindings() -> None:
     _implementation.SECEdgarProvider = SECEdgarProvider
 
 
-def _default_probe(*args, **kwargs):
+def _default_probe(universe, decision_as_of):
+    """Collect every scheduled instrument without retaining all raw history in RAM."""
+
     _synchronize_runtime_bindings()
-    return _ORIGINAL_DEFAULT_PROBE(*args, **kwargs)
+    return collect_spooled_paper_evidence(
+        universe,
+        decision_as_of,
+        create_alpaca_client=create_alpaca_paper_client,
+        sec_provider_factory=SECEdgarProvider,
+        fred_provider_factory=FREDProvider,
+        direct_market_client_type=DirectGlobalMarketClient,
+        direct_market_universe_type=DirectGlobalMarketUniverse,
+        filing_query_type=FilingQuery,
+        candidate_asset_class=CandidateAssetClass,
+        instrument_evaluation_scheduled=instrument_evaluation_scheduled,
+        history_days=_HISTORY_DAYS,
+    )
 
 
 def collect_paper_evidence(*args, **kwargs):
@@ -99,4 +118,8 @@ _implementation._default_probe = _default_probe
 _implementation._candidate_and_evidence = _candidate_and_evidence
 _implementation.create_alpaca_paper_client = create_alpaca_paper_client
 _implementation.SECEdgarProvider = SECEdgarProvider
-__all__ = tuple(getattr(_implementation, "__all__", ()))
+__all__ = tuple(
+    dict.fromkeys(
+        (*getattr(_implementation, "__all__", ()), "close_spooled_paper_evidence")
+    )
+)

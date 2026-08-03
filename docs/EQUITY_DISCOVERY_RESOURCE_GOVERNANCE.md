@@ -16,38 +16,57 @@ historical backfill, backup, readiness watchdog, and paper operator in one conta
 Retaining the complete bar payload for every passing company therefore created an
 unbounded memory requirement unrelated to investment quality.
 
-## Correction
+The first resource correction imposed fixed 400-name and 64-name admission cohorts.
+That prevented memory exhaustion, but it also meant ranking could stop an otherwise
+eligible company before complete evidence and specialist qualification. The production
+resource control therefore became an investment-consideration limit.
 
-The U.S.-equity lane now preserves a staged, versioned funnel:
+## Complete streaming correction
+
+The U.S.-equity lane now preserves complete consideration through a staged, versioned
+streaming funnel:
 
 1. Every eligible Alpaca/SEC-listed company remains inside broad identity and current
    snapshot review. No maximum snapshot-universe count is applied by default.
-2. Current price, dollar volume, daily movement, and liquidity rank the complete
-   snapshot-covered set.
-3. The strongest 400 companies receive 550-day multi-horizon analysis. Every current
-   holding and every tracked unresolved thesis is included even when it ranks below
-   that boundary.
-4. Deep history is retrieved and converted to derived features in batches of at most
-   25 symbols; each raw batch is released before the next batch is requested.
-5. The strongest 64 new companies proceed into the full 10-year candidate-evidence
-   stage. Current holdings and tracked theses are added outside that new-candidate
-   allowance.
-6. Symbols that do not advance remain explicitly classified as
-   `outside_deep_evidence_cohort` or `outside_decision_evidence_cohort`; they are not
-   represented as fully analyzed or as rejected by the CIO.
-7. Prices from deep-reviewed symbols remain available for missed-opportunity and
-   unresolved-outcome evaluation.
+2. Objective price and dollar-liquidity floors determine whether a company proceeds.
+   Current movement and liquidity rank processing order only.
+3. Every company passing that objective screen receives 550-day multi-horizon analysis.
+4. Discovery history is retrieved and converted to compact features in batches of at
+   most 25 symbols; each raw batch is released before the next request.
+5. Every company with sufficient point-in-time history proceeds to the complete
+   ten-year candidate-evidence lane. There is no default 400-name or 64-name cutoff.
+6. Ten-year listed-market bars and quotes are collected in bounded batches of at most
+   ten symbols. Each completed symbol is written to a cycle-local append-only SQLite
+   spool on the configured data disk before the next batch is requested.
+7. SEC Company Facts are collected and persisted one issuer at a time. Evidence builders
+   read bars, quotes, and facts lazily by symbol rather than retaining the complete raw
+   provider payload in process memory.
+8. Current holdings and tracked unresolved theses remain mandatory and fail closed when
+   their evidence is incomplete.
+9. The downstream evidence, opportunity, specialist, CIO, construction, and paper
+   execution gates remain unchanged. Complete consideration does not imply qualification.
 
-The 64-company decision cohort can represent up to 64% of portfolio NAV at the 1%
-exploratory company cap. Strategic cross-asset wrappers, existing scaled holdings, and
-the required cash reserve remain separate, so this operational boundary does not bind
-feasible portfolio construction.
+Explicit count limits remain accepted only as compatibility/test overrides. The
+production default is uncapped at the snapshot, deep-analysis, and decision-evidence
+admission stages.
+
+## Persistence and cleanup
+
+The evidence spool is an operational buffer, not an investment authority:
+
+- entries are append-only and content-hashed by namespace and symbol;
+- a conflicting second write for the same symbol is rejected;
+- completed provider records are available through read-only lazy mappings;
+- the spool contains no credentials or authorization state;
+- normal completion removes the cycle-local spool after compact governed evidence has
+  been built; abandoned spools older than two days are removed at the next collection;
+- the canonical append-only screening and production-context stores remain the final
+  decision records.
 
 ## Governance boundary
 
-This correction does not shrink the eligible universe, lower an investment threshold,
-change the ranking formula, shorten the evidence window for an admitted candidate,
-remove holding review, manufacture evidence, authorize the CIO, alter construction,
-execute an order, or enable real money. It restores the intended distinction between
-broad screening and decision-eligible evidence while imposing a finite production
-memory envelope.
+This correction does not lower an investment threshold, change the ranking formula,
+shorten an evidence window, remove holding review, manufacture evidence, authorize the
+CIO, alter construction, execute an order, or enable real money. It removes arbitrary
+candidate-count admission limits while retaining a finite provider-payload memory
+envelope.
