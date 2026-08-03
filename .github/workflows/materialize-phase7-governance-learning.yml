@@ -67,7 +67,7 @@ jobs:
           git add cio/models.py cio/service.py cio/__init__.py cio/policy_authority.py cio/evidence_outage.py
           git add opportunity/engine.py application/cio_cycle.py evaluation/__init__.py evaluation/decision_value.py
           git add tests/test_policy_outage_and_decision_value.py
-          git rm scripts/materialize_phase7_governance_learning.py
+          git rm -f scripts/materialize_phase7_governance_learning.py
           git rm scripts/repair_phase7_materializer.py
           git rm .github/workflows/materialize-phase7-governance-learning.yml
           git commit -m "Integrate canonical policy outage aging and advisory decision learning"
