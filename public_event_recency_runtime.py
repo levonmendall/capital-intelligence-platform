@@ -6,12 +6,17 @@ but that timestamp must not renew an old story's investor-facing 24-hour life.
 This presentation-only adapter makes publication time the primary recency
 authority, event time the secondary authority, and retrieval time a last-resort
 fallback when the source supplied neither.
+
+The Render snapshot keeps a bounded source-timed history so the Today surface can
+show the most recent prior stories when a current cycle contains no new qualifying
+event. Current-story eligibility remains enforced downstream by the unchanged
+24-hour selection controls.
 """
 
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import ModuleType
 from typing import Any, Mapping
 
@@ -42,21 +47,26 @@ def source_event_time(record: Mapping[str, Any]) -> datetime | None:
 
 
 def _recent_public_event_snapshot(event_ui: ModuleType):
+    """Return bounded source-timed history; downstream selection decides recency."""
+
     path = event_ui._records_path()
     try:
         modified_ns = path.stat().st_mtime_ns
     except OSError:
         modified_ns = 0
-    reader = getattr(event_ui._read_public_event_file, "__wrapped__", event_ui._read_public_event_file)
+    reader = getattr(
+        event_ui._read_public_event_file,
+        "__wrapped__",
+        event_ui._read_public_event_file,
+    )
     snapshot = reader(str(path), modified_ns)
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=48)
     timed_records: list[tuple[datetime, Mapping[str, Any]]] = []
     for record in snapshot.records:
         if not isinstance(record, Mapping):
             continue
         observed_at = source_event_time(record)
-        if observed_at is None or observed_at < cutoff or observed_at > now:
+        if observed_at is None or observed_at > now:
             continue
         timed_records.append((observed_at, record))
     timed_records.sort(key=lambda item: item[0], reverse=True)
