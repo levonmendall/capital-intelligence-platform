@@ -44,6 +44,8 @@ class CIOJournalEventType(str, Enum):
     THESIS_REVIEW = "thesis_review"
     PORTFOLIO_CONSTRUCTION = "portfolio_construction"
     CONSTRUCTION_RECONCILIATION = "construction_reconciliation"
+    CANDIDATE_RISK_ASSESSMENT = "candidate_risk_assessment"
+    JOINT_CANDIDATE_ASSESSMENT = "joint_candidate_assessment"
     DECISION_EVIDENCE_SNAPSHOT = "decision_evidence_snapshot"
     DECISION_EVALUATION = "decision_evaluation"
     CONFIDENCE_CALIBRATION = "confidence_calibration"
