@@ -12,23 +12,51 @@
       "required": true,
       "credential_environment_variables": [],
       "parameters": {
-        "query": "(economy OR markets OR inflation OR central bank OR earnings OR commodities OR sanctions OR conflict OR cyber OR weather)",
+        "query": "(economy OR markets OR stocks OR bonds OR oil OR inflation OR central bank OR earnings OR commodities OR sanctions OR conflict OR ceasefire OR trade OR cyber OR weather)",
         "mode": "artlist",
         "format": "json",
         "maxrecords": 250,
         "sort": "HybridRel",
-        "timespan": "1h"
+        "timespan": "24h"
       },
       "headers": {},
       "maximum_records": 250,
-      "domains": ["current_events_news", "geopolitical_security", "government_policy_regulation", "public_health", "cybersecurity_incidents", "supply_chain_shipping_inventories", "weather_climate_disasters", "social_search_sentiment"],
-      "impact_channels": ["growth", "inflation", "policy", "earnings", "credit", "supply", "demand", "commodity", "currency", "volatility", "regulation", "geopolitical", "cyber", "climate_weather", "sentiment"],
+      "domains": [
+        "current_events_news",
+        "geopolitical_security",
+        "government_policy_regulation",
+        "public_health",
+        "cybersecurity_incidents",
+        "supply_chain_shipping_inventories",
+        "weather_climate_disasters",
+        "social_search_sentiment"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "earnings",
+        "credit",
+        "supply",
+        "demand",
+        "commodity",
+        "currency",
+        "volatility",
+        "regulation",
+        "geopolitical",
+        "cyber",
+        "climate_weather",
+        "sentiment"
+      ],
       "reliability": 0.55,
       "relevance": 0.7,
       "materiality": 0.45,
       "license_identifier": "GDELT-public-api-metadata",
       "usage_rights_identifier": "metadata-and-links-only.no-article-body-storage",
-      "limitations": ["Discovery metadata only; article text is not copied or stored.", "Must be corroborated by an original or independently licensed source before CIO reliance."]
+      "limitations": [
+        "Discovery metadata only; article text is not copied or stored.",
+        "Must be corroborated by an original or independently licensed source before CIO reliance."
+      ]
     },
     {
       "identifier": "federal-reserve-live",
@@ -43,14 +71,30 @@
       "parameters": {},
       "headers": {},
       "maximum_records": 100,
-      "domains": ["current_events_news", "government_policy_regulation", "central_bank_communications"],
-      "impact_channels": ["growth", "inflation", "policy", "liquidity", "discount_rate", "credit", "currency", "volatility", "regulation"],
+      "domains": [
+        "current_events_news",
+        "government_policy_regulation",
+        "central_bank_communications"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "liquidity",
+        "discount_rate",
+        "credit",
+        "currency",
+        "volatility",
+        "regulation"
+      ],
       "reliability": 0.99,
       "relevance": 0.95,
       "materiality": 0.85,
       "license_identifier": "Federal-Reserve-public-information",
       "usage_rights_identifier": "official-feed.internal-analysis",
-      "limitations": ["Official U.S. central-bank source; does not provide independent interpretation."]
+      "limitations": [
+        "Official U.S. central-bank source; does not provide independent interpretation."
+      ]
     },
     {
       "identifier": "ecb-live",
@@ -65,14 +109,30 @@
       "parameters": {},
       "headers": {},
       "maximum_records": 100,
-      "domains": ["current_events_news", "government_policy_regulation", "central_bank_communications"],
-      "impact_channels": ["growth", "inflation", "policy", "liquidity", "discount_rate", "credit", "currency", "volatility", "regulation"],
+      "domains": [
+        "current_events_news",
+        "government_policy_regulation",
+        "central_bank_communications"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "liquidity",
+        "discount_rate",
+        "credit",
+        "currency",
+        "volatility",
+        "regulation"
+      ],
       "reliability": 0.99,
       "relevance": 0.9,
       "materiality": 0.8,
       "license_identifier": "ECB-public-information",
       "usage_rights_identifier": "official-feed.internal-analysis",
-      "limitations": ["Official euro-area central-bank source; does not provide independent interpretation."]
+      "limitations": [
+        "Official euro-area central-bank source; does not provide independent interpretation."
+      ]
     },
     {
       "identifier": "sec-press-live",
@@ -83,19 +143,35 @@
       "independence_group": "sec-press-office",
       "enabled": true,
       "required": true,
-      "credential_environment_variables": ["SEC_USER_AGENT"],
+      "credential_environment_variables": [
+        "SEC_USER_AGENT"
+      ],
       "user_agent_environment_variable": "SEC_USER_AGENT",
       "parameters": {},
-      "headers": {"Accept": "application/rss+xml, application/xml;q=0.9"},
+      "headers": {
+        "Accept": "application/rss+xml, application/xml;q=0.9"
+      },
       "maximum_records": 100,
-      "domains": ["current_events_news", "government_policy_regulation", "legal_litigation_sanctions", "filings_corporate_disclosures"],
-      "impact_channels": ["earnings", "regulation", "operational", "volatility"],
+      "domains": [
+        "current_events_news",
+        "government_policy_regulation",
+        "legal_litigation_sanctions",
+        "filings_corporate_disclosures"
+      ],
+      "impact_channels": [
+        "earnings",
+        "regulation",
+        "operational",
+        "volatility"
+      ],
       "reliability": 0.99,
       "relevance": 0.85,
       "materiality": 0.7,
       "license_identifier": "SEC-public-information",
       "usage_rights_identifier": "official-feed.internal-analysis",
-      "limitations": ["Requires the descriptive SEC_USER_AGENT already used by the EDGAR adapter."]
+      "limitations": [
+        "Requires the descriptive SEC_USER_AGENT already used by the EDGAR adapter."
+      ]
     },
     {
       "identifier": "federal-register-live",
@@ -107,17 +183,37 @@
       "enabled": true,
       "required": true,
       "credential_environment_variables": [],
-      "parameters": {"per_page": 100, "order": "newest"},
-      "headers": {"Accept": "application/json"},
+      "parameters": {
+        "per_page": 100,
+        "order": "newest"
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 100,
-      "domains": ["current_events_news", "government_policy_regulation", "legal_litigation_sanctions", "elections_political_risk"],
-      "impact_channels": ["policy", "earnings", "credit", "regulation", "geopolitical", "operational", "volatility"],
+      "domains": [
+        "current_events_news",
+        "government_policy_regulation",
+        "legal_litigation_sanctions",
+        "elections_political_risk"
+      ],
+      "impact_channels": [
+        "policy",
+        "earnings",
+        "credit",
+        "regulation",
+        "geopolitical",
+        "operational",
+        "volatility"
+      ],
       "reliability": 0.99,
       "relevance": 0.9,
       "materiality": 0.75,
       "license_identifier": "Federal-Register-public-api",
       "usage_rights_identifier": "official-public-record.internal-analysis",
-      "limitations": ["Documents require agency, authority, effective-date, and affected-entity interpretation before portfolio conclusions."]
+      "limitations": [
+        "Documents require agency, authority, effective-date, and affected-entity interpretation before portfolio conclusions."
+      ]
     },
     {
       "identifier": "ofac-sdn-live",
@@ -130,16 +226,36 @@
       "required": true,
       "credential_environment_variables": [],
       "parameters": {},
-      "headers": {"Accept": "text/csv"},
+      "headers": {
+        "Accept": "text/csv"
+      },
       "maximum_records": 5000,
-      "domains": ["current_events_news", "geopolitical_security", "government_policy_regulation", "legal_litigation_sanctions", "filings_corporate_disclosures"],
-      "impact_channels": ["policy", "earnings", "credit", "currency", "regulation", "geopolitical", "operational", "counterparty", "volatility"],
+      "domains": [
+        "current_events_news",
+        "geopolitical_security",
+        "government_policy_regulation",
+        "legal_litigation_sanctions",
+        "filings_corporate_disclosures"
+      ],
+      "impact_channels": [
+        "policy",
+        "earnings",
+        "credit",
+        "currency",
+        "regulation",
+        "geopolitical",
+        "operational",
+        "counterparty",
+        "volatility"
+      ],
       "reliability": 0.99,
       "relevance": 0.9,
       "materiality": 0.85,
       "license_identifier": "OFAC-Sanctions-List-Service-public-data",
       "usage_rights_identifier": "official-sanctions-data.internal-analysis",
-      "limitations": ["A list match requires governed entity-resolution and legal review; fuzzy or alias matches are not investment conclusions."]
+      "limitations": [
+        "A list match requires governed entity-resolution and legal review; fuzzy or alias matches are not investment conclusions."
+      ]
     },
     {
       "identifier": "ofac-consolidated-live",
@@ -152,16 +268,35 @@
       "required": false,
       "credential_environment_variables": [],
       "parameters": {},
-      "headers": {"Accept": "text/csv"},
+      "headers": {
+        "Accept": "text/csv"
+      },
       "maximum_records": 5000,
-      "domains": ["current_events_news", "geopolitical_security", "government_policy_regulation", "legal_litigation_sanctions"],
-      "impact_channels": ["policy", "earnings", "credit", "currency", "regulation", "geopolitical", "operational", "counterparty", "volatility"],
+      "domains": [
+        "current_events_news",
+        "geopolitical_security",
+        "government_policy_regulation",
+        "legal_litigation_sanctions"
+      ],
+      "impact_channels": [
+        "policy",
+        "earnings",
+        "credit",
+        "currency",
+        "regulation",
+        "geopolitical",
+        "operational",
+        "counterparty",
+        "volatility"
+      ],
       "reliability": 0.99,
       "relevance": 0.85,
       "materiality": 0.8,
       "license_identifier": "OFAC-Sanctions-List-Service-public-data",
       "usage_rights_identifier": "official-sanctions-data.internal-analysis",
-      "limitations": ["Non-SDN restrictions vary by program and require program-specific legal interpretation."]
+      "limitations": [
+        "Non-SDN restrictions vary by program and require program-specific legal interpretation."
+      ]
     },
     {
       "identifier": "cftc-positioning-live",
@@ -173,17 +308,34 @@
       "enabled": true,
       "required": true,
       "credential_environment_variables": [],
-      "parameters": {"$limit": 500, "$order": "report_date_as_yyyy_mm_dd DESC"},
-      "headers": {"Accept": "application/json"},
+      "parameters": {
+        "$limit": 500,
+        "$order": "report_date_as_yyyy_mm_dd DESC"
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 500,
-      "domains": ["futures_positioning", "commodity_physical_balances", "fund_flows_positioning"],
-      "impact_channels": ["commodity", "currency", "volatility", "positioning", "sentiment"],
+      "domains": [
+        "futures_positioning",
+        "commodity_physical_balances",
+        "fund_flows_positioning"
+      ],
+      "impact_channels": [
+        "commodity",
+        "currency",
+        "volatility",
+        "positioning",
+        "sentiment"
+      ],
       "reliability": 0.98,
       "relevance": 0.8,
       "materiality": 0.65,
       "license_identifier": "CFTC-public-reporting",
       "usage_rights_identifier": "official-open-data.internal-analysis",
-      "limitations": ["Weekly positioning data; not a real-time futures tape or complete physical inventory source."]
+      "limitations": [
+        "Weekly positioning data; not a real-time futures tape or complete physical inventory source."
+      ]
     },
     {
       "identifier": "nws-weather-alerts-live",
@@ -196,16 +348,32 @@
       "required": true,
       "credential_environment_variables": [],
       "parameters": {},
-      "headers": {"Accept": "application/geo+json", "User-Agent": "Capital-Intelligence-Platform/1.0 (https://github.com/levonmendall/capital-intelligence-platform-)"},
+      "headers": {
+        "Accept": "application/geo+json",
+        "User-Agent": "Capital-Intelligence-Platform/1.0 (https://github.com/levonmendall/capital-intelligence-platform-)"
+      },
       "maximum_records": 500,
-      "domains": ["weather_climate_disasters", "commodity_physical_balances", "supply_chain_shipping_inventories", "energy_grid_power"],
-      "impact_channels": ["supply", "demand", "commodity", "operational", "climate_weather"],
+      "domains": [
+        "weather_climate_disasters",
+        "commodity_physical_balances",
+        "supply_chain_shipping_inventories",
+        "energy_grid_power"
+      ],
+      "impact_channels": [
+        "supply",
+        "demand",
+        "commodity",
+        "operational",
+        "climate_weather"
+      ],
       "reliability": 0.99,
       "relevance": 0.7,
       "materiality": 0.6,
       "license_identifier": "NOAA-NWS-public-data",
       "usage_rights_identifier": "official-public-api.internal-analysis",
-      "limitations": ["U.S.-focused alerts; global weather coverage still requires additional national and commercial sources."]
+      "limitations": [
+        "U.S.-focused alerts; global weather coverage still requires additional national and commercial sources."
+      ]
     },
     {
       "identifier": "fema-disasters-live",
@@ -217,17 +385,39 @@
       "enabled": true,
       "required": true,
       "credential_environment_variables": [],
-      "parameters": {"$top": 250, "$orderby": "declarationDate desc"},
-      "headers": {"Accept": "application/json"},
+      "parameters": {
+        "$top": 250,
+        "$orderby": "declarationDate desc"
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 250,
-      "domains": ["current_events_news", "weather_climate_disasters", "supply_chain_shipping_inventories", "real_estate_activity", "energy_grid_power"],
-      "impact_channels": ["supply", "demand", "commodity", "earnings", "credit", "operational", "climate_weather", "counterparty"],
+      "domains": [
+        "current_events_news",
+        "weather_climate_disasters",
+        "supply_chain_shipping_inventories",
+        "real_estate_activity",
+        "energy_grid_power"
+      ],
+      "impact_channels": [
+        "supply",
+        "demand",
+        "commodity",
+        "earnings",
+        "credit",
+        "operational",
+        "climate_weather",
+        "counterparty"
+      ],
       "reliability": 0.98,
       "relevance": 0.75,
       "materiality": 0.7,
       "license_identifier": "OpenFEMA-public-api",
       "usage_rights_identifier": "official-open-data.internal-analysis",
-      "limitations": ["Declarations measure official disaster status, not complete loss estimates or company-level exposure."]
+      "limitations": [
+        "Declarations measure official disaster status, not complete loss estimates or company-level exposure."
+      ]
     },
     {
       "identifier": "usgs-earthquakes-live",
@@ -240,16 +430,30 @@
       "required": true,
       "credential_environment_variables": [],
       "parameters": {},
-      "headers": {"Accept": "application/geo+json"},
+      "headers": {
+        "Accept": "application/geo+json"
+      },
       "maximum_records": 500,
-      "domains": ["weather_climate_disasters", "supply_chain_shipping_inventories", "energy_grid_power"],
-      "impact_channels": ["supply", "commodity", "operational", "climate_weather", "counterparty"],
+      "domains": [
+        "weather_climate_disasters",
+        "supply_chain_shipping_inventories",
+        "energy_grid_power"
+      ],
+      "impact_channels": [
+        "supply",
+        "commodity",
+        "operational",
+        "climate_weather",
+        "counterparty"
+      ],
       "reliability": 0.99,
       "relevance": 0.55,
       "materiality": 0.6,
       "license_identifier": "USGS-public-domain-data",
       "usage_rights_identifier": "official-public-feed.internal-analysis",
-      "limitations": ["Earthquake events require geographic exposure mapping before portfolio relevance can be high."]
+      "limitations": [
+        "Earthquake events require geographic exposure mapping before portfolio relevance can be high."
+      ]
     },
     {
       "identifier": "nasa-firms-fire-live",
@@ -260,18 +464,37 @@
       "independence_group": "nasa-firms",
       "enabled": true,
       "required": false,
-      "credential_environment_variables": ["NASA_FIRMS_MAP_KEY"],
+      "credential_environment_variables": [
+        "NASA_FIRMS_MAP_KEY"
+      ],
       "parameters": {},
-      "headers": {"Accept": "text/csv"},
+      "headers": {
+        "Accept": "text/csv"
+      },
       "maximum_records": 1000,
-      "domains": ["weather_climate_disasters", "commodity_physical_balances", "supply_chain_shipping_inventories", "energy_grid_power", "real_estate_activity"],
-      "impact_channels": ["supply", "demand", "commodity", "earnings", "operational", "climate_weather"],
+      "domains": [
+        "weather_climate_disasters",
+        "commodity_physical_balances",
+        "supply_chain_shipping_inventories",
+        "energy_grid_power",
+        "real_estate_activity"
+      ],
+      "impact_channels": [
+        "supply",
+        "demand",
+        "commodity",
+        "earnings",
+        "operational",
+        "climate_weather"
+      ],
       "reliability": 0.96,
       "relevance": 0.75,
       "materiality": 0.7,
       "license_identifier": "NASA-FIRMS-open-data",
       "usage_rights_identifier": "official-near-real-time-data.internal-analysis",
-      "limitations": ["A free FIRMS map key is required; detections are hotspots, not confirmed damage or issuer exposure."]
+      "limitations": [
+        "A free FIRMS map key is required; detections are hotspots, not confirmed damage or issuer exposure."
+      ]
     },
     {
       "identifier": "cisa-kev-live",
@@ -284,16 +507,28 @@
       "required": true,
       "credential_environment_variables": [],
       "parameters": {},
-      "headers": {"Accept": "application/json"},
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 500,
-      "domains": ["cybersecurity_incidents", "current_events_news"],
-      "impact_channels": ["operational", "cyber", "counterparty", "volatility"],
+      "domains": [
+        "cybersecurity_incidents",
+        "current_events_news"
+      ],
+      "impact_channels": [
+        "operational",
+        "cyber",
+        "counterparty",
+        "volatility"
+      ],
       "reliability": 0.99,
       "relevance": 0.7,
       "materiality": 0.65,
       "license_identifier": "CISA-KEV-public-data",
       "usage_rights_identifier": "official-public-catalog.internal-analysis",
-      "limitations": ["Vulnerability presence is not proof that a portfolio company has been compromised."]
+      "limitations": [
+        "Vulnerability presence is not proof that a portfolio company has been compromised."
+      ]
     },
     {
       "identifier": "openfda-food-recalls-live",
@@ -305,17 +540,38 @@
       "enabled": true,
       "required": false,
       "credential_environment_variables": [],
-      "parameters": {"sort": "report_date:desc", "limit": 100},
-      "headers": {"Accept": "application/json"},
+      "parameters": {
+        "sort": "report_date:desc",
+        "limit": 100
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 100,
-      "domains": ["current_events_news", "government_policy_regulation", "public_health", "supply_chain_shipping_inventories", "filings_corporate_disclosures"],
-      "impact_channels": ["earnings", "supply", "demand", "regulation", "operational", "counterparty", "volatility"],
+      "domains": [
+        "current_events_news",
+        "government_policy_regulation",
+        "public_health",
+        "supply_chain_shipping_inventories",
+        "filings_corporate_disclosures"
+      ],
+      "impact_channels": [
+        "earnings",
+        "supply",
+        "demand",
+        "regulation",
+        "operational",
+        "counterparty",
+        "volatility"
+      ],
       "reliability": 0.97,
       "relevance": 0.8,
       "materiality": 0.7,
       "license_identifier": "openFDA-public-api",
       "usage_rights_identifier": "official-enforcement-data.internal-analysis",
-      "limitations": ["Recall reports require issuer, brand, product, distribution, and financial-exposure mapping."]
+      "limitations": [
+        "Recall reports require issuer, brand, product, distribution, and financial-exposure mapping."
+      ]
     },
     {
       "identifier": "openfda-drug-recalls-live",
@@ -327,17 +583,38 @@
       "enabled": true,
       "required": false,
       "credential_environment_variables": [],
-      "parameters": {"sort": "report_date:desc", "limit": 100},
-      "headers": {"Accept": "application/json"},
+      "parameters": {
+        "sort": "report_date:desc",
+        "limit": 100
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 100,
-      "domains": ["current_events_news", "government_policy_regulation", "public_health", "supply_chain_shipping_inventories", "filings_corporate_disclosures"],
-      "impact_channels": ["earnings", "supply", "demand", "regulation", "operational", "counterparty", "volatility"],
+      "domains": [
+        "current_events_news",
+        "government_policy_regulation",
+        "public_health",
+        "supply_chain_shipping_inventories",
+        "filings_corporate_disclosures"
+      ],
+      "impact_channels": [
+        "earnings",
+        "supply",
+        "demand",
+        "regulation",
+        "operational",
+        "counterparty",
+        "volatility"
+      ],
       "reliability": 0.97,
       "relevance": 0.85,
       "materiality": 0.75,
       "license_identifier": "openFDA-public-api",
       "usage_rights_identifier": "official-enforcement-data.internal-analysis",
-      "limitations": ["Recall reports are not a complete measure of clinical, legal, or financial impact."]
+      "limitations": [
+        "Recall reports are not a complete measure of clinical, legal, or financial impact."
+      ]
     },
     {
       "identifier": "openfda-device-recalls-live",
@@ -349,17 +626,38 @@
       "enabled": true,
       "required": false,
       "credential_environment_variables": [],
-      "parameters": {"sort": "report_date:desc", "limit": 100},
-      "headers": {"Accept": "application/json"},
+      "parameters": {
+        "sort": "report_date:desc",
+        "limit": 100
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 100,
-      "domains": ["current_events_news", "government_policy_regulation", "public_health", "supply_chain_shipping_inventories", "filings_corporate_disclosures"],
-      "impact_channels": ["earnings", "supply", "demand", "regulation", "operational", "counterparty", "volatility"],
+      "domains": [
+        "current_events_news",
+        "government_policy_regulation",
+        "public_health",
+        "supply_chain_shipping_inventories",
+        "filings_corporate_disclosures"
+      ],
+      "impact_channels": [
+        "earnings",
+        "supply",
+        "demand",
+        "regulation",
+        "operational",
+        "counterparty",
+        "volatility"
+      ],
       "reliability": 0.97,
       "relevance": 0.8,
       "materiality": 0.7,
       "license_identifier": "openFDA-public-api",
       "usage_rights_identifier": "official-enforcement-data.internal-analysis",
-      "limitations": ["Device recall data requires manufacturer, product-line, and revenue exposure mapping."]
+      "limitations": [
+        "Device recall data requires manufacturer, product-line, and revenue exposure mapping."
+      ]
     },
     {
       "identifier": "who-disease-outbreaks-live",
@@ -371,17 +669,39 @@
       "enabled": true,
       "required": false,
       "credential_environment_variables": [],
-      "parameters": {"$top": 100, "$orderby": "PublicationDateAndTime desc"},
-      "headers": {"Accept": "application/json"},
+      "parameters": {
+        "$top": 100,
+        "$orderby": "PublicationDateAndTime desc"
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 100,
-      "domains": ["current_events_news", "public_health", "geopolitical_security", "supply_chain_shipping_inventories"],
-      "impact_channels": ["growth", "earnings", "supply", "demand", "currency", "volatility", "geopolitical", "operational", "counterparty"],
+      "domains": [
+        "current_events_news",
+        "public_health",
+        "geopolitical_security",
+        "supply_chain_shipping_inventories"
+      ],
+      "impact_channels": [
+        "growth",
+        "earnings",
+        "supply",
+        "demand",
+        "currency",
+        "volatility",
+        "geopolitical",
+        "operational",
+        "counterparty"
+      ],
       "reliability": 0.99,
       "relevance": 0.85,
       "materiality": 0.8,
       "license_identifier": "WHO-public-information-api",
       "usage_rights_identifier": "official-public-health-information.internal-analysis",
-      "limitations": ["WHO Disease Outbreak News is authoritative but not an exhaustive list of every event WHO monitors."]
+      "limitations": [
+        "WHO Disease Outbreak News is authoritative but not an exhaustive list of every event WHO monitors."
+      ]
     },
     {
       "identifier": "treasury-fiscal-live",
@@ -393,17 +713,36 @@
       "enabled": true,
       "required": true,
       "credential_environment_variables": [],
-      "parameters": {"sort": "-record_date", "page[size]": 100},
-      "headers": {"Accept": "application/json"},
+      "parameters": {
+        "sort": "-record_date",
+        "page[size]": 100
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 100,
-      "domains": ["government_policy_regulation", "central_bank_communications", "credit_ratings_defaults"],
-      "impact_channels": ["growth", "inflation", "policy", "liquidity", "discount_rate", "credit", "currency"],
+      "domains": [
+        "government_policy_regulation",
+        "central_bank_communications",
+        "credit_ratings_defaults"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "liquidity",
+        "discount_rate",
+        "credit",
+        "currency"
+      ],
       "reliability": 0.99,
       "relevance": 0.75,
       "materiality": 0.6,
       "license_identifier": "Treasury-Fiscal-Data-public-api",
       "usage_rights_identifier": "official-open-data.internal-analysis",
-      "limitations": ["Debt totals alone do not measure fiscal impulse, issuance composition, or market demand."]
+      "limitations": [
+        "Debt totals alone do not measure fiscal impulse, issuance composition, or market demand."
+      ]
     },
     {
       "identifier": "world-bank-global-growth-live",
@@ -415,17 +754,38 @@
       "enabled": true,
       "required": true,
       "credential_environment_variables": [],
-      "parameters": {"format": "json", "per_page": 400, "date": "2023:2026"},
-      "headers": {"Accept": "application/json"},
+      "parameters": {
+        "format": "json",
+        "per_page": 400,
+        "date": "2023:2026"
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 400,
-      "domains": ["government_policy_regulation", "consumer_activity", "labor_web_activity", "real_estate_activity"],
-      "impact_channels": ["growth", "inflation", "policy", "earnings", "credit", "demand", "currency"],
+      "domains": [
+        "government_policy_regulation",
+        "consumer_activity",
+        "labor_web_activity",
+        "real_estate_activity"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "earnings",
+        "credit",
+        "demand",
+        "currency"
+      ],
       "reliability": 0.95,
       "relevance": 0.65,
       "materiality": 0.55,
       "license_identifier": "World-Bank-Indicators-API",
       "usage_rights_identifier": "official-open-data.internal-analysis",
-      "limitations": ["Lower-frequency macro coverage; publication and revision timing must remain explicit."]
+      "limitations": [
+        "Lower-frequency macro coverage; publication and revision timing must remain explicit."
+      ]
     },
     {
       "identifier": "imf-global-growth-live",
@@ -438,16 +798,34 @@
       "required": false,
       "credential_environment_variables": [],
       "parameters": {},
-      "headers": {"Accept": "application/json"},
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 1000,
-      "domains": ["government_policy_regulation", "consumer_activity", "labor_web_activity", "real_estate_activity", "analyst_estimates_revisions"],
-      "impact_channels": ["growth", "inflation", "policy", "earnings", "credit", "demand", "currency"],
+      "domains": [
+        "government_policy_regulation",
+        "consumer_activity",
+        "labor_web_activity",
+        "real_estate_activity",
+        "analyst_estimates_revisions"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "earnings",
+        "credit",
+        "demand",
+        "currency"
+      ],
       "reliability": 0.96,
       "relevance": 0.75,
       "materiality": 0.65,
       "license_identifier": "IMF-DataMapper-public-api",
       "usage_rights_identifier": "official-macro-data.internal-analysis",
-      "limitations": ["Forecast and estimate vintages must be preserved; country aggregates do not map directly to portfolio instruments."]
+      "limitations": [
+        "Forecast and estimate vintages must be preserved; country aggregates do not map directly to portfolio instruments."
+      ]
     },
     {
       "identifier": "eia-energy-live",
@@ -458,18 +836,42 @@
       "independence_group": "us-eia",
       "enabled": true,
       "required": false,
-      "credential_environment_variables": ["EIA_API_KEY"],
-      "parameters": {"api_key": "${EIA_API_KEY}", "frequency": "weekly", "data[0]": "value", "sort[0][column]": "period", "sort[0][direction]": "desc", "length": 500},
-      "headers": {"Accept": "application/json"},
+      "credential_environment_variables": [
+        "EIA_API_KEY"
+      ],
+      "parameters": {
+        "api_key": "${EIA_API_KEY}",
+        "frequency": "weekly",
+        "data[0]": "value",
+        "sort[0][column]": "period",
+        "sort[0][direction]": "desc",
+        "length": 500
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
       "maximum_records": 500,
-      "domains": ["commodity_physical_balances", "energy_grid_power", "supply_chain_shipping_inventories"],
-      "impact_channels": ["inflation", "supply", "demand", "commodity", "currency", "operational"],
+      "domains": [
+        "commodity_physical_balances",
+        "energy_grid_power",
+        "supply_chain_shipping_inventories"
+      ],
+      "impact_channels": [
+        "inflation",
+        "supply",
+        "demand",
+        "commodity",
+        "currency",
+        "operational"
+      ],
       "reliability": 0.99,
       "relevance": 0.85,
       "materiality": 0.75,
       "license_identifier": "EIA-open-data-terms",
       "usage_rights_identifier": "official-free-api.internal-analysis",
-      "limitations": ["A free EIA_API_KEY is required; bulk files may be used separately without a key."]
+      "limitations": [
+        "A free EIA_API_KEY is required; bulk files may be used separately without a key."
+      ]
     }
   ]
 }
