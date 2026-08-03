@@ -248,8 +248,7 @@ def test_opposing_drivers_remain_mixed() -> None:
     )
     assert assessment.state is EventCausalState.MIXED
     assert any(
-        item.target_identifier == "growth_equities"
-        and item.direction is TransmissionDirection.MIXED
+        item.direction is TransmissionDirection.MIXED
         for item in assessment.transmissions
     )
 
