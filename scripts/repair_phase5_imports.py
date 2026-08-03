@@ -35,3 +35,28 @@ replace_if_present(
     "    assert journal.count() == 8\n",
     "    assert journal.count() == 9\n",
 )
+replace_once(
+    "tests/test_forward_intelligence_integration.py",
+    "def _bundle(candidate):\n",
+    "def _bundle(candidate, *, as_of=None):\n    point_in_time = candidate.as_of if as_of is None else as_of\n",
+)
+replace_once(
+    "tests/test_forward_intelligence_integration.py",
+    "            as_of=candidate.as_of,\n",
+    "            as_of=point_in_time,\n",
+)
+replace_once(
+    "tests/test_forward_intelligence_integration.py",
+    "            as_of=candidate.as_of,\n",
+    "            as_of=point_in_time,\n",
+)
+replace_once(
+    "tests/test_forward_intelligence_integration.py",
+    "        as_of=candidate.as_of,\n        business=business,\n",
+    "        as_of=point_in_time,\n        business=business,\n",
+)
+replace_once(
+    "tests/test_forward_intelligence_integration.py",
+    "    bundle = _bundle(candidate)\n    lineage = replace(\n",
+    "    bundle = _bundle(candidate, as_of=base.as_of)\n    lineage = replace(\n",
+)
