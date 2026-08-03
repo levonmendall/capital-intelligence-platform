@@ -1,4 +1,4 @@
-"""Broad discovery stays complete while deep evidence remains resource-bounded."""
+"""Complete broad consideration stays resource-bounded through streaming batches."""
 
 from __future__ import annotations
 
@@ -98,7 +98,39 @@ class _SEC:
         )
 
 
-def test_broad_screen_advances_only_bounded_decision_evidence_cohort() -> None:
+def test_default_policy_advances_every_objective_qualified_company() -> None:
+    client = _Client()
+    policy = EquityDiscoveryPolicy(
+        deep_history_batch_size=2,
+        minimum_history_bars=252,
+    )
+
+    result = discover_us_equities(
+        as_of=AS_OF,
+        held_symbols=("FFF",),
+        client=client,
+        sec_provider=_SEC(),
+        policy=policy,
+    )
+
+    assert result.screened_asset_count == 6
+    assert result.snapshot_covered_count == 6
+    assert set().union(*map(set, client.snapshot_calls)) == set(SYMBOLS)
+    assert result.deep_shortlist_count == 6
+
+    deep_batches = tuple(
+        batch for batch in client.history_calls if batch != ("VTI",)
+    )
+    assert set().union(*(set(batch) for batch in deep_batches)) == set(SYMBOLS)
+    assert all(len(batch) <= 2 for batch in deep_batches)
+    assert {item.symbol for item in result.selected} == set(SYMBOLS)
+
+    reasons = dict(result.exclusions)
+    assert "outside_deep_evidence_cohort" not in reasons.values()
+    assert "outside_decision_evidence_cohort" not in reasons.values()
+
+
+def test_explicit_compatibility_limits_remain_protected_and_auditable() -> None:
     client = _Client()
     policy = EquityDiscoveryPolicy(
         deep_shortlist_count=3,
@@ -115,19 +147,7 @@ def test_broad_screen_advances_only_bounded_decision_evidence_cohort() -> None:
         policy=policy,
     )
 
-    assert result.screened_asset_count == 6
-    assert result.snapshot_covered_count == 6
-    assert set().union(*map(set, client.snapshot_calls)) == set(SYMBOLS)
-
-    # Top three receive deep history and the held symbol is always protected.
     assert result.deep_shortlist_count == 4
-    deep_symbols = set().union(
-        *(set(batch) for batch in client.history_calls if batch != ("VTI",))
-    )
-    assert deep_symbols == {"AAA", "BBB", "CCC", "FFF"}
-    assert all(len(batch) <= 2 for batch in client.history_calls)
-
-    # Two strongest new companies plus the held company enter decision evidence.
     assert [item.symbol for item in result.selected] == ["AAA", "BBB", "FFF"]
     reasons = dict(result.exclusions)
     assert reasons["CCC"] == "outside_decision_evidence_cohort"
@@ -135,11 +155,14 @@ def test_broad_screen_advances_only_bounded_decision_evidence_cohort() -> None:
     assert reasons["EEE"] == "outside_deep_evidence_cohort"
 
 
-def test_default_policy_keeps_full_snapshot_scope_and_bounded_deep_work() -> None:
+def test_default_policy_has_no_candidate_count_admission_cap() -> None:
     policy = EquityDiscoveryPolicy()
 
     assert policy.maximum_snapshot_assets is None
-    assert policy.deep_shortlist_count == 400
-    assert policy.selected_candidate_count == 64
+    assert policy.deep_shortlist_count is None
+    assert policy.selected_candidate_count is None
     assert policy.deep_history_batch_size == 25
-    assert policy.version == "broad-us-equity-discovery.v3-bounded-decision-evidence"
+    assert (
+        policy.version
+        == "broad-us-equity-discovery.v4-complete-streaming-evidence"
+    )
