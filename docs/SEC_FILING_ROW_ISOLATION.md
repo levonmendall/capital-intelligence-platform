@@ -3,52 +3,56 @@
 ## Incident sequence
 
 The retried August 3, 2026 canonical CIO cycle reached cross-market evidence
-collection after the optional EODHD/LSE failure was isolated. The first SEC repair
-showed that malformed individual filing rows could be excluded without discarding an
-otherwise valid official filing history.
+collection after the optional EODHD/LSE failure was isolated. Early retries showed that
+isolated malformed SEC rows and bounded trailing legacy rows could otherwise discard
+hundreds of valid filings.
 
-Subsequent retries exposed bounded trailing legacy patterns in ASML and Suncor filing
-histories. Those incidents established one-percent ordinary and two-percent contiguous
-oldest-suffix controls.
+Subsequent retries exposed three distinct scope problems:
 
-The next retry reached Invesco QQQ Trust, Series 1, CIK `0001067839`. Twelve malformed
-oldest rows were present in a 254-row SEC submission set. That count exceeded the
-trailing percentage policy, but the production request was not asking for fund forms.
-It requested only corporate annual forms: `10-K`, `10-K/A`, `20-F`, `20-F/A`, `40-F`,
-and `40-F/A`.
+1. ASML and Suncor histories contained bounded malformed oldest-row suffixes.
+2. Invesco QQQ contained malformed legacy fund forms even though the production query
+   requested only corporate annual forms.
+3. STMicroelectronics, CIK `0000932787`, contained four malformed oldest annual-form
+   rows among 32 requested-form rows and 963 total submissions. The company-facts
+   payload did not reference those pre-XBRL filings, but the provider still validated
+   them before joining facts to submission acceptance times.
 
-The deeper defect was therefore filter order. The provider parsed and validated every
-SEC submission row before applying the requested-form filter. Unrelated legacy fund
-forms could block a corporate-facts request even though they were not evidence for the
-query.
+The final defect was therefore not an insufficient corruption allowance. A
+company-facts query was validating historical annual filings that could not contribute
+a company fact.
 
 ## Correction
 
-Production company evidence now applies query scope before row validation:
+Production SEC evidence now uses two layers of query scope:
 
 1. Required SEC columns and aligned parallel arrays remain structural prerequisites.
-2. A valid raw form is normalized first.
-3. Rows outside the filing forms requested by the point-in-time query are skipped
-   before acceptance, filing-date, report-date, accession, and document validation.
-4. A missing or invalid form cannot be proven out of scope and therefore remains
-   fail-closed.
-5. Ordinary malformed rows inside the requested form scope remain limited to one
-   percent, with a minimum allowance of one row.
-6. An in-scope filing history containing at least 100 rows may exclude a contiguous
-   malformed suffix only when it is the oldest part of the relevant SEC rows.
-7. That in-scope trailing-history allowance remains capped at two percent.
-8. Recent, scattered, middle-of-history, structural, or zero-usable-row corruption
-   inside the requested evidence scope still fails closed.
-9. Every retained row preserves its original accession number, acceptance time,
-   filing date, report date, form, document, retrieval time, and official archive URL.
-10. Diagnostics report complete and relevant row counts, requested forms, invalid
-    indexes, suffix classification, applied boundary, and policy version without
-    filing contents or credentials.
+2. Filing queries validate every row inside the requested filing forms.
+3. Company-facts queries first collect the accessions actually referenced by facts
+   inside the requested forms.
+4. Submission-row validation for company facts is limited to those referenced
+   accessions.
+5. An unreferenced pre-XBRL filing cannot veto a company-facts request because it is
+   not evidence used by that request.
+6. A referenced filing remains subject to the existing acceptance-time, filing-date,
+   report-date, accession, document, row-quality, and point-in-time controls.
+7. Missing referenced acceptance evidence causes the affected fact to remain
+   unavailable; excessive malformed referenced rows still fail closed.
+8. Ordinary malformed in-scope rows remain limited to one percent, with a minimum
+   allowance of one row.
+9. A sufficiently large in-scope history may exclude only a contiguous oldest-row
+   suffix capped at two percent.
+10. Missing columns, misaligned arrays, recent or scattered corruption, excessive
+    relevant corruption, and zero usable relevant rows remain blocking.
+11. Every retained record preserves its original SEC accession, acceptance time,
+    filing date, report date, form, document, retrieval time, and official archive URL.
+12. Diagnostics record complete-row, relevant-row, requested-form, requested-accession,
+    invalid-index, policy-version, and applied-boundary metadata without filing contents
+    or credentials.
 
 ## Governance boundary
 
 This change does not broaden acceptable corruption, infer a missing acceptance time,
 repair an SEC value, fabricate a filing, alter the decision cutoff, lower an investment
 threshold, create a candidate, authorize capital, change portfolio construction, or
-enable real money. It prevents evidence outside the explicit filing-form query from
-vetoing the evidence that was actually requested.
+enable real money. It prevents SEC rows that cannot contribute to the requested
+company-facts evidence from vetoing that evidence.

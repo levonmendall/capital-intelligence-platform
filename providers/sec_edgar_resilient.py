@@ -1,9 +1,9 @@
 """Scope-aware row isolation for official SEC EDGAR filing submissions.
 
 The SEC submissions endpoint uses parallel arrays. Malformed rows outside the filing
-forms requested by a point-in-time query must not block that query. Malformed rows
-inside the requested evidence scope remain bounded and fail closed when structural or
-material corruption is present.
+forms or fact accessions requested by a point-in-time query must not block that query.
+Malformed rows inside the requested evidence scope remain bounded and fail closed when
+structural or material corruption is present.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from providers.sec_edgar import (
 
 
 _LOGGER = logging.getLogger("capital_intelligence.providers.sec_edgar")
-_ROW_POLICY_VERSION = "sec-edgar-filing-row-isolation.v4"
+_ROW_POLICY_VERSION = "sec-edgar-filing-row-isolation.v5"
 _MINIMUM_TRAILING_POLICY_ROWS = 100
 
 
@@ -57,21 +57,10 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
         return tuple(ordered[: query.limit])
 
     def fetch_company_facts(self, query: FilingQuery) -> tuple[CompanyFact, ...]:
-        """Join facts only to filing forms included in the governed query."""
+        """Join facts only to SEC filings actually referenced by the fact payload."""
 
         self._validate_query(query)
         retrieved_at = self._retrieved_at()
-        submissions = self._submissions_payload(query.cik)
-        filings = self._filing_records(
-            submissions,
-            cik=query.cik,
-            retrieved_at=retrieved_at,
-            forms=query.forms,
-        )
-        accepted_by_accession = {
-            record.accession_number: record.accepted_at
-            for record in filings
-        }
         payload = self._request_payload(
             SEC_COMPANY_FACTS_URL.format(cik=query.cik),
             resource=f"company facts for {query.cik}",
@@ -81,6 +70,23 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
             raise SECEdgarProviderError(
                 f"SEC returned invalid company facts for {query.cik}."
             )
+
+        referenced_accessions = self._fact_accessions(
+            facts,
+            forms=query.forms,
+        )
+        submissions = self._submissions_payload(query.cik)
+        filings = self._filing_records(
+            submissions,
+            cik=query.cik,
+            retrieved_at=retrieved_at,
+            forms=query.forms,
+            accessions=referenced_accessions,
+        )
+        accepted_by_accession = {
+            record.accession_number: record.accepted_at
+            for record in filings
+        }
 
         normalized: list[CompanyFact] = []
         for taxonomy, taxonomy_facts in facts.items():
@@ -117,6 +123,46 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
         )
         return tuple(normalized[: query.limit])
 
+    @staticmethod
+    def _fact_accessions(
+        facts: dict[str, Any],
+        *,
+        forms: tuple[str, ...],
+    ) -> frozenset[str]:
+        """Return valid accessions referenced by facts inside the requested forms."""
+
+        form_scope = frozenset(form.strip().upper() for form in forms)
+        accessions: set[str] = set()
+        for taxonomy_facts in facts.values():
+            if not isinstance(taxonomy_facts, dict):
+                continue
+            for concept in taxonomy_facts.values():
+                if not isinstance(concept, dict):
+                    continue
+                units = concept.get("units")
+                if not isinstance(units, dict):
+                    continue
+                for entries in units.values():
+                    if not isinstance(entries, list):
+                        continue
+                    for entry in entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        raw_form = entry.get("form")
+                        raw_accession = entry.get("accn")
+                        if not isinstance(raw_form, str) or not raw_form.strip():
+                            continue
+                        if (
+                            not isinstance(raw_accession, str)
+                            or not raw_accession.strip()
+                        ):
+                            continue
+                        form = raw_form.strip().upper()
+                        if form_scope and form not in form_scope:
+                            continue
+                        accessions.add(raw_accession.strip())
+        return frozenset(accessions)
+
     @classmethod
     def _filing_records(
         cls,
@@ -125,6 +171,7 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
         cik: str,
         retrieved_at: datetime,
         forms: tuple[str, ...] = (),
+        accessions: frozenset[str] | None = None,
     ) -> tuple[FilingRecord, ...]:
         filings = payload.get("filings")
         recent = filings.get("recent") if isinstance(filings, dict) else None
@@ -160,14 +207,37 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
             return ()
 
         form_scope = frozenset(form.strip().upper() for form in forms)
+        accession_scope = (
+            None
+            if accessions is None
+            else frozenset(
+                accession.strip()
+                for accession in accessions
+                if isinstance(accession, str) and accession.strip()
+            )
+        )
+        if accession_scope == frozenset():
+            return ()
+
         records: list[FilingRecord] = []
         relevant_indexes: list[int] = []
         invalid_indexes: list[int] = []
         for index in range(row_count):
+            raw_accession = columns["accessionNumber"][index]
+            if accession_scope is not None:
+                if (
+                    not isinstance(raw_accession, str)
+                    or raw_accession.strip() not in accession_scope
+                ):
+                    continue
+                accession_number = raw_accession.strip()
+            else:
+                accession_number = ""
+
             raw_form = columns["form"][index]
             if not isinstance(raw_form, str) or not raw_form.strip():
-                # A missing form cannot be proven out of scope, so retain strict
-                # treatment rather than silently discarding the row.
+                # A missing form cannot be proven out of scope once the row is
+                # otherwise relevant to the request.
                 relevant_indexes.append(index)
                 invalid_indexes.append(index)
                 continue
@@ -177,14 +247,14 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
             relevant_indexes.append(index)
 
             try:
-                raw_accession = columns["accessionNumber"][index]
                 raw_document = columns["primaryDocument"][index]
-                if not isinstance(raw_accession, str) or not raw_accession.strip():
-                    raise ValueError("accessionNumber is unavailable")
+                if accession_scope is None:
+                    if not isinstance(raw_accession, str) or not raw_accession.strip():
+                        raise ValueError("accessionNumber is unavailable")
+                    accession_number = raw_accession.strip()
                 if not isinstance(raw_document, str) or not raw_document.strip():
                     raise ValueError("primaryDocument is unavailable")
 
-                accession_number = raw_accession.strip()
                 primary_document = raw_document.strip()
                 records.append(
                     FilingRecord(
@@ -230,8 +300,9 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
             trailing_allowed if trailing_policy_applies else ordinary_allowed
         )
 
-        # Bounds apply only to requested forms. Unrequested rows are not evidence for
-        # this query and therefore are not normalized, counted, or allowed to veto it.
+        # Bounds apply only to rows that can contribute to the governed request.
+        # Unrequested forms and unreferenced fact accessions are not evidence for this
+        # query and therefore are not normalized, counted, or allowed to veto it.
         if not records or len(invalid_indexes) > allowed_invalid:
             sample = ", ".join(str(value) for value in invalid_indexes[:10])
             raise SECEdgarProviderError(
@@ -251,6 +322,9 @@ class ResilientSECEdgarProvider(SECEdgarProvider):
                     "filing_row_count": row_count,
                     "invalid_filing_indexes": invalid_indexes[:10],
                     "requested_forms": sorted(form_scope),
+                    "requested_accession_count": (
+                        None if accession_scope is None else len(accession_scope)
+                    ),
                     "trailing_suffix": trailing_suffix,
                     "allowed_invalid_filing_count": allowed_invalid,
                     "policy_version": cls.row_policy_version,
