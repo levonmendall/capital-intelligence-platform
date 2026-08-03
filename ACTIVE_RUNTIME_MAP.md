@@ -7,67 +7,111 @@ Render branch main / Docker build context .
   -> dockerCommand: python run_render_service.py
   -> initialize.py (must succeed)
   -> supervisor children sharing /app/database
-       api                 uvicorn api.app:create_app --factory :8000
-       cio-paper-operator  python run_autonomous_paper_operator.py --loop
+       api                  uvicorn api.app:create_app --factory :8000
+       cio-paper-operator   python run_autonomous_paper_operator.py --loop
        historical-backfill python run_historical_backfill.py --loop
        encrypted-backup    python run_backup.py --loop
        streamlit            python -m streamlit run render_app.py :$PORT
 ```
 
-API, operator, and Streamlit are marked critical by the supervisor. Backfill and backup are restarted after bounded delay. Render currently probes only the Streamlit endpoint `/_stcore/health`.
+API, autonomous paper operator, and Streamlit are critical supervisor children.
+Historical backfill and encrypted backup are restarted after bounded delay. Render's
+external health probe targets the Streamlit `/_stcore/health` endpoint; the supervisor
+also owns child-process health and restart behavior.
 
-## Streamlit call graph on main
+## Active Streamlit composition
 
 ```text
 render_app.py
-  read/compile/exec secure_app.py
-    AuthenticationService + session handling
-    rewrite/compile/exec app.py with authorized portfolio bindings
-      reload + monkey-patch premium_ui
-      read/transform/compile/exec app_impl.py
-        Today | Environment | Portfolio | History
-      invoke streamlit_paper_execution_worker
-  append Render deployment identity + administrator smoke-test dialog
+  -> imports secure_app, app_impl, presentation refinements, and read adapters
+  -> secure_app.create_streamlit_application(...)
+       -> authenticate and bind the authorized session principal
+       -> provide typed, read-only portfolio and operating dependencies
+       -> render_app composes the four product surfaces through ordinary calls
+            Portfolio | Today | Environment | History
+       -> read current canonical portfolio, CIO, market, event, and operating state
+       -> expose paper-status and administrator controls without trade authority
 ```
 
-PR3 replaces this graph with the following active composition:
+No active Streamlit entrypoint reads, rewrites, compiles, monkey-patches, or executes
+another Python source file. `render_app.py`, `secure_app.py`, and `app_impl.py` are
+ordinary imported modules. The removed `streamlit_paper_execution_worker.py` is not an
+execution path; paper implementation is owned by the headless operator.
+
+## Active FastAPI composition
 
 ```text
-render_app.py / app.py
-  -> secure_app.create_streamlit_application(...)
-       -> session principal
-       -> typed authorized read dependencies
-       -> app_impl.render_surfaces(...)
-            -> direct presentation/helper imports
+uvicorn api.app:create_app --factory
+  -> ApiSettings + explicit repository resources
+  -> AuthenticationService and identity store
+  -> operational middleware, metrics, and SLO service
+  -> public health / operations / provider-validation routes
+  -> authenticated CIO, daily, environment, analytical, governance,
+     decision, replay, alert, and canonical-portfolio read surfaces
 ```
 
-No active Streamlit entrypoint reads, rewrites, reloads, monkey-patches, or
-executes Python source. The four product surfaces and their intelligence,
-archive, live-market, and read-only paper-status panels remain connected by
-ordinary calls.
+Discontinued Personal CIO, investor-objective, and personalization routes are not
+mounted and have been removed from the active repository.
 
-## Headless operating graph
+## Headless investment and paper-operating graph
 
 ```text
 run_autonomous_paper_operator.py --loop
-  -> public information collection if due
-  -> material-change reassessment
-  -> production context preparation / complete-universe gate
-  -> scheduled or triggered CanonicalCIOCycle
-  -> pending construction publication
-  -> governed internal paper execution attempt
-  -> reconciliation and canonical state publication
-  -> alerts, after-close learning, heartbeat
+  -> collect public information when due
+  -> evaluate material-change triggers
+  -> prepare certified complete-universe and production context
+  -> run scheduled or triggered CanonicalCIOCycle
+       opportunity qualification
+       exactly six specialist analyses
+       committee synthesis
+       CIO-only decision and initial target
+       independent portfolio construction
+       CIO-to-construction reconciliation
+  -> publish pending construction
+  -> attempt governed internal paper implementation
+  -> reconcile fills and publish canonical portfolio state
+  -> publish alerts, thesis monitoring, learning evidence, and heartbeat
 ```
 
-PR2 must make this the only process allowed to implement paper transactions. Streamlit becomes a read-only projection.
+This is the only supported process that may implement paper transactions. Streamlit
+and FastAPI project governed state but do not independently authorize or execute a
+portfolio change. Live-money authority remains disabled.
 
-## Active versus legacy classification rule
+## Historical, backup, and operational paths
 
-- Active: reachable from a declared environment entrypoint, stage binding, application factory, or imported production module.
-- Operational tool: intentionally invoked through a documented CLI/CI workflow but not resident.
-- Compatibility: imported only to maintain an old module contract.
-- Legacy: not reachable from a supported topology and not required by a behavioral test.
-- Unknown: not yet proven either way; unknown code may not be deleted.
+```text
+run_historical_backfill.py --loop
+  -> point-in-time historical replay and advisory learning
+  -> no automatic threshold or policy promotion
 
-The repository-wide classification is a PR5/PR7 deliverable. Root-script count at this baseline is 87.
+run_backup.py --loop
+  -> encrypted backup of canonical databases and required evidence stores
+
+Documented CLI / CI commands
+  -> provider certification, replay, recovery, smoke, and readiness operations
+  -> operational tools only; they are not resident investment authorities
+```
+
+## Active versus retired classification rule
+
+- **Active:** reachable from a declared deployment entrypoint, application factory,
+  canonical stage binding, or imported production module.
+- **Operational tool:** intentionally invoked through a documented CLI or CI workflow
+  but not resident in the Render supervisor.
+- **Compatibility:** still imported to preserve a supported contract; compatibility
+  code may be consolidated but is not dead code.
+- **Retired:** unreachable from supported topology and no longer required by an active
+  behavioral contract. Retired executable code is deleted and preserved through Git
+  history, with a Markdown removal manifest under `archive/`.
+- **Unknown:** not yet proven active, operational, compatible, or retired. Unknown code
+  may not be deleted without import, entrypoint, workflow, and test-ownership evidence.
+
+## Current authority boundaries
+
+- One canonical `$250,000` `COMPOUNDING` paper portfolio.
+- Exactly six advisory specialists.
+- CIO-only investment authority.
+- Risk-adjusted CIO initial target followed by independent construction.
+- Fail-closed, point-in-time, append-only evidence and lineage.
+- Reconciled paper-only execution.
+- No live-money authority.
