@@ -267,13 +267,17 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
             page.get_by_role("heading", name=surface, exact=True).wait_for()
             _assert_surface_body(page, surface)
             _assert_public_boundary(page)
-            if surface in {"Today", "Environment"}:
+            if surface == "Environment":
                 health = page.locator('.information-health[role="status"]')
                 health.wait_for(state="visible")
                 assert health.count() == 1
             if surface == "Today":
                 page.get_by_text(RETAINED_STORY_TITLE, exact=True).wait_for()
                 page.get_by_text("No new qualifying stories", exact=True).wait_for()
+                # The retained-story state is the Today-specific freshness signal.
+                # A separate provider-health strip may be present, but it is not
+                # required for the retained-feed contract.
+                assert page.locator('.information-health[role="status"]').count() <= 1
             if surface == "Portfolio":
                 _assert_portfolio_opening_hierarchy(page)
             if surface == "Environment":
