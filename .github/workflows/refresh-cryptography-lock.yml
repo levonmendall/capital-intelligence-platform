@@ -1,0 +1,33 @@
+name: Refresh cryptography lock
+
+on:
+  push:
+    branches:
+      - feature/compounding-allocation-core
+    paths:
+      - requirements.txt
+      - .github/workflows/refresh-cryptography-lock.yml
+
+permissions:
+  contents: read
+
+jobs:
+  compile-lock:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+      - name: Compile hashed runtime lock
+        run: |
+          python -m pip install --upgrade pip pip-tools
+          pip-compile --generate-hashes --output-file=requirements.lock --strip-extras requirements.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: refreshed-requirements-lock
+          path: requirements.lock
+          if-no-files-found: error
+          retention-days: 1
