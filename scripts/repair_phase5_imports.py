@@ -55,12 +55,7 @@ replace_count(
     "tests/test_forward_intelligence_integration.py",
     "            as_of=candidate.as_of,\n",
     "            as_of=point_in_time,\n",
-    2,
-)
-replace_once(
-    "tests/test_forward_intelligence_integration.py",
-    "        as_of=candidate.as_of,\n        business=business,\n",
-    "        as_of=point_in_time,\n        business=business,\n",
+    3,
 )
 replace_once(
     "tests/test_forward_intelligence_integration.py",
