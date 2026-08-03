@@ -158,10 +158,20 @@ from portfolio.decision_reconciliation import (
     )
     replace_once(
         "application/cio_cycle.py",
-        """            construction=construction,
+        """        return CanonicalCIOCycleResult(
+            identifier=cycle_identifier,
+            as_of=portfolio.as_of,
+            opportunity_queue=queue,
+            decisions=tuple(decisions),
+            construction=construction,
             theses=theses,
 """,
-        """            construction=construction,
+        """        return CanonicalCIOCycleResult(
+            identifier=cycle_identifier,
+            as_of=portfolio.as_of,
+            opportunity_queue=queue,
+            decisions=tuple(decisions),
+            construction=construction,
             construction_reconciliations=construction_reconciliations,
             theses=theses,
 """,
