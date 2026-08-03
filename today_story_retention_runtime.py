@@ -22,6 +22,7 @@ import streamlit as st
 
 
 _INSTALLED_STATE_KEY = "_capital_intelligence_today_story_retention_installed"
+_ORIGINAL_CALLABLE_ATTRIBUTE = "_capital_intelligence_today_story_retention_original"
 _SCHEMA_VERSION = "today-story-retention.v1"
 _MAX_CACHED_RECORDS = 250
 
@@ -43,6 +44,19 @@ def _cache_path() -> Path:
 
 def _records(value: Iterable[Mapping[str, Any]]) -> tuple[Mapping[str, Any], ...]:
     return tuple(item for item in value if isinstance(item, Mapping))
+
+
+def _base_callable(value: Callable[..., Any]) -> Callable[..., Any]:
+    original = getattr(value, _ORIGINAL_CALLABLE_ATTRIBUTE, None)
+    return original if callable(original) else value
+
+
+def _mark_wrapper(
+    wrapper: Callable[..., Any],
+    original: Callable[..., Any],
+) -> Callable[..., Any]:
+    setattr(wrapper, _ORIGINAL_CALLABLE_ATTRIBUTE, _base_callable(original))
+    return wrapper
 
 
 def _record_time(event_ui: ModuleType, record: Mapping[str, Any]) -> datetime | None:
@@ -228,8 +242,10 @@ def _retaining_loader(
     original_builder: Callable[..., tuple[object, ...]],
     event_ui: ModuleType,
 ) -> Callable[[], object]:
+    base_loader = _base_callable(original_loader)
+
     def load_snapshot() -> object:
-        snapshot = original_loader()
+        snapshot = base_loader()
         source_records = _records(getattr(snapshot, "records", ()))
         now = datetime.now(timezone.utc)
         current = tuple(original_builder(source_records, now=now, limit=3))
@@ -272,7 +288,7 @@ def _retaining_loader(
             detail=_retention_detail(retained_items),
         )
 
-    return load_snapshot
+    return _mark_wrapper(load_snapshot, base_loader)
 
 
 def _retained_today_renderer(
@@ -412,14 +428,17 @@ def install(
     operating_ui: ModuleType,
     story_ui: ModuleType,
 ) -> None:
-    """Install story retention after the final Today storytelling renderer."""
+    """Reattach retention after each Streamlit rerun without nesting wrappers."""
 
-    if getattr(app_impl, _INSTALLED_STATE_KEY, False):
-        return
-
-    original_builder = event_ui.build_today_items
-    original_event_loader = event_ui.load_public_event_snapshot
-    original_operating_loader = operating_ui.load_public_event_snapshot
+    # Render and local Streamlit entrypoints run from top to bottom after every
+    # navigation interaction. Earlier setup steps intentionally restore the
+    # nonblocking loaders and the aligned 24-hour builder. Rebind retention on
+    # every run so those assignments cannot silently remove the fallback.
+    original_builder = _base_callable(event_ui.build_today_items)
+    original_event_loader = _base_callable(event_ui.load_public_event_snapshot)
+    original_operating_loader = _base_callable(
+        operating_ui.load_public_event_snapshot
+    )
 
     def build_today_items(
         records: Iterable[Mapping[str, Any]],
@@ -435,8 +454,9 @@ def install(
             limit=limit,
         )
 
-    event_ui.build_today_items = build_today_items
-    operating_ui.build_today_items = build_today_items
+    retained_builder = _mark_wrapper(build_today_items, original_builder)
+    event_ui.build_today_items = retained_builder
+    operating_ui.build_today_items = retained_builder
     event_ui.load_public_event_snapshot = _retaining_loader(
         original_event_loader,
         original_builder,
