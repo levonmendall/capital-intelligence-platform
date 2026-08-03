@@ -24,6 +24,8 @@ Environment surface remains restricted to economic impact channels.
 When no usable current records exist, the UI reports incomplete coverage and keeps the
 collection/filtering condition visible. It no longer says that no story deserved
 attention. Historical retention is capped at 36 hours and never renews publication age.
+If all upstream sources are unavailable, the application reports the outage rather than
+fabricating a headline or relabeling stale information as current.
 
 These controls affect educational presentation only. They do not lower evidence,
 specialist, CIO, cash-hurdle, construction, sizing, paper-execution, or real-money
