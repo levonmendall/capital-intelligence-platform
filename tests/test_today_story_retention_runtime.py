@@ -6,6 +6,7 @@ from pathlib import Path
 
 import educational_market_briefing_ui as event_ui
 import public_event_recency_runtime
+import today_event_alignment_runtime
 import today_story_retention_runtime as retention
 
 
@@ -57,6 +58,39 @@ def test_old_story_is_retained_without_renewing_its_publication_time() -> None:
 
     assert [item.title for item in retained] == ["Event prior"]
     assert retained[0].published_at == now - timedelta(days=3)
+
+
+def test_aligned_federal_reserve_story_is_retained() -> None:
+    now = datetime(2026, 8, 3, 4, 0, tzinfo=timezone.utc)
+    published_at = now - timedelta(days=3)
+    story = _record(
+        identifier="retained-fed-story",
+        published_at=published_at,
+        available_at=now - timedelta(minutes=5),
+    )
+    story["topic"] = "Federal Reserve policy decision changes the rate outlook"
+    story["summary"] = (
+        "The Federal Reserve held its policy rate steady and said future decisions "
+        "depend on inflation and labor-market evidence."
+    )
+    story["provenance"] = {
+        "provider": "Federal Reserve",
+        "source_type": "official",
+    }
+    public_event_recency_runtime.install(event_ui)
+
+    retained = retention._build_retained_items(
+        today_event_alignment_runtime.build_today_items,
+        event_ui,
+        (story,),
+        now=now,
+        limit=3,
+    )
+
+    assert [item.title for item in retained] == [
+        "Federal Reserve policy decision changes the rate outlook"
+    ]
+    assert retained[0].published_at == published_at
 
 
 def test_current_story_is_preferred_over_retained_history() -> None:
