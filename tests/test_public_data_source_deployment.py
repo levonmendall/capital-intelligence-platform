@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+from providers.public_live_source_catalogs import load_operating_public_live_source_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,9 +11,10 @@ CATALOG = ROOT / "config" / "public_live_information_sources.json"
 
 
 def test_new_official_public_sources_are_declared() -> None:
-    payload = json.loads(CATALOG.read_text(encoding="utf-8"))
-    identifiers = {item["identifier"] for item in payload["sources"]}
+    catalog = load_operating_public_live_source_catalog(CATALOG)
+    identifiers = {item.identifier for item in catalog.sources}
 
+    assert len(catalog.sources) >= 41
     assert {
         "bls-labor-inflation-live",
         "nyfed-sofr-live",
@@ -21,6 +23,18 @@ def test_new_official_public_sources_are_declared() -> None:
         "eurostat-gdp-live",
         "bea-national-accounts-live",
         "census-economic-indicators-live",
+        "bank-of-england-news-live",
+        "bank-of-japan-live",
+        "bank-of-canada-live",
+        "snb-monetary-policy-live",
+        "bis-statistics-releases-live",
+        "eurostat-statistics-updates-live",
+        "bls-unemployment-live",
+        "bls-payrolls-live",
+        "ecb-deposit-facility-rate-live",
+        "eurostat-hicp-live",
+        "oecd-leading-indicators-live",
+        "usda-crop-production-live",
     } <= identifiers
 
 
@@ -38,6 +52,7 @@ def test_render_exposes_existing_bindings_and_optional_public_credentials() -> N
         "NASA_FIRMS_MAP_KEY",
         "BEA_API_KEY",
         "CENSUS_API_KEY",
+        "USDA_NASS_API_KEY",
     ):
         assert f"- key: {key}" in source
 

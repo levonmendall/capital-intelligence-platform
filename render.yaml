@@ -146,3 +146,5 @@ services:
         sync: false
       - key: CENSUS_API_KEY
         sync: false
+      - key: USDA_NASS_API_KEY
+        sync: false

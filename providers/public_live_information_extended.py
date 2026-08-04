@@ -392,3 +392,65 @@ class ImpactfulPublicLiveInformationProvider(
             )
         return output
 
+    def _parse_usda_quickstats(
+        self,
+        response: Any,
+        source: PublicLiveSourceDefinition,
+        retrieved_at: datetime,
+    ) -> list[DecisionInformationRecord]:
+        payload = response.json()
+        rows = payload.get("data", []) if isinstance(payload, Mapping) else []
+        output: list[DecisionInformationRecord] = []
+        for item in rows:
+            if not isinstance(item, Mapping):
+                continue
+            year = item.get("year")
+            value = item.get("Value") or item.get("value")
+            commodity = item.get("commodity_desc") or "Agricultural commodity"
+            statistic = (
+                item.get("statisticcat_desc")
+                or item.get("short_desc")
+                or "USDA observation"
+            )
+            period = (
+                item.get("reference_period_desc")
+                or item.get("freq_desc")
+                or year
+            )
+            if year in {None, ""} or value in {None, ""}:
+                continue
+            geography = (
+                item.get("state_name")
+                or item.get("country_name")
+                or "United States"
+            )
+            unit = item.get("unit_desc") or "reported units"
+            identifier = item.get("CV") or item.get("asd_code") or _hash_payload(item)
+            output.append(
+                self._record(
+                    source,
+                    item,
+                    retrieved_at=retrieved_at,
+                    topic=f"USDA {commodity} {statistic}",
+                    summary=(
+                        f"{commodity} {statistic} was {value} {unit} "
+                        f"for {period} {year}."
+                    ),
+                    event_at=str(year),
+                    published_at=retrieved_at,
+                    source_identifier=f"{identifier}:{year}:{period}",
+                    entities=(
+                        "USDA National Agricultural Statistics Service",
+                        str(commodity),
+                    ),
+                    geographies=(str(geography),),
+                    tags=(
+                        "official-statistic",
+                        "agriculture",
+                        "physical-commodity",
+                        "usda-nass",
+                    ),
+                )
+            )
+        return output
+

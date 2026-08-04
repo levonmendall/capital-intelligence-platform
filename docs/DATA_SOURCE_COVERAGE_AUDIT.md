@@ -47,6 +47,26 @@ The runtime now supports BLS JSON, New York Fed reference-rate JSON, Treasury At
 
 These feeds strengthen supporting economic context but do not, by themselves, activate comprehensive all-market data readiness or replace certified point-in-time institutional datasets.
 
+### Additional sources added after the concurrent baseline merge
+
+A second non-duplicative pass adds:
+
+- Bank of England news and statistical-release feeds;
+- Bank of Japan official updates;
+- Bank of Canada press releases;
+- Swiss National Bank monetary-policy releases;
+- BIS statistical-release notices;
+- Eurostat statistical-release notices;
+- BLS unemployment and total nonfarm payroll observations;
+- the ECB deposit-facility policy rate;
+- Eurostat harmonised inflation;
+- OECD composite leading indicators for material economies;
+- USDA NASS crop-production observations.
+
+The catalog now contains 41 governed public sources. These additions improve independent
+policy, labor, inflation, leading-indicator and physical-commodity evidence while
+remaining outside candidate, vote, sizing, construction and execution authority.
+
 ## Deployment corrections
 
 Render now declares the checked-in EODHD, Databento and crypto binding files and exposes secret slots for adapters that already existed but were not represented in the deployment blueprint:
@@ -58,6 +78,7 @@ Render now declares the checked-in EODHD, Databento and crypto binding files and
 - `NASA_FIRMS_MAP_KEY`
 - `BEA_API_KEY`
 - `CENSUS_API_KEY`
+- `USDA_NASS_API_KEY`
 
 Missing optional credentials leave only the affected optional source unavailable. They do not grant readiness or permit degraded evidence to be treated as complete.
 
@@ -69,6 +90,7 @@ Obtain these only when not already configured in Render:
 
 - BEA API key;
 - Census API key;
+- USDA NASS Quick Stats API key;
 - EIA API key;
 - NASA FIRMS map key;
 - OpenFIGI API key for higher mapping limits;
