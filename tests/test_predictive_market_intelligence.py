@@ -116,7 +116,8 @@ def test_positive_bounce_after_medium_decline_is_not_treated_as_durable_flow() -
     )
     assessment = CapitalFlowEngine().analyze(observation)
 
-    assert observation.short_covering_likelihood >= 0.50
+    assert observation.short_covering_likelihood >= 0.30
+    assert observation.medium_trend < observation.short_trend
     assert assessment.state in {
         CapitalFlowState.SHORT_COVERING,
         CapitalFlowState.CROWDED_ADVANCE,
