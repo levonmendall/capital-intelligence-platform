@@ -1,11 +1,16 @@
 """EODHD provider facade with bounded symbol-directory continuity.
 
-The implementation remains in :mod:`providers.eodhd_base`.  This facade narrows one
-production resilience rule: an EODHD HTTP 402 may use a recent, previously successful
-active-symbol directory, and a current active directory is not discarded solely
-because the historical delisted-symbol directory is temporarily unavailable.  Missing
-or expired active-directory evidence, authentication failures, and every non-directory
-provider failure remain fail-closed.
+The implementation remains in :mod:`providers.eodhd_base`.  This facade narrows two
+production resilience rules for symbol directories only:
+
+* an EODHD HTTP 402 may use a recent, previously successful EODHD active-directory
+  cache; and
+* when no valid EODHD cache exists, an independent Twelve Data daily stock catalog may
+  supply the configured global equity exchange.
+
+A current active directory is not discarded solely because the historical delisted-
+symbol directory is temporarily unavailable.  Missing or incomplete fallback evidence,
+authentication failures, and every non-directory provider failure remain fail-closed.
 """
 
 from __future__ import annotations
@@ -31,6 +36,11 @@ from providers.eodhd_base import (
     EODHDRetrievalPolicy,
     load_eodhd_bindings,
 )
+from providers.twelve_data_reference import (
+    TwelveDataReferenceError,
+    TwelveDataReferenceProvider,
+    build_twelve_data_reference_provider,
+)
 
 
 def __getattr__(name: str):
@@ -46,6 +56,15 @@ def __getattr__(name: str):
 
 class EODHDProvider(_base.EODHDProvider):
     """Apply bounded continuity only to EODHD symbol-directory retrieval."""
+
+    def __init__(
+        self,
+        *args,
+        reference_provider: TwelveDataReferenceProvider | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._reference_provider = reference_provider
 
     def fetch_dataset(
         self,
@@ -68,15 +87,32 @@ class EODHDProvider(_base.EODHDProvider):
                     f"the requested cutoff was {query.as_of.isoformat()}",
                 )
 
-        (
-            active_directory,
-            quality_state,
-            cached_at,
-            directory_limitations,
-        ) = self._active_symbol_directory(
-            query.provider_symbol,
-            retrieved_at=retrieved_at,
-        )
+        try:
+            (
+                active_directory,
+                quality_state,
+                cached_at,
+                directory_limitations,
+            ) = self._active_symbol_directory(
+                query.provider_symbol,
+                retrieved_at=retrieved_at,
+            )
+        except EODHDRetrievalFailure as error:
+            if error.status_code != 402:
+                raise
+            fallback = self._reference_provider
+            if fallback is None:
+                fallback = build_twelve_data_reference_provider()
+                self._reference_provider = fallback
+            try:
+                return fallback.fetch_dataset(query)
+            except TwelveDataReferenceError as fallback_error:
+                raise EODHDProviderError(
+                    "EODHD symbol directory "
+                    f"{query.provider_symbol} returned HTTP 402 and the independent "
+                    "Twelve Data reference fallback is unavailable: "
+                    f"{fallback_error}"
+                ) from fallback_error
 
         delisted_directory: list[Any] = []
         provider_symbol = query.provider_symbol.strip().upper()
