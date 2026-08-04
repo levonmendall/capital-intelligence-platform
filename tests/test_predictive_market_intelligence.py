@@ -5,11 +5,19 @@ from types import SimpleNamespace
 
 import production_paper_evidence as paper_evidence
 from committee.specialists import MarketSpecialistContext
+from intelligence.forward import (
+    ForwardIntelligenceBundle,
+    ForwardScenario,
+    ForwardSignal,
+)
 from intelligence.predictive_market import (
     CapitalFlowEngine,
     CapitalFlowState,
     MarketExpectationsEngine,
     build_predictive_market_intelligence,
+)
+from intelligence.predictive_scenario_merge import (
+    reconcile_forward_intelligence,
 )
 
 
@@ -196,6 +204,70 @@ def test_predictive_signals_enrich_existing_market_and_forward_contract() -> Non
         set(result.evidence_identifiers)
     )
     assert any("priced-in" in item for item in result.market.risks)
+
+
+def test_duplicate_forward_scenario_labels_are_reconciled_not_appended() -> None:
+    signal = ForwardSignal(
+        identifier="signal:test",
+        as_of=NOW,
+        name="test signal",
+        channels=("forecast",),
+        expected_return_impact=0.01,
+        confidence=0.60,
+        evidence=("test evidence",),
+        contradictory_evidence=(),
+        assumptions=("test assumption",),
+        risks=("test risk",),
+        change_conditions=("test change",),
+        evidence_identifiers=("evidence:test",),
+    )
+    existing = ForwardIntelligenceBundle(
+        identifier="forward:existing",
+        candidate_identifier="candidate:test:ABC",
+        as_of=NOW,
+        signals=(signal,),
+        scenarios=(
+            ForwardScenario(
+                label="bull",
+                return_delta=0.05,
+                probability_delta=0.01,
+                path_drawdown_delta=0.0,
+                rationale="existing bull case",
+                evidence_identifiers=("evidence:existing",),
+            ),
+        ),
+        diagnostics=(),
+        model_versions=("existing.v1",),
+    )
+    predictive = ForwardIntelligenceBundle(
+        identifier="forward:predictive",
+        candidate_identifier="candidate:test:ABC",
+        as_of=NOW,
+        signals=(),
+        scenarios=(
+            ForwardScenario(
+                label="bull",
+                return_delta=0.04,
+                probability_delta=0.02,
+                path_drawdown_delta=0.0,
+                rationale="predictive bull case",
+                evidence_identifiers=("evidence:predictive",),
+            ),
+        ),
+        diagnostics=(),
+        model_versions=("predictive.v1",),
+    )
+
+    merged = reconcile_forward_intelligence(existing, predictive)
+
+    assert len(merged.scenarios) == 1
+    assert merged.scenarios[0].label == "bull"
+    assert merged.scenarios[0].return_delta == 0.09
+    assert merged.scenarios[0].probability_delta == 0.03
+    assert set(merged.scenarios[0].evidence_identifiers) == {
+        "evidence:existing",
+        "evidence:predictive",
+    }
 
 
 def test_direct_helper_compatibility_flow_is_explicitly_neutral_and_nonproduction() -> None:
