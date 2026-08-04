@@ -4,8 +4,10 @@ from types import SimpleNamespace
 
 from portfolio.compounding_allocation import (
     CandidateAllocationDirective,
-    CompoundingParticipationPolicy,
     PortfolioSleeve,
+)
+from portfolio.compounding_participation_authority import (
+    AuthoritativeCompoundingParticipationPolicy,
 )
 
 
@@ -48,6 +50,7 @@ def test_small_position_is_authorized_only_when_all_hard_controls_clear() -> Non
         stressed_edge=0.004,
         probability_of_loss=0.40,
         probability_consistency_gap=0.08,
+        reasons=(),
     )
     reconciliation = SimpleNamespace(
         probability_of_success=0.56,
@@ -59,7 +62,7 @@ def test_small_position_is_authorized_only_when_all_hard_controls_clear() -> Non
         maximum_target_weight=0.01,
         target_multiplier=0.60,
     )
-    policy = CompoundingParticipationPolicy()
+    policy = AuthoritativeCompoundingParticipationPolicy()
 
     result = policy.assess(
         candidate=candidate,
@@ -107,7 +110,7 @@ def test_negative_stressed_edge_cannot_be_rescued_by_favorable_posture() -> None
         rationale="strongly preferred sleeve",
     )
 
-    result = CompoundingParticipationPolicy().assess(
+    result = AuthoritativeCompoundingParticipationPolicy().assess(
         candidate=candidate,
         directive=directive,
         universe=SimpleNamespace(direct_recommendation_allowed=True),
@@ -117,6 +120,7 @@ def test_negative_stressed_edge_cannot_be_rescued_by_favorable_posture() -> None
             stressed_edge=-0.001,
             probability_of_loss=0.40,
             probability_consistency_gap=0.08,
+            reasons=(),
         ),
         reconciliation=SimpleNamespace(
             probability_of_success=0.58,
@@ -134,3 +138,47 @@ def test_negative_stressed_edge_cannot_be_rescued_by_favorable_posture() -> None
 
     assert result.authorized is False
     assert any("stressed edge" in item for item in result.reasons)
+
+
+def test_authoritative_robustness_inconsistency_remains_blocking() -> None:
+    candidate = _candidate()
+    directive = CandidateAllocationDirective(
+        candidate_identifier=candidate.identifier,
+        sleeve=PortfolioSleeve.PRODUCTIVE_RISK,
+        posture_alignment=0.90,
+        preferred=True,
+        discouraged=False,
+        maximum_staged_weight=0.01,
+        rationale="preferred sleeve",
+    )
+
+    result = AuthoritativeCompoundingParticipationPolicy().assess(
+        candidate=candidate,
+        directive=directive,
+        universe=SimpleNamespace(direct_recommendation_allowed=True),
+        specialists=_specialists(),
+        robustness=SimpleNamespace(
+            robust_edge=0.02,
+            stressed_edge=0.01,
+            probability_of_loss=0.35,
+            probability_consistency_gap=0.01,
+            reasons=(
+                "stated probability of success is inconsistent with the disclosed scenarios",
+            ),
+        ),
+        reconciliation=SimpleNamespace(
+            probability_of_success=0.60,
+            expected_return=0.11,
+        ),
+        ensemble=SimpleNamespace(
+            stage=SimpleNamespace(value="explore"),
+            minimum_target_weight=0.0025,
+            maximum_target_weight=0.01,
+            target_multiplier=0.75,
+        ),
+        effective_alternative=0.04,
+        material_opposition_threshold=0.75,
+    )
+
+    assert result.authorized is False
+    assert any("scenario-implied" in item for item in result.reasons)
