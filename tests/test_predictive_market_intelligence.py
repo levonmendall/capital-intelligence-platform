@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import production_paper_evidence as paper_evidence
 from committee.specialists import MarketSpecialistContext
 from intelligence.predictive_market import (
     CapitalFlowEngine,
@@ -52,6 +53,7 @@ def _features(*, momentum: float, six_month: float, twelve_month: float, volatil
         twelve_month_return=twelve_month,
         annualized_volatility=volatility,
         rolling_annual_median=0.10,
+        evidence_identifiers=("bars:ABC", "quote:ABC"),
     )
 
 
@@ -193,3 +195,29 @@ def test_predictive_signals_enrich_existing_market_and_forward_contract() -> Non
         set(result.evidence_identifiers)
     )
     assert any("priced-in" in item for item in result.market.risks)
+
+
+def test_direct_helper_compatibility_flow_is_explicitly_neutral_and_nonproduction() -> None:
+    features = _features(
+        momentum=0.0,
+        six_month=0.0,
+        twelve_month=0.0,
+        volatility=0.24,
+    )
+    observation = paper_evidence._compatibility_flow_observation(features, NOW)
+
+    assert "compatibility-only" in observation.identifier
+    assert observation.signed_dollar_flow == 0.0
+    assert observation.accumulation_distribution == 0.0
+    assert observation.persistence == 0.50
+    assert observation.volatility == 0.24
+    assert observation.identifier in observation.evidence_identifiers
+
+
+def test_production_build_flag_is_distinct_from_direct_helper_compatibility() -> None:
+    paper_evidence._FLOW_STATE.production_build = True
+    try:
+        assert paper_evidence._production_build_active() is True
+    finally:
+        paper_evidence._FLOW_STATE.production_build = False
+    assert paper_evidence._production_build_active() is False
