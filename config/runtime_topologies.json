@@ -51,6 +51,7 @@
       "run_container_acceptance.py",
       "run_daily_operations.py",
       "run_historical_backfill.py",
+      "run_manual_cio_diagnostic.py",
       "run_public_headline_collector.py",
       "run_release_validation.py",
       "run_render_service.py",

@@ -56,3 +56,20 @@ def test_loop_rejects_nonpositive_interval() -> None:
         assert "interval_seconds" in str(error)
     else:
         raise AssertionError("expected interval validation to fail")
+
+
+def test_release_diagnostic_is_launched_as_a_separate_process(monkeypatch) -> None:
+    calls = []
+
+    def run(command, *, env, check):
+        calls.append((command, env, check))
+        return SimpleNamespace(returncode=3)
+
+    monkeypatch.setattr(worker.subprocess, "run", run)
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_ENVIRONMENT", "production")
+
+    worker._run_release_diagnostic()
+
+    assert calls[0][0][1:] == ("run_manual_cio_diagnostic.py",)
+    assert calls[0][1]["CAPITAL_INTELLIGENCE_ENVIRONMENT"] == "production"
+    assert calls[0][2] is False
