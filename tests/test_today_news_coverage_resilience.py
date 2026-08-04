@@ -113,11 +113,35 @@ def test_deployment_and_discovery_windows_support_continuous_today_coverage() ->
         if item["identifier"] == "gdelt-global-news-discovery"
     )
     render = Path("render.yaml").read_text(encoding="utf-8")
+    supervisor = Path("run_render_service.py").read_text(encoding="utf-8")
+    collector = Path("run_public_headline_collector.py").read_text(encoding="utf-8")
     retention_source = Path("today_story_retention_runtime.py").read_text(encoding="utf-8")
 
+    # GDELT remains one broad discovery input, but no longer the only one.
     assert source["parameters"]["timespan"] == "24h"
     assert "stocks OR bonds OR oil" in source["parameters"]["query"]
     assert "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_INTERVAL_SECONDS" in render
     assert 'value: "900"' in render
+
+    # A dedicated five-minute worker continuously adds independent publisher feeds.
+    assert "CAPITAL_INTELLIGENCE_PUBLIC_HEADLINE_INTERVAL_SECONDS" in supervisor
+    assert '"300"' in supervisor
+    assert 'name="public-headline-collector"' in supervisor
+    for provider in (
+        "BBC Business",
+        "NPR Business",
+        "The Guardian Business",
+        "CoinDesk",
+    ):
+        assert provider in collector
+    assert "FINNHUB_API_KEY" in collector
+    assert "ALPHA_VANTAGE_API_KEY" in collector
+    assert "EODHD_API_KEY" in collector
+    assert "MARKETAUX_API_TOKEN" in collector
+
+    # Today always renders useful content without manufacturing a headline.
     assert "No new story earned investor attention" not in retention_source
-    assert "Current headline coverage is incomplete" in retention_source
+    assert "No new qualifying stories" in retention_source
+    assert "Live market pulse" in retention_source
+    assert "Headline providers are refreshing; market context remains live." in retention_source
+    assert "timedelta(hours=72)" in retention_source
