@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from providers.public_live_information import load_public_live_source_catalog
+from providers.public_live_source_catalogs import load_operating_public_live_source_catalog
 from providers.public_live_information_extended import (
     ImpactfulPublicLiveInformationProvider,
 )
@@ -278,7 +278,7 @@ def collect_public_live_information_if_due(
                 "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_SOURCE_CATALOG",
                 "config/public_live_information_sources.json",
             )
-            catalog = load_public_live_source_catalog(catalog_path)
+            catalog = load_operating_public_live_source_catalog(catalog_path)
             factory = provider_factory or ImpactfulPublicLiveInformationProvider
             report = factory(catalog).collect(include_optional=True)
             failed_source_count = sum(
