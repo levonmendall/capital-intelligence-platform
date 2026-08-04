@@ -59,7 +59,14 @@
             "openfda_enforcement",
             "who_disease_outbreaks",
             "firms_csv",
-            "imf_datamapper"
+            "imf_datamapper",
+            "bls_series",
+            "nyfed_rates",
+            "treasury_yield_xml",
+            "sdmx_csv",
+            "eurostat_jsonstat",
+            "bea_api",
+            "census_eits"
           ]
         },
         "endpoint": {"type": "string", "pattern": "^https://"},
