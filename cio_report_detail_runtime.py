@@ -1,10 +1,9 @@
 """Move the complete CIO report off the primary Portfolio surface.
 
-The Portfolio page keeps a compact, accessible link containing only the current
-CIO conclusion. The link opens a dedicated query-parameter view with the full
-governed report, monitoring conditions, implementation state, freshness, and
-lineage. Presentation only: this module cannot alter evidence, decisions,
-construction, execution, portfolio state, or real-money authority.
+Portfolio keeps one compact link containing the current conclusion. The link
+opens a dedicated query-parameter view with the complete governed report.
+Presentation only: this module cannot alter evidence, decisions, construction,
+execution, portfolio state, or real-money authority.
 """
 
 from __future__ import annotations
@@ -25,16 +24,37 @@ _VIEW_QUERY_VALUE = "cio-report"
 
 _CSS = """
 <style>
+/* Keep the existing browser-level report-trigger contract while replacing the
+   Streamlit expander with one direct, accessible link. */
+div[data-testid="stExpander"].cio-report-link-shell {
+    margin: .5rem 0 .9rem !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 1rem !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+}
+div[data-testid="stExpander"].cio-report-link-shell > summary {
+    display: block !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    list-style: none !important;
+}
+div[data-testid="stExpander"].cio-report-link-shell > summary::-webkit-details-marker,
+div[data-testid="stExpander"].cio-report-link-shell > summary::before {
+    display: none !important;
+    content: none !important;
+}
 .cio-report-link-card {
     display: grid;
     grid-template-columns: 2.65rem minmax(0, 1fr) auto;
     align-items: center;
     gap: .78rem;
-    margin: .5rem 0 .9rem;
     padding: .78rem .86rem;
     border: 1px solid rgba(var(--surface-rgb), .25);
     border-radius: 1rem;
-    background: linear-gradient(145deg, rgba(13, 20, 34, .94), rgba(8, 13, 24, .94));
+    background: linear-gradient(145deg, rgba(13,20,34,.94), rgba(8,13,24,.94));
     color: inherit !important;
     text-decoration: none !important;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 14px 34px rgba(0,0,0,.18);
@@ -42,8 +62,8 @@ _CSS = """
 }
 .cio-report-link-card:hover,
 .cio-report-link-card:focus-visible {
-    border-color: rgba(var(--surface-rgb), .45);
-    background: linear-gradient(145deg, rgba(var(--surface-rgb), .09), rgba(8, 13, 24, .96));
+    border-color: rgba(var(--surface-rgb), .46);
+    background: linear-gradient(145deg, rgba(var(--surface-rgb),.09), rgba(8,13,24,.96));
     transform: translateY(-1px);
     outline: none;
 }
@@ -54,7 +74,7 @@ _CSS = """
     place-items: center;
     border: 1px solid rgba(var(--surface-rgb), .34);
     border-radius: .78rem;
-    background: linear-gradient(145deg, rgba(var(--surface-rgb), .17), rgba(var(--surface-rgb-2), .08));
+    background: linear-gradient(145deg, rgba(var(--surface-rgb),.17), rgba(var(--surface-rgb-2),.08));
     color: var(--surface-accent);
     font-size: 1rem;
     font-weight: 850;
@@ -68,6 +88,7 @@ _CSS = """
     text-transform: uppercase;
 }
 .cio-report-link-title {
+    display: block;
     margin-top: .22rem;
     color: #f3f7fd;
     font-size: .94rem;
@@ -75,6 +96,7 @@ _CSS = """
     font-weight: 760;
 }
 .cio-report-link-meta {
+    display: block;
     margin-top: .24rem;
     color: #8190a6;
     font-size: .67rem;
@@ -177,12 +199,8 @@ def _decision_identifier(briefing: Mapping[str, Any] | None) -> str:
 def _posture(mandate: Mapping[str, Any], deployed: float) -> tuple[str, str]:
     holdings = mandate.get("holdings", [])
     posture = "Fully in cash" if deployed <= 0.0000001 else f"{deployed:.0%} invested"
-    holding_count = len(holdings) if isinstance(holdings, Sequence) else 0
-    detail = (
-        "Cash only"
-        if holding_count == 0
-        else f"{holding_count} governed position{'s' if holding_count != 1 else ''}"
-    )
+    count = len(holdings) if isinstance(holdings, Sequence) else 0
+    detail = "Cash only" if count == 0 else f"{count} governed position{'s' if count != 1 else ''}"
     return posture, detail
 
 
@@ -192,8 +210,7 @@ def _implementation(construction: Mapping[str, Any] | None) -> tuple[str, str, i
     transactions = construction.get("trades", [])
     count = len(transactions) if isinstance(transactions, Sequence) else 0
     state = _status_title(construction.get("status"))
-    detail = f"{count} proposed paper transaction{'s' if count != 1 else ''}."
-    return state, detail, count
+    return state, f"{count} proposed paper transaction{'s' if count != 1 else ''}.", count
 
 
 def _confidence(briefing: Mapping[str, Any] | None) -> str:
@@ -205,23 +222,13 @@ def _confidence(briefing: Mapping[str, Any] | None) -> str:
 
 def _condition_values(value: object) -> tuple[str, ...]:
     if isinstance(value, str):
-        return tuple(
-            _clean(item)
-            for item in re.split(r"\s*[•\n]+\s*", value)
-            if _clean(item)
-        )
+        return tuple(_clean(item) for item in re.split(r"\s*[•\n]+\s*", value) if _clean(item))
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        result: list[str] = []
-        for item in value:
-            result.extend(_condition_values(item))
-        return tuple(result)
+        return tuple(part for item in value for part in _condition_values(item))
     return ()
 
 
-def _monitoring_conditions(
-    app: ModuleType,
-    briefing: Mapping[str, Any] | None,
-) -> tuple[str, ...]:
+def _monitoring_conditions(app: ModuleType, briefing: Mapping[str, Any] | None) -> tuple[str, ...]:
     values: list[str] = []
     if isinstance(briefing, Mapping):
         for field_name in (
@@ -232,17 +239,14 @@ def _monitoring_conditions(
             "evidence_that_changes_conclusion",
         ):
             values.extend(_condition_values(briefing.get(field_name)))
-    environment = backdrop._environment_record(app)
-    values.extend(_condition_values(environment.get("review_conditions")))
-
+    values.extend(_condition_values(backdrop._environment_record(app).get("review_conditions")))
     unique: list[str] = []
     seen: set[str] = set()
     for value in values:
         key = value.casefold().strip(" .,;:–—-")
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        unique.append(value)
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(value)
     return tuple(unique) or (
         "A superior liquid opportunity clears every decision threshold.",
         "Growth, inflation, policy, liquidity, earnings, or cross-asset evidence changes materially.",
@@ -259,10 +263,11 @@ def _render_link(
     deployed: float,
 ) -> None:
     decision = trigger._current_report_title(briefing)
-    posture, _posture_detail = _posture(mandate, deployed)
-    implementation_state, _implementation_detail, _count = _implementation(construction)
+    posture, _ = _posture(mandate, deployed)
+    implementation_state, _, _ = _implementation(construction)
     streamlit_module.markdown(
         (
+            '<div class="cio-report-link-shell" data-testid="stExpander"><summary>'
             '<a class="cio-report-link-card" href="?view=cio-report" target="_self" '
             'aria-label="View full CIO report">'
             '<span class="cio-report-link-icon" aria-hidden="true">✓</span>'
@@ -271,7 +276,8 @@ def _render_link(
             f'<span class="cio-report-link-title">{escape(decision)}</span>'
             f'<span class="cio-report-link-meta">{escape(posture)} · '
             f'{escape(implementation_state)} · Open complete decision record</span>'
-            '</span><span class="cio-report-link-arrow" aria-hidden="true">→</span></a>'
+            '</span><span class="cio-report-link-arrow" aria-hidden="true">→</span>'
+            '</a></summary></div>'
         ),
         unsafe_allow_html=True,
     )
@@ -284,10 +290,7 @@ def _render_monitoring(streamlit_module: ModuleType, conditions: Sequence[str]) 
         f'<span>{escape(condition)}</span></div>'
         for index, condition in enumerate(conditions, start=1)
     )
-    streamlit_module.markdown(
-        f'<div class="cio-monitoring-list">{rows}</div>',
-        unsafe_allow_html=True,
-    )
+    streamlit_module.markdown(f'<div class="cio-monitoring-list">{rows}</div>', unsafe_allow_html=True)
 
 
 def _render_full_report(
@@ -315,23 +318,17 @@ def _render_full_report(
     )
     positioning_reason = _plain(
         briefing.get("why_it_matters") if isinstance(briefing, Mapping) else None,
-        (
-            "Capital remains in its current position until a governed opportunity "
-            "clears evidence, risk, cost, liquidity, and construction controls."
-        ),
+        "Capital remains in its current position until a governed opportunity clears evidence, risk, cost, liquidity, and construction controls.",
     )
-    market_backdrop = backdrop._current_market_backdrop(app, briefing)
-    conditions = _monitoring_conditions(app, briefing)
     candidate = (
-        _clean(briefing.get("candidate_identifier"))
-        if isinstance(briefing, Mapping)
-        else ""
+        _clean(briefing.get("candidate_identifier")) if isinstance(briefing, Mapping) else ""
     ) or "No qualified candidate"
     cycle = (
-        _clean(briefing.get("cycle_identifier"))
-        if isinstance(briefing, Mapping)
-        else ""
+        _clean(briefing.get("cycle_identifier")) if isinstance(briefing, Mapping) else ""
     ) or "Unavailable"
+    construction_identifier = (
+        _clean(construction.get("identifier")) if isinstance(construction, Mapping) else ""
+    ) or ("Unavailable" if isinstance(construction, Mapping) else "Not required")
 
     streamlit_module.markdown(
         '<a class="cio-report-back-link" href="?" target="_self">← Back to Portfolio</a>',
@@ -345,7 +342,7 @@ def _render_full_report(
     app.callout_card(
         "CIO decision",
         decision,
-        "Only the CIO can authorize a portfolio action; this report does not create execution authority.",
+        "Only the CIO can authorize a portfolio action; this report creates no execution authority.",
     )
     app.metric_grid(
         (
@@ -356,7 +353,6 @@ def _render_full_report(
         ),
         variant="portfolio",
     )
-
     app.page_header(
         "Decision context",
         "The backdrop, evidence change, and portfolio rationale behind the current conclusion.",
@@ -366,26 +362,20 @@ def _render_full_report(
         (
             (
                 "Current market backdrop",
-                market_backdrop,
+                backdrop._current_market_backdrop(app, briefing),
                 "Current governed market, economic, and implementation-data setting.",
             ),
             ("What changed", what_changed, "Latest governed evidence update."),
-            (
-                "Why capital is positioned this way",
-                positioning_reason,
-                opportunity_or_risk,
-            ),
+            ("Why capital is positioned this way", positioning_reason, opportunity_or_risk),
         ),
         variant="portfolio",
     )
-
     app.page_header(
         "Monitoring and reversal conditions",
         "Distinct evidence that could confirm, weaken, or change the current CIO conclusion.",
         "02",
     )
-    _render_monitoring(streamlit_module, conditions)
-
+    _render_monitoring(streamlit_module, _monitoring_conditions(app, briefing))
     app.page_header(
         "Decision lineage",
         "Identifiers and source-health references needed to audit the current report.",
@@ -396,13 +386,7 @@ def _render_full_report(
             ("Decision", _decision_identifier(briefing), "Canonical decision reference"),
             ("Cycle", cycle, "Governed evaluation cycle"),
             ("Candidate", candidate, "Current decision candidate"),
-            (
-                "Construction",
-                _clean(construction.get("identifier"))
-                if isinstance(construction, Mapping)
-                else "Not required",
-                "Paper construction reference",
-            ),
+            ("Construction", construction_identifier, "Paper construction reference"),
         ),
         variant="portfolio",
     )
@@ -418,7 +402,6 @@ def install(portfolio_first: ModuleType) -> None:
 
     if getattr(portfolio_first, _INSTALLED_STATE_KEY, False):
         return
-
     original_capital = portfolio_first._capital_structure
     original_report = portfolio_first._render_cio_report
 
@@ -433,8 +416,7 @@ def install(portfolio_first: ModuleType) -> None:
         nav = float(mandate["nav"])
         cash = float(mandate["cash"])
         invested = max(nav - cash, 0.0)
-        deployed = 0.0 if nav <= 0 else invested / nav
-        return nav, cash, deployed
+        return nav, cash, 0.0 if nav <= 0 else invested / nav
 
     @wraps(original_report)
     def render_cio_report(
