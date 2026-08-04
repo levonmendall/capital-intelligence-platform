@@ -11,8 +11,10 @@ The runtime adapter also certifies Twelve Data's dedicated ``/forex_pairs`` endp
 an independent current foreign-exchange directory when EODHD cannot supply its virtual
 ``FOREX`` symbol directory. Forex responses are accepted only when the provider supplies
 an exact count matching a non-empty, unique, structurally valid pair catalog within the
-explicit memory bound. Ambiguous, incomplete, duplicated, or oversized responses remain
-fail-closed.
+explicit memory bound. Twelve Data may return the base and quote fields as descriptive
+currency names rather than ISO codes, so pair identity is governed by the canonical
+``AAA/BBB`` symbol while non-empty component metadata remains required. Ambiguous,
+incomplete, duplicated, or oversized responses remain fail-closed.
 """
 
 from __future__ import annotations
@@ -40,9 +42,10 @@ from providers.twelve_data_reference import (
 )
 
 
-TWELVE_DATA_RUNTIME_REFERENCE_SOURCE_VERSION = "twelve-data-reference.v4-forex"
+TWELVE_DATA_RUNTIME_REFERENCE_SOURCE_VERSION = "twelve-data-reference.v5-forex-components"
 _FOREX_EXCHANGE = "FOREX"
 _FOREX_SYMBOL = re.compile(r"^[A-Z]{3}/[A-Z]{3}$")
+_FOREX_CODE_COMPONENT = re.compile(r"^[A-Z]{3}$")
 
 
 def _normalized_identity(item: Mapping[str, str]) -> tuple[str, str, str, str, str]:
@@ -187,8 +190,10 @@ class TwelveDataRuntimeReferenceProvider(TwelveDataReferenceProvider):
             limitations=(
                 "Twelve Data's daily current forex-pair catalog was used as an "
                 "independent reference fallback after EODHD directory failure.",
-                "The provider-reported count exactly matched the complete response and "
-                "every pair passed ISO-style structural and duplicate validation.",
+                "The provider-reported count exactly matched the complete response; "
+                "pair symbols passed ISO-style structural and duplicate validation, "
+                "component metadata was non-empty, and code-valued components were "
+                "cross-checked against the pair symbol.",
                 "The fallback catalog is current-only and does not certify historical "
                 "pair availability or identifier-change lineage.",
                 "Reference-catalog fallback has discovery authority only and cannot "
@@ -251,11 +256,21 @@ class TwelveDataRuntimeReferenceProvider(TwelveDataReferenceProvider):
                 "Twelve Data forex catalog contains an invalid pair symbol"
             )
         base, quote = symbol.split("/", maxsplit=1)
-        reported_base = str(item.get("currency_base") or "").strip().upper()
-        reported_quote = str(item.get("currency_quote") or "").strip().upper()
-        if reported_base != base or reported_quote != quote:
+        reported_base = str(item.get("currency_base") or "").strip()
+        reported_quote = str(item.get("currency_quote") or "").strip()
+        if not reported_base or not reported_quote:
             raise TwelveDataReferenceError(
-                "Twelve Data forex pair components do not match the pair symbol"
+                "Twelve Data forex catalog requires non-empty currency components"
+            )
+        if (
+            _FOREX_CODE_COMPONENT.fullmatch(reported_base)
+            and reported_base != base
+        ) or (
+            _FOREX_CODE_COMPONENT.fullmatch(reported_quote)
+            and reported_quote != quote
+        ):
+            raise TwelveDataReferenceError(
+                "Twelve Data forex code components do not match the pair symbol"
             )
         group = str(item.get("currency_group") or "").strip()
         return {
