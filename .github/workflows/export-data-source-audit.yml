@@ -1,0 +1,26 @@
+name: Export Data Source Audit Source
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact branch source
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - name: Package tracked source
+        shell: bash
+        run: |
+          git ls-files -z | tar --null -T - -czf data-source-audit-current-source.tar.gz
+      - name: Upload source archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: data-source-audit-current-source
+          path: data-source-audit-current-source.tar.gz
+          retention-days: 1
+          if-no-files-found: error
