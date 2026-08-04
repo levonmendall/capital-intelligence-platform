@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
@@ -38,6 +39,27 @@ from run_autonomous_paper_operator import _payloads
 from run_scheduler import build_worker
 
 
+_SECRET_ENVIRONMENT_NAMES = (
+    "APCA_API_KEY_ID",
+    "APCA_API_SECRET_KEY",
+    "FRED_API_KEY",
+    "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN",
+    "CAPITAL_INTELLIGENCE_DATABENTO_API_KEY",
+    "OPENFIGI_API_KEY",
+    "ALPHA_VANTAGE_API_KEY",
+    "TWELVE_DATA_API_KEY",
+    "TWELVE_API_KEY",
+    "FINRA_API_CLIENT_ID",
+    "FINRA_API_CLIENT_SECRET",
+    "EIA_API_KEY",
+    "NASA_FIRMS_MAP_KEY",
+    "BEA_API_KEY",
+    "CENSUS_API_KEY",
+    "USDA_NASS_API_KEY",
+)
+_REDACTED = "[REDACTED]"
+
+
 def _boolean(value: str | None, *, default: bool = False) -> bool:
     if value is None:
         return default
@@ -58,6 +80,30 @@ def _release(values: Mapping[str, str]) -> str:
     ).strip()
 
 
+def _redact(value: str | None, values: Mapping[str, str]) -> str | None:
+    if value is None:
+        return None
+    text = value
+    secrets = {
+        secret
+        for name in _SECRET_ENVIRONMENT_NAMES
+        if len(secret := values.get(name, "").strip()) >= 4
+    }
+    for secret in sorted(secrets, key=len, reverse=True):
+        text = text.replace(secret, _REDACTED)
+    text = re.sub(
+        r"(?i)([?&](?:api[_-]?key|apikey|api_token|access_token|token)=)[^&\s]+",
+        rf"\1{_REDACTED}",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}",
+        rf"\1{_REDACTED}",
+        text,
+    )
+    return text[:2000]
+
+
 def _log(event: str, **details: object) -> None:
     print(
         json.dumps(
@@ -67,6 +113,7 @@ def _log(event: str, **details: object) -> None:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "paper_only": True,
                 "real_money_authorized": False,
+                "secret_values_disclosed": False,
                 **details,
             },
             sort_keys=True,
@@ -191,8 +238,12 @@ def run_diagnostic_once(
                     )
     except Exception as error:  # Operational boundary; preserve fail-closed detail.
         detail = f"{type(error).__name__}: {error}"
-        logger.exception("manual CIO diagnostic failed closed")
+        logger.error(
+            "manual CIO diagnostic failed closed; error_type=%s",
+            type(error).__name__,
+        )
     finally:
+        detail = _redact(detail, resolved)
         finished = finish_manual_cio_diagnostic(
             claimed,
             succeeded=succeeded,
@@ -228,7 +279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _log(
             "manual_cio_diagnostic_start_failed",
             error_type=type(error).__name__,
-            detail=str(error)[:1000],
+            detail=_redact(str(error), os.environ),
         )
         return 2
 
