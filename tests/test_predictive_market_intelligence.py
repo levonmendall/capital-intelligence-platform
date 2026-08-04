@@ -102,7 +102,7 @@ def test_durable_price_volume_confirmation_is_accumulation() -> None:
     assert assessment.signal.channels == ("market", "forecast")
 
 
-def test_positive_bounce_after_medium_decline_is_not_treated_as_durable_flow() -> None:
+def test_positive_bounce_after_medium_decline_retains_covering_risk() -> None:
     rows = list(_rows(first=120.0, daily_return=-0.003, volume_growth=0.0, count=100))
     close = float(rows[-1]["c"])
     volume = float(rows[-1]["v"])
@@ -127,11 +127,13 @@ def test_positive_bounce_after_medium_decline_is_not_treated_as_durable_flow() -
     assert observation.short_covering_likelihood >= 0.30
     assert observation.medium_trend < observation.short_trend
     assert assessment.state in {
+        CapitalFlowState.ACCUMULATION,
         CapitalFlowState.SHORT_COVERING,
         CapitalFlowState.CROWDED_ADVANCE,
         CapitalFlowState.ROTATION,
     }
     assert assessment.expected_return_impact < 0.08
+    assert assessment.reversal_risk > 0.0
 
 
 def test_expectations_gap_rewards_unpriced_outlook_and_penalizes_fully_priced_move() -> None:
