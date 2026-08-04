@@ -1,4 +1,4 @@
-"""Regression coverage for the Twelve Data global equity reference catalog."""
+"""Regression coverage for the bounded Twelve Data equity reference catalog."""
 
 from __future__ import annotations
 
@@ -35,9 +35,9 @@ def query(exchange: str) -> ProviderDatasetQuery:
     )
 
 
-def hk_row():
+def hk_row(symbol: str = "0005"):
     return {
-        "symbol": "0005",
+        "symbol": symbol,
         "name": "HSBC Holdings plc",
         "currency": "HKD",
         "exchange": "Hong Kong Stock Exchange",
@@ -61,24 +61,18 @@ def lse_row():
     }
 
 
-def us_row():
-    return {
-        "symbol": "AAPL",
-        "name": "Apple Inc",
-        "currency": "USD",
-        "exchange": "NASDAQ",
-        "mic_code": "XNGS",
-        "country": "United States",
-        "type": "Common Stock",
-    }
-
-
-def test_global_catalog_is_fully_paginated_and_reused_across_exchanges() -> None:
+def test_exchange_scoped_catalog_is_paginated_without_global_retention() -> None:
     calls: list[dict[str, object]] = []
     responses = [
-        Response({"count": 3, "data": [hk_row(), lse_row()], "status": "ok"}),
-        Response({"count": 3, "data": [us_row()], "status": "ok"}),
-        Response({"count": 3, "data": [], "status": "ok"}),
+        Response(
+            {
+                "count": 3,
+                "data": [hk_row("0005"), hk_row("0700")],
+                "status": "ok",
+            }
+        ),
+        Response({"count": 3, "data": [hk_row("1299")], "status": "ok"}),
+        Response({"count": 1, "data": [lse_row()], "status": "ok"}),
     ]
 
     def get(_url, *, params, timeout):
@@ -99,43 +93,54 @@ def test_global_catalog_is_fully_paginated_and_reused_across_exchanges() -> None
 
     assert hk_snapshot.provider == "Twelve Data"
     assert hk_snapshot.quality_state is DataQualityState.FALLBACK
-    assert hk_snapshot.payload["active"][0]["Code"] == "0005"
+    assert [item["Code"] for item in hk_snapshot.payload["active"]] == [
+        "0005",
+        "0700",
+        "1299",
+    ]
     assert hk_snapshot.payload["active"][0]["CountryISO2"] == "HK"
     assert hk_snapshot.payload["active"][0]["Exchange"] == "HK"
     assert hk_snapshot.payload["delisted"] == []
     assert lse_snapshot.payload["active"][0]["Code"] == "VOD"
     assert lse_snapshot.payload["active"][0]["CountryISO2"] == "GB"
-    assert [item["page"] for item in calls] == [1, 2, 3]
+    assert [item["page"] for item in calls] == [1, 2, 1]
+    assert [item["mic_code"] for item in calls] == ["XHKG", "XHKG", "XLON"]
     assert all(item["include_delisted"] == "false" for item in calls)
     assert all(item["apikey"] == "secret-key" for item in calls)
+    assert not hasattr(provider, "_catalog_rows")
+    assert not hasattr(provider, "_catalog_retrieved_at")
 
 
-def test_country_fallback_is_used_only_for_certified_single_market_selector() -> None:
-    rows = [
-        {
-            "symbol": "0700",
-            "name": "Tencent Holdings",
-            "currency": "HKD",
-            "exchange": "Unknown Hong Kong Venue",
-            "mic_code": "",
-            "country": "HK",
-            "type": "Common Stock",
-        }
-    ]
+def test_country_fallback_is_used_only_after_direct_selectors_are_empty() -> None:
+    row = hk_row("0700")
+    row["exchange"] = "Unknown Hong Kong Venue"
+    row["mic_code"] = ""
+    row["country"] = "HK"
+    calls: list[dict[str, object]] = []
     responses = [
-        Response({"count": 1, "data": rows, "status": "ok"}),
-        Response({"count": 1, "data": [], "status": "ok"}),
+        Response({"count": 0, "data": [], "status": "ok"}),
+        Response({"count": 0, "data": [], "status": "ok"}),
+        Response({"count": 0, "data": [], "status": "ok"}),
+        Response({"count": 0, "data": [], "status": "ok"}),
+        Response({"count": 1, "data": [row], "status": "ok"}),
     ]
+
+    def get(_url, *, params, timeout):
+        del timeout
+        calls.append(dict(params))
+        return responses.pop(0)
 
     provider = TwelveDataReferenceProvider(
         api_key="secret-key",
-        http_get=lambda *_args, **_kwargs: responses.pop(0),
+        http_get=get,
         clock=lambda: NOW,
-        page_size=5_000,
     )
 
     snapshot = provider.fetch_dataset(query("HK"))
+
     assert snapshot.payload["active"][0]["Code"] == "0700"
+    assert calls[0]["mic_code"] == "XHKG"
+    assert calls[-1]["country"] == "HK"
 
 
 def test_missing_reference_credential_remains_fail_closed(monkeypatch) -> None:
@@ -154,7 +159,11 @@ def test_unsupported_virtual_directory_remains_fail_closed() -> None:
 
 
 def test_repeated_page_cannot_be_certified_as_complete() -> None:
-    page = {"count": 4, "data": [hk_row(), lse_row()], "status": "ok"}
+    page = {
+        "count": 4,
+        "data": [hk_row("0005"), hk_row("0700")],
+        "status": "ok",
+    }
     responses = [Response(page), Response(page)]
 
     provider = TwelveDataReferenceProvider(
@@ -172,7 +181,44 @@ def test_repeated_page_cannot_be_certified_as_complete() -> None:
 def test_reported_count_cannot_exceed_completed_pagination() -> None:
     responses = [
         Response({"count": 10, "data": [hk_row()], "status": "ok"}),
-        Response({"count": 10, "data": [], "status": "ok"}),
+    ]
+    provider = TwelveDataReferenceProvider(
+        api_key="secret-key",
+        http_get=lambda *_args, **_kwargs: responses.pop(0),
+        clock=lambda: NOW,
+        page_size=5_000,
+    )
+
+    with pytest.raises(TwelveDataReferenceError, match="before the reported count"):
+        provider.fetch_dataset(query("HK"))
+
+
+def test_exchange_memory_bound_fails_closed_before_retaining_unbounded_rows() -> None:
+    responses = [
+        Response(
+            {
+                "count": 2,
+                "data": [hk_row("0005"), hk_row("0700")],
+                "status": "ok",
+            }
+        )
+    ]
+    provider = TwelveDataReferenceProvider(
+        api_key="secret-key",
+        http_get=lambda *_args, **_kwargs: responses.pop(0),
+        clock=lambda: NOW,
+        page_size=2,
+        max_records=1,
+    )
+
+    with pytest.raises(TwelveDataReferenceError, match="memory safety bound"):
+        provider.fetch_dataset(query("HK"))
+
+
+def test_provider_record_outside_requested_exchange_fails_closed() -> None:
+    wrong = lse_row()
+    responses = [
+        Response({"count": 1, "data": [wrong], "status": "ok"}),
     ]
     provider = TwelveDataReferenceProvider(
         api_key="secret-key",
@@ -180,7 +226,7 @@ def test_reported_count_cannot_exceed_completed_pagination() -> None:
         clock=lambda: NOW,
     )
 
-    with pytest.raises(TwelveDataReferenceError, match="before the reported count"):
+    with pytest.raises(TwelveDataReferenceError, match="outside the requested exchange"):
         provider.fetch_dataset(query("HK"))
 
 
