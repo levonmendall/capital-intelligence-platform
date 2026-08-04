@@ -1,16 +1,17 @@
 """EODHD provider facade with bounded symbol-directory continuity.
 
-The implementation remains in :mod:`providers.eodhd_base`.  This facade narrows two
+The implementation remains in :mod:`providers.eodhd_base`. This facade narrows two
 production resilience rules for symbol directories only:
 
-* an EODHD HTTP 402 may use a recent, previously successful EODHD active-directory
-  cache; and
-* when no valid EODHD cache exists, an independent Twelve Data daily stock catalog may
-  supply the configured global equity exchange.
+* an EODHD HTTP 402 entitlement response or HTTP 404 unsupported-directory response may
+  use a recent, previously successful EODHD active-directory cache; and
+* when no valid EODHD cache exists, an independent Twelve Data stock catalog may supply
+  a configured global-equity exchange with a certified reference selector.
 
 A current active directory is not discarded solely because the historical delisted-
-symbol directory is temporarily unavailable.  Missing or incomplete fallback evidence,
-authentication failures, and every non-directory provider failure remain fail-closed.
+symbol directory is temporarily unavailable. Missing or incomplete fallback evidence,
+authentication failures, virtual markets without a certified reference selector, and
+every non-directory provider failure remain fail-closed.
 """
 
 from __future__ import annotations
@@ -43,6 +44,9 @@ from providers.twelve_data_reference import (
 from providers.twelve_data_reference_runtime import (
     build_twelve_data_runtime_reference_provider,
 )
+
+
+_DIRECTORY_CONTINUITY_STATUS_CODES = frozenset({402, 404})
 
 
 def __getattr__(name: str):
@@ -100,7 +104,7 @@ class EODHDProvider(_base.EODHDProvider):
                 retrieved_at=retrieved_at,
             )
         except EODHDRetrievalFailure as error:
-            if error.status_code != 402:
+            if error.status_code not in _DIRECTORY_CONTINUITY_STATUS_CODES:
                 raise
             fallback = self._reference_provider
             if fallback is None:
@@ -111,8 +115,8 @@ class EODHDProvider(_base.EODHDProvider):
             except TwelveDataReferenceError as fallback_error:
                 raise EODHDProviderError(
                     "EODHD symbol directory "
-                    f"{query.provider_symbol} returned HTTP 402 and the independent "
-                    "Twelve Data reference fallback is unavailable: "
+                    f"{query.provider_symbol} returned HTTP {error.status_code} and the "
+                    "independent Twelve Data reference fallback is unavailable: "
                     f"{fallback_error}"
                 ) from fallback_error
 
@@ -136,7 +140,10 @@ class EODHDProvider(_base.EODHDProvider):
                         retryable=True,
                     )
             except EODHDRetrievalFailure as error:
-                if not (error.retryable or error.status_code == 402):
+                if not (
+                    error.retryable
+                    or error.status_code in _DIRECTORY_CONTINUITY_STATUS_CODES
+                ):
                     raise
                 directory_limitations = (
                     *directory_limitations,
@@ -206,7 +213,7 @@ class EODHDProvider(_base.EODHDProvider):
                 retrieved_at=retrieved_at,
             )
         except EODHDRetrievalFailure as error:
-            if error.status_code != 402:
+            if error.status_code not in _DIRECTORY_CONTINUITY_STATUS_CODES:
                 raise
             cached = self._load_directory_cache(
                 provider_symbol,
@@ -222,8 +229,8 @@ class EODHDProvider(_base.EODHDProvider):
                 DataQualityState.CACHED,
                 cached_at,
                 (
-                    f"live {resource} returned HTTP 402; using the last successful "
-                    f"directory cached {age_hours:.1f} hours earlier",
+                    f"live {resource} returned HTTP {error.status_code}; using the last "
+                    f"successful directory cached {age_hours:.1f} hours earlier",
                     str(error),
                     "cached directory evidence cannot independently authorize a "
                     "no-superior-opportunity conclusion",

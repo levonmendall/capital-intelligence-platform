@@ -1,4 +1,4 @@
-"""Regression coverage for uncached EODHD HTTP 402 reference failover."""
+"""Regression coverage for uncached EODHD directory reference failover."""
 
 from __future__ import annotations
 
@@ -85,6 +85,18 @@ def hk_row():
     }
 
 
+def tokyo_row():
+    return {
+        "symbol": "7203",
+        "name": "Toyota Motor Corporation",
+        "currency": "JPY",
+        "exchange": "Tokyo Stock Exchange",
+        "mic_code": "XJPX",
+        "country": "Japan",
+        "type": "Common Stock",
+    }
+
+
 def test_uncached_http_402_uses_independent_twelve_data_reference(
     tmp_path: Path,
 ) -> None:
@@ -112,7 +124,34 @@ def test_uncached_http_402_uses_independent_twelve_data_reference(
     assert any("discovery authority only" in item for item in snapshot.limitations)
 
 
-def test_non_entitlement_failure_does_not_route_to_reference_provider(
+def test_uncached_http_404_uses_certified_tokyo_reference(
+    tmp_path: Path,
+) -> None:
+    fallback = reference_provider(
+        [
+            Response({"count": 1, "data": [tokyo_row()], "status": "ok"}),
+            Response({"count": 0, "data": [], "status": "ok"}),
+        ]
+    )
+    provider = eodhd_provider(
+        cache_dir=tmp_path,
+        eodhd_response=Response({}, 404),
+        fallback=fallback,
+    )
+
+    snapshot = provider.fetch_dataset(query("TSE"))
+
+    assert snapshot.provider == "Twelve Data"
+    assert snapshot.quality_state is DataQualityState.FALLBACK
+    assert snapshot.payload["active"][0]["Code"] == "7203"
+    assert snapshot.payload["active"][0]["Exchange"] == "TSE"
+    assert snapshot.payload["active"][0]["CountryISO2"] == "JP"
+    assert snapshot.provider_record_id.startswith(
+        "twelve-data:stocks-reference:TSE:"
+    )
+
+
+def test_non_directory_continuity_failure_does_not_route_to_reference_provider(
     tmp_path: Path,
 ) -> None:
     fallback = reference_provider(
@@ -147,12 +186,14 @@ def test_http_402_and_unavailable_reference_remain_fail_closed(
         provider.fetch_dataset(query())
 
 
+@pytest.mark.parametrize("status_code", (402, 404))
 def test_virtual_market_without_certified_reference_selector_stays_closed(
     tmp_path: Path,
+    status_code: int,
 ) -> None:
     provider = eodhd_provider(
         cache_dir=tmp_path,
-        eodhd_response=Response({}, 402),
+        eodhd_response=Response({}, status_code),
         fallback=TwelveDataReferenceProvider(
             api_key="twelve-secret",
             clock=lambda: NOW,
