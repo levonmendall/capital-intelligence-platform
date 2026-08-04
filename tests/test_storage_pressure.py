@@ -35,7 +35,9 @@ def test_pressure_recovery_removes_only_oldest_backups(monkeypatch, tmp_path) ->
     )
 
     def disk_usage(_path):
-        archive_count = sum(backup_root.glob("capital-intelligence-*.tar.gz*"))
+        archive_count = sum(
+            1 for _ in backup_root.glob("capital-intelligence-*.tar.gz*")
+        )
         free = 100 + (3 - archive_count) * 500
         return SimpleNamespace(total=5_000, used=5_000 - free, free=free)
 
