@@ -1,0 +1,37 @@
+name: Publish Data Sources Clean
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          fetch-depth: 0
+      - name: Publish clean product-only branch
+        shell: bash
+        run: |
+          git fetch origin feature/add-required-public-data-sources
+          git switch -C feature/add-required-public-data-sources-final origin/main
+          git checkout origin/feature/add-required-public-data-sources -- \
+            config/public_live_information_sources.json \
+            docs/DATA_SOURCE_COVERAGE_AUDIT.md \
+            providers/public_live_information_extended.py \
+            providers/public_live_information_runtime.py \
+            render.yaml \
+            schemas/public_live_information_sources.schema.json \
+            tests/test_impactful_public_live_sources.py \
+            tests/test_public_data_source_deployment.py
+          git config user.name "capital-intelligence-automation"
+          git config user.email "capital-intelligence-automation@users.noreply.github.com"
+          git add -A
+          git commit -m "Add necessary official public data sources"
+          git push --force-with-lease origin HEAD:feature/add-required-public-data-sources-final
