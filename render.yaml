@@ -39,8 +39,15 @@ services:
         value: /app/database/backups
       - key: CAPITAL_INTELLIGENCE_BACKUP_INTERVAL_HOURS
         value: "24"
+      # The five-gigabyte test disk cannot safely retain a month of full
+      # canonical-authority archives. Preserve the newest daily recovery point
+      # and reclaim older archives before any child process writes new state.
       - key: CAPITAL_INTELLIGENCE_BACKUP_RETENTION_DAYS
-        value: "30"
+        value: "1"
+      - key: CAPITAL_INTELLIGENCE_STORAGE_RESERVE_MB
+        value: "1024"
+      - key: CAPITAL_INTELLIGENCE_BACKUP_MINIMUM_ARCHIVES
+        value: "1"
       - key: CAPITAL_INTELLIGENCE_READINESS_STARTUP_GRACE_SECONDS
         value: "900"
       - key: CAPITAL_INTELLIGENCE_READINESS_POLL_SECONDS
