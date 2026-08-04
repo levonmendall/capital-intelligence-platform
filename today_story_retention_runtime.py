@@ -352,7 +352,7 @@ def _retained_today_renderer(
             f'<span class="ci-chip">Market {story_ui._session(market).lower()}</span>'
             f'<span class="ci-chip">{escape(story_ui._coverage(market))} governed quotes</span>'
             f'<span class="ci-chip">{escape(story_ui._age_label(getattr(snapshot, "evaluated_at", None)))}</span>'
-            + ('<span class="ci-chip">Latest verified stories</span>' if retained else "")
+            + ('<span class="ci-chip">No new qualifying stories</span>' if retained else "")
             + ('<span class="ci-chip">Headline feeds refreshing</span>' if empty else "")
             + (
                 '<span class="ci-chip">Coverage incomplete</span>'
