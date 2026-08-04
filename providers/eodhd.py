@@ -33,6 +33,17 @@ from providers.eodhd_base import (
 )
 
 
+def __getattr__(name: str):
+    """Preserve compatibility for non-exported constants and helpers."""
+
+    try:
+        return getattr(_base, name)
+    except AttributeError as error:
+        raise AttributeError(
+            f"module 'providers.eodhd' has no attribute {name!r}"
+        ) from error
+
+
 class EODHDProvider(_base.EODHDProvider):
     """Apply bounded continuity only to EODHD symbol-directory retrieval."""
 
