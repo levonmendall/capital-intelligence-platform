@@ -39,6 +39,14 @@ def _date_value(value: object) -> object:
         return f"{raw}-01-01"
     if len(raw) == 8 and raw.isdigit():
         return f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    if len(raw) == 7 and raw[4] == "-" and raw[:4].isdigit() and raw[5:].isdigit():
+        month = int(raw[5:])
+        if 1 <= month <= 12:
+            return f"{raw}-01"
+    normalized_quarter = raw.replace("-", "").upper()
+    if len(normalized_quarter) == 6 and normalized_quarter[:4].isdigit() and normalized_quarter[4] == "Q" and normalized_quarter[5] in "1234":
+        month = 1 + (int(normalized_quarter[5]) - 1) * 3
+        return f"{normalized_quarter[:4]}-{month:02d}-01"
     return value
 
 
@@ -86,11 +94,17 @@ class GovernedPublicLiveInformationProvider(PublicLiveInformationProvider):
             name: os.getenv(name, "").strip()
             for name in source.credential_environment_variables
         }
+        runtime_values = {
+            "CURRENT_YEAR": str(retrieved_at.year),
+            "CURRENT_MONTH": f"{retrieved_at.month:02d}",
+            "CURRENT_DATE": retrieved_at.date().isoformat(),
+        }
+        substitutions = {**runtime_values, **secrets}
         endpoint = source.endpoint
-        for name, value in secrets.items():
+        for name, value in substitutions.items():
             endpoint = endpoint.replace(f"${{{name}}}", quote(value, safe=""))
-        parameters = _replace_placeholders(dict(source.parameters), secrets)
-        headers = _replace_placeholders(dict(source.headers), secrets)
+        parameters = _replace_placeholders(dict(source.parameters), substitutions)
+        headers = _replace_placeholders(dict(source.headers), substitutions)
         if source.user_agent_environment_variable:
             user_agent = os.getenv(
                 source.user_agent_environment_variable,
