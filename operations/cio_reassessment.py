@@ -9,10 +9,13 @@ from operations.cio_after_close import (
     AfterCloseLearningResult,
     AfterCloseOpportunityReviewer,
 )
-from operations.cio_material_reassessment import (
-    MaterialCIOReassessmentEngine,
-    ReassessmentResult,
+from operations.cio_material_reassessment import ReassessmentResult
+from operations.investor_material_reassessment import (
+    InvestorMaterialCIOReassessmentEngine,
 )
+
+
+MaterialCIOReassessmentEngine = InvestorMaterialCIOReassessmentEngine
 
 
 def build_default_reassessment_engine(

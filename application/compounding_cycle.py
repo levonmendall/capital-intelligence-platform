@@ -1,10 +1,10 @@
 """Compounding-first extension of the canonical CIO decision cycle.
 
 The base canonical cycle remains authoritative for opportunity qualification, six
-specialists, CIO decisions, construction, thesis lineage, and reporting.  This
-extension supplies one governed portfolio posture to the CIO, persists complete
-portfolio alternatives, and returns the base result with additional read-only
-allocation context.
+specialists, CIO decisions, construction, thesis lineage, and reporting. This
+extension supplies governed portfolio posture, certified view-to-expression ranking,
+position lifecycle, reactive dependencies, portfolio alternatives, and compounding
+accountability without creating a parallel decision or execution path.
 """
 
 from __future__ import annotations
@@ -14,6 +14,20 @@ from dataclasses import fields
 from application.cio_cycle import CanonicalCIOCycle, CanonicalCIOCycleResult
 from cio.compounding_authority import CompoundingChiefInvestmentOfficer
 from cio.policy_authority import CanonicalDecisionPolicyAuthority
+from portfolio.active_investor import (
+    CompoundingAccountabilityEngine,
+    CompoundingAccountabilitySnapshot,
+    PositionLifecycleEngine,
+    PositionLifecyclePlan,
+    ReactiveMonitoringEngine,
+    ReactiveMonitoringPlan,
+    SQLiteActiveInvestorStore,
+    ViewExpressionSet,
+    ViewToExpressionEngine,
+)
+from portfolio.compounding_accountability import (
+    ProspectiveCompoundingAccountabilityEngine,
+)
 from portfolio.compounding_allocation import (
     AllocationRange,
     CompoundingPortfolioAlternativeEngine,
@@ -28,27 +42,51 @@ from portfolio.compounding_allocation import (
 
 
 class CompoundingCanonicalCIOCycleResult(CanonicalCIOCycleResult):
-    """Canonical result with additional advisory compounding context."""
+    """Canonical result with additional non-authoritative investor-loop context."""
 
-    __slots__ = ("portfolio_posture", "portfolio_alternatives")
+    __slots__ = (
+        "portfolio_posture",
+        "view_expressions",
+        "portfolio_alternatives",
+        "position_lifecycle",
+        "reactive_monitoring",
+        "compounding_accountability",
+    )
 
     def __init__(
         self,
         *,
         base_result: CanonicalCIOCycleResult,
         portfolio_posture: PortfolioPosture,
+        view_expressions: ViewExpressionSet,
         portfolio_alternatives: CompoundingPortfolioAlternativeSet,
+        position_lifecycle: PositionLifecyclePlan,
+        reactive_monitoring: ReactiveMonitoringPlan,
+        compounding_accountability: CompoundingAccountabilitySnapshot,
     ) -> None:
         if not isinstance(base_result, CanonicalCIOCycleResult):
             raise TypeError("base_result must be CanonicalCIOCycleResult")
         if not isinstance(portfolio_posture, PortfolioPosture):
             raise TypeError("portfolio_posture must be PortfolioPosture")
+        if not isinstance(view_expressions, ViewExpressionSet):
+            raise TypeError("view_expressions must be ViewExpressionSet")
         if not isinstance(
             portfolio_alternatives,
             CompoundingPortfolioAlternativeSet,
         ):
             raise TypeError(
                 "portfolio_alternatives must be CompoundingPortfolioAlternativeSet"
+            )
+        if not isinstance(position_lifecycle, PositionLifecyclePlan):
+            raise TypeError("position_lifecycle must be PositionLifecyclePlan")
+        if not isinstance(reactive_monitoring, ReactiveMonitoringPlan):
+            raise TypeError("reactive_monitoring must be ReactiveMonitoringPlan")
+        if not isinstance(
+            compounding_accountability,
+            CompoundingAccountabilitySnapshot,
+        ):
+            raise TypeError(
+                "compounding_accountability must be CompoundingAccountabilitySnapshot"
             )
         super().__init__(
             **{
@@ -57,7 +95,15 @@ class CompoundingCanonicalCIOCycleResult(CanonicalCIOCycleResult):
             }
         )
         object.__setattr__(self, "portfolio_posture", portfolio_posture)
+        object.__setattr__(self, "view_expressions", view_expressions)
         object.__setattr__(self, "portfolio_alternatives", portfolio_alternatives)
+        object.__setattr__(self, "position_lifecycle", position_lifecycle)
+        object.__setattr__(self, "reactive_monitoring", reactive_monitoring)
+        object.__setattr__(
+            self,
+            "compounding_accountability",
+            compounding_accountability,
+        )
 
 
 def _neutral_posture(as_of) -> PortfolioPosture:
@@ -108,14 +154,19 @@ def _neutral_posture(as_of) -> PortfolioPosture:
 
 
 class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
-    """Run the canonical cycle with portfolio posture and staged participation."""
+    """Run the canonical cycle with a complete active-investor reasoning loop."""
 
     def __init__(
         self,
         *,
         posture_engine: PortfolioPostureEngine | None = None,
+        expression_engine: ViewToExpressionEngine | None = None,
         alternative_engine: CompoundingPortfolioAlternativeEngine | None = None,
+        lifecycle_engine: PositionLifecycleEngine | None = None,
+        reactive_engine: ReactiveMonitoringEngine | None = None,
+        accountability_engine: CompoundingAccountabilityEngine | None = None,
         allocation_store: SQLiteCompoundingAllocationStore | None = None,
+        active_investor_store: SQLiteActiveInvestorStore | None = None,
         cio=None,
         policy_authority: CanonicalDecisionPolicyAuthority | None = None,
         journal=None,
@@ -138,14 +189,27 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
             **kwargs,
         )
         self.posture_engine = posture_engine or PortfolioPostureEngine()
+        self.expression_engine = expression_engine or ViewToExpressionEngine()
         self.alternative_engine = (
             alternative_engine or CompoundingPortfolioAlternativeEngine()
         )
+        self.lifecycle_engine = lifecycle_engine or PositionLifecycleEngine()
+        self.reactive_engine = reactive_engine or ReactiveMonitoringEngine()
+        self.accountability_engine = (
+            accountability_engine
+            or ProspectiveCompoundingAccountabilityEngine()
+        )
         self.allocation_store = allocation_store
-        if self.allocation_store is None and self.journal is not None:
-            self.allocation_store = SQLiteCompoundingAllocationStore(
-                self.journal.path
-            )
+        self.active_investor_store = active_investor_store
+        if self.journal is not None:
+            if self.allocation_store is None:
+                self.allocation_store = SQLiteCompoundingAllocationStore(
+                    self.journal.path
+                )
+            if self.active_investor_store is None:
+                self.active_investor_store = SQLiteActiveInvestorStore(
+                    self.journal.path
+                )
 
     def run(self, **kwargs) -> CompoundingCanonicalCIOCycleResult:
         candidates = kwargs.get("candidates")
@@ -159,6 +223,7 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
             raise TypeError("specialist_contexts must be supplied as a tuple")
         if portfolio is None:
             raise TypeError("portfolio must be supplied")
+
         posture = (
             self.posture_engine.assess(
                 as_of=portfolio.as_of,
@@ -167,7 +232,17 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
             if specialist_contexts
             else _neutral_posture(portfolio.as_of)
         )
-        directives = self.posture_engine.directives(candidates, posture)
+        base_directives = self.posture_engine.directives(candidates, posture)
+        view_expressions = self.expression_engine.build(
+            posture=posture,
+            candidates=candidates,
+            specialist_contexts=specialist_contexts,
+            directives=base_directives,
+        )
+        directives = self.expression_engine.enhance_directives(
+            base_directives,
+            view_expressions,
+        )
         compounding_cio = (
             self.cio
             if isinstance(self.cio, CompoundingChiefInvestmentOfficer)
@@ -199,6 +274,27 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
             portfolio=portfolio,
             construction=base_result.construction,
         )
+        lifecycle = self.lifecycle_engine.build(
+            as_of=portfolio.as_of,
+            candidates=candidates,
+            decisions=base_result.decisions,
+            theses=base_result.theses,
+            expression_set=view_expressions,
+            portfolio=portfolio,
+            construction=base_result.construction,
+        )
+        reactive = self.reactive_engine.build(
+            posture=posture,
+            expression_set=view_expressions,
+            lifecycle=lifecycle,
+        )
+        accountability = self.accountability_engine.build(
+            posture=posture,
+            alternatives=alternatives,
+            candidates=candidates,
+            decisions=base_result.decisions,
+            construction=base_result.construction,
+        )
         if self.allocation_store is not None:
             self.allocation_store.append(
                 cycle_identifier=str(identifier),
@@ -206,10 +302,23 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
                 alternatives=alternatives,
                 code_version=str(code_version),
             )
+        if self.active_investor_store is not None:
+            self.active_investor_store.append_cycle(
+                cycle_identifier=str(identifier),
+                expressions=view_expressions,
+                lifecycle=lifecycle,
+                reactive=reactive,
+                accountability=accountability,
+                code_version=str(code_version),
+            )
         return CompoundingCanonicalCIOCycleResult(
             base_result=base_result,
             portfolio_posture=posture,
+            view_expressions=view_expressions,
             portfolio_alternatives=alternatives,
+            position_lifecycle=lifecycle,
+            reactive_monitoring=reactive,
+            compounding_accountability=accountability,
         )
 
 
