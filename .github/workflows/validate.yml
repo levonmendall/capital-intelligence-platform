@@ -38,6 +38,12 @@ jobs:
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
+      - name: Report cryptography 50 wheel hash
+        run: |
+          mkdir -p /tmp/cryptography-wheel
+          python -m pip download --only-binary=:all: --no-deps cryptography==50.0.0 --dest /tmp/cryptography-wheel
+          sha256sum /tmp/cryptography-wheel/*
+
       - name: Install locked runtime dependencies
         run: pip install --require-hashes -r requirements.lock
 
