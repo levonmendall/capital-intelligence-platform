@@ -1,10 +1,9 @@
-"""Keep CIO-report navigation inside the authenticated Streamlit session.
+"""Keep CIO-report navigation tappable inside the authenticated Streamlit session.
 
-A raw ``href`` starts a new browser request and therefore a new Streamlit session.
-Authentication tokens are session-local, so that navigation can return an
-otherwise authenticated user to the login screen. This presentation-only adapter
-replaces both report anchors with in-app buttons that update query parameters and
-rerun the existing session.
+Raw browser links replace the Streamlit session and can discard session-local
+authentication. A visual card layered over an invisible button is also unreliable
+on touch devices. This presentation-only adapter uses visible native Streamlit
+controls and stores report-open state in the existing authenticated session.
 """
 
 from __future__ import annotations
@@ -12,51 +11,75 @@ from __future__ import annotations
 from functools import wraps
 from html import escape
 from types import ModuleType
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 
 _INSTALLED_STATE_KEY = "_capital_intelligence_cio_report_session_navigation_installed"
+_REPORT_STATE_KEY = "_capital_intelligence_full_cio_report_open"
 _VIEW_QUERY_KEY = "view"
 _VIEW_QUERY_VALUE = "cio-report"
 
 _SESSION_NAVIGATION_CSS = """
 <style>
 .st-key-cio_report_open_control {
-    position: relative;
     margin: .5rem 0 .9rem;
+    border: 1px solid rgba(var(--surface-rgb), .25);
+    border-radius: 1rem;
+    background: linear-gradient(145deg, rgba(13,20,34,.94), rgba(8,13,24,.94));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 14px 34px rgba(0,0,0,.18);
+    overflow: hidden;
 }
 .st-key-cio_report_open_control .cio-report-link-shell {
     margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.st-key-cio_report_open_control .cio-report-link-card {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
 }
 .st-key-cio_report_open_control [data-testid="stButton"] {
-    position: absolute;
-    inset: 0;
-    z-index: 4;
+    position: static !important;
     margin: 0 !important;
+    padding: 0 .72rem .72rem !important;
 }
 .st-key-cio_report_open_control [data-testid="stButton"] button {
+    position: static !important;
     width: 100% !important;
-    height: 100% !important;
-    min-height: 100% !important;
-    padding: 0 !important;
-    border: 0 !important;
-    background: transparent !important;
-    color: transparent !important;
-    box-shadow: none !important;
+    min-height: 3rem !important;
+    padding: .68rem .9rem !important;
+    border: 1px solid rgba(var(--surface-rgb), .42) !important;
+    border-radius: .78rem !important;
+    background: linear-gradient(135deg, rgba(var(--surface-rgb), .2), rgba(var(--surface-rgb-2), .12)) !important;
+    color: #f5f7ff !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06) !important;
     cursor: pointer !important;
-    opacity: 0 !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    font-size: .78rem !important;
+    line-height: 1.25 !important;
+    font-weight: 800 !important;
+    letter-spacing: .015em !important;
 }
-.st-key-cio_report_open_control:focus-within .cio-report-link-card {
-    border-color: rgba(var(--surface-rgb), .5);
-    box-shadow: 0 0 0 2px rgba(var(--surface-rgb), .18), 0 14px 34px rgba(0,0,0,.18);
+.st-key-cio_report_open_control [data-testid="stButton"] button:hover,
+.st-key-cio_report_open_control [data-testid="stButton"] button:focus-visible {
+    border-color: rgba(var(--surface-rgb), .68) !important;
+    background: linear-gradient(135deg, rgba(var(--surface-rgb), .3), rgba(var(--surface-rgb-2), .18)) !important;
+    box-shadow: 0 0 0 2px rgba(var(--surface-rgb), .15) !important;
+    transform: translateY(-1px);
 }
 .st-key-cio_report_back_control {
     width: fit-content;
     margin: .28rem 0 .38rem;
 }
 .st-key-cio_report_back_control [data-testid="stButton"] button {
-    min-height: 2rem !important;
-    padding: .25rem .1rem !important;
+    min-height: 2.75rem !important;
+    padding: .35rem .25rem !important;
     border: 0 !important;
     background: transparent !important;
     color: var(--surface-accent) !important;
@@ -71,22 +94,56 @@ _SESSION_NAVIGATION_CSS = """
     text-decoration: underline !important;
     background: transparent !important;
 }
+@media (max-width: 760px) {
+    .st-key-cio_report_open_control [data-testid="stButton"] {
+        padding: 0 .62rem .62rem !important;
+    }
+    .st-key-cio_report_open_control [data-testid="stButton"] button {
+        min-height: 3.15rem !important;
+        font-size: .76rem !important;
+    }
+}
 </style>
 """
 
 
-def _set_report_view(streamlit_module: ModuleType, *, open_report: bool) -> None:
-    """Change the report route without replacing the authenticated browser session."""
+def _remove_legacy_route(streamlit_module: ModuleType) -> None:
+    """Remove only the obsolete report query parameter when it is present."""
 
-    params = streamlit_module.query_params
+    params = getattr(streamlit_module, "query_params", None)
+    if params is None:
+        return
+    try:
+        del params[_VIEW_QUERY_KEY]
+    except (AttributeError, KeyError, TypeError, ValueError):
+        pass
+
+
+def _set_report_view(streamlit_module: ModuleType, *, open_report: bool) -> None:
+    """Change the report view without replacing the authenticated browser session."""
+
+    state = streamlit_module.session_state
     if open_report:
-        params[_VIEW_QUERY_KEY] = _VIEW_QUERY_VALUE
+        state[_REPORT_STATE_KEY] = True
     else:
         try:
-            del params[_VIEW_QUERY_KEY]
+            del state[_REPORT_STATE_KEY]
         except (KeyError, TypeError):
             pass
+    _remove_legacy_route(streamlit_module)
     streamlit_module.rerun()
+
+
+def _session_report_requested(
+    streamlit_module: ModuleType,
+    legacy_requested: Callable[[ModuleType], bool],
+) -> bool:
+    try:
+        if bool(streamlit_module.session_state.get(_REPORT_STATE_KEY, False)):
+            return True
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return bool(legacy_requested(streamlit_module))
 
 
 def _render_authenticated_link(
@@ -112,9 +169,8 @@ def _render_authenticated_link(
                 '<span class="cio-report-link-kicker">Current CIO report</span>'
                 f'<span class="cio-report-link-title">{escape(decision)}</span>'
                 f'<span class="cio-report-link-meta">{escape(posture)} · '
-                f'{escape(implementation_state)} · Open complete decision record</span>'
-                '</span><span class="cio-report-link-arrow" aria-hidden="true">→</span>'
-                '</div></summary></div>'
+                f'{escape(implementation_state)}</span>'
+                '</span></div></summary></div>'
             ),
             unsafe_allow_html=True,
         )
@@ -143,12 +199,19 @@ class _BackAnchorSuppressingProxy:
 
 
 def install(detail: ModuleType) -> None:
-    """Replace report anchors with session-preserving Streamlit controls."""
+    """Replace report anchors and overlays with visible session-native controls."""
 
     if getattr(detail, _INSTALLED_STATE_KEY, False):
         return
 
     original_full_report = detail._render_full_report
+    original_report_requested = detail.report_requested
+
+    def report_requested(streamlit_module: ModuleType) -> bool:
+        return _session_report_requested(
+            streamlit_module,
+            original_report_requested,
+        )
 
     def render_link(
         streamlit_module: ModuleType,
@@ -194,6 +257,7 @@ def install(detail: ModuleType) -> None:
             deployed=deployed,
         )
 
+    detail.report_requested = report_requested
     detail._render_link = render_link
     detail._render_full_report = render_full_report
     setattr(detail, _INSTALLED_STATE_KEY, True)

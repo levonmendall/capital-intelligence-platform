@@ -13,16 +13,36 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _activate(page, locator, *, touch: bool) -> None:
+    box = locator.bounding_box()
+    assert box is not None
+    assert box["width"] > 0
+    assert box["height"] >= 44
+    if touch:
+        page.touchscreen.tap(
+            box["x"] + box["width"] / 2,
+            box["y"] + box["height"] / 2,
+        )
+    else:
+        locator.click()
+
+
 @pytest.mark.parametrize("viewport_name", ("desktop", "iphone"))
-def test_portfolio_opens_full_cio_report_without_replacing_authenticated_session(
+def test_portfolio_opens_full_cio_report_from_visible_touch_target(
     live_streamlit,
     viewport_name,
 ) -> None:
     playwright = pytest.importorskip("playwright.sync_api")
     viewport = BASELINE["viewports"][viewport_name]
+    touch = viewport_name == "iphone"
     with playwright.sync_playwright() as runtime:
         browser = runtime.chromium.launch(headless=True)
-        page = browser.new_page(viewport=viewport, device_scale_factor=1)
+        page = browser.new_page(
+            viewport=viewport,
+            device_scale_factor=1,
+            has_touch=touch,
+            is_mobile=touch,
+        )
         page.goto(live_streamlit, wait_until="networkidle")
         main_frame_navigations: list[str] = []
 
@@ -53,8 +73,15 @@ def test_portfolio_opens_full_cio_report_without_replacing_authenticated_session
         assert capital_box is not None
         assert button_box is not None
         assert capital_box["y"] < button_box["y"]
+        assert button_box["height"] >= 44
+        assert float(
+            report_button.evaluate("element => getComputedStyle(element).opacity")
+        ) >= 0.99
+        assert report_button.evaluate(
+            "element => getComputedStyle(element).pointerEvents"
+        ) != "none"
 
-        report_button.click()
+        _activate(page, report_button, touch=touch)
         page.get_by_text("Full CIO report", exact=True).first.wait_for(
             state="visible",
             timeout=15_000,
@@ -62,7 +89,6 @@ def test_portfolio_opens_full_cio_report_without_replacing_authenticated_session
         page.get_by_text("Decision context", exact=True).wait_for()
         page.get_by_text("Monitoring and reversal conditions", exact=True).wait_for()
         page.get_by_text("Decision lineage", exact=True).wait_for()
-        assert "view=cio-report" in page.url
         assert main_frame_navigations == []
         assert page.get_by_text("Capital structure", exact=True).count() == 0
         assert page.get_by_role(
@@ -74,7 +100,7 @@ def test_portfolio_opens_full_cio_report_without_replacing_authenticated_session
 
         back = page.get_by_role("button", name="Back to Portfolio", exact=False)
         back.wait_for(state="visible")
-        back.click()
+        _activate(page, back, touch=touch)
         page.get_by_text("Capital structure", exact=True).first.wait_for(
             state="visible",
             timeout=15_000,
@@ -84,7 +110,6 @@ def test_portfolio_opens_full_cio_report_without_replacing_authenticated_session
             name="View full CIO report",
             exact=True,
         ).wait_for()
-        assert "view=cio-report" not in page.url
         assert main_frame_navigations == []
         assert page.get_by_text("Full CIO report", exact=True).count() == 0
         assert page.get_by_label("Email address").count() == 0

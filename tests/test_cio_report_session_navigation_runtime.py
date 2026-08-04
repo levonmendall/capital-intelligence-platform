@@ -15,6 +15,7 @@ class _RerunRequested(BaseException):
 class _FakeStreamlit:
     def __init__(self, *, pressed: str = "") -> None:
         self.query_params: dict[str, str] = {}
+        self.session_state: dict[str, object] = {}
         self.pressed = pressed
         self.markdown_calls: list[str] = []
         self.button_calls: list[tuple[str, str]] = []
@@ -52,20 +53,19 @@ def _detail_module() -> tuple[ModuleType, list[str]]:
         "Existing capital remains unchanged.",
         0,
     )
+    detail.report_requested = lambda streamlit_module: (
+        streamlit_module.query_params.get("view") == "cio-report"
+    )
 
     def old_link(*args: object, **kwargs: object) -> None:
         del args, kwargs
         calls.append("old-link")
 
-    def old_full_report(
-        app: object,
-        streamlit_module: object,
-        **kwargs: object,
-    ) -> None:
+    def old_full_report(app: object, streamlit_module: object, **kwargs: object) -> None:
         del app, kwargs
         calls.append("full-report")
         streamlit_module.markdown(
-            '<a class="cio-report-back-link" href="?">Back</a>',
+            '<a class="cio-report-back-link">Back</a>',
             unsafe_allow_html=True,
         )
         streamlit_module.markdown("report body", unsafe_allow_html=True)
@@ -75,7 +75,7 @@ def _detail_module() -> tuple[ModuleType, list[str]]:
     return detail, calls
 
 
-def test_open_report_uses_query_params_and_rerun_without_href() -> None:
+def test_open_report_uses_session_state_and_visible_button() -> None:
     detail, calls = _detail_module()
     navigation.install(detail)
     streamlit_module = _FakeStreamlit(pressed="open_full_cio_report")
@@ -91,14 +91,25 @@ def test_open_report_uses_query_params_and_rerun_without_href() -> None:
         )
 
     assert calls == []
-    assert streamlit_module.query_params == {
-        "tenant": "current",
-        "view": "cio-report",
-    }
+    assert streamlit_module.query_params == {"tenant": "current"}
+    assert streamlit_module.session_state[
+        "_capital_intelligence_full_cio_report_open"
+    ] is True
+    assert detail.report_requested(streamlit_module) is True
     assert ("View full CIO report", "open_full_cio_report") in streamlit_module.button_calls
     markup = "\n".join(streamlit_module.markdown_calls)
-    assert "href=" not in markup
     assert "Current CIO report" in markup
+    assert "opacity: 0" not in markup
+    assert "pointer-events: auto" in markup
+    assert "position: absolute" not in markup
+
+
+def test_legacy_report_query_remains_supported() -> None:
+    detail, _ = _detail_module()
+    navigation.install(detail)
+    streamlit_module = _FakeStreamlit()
+    streamlit_module.query_params["view"] = "cio-report"
+    assert detail.report_requested(streamlit_module) is True
 
 
 def test_full_report_suppresses_obsolete_back_anchor() -> None:
@@ -119,14 +130,16 @@ def test_full_report_suppresses_obsolete_back_anchor() -> None:
     assert ("← Back to Portfolio", "close_full_cio_report") in streamlit_module.button_calls
     markup = "\n".join(streamlit_module.markdown_calls)
     assert "cio-report-back-link" not in markup
-    assert "href=" not in markup
     assert "report body" in markup
 
 
-def test_back_to_portfolio_removes_only_report_route() -> None:
+def test_back_clears_session_state_and_legacy_query() -> None:
     detail, calls = _detail_module()
     navigation.install(detail)
     streamlit_module = _FakeStreamlit(pressed="close_full_cio_report")
+    streamlit_module.session_state[
+        "_capital_intelligence_full_cio_report_open"
+    ] = True
     streamlit_module.query_params.update(
         {"view": "cio-report", "tenant": "current"}
     )
@@ -143,3 +156,7 @@ def test_back_to_portfolio_removes_only_report_route() -> None:
 
     assert calls == []
     assert streamlit_module.query_params == {"tenant": "current"}
+    assert "_capital_intelligence_full_cio_report_open" not in (
+        streamlit_module.session_state
+    )
+    assert detail.report_requested(streamlit_module) is False
