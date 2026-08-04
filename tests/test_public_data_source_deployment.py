@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+from providers.public_live_source_catalogs import load_operating_public_live_source_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,9 +11,10 @@ CATALOG = ROOT / "config" / "public_live_information_sources.json"
 
 
 def test_new_official_public_sources_are_declared() -> None:
-    payload = json.loads(CATALOG.read_text(encoding="utf-8"))
-    identifiers = {item["identifier"] for item in payload["sources"]}
+    catalog = load_operating_public_live_source_catalog(CATALOG)
+    identifiers = {item.identifier for item in catalog.sources}
 
+    assert len(catalog.sources) >= 41
     assert {
         "bls-labor-inflation-live",
         "nyfed-sofr-live",
