@@ -139,10 +139,35 @@ def run_diagnostic_once(
         return 0
 
     existing = latest_manual_cio_diagnostic(values=resolved)
+    # An in-progress record observed during a fresh process startup belongs to a
+    # process that did not survive the preceding restart/deploy. Close it truthfully
+    # before requesting the current release's diagnostic so troubleshooting cannot
+    # become permanently wedged on durable coordination state.
+    if existing is not None and existing.state == "in_progress":
+        interrupted = finish_manual_cio_diagnostic(
+            existing,
+            succeeded=False,
+            cycle_key=existing.cycle_key,
+            snapshot_identifier=existing.snapshot_identifier,
+            detail=(
+                "Diagnostic execution was interrupted by a prior service process; "
+                "the new service process may issue a replacement request."
+            ),
+            values=resolved,
+        )
+        _log(
+            "manual_cio_diagnostic_interrupted_recovered",
+            release=release,
+            request_id=interrupted.request_id,
+            prior_requester=interrupted.requested_by,
+        )
+        existing = interrupted
+
     if (
         not force
         and existing is not None
         and existing.requested_by == requester
+        and existing.state in {"completed", "failed"}
     ):
         _log(
             "manual_cio_diagnostic_already_recorded",
