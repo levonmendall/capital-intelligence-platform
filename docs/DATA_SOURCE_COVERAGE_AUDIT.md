@@ -45,6 +45,8 @@ The public-information catalog now includes:
 
 The runtime now supports BLS JSON, New York Fed reference-rate JSON, Treasury Atom/XML, generic SDMX CSV, Eurostat JSON-stat, BEA JSON and Census tabular JSON. Dynamic current-date placeholders keep bounded official queries current without hard-coded annual maintenance.
 
+These feeds strengthen supporting economic context but do not, by themselves, activate comprehensive all-market data readiness or replace certified point-in-time institutional datasets.
+
 ## Deployment corrections
 
 Render now declares the checked-in EODHD, Databento and crypto binding files and exposes secret slots for adapters that already existed but were not represented in the deployment blueprint:
