@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
@@ -24,42 +24,10 @@ jobs:
       CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
 
     steps:
-      - name: Check out feature branch
+      - name: Check out repository
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
-          persist-credentials: true
-          ref: feature/compounding-allocation-core
-
-      - name: Regenerate fixed cryptography lock entry
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path("requirements.lock")
-          content = path.read_text(encoding="utf-8")
-          replacement = (
-              "cryptography==50.0.0 \\\n"
-              "    --hash=sha256:82148ec5bddac30b51a5b3c1945075f896fa022cb93f8e4a01e9f6ee95292c5f\n"
-              "    # via -r requirements.txt"
-          )
-          updated, count = re.subn(
-              r"cryptography==49\.0\.0 \\\n(?:    --hash=sha256:[0-9a-f]+ \\\n)*    --hash=sha256:[0-9a-f]+\n    # via -r requirements\.txt",
-              replacement,
-              content,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit(f"expected one cryptography lock block, replaced {count}")
-          path.write_text(updated, encoding="utf-8")
-          PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add requirements.lock
-          if ! git diff --cached --quiet; then
-            git commit -m "Regenerate runtime lock for cryptography 50"
-            git push origin HEAD:feature/compounding-allocation-core
-          fi
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
