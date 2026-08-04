@@ -86,6 +86,38 @@ def test_disabled_background_validation_preserves_existing_startup_mode(
     assert values["CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP"] == "true"
 
 
+def test_bond_source_transition_makes_only_the_expansion_optional(monkeypatch) -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED": "false",
+        "CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP": "false",
+        "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY": "true",
+        "CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE": "true",
+    }
+    supervisor_calls = []
+    monkeypatch.setattr(bootstrap, "prepare_render_environment", lambda env: env)
+    monkeypatch.setattr(
+        bootstrap,
+        "run_supervisor",
+        lambda *, environment: supervisor_calls.append(environment) or 0,
+    )
+
+    assert bootstrap.run_nonblocking_render_service(values) == 0
+    assert supervisor_calls == [values]
+    assert values["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY"] == "false"
+
+
+def test_transition_mode_is_explicit_and_disabled_by_default(monkeypatch) -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED": "false",
+        "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY": "true",
+    }
+    monkeypatch.setattr(bootstrap, "prepare_render_environment", lambda env: env)
+    monkeypatch.setattr(bootstrap, "run_supervisor", lambda *, environment: 0)
+
+    assert bootstrap.run_nonblocking_render_service(values) == 0
+    assert values["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY"] == "true"
+
+
 def test_render_blueprint_uses_nonblocking_bootstrap() -> None:
     text = Path("render.yaml").read_text(encoding="utf-8")
 
@@ -94,3 +126,4 @@ def test_render_blueprint_uses_nonblocking_bootstrap() -> None:
     assert "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED" in text
     assert "CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER\n        value: \"true\"" in text
     assert "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY\n        value: \"true\"" in text
+    assert "CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE\n        value: \"true\"" in text
