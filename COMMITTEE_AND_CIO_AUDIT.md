@@ -1,71 +1,105 @@
 # Committee and CIO Audit
 
-## Decision status
+## Current decision status
 
-The six-specialist and CIO path is structurally complete, but its persisted decision packet is not yet sufficient to declare that persistent cash is always an informed, non-duplicative choice. No production journal was included in the repository, so this is a source-and-contract audit plus forward instrumentation, not a measured claim about live decisions.
+The six-specialist and CIO architecture is structurally complete. The remaining conclusion is deliberately narrower:
 
-The new `committee-cio-information-trace.v1` event freezes source lineage, the normalized candidate, derived metrics, each specialist input/output, origin overlap, return-reconciliation adjustment, CIO sufficiency, initial target, and construction result after the decision. It has no decision or execution authority.
+- the decision process is suitable for governed paper testing;
+- correlated specialist evidence is now discounted throughout return reconciliation, growth-stage qualification, alignment, coverage, disagreement dispersion and CIO confidence;
+- the final decision packet now preserves the complete committee handoff and a structured action ladder;
+- the post-decision trace freezes the complete point-in-time portfolio and construction context;
+- the strategy, thresholds, specialist mandates, CIO authority, construction boundary and paper-only execution boundary are unchanged; and
+- investment skill and threshold calibration remain unproven until representative production and historical cycles reach every decision stage.
 
-## Active evidence path
+No production journal was included in the repository audit artifact. This remains a source, contract and instrumentation assessment rather than a performance or alpha claim.
+
+## Active evidence and authority path
 
 ```mermaid
 flowchart TD
     S["Source and manifest lineage"] --> N["Normalized point-in-time candidate"]
-    N --> D["Derived return, risk, evidence, liquidity, and cost metrics"]
+    N --> D["Derived return, risk, evidence, liquidity and cost metrics"]
     D --> P["Six independent specialist first passes"]
-    P --> R["Dependency-aware return reconciliation plus growth ensemble"]
-    R --> C["CIO decision and initial target"]
-    C --> K["Portfolio construction"]
+    P --> R["Dependency-aware return and confirmation reconciliation"]
+    R --> C["CIO-only decision and risk-adjusted initial target"]
+    C --> K["Independent portfolio construction"]
+    K --> E["Governed paper implementation and reconciliation"]
 ```
 
-There is no separate voting committee with investment authority. “Committee synthesis” consists of an exact six-role packet, dependency-aware return reconciliation, robustness, and the adaptive growth ensemble inside the CIO service. The CIO alone issues the canonical action.
+There is no separate voting committee with investment authority. The six specialists produce advisory analyses. The CIO alone issues the canonical investment action. Construction may reduce or reject an approved target but cannot originate an action or increase the CIO target.
 
-## Six-specialist audit
+## Six-specialist responsibilities
 
-| Specialist | Required and actually supplied inputs in the active contract | Unique contribution | Confidence method | Missing/stale behavior | Veto or sizing effect |
-|---|---|---|---|---|---|
-| Macro Economic Strategist | Macro regime, impact, confidence, tailwinds/headwinds, systemic risks, scenarios, evidence IDs | Regime and systemic-risk return context | Governed macro confidence, capped by historical learning | Production context must exist; the role does not independently recompute macro age | Directional return adjustment, ensemble alignment, median confidence; no veto |
-| Market Strategist | Regime, trend, momentum, breadth, liquidity, positioning, evidence, risks, entry conditions | Technical/participation/positioning/liquidity condition | Governed market confidence, capped by historical learning | Candidate market-data staleness is policed by evidence governance | Directional return adjustment, ensemble alignment, median confidence; no veto |
-| Cross-Asset Forecast Specialist | Horizon, calibration, model agreement, stability, scenario probabilities/impacts/path drawdowns, dependencies | Forward distribution and path-risk translation | Minimum of aggregate confidence, calibration, agreement, stability, and horizon alignment; historical ceiling | Missing or failed quality gates cause abstention and zero impact | Scenario-specific reconciliation, ensemble coverage/alignment; no veto |
-| Fundamental & Valuation Analyst | Company analysis for direct equities or asset-specific valuation for wrappers/other assets | Independent valuation, quality, growth, earnings-quality and return-driver challenge | Asset valuation confidence, or minimum of company/quality/valuation factor confidence; historical ceiling | Missing valuation causes abstention; missing U.S.-equity company analysis also triggers evidence veto | Directional adjustment, ensemble alignment, median confidence; no direct veto |
-| Portfolio & Risk Manager | Current portfolio/cash, exposure profile, scenario construction preview, constraints, costs, funding, risk budget | Feasible ceiling, marginal portfolio effect, funding and implementation feasibility | Weakest evidence dimension when feasible, otherwise 40%; historical ceiling | No feasible target causes abstention; explicit blocks cause opposition | Sole specialist allowed to propose size/funding and implementation blocks; cannot issue CIO action |
-| Evidence & Governance Officer | Six quality dimensions, data age, identifiers, models, review boundary, valuation coverage | Reproducibility, freshness, completeness, integrity and lineage | Weakest evidence dimension; historical ceiling | Low quality, stale data, missing IDs/models or invalid timing creates categorized veto | Sole evidence-veto authority; veto blocks new/increased exposure but cannot issue an action |
+| Specialist | Unique contribution | Missing or stale behavior | Authority |
+|---|---|---|---|
+| Macro & Economic Strategist | Regime, policy, liquidity and systemic-risk return context | Requires governed production context; upstream evidence governance owns freshness | Advisory return impact only |
+| Market Strategist | Trend, breadth, positioning, volatility and liquidity condition | Stale market evidence is blocked through evidence governance | Advisory return impact only |
+| Cross-Asset Forecast Specialist | Calibrated forward distribution, cross-asset scenarios and path risk | Missing or failed quality gates cause abstention and zero impact | Advisory scenario adjustment only |
+| Fundamental & Valuation Analyst | Independent valuation, quality, growth and return-driver challenge | Missing applicable analysis causes abstention and may create an evidence veto | Advisory return impact only |
+| Portfolio & Risk Manager | Feasible ceiling, funding, marginal portfolio effect and implementation feasibility | No feasible target causes abstention; explicit violations create implementation blocks | May block implementation, not issue an action |
+| Evidence & Governance Officer | Reliability, freshness, completeness, independence, integrity and reproducibility | Inadequate evidence creates a categorized veto | May veto new or increased exposure, not issue an action |
 
-## Specialist input findings
+## Evidence-dependency correction
 
-1. The active production builder requires exact context coverage for every ranked candidate and fails closed on mismatches. Forecast support is attached through the governed forecast-support provider; company or asset valuation is required by the canonical adapter.
-2. Portfolio context is generated from the canonical state and a scenario-aware construction preview. The specialist packet persists the output, but the complete structured exposure/risk-budget input is not frozen in the CIO decision itself.
-3. Portfolio-risk analyses currently declare no evidence-origin identifiers. Their constraint evidence is preserved as text, so cross-role origin overlap involving portfolio evidence cannot be measured completely.
-4. Macro and market roles trust the certified context and do not each perform a distinct source-age check. Evidence governance applies candidate market-data age; per-category macro/market age is therefore upstream rather than role-local.
-5. Only the strongest opposing directional analysis is promoted to `MaterialDissent` on the CIO decision. All analyses remain in the specialist packet, but the decision record alone does not preserve the full disagreement distribution.
+The active process now uses the same evidence-origin dependency model across all confirmation paths:
 
-## Correlated opinion finding
+1. The return reconciler expands evidence dependencies, identifies shared origins and discounts overlapping specialist return impacts.
+2. The growth ensemble calculates effective engine count, coverage, supportive ratio, alignment and disagreement dispersion using evidence-independence weights rather than raw role counts.
+3. CIO confidence uses dependency-adjusted directional support, independent confidence, evidence independence and effective specialist coverage.
+4. Raw specialist conclusions remain preserved so discounting cannot hide dissent, abstention or limitations.
 
-Correlated opinions are treated in two different ways:
+Therefore several specialists repeating one originating fact cannot create the confidence, growth stage or position-size influence of several genuinely independent conclusions.
 
-- The return reconciler expands declared evidence dependencies, counts shared origins, and discounts each role’s return impact before applying a total adjustment cap. This is dependency-aware.
-- The growth ensemble counts the four directional roles as separate engines when computing coverage, supportive ratio, confidence, alignment, dispersion, and stage. CIO final confidence also uses median specialist confidence, directional support, and coverage. Those calculations do not apply the reconciliation overlap discount.
+## Self-contained CIO decision packet
 
-Therefore correlated opinions are **partly treated as independent confirmation**. This is not enough evidence to alter the strategy, but it is a required Phase 3 ablation target.
+The append-only CIO decision retains its existing schema for compatibility and now includes a versioned machine-readable `decision-context.v1` record. The record preserves:
 
-## CIO information audit
+- every specialist role, position, confidence, conclusion and dependency weight;
+- all material opposition and every abstention rather than only the strongest dissent;
+- specialist supporting evidence, contradictions, assumptions, risks, limitations and change conditions;
+- evidence vetoes and implementation blocks;
+- the portfolio specialist's feasible ceiling, funding source and expected portfolio contribution;
+- current and recommended candidate weight;
+- the best competing use of capital, effective opportunity cost and cash-relative edge;
+- the exact policy requirements for buying or increasing; and
+- the governed conditions for holding, reducing and exiting.
 
-The CIO receives the full candidate, universe assessment, six-role packet, best capital alternative, prior context, and lane. Expected return, horizon, distribution, downside, cash-relative edge, liquidity, cost, valuation/technical outputs, catalysts, disconfirming evidence, target, and portfolio preview are available in memory.
+Benchmark-relative attractiveness is explicitly recorded as unavailable unless an approved point-in-time benchmark return is supplied. Benchmarks remain evaluation tools and do not become a second optimization objective.
 
-The audit identifies four material persistence/sufficiency gaps:
+## Complete post-decision trace
 
-- no explicit approved benchmark-relative attractiveness field;
-- full specialist limitations and all disagreements are upstream, while the decision preserves only the strongest dissent;
-- current exposures, diversification, correlation effect, and available risk budget are not frozen as structured CIO-decision fields; and
-- increase/reduce/exit conditions are split across invalidations, monitoring, and policy code rather than emitted as one structured action ladder.
+The `committee-cio-information-trace.v2-self-contained` event freezes, for each completed decision:
 
-## Acceptance, deployment, and rollback
+- source and manifest lineage;
+- the normalized candidate and point-in-time fingerprint;
+- derived return, downside, probability, evidence, liquidity and cost metrics;
+- all six specialist inputs and outputs;
+- pairwise source overlap and dependency weights;
+- the complete CIO context and action ladder;
+- portfolio value, cash, positions, sectors, factors and correlation buckets;
+- the active-universe and scenario-set lineage; and
+- construction targets, cash, turnover, cost, expected improvement and blocks.
 
-- Exactly six trace roles must reconcile to every CIO decision.
-- Source and candidate identifiers, the point-in-time snapshot fingerprint, specialist outputs, CIO target, and construction target must reconcile.
-- Shared directional origins must be reported and must state where overlap is and is not discounted.
-- A trace failure cannot change the CIO result.
-- Migration: none; new events append to the existing CIO journal.
-- Rollback: redeploy prior code and retain already-appended trace history.
-- Investment behavior, CIO, construction, governance, execution, and real-money authority changed: **no**.
+The trace is diagnostic and reproducibility evidence only. A trace failure cannot alter or suppress the immutable CIO result.
 
+## Remaining limitations
+
+The architecture corrections do not establish investment skill. The following evidence is still required:
+
+1. Representative completed production paper cycles through screening, specialists, CIO, construction and implementation.
+2. A certified historical replay of the actual decision-eligible universe across multiple regimes.
+3. Calibration of forecast probabilities and CIO confidence against realized outcomes.
+4. Evaluation of correct abstentions, missed opportunities, sizing efficiency, timing, costs and opportunity selection.
+5. Provider runtime validation and formal provider/data certification for every required domain.
+6. Human-governed champion-versus-challenger review before any policy or threshold change.
+
+## Acceptance, deployment and rollback
+
+- Exactly six specialist roles must reconcile to every CIO decision.
+- Dependency-adjusted confirmation metrics must never exceed their raw equivalents through duplicated evidence.
+- The decision-context record and trace must preserve all disagreements and limitations.
+- Source, candidate, decision, target and construction identifiers must reconcile.
+- Runtime provider reports must contain credential names and redacted evidence only, never secret values.
+- Migration: none; records append to existing journals and operational report paths.
+- Rollback: redeploy the prior code and retain already-appended audit history.
+- Strategy, thresholds, CIO authority, construction authority, execution authority and real-money authority changed: **no**.

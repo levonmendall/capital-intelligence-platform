@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,7 @@ from cio import (
     SpecialistPosition,
     SpecialistRole,
 )
+from cio.growth_ensemble import AdaptiveRobustGrowthEnsemble, GrowthStage
 from cio.persistence import serialize_specialist_packet
 
 AS_OF = datetime(2026, 8, 2, 12, 0, tzinfo=timezone.utc)
@@ -76,6 +78,20 @@ def _packet(*, shared: bool, opposed: bool = False) -> IndependentSpecialistPack
     )
 
 
+def _fully_correlated_packet() -> IndependentSpecialistPacket:
+    return IndependentSpecialistPacket(
+        candidate_identifier="candidate:test",
+        analyses=(
+            _analysis(SpecialistRole.MACRO_ECONOMIC, origin="origin:shared"),
+            _analysis(SpecialistRole.MARKET, origin="origin:shared"),
+            _analysis(SpecialistRole.CROSS_ASSET_FORECAST, origin="origin:shared"),
+            _analysis(SpecialistRole.FUNDAMENTAL_VALUATION, origin="origin:shared"),
+            _analysis(SpecialistRole.PORTFOLIO_RISK),
+            _analysis(SpecialistRole.EVIDENCE_GOVERNANCE),
+        ),
+    )
+
+
 def test_shared_origin_reduces_effective_directional_count() -> None:
     independent = _packet(shared=False).evidence_independence
     shared = _packet(shared=True).evidence_independence
@@ -130,3 +146,37 @@ def test_packet_serialization_persists_independence_diagnostics() -> None:
     assert payload["effective_directional_count"] == pytest.approx(3.0)
     assert payload["evidence_independence_ratio"] == pytest.approx(0.75)
     assert payload["independent_cluster_count"] == 3
+
+
+def test_growth_stage_uses_dependency_adjusted_coverage_and_engine_count() -> None:
+    ensemble = AdaptiveRobustGrowthEnsemble()
+    candidate = SimpleNamespace(
+        identifier="candidate:test",
+        current_portfolio_weight=0.0,
+    )
+    robustness = SimpleNamespace(robust_edge=0.03, evidence_reliability=0.90)
+    profile = SimpleNamespace(
+        minimum_opportunity_edge=0.01,
+        maximum_position_weight=0.10,
+    )
+
+    independent = ensemble.assess(
+        candidate,
+        _packet(shared=False),
+        robustness,
+        profile,
+        analysis_lane="participation",
+    )
+    correlated = ensemble.assess(
+        candidate,
+        _fully_correlated_packet(),
+        robustness,
+        profile,
+        analysis_lane="participation",
+    )
+
+    assert independent.engine_coverage == pytest.approx(1.0)
+    assert independent.stage is GrowthStage.STRATEGIC
+    assert correlated.engine_coverage == pytest.approx(0.25)
+    assert correlated.stage is GrowthStage.EXPLORE
+    assert "dependency-adjusted coverage" in correlated.explanation

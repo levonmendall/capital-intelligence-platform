@@ -1,10 +1,9 @@
-"""Persist educational public live information for the operating application.
+"""Persist educational public information and credential-safe provider health.
 
-The GitHub workflow remains an independent hourly observability check. This module
-writes credential-safe reports into the persistent application data volume for the
-daily explanatory experience. The collection has no candidate, ranking, sizing,
-portfolio, execution, or CIO authority. Canonical decision evidence remains governed
-by the production-context publication boundary.
+The collection and provider-validation reports are operational observations only.
+They have no candidate, ranking, sizing, portfolio, CIO, construction, execution,
+or real-money authority. Canonical decision evidence remains governed by the
+production-context publication boundary.
 """
 
 from __future__ import annotations
@@ -19,6 +18,9 @@ from typing import Any, Callable, Mapping
 from providers.public_live_source_catalogs import load_operating_public_live_source_catalog
 from providers.public_live_information_extended import (
     ImpactfulPublicLiveInformationProvider,
+)
+from providers.render_public_provider_validation import (
+    build_render_public_provider_validation,
 )
 from public_live_record_history import merge_public_event_records
 
@@ -36,6 +38,8 @@ class PublicLiveCollectionResult:
     source_count: int = 0
     failed_source_count: int = 0
     next_due_at: datetime | None = None
+    provider_validation_path: Path | None = None
+    provider_validation_state: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -52,6 +56,12 @@ class PublicLiveCollectionResult:
             "next_due_at": (
                 self.next_due_at.isoformat() if self.next_due_at is not None else None
             ),
+            "provider_validation_path": (
+                None
+                if self.provider_validation_path is None
+                else str(self.provider_validation_path)
+            ),
+            "provider_validation_state": self.provider_validation_state,
             "decision_evidence_authority": False,
             "candidate_authority": False,
             "ranking_authority": False,
@@ -177,6 +187,7 @@ def collect_public_live_information_if_due(
     now: datetime | None = None,
     force: bool = False,
     provider_factory: Callable[[object], object] | None = None,
+    provider_validation_builder: Callable[..., Mapping[str, object]] | None = None,
 ) -> PublicLiveCollectionResult:
     """Collect once immediately when no state exists, then at most once per interval."""
 
@@ -193,20 +204,28 @@ def collect_public_live_information_if_due(
         "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_STATE",
         "public-live-information-runtime-state.json",
     )
+    provider_validation_path = _data_path(
+        "CAPITAL_INTELLIGENCE_PUBLIC_PROVIDER_VALIDATION_REPORT",
+        "public-provider-runtime-validation.json",
+    )
     lock_path = _data_path(
         "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_LOCK",
         "public-live-information-runtime.lock",
     )
 
+    common_result = {
+        "report_path": report_path,
+        "records_path": records_path,
+        "state_path": state_path,
+        "provider_validation_path": provider_validation_path,
+    }
     if not _enabled():
         return PublicLiveCollectionResult(
             state="disabled",
             detail="Runtime public live-information collection is disabled.",
             evaluated_at=evaluated_at,
             exit_code=None,
-            report_path=report_path,
-            records_path=records_path,
-            state_path=state_path,
+            **common_result,
         )
 
     interval = _interval()
@@ -214,6 +233,11 @@ def collect_public_live_information_if_due(
     last_completed_at = _parse_time(previous.get("completed_at"))
     next_due_at = (
         last_completed_at + interval if last_completed_at is not None else evaluated_at
+    )
+    prior_validation_state = (
+        str(previous["provider_validation_state"])
+        if isinstance(previous.get("provider_validation_state"), str)
+        else None
     )
     if not force and last_completed_at is not None and evaluated_at < next_due_at:
         return PublicLiveCollectionResult(
@@ -225,9 +249,6 @@ def collect_public_live_information_if_due(
                 if isinstance(previous.get("exit_code"), int)
                 else None
             ),
-            report_path=report_path,
-            records_path=records_path,
-            state_path=state_path,
             required_sources_ready=(
                 bool(previous["required_sources_ready"])
                 if isinstance(previous.get("required_sources_ready"), bool)
@@ -236,6 +257,8 @@ def collect_public_live_information_if_due(
             source_count=int(previous.get("source_count", 0) or 0),
             failed_source_count=int(previous.get("failed_source_count", 0) or 0),
             next_due_at=next_due_at,
+            provider_validation_state=prior_validation_state,
+            **common_result,
         )
 
     if not _acquire_lock(lock_path, now=evaluated_at):
@@ -247,9 +270,6 @@ def collect_public_live_information_if_due(
             ),
             evaluated_at=evaluated_at,
             exit_code=None,
-            report_path=report_path,
-            records_path=records_path,
-            state_path=state_path,
             required_sources_ready=(
                 bool(previous["required_sources_ready"])
                 if isinstance(previous.get("required_sources_ready"), bool)
@@ -258,15 +278,18 @@ def collect_public_live_information_if_due(
             source_count=int(previous.get("source_count", 0) or 0),
             failed_source_count=int(previous.get("failed_source_count", 0) or 0),
             next_due_at=next_due_at,
+            provider_validation_state=prior_validation_state,
+            **common_result,
         )
 
     try:
         attempted_payload: dict[str, object] = {
-            "schema_version": "public-live-information-runtime-state.v1",
+            "schema_version": "public-live-information-runtime-state.v2",
             "state": "collecting",
             "attempted_at": evaluated_at.isoformat(),
             "report_path": str(report_path),
             "records_path": str(records_path),
+            "provider_validation_path": str(provider_validation_path),
             "interval_seconds": int(interval.total_seconds()),
             "decision_evidence_authority": False,
             "real_money_authorized": False,
@@ -315,8 +338,23 @@ def collect_public_live_information_if_due(
                 "secret_values_disclosed": False,
                 "real_money_authorized": False,
             }
+            validation_builder = (
+                provider_validation_builder
+                or build_render_public_provider_validation
+            )
+            provider_validation = dict(
+                validation_builder(
+                    catalog=catalog,
+                    coverage_report=report,
+                    evaluated_at=report.evaluated_at,
+                )
+            )
+            provider_validation_state = str(
+                provider_validation.get("state", "degraded")
+            )
             _write_json(report_path, report_payload)
             _write_json(records_path, records_payload)
+            _write_json(provider_validation_path, provider_validation)
 
             if not report.required_sources_ready:
                 exit_code = 3
@@ -344,7 +382,7 @@ def collect_public_live_information_if_due(
             completed_at = _aware_utc(report.evaluated_at)
             next_due_at = completed_at + interval
             state_payload = {
-                "schema_version": "public-live-information-runtime-state.v1",
+                "schema_version": "public-live-information-runtime-state.v2",
                 "state": state,
                 "detail": detail,
                 "attempted_at": evaluated_at.isoformat(),
@@ -358,6 +396,14 @@ def collect_public_live_information_if_due(
                 "catalog_identifier": report.catalog_identifier,
                 "report_path": str(report_path),
                 "records_path": str(records_path),
+                "provider_validation_path": str(provider_validation_path),
+                "provider_validation_state": provider_validation_state,
+                "provider_configured_count": provider_validation.get(
+                    "configured_provider_count", 0
+                ),
+                "provider_validated_count": provider_validation.get(
+                    "validated_provider_count", 0
+                ),
                 "interval_seconds": int(interval.total_seconds()),
                 "decision_evidence_authority": False,
                 "full_article_text_stored": False,
@@ -370,20 +416,19 @@ def collect_public_live_information_if_due(
                 detail=detail,
                 evaluated_at=completed_at,
                 exit_code=exit_code,
-                report_path=report_path,
-                records_path=records_path,
-                state_path=state_path,
                 required_sources_ready=bool(report.required_sources_ready),
                 source_count=len(report.sources),
                 failed_source_count=failed_source_count,
                 next_due_at=next_due_at,
+                provider_validation_state=provider_validation_state,
+                **common_result,
             )
         except (KeyError, OSError, TypeError, ValueError, RuntimeError) as error:
             detail = f"Runtime public live-information collector failed: {error}"
             _write_json(
                 state_path,
                 {
-                    "schema_version": "public-live-information-runtime-state.v1",
+                    "schema_version": "public-live-information-runtime-state.v2",
                     "state": "failed",
                     "detail": detail,
                     "attempted_at": evaluated_at.isoformat(),
@@ -391,6 +436,7 @@ def collect_public_live_information_if_due(
                     "exit_code": 4,
                     "report_path": str(report_path),
                     "records_path": str(records_path),
+                    "provider_validation_path": str(provider_validation_path),
                     "interval_seconds": int(interval.total_seconds()),
                     "decision_evidence_authority": False,
                     "secret_values_disclosed": False,
@@ -402,9 +448,7 @@ def collect_public_live_information_if_due(
                 detail=detail,
                 evaluated_at=evaluated_at,
                 exit_code=4,
-                report_path=report_path,
-                records_path=records_path,
-                state_path=state_path,
+                **common_result,
             )
     finally:
         try:

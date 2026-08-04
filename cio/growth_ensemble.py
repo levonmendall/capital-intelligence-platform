@@ -8,8 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import exp, log
-from statistics import pstdev
+from math import exp, log, sqrt
 from typing import Iterable
 
 from cio.committee import IndependentSpecialistPacket
@@ -29,7 +28,7 @@ class GrowthStage(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class GrowthEnsemblePolicy:
-    version: str = "adaptive-robust-growth-ensemble.v1"
+    version: str = "adaptive-robust-growth-ensemble.v2-dependency-aware"
     minimum_engine_coverage: float = 0.50
     exploration_floor: float = 0.0025
     validation_floor: float = 0.0075
@@ -106,6 +105,23 @@ class AdaptiveRobustGrowthEnsemble:
             return 0.0
         return exp(sum(log(value) for value in cleaned) / len(cleaned))
 
+    @staticmethod
+    def _weighted_dispersion(
+        values: tuple[float, ...],
+        weights: tuple[float, ...],
+    ) -> float:
+        """Measure disagreement without counting duplicated evidence as new engines."""
+
+        total = sum(weights)
+        if len(values) < 2 or total <= 0.0:
+            return 0.0
+        mean = sum(value * weight for value, weight in zip(values, weights, strict=True)) / total
+        variance = sum(
+            weight * (value - mean) ** 2
+            for value, weight in zip(values, weights, strict=True)
+        ) / total
+        return sqrt(max(0.0, variance))
+
     def assess(
         self,
         candidate: CandidateDecisionRecord,
@@ -120,39 +136,39 @@ class AdaptiveRobustGrowthEnsemble:
             item for item in analyses
             if item.position is not SpecialistPosition.ABSTAIN
         )
-        coverage = len(active) / len(analyses)
         independence = specialists.evidence_independence
-        role_weight_total = sum(
+        role_weights = tuple(
             independence.weight_for(item.role) for item in active
         )
-        weight_total = sum(
-            max(0.05, item.confidence) * independence.weight_for(item.role)
-            for item in active
+        effective = sum(role_weights)
+        coverage = min(1.0, effective / len(analyses))
+        role_weight_total = effective
+        confidence_weights = tuple(
+            max(0.05, item.confidence) * role_weight
+            for item, role_weight in zip(active, role_weights, strict=True)
         )
+        weight_total = sum(confidence_weights)
         alignment = (
             0.0
             if weight_total <= 0.0
             else sum(
-                self._position_signal(item.position)
-                * max(0.05, item.confidence)
-                * independence.weight_for(item.role)
-                for item in active
+                self._position_signal(item.position) * weight
+                for item, weight in zip(active, confidence_weights, strict=True)
             ) / weight_total
         )
         supportive = (
             0.0
             if role_weight_total <= 0.0
             else sum(
-                independence.weight_for(item.role)
-                for item in active
+                role_weight
+                for item, role_weight in zip(active, role_weights, strict=True)
                 if item.position is SpecialistPosition.SUPPORTIVE
             ) / role_weight_total
         )
         confidence = independence.independent_confidence
-        dispersion = (
-            0.0
-            if len(active) < 2
-            else pstdev(item.expected_return_impact for item in active)
+        dispersion = self._weighted_dispersion(
+            tuple(item.expected_return_impact for item in active),
+            confidence_weights,
         )
         positive = tuple(
             item.role.value for item in active
@@ -183,7 +199,6 @@ class AdaptiveRobustGrowthEnsemble:
         ) * uncertainty
         raw_multiplier = max(0.15, min(1.0, raw_multiplier))
 
-        effective = independence.effective_role_count
         if current >= 0.03 and alignment >= 0.20 and effective >= 2.0:
             stage = GrowthStage.ESTABLISHED
         elif (
@@ -242,11 +257,13 @@ class AdaptiveRobustGrowthEnsemble:
 
         explanation = (
             f"{stage.value.title()} stage from {len(active)}/{len(analyses)} active "
-            f"return engines and {independence.effective_role_count:.2f} effective independent engines; "
-            f"supportive={supportive:.0%}, alignment={alignment:+.2f}, "
-            f"confidence={confidence:.0%}, independence={independence.independence_ratio:.0%}, "
+            f"return engines, {effective:.2f} effective independent engines, and "
+            f"{coverage:.0%} dependency-adjusted coverage; supportive={supportive:.0%}, "
+            f"alignment={alignment:+.2f}, confidence={confidence:.0%}, "
+            f"independence={independence.independence_ratio:.0%}, "
             f"robust edge={robustness.robust_edge:+.2%}. "
-            "Uncertainty changes position size before it eliminates participation."
+            "Shared evidence is discounted before coverage, disagreement, alignment, "
+            "stage, and size influence are calculated."
         )
         return GrowthEnsembleAssessment(
             candidate_identifier=candidate.identifier,
