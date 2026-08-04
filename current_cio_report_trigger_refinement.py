@@ -141,8 +141,10 @@ def install(portfolio_first: ModuleType) -> None:
     # their scope unchanged while attaching the dedicated route in the app.
     if hasattr(portfolio_first, "_capital_structure"):
         import cio_report_detail_runtime
+        import cio_report_session_navigation_runtime
 
         cio_report_detail_runtime.install(portfolio_first)
+        cio_report_session_navigation_runtime.install(cio_report_detail_runtime)
 
 
 __all__ = ["install", "_current_report_title"]
