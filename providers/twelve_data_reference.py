@@ -1,12 +1,12 @@
 """Twelve Data reference-catalog fallback for global equity discovery.
 
 The canonical runtime prefers the configured EODHD symbol directory and its bounded
-last-success cache.  This provider is a second independent reference source used only
-when EODHD returns HTTP 402 and no valid EODHD cache exists.  It retrieves Twelve
+last-success cache. This provider is a second independent reference source used only
+when EODHD returns HTTP 402 and no valid EODHD cache exists. It retrieves Twelve
 Data's daily global stock catalog, proves pagination completion, and then exposes the
 subset belonging to the requested configured exchange.
 
-The adapter has discovery authority only.  It cannot rank candidates, size positions,
+The adapter has discovery authority only. It cannot rank candidates, size positions,
 construct a portfolio, authorize execution, or enable real money.
 """
 
@@ -39,6 +39,10 @@ _DEFAULT_PAGE_SIZE = 5_000
 _DEFAULT_MAX_PAGES = 250
 
 
+def _normalized_text(value: object) -> str:
+    return re.sub(r"[^A-Z0-9]+", " ", str(value or "").upper()).strip()
+
+
 class TwelveDataReferenceError(ProviderDatasetError):
     """Raised when the Twelve Data reference catalog is unavailable or incomplete."""
 
@@ -63,7 +67,9 @@ class ExchangeSelector:
             frozenset(item.strip().upper() for item in self.mic_codes if item.strip()),
         )
         aliases = tuple(
-            _normalized_text(item) for item in self.exchange_aliases if str(item).strip()
+            _normalized_text(item)
+            for item in self.exchange_aliases
+            if str(item).strip()
         )
         if not self.mic_codes and not aliases:
             raise ValueError("exchange selector requires a MIC or exchange alias")
@@ -191,15 +197,11 @@ _COUNTRY_CODES = {
     "POLAND": "PL",
     "SINGAPORE": "SG",
     "SOUTH KOREA": "KR",
-    "KOREA, REPUBLIC OF": "KR",
+    "KOREA REPUBLIC OF": "KR",
     "SWITZERLAND": "CH",
     "UNITED KINGDOM": "GB",
     "UK": "GB",
 }
-
-
-def _normalized_text(value: object) -> str:
-    return re.sub(r"[^A-Z0-9]+", " ", str(value or "").upper()).strip()
 
 
 def _country_code(value: object) -> str:
@@ -296,7 +298,11 @@ class TwelveDataReferenceProvider:
             snapshot_query = replace(query, as_of=retrieved_at)
 
         normalized = tuple(
-            self._normalized_directory_row(item, exchange=exchange, selector=selector)
+            self._normalized_directory_row(
+                item,
+                exchange=exchange,
+                selector=selector,
+            )
             for item in selected
         )
         material = json.dumps(
@@ -341,7 +347,8 @@ class TwelveDataReferenceProvider:
         raw_count = 0
         for page in range(1, self.max_pages + 1):
             payload = self._request_page(page)
-            if str(payload.get("status", "ok")).strip().lower() not in {"ok", "success"}:
+            status = str(payload.get("status", "ok")).strip().lower()
+            if status not in {"ok", "success"}:
                 raise TwelveDataReferenceError(
                     "Twelve Data stock catalog returned a provider rejection"
                 )
@@ -456,7 +463,9 @@ class TwelveDataReferenceProvider:
             raise TwelveDataReferenceError(
                 "Twelve Data stock catalog response must be an object"
             )
-        if payload.get("code") or payload.get("message") and payload.get("status") == "error":
+        if payload.get("code") or (
+            payload.get("message") and payload.get("status") == "error"
+        ):
             raise TwelveDataReferenceError(
                 "Twelve Data stock catalog returned a provider error"
             )
