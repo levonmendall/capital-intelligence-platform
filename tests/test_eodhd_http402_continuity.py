@@ -1,4 +1,4 @@
-"""Regression coverage for bounded EODHD HTTP 402 directory continuity."""
+"""Regression coverage for bounded EODHD directory continuity."""
 
 from __future__ import annotations
 
@@ -77,7 +77,11 @@ def live_payload(exchange: str = "CC"):
     ]
 
 
-def test_http_402_uses_recent_successful_active_directory(tmp_path: Path) -> None:
+@pytest.mark.parametrize("status_code", (402, 404))
+def test_directory_status_uses_recent_successful_active_directory(
+    tmp_path: Path,
+    status_code: int,
+) -> None:
     provider(
         [Response(live_payload())],
         cache_dir=tmp_path,
@@ -85,7 +89,7 @@ def test_http_402_uses_recent_successful_active_directory(tmp_path: Path) -> Non
     later = NOW + timedelta(hours=2)
 
     snapshot = provider(
-        [Response({}, 402)],
+        [Response({}, status_code)],
         cache_dir=tmp_path,
         now=later,
     ).fetch_dataset(query(later))
@@ -93,11 +97,13 @@ def test_http_402_uses_recent_successful_active_directory(tmp_path: Path) -> Non
     assert snapshot.quality_state is DataQualityState.CACHED
     assert snapshot.observed_at == NOW
     assert snapshot.payload["active"] == live_payload()
-    assert any("HTTP 402" in item for item in snapshot.limitations)
+    assert any(f"HTTP {status_code}" in item for item in snapshot.limitations)
 
 
-def test_lse_active_continuity_survives_delisted_directory_402(
+@pytest.mark.parametrize("status_code", (402, 404))
+def test_lse_active_continuity_survives_delisted_directory_failure(
     tmp_path: Path,
+    status_code: int,
 ) -> None:
     provider(
         [Response(live_payload("LSE")), Response([])],
@@ -106,7 +112,7 @@ def test_lse_active_continuity_survives_delisted_directory_402(
     later = NOW + timedelta(hours=2)
 
     snapshot = provider(
-        [Response({}, 402), Response({}, 402)],
+        [Response({}, status_code), Response({}, status_code)],
         cache_dir=tmp_path,
         now=later,
     ).fetch_dataset(query(later, provider_symbol="LSE"))
@@ -115,7 +121,9 @@ def test_lse_active_continuity_survives_delisted_directory_402(
     assert snapshot.payload["active"] == live_payload("LSE")
     assert snapshot.payload["delisted"] == []
     assert any("delisted-symbol directory" in item for item in snapshot.limitations)
-    assert sum("HTTP 402" in item for item in snapshot.limitations) >= 2
+    assert sum(
+        f"HTTP {status_code}" in item for item in snapshot.limitations
+    ) >= 2
 
 
 def test_http_402_without_recent_active_cache_remains_fail_closed(
