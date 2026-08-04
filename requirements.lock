@@ -244,6 +244,7 @@ click==8.4.2 \
     #   streamlit
     #   uvicorn
 cryptography==50.0.0 \
+    --hash=sha256:7cec5b856506da6defb290f30c9ee687d5f5e8cb0bd3f6459dde43b0b4fa40ef \
     --hash=sha256:82148ec5bddac30b51a5b3c1945075f896fa022cb93f8e4a01e9f6ee95292c5f
     # via -r requirements.txt
 fastapi==0.140.0 \
