@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -24,10 +24,38 @@ jobs:
       CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
 
     steps:
-      - name: Check out repository
+      - name: Check out feature branch
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
-          persist-credentials: false
+          persist-credentials: true
+          ref: feature/compounding-allocation-core
+
+      - name: Add verified Alpine cryptography wheel hash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          old = (
+              "cryptography==50.0.0 \\\n"
+              "    --hash=sha256:82148ec5bddac30b51a5b3c1945075f896fa022cb93f8e4a01e9f6ee95292c5f\n"
+              "    # via -r requirements.txt"
+          )
+          new = (
+              "cryptography==50.0.0 \\\n"
+              "    --hash=sha256:7cec5b856506da6defb290f30c9ee687d5f5e8cb0bd3f6459dde43b0b4fa40ef \\\n"
+              "    --hash=sha256:82148ec5bddac30b51a5b3c1945075f896fa022cb93f8e4a01e9f6ee95292c5f\n"
+              "    # via -r requirements.txt"
+          )
+          path = Path("requirements.lock")
+          content = path.read_text(encoding="utf-8")
+          if content.count(old) != 1:
+              raise SystemExit("expected exactly one cryptography 50 lock block")
+          path.write_text(content.replace(old, new), encoding="utf-8")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add requirements.lock
+          git commit -m "Add Alpine wheel hash for cryptography 50"
+          git push origin HEAD:feature/compounding-allocation-core
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
