@@ -47,6 +47,12 @@ def _safe_error(error: Exception, aliases: tuple[str, ...]) -> str:
     return message
 
 
+def _redacted_text(value: object, aliases: tuple[str, ...]) -> str | None:
+    if value is None:
+        return None
+    return _safe_error(RuntimeError(str(value)), aliases)
+
+
 def _supplemental_probe(provider: str, aliases: tuple[str, ...]) -> dict[str, Any]:
     configured_names = configured_environment_names(*aliases)
     result: dict[str, Any] = {
@@ -124,7 +130,10 @@ def _catalog_results(
     )
     passed = any(bool(getattr(item, "succeeded", False)) for item in observed)
     errors = tuple(
-        str(getattr(item, "error", "source request failed"))
+        _redacted_text(
+            getattr(item, "error", "source request failed"),
+            aliases,
+        )
         for item in observed
         if not bool(getattr(item, "succeeded", False))
     )
@@ -155,7 +164,9 @@ def _catalog_results(
     elif not observed:
         payload["error"] = "mapped operating source was not observed in this collection"
     elif not passed:
-        payload["error"] = "; ".join(errors) or "all mapped source requests failed"
+        payload["error"] = "; ".join(item for item in errors if item) or (
+            "all mapped source requests failed"
+        )
     return payload
 
 
@@ -201,7 +212,7 @@ def build_render_public_provider_validation(
                     else ("validation_failed" if configured else "missing_configuration")
                 ),
                 "evidence": dict(result.get("evidence", {})),
-                "error": result.get("error"),
+                "error": _redacted_text(result.get("error"), aliases),
                 "provider_certified": False,
                 "decision_evidence_authority": False,
                 "execution_authority": False,
