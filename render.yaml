@@ -71,6 +71,11 @@ services:
         value: "5"
       - key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_INTERVAL_SECONDS
         value: "3600"
+      # During active troubleshooting, run one unique paper-only diagnostic CIO
+      # pass after the first provider-validation attempt for each deployed release.
+      # Only the calendar due check is bypassed; all evidence and CIO gates remain.
+      - key: CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_ON_RELEASE
+        value: "true"
       # Provider validation still runs and persists its failed checks, but a
       # transient or entitlement-specific provider issue must not take the
       # authenticated console offline. REQUIRE_LIVE_PROVIDER remains the
