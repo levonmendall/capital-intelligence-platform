@@ -23,13 +23,36 @@ def _environment_value(source: str, key: str) -> str:
 def test_provider_degradation_keeps_render_console_online_and_cio_fail_closed() -> None:
     source = BLUEPRINT.read_text(encoding="utf-8")
 
-    # Startup still performs and persists credential-safe provider validation.
+    # External provider calls do not block Streamlit/API health during startup.
     assert (
         _environment_value(
             source,
             "CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP",
         )
+        == "false"
+    )
+
+    # A noncritical worker still performs and persists credential-safe validation.
+    assert (
+        _environment_value(
+            source,
+            "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED",
+        )
         == "true"
+    )
+    assert (
+        _environment_value(
+            source,
+            "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_INITIAL_DELAY_SECONDS",
+        )
+        == "5"
+    )
+    assert (
+        _environment_value(
+            source,
+            "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_INTERVAL_SECONDS",
+        )
+        == "3600"
     )
 
     # A failed provider probe must not terminate Streamlit/API availability.
@@ -58,5 +81,12 @@ def test_provider_degradation_keeps_render_console_online_and_cio_fail_closed() 
     )
     assert (
         _environment_value(source, "CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL")
+        == "true"
+    )
+    assert (
+        _environment_value(
+            source,
+            "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY",
+        )
         == "true"
     )
