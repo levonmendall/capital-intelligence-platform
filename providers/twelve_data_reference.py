@@ -1,10 +1,13 @@
-"""Twelve Data reference-catalog fallback for global equity discovery.
+"""Twelve Data exchange-scoped reference fallback for global equity discovery.
 
 The canonical runtime prefers the configured EODHD symbol directory and its bounded
 last-success cache. This provider is a second independent reference source used only
-when EODHD returns HTTP 402 and no valid EODHD cache exists. It retrieves Twelve
-Data's daily global stock catalog, proves pagination completion, and then exposes the
-subset belonging to the requested configured exchange.
+when EODHD returns HTTP 402 and no valid EODHD cache exists.
+
+Unlike the original fallback, this adapter never materializes or retains Twelve Data's
+worldwide stock catalog. It requests one certified exchange selector at a time, paginates
+that bounded result to completion, deduplicates incrementally, and discards each raw page
+before requesting the next one.
 
 The adapter has discovery authority only. It cannot rank candidates, size positions,
 construct a portfolio, authorize execution, or enable real money.
@@ -33,10 +36,11 @@ from providers.environment_aliases import provider_environment_value
 
 
 TWELVE_DATA_API_BASE = "https://api.twelvedata.com"
-TWELVE_DATA_REFERENCE_SOURCE_VERSION = "twelve-data-stocks-reference.v1"
+TWELVE_DATA_REFERENCE_SOURCE_VERSION = "twelve-data-stocks-reference.v2"
 _LIVE_QUERY_GRACE = timedelta(minutes=5)
-_DEFAULT_PAGE_SIZE = 5_000
-_DEFAULT_MAX_PAGES = 250
+_DEFAULT_PAGE_SIZE = 1_000
+_DEFAULT_MAX_PAGES = 100
+_DEFAULT_MAX_RECORDS = 50_000
 
 
 def _normalized_text(value: object) -> str:
@@ -217,8 +221,28 @@ def _required_text(value: object, *, field_name: str) -> str:
     return value.strip()
 
 
+def _raw_identity(item: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
+    return (
+        str(item.get("symbol", "")).strip().upper(),
+        str(item.get("mic_code", "")).strip().upper(),
+        _normalized_text(item.get("exchange")),
+        _country_code(item.get("country")),
+        _normalized_text(item.get("type")),
+    )
+
+
+def _normalized_identity(item: Mapping[str, str]) -> tuple[str, str, str, str, str]:
+    return (
+        item["Code"],
+        item["MIC"],
+        item["Exchange"],
+        item["CountryISO2"],
+        item["Type"],
+    )
+
+
 class TwelveDataReferenceProvider:
-    """Retrieve and partition Twelve Data's complete current global stock catalog."""
+    """Retrieve one complete, bounded exchange catalog at a time."""
 
     def __init__(
         self,
@@ -229,6 +253,7 @@ class TwelveDataReferenceProvider:
         timeout_seconds: int = 30,
         page_size: int = _DEFAULT_PAGE_SIZE,
         max_pages: int = _DEFAULT_MAX_PAGES,
+        max_records: int = _DEFAULT_MAX_RECORDS,
     ) -> None:
         self.api_key = api_key or provider_environment_value(
             "TWELVE_API_KEY",
@@ -239,14 +264,15 @@ class TwelveDataReferenceProvider:
         self.timeout_seconds = int(timeout_seconds)
         self.page_size = int(page_size)
         self.max_pages = int(max_pages)
+        self.max_records = int(max_records)
         if self.timeout_seconds < 1:
             raise ValueError("timeout_seconds must be positive")
         if not 1 <= self.page_size <= 5_000:
             raise ValueError("page_size must be between 1 and 5000")
         if self.max_pages < 1:
             raise ValueError("max_pages must be positive")
-        self._catalog_rows: tuple[Mapping[str, Any], ...] | None = None
-        self._catalog_retrieved_at: datetime | None = None
+        if self.max_records < 1:
+            raise ValueError("max_records must be positive")
 
     @property
     def name(self) -> str:
@@ -277,15 +303,14 @@ class TwelveDataReferenceProvider:
                 "TWELVE_API_KEY or TWELVE_DATA_API_KEY is not configured"
             )
 
-        rows, retrieved_at = self._global_stock_catalog()
-        selected = self._select_exchange(rows, selector)
-        if not selected:
+        normalized, retrieved_at = self._exchange_stock_catalog(
+            exchange=exchange,
+            selector=selector,
+            query_limit=query.limit,
+        )
+        if not normalized:
             raise TwelveDataReferenceError(
                 f"Twelve Data returned no certified current records for {exchange}"
-            )
-        if len(selected) > query.limit:
-            raise TwelveDataReferenceError(
-                f"Twelve Data directory {exchange} exceeds the query completeness limit"
             )
 
         snapshot_query = query
@@ -297,21 +322,17 @@ class TwelveDataReferenceProvider:
                 )
             snapshot_query = replace(query, as_of=retrieved_at)
 
-        normalized = tuple(
-            self._normalized_directory_row(
-                item,
-                exchange=exchange,
-                selector=selector,
+        fingerprint = hashlib.sha256()
+        for item in normalized:
+            fingerprint.update(
+                json.dumps(
+                    item,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
             )
-            for item in selected
-        )
-        material = json.dumps(
-            normalized,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-        fingerprint = hashlib.sha256(material).hexdigest()
+            fingerprint.update(b"\n")
         return ProviderDatasetSnapshot(
             query=snapshot_query,
             provider=self.name,
@@ -323,30 +344,91 @@ class TwelveDataReferenceProvider:
             availability_basis=AvailabilityBasis.RETRIEVAL_PROXY,
             payload={"active": list(normalized), "delisted": []},
             provider_record_id=(
-                f"twelve-data:stocks-reference:{exchange}:{fingerprint}"
+                f"twelve-data:stocks-reference:{exchange}:{fingerprint.hexdigest()}"
             ),
             limitations=(
-                "Twelve Data's daily current stock catalog was used as an independent "
-                "reference fallback after EODHD entitlement failure.",
+                "Twelve Data's exchange-scoped current stock catalog was used as an "
+                "independent reference fallback after EODHD entitlement failure.",
                 "The fallback catalog is current-only and does not certify historical "
                 "delisting or identifier-change lineage.",
                 "Reference-catalog fallback has discovery authority only and cannot "
                 "authorize a candidate, decision, size, construction, or execution.",
+                f"Raw pages were bounded to {self.page_size} records and were discarded "
+                "after incremental validation.",
             ),
         )
 
-    def _global_stock_catalog(
+    def _exchange_stock_catalog(
         self,
-    ) -> tuple[tuple[Mapping[str, Any], ...], datetime]:
-        if self._catalog_rows is not None and self._catalog_retrieved_at is not None:
-            return self._catalog_rows, self._catalog_retrieved_at
+        *,
+        exchange: str,
+        selector: ExchangeSelector,
+        query_limit: int,
+    ) -> tuple[tuple[dict[str, str], ...], datetime]:
+        maximum = min(query_limit, self.max_records)
+        unique: dict[tuple[str, str, str, str, str], dict[str, str]] = {}
 
-        rows: list[Mapping[str, Any]] = []
+        for mic_code in sorted(selector.mic_codes):
+            self._collect_filter(
+                exchange=exchange,
+                selector=selector,
+                filter_name="mic_code",
+                filter_value=mic_code,
+                unique=unique,
+                maximum=maximum,
+            )
+
+        if not unique:
+            for alias in selector.exchange_aliases:
+                self._collect_filter(
+                    exchange=exchange,
+                    selector=selector,
+                    filter_name="exchange",
+                    filter_value=alias,
+                    unique=unique,
+                    maximum=maximum,
+                )
+                if unique:
+                    break
+
+        if not unique and selector.allow_country_fallback:
+            self._collect_filter(
+                exchange=exchange,
+                selector=selector,
+                filter_name="country",
+                filter_value=selector.country_code,
+                unique=unique,
+                maximum=maximum,
+            )
+
+        if not unique:
+            raise TwelveDataReferenceError(
+                f"Twelve Data returned no certified current records for {exchange}"
+            )
+        ordered = tuple(unique[key] for key in sorted(unique))
+        return ordered, self._now()
+
+    def _collect_filter(
+        self,
+        *,
+        exchange: str,
+        selector: ExchangeSelector,
+        filter_name: str,
+        filter_value: str,
+        unique: dict[tuple[str, str, str, str, str], dict[str, str]],
+        maximum: int,
+    ) -> None:
         seen_pages: set[str] = set()
-        first_reported_count: int | None = None
+        reported_count: int | None = None
         raw_count = 0
+        completed = False
+
         for page in range(1, self.max_pages + 1):
-            payload = self._request_page(page)
+            payload = self._request_page(
+                page,
+                filter_name=filter_name,
+                filter_value=filter_value,
+            )
             status = str(payload.get("status", "ok")).strip().lower()
             if status not in {"ok", "success"}:
                 raise TwelveDataReferenceError(
@@ -362,73 +444,94 @@ class TwelveDataReferenceProvider:
                 raise TwelveDataReferenceError(
                     "Twelve Data stock catalog contains a non-object record"
                 )
+            if len(page_rows) > self.page_size:
+                raise TwelveDataReferenceError(
+                    "Twelve Data stock catalog exceeded the requested page-size bound"
+                )
             if page == 1:
-                raw_count_value = payload.get("count")
+                value = payload.get("count")
                 try:
-                    first_reported_count = int(raw_count_value)
+                    reported_count = int(value)
                 except (TypeError, ValueError):
-                    first_reported_count = None
+                    reported_count = None
+                if reported_count is not None and reported_count < 0:
+                    raise TwelveDataReferenceError(
+                        "Twelve Data stock catalog reported an invalid count"
+                    )
+
             if not page_rows:
+                completed = True
                 break
-            page_fingerprint = hashlib.sha256(
-                json.dumps(
-                    page_rows,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    allow_nan=False,
-                ).encode("utf-8")
-            ).hexdigest()
+
+            page_fingerprint = self._page_fingerprint(page_rows)
             if page_fingerprint in seen_pages:
                 raise TwelveDataReferenceError(
                     "Twelve Data stock catalog pagination repeated a prior page"
                 )
             seen_pages.add(page_fingerprint)
-            rows.extend(page_rows)
             raw_count += len(page_rows)
-        else:
+
+            for item in page_rows:
+                if not self._matches_filter(
+                    item,
+                    selector=selector,
+                    filter_name=filter_name,
+                    filter_value=filter_value,
+                ):
+                    raise TwelveDataReferenceError(
+                        "Twelve Data stock catalog returned a record outside the "
+                        "requested exchange filter"
+                    )
+                normalized = self._normalized_directory_row(
+                    item,
+                    exchange=exchange,
+                    selector=selector,
+                )
+                unique.setdefault(_normalized_identity(normalized), normalized)
+                if len(unique) > maximum:
+                    raise TwelveDataReferenceError(
+                        f"Twelve Data directory {exchange} exceeded the explicit "
+                        f"{maximum}-record memory safety bound"
+                    )
+
+            if reported_count is not None and raw_count >= reported_count:
+                completed = True
+                break
+            if len(page_rows) < self.page_size:
+                completed = True
+                break
+        if not completed:
             raise TwelveDataReferenceError(
                 "Twelve Data stock catalog exceeded the certified pagination bound"
             )
-
-        if not rows:
-            raise TwelveDataReferenceError("Twelve Data stock catalog is empty")
-        if first_reported_count is not None and first_reported_count > raw_count:
+        if reported_count is not None and raw_count < reported_count:
             raise TwelveDataReferenceError(
                 "Twelve Data stock catalog pagination ended before the reported count"
             )
-
-        unique: dict[tuple[str, str, str, str, str], Mapping[str, Any]] = {}
-        for item in rows:
-            key = (
-                str(item.get("symbol", "")).strip().upper(),
-                str(item.get("mic_code", "")).strip().upper(),
-                _normalized_text(item.get("exchange")),
-                _country_code(item.get("country")),
-                _normalized_text(item.get("type")),
-            )
-            if not key[0]:
-                continue
-            unique.setdefault(key, item)
-        if not unique:
+        if reported_count is not None and raw_count > reported_count:
             raise TwelveDataReferenceError(
-                "Twelve Data stock catalog contains no usable symbol identities"
+                "Twelve Data stock catalog returned more records than the reported count"
             )
-        retrieved_at = self._now()
-        self._catalog_rows = tuple(unique.values())
-        self._catalog_retrieved_at = retrieved_at
-        return self._catalog_rows, retrieved_at
 
-    def _request_page(self, page: int) -> Mapping[str, Any]:
+    def _request_page(
+        self,
+        page: int,
+        *,
+        filter_name: str,
+        filter_value: str,
+    ) -> Mapping[str, Any]:
+        params: dict[str, object] = {
+            "apikey": self.api_key,
+            "format": "JSON",
+            "include_delisted": "false",
+            "outputsize": self.page_size,
+            "page": page,
+            filter_name: filter_value,
+        }
         try:
             response = self._http_get(
                 TWELVE_DATA_API_BASE + "/stocks",
-                params={
-                    "apikey": self.api_key,
-                    "format": "JSON",
-                    "include_delisted": "false",
-                    "outputsize": self.page_size,
-                    "page": page,
-                },
+                params=params,
                 timeout=self.timeout_seconds,
             )
         except requests.Timeout as error:
@@ -472,27 +575,29 @@ class TwelveDataReferenceProvider:
         return payload
 
     @staticmethod
-    def _select_exchange(
-        rows: Sequence[Mapping[str, Any]],
-        selector: ExchangeSelector,
-    ) -> tuple[Mapping[str, Any], ...]:
-        direct: list[Mapping[str, Any]] = []
-        country_rows: list[Mapping[str, Any]] = []
+    def _page_fingerprint(rows: Sequence[Mapping[str, Any]]) -> str:
+        digest = hashlib.sha256()
         for item in rows:
-            country = _country_code(item.get("country"))
-            if country == selector.country_code:
-                country_rows.append(item)
-            mic = str(item.get("mic_code", "")).strip().upper()
+            digest.update("\x1f".join(_raw_identity(item)).encode("utf-8"))
+            digest.update(b"\n")
+        return digest.hexdigest()
+
+    @staticmethod
+    def _matches_filter(
+        item: Mapping[str, Any],
+        *,
+        selector: ExchangeSelector,
+        filter_name: str,
+        filter_value: str,
+    ) -> bool:
+        if filter_name == "mic_code":
+            return str(item.get("mic_code", "")).strip().upper() == filter_value.upper()
+        if filter_name == "exchange":
             exchange = _normalized_text(item.get("exchange"))
-            if mic in selector.mic_codes or any(
-                alias and alias in exchange for alias in selector.exchange_aliases
-            ):
-                direct.append(item)
-        if direct:
-            return tuple(direct)
-        if selector.allow_country_fallback:
-            return tuple(country_rows)
-        return ()
+            return _normalized_text(filter_value) in exchange
+        if filter_name == "country":
+            return _country_code(item.get("country")) == selector.country_code
+        return False
 
     @staticmethod
     def _normalized_directory_row(
