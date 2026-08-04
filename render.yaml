@@ -102,6 +102,12 @@ services:
         value: "true"
       - key: CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_INTERVAL_SECONDS
         value: "900"
+      - key: CAPITAL_INTELLIGENCE_EODHD_BINDINGS
+        value: config/eodhd_instrument_bindings.all_markets.json
+      - key: CAPITAL_INTELLIGENCE_DATABENTO_INSTRUMENT_BINDINGS
+        value: config/databento_instrument_bindings.all_markets.json
+      - key: CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS
+        value: config/crypto_venue_bindings.all_markets.json
       - key: CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_CODE
         value: COMPOUNDING
       - key: APCA_API_BASE_URL
@@ -125,4 +131,18 @@ services:
       - key: CAPITAL_INTELLIGENCE_EODHD_API_TOKEN
         sync: false
       - key: CAPITAL_INTELLIGENCE_DATABENTO_API_KEY
+        sync: false
+      - key: OPENFIGI_API_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: TWELVE_DATA_API_KEY
+        sync: false
+      - key: EIA_API_KEY
+        sync: false
+      - key: NASA_FIRMS_MAP_KEY
+        sync: false
+      - key: BEA_API_KEY
+        sync: false
+      - key: CENSUS_API_KEY
         sync: false

@@ -1,5 +1,5 @@
 {
-  "identifier": "public-live-information-sources.v2",
+  "identifier": "public-live-information-sources.v3",
   "sources": [
     {
       "identifier": "gdelt-global-news-discovery",
@@ -871,6 +871,278 @@
       "usage_rights_identifier": "official-free-api.internal-analysis",
       "limitations": [
         "A free EIA_API_KEY is required; bulk files may be used separately without a key."
+      ]
+    },
+    {
+      "identifier": "bls-labor-inflation-live",
+      "source_name": "U.S. Bureau of Labor Statistics CPI observations",
+      "parser": "bls_series",
+      "endpoint": "https://api.bls.gov/publicAPI/v1/timeseries/data/CUSR0000SA0",
+      "source_type": "official",
+      "independence_group": "us-bureau-labor-statistics",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [],
+      "parameters": {},
+      "headers": {
+        "Accept": "application/json"
+      },
+      "maximum_records": 24,
+      "domains": [
+        "economic_data_releases"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "discount_rate",
+        "earnings"
+      ],
+      "reliability": 0.99,
+      "relevance": 0.95,
+      "materiality": 0.85,
+      "license_identifier": "BLS-public-data-api",
+      "usage_rights_identifier": "official-public-api.internal-analysis",
+      "limitations": [
+        "Keyless BLS v1 is rate limited and provides a bounded recent window.",
+        "This supporting feed does not replace point-in-time vintage macro certification."
+      ]
+    },
+    {
+      "identifier": "nyfed-sofr-live",
+      "source_name": "Federal Reserve Bank of New York reference rates",
+      "parser": "nyfed_rates",
+      "endpoint": "https://markets.newyorkfed.org/api/rates/secured/sofr/last/5.json",
+      "source_type": "official",
+      "independence_group": "federal-reserve-bank-new-york",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [],
+      "parameters": {},
+      "headers": {
+        "Accept": "application/json"
+      },
+      "maximum_records": 10,
+      "domains": [
+        "economic_data_releases",
+        "central_bank_communications"
+      ],
+      "impact_channels": [
+        "policy",
+        "liquidity",
+        "discount_rate",
+        "credit",
+        "currency"
+      ],
+      "reliability": 0.99,
+      "relevance": 0.95,
+      "materiality": 0.85,
+      "license_identifier": "NY-Fed-public-markets-api",
+      "usage_rights_identifier": "official-public-api.internal-analysis",
+      "limitations": [
+        "Reference-rate observations are supporting market evidence and not execution quotes."
+      ]
+    },
+    {
+      "identifier": "treasury-yield-curve-live",
+      "source_name": "U.S. Treasury daily par yield curve rates",
+      "parser": "treasury_yield_xml",
+      "endpoint": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml",
+      "source_type": "official",
+      "independence_group": "us-department-treasury-rates",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [],
+      "parameters": {
+        "data": "daily_treasury_yield_curve",
+        "field_tdr_date_value": "${CURRENT_YEAR}",
+        "page": "0"
+      },
+      "headers": {
+        "Accept": "application/atom+xml, application/xml;q=0.9"
+      },
+      "maximum_records": 400,
+      "domains": [
+        "economic_data_releases"
+      ],
+      "impact_channels": [
+        "policy",
+        "liquidity",
+        "discount_rate",
+        "credit",
+        "currency",
+        "volatility"
+      ],
+      "reliability": 0.99,
+      "relevance": 0.95,
+      "materiality": 0.9,
+      "license_identifier": "US-Treasury-public-interest-rate-feed",
+      "usage_rights_identifier": "official-public-feed.internal-analysis",
+      "limitations": [
+        "Daily par yields are sovereign-curve evidence, not security-level evaluated bond prices or bid/ask quotes."
+      ]
+    },
+    {
+      "identifier": "ecb-data-portal-live",
+      "source_name": "ECB Data Portal euro foreign-exchange observations",
+      "parser": "sdmx_csv",
+      "endpoint": "https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A",
+      "source_type": "official",
+      "independence_group": "ecb-data-portal",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [],
+      "parameters": {
+        "format": "csvdata",
+        "startPeriod": "${CURRENT_YEAR}-01-01"
+      },
+      "headers": {
+        "Accept": "text/csv"
+      },
+      "maximum_records": 400,
+      "domains": [
+        "economic_data_releases"
+      ],
+      "impact_channels": [
+        "currency",
+        "policy",
+        "liquidity",
+        "growth",
+        "inflation"
+      ],
+      "reliability": 0.99,
+      "relevance": 0.9,
+      "materiality": 0.8,
+      "license_identifier": "ECB-Data-Portal-public-api",
+      "usage_rights_identifier": "official-public-api.internal-analysis",
+      "limitations": [
+        "The bounded EUR/USD series supports FX context but does not replace complete global FX and benchmark coverage."
+      ]
+    },
+    {
+      "identifier": "eurostat-gdp-live",
+      "source_name": "Eurostat euro-area quarterly GDP observations",
+      "parser": "eurostat_jsonstat",
+      "endpoint": "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/namq_10_gdp",
+      "source_type": "official",
+      "independence_group": "eurostat",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [],
+      "parameters": {
+        "geo": "EA20",
+        "unit": "CLV10_MEUR",
+        "na_item": "B1GQ",
+        "lastTimePeriod": "1"
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
+      "maximum_records": 10,
+      "domains": [
+        "economic_data_releases"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "earnings",
+        "credit"
+      ],
+      "reliability": 0.99,
+      "relevance": 0.9,
+      "materiality": 0.85,
+      "license_identifier": "Eurostat-public-web-services",
+      "usage_rights_identifier": "official-public-api.internal-analysis",
+      "limitations": [
+        "Eurostat dissemination returns current published values; revision-vintage history must be preserved separately before production certification."
+      ]
+    },
+    {
+      "identifier": "bea-national-accounts-live",
+      "source_name": "U.S. Bureau of Economic Analysis national accounts",
+      "parser": "bea_api",
+      "endpoint": "https://apps.bea.gov/api/data",
+      "source_type": "official",
+      "independence_group": "us-bureau-economic-analysis",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [
+        "BEA_API_KEY"
+      ],
+      "parameters": {
+        "UserID": "${BEA_API_KEY}",
+        "method": "GetData",
+        "datasetname": "NIPA",
+        "TableName": "T10101",
+        "Frequency": "Q",
+        "Year": "${CURRENT_YEAR}",
+        "ResultFormat": "JSON"
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
+      "maximum_records": 100,
+      "domains": [
+        "economic_data_releases"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "earnings",
+        "credit"
+      ],
+      "reliability": 0.99,
+      "relevance": 0.95,
+      "materiality": 0.9,
+      "license_identifier": "BEA-public-data-api",
+      "usage_rights_identifier": "official-public-api.internal-analysis",
+      "limitations": [
+        "A free BEA API key is required.",
+        "Current-year national accounts do not replace a point-in-time vintage database."
+      ]
+    },
+    {
+      "identifier": "census-economic-indicators-live",
+      "source_name": "U.S. Census Bureau economic indicators",
+      "parser": "census_eits",
+      "endpoint": "https://api.census.gov/data/timeseries/eits/marts",
+      "source_type": "official",
+      "independence_group": "us-census-bureau",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [
+        "CENSUS_API_KEY"
+      ],
+      "parameters": {
+        "get": "cell_value",
+        "time": "from ${CURRENT_YEAR}-01 to ${CURRENT_YEAR}-12",
+        "seasonally_adj": "yes",
+        "key": "${CENSUS_API_KEY}"
+      },
+      "headers": {
+        "Accept": "application/json"
+      },
+      "maximum_records": 24,
+      "domains": [
+        "economic_data_releases"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "earnings",
+        "demand",
+        "policy"
+      ],
+      "reliability": 0.99,
+      "relevance": 0.9,
+      "materiality": 0.8,
+      "license_identifier": "Census-public-data-api",
+      "usage_rights_identifier": "official-public-api.internal-analysis",
+      "limitations": [
+        "A Census API key is required under the current API access policy.",
+        "The retail-trade probe is supporting demand evidence, not complete Census economic coverage."
       ]
     }
   ]
