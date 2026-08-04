@@ -84,35 +84,28 @@ GitHub Actions secrets are not automatically copied into the Render service envi
 
 Missing optional credentials leave only the affected optional source unavailable. They do not grant readiness or permit degraded evidence to be treated as complete.
 
-## Known credentials already obtained
+## Public credentials obtained and configured
 
-The user has confirmed that the following credentials already exist in GitHub Secrets:
+The user has confirmed that the following credentials have been obtained and added to the Render service environment:
 
-- OpenFIGI API key;
-- Alpha Vantage API key;
-- Twelve Data API key.
+- OpenFIGI API key as `OPENFIGI_API_KEY`;
+- Alpha Vantage API key as `ALPHA_VANTAGE_API_KEY`;
+- Twelve Data API key as `TWELVE_DATA_API_KEY`;
+- BEA API key as `BEA_API_KEY`;
+- U.S. Census API key as `CENSUS_API_KEY`;
+- USDA NASS Quick Stats API key as `USDA_NASS_API_KEY`;
+- EIA API key as `EIA_API_KEY`;
+- NASA FIRMS map key as `NASA_FIRMS_MAP_KEY`.
 
-These credentials do not need to be obtained again. Confirm that the same values are also configured in Render under:
+No additional public-source credentials from this audit remain to be procured. Secret values must remain excluded from source-control files, commits, logs and documentation.
 
-- `OPENFIGI_API_KEY`
-- `ALPHA_VANTAGE_API_KEY`
-- `TWELVE_DATA_API_KEY`
+This status is based on user confirmation. Runtime validation and provider certification remain separate requirements and should verify successful authentication, entitlements, freshness, expected schemas and fail-closed outage behavior.
 
-They should remain excluded from source-control files, commits, logs and documentation values.
+## Existing credentials that must remain valid
+
+The existing Alpaca, FRED, EODHD and Databento credentials and entitlements must remain active and correctly configured in Render. They were already part of the project before this public-source expansion and are not new procurement items.
 
 ## Sources the user still needs to obtain
-
-### Free or low-cost credentials
-
-Obtain these only when not already configured in either the user's credential inventory or Render:
-
-- BEA API key;
-- Census API key;
-- USDA NASS Quick Stats API key;
-- EIA API key;
-- NASA FIRMS map key.
-
-The existing Alpaca, FRED, EODHD and Databento credentials must also remain valid. OpenFIGI, Alpha Vantage and Twelve Data are already owned; their remaining action is Render configuration and runtime validation, not procurement.
 
 ### Contracted institutional datasets
 
