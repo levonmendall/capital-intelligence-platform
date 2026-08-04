@@ -21,6 +21,18 @@ def test_new_official_public_sources_are_declared() -> None:
         "eurostat-gdp-live",
         "bea-national-accounts-live",
         "census-economic-indicators-live",
+        "bank-of-england-news-live",
+        "bank-of-japan-live",
+        "bank-of-canada-live",
+        "snb-monetary-policy-live",
+        "bis-statistics-releases-live",
+        "eurostat-statistics-updates-live",
+        "bls-unemployment-live",
+        "bls-payrolls-live",
+        "ecb-deposit-facility-rate-live",
+        "eurostat-hicp-live",
+        "oecd-leading-indicators-live",
+        "usda-crop-production-live",
     } <= identifiers
 
 
@@ -38,6 +50,7 @@ def test_render_exposes_existing_bindings_and_optional_public_credentials() -> N
         "NASA_FIRMS_MAP_KEY",
         "BEA_API_KEY",
         "CENSUS_API_KEY",
+        "USDA_NASS_API_KEY",
     ):
         assert f"- key: {key}" in source
 
