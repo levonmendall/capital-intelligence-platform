@@ -206,10 +206,10 @@ def enrich_committee_handoff(
     decision: CIODecision,
     specialists: IndependentSpecialistPacket,
     *,
-    candidate,
-    policy,
-    policy_profile,
     material_opposition_threshold: float,
+    candidate=None,
+    policy=None,
+    policy_profile=None,
 ) -> CIODecision:
     """Make the final CIO record self-contained without changing its action."""
 
@@ -247,13 +247,15 @@ def enrich_committee_handoff(
         if item.position is SpecialistPosition.OPPOSED
         and item.confidence >= material_opposition_threshold
     )
-    context_record = _decision_context_record(
-        decision=decision,
-        candidate=candidate,
-        specialists=specialists,
-        policy=policy,
-        policy_profile=policy_profile,
-    )
+    context_record = None
+    if candidate is not None and policy is not None and policy_profile is not None:
+        context_record = _decision_context_record(
+            decision=decision,
+            candidate=candidate,
+            specialists=specialists,
+            policy=policy,
+            policy_profile=policy_profile,
+        )
     committee_explanation = " Committee record: " + " | ".join(role_summaries)
     if material_opposition:
         committee_explanation += (
@@ -263,7 +265,6 @@ def enrich_committee_handoff(
 
     return replace(
         decision,
-        schema_version="cio-decision.v4-self-contained",
         supporting_evidence=_unique(
             decision.supporting_evidence,
             tuple(
@@ -314,7 +315,7 @@ def enrich_committee_handoff(
                 f"committee:{item.role.value}:{item.position.value}"
                 for item in analyses
             ),
-            (context_record,),
+            (() if context_record is None else (context_record,)),
         ),
         explanation=decision.explanation + committee_explanation,
     )
@@ -390,12 +391,12 @@ class ChiefInvestmentOfficer(_ChiefInvestmentOfficer):
         enriched = enrich_committee_handoff(
             decision,
             specialists,
-            candidate=candidate,
-            policy=self.policy,
-            policy_profile=self.policy_authority.resolve(candidate),
             material_opposition_threshold=(
                 self.policy.maximum_unresolved_dissent_confidence
             ),
+            candidate=candidate,
+            policy=self.policy,
+            policy_profile=self.policy_authority.resolve(candidate),
         )
         return normalize_final_decision(enriched)
 
