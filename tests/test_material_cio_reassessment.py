@@ -172,7 +172,7 @@ def test_material_scan_triggers_from_credit_currency_and_positioning_evidence(tm
     )
     assert same.state == "no_material_change"
 
-    second_time = first_time + timedelta(minutes=70)
+    second_time = first_time + timedelta(minutes=100)
     second_record = _material_record(
         "record:inflation-rates",
         second_time - timedelta(minutes=1),
