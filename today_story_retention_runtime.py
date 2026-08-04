@@ -105,7 +105,7 @@ def _build_retained_items(
     if current:
         return current
     latest = _latest_record_time(event_ui, candidates, now=evaluated_at)
-    if latest is None or evaluated_at - latest > _MAX_RETENTION_AGE:
+    if latest is None or evaluated_at - latest >= _MAX_RETENTION_AGE:
         return ()
     # Reuse the governed ranking, quality, channel, clustering, and provider
     # diversity controls by anchoring selection to the last recorded event.
@@ -137,7 +137,7 @@ def _ordered_records(
     cutoff = now - _MAX_RETENTION_AGE
     for record in _records(records):
         observed_at = _record_time(event_ui, record)
-        if observed_at is None or observed_at > now or observed_at < cutoff:
+        if observed_at is None or observed_at > now or observed_at <= cutoff:
             continue
         timed.append((observed_at, record))
     timed.sort(key=lambda item: item[0], reverse=True)
