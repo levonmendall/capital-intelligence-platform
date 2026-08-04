@@ -74,10 +74,13 @@ services:
         value: "168"
       - key: CAPITAL_INTELLIGENCE_REQUIRE_CANONICAL_ENVIRONMENT
         value: "true"
-      # The product represents the CIO process as all-market. Comprehensive
-      # discovery must therefore complete; a degraded limited-scope fallback
-      # cannot publish a final CIO evaluation or decision.
+      # Comprehensive discovery remains the canonical target. During the
+      # explicit bond-source transition the bootstrap makes this expansion
+      # optional, records degraded scope, and continues through the certified
+      # listed-wrapper and broad U.S.-security CIO path.
       - key: CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY
+        value: "true"
+      - key: CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE
         value: "true"
       - key: CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE
         value: automatic
