@@ -98,6 +98,7 @@ def _candidate(
         current_portfolio_weight=current_weight,
         maximum_position_weight=0.12,
         decision_horizon_days=365,
+        evidence_quality=SimpleNamespace(score=0.84, ceiling=0.80),
         evidence_identifiers=(f"evidence:{symbol}",),
         primary_catalysts=("earnings and flow remain supportive",),
         invalidation_conditions=("expected return turns negative",),
