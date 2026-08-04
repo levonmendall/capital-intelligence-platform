@@ -1,28 +1,48 @@
-"""Production compatibility for Twelve Data exchange reference responses.
+"""Production compatibility for Twelve Data reference responses.
 
 Twelve Data's ``/stocks`` reference endpoint may ignore ``outputsize`` and ``page`` for
 an exchange-filtered request and return the complete filtered catalog in one response.
-The base adapter intentionally assumes ordinary pagination.  This runtime adapter accepts
+The base adapter intentionally assumes ordinary pagination. This runtime adapter accepts
 that observed reference-endpoint behavior only when the first response includes an exact
 provider count matching the returned rows and remains within the explicit exchange memory
-bound.  Ambiguous, incomplete, repeated, or oversized responses remain fail-closed.
+bound.
+
+The runtime adapter also certifies Twelve Data's dedicated ``/forex_pairs`` endpoint as
+an independent current foreign-exchange directory when EODHD cannot supply its virtual
+``FOREX`` symbol directory. Forex responses are accepted only when the provider supplies
+an exact count matching a non-empty, unique, structurally valid pair catalog within the
+explicit memory bound. Ambiguous, incomplete, duplicated, or oversized responses remain
+fail-closed.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
-from data.provider_dataset import ProviderDatasetQuery, ProviderDatasetSnapshot
+import requests
+
+from data.observation import AvailabilityBasis, DataQualityState
+from data.provider_dataset import (
+    ProviderDatasetQuery,
+    ProviderDatasetSnapshot,
+    ProviderDatasetType,
+)
 from providers.twelve_data_reference import (
+    TWELVE_DATA_API_BASE,
     ExchangeSelector,
     TwelveDataReferenceError,
     TwelveDataReferenceProvider,
 )
 
 
-TWELVE_DATA_RUNTIME_REFERENCE_SOURCE_VERSION = "twelve-data-stocks-reference.v3"
+TWELVE_DATA_RUNTIME_REFERENCE_SOURCE_VERSION = "twelve-data-reference.v4-forex"
+_FOREX_EXCHANGE = "FOREX"
+_FOREX_SYMBOL = re.compile(r"^[A-Z]{3}/[A-Z]{3}$")
 
 
 def _normalized_identity(item: Mapping[str, str]) -> tuple[str, str, str, str, str]:
@@ -36,12 +56,21 @@ def _normalized_identity(item: Mapping[str, str]) -> tuple[str, str, str, str, s
 
 
 class TwelveDataRuntimeReferenceProvider(TwelveDataReferenceProvider):
-    """Accept count-certified complete exchange responses without global retention."""
+    """Accept count-certified complete stock and forex reference responses."""
 
     def fetch_dataset(
         self,
         query: ProviderDatasetQuery,
     ) -> ProviderDatasetSnapshot:
+        if not isinstance(query, ProviderDatasetQuery):
+            raise TypeError("query must be ProviderDatasetQuery")
+        exchange = query.provider_symbol.strip().upper()
+        if (
+            query.dataset_type is ProviderDatasetType.SYMBOL_DIRECTORY
+            and exchange == _FOREX_EXCHANGE
+        ):
+            return self._fetch_forex_dataset(query)
+
         snapshot = super().fetch_dataset(query)
         limitations = tuple(
             (
@@ -59,6 +88,189 @@ class TwelveDataRuntimeReferenceProvider(TwelveDataReferenceProvider):
             source_version=TWELVE_DATA_RUNTIME_REFERENCE_SOURCE_VERSION,
             limitations=limitations,
         )
+
+    def _fetch_forex_dataset(
+        self,
+        query: ProviderDatasetQuery,
+    ) -> ProviderDatasetSnapshot:
+        if not self.api_key:
+            raise TwelveDataReferenceError(
+                "TWELVE_API_KEY or TWELVE_DATA_API_KEY is not configured"
+            )
+        payload = self._request_forex_catalog()
+        status = str(payload.get("status", "ok")).strip().lower()
+        if status not in {"ok", "success"}:
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog returned a provider rejection"
+            )
+        data = payload.get("data")
+        if not isinstance(data, Sequence) or isinstance(data, (str, bytes)):
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog data must be an array"
+            )
+        rows = tuple(item for item in data if isinstance(item, Mapping))
+        if len(rows) != len(data):
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog contains a non-object record"
+            )
+        try:
+            reported_count = int(payload.get("count"))
+        except (TypeError, ValueError) as error:
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog requires an exact provider count"
+            ) from error
+        if reported_count < 1:
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog reported an empty or invalid count"
+            )
+        if reported_count != len(rows):
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog row count did not match the provider count"
+            )
+        maximum = min(query.limit, self.max_records)
+        if len(rows) > maximum:
+            raise TwelveDataReferenceError(
+                f"Twelve Data directory FOREX exceeded the explicit {maximum}-record "
+                "memory safety bound"
+            )
+
+        normalized: dict[str, dict[str, str]] = {}
+        for item in rows:
+            row = self._normalized_forex_row(item)
+            symbol = row["Code"]
+            if symbol in normalized:
+                raise TwelveDataReferenceError(
+                    f"Twelve Data forex catalog contains duplicate pair {symbol}"
+                )
+            normalized[symbol] = row
+        if not normalized:
+            raise TwelveDataReferenceError(
+                "Twelve Data returned no certified current records for FOREX"
+            )
+
+        retrieved_at = self._now()
+        snapshot_query = query
+        if retrieved_at > query.as_of:
+            delay_seconds = (retrieved_at - query.as_of).total_seconds()
+            if delay_seconds > 300:
+                raise TwelveDataReferenceError(
+                    "Twelve Data catalog completed outside the live query grace window"
+                )
+            snapshot_query = replace(query, as_of=retrieved_at)
+
+        ordered = tuple(normalized[symbol] for symbol in sorted(normalized))
+        fingerprint = hashlib.sha256()
+        for item in ordered:
+            fingerprint.update(
+                json.dumps(
+                    item,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            )
+            fingerprint.update(b"\n")
+        return ProviderDatasetSnapshot(
+            query=snapshot_query,
+            provider=self.name,
+            source_version=TWELVE_DATA_RUNTIME_REFERENCE_SOURCE_VERSION,
+            observed_at=retrieved_at,
+            available_at=retrieved_at,
+            retrieved_at=retrieved_at,
+            quality_state=DataQualityState.FALLBACK,
+            availability_basis=AvailabilityBasis.RETRIEVAL_PROXY,
+            payload={"active": list(ordered), "delisted": []},
+            provider_record_id=(
+                "twelve-data:forex-reference:FOREX:"
+                + fingerprint.hexdigest()
+            ),
+            limitations=(
+                "Twelve Data's daily current forex-pair catalog was used as an "
+                "independent reference fallback after EODHD directory failure.",
+                "The provider-reported count exactly matched the complete response and "
+                "every pair passed ISO-style structural and duplicate validation.",
+                "The fallback catalog is current-only and does not certify historical "
+                "pair availability or identifier-change lineage.",
+                "Reference-catalog fallback has discovery authority only and cannot "
+                "authorize a candidate, decision, size, construction, or execution.",
+            ),
+        )
+
+    def _request_forex_catalog(self) -> Mapping[str, Any]:
+        try:
+            response = self._http_get(
+                TWELVE_DATA_API_BASE + "/forex_pairs",
+                params={"apikey": self.api_key, "format": "JSON"},
+                timeout=self.timeout_seconds,
+            )
+        except requests.Timeout as error:
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog request timed out"
+            ) from error
+        except requests.ConnectionError as error:
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog connection failed"
+            ) from error
+        except requests.RequestException as error:
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog request failed"
+            ) from error
+        try:
+            status_code = int(getattr(response, "status_code", 0))
+        except (TypeError, ValueError) as error:
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog returned an invalid HTTP response"
+            ) from error
+        if status_code < 200 or status_code >= 300:
+            raise TwelveDataReferenceError(
+                f"Twelve Data forex catalog returned HTTP {status_code}"
+            )
+        try:
+            payload = response.json()
+        except (TypeError, ValueError) as error:
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog returned invalid JSON"
+            ) from error
+        if not isinstance(payload, Mapping):
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog response must be an object"
+            )
+        if payload.get("code") or (
+            payload.get("message") and payload.get("status") == "error"
+        ):
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog returned a provider error"
+            )
+        return payload
+
+    @staticmethod
+    def _normalized_forex_row(item: Mapping[str, Any]) -> dict[str, str]:
+        symbol = str(item.get("symbol") or "").strip().upper()
+        if not _FOREX_SYMBOL.fullmatch(symbol):
+            raise TwelveDataReferenceError(
+                "Twelve Data forex catalog contains an invalid pair symbol"
+            )
+        base, quote = symbol.split("/", maxsplit=1)
+        reported_base = str(item.get("currency_base") or "").strip().upper()
+        reported_quote = str(item.get("currency_quote") or "").strip().upper()
+        if reported_base != base or reported_quote != quote:
+            raise TwelveDataReferenceError(
+                "Twelve Data forex pair components do not match the pair symbol"
+            )
+        group = str(item.get("currency_group") or "").strip()
+        return {
+            "Code": symbol,
+            "Name": f"{base} / {quote}" + (f" ({group})" if group else ""),
+            "Exchange": _FOREX_EXCHANGE,
+            "MIC": "",
+            "Currency": quote,
+            "CountryISO2": "GLOBAL",
+            "Type": "Currency",
+            "Figi": "",
+            "CFI": "",
+            "ISIN": "",
+            "SourceProvider": "Twelve Data",
+        }
 
     def _collect_filter(
         self,
