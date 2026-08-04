@@ -13,6 +13,11 @@ from dataclasses import fields
 
 from application.cio_cycle import CanonicalCIOCycle, CanonicalCIOCycleResult
 from cio.compounding_authority import CompoundingChiefInvestmentOfficer
+from intelligence.advanced_shadow import (
+    AdvancedIntelligenceShadowCoordinator,
+    AdvancedShadowSnapshot,
+    SQLiteAdvancedShadowStore,
+)
 from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from portfolio.active_investor import (
     CompoundingAccountabilityEngine,
@@ -51,6 +56,7 @@ class CompoundingCanonicalCIOCycleResult(CanonicalCIOCycleResult):
         "position_lifecycle",
         "reactive_monitoring",
         "compounding_accountability",
+        "advanced_intelligence_shadow",
     )
 
     def __init__(
@@ -63,6 +69,7 @@ class CompoundingCanonicalCIOCycleResult(CanonicalCIOCycleResult):
         position_lifecycle: PositionLifecyclePlan,
         reactive_monitoring: ReactiveMonitoringPlan,
         compounding_accountability: CompoundingAccountabilitySnapshot,
+        advanced_intelligence_shadow: AdvancedShadowSnapshot,
     ) -> None:
         if not isinstance(base_result, CanonicalCIOCycleResult):
             raise TypeError("base_result must be CanonicalCIOCycleResult")
@@ -88,6 +95,10 @@ class CompoundingCanonicalCIOCycleResult(CanonicalCIOCycleResult):
             raise TypeError(
                 "compounding_accountability must be CompoundingAccountabilitySnapshot"
             )
+        if not isinstance(advanced_intelligence_shadow, AdvancedShadowSnapshot):
+            raise TypeError(
+                "advanced_intelligence_shadow must be AdvancedShadowSnapshot"
+            )
         super().__init__(
             **{
                 item.name: getattr(base_result, item.name)
@@ -103,6 +114,11 @@ class CompoundingCanonicalCIOCycleResult(CanonicalCIOCycleResult):
             self,
             "compounding_accountability",
             compounding_accountability,
+        )
+        object.__setattr__(
+            self,
+            "advanced_intelligence_shadow",
+            advanced_intelligence_shadow,
         )
 
 
@@ -167,6 +183,8 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
         accountability_engine: CompoundingAccountabilityEngine | None = None,
         allocation_store: SQLiteCompoundingAllocationStore | None = None,
         active_investor_store: SQLiteActiveInvestorStore | None = None,
+        advanced_shadow_coordinator: AdvancedIntelligenceShadowCoordinator | None = None,
+        advanced_shadow_store: SQLiteAdvancedShadowStore | None = None,
         cio=None,
         policy_authority: CanonicalDecisionPolicyAuthority | None = None,
         journal=None,
@@ -201,6 +219,10 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
         )
         self.allocation_store = allocation_store
         self.active_investor_store = active_investor_store
+        self.advanced_shadow_coordinator = (
+            advanced_shadow_coordinator or AdvancedIntelligenceShadowCoordinator()
+        )
+        self.advanced_shadow_store = advanced_shadow_store
         if self.journal is not None:
             if self.allocation_store is None:
                 self.allocation_store = SQLiteCompoundingAllocationStore(
@@ -208,6 +230,10 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
                 )
             if self.active_investor_store is None:
                 self.active_investor_store = SQLiteActiveInvestorStore(
+                    self.journal.path
+                )
+            if self.advanced_shadow_store is None:
+                self.advanced_shadow_store = SQLiteAdvancedShadowStore(
                     self.journal.path
                 )
 
@@ -295,6 +321,16 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
             decisions=base_result.decisions,
             construction=base_result.construction,
         )
+        advanced_shadow = self.advanced_shadow_coordinator.observe_cycle(
+            cycle_identifier=str(identifier),
+            as_of=portfolio.as_of,
+            code_version=str(code_version),
+            candidate_count=len(candidates),
+            specialist_context_count=len(specialist_contexts),
+            decision_count=len(base_result.decisions),
+            alternative_count=len(alternatives.alternatives),
+            posture_identifier=posture.identifier,
+        )
         if self.allocation_store is not None:
             self.allocation_store.append(
                 cycle_identifier=str(identifier),
@@ -302,6 +338,8 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
                 alternatives=alternatives,
                 code_version=str(code_version),
             )
+        if self.advanced_shadow_store is not None:
+            self.advanced_shadow_store.append(advanced_shadow)
         if self.active_investor_store is not None:
             self.active_investor_store.append_cycle(
                 cycle_identifier=str(identifier),
@@ -319,6 +357,7 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
             position_lifecycle=lifecycle,
             reactive_monitoring=reactive,
             compounding_accountability=accountability,
+            advanced_intelligence_shadow=advanced_shadow,
         )
 
 
