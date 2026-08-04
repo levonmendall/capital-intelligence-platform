@@ -1,0 +1,26 @@
+name: Export Advanced Roadmap Source
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact branch source
+        uses: actions/checkout@v4
+      - name: Package tracked source
+        shell: bash
+        run: |
+          git ls-files -z | tar --null -T - -czf advanced-roadmap-current-source.tar.gz
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: advanced-roadmap-current-source
+          path: advanced-roadmap-current-source.tar.gz
+          retention-days: 1
+          if-no-files-found: error
