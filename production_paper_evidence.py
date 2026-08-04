@@ -78,6 +78,54 @@ def _flow_key(symbol: str, as_of) -> tuple[str, str]:
     return str(symbol).upper(), as_of.isoformat()
 
 
+def _production_build_active() -> bool:
+    return bool(getattr(_FLOW_STATE, "production_build", False))
+
+
+def _compatibility_flow_observation(features, as_of) -> CapitalFlowObservation:
+    """Return explicit neutral flow only for direct legacy helper compatibility.
+
+    The governed production build never uses this path.  It requires a raw-bar-derived
+    observation from ``_features`` and fails closed when that observation is absent.
+    Several historical unit tests call the lower candidate helper directly with an
+    already-constructed feature record; this neutral observation keeps that narrow
+    compatibility surface deterministic without pretending that market flow was
+    observed.
+    """
+
+    symbol = str(features.symbol).upper()
+    identifier = (
+        f"derived-capital-flow-compatibility-only:{symbol}:{as_of.isoformat()}"
+    )
+    volatility = max(
+        0.0,
+        min(1.0, float(getattr(features, "annualized_volatility", 0.0))),
+    )
+    return CapitalFlowObservation(
+        identifier=identifier,
+        symbol=symbol,
+        as_of=as_of,
+        recent_volume_impulse=0.0,
+        signed_dollar_flow=0.0,
+        accumulation_distribution=0.0,
+        price_volume_confirmation=0.0,
+        persistence=0.50,
+        short_trend=0.0,
+        medium_trend=0.0,
+        volatility=volatility,
+        crowding=0.0,
+        short_covering_likelihood=0.0,
+        evidence_identifiers=tuple(
+            dict.fromkeys(
+                (
+                    *tuple(getattr(features, "evidence_identifiers", ()) or ()),
+                    identifier,
+                )
+            )
+        ),
+    )
+
+
 def _synchronize_runtime_bindings() -> None:
     """Propagate facade monkeypatches into implementation function globals."""
 
@@ -146,9 +194,11 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
         _flow_key(features.symbol, candidate.as_of)
     )
     if observation is None:
-        raise ProductionPaperEvidenceError(
-            f"point-in-time capital-flow evidence is unavailable for {features.symbol}"
-        )
+        if _production_build_active():
+            raise ProductionPaperEvidenceError(
+                f"point-in-time capital-flow evidence is unavailable for {features.symbol}"
+            )
+        observation = _compatibility_flow_observation(features, candidate.as_of)
     predictive = build_predictive_market_intelligence(
         candidate=candidate,
         features=features,
@@ -284,9 +334,11 @@ def _company_candidate_and_evidence(instrument, features, *args, **kwargs):
 def build_paper_evidence(*args, **kwargs):
     _synchronize_runtime_bindings()
     _FLOW_STATE.observations = {}
+    _FLOW_STATE.production_build = True
     try:
         return _ORIGINAL_BUILD_PAPER_EVIDENCE(*args, **kwargs)
     finally:
+        _FLOW_STATE.production_build = False
         _FLOW_STATE.observations = {}
 
 
