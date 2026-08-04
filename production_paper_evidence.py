@@ -12,11 +12,15 @@ from __future__ import annotations
 import threading
 from dataclasses import replace
 
+import intelligence.predictive_market as _predictive_market
 import production_paper_evidence_impl as _implementation
 from intelligence.predictive_market import (
     CapitalFlowEngine,
     CapitalFlowObservation,
     build_predictive_market_intelligence,
+)
+from intelligence.predictive_scenario_merge import (
+    reconcile_forward_intelligence,
 )
 from operations.paper_evidence_spool import (
     close_spooled_paper_evidence,
@@ -61,6 +65,7 @@ for _name, _value in vars(_implementation).items():
     globals()[_name] = _value
 
 
+_predictive_market.merge_forward_intelligence = reconcile_forward_intelligence
 install_company_facts_availability_boundary()
 create_alpaca_paper_client = create_complete_alpaca_paper_client
 SECEdgarProvider = ResilientSECEdgarProvider
@@ -85,7 +90,7 @@ def _production_build_active() -> bool:
 def _compatibility_flow_observation(features, as_of) -> CapitalFlowObservation:
     """Return explicit neutral flow only for direct legacy helper compatibility.
 
-    The governed production build never uses this path.  It requires a raw-bar-derived
+    The governed production build never uses this path. It requires a raw-bar-derived
     observation from ``_features`` and fails closed when that observation is absent.
     Several historical unit tests call the lower candidate helper directly with an
     already-constructed feature record; this neutral observation keeps that narrow
