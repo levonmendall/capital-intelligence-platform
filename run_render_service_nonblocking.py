@@ -12,6 +12,12 @@ cycle. The governed publication already records that degraded scope and cannot r
 it as complete all-market coverage. The canonical listed-wrapper bond alternatives,
 broad U.S.-security discovery, six-specialist review, CIO authority, portfolio
 construction, paper-only execution, and real-money prohibition remain unchanged.
+
+Before any child process starts, the bootstrap also checks the persistent disk reserve.
+When the disk is under pressure it may remove only oldest canonical backup archives and
+stale backup temporary files while preserving at least the configured newest archive.
+Canonical databases, portfolio state, evidence, lineage, reports, and research records
+are never deleted by this recovery path.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ import sys
 import time
 from collections.abc import MutableMapping, Sequence
 
+from operations.storage_pressure import reclaim_from_environment
 from run_render_service import prepare_render_environment, run_supervisor
 
 
@@ -66,6 +73,17 @@ def run_nonblocking_render_service(
     """Run the existing supervisor with provider validation detached from startup."""
 
     values = prepare_render_environment(os.environ if environment is None else environment)
+    try:
+        storage_report = reclaim_from_environment(values)
+    except (OSError, TypeError, ValueError) as error:
+        _log(
+            "persistent_storage_recovery_failed",
+            error_type=type(error).__name__,
+            canonical_authorities_deleted=False,
+        )
+    else:
+        _log("persistent_storage_checked", **storage_report.to_dict())
+
     background_enabled = _enabled(
         values,
         "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED",
