@@ -17,6 +17,9 @@ from portfolio.compounding_allocation import (
     CompoundingParticipationPolicy,
     PortfolioPosture,
 )
+from portfolio.compounding_participation_authority import (
+    AuthoritativeCompoundingParticipationPolicy,
+)
 
 
 _NON_OWNERSHIP_ABSTENTIONS = {
@@ -37,7 +40,8 @@ class CompoundingChiefInvestmentOfficer(ChiefInvestmentOfficer):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.participation_policy = (
-            participation_policy or CompoundingParticipationPolicy()
+            participation_policy
+            or AuthoritativeCompoundingParticipationPolicy()
         )
         self._portfolio_posture: PortfolioPosture | None = None
         self._allocation_directives: dict[str, CandidateAllocationDirective] = {}
