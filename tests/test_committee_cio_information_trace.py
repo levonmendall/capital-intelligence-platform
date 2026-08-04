@@ -66,13 +66,16 @@ def test_trace_documents_all_six_specialists_and_cio_packet(tmp_path) -> None:
     _, result, trace = _completed_trace(tmp_path)
     payload = trace.to_dict()
 
+    assert trace.schema_version == "committee-cio-information-trace.v2-self-contained"
     assert len(payload["specialists"]) == 6
     assert payload["committee_synthesis"]["exact_role_count"] == 6
     assert payload["normalized_point_in_time_record"]["fingerprint"] == (
         result.evaluation_snapshots[0].fingerprint
     )
     assert payload["cio_decision"]["action"] == result.decisions[0].action.value
+    assert payload["cio_decision"]["self_contained_context"]
     assert payload["initial_target"] == result.decisions[0].recommended_position_weight
+    assert payload["portfolio_context"]["portfolio_value"] > 0.0
     assert payload["authority"]["investment_behavior_changed"] is False
     assert all(
         item["direct_portfolio_action_authority"] is False
@@ -80,7 +83,7 @@ def test_trace_documents_all_six_specialists_and_cio_packet(tmp_path) -> None:
     )
 
 
-def test_trace_detects_correlated_directional_confirmation_not_discounted_everywhere(
+def test_trace_reports_correlated_confirmation_as_dependency_discounted(
     tmp_path,
 ) -> None:
     def correlate(payload):
@@ -99,11 +102,12 @@ def test_trace_detects_correlated_directional_confirmation_not_discounted_everyw
 
     assert synthesis["correlated_directional_clusters"]
     assert synthesis["return_reconciliation_dependency_discounted"] is True
-    assert synthesis["growth_ensemble_and_support_ratios_dependency_discounted"] is False
-    assert synthesis["correlated_opinions_partly_treated_as_independent"] is True
+    assert synthesis["growth_ensemble_and_support_ratios_dependency_discounted"] is True
+    assert synthesis["cio_confidence_dependency_discounted"] is True
+    assert synthesis["correlated_opinions_partly_treated_as_independent"] is False
 
 
-def test_information_go_no_go_exposes_missing_and_partial_cio_categories(
+def test_information_go_no_go_is_complete_without_making_benchmark_authoritative(
     tmp_path,
 ) -> None:
     _, _, trace = _completed_trace(tmp_path)
@@ -114,10 +118,21 @@ def test_information_go_no_go_exposes_missing_and_partial_cio_categories(
     }
 
     assert by_name["expected return and horizon"] == "present_structured"
-    assert by_name["benchmark-relative attractiveness"] == "missing"
-    assert by_name["specialist agreement and disagreement"] == "partial"
-    assert by_name["current exposures and available risk budget"] == "partial"
-    assert payload["information_sufficiency_go_no_go"] == "no_go"
+    assert by_name["benchmark-relative attractiveness"] == (
+        "present_structured_not_authoritative"
+    )
+    assert by_name["specialist agreement and disagreement"] == "present_structured"
+    assert by_name["current exposures and available risk budget"] == (
+        "present_structured"
+    )
+    assert by_name["conditions for increasing, reducing, and exiting"] == (
+        "present_structured"
+    )
+    assert payload["information_sufficiency_go_no_go"] == "go"
+    context = payload["cio_decision"]["self_contained_context"]
+    assert context["action_ladder"]["reduce"]["triggers"]
+    assert context["committee"]["roles"]
+    assert context["benchmark_relative_attractiveness"]["value"] is None
 
 
 def test_trace_append_is_idempotent_and_hash_chained(tmp_path) -> None:
@@ -148,6 +163,7 @@ def test_active_executor_appends_trace_for_each_cio_decision(tmp_path) -> None:
 
     assert len(traces) == len(result.decisions)
     assert traces[0].payload["normalized_point_in_time_record"]["fingerprint"]
+    assert traces[0].payload["cio_decision"]["self_contained_context"]
     assert journal.verify_integrity()
 
 
