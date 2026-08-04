@@ -242,7 +242,7 @@ def test_entrypoints_install_retention_after_final_today_renderer() -> None:
 def test_retained_today_copy_is_truthful_about_story_age() -> None:
     source = Path("today_story_retention_runtime.py").read_text(encoding="utf-8")
 
-    assert "Today // latest prior developments" in source
+    assert "Today // latest verified developments" in source
     assert "No new source-qualified development cleared the current 24-hour controls" in source
     assert "original publication timestamps" in source
     assert "No new qualifying stories" in source

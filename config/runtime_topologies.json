@@ -4,6 +4,7 @@
     "api": ["{python}", "-m", "uvicorn", "api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"],
     "backup": ["{python}", "run_backup.py", "--loop"],
     "backfill": ["{python}", "run_historical_backfill.py", "--loop"],
+    "headlines": ["{python}", "run_public_headline_collector.py", "--loop"],
     "operator": ["{python}", "run_autonomous_paper_operator.py", "--loop"],
     "render": ["{python}", "run_render_service.py"],
     "ui": ["{python}", "-m", "streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"],
@@ -12,7 +13,7 @@
   "topologies": {
     "render": {
       "entry_command": "render",
-      "processes": ["api", "cio-paper-operator", "historical-backfill", "encrypted-backup", "streamlit", "composite-readiness-watchdog"],
+      "processes": ["api", "cio-paper-operator", "public-headline-collector", "historical-backfill", "encrypted-backup", "streamlit", "composite-readiness-watchdog"],
       "paper_execution_default": "automatic",
       "persistent_state": "/app/database"
     },
@@ -49,6 +50,7 @@
       "run_container_acceptance.py",
       "run_daily_operations.py",
       "run_historical_backfill.py",
+      "run_public_headline_collector.py",
       "run_release_validation.py",
       "run_render_service.py",
       "run_restore.py"

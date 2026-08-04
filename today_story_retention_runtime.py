@@ -3,9 +3,10 @@
 The current 24-hour selection remains authoritative. This presentation-only
 runtime stores the most recent source-qualified record set on the persistent
 application disk and reuses it only when the current selection is empty. Prior
-stories keep their original publication timestamps and are explicitly labeled
-as retained history; they are never renewed, treated as current evidence, or
-allowed to authorize a portfolio action.
+stories remain available for a bounded 72-hour continuity window, keep their
+original publication timestamps, and are explicitly labeled as retained history;
+they are never renewed, treated as current evidence, or allowed to authorize a
+portfolio action.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ _INSTALLED_STATE_KEY = "_capital_intelligence_today_story_retention_installed"
 _ORIGINAL_CALLABLE_ATTRIBUTE = "_capital_intelligence_today_story_retention_original"
 _SCHEMA_VERSION = "today-story-retention.v1"
 _MAX_CACHED_RECORDS = 250
-_MAX_RETENTION_AGE = timedelta(hours=36)
+_MAX_RETENTION_AGE = timedelta(hours=72)
 
 
 def _utc_now(value: datetime | None = None) -> datetime:
@@ -94,7 +95,7 @@ def _build_retained_items(
     now: datetime | None = None,
     limit: int = 3,
 ) -> tuple[object, ...]:
-    """Use current items first, then the latest historical 24-hour story batch."""
+    """Use current items first, then the latest verified story batch."""
 
     evaluated_at = _utc_now(now)
     candidates = _records(records)
@@ -104,7 +105,7 @@ def _build_retained_items(
     if current:
         return current
     latest = _latest_record_time(event_ui, candidates, now=evaluated_at)
-    if latest is None or evaluated_at - latest > _MAX_RETENTION_AGE:
+    if latest is None or evaluated_at - latest >= _MAX_RETENTION_AGE:
         return ()
     # Reuse the governed ranking, quality, channel, clustering, and provider
     # diversity controls by anchoring selection to the last recorded event.
@@ -136,7 +137,7 @@ def _ordered_records(
     cutoff = now - _MAX_RETENTION_AGE
     for record in _records(records):
         observed_at = _record_time(event_ui, record)
-        if observed_at is None or observed_at > now or observed_at < cutoff:
+        if observed_at is None or observed_at > now or observed_at <= cutoff:
             continue
         timed.append((observed_at, record))
     timed.sort(key=lambda item: item[0], reverse=True)
@@ -234,8 +235,8 @@ def _retention_detail(items: Sequence[object]) -> str:
     )
     return (
         "No new source-qualified development cleared the current 24-hour controls. "
-        f"The latest prior stories remain visible; the most recent was published {date_label}. "
-        "Their original publication times are preserved until newer qualifying information arrives."
+        f"The latest verified stories remain visible; the most recent was published {date_label}. "
+        "Their original publication times are preserved while independent feeds refresh."
     )
 
 
@@ -311,6 +312,7 @@ def _retained_today_renderer(
         current_items = tuple(original_builder(records, now=now, limit=3))
         items = tuple(operating_ui.build_today_items(records, now=now, limit=3))
         retained = not current_items and bool(items)
+        empty = not items
 
         active_app.page_header(
             "Investment world today",
@@ -322,11 +324,18 @@ def _retained_today_renderer(
             surface="today",
         )
         if retained:
-            kicker = "Today // latest prior developments"
+            kicker = "Today // latest verified developments"
             deck = (
                 "No new source-qualified development cleared the current 24-hour controls. "
-                "The most recent prior stories remain visible with their original publication age "
-                "until newer qualifying information arrives."
+                "The most recent verified stories remain visible with their original publication "
+                "age while independent feeds refresh."
+            )
+        elif empty:
+            kicker = "Today // live market pulse"
+            deck = (
+                "Independent headline feeds are refreshing. Live market-session and governed-quote "
+                "context remains visible so the Today section never disappears or implies that "
+                "nothing is happening."
             )
         else:
             kicker = "Today // current developments"
@@ -344,6 +353,7 @@ def _retained_today_renderer(
             f'<span class="ci-chip">{escape(story_ui._coverage(market))} governed quotes</span>'
             f'<span class="ci-chip">{escape(story_ui._age_label(getattr(snapshot, "evaluated_at", None)))}</span>'
             + ('<span class="ci-chip">No new qualifying stories</span>' if retained else "")
+            + ('<span class="ci-chip">Headline feeds refreshing</span>' if empty else "")
             + (
                 '<span class="ci-chip">Coverage incomplete</span>'
                 if str(getattr(snapshot, "state", "available")) != "available"
@@ -357,14 +367,21 @@ def _retained_today_renderer(
             detail = story_ui._clean(getattr(snapshot, "detail", "")) or (
                 "The current public-news collection did not return a usable story."
             )
+            session = story_ui._session(market)
+            coverage = story_ui._coverage(market)
             hero += (
                 '<div class="ci-primary"><div class="ci-meta"><span class="ci-rank">'
-                "Coverage status</span></div>"
-                '<div class="ci-title">Current headline coverage is incomplete.</div>'
-                '<div class="ci-box"><div class="ci-label">What this means</div>'
-                f'<p>{escape(detail)} The application will not treat an empty record set as '
-                "proof that nothing happened. Collection and filtering diagnostics remain "
-                "visible while the feed refreshes.</p></div></div>"
+                "Live market pulse</span></div>"
+                '<div class="ci-title">Headline providers are refreshing; market context remains live.</div>'
+                '<div class="ci-three"><div class="ci-box"><div class="ci-label">What is live</div>'
+                f'<p>The market session is {escape(session.lower())}, with {escape(coverage)} governed '
+                "quotes currently represented.</p></div>"
+                '<div class="ci-box"><div class="ci-label">Coverage status</div>'
+                f'<p>{escape(detail)} The application retains verified stories and never interprets '
+                "an empty feed as proof that the news cycle is quiet.</p></div>"
+                '<div class="ci-box"><div class="ci-label">What to watch</div>'
+                '<p>New independent-source headlines, meaningful cross-asset price moves, official '
+                "confirmations, and any change to the CIO assessment.</p></div></div></div>"
             )
         st.markdown(hero + "</section>", unsafe_allow_html=True)
 
@@ -415,14 +432,21 @@ def _retained_today_renderer(
         with st.expander("Live market operating detail", expanded=False):
             active_app.render_live_market_status()
         retained_caption = (
-            " No new qualifying event was available, so the latest prior stories remain visible "
+            " No new qualifying event was available, so the latest verified stories remain visible "
             "with their original publication timestamps."
             if retained
+            else ""
+        )
+        pulse_caption = (
+            " Headline providers are refreshing, so the live market pulse is shown instead of an "
+            "empty section."
+            if empty
             else ""
         )
         st.caption(
             event_ui._daily_caption(snapshot)
             + retained_caption
+            + pulse_caption
             + " Educational interpretation only. Today explains external developments; holdings "
             "and CIO-authorized actions remain in Portfolio."
         )

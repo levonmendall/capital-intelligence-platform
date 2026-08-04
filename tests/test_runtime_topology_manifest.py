@@ -9,8 +9,8 @@ def test_every_root_command_has_exactly_one_classification() -> None:
     report = validate_manifest(manifest)
     assert report == {
         "ready": True,
-        "root_script_count": 89,
-        "classified_script_count": 89,
+        "root_script_count": 90,
+        "classified_script_count": 90,
         "missing": [],
         "extra": [],
         "duplicate_classifications": 0,
@@ -29,14 +29,20 @@ def test_render_runtime_matches_canonical_manifest_behaviorally() -> None:
     }
     assert actual == declared
     assert command_tokens("render", manifest)[-1] == "run_render_service.py"
+    assert command_tokens("headlines", manifest)[-2:] == (
+        "run_public_headline_collector.py",
+        "--loop",
+    )
 
 
 def test_canonical_commands_preserve_single_execution_authority() -> None:
     manifest = load_manifest()
     operator = command_tokens("operator", manifest)
     ui = command_tokens("ui", manifest)
+    headlines = command_tokens("headlines", manifest)
     assert "run_autonomous_paper_operator.py" in operator
     assert "app.py" in ui
     assert "paper_execution" not in " ".join(ui)
+    assert "paper_execution" not in " ".join(headlines)
     assert manifest["topologies"]["local"]["paper_execution_default"] == "disabled"
     assert manifest["topologies"]["docker-api"]["paper_execution_default"] == "disabled"

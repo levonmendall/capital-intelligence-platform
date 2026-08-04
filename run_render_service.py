@@ -2,15 +2,15 @@
 
 Render persistent disks attach to a single service instance. This supervisor therefore
 runs the authenticated Streamlit console, read-only API, autonomous CIO/paper operator,
-historical backfill loop, and encrypted backup loop as child processes that share one
-durable SQLite and research-data state root.
+redundant headline collector, historical backfill loop, and encrypted backup loop as
+child processes that share one durable SQLite and research-data state root.
 
 The supervisor is intentionally fail-closed:
 
 * initialization must succeed before any child starts;
 * the public web, API, and CIO operator are critical processes;
 * loss of a critical process terminates the service so Render restarts it;
-* historical collection, backup, and readiness-monitoring loops are restarted with
+* headline, historical, backup, and readiness-monitoring loops are restarted with
   bounded delay without taking the trading console down during a transient or
   persistently blocked operational condition;
 * SIGTERM is forwarded to every child for an orderly deployment shutdown; and
@@ -136,6 +136,14 @@ def prepare_render_environment(
         "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_LOCK",
         str(state_root / "public-live-information-runtime.lock"),
     )
+    values.setdefault(
+        "CAPITAL_INTELLIGENCE_PUBLIC_HEADLINE_REPORT",
+        str(state_root / "public-headline-collection-report.json"),
+    )
+    values.setdefault(
+        "CAPITAL_INTELLIGENCE_PUBLIC_HEADLINE_STATE",
+        str(state_root / "public-headline-collection-state.json"),
+    )
 
     values.setdefault("CAPITAL_INTELLIGENCE_ENVIRONMENT", "production")
     values.setdefault("CAPITAL_INTELLIGENCE_JSON_LOGS", "true")
@@ -149,6 +157,10 @@ def prepare_render_environment(
     values.setdefault(
         "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_INTERVAL_SECONDS",
         "3600",
+    )
+    values.setdefault(
+        "CAPITAL_INTELLIGENCE_PUBLIC_HEADLINE_INTERVAL_SECONDS",
+        "300",
     )
     values.setdefault("CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE", "America/New_York")
     values.setdefault("CAPITAL_INTELLIGENCE_SCHEDULER_HOUR", "7")
@@ -222,6 +234,12 @@ def managed_processes(
         ManagedProcess(
             name="cio-paper-operator",
             command=(python, "run_autonomous_paper_operator.py", "--loop"),
+        ),
+        ManagedProcess(
+            name="public-headline-collector",
+            command=(python, "run_public_headline_collector.py", "--loop"),
+            critical=False,
+            restart_delay_seconds=60,
         ),
         ManagedProcess(
             name="historical-backfill",
