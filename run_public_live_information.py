@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from providers.public_live_information import load_public_live_source_catalog
+from providers.public_live_source_catalogs import load_operating_public_live_source_catalog
 from providers.public_live_information_extended import (
     ImpactfulPublicLiveInformationProvider,
 )
@@ -56,7 +56,7 @@ def _write(path: str, payload: Mapping[str, object]) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        catalog = load_public_live_source_catalog(args.catalog)
+        catalog = load_operating_public_live_source_catalog(args.catalog)
         report = ImpactfulPublicLiveInformationProvider(catalog).collect(
             include_optional=not args.required_only
         )
