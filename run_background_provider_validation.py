@@ -1,9 +1,14 @@
 """Refresh live-provider readiness without blocking Render web startup.
 
 The report produced here remains an operational prerequisite for governed CIO analysis
-and paper implementation.  This worker is deliberately noncritical to web availability:
+and paper implementation. This worker is deliberately noncritical to web availability:
 provider outages or slow responses are recorded in the readiness report while the
 authenticated console and health endpoint remain online.
+
+When explicitly enabled, the worker also launches one paper-only diagnostic CIO pass per
+release after the first provider-validation attempt. That pass bypasses only the calendar
+due check; every evidence, specialist, CIO, construction, and paper-execution control
+remains active and fail-closed.
 """
 
 from __future__ import annotations
@@ -12,6 +17,8 @@ import argparse
 import json
 import os
 import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 from threading import Event
@@ -73,6 +80,27 @@ def validate_once() -> tuple[ProviderValidationReport, Path]:
     return report, report_path
 
 
+def _run_release_diagnostic() -> None:
+    """Launch the bounded diagnostic without making it a web-service dependency."""
+
+    try:
+        completed = subprocess.run(
+            (sys.executable, "run_manual_cio_diagnostic.py"),
+            env=dict(os.environ),
+            check=False,
+        )
+    except OSError as error:
+        _log(
+            "manual_cio_diagnostic_launch_failed",
+            error_type=type(error).__name__,
+        )
+        return
+    _log(
+        "manual_cio_diagnostic_process_finished",
+        return_code=completed.returncode,
+    )
+
+
 def run_loop(
     *,
     interval_seconds: float | None = None,
@@ -116,6 +144,7 @@ def run_loop(
             signal.SIGINT: signal.signal(signal.SIGINT, request_stop),
         }
 
+    diagnostic_attempted = False
     try:
         _log(
             "provider_validation_worker_started",
@@ -132,6 +161,9 @@ def run_loop(
                     "provider_validation_iteration_failed",
                     error_type=type(error).__name__,
                 )
+            if not diagnostic_attempted:
+                _run_release_diagnostic()
+                diagnostic_attempted = True
             if stopping.wait(interval):
                 break
         return 0
