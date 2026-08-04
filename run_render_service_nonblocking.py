@@ -5,6 +5,13 @@ unavailable external providers are validated by a separate noncritical worker, a
 Streamlit to open Render's health-check port promptly. Existing readiness gates continue
 to prevent CIO analysis and paper implementation from using missing or stale provider
 evidence.
+
+During the explicitly configured bond-source transition, comprehensive direct-market
+discovery becomes an optional expansion rather than a prerequisite for the entire CIO
+cycle. The governed publication already records that degraded scope and cannot represent
+it as complete all-market coverage. The canonical listed-wrapper bond alternatives,
+broad U.S.-security discovery, six-specialist review, CIO authority, portfolio
+construction, paper-only execution, and real-money prohibition remain unchanged.
 """
 
 from __future__ import annotations
@@ -66,6 +73,21 @@ def run_nonblocking_render_service(
     )
     if background_enabled:
         values["CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP"] = "false"
+
+    bond_source_transition = _enabled(
+        values,
+        "CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE",
+        default=False,
+    )
+    if bond_source_transition:
+        values["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY"] = "false"
+        _log(
+            "bond_source_transition_mode_enabled",
+            comprehensive_discovery_required=False,
+            direct_bond_discovery_authority=False,
+            degraded_scope_disclosed=True,
+            listed_bond_wrappers_remain_available=True,
+        )
 
     validation_process: subprocess.Popen[bytes] | subprocess.Popen[str] | None = None
     try:
