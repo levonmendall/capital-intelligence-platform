@@ -136,5 +136,13 @@ def install(portfolio_first: ModuleType) -> None:
     portfolio_first._render_cio_report = render_cio_report
     setattr(portfolio_first, _INSTALLED_STATE_KEY, True)
 
+    # Production portfolio_first exposes the capital renderer. Unit tests for
+    # this isolated trigger intentionally use a smaller fake module, so keep
+    # their scope unchanged while attaching the dedicated route in the app.
+    if hasattr(portfolio_first, "_capital_structure"):
+        import cio_report_detail_runtime
+
+        cio_report_detail_runtime.install(portfolio_first)
+
 
 __all__ = ["install", "_current_report_title"]
