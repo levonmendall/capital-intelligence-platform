@@ -128,7 +128,10 @@ def test_uncached_http_404_uses_certified_tokyo_reference(
     tmp_path: Path,
 ) -> None:
     fallback = reference_provider(
-        [Response({"count": 1, "data": [tokyo_row()], "status": "ok"})]
+        [
+            Response({"count": 1, "data": [tokyo_row()], "status": "ok"}),
+            Response({"count": 0, "data": [], "status": "ok"}),
+        ]
     )
     provider = eodhd_provider(
         cache_dir=tmp_path,
