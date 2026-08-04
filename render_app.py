@@ -28,6 +28,7 @@ import portfolio_first_ui_refinement
 import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
+import surface_route_isolation_runtime
 import today_development_card_format_runtime
 import today_event_alignment_runtime
 import today_story_retention_runtime
@@ -303,6 +304,10 @@ def main() -> None:
         app_impl,
         educational_market_briefing_ui,
         operating_intelligence_ui,
+        environment_story_placement_refinement,
+    )
+    surface_route_isolation_runtime.install(
+        app_impl,
         environment_story_placement_refinement,
     )
     prepare_render_surface_runtime()
