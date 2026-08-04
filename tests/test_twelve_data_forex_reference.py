@@ -46,14 +46,14 @@ def forex_rows():
         {
             "symbol": "EUR/USD",
             "currency_group": "Major",
-            "currency_base": "EUR",
-            "currency_quote": "USD",
+            "currency_base": "Euro",
+            "currency_quote": "US Dollar",
         },
         {
             "symbol": "USD/JPY",
             "currency_group": "Major",
-            "currency_base": "USD",
-            "currency_quote": "JPY",
+            "currency_base": "US Dollar",
+            "currency_quote": "Japanese Yen",
         },
     ]
 
@@ -100,6 +100,28 @@ def test_count_certified_forex_catalog_is_normalized_for_discovery() -> None:
     assert timeout == 30
 
 
+def test_forex_catalog_code_components_remain_supported() -> None:
+    rows = forex_rows()
+    rows[0] = {
+        **rows[0],
+        "currency_base": "EUR",
+        "currency_quote": "USD",
+    }
+    rows[1] = {
+        **rows[1],
+        "currency_base": "USD",
+        "currency_quote": "JPY",
+    }
+    provider = runtime_provider({"count": 2, "data": rows, "status": "ok"})
+
+    snapshot = provider.fetch_dataset(forex_query())
+
+    assert [item["Code"] for item in snapshot.payload["active"]] == [
+        "EUR/USD",
+        "USD/JPY",
+    ]
+
+
 def test_forex_catalog_count_mismatch_remains_fail_closed() -> None:
     provider = runtime_provider(
         {"count": 3, "data": forex_rows(), "status": "ok"}
@@ -118,12 +140,21 @@ def test_forex_catalog_duplicate_pair_remains_fail_closed() -> None:
         provider.fetch_dataset(forex_query())
 
 
-def test_forex_catalog_component_mismatch_remains_fail_closed() -> None:
+def test_forex_catalog_code_component_mismatch_remains_fail_closed() -> None:
     rows = forex_rows()
     rows[0] = {**rows[0], "currency_quote": "JPY"}
     provider = runtime_provider({"count": 2, "data": rows, "status": "ok"})
 
-    with pytest.raises(TwelveDataReferenceError, match="components do not match"):
+    with pytest.raises(TwelveDataReferenceError, match="code components do not match"):
+        provider.fetch_dataset(forex_query())
+
+
+def test_forex_catalog_missing_component_remains_fail_closed() -> None:
+    rows = forex_rows()
+    rows[0] = {**rows[0], "currency_base": ""}
+    provider = runtime_provider({"count": 2, "data": rows, "status": "ok"})
+
+    with pytest.raises(TwelveDataReferenceError, match="non-empty currency components"):
         provider.fetch_dataset(forex_query())
 
 
