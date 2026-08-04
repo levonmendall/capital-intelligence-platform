@@ -21,12 +21,28 @@ def test_render_blueprint_defines_one_paid_disk_backed_operating_service() -> No
     assert "plan: starter" not in source
     assert "autoDeployTrigger: checksPass" in source
     assert "numInstances: 1" in source
-    assert "dockerCommand: python run_render_service.py" in source
+    assert "dockerCommand: python run_render_service_nonblocking.py" in source
     assert "healthCheckPath: /_stcore/health" in source
     assert "mountPath: /app/database" in source
     assert "sizeGB: 5" in source
     assert "maxShutdownDelaySeconds" not in source
     assert "previews:\n  generation: off" in source
+    assert (
+        "- key: CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP\n"
+        "        value: \"false\""
+    ) in source
+    assert (
+        "- key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED\n"
+        "        value: \"true\""
+    ) in source
+    assert (
+        "- key: CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER\n"
+        "        value: \"true\""
+    ) in source
+    assert (
+        "- key: CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY\n"
+        "        value: \"true\""
+    ) in source
 
 
 def test_render_blueprint_prompts_for_only_human_or_provider_secrets() -> None:

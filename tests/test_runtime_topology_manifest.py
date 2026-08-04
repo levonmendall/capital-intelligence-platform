@@ -9,8 +9,8 @@ def test_every_root_command_has_exactly_one_classification() -> None:
     report = validate_manifest(manifest)
     assert report == {
         "ready": True,
-        "root_script_count": 90,
-        "classified_script_count": 90,
+        "root_script_count": 92,
+        "classified_script_count": 92,
         "missing": [],
         "extra": [],
         "duplicate_classifications": 0,
@@ -28,7 +28,9 @@ def test_render_runtime_matches_canonical_manifest_behaviorally() -> None:
         for process in managed_processes(port=10000, python_executable="python")
     }
     assert actual == declared
-    assert command_tokens("render", manifest)[-1] == "run_render_service.py"
+    assert command_tokens("render", manifest)[-1] == (
+        "run_render_service_nonblocking.py"
+    )
     assert command_tokens("headlines", manifest)[-2:] == (
         "run_public_headline_collector.py",
         "--loop",
