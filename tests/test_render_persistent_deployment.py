@@ -106,6 +106,7 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
     assert set(by_name) == {
         "api",
         "cio-paper-operator",
+        "public-headline-collector",
         "historical-backfill",
         "encrypted-backup",
         "streamlit",
@@ -130,6 +131,13 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
         "run_autonomous_paper_operator.py",
         "--loop",
     )
+    assert by_name["public-headline-collector"].command == (
+        "python",
+        "run_public_headline_collector.py",
+        "--loop",
+    )
+    assert by_name["public-headline-collector"].critical is False
+    assert by_name["public-headline-collector"].restart_delay_seconds == 60
     assert by_name["historical-backfill"].command == (
         "python",
         "run_historical_backfill.py",
@@ -157,6 +165,7 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
         for process in processes
         if process.name
         not in {
+            "public-headline-collector",
             "historical-backfill",
             "encrypted-backup",
             "composite-readiness-watchdog",
