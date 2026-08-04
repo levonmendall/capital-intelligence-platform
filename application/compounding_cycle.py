@@ -25,6 +25,9 @@ from portfolio.active_investor import (
     ViewExpressionSet,
     ViewToExpressionEngine,
 )
+from portfolio.compounding_accountability import (
+    ProspectiveCompoundingAccountabilityEngine,
+)
 from portfolio.compounding_allocation import (
     AllocationRange,
     CompoundingPortfolioAlternativeEngine,
@@ -193,7 +196,8 @@ class CompoundingCanonicalCIOCycle(CanonicalCIOCycle):
         self.lifecycle_engine = lifecycle_engine or PositionLifecycleEngine()
         self.reactive_engine = reactive_engine or ReactiveMonitoringEngine()
         self.accountability_engine = (
-            accountability_engine or CompoundingAccountabilityEngine()
+            accountability_engine
+            or ProspectiveCompoundingAccountabilityEngine()
         )
         self.allocation_store = allocation_store
         self.active_investor_store = active_investor_store
