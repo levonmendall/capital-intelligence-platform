@@ -5,13 +5,15 @@ production resilience rules for symbol directories only:
 
 * an EODHD HTTP 402 entitlement response or HTTP 404 unsupported-directory response may
   use a recent, previously successful EODHD active-directory cache; and
-* when no valid EODHD cache exists, an independent Twelve Data stock catalog may supply
-  a configured global-equity exchange with a certified reference selector.
+* when no valid EODHD cache exists, an independent Twelve Data stock or forex catalog
+  may supply a configured market through a certified selector and bounded rate-limit
+  continuity.
 
 A current active directory is not discarded solely because the historical delisted-
 symbol directory is temporarily unavailable. Missing or incomplete fallback evidence,
-authentication failures, virtual markets without a certified reference selector, and
-every non-directory provider failure remain fail-closed.
+authentication failures, persistent provider throttling, virtual markets without a
+certified reference selector, and every non-directory provider failure remain
+fail-closed.
 """
 
 from __future__ import annotations
@@ -41,8 +43,8 @@ from providers.twelve_data_reference import (
     TwelveDataReferenceError,
     TwelveDataReferenceProvider,
 )
-from providers.twelve_data_reference_runtime import (
-    build_twelve_data_runtime_reference_provider,
+from providers.twelve_data_reference_rate_limited import (
+    build_twelve_data_rate_limited_reference_provider,
 )
 
 
@@ -108,7 +110,7 @@ class EODHDProvider(_base.EODHDProvider):
                 raise
             fallback = self._reference_provider
             if fallback is None:
-                fallback = build_twelve_data_runtime_reference_provider()
+                fallback = build_twelve_data_rate_limited_reference_provider()
                 self._reference_provider = fallback
             try:
                 return fallback.fetch_dataset(query)
