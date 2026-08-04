@@ -206,6 +206,15 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
         market=evidence.market,
         existing_forward_intelligence=evidence.forward_intelligence,
     )
+    persisted_forward = predictive.forward_intelligence
+    if len(persisted_forward.model_versions) > 1:
+        composite_version = "forward-bundle[" + "|".join(
+            persisted_forward.model_versions
+        ) + "]"
+        persisted_forward = replace(
+            persisted_forward,
+            model_versions=(composite_version,),
+        )
     lineage = replace(
         evidence.lineage,
         evidence_identifiers=tuple(
@@ -228,7 +237,7 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
     enriched_evidence = replace(
         evidence,
         market=predictive.market,
-        forward_intelligence=predictive.forward_intelligence,
+        forward_intelligence=persisted_forward,
         lineage=lineage,
     )
     enriched_candidate = replace(
