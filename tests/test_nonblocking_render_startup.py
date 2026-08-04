@@ -29,6 +29,23 @@ class FakeProcess:
         self.terminated = True
 
 
+class FakeStorageReport:
+    def to_dict(self):
+        return {
+            "recovered": False,
+            "reserve_satisfied": True,
+            "canonical_authorities_deleted": False,
+        }
+
+
+def _safe_storage(monkeypatch) -> None:
+    monkeypatch.setattr(
+        bootstrap,
+        "reclaim_from_environment",
+        lambda _values: FakeStorageReport(),
+    )
+
+
 def test_background_validation_is_detached_before_supervisor(monkeypatch) -> None:
     values = {
         "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED": "true",
@@ -39,6 +56,7 @@ def test_background_validation_is_detached_before_supervisor(monkeypatch) -> Non
     supervisor_calls = []
 
     monkeypatch.setattr(bootstrap, "prepare_render_environment", lambda env: env)
+    _safe_storage(monkeypatch)
 
     def popen(command, *, env):
         popen_calls.append((command, env))
@@ -71,6 +89,7 @@ def test_disabled_background_validation_preserves_existing_startup_mode(
         "CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP": "true",
     }
     monkeypatch.setattr(bootstrap, "prepare_render_environment", lambda env: env)
+    _safe_storage(monkeypatch)
 
     def unexpected_popen(*args, **kwargs):
         raise AssertionError((args, kwargs))
@@ -86,6 +105,34 @@ def test_disabled_background_validation_preserves_existing_startup_mode(
     assert values["CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP"] == "true"
 
 
+def test_storage_recovery_runs_before_supervisor(monkeypatch) -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED": "false",
+    }
+    events = []
+
+    def prepare(environment):
+        events.append("prepare")
+        return environment
+
+    def reclaim(environment):
+        assert environment is values
+        events.append("reclaim")
+        return FakeStorageReport()
+
+    def supervisor(*, environment):
+        assert environment is values
+        events.append("supervisor")
+        return 0
+
+    monkeypatch.setattr(bootstrap, "prepare_render_environment", prepare)
+    monkeypatch.setattr(bootstrap, "reclaim_from_environment", reclaim)
+    monkeypatch.setattr(bootstrap, "run_supervisor", supervisor)
+
+    assert bootstrap.run_nonblocking_render_service(values) == 0
+    assert events == ["prepare", "reclaim", "supervisor"]
+
+
 def test_bond_source_transition_makes_only_the_expansion_optional(monkeypatch) -> None:
     values = {
         "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED": "false",
@@ -95,6 +142,7 @@ def test_bond_source_transition_makes_only_the_expansion_optional(monkeypatch) -
     }
     supervisor_calls = []
     monkeypatch.setattr(bootstrap, "prepare_render_environment", lambda env: env)
+    _safe_storage(monkeypatch)
     monkeypatch.setattr(
         bootstrap,
         "run_supervisor",
@@ -112,6 +160,7 @@ def test_transition_mode_is_explicit_and_disabled_by_default(monkeypatch) -> Non
         "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY": "true",
     }
     monkeypatch.setattr(bootstrap, "prepare_render_environment", lambda env: env)
+    _safe_storage(monkeypatch)
     monkeypatch.setattr(bootstrap, "run_supervisor", lambda *, environment: 0)
 
     assert bootstrap.run_nonblocking_render_service(values) == 0
@@ -127,3 +176,6 @@ def test_render_blueprint_uses_nonblocking_bootstrap() -> None:
     assert "CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER\n        value: \"true\"" in text
     assert "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY\n        value: \"true\"" in text
     assert "CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE\n        value: \"true\"" in text
+    assert "CAPITAL_INTELLIGENCE_BACKUP_RETENTION_DAYS\n        value: \"1\"" in text
+    assert "CAPITAL_INTELLIGENCE_STORAGE_RESERVE_MB\n        value: \"1024\"" in text
+    assert "CAPITAL_INTELLIGENCE_BACKUP_MINIMUM_ARCHIVES\n        value: \"1\"" in text
