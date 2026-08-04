@@ -12,7 +12,7 @@ services:
     numInstances: 1
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: python run_render_service.py
+    dockerCommand: python run_render_service_nonblocking.py
     healthCheckPath: /_stcore/health
     disk:
       name: capital-intelligence-state
@@ -53,8 +53,17 @@ services:
         value: "true"
       - key: CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER
         value: "true"
+      # External provider calls no longer block Streamlit from opening the
+      # Render health-check port. A noncritical background worker refreshes
+      # the same governed validation report after startup and every hour.
       - key: CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP
+        value: "false"
+      - key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED
         value: "true"
+      - key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_INITIAL_DELAY_SECONDS
+        value: "5"
+      - key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_INTERVAL_SECONDS
+        value: "3600"
       # Provider validation still runs and persists its failed checks, but a
       # transient or entitlement-specific provider issue must not take the
       # authenticated console offline. REQUIRE_LIVE_PROVIDER remains the
