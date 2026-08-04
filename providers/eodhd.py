@@ -39,7 +39,9 @@ from providers.eodhd_base import (
 from providers.twelve_data_reference import (
     TwelveDataReferenceError,
     TwelveDataReferenceProvider,
-    build_twelve_data_reference_provider,
+)
+from providers.twelve_data_reference_runtime import (
+    build_twelve_data_runtime_reference_provider,
 )
 
 
@@ -102,7 +104,7 @@ class EODHDProvider(_base.EODHDProvider):
                 raise
             fallback = self._reference_provider
             if fallback is None:
-                fallback = build_twelve_data_reference_provider()
+                fallback = build_twelve_data_runtime_reference_provider()
                 self._reference_provider = fallback
             try:
                 return fallback.fetch_dataset(query)
