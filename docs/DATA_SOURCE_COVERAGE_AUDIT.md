@@ -69,7 +69,7 @@ remaining outside candidate, vote, sizing, construction and execution authority.
 
 ## Deployment corrections
 
-Render now declares the checked-in EODHD, Databento and crypto binding files and exposes secret slots for adapters that already existed but were not represented in the deployment blueprint:
+Render declares the checked-in EODHD, Databento and crypto binding files and exposes secret slots for adapters that already existed but were not represented in the deployment blueprint:
 
 - `OPENFIGI_API_KEY`
 - `ALPHA_VANTAGE_API_KEY`
@@ -80,23 +80,39 @@ Render now declares the checked-in EODHD, Databento and crypto binding files and
 - `CENSUS_API_KEY`
 - `USDA_NASS_API_KEY`
 
+GitHub Actions secrets are not automatically copied into the Render service environment. A credential stored only in GitHub is available to eligible GitHub Actions workflows, but the deployed application cannot read it unless the same value is also configured as the corresponding Render environment secret.
+
 Missing optional credentials leave only the affected optional source unavailable. They do not grant readiness or permit degraded evidence to be treated as complete.
+
+## Known credentials already obtained
+
+The user has confirmed that the following credentials already exist in GitHub Secrets:
+
+- OpenFIGI API key;
+- Alpha Vantage API key;
+- Twelve Data API key.
+
+These credentials do not need to be obtained again. Confirm that the same values are also configured in Render under:
+
+- `OPENFIGI_API_KEY`
+- `ALPHA_VANTAGE_API_KEY`
+- `TWELVE_DATA_API_KEY`
+
+They should remain excluded from source-control files, commits, logs and documentation values.
 
 ## Sources the user still needs to obtain
 
 ### Free or low-cost credentials
 
-Obtain these only when not already configured in Render:
+Obtain these only when not already configured in either the user's credential inventory or Render:
 
 - BEA API key;
 - Census API key;
 - USDA NASS Quick Stats API key;
 - EIA API key;
-- NASA FIRMS map key;
-- OpenFIGI API key for higher mapping limits;
-- Alpha Vantage API key and Twelve Data API key for independent supplemental quote fallback.
+- NASA FIRMS map key.
 
-The existing Alpaca, FRED, EODHD and Databento credentials must also remain valid, but those adapters were already present before this audit.
+The existing Alpaca, FRED, EODHD and Databento credentials must also remain valid. OpenFIGI, Alpha Vantage and Twelve Data are already owned; their remaining action is Render configuration and runtime validation, not procurement.
 
 ### Contracted institutional datasets
 
