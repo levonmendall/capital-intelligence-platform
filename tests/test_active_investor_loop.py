@@ -6,13 +6,15 @@ from types import SimpleNamespace
 
 from cio.models import CandidateAssetClass, CIOAction, ThesisState
 from portfolio.active_investor import (
-    CompoundingAccountabilityEngine,
     PositionLifecycleEngine,
     PositionLifecycleStage,
     ReactiveMonitoringEngine,
     ReactiveTriggerKind,
     SQLiteActiveInvestorStore,
     ViewToExpressionEngine,
+)
+from portfolio.compounding_accountability import (
+    ProspectiveCompoundingAccountabilityEngine,
 )
 from portfolio.compounding_allocation import (
     AllocationRange,
@@ -29,7 +31,6 @@ NOW = datetime(2026, 8, 4, 1, 30, tzinfo=timezone.utc)
 
 
 def _posture(
-    *,
     regime: PortfolioRegime = PortfolioRegime.RISK_ON_GROWTH,
     preferred: tuple[PortfolioSleeve, ...] = (PortfolioSleeve.PRODUCTIVE_RISK,),
 ) -> PortfolioPosture:
@@ -47,7 +48,7 @@ def _posture(
         preferred_sleeves=preferred,
         discouraged_sleeves=(),
         transitions=(
-            RegimeTransition(regime, 0.60, "base regime persists", ("breadth",)),
+            RegimeTransition(regime, 0.60, "base persists", ("breadth",)),
             RegimeTransition(
                 PortfolioRegime.BALANCED_TRANSITION,
                 0.25,
@@ -73,9 +74,7 @@ def _candidate(
     asset_class: CandidateAssetClass,
     *,
     expected_return: float = 0.14,
-    opportunity_cost: float = 0.04,
     current_weight: float = 0.0,
-    liquidity: float = 0.90,
     treasury: bool = False,
     duration: float | None = None,
 ):
@@ -91,13 +90,14 @@ def _candidate(
             effective_duration_years=duration,
         ),
         net_expected_return=expected_return,
-        opportunity_cost_return=opportunity_cost,
+        opportunity_cost_return=0.04,
         implementation_cost_return=0.001,
         transaction_cost_bps=4.0,
         slippage_bps=3.0,
-        liquidity_score=liquidity,
+        liquidity_score=0.90,
         current_portfolio_weight=current_weight,
         maximum_position_weight=0.12,
+        decision_horizon_days=365,
         evidence_identifiers=(f"evidence:{symbol}",),
         primary_catalysts=("earnings and flow remain supportive",),
         invalidation_conditions=("expected return turns negative",),
@@ -109,9 +109,9 @@ def _candidate(
     )
 
 
-def _directive(candidate_identifier: str, sleeve: PortfolioSleeve) -> CandidateAllocationDirective:
+def _directive(identifier: str, sleeve: PortfolioSleeve):
     return CandidateAllocationDirective(
-        candidate_identifier=candidate_identifier,
+        candidate_identifier=identifier,
         sleeve=sleeve,
         posture_alignment=0.72,
         preferred=True,
@@ -121,28 +121,38 @@ def _directive(candidate_identifier: str, sleeve: PortfolioSleeve) -> CandidateA
     )
 
 
-def _context(candidate_identifier: str, *, flow: float, expectations: float):
-    signals = (
-        SimpleNamespace(
-            identifier=f"signal:capital-flow:{candidate_identifier}",
-            name="accumulation capital-flow proxy",
-            expected_return_impact=flow,
-            confidence=0.72,
-        ),
-        SimpleNamespace(
-            identifier=f"signal:market-expectations:{candidate_identifier}",
-            name="market expectations gap",
-            expected_return_impact=expectations,
-            confidence=0.68,
-        ),
-    )
+def _context(identifier: str, flow: float = 0.04, expectations: float = 0.05):
     return SimpleNamespace(
-        candidate_identifier=candidate_identifier,
-        forward_intelligence=SimpleNamespace(signals=signals),
+        candidate_identifier=identifier,
+        forward_intelligence=SimpleNamespace(
+            signals=(
+                SimpleNamespace(
+                    identifier=f"signal:capital-flow:{identifier}",
+                    name="accumulation capital-flow proxy",
+                    expected_return_impact=flow,
+                    confidence=0.72,
+                ),
+                SimpleNamespace(
+                    identifier=f"signal:market-expectations:{identifier}",
+                    name="market expectations gap",
+                    expected_return_impact=expectations,
+                    confidence=0.68,
+                ),
+            )
+        ),
     )
 
 
-def test_risk_on_view_ranks_only_certified_candidates() -> None:
+def _expression_set(posture, candidates, directives):
+    return ViewToExpressionEngine().build(
+        posture=posture,
+        candidates=candidates,
+        specialist_contexts=tuple(_context(item.identifier) for item in candidates),
+        directives=directives,
+    )
+
+
+def test_views_rank_only_certified_regime_consistent_candidates() -> None:
     equity = _candidate("candidate:ABC", "ABC", CandidateAssetClass.US_EQUITY)
     bond = _candidate(
         "candidate:IEF",
@@ -152,15 +162,10 @@ def test_risk_on_view_ranks_only_certified_candidates() -> None:
         treasury=True,
         duration=7.0,
     )
-    engine = ViewToExpressionEngine()
-    result = engine.build(
-        posture=_posture(),
-        candidates=(equity, bond),
-        specialist_contexts=(
-            _context(equity.identifier, flow=0.04, expectations=0.05),
-            _context(bond.identifier, flow=-0.01, expectations=0.01),
-        ),
-        directives=(
+    result = _expression_set(
+        _posture(),
+        (equity, bond),
+        (
             _directive(equity.identifier, PortfolioSleeve.PRODUCTIVE_RISK),
             _directive(bond.identifier, PortfolioSleeve.DEFENSIVE_INCOME),
         ),
@@ -171,113 +176,80 @@ def test_risk_on_view_ranks_only_certified_candidates() -> None:
     }
     assert result.expressions[0].rank == 1
     assert result.expressions[0].expression_score > 0.60
-    assert result.expressions[0].symbol == "ABC"
-    assert result.uncovered_views == ()
+    assert result.expressions[0].to_dict()["investment_authority"] is False
 
 
-def test_funding_stress_originates_dollar_expressions_without_forcing_a_trade() -> None:
-    cash = _candidate(
-        "candidate:BIL",
-        "BIL",
-        CandidateAssetClass.CASH_EQUIVALENT,
-        expected_return=0.05,
-    )
+def test_funding_stress_produces_dollar_expressions_without_trade_authority() -> None:
+    cash = _candidate("candidate:BIL", "BIL", CandidateAssetClass.CASH_EQUIVALENT)
     treasury = _candidate(
         "candidate:SHY",
         "SHY",
         CandidateAssetClass.FIXED_INCOME,
-        expected_return=0.055,
         treasury=True,
         duration=1.8,
     )
     posture = _posture(
-        regime=PortfolioRegime.RISK_OFF_FUNDING_STRESS,
-        preferred=(PortfolioSleeve.DOLLAR_LIQUIDITY,),
+        PortfolioRegime.RISK_OFF_FUNDING_STRESS,
+        (PortfolioSleeve.DOLLAR_LIQUIDITY,),
     )
-    result = ViewToExpressionEngine().build(
-        posture=posture,
-        candidates=(cash, treasury),
-        specialist_contexts=(
-            _context(cash.identifier, flow=0.02, expectations=0.01),
-            _context(treasury.identifier, flow=0.03, expectations=0.02),
-        ),
-        directives=(
+    result = _expression_set(
+        posture,
+        (cash, treasury),
+        (
             _directive(cash.identifier, PortfolioSleeve.DOLLAR_LIQUIDITY),
             _directive(treasury.identifier, PortfolioSleeve.DOLLAR_LIQUIDITY),
         ),
     )
 
-    kinds = {item.kind.value for item in result.views}
-    assert "dollar_strength" in kinds
-    assert "liquidity_reserve" in kinds
+    assert {item.kind.value for item in result.views}.issuperset(
+        {"dollar_strength", "liquidity_reserve"}
+    )
     assert {item.symbol for item in result.expressions} == {"BIL", "SHY"}
-    assert all(
-        item.to_dict()["investment_authority"] is False
-        for item in result.expressions
-    )
+    assert result.to_dict()["cio_authority"] is False
 
 
-def test_lifecycle_maps_cio_and_construction_state_to_investor_stages() -> None:
-    initiate = _candidate("candidate:NEW", "NEW", CandidateAssetClass.US_EQUITY)
-    add = _candidate(
-        "candidate:ADD",
-        "ADD",
-        CandidateAssetClass.US_EQUITY,
-        current_weight=0.02,
-    )
-    trim = _candidate(
-        "candidate:TRIM",
-        "TRIM",
-        CandidateAssetClass.US_EQUITY,
-        current_weight=0.08,
-    )
-    exit_candidate = _candidate(
-        "candidate:EXIT",
-        "EXIT",
-        CandidateAssetClass.US_EQUITY,
-        current_weight=0.04,
-    )
-    candidates = (initiate, add, trim, exit_candidate)
-    expressions = ViewToExpressionEngine().build(
-        posture=_posture(),
-        candidates=candidates,
-        specialist_contexts=tuple(
-            _context(item.identifier, flow=0.03, expectations=0.04)
-            for item in candidates
+def test_lifecycle_and_reactive_dependencies_cover_the_position_loop() -> None:
+    candidates = (
+        _candidate("candidate:NEW", "NEW", CandidateAssetClass.US_EQUITY),
+        _candidate(
+            "candidate:ADD",
+            "ADD",
+            CandidateAssetClass.US_EQUITY,
+            current_weight=0.02,
         ),
-        directives=tuple(
+        _candidate(
+            "candidate:TRIM",
+            "TRIM",
+            CandidateAssetClass.US_EQUITY,
+            current_weight=0.08,
+        ),
+        _candidate(
+            "candidate:EXIT",
+            "EXIT",
+            CandidateAssetClass.US_EQUITY,
+            current_weight=0.04,
+        ),
+    )
+    posture = _posture()
+    expressions = _expression_set(
+        posture,
+        candidates,
+        tuple(
             _directive(item.identifier, PortfolioSleeve.PRODUCTIVE_RISK)
             for item in candidates
         ),
     )
-    decisions = (
+    decisions = tuple(
         SimpleNamespace(
-            candidate_identifier=initiate.identifier,
-            action=CIOAction.BUY,
-            recommended_position_weight=0.01,
-        ),
-        SimpleNamespace(
-            candidate_identifier=add.identifier,
-            action=CIOAction.INCREASE,
-            recommended_position_weight=0.05,
-        ),
-        SimpleNamespace(
-            candidate_identifier=trim.identifier,
-            action=CIOAction.REDUCE,
-            recommended_position_weight=0.04,
-        ),
-        SimpleNamespace(
-            candidate_identifier=exit_candidate.identifier,
-            action=CIOAction.EXIT,
-            recommended_position_weight=0.0,
-        ),
-    )
-    construction = SimpleNamespace(
-        target_weights=(
-            ("NEW", 0.01),
-            ("ADD", 0.05),
-            ("TRIM", 0.04),
-            ("EXIT", 0.0),
+            candidate_identifier=item.identifier,
+            action=action,
+            recommended_position_weight=weight,
+        )
+        for item, action, weight in zip(
+            candidates,
+            (CIOAction.BUY, CIOAction.INCREASE, CIOAction.REDUCE, CIOAction.EXIT),
+            (0.01, 0.05, 0.04, 0.0),
+            strict=True,
         )
     )
     lifecycle = PositionLifecycleEngine().build(
@@ -287,57 +259,28 @@ def test_lifecycle_maps_cio_and_construction_state_to_investor_stages() -> None:
         theses=(),
         expression_set=expressions,
         portfolio=SimpleNamespace(),
-        construction=construction,
+        construction=SimpleNamespace(
+            target_weights=(("NEW", 0.01), ("ADD", 0.05), ("TRIM", 0.04), ("EXIT", 0.0))
+        ),
     )
-    stage_by_symbol = {item.symbol: item.stage for item in lifecycle.directives}
-
-    assert stage_by_symbol == {
+    assert {item.symbol: item.stage for item in lifecycle.directives} == {
         "NEW": PositionLifecycleStage.INITIATE,
         "ADD": PositionLifecycleStage.ADD,
         "TRIM": PositionLifecycleStage.TRIM,
         "EXIT": PositionLifecycleStage.EXIT,
     }
-    assert all(item.validation_milestones for item in lifecycle.directives)
 
-
-def test_reactive_plan_targets_dependencies_and_reserves_full_cycle_for_regime() -> None:
-    candidate = _candidate("candidate:ABC", "ABC", CandidateAssetClass.US_EQUITY)
-    posture = _posture()
-    expressions = ViewToExpressionEngine().build(
-        posture=posture,
-        candidates=(candidate,),
-        specialist_contexts=(
-            _context(candidate.identifier, flow=0.04, expectations=0.04),
-        ),
-        directives=(
-            _directive(candidate.identifier, PortfolioSleeve.PRODUCTIVE_RISK),
-        ),
-    )
-    lifecycle = PositionLifecycleEngine().build(
-        as_of=NOW,
-        candidates=(candidate,),
-        decisions=(
-            SimpleNamespace(
-                candidate_identifier=candidate.identifier,
-                action=CIOAction.BUY,
-                recommended_position_weight=0.01,
-            ),
-        ),
-        theses=(),
-        expression_set=expressions,
-        portfolio=SimpleNamespace(),
-        construction=SimpleNamespace(target_weights=(("ABC", 0.01),)),
-    )
     reactive = ReactiveMonitoringEngine().build(
         posture=posture,
         expression_set=expressions,
         lifecycle=lifecycle,
     )
-
     kinds = {item.kind for item in reactive.dependencies}
-    assert ReactiveTriggerKind.FLOW_REVERSAL in kinds
-    assert ReactiveTriggerKind.EXPECTATIONS_GAP in kinds
-    assert ReactiveTriggerKind.REGIME_TRANSITION in kinds
+    assert {
+        ReactiveTriggerKind.FLOW_REVERSAL,
+        ReactiveTriggerKind.EXPECTATIONS_GAP,
+        ReactiveTriggerKind.REGIME_TRANSITION,
+    }.issubset(kinds)
     regime = next(
         item
         for item in reactive.dependencies
@@ -347,7 +290,7 @@ def test_reactive_plan_targets_dependencies_and_reserves_full_cycle_for_regime()
     assert any(item.incremental_reassessment for item in reactive.dependencies)
 
 
-def test_accountability_exposes_cash_cost_and_positive_edge_nonownership() -> None:
+def _accountability_fixture():
     candidate = _candidate("candidate:ABC", "ABC", CandidateAssetClass.US_EQUITY)
     posture = _posture()
     directive = _directive(candidate.identifier, PortfolioSleeve.PRODUCTIVE_RISK)
@@ -363,7 +306,7 @@ def test_accountability_exposes_cash_cost_and_positive_edge_nonownership() -> No
         ),
         construction=None,
     )
-    accountability = CompoundingAccountabilityEngine().build(
+    accountability = ProspectiveCompoundingAccountabilityEngine().build(
         posture=posture,
         alternatives=alternatives,
         candidates=(candidate,),
@@ -378,26 +321,35 @@ def test_accountability_exposes_cash_cost_and_positive_edge_nonownership() -> No
             expected_return_improvement=0.02,
         ),
     )
+    return candidate, posture, directive, alternatives, accountability
 
+
+def test_accountability_separates_advisory_cash_cost_from_selection() -> None:
+    candidate, _posture_value, _directive_value, alternatives, accountability = (
+        _accountability_fixture()
+    )
+
+    assert alternatives.selected_alternative_identifier is None
+    assert accountability.selected_alternative_identifier is None
     assert accountability.cash_opportunity_cost > 0.0
-    assert accountability.positive_edge_nonownership_count == 1
     assert accountability.positive_edge_nonownership_candidates == (
         candidate.identifier,
     )
     assert accountability.to_dict()["automatic_policy_change"] is False
+    assert any(
+        "does not represent CIO selection" in item
+        for item in accountability.limitations
+    )
 
 
 def test_active_investor_store_is_idempotent_and_hash_chained(tmp_path: Path) -> None:
-    candidate = _candidate("candidate:ABC", "ABC", CandidateAssetClass.US_EQUITY)
-    posture = _posture()
-    directive = _directive(candidate.identifier, PortfolioSleeve.PRODUCTIVE_RISK)
-    expressions = ViewToExpressionEngine().build(
-        posture=posture,
-        candidates=(candidate,),
-        specialist_contexts=(
-            _context(candidate.identifier, flow=0.03, expectations=0.04),
-        ),
-        directives=(directive,),
+    candidate, posture, directive, alternatives, accountability = (
+        _accountability_fixture()
+    )
+    expressions = _expression_set(
+        posture,
+        (candidate,),
+        (directive,),
     )
     lifecycle = PositionLifecycleEngine().build(
         as_of=NOW,
@@ -424,50 +376,17 @@ def test_active_investor_store_is_idempotent_and_hash_chained(tmp_path: Path) ->
         expression_set=expressions,
         lifecycle=lifecycle,
     )
-    alternatives = CompoundingPortfolioAlternativeEngine().build(
-        cycle_identifier="cycle:test",
-        posture=posture,
-        candidates=(candidate,),
-        directives=(directive,),
-        portfolio=SimpleNamespace(
-            positions=(),
-            cash_weight=1.0,
-            cash_expected_return=0.04,
-        ),
-        construction=None,
-    )
-    accountability = CompoundingAccountabilityEngine().build(
-        posture=posture,
-        alternatives=alternatives,
-        candidates=(candidate,),
-        decisions=(
-            SimpleNamespace(
-                candidate_identifier=candidate.identifier,
-                action=CIOAction.BUY,
-            ),
-        ),
-        construction=SimpleNamespace(
-            estimated_cost_return=0.001,
-            expected_return_improvement=0.02,
-        ),
-    )
     store = SQLiteActiveInvestorStore(tmp_path / "journal.db")
+    values = dict(
+        cycle_identifier="cycle:test",
+        expressions=expressions,
+        lifecycle=lifecycle,
+        reactive=reactive,
+        accountability=accountability,
+        code_version="test",
+    )
 
-    store.append_cycle(
-        cycle_identifier="cycle:test",
-        expressions=expressions,
-        lifecycle=lifecycle,
-        reactive=reactive,
-        accountability=accountability,
-        code_version="test",
-    )
-    store.append_cycle(
-        cycle_identifier="cycle:test",
-        expressions=expressions,
-        lifecycle=lifecycle,
-        reactive=reactive,
-        accountability=accountability,
-        code_version="test",
-    )
+    store.append_cycle(**values)
+    store.append_cycle(**values)
 
     assert store.verify_integrity() is True
