@@ -21,7 +21,9 @@ are never deleted by this recovery path.
 
 When explicitly enabled, one release diagnostic waits until the current API and Streamlit
 children are healthy, then invokes the existing fully governed manual CIO diagnostic. The
-diagnostic is one-shot, paper-only, and never restarted in a loop by this bootstrap.
+diagnostic is one-shot, paper-only, requires complete all-market discovery even while the
+long-running service remains in an explicit source transition, and is never restarted in
+a loop by this bootstrap.
 """
 
 from __future__ import annotations
@@ -91,6 +93,24 @@ def _terminate(process: subprocess.Popen[bytes] | subprocess.Popen[str] | None) 
         process.wait(timeout=5)
 
 
+def _release_diagnostic_environment(
+    values: MutableMapping[str, str],
+) -> dict[str, str]:
+    diagnostic = dict(values)
+    diagnostic.update(
+        {
+            "CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE": "false",
+            "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY": "true",
+            "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_MARKET_DISCOVERY": "true",
+            "CAPITAL_INTELLIGENCE_DISCOVERY_REQUIRE_COMPLETE_MARKET_COVERAGE": "true",
+            "CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER": "true",
+            "CAPITAL_INTELLIGENCE_PROVIDER_RUNTIME_MODE": "live",
+            "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED": "true",
+        }
+    )
+    return diagnostic
+
+
 def _release_diagnostic_command(
     values: MutableMapping[str, str],
     *,
@@ -158,15 +178,18 @@ def _run_release_diagnostic_after_readiness(
         )
         return
 
-    command = _release_diagnostic_command(values)
+    diagnostic_values = _release_diagnostic_environment(values)
+    command = _release_diagnostic_command(diagnostic_values)
     _log(
         "manual_cio_release_diagnostic_starting",
         command=list(command),
-        release=values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+        release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+        complete_all_market_coverage_required=True,
+        source_transition_disabled_for_diagnostic=True,
         paper_only=True,
     )
     try:
-        completed = subprocess.run(command, env=dict(values), check=False)
+        completed = subprocess.run(command, env=diagnostic_values, check=False)
     except OSError as error:
         _log(
             "manual_cio_release_diagnostic_start_failed",
@@ -177,7 +200,8 @@ def _run_release_diagnostic_after_readiness(
     _log(
         "manual_cio_release_diagnostic_finished",
         return_code=completed.returncode,
-        release=values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+        release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+        complete_all_market_coverage_required=True,
         paper_only=True,
     )
 
@@ -202,6 +226,7 @@ def _start_release_diagnostic(
     _log(
         "manual_cio_release_diagnostic_armed",
         release=values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+        complete_all_market_coverage_required=True,
         paper_only=True,
     )
     return thread
