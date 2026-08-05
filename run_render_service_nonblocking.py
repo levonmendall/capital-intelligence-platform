@@ -19,13 +19,13 @@ stale backup temporary files while preserving at least the configured newest arc
 Canonical databases, portfolio state, evidence, lineage, reports, and research records
 are never deleted by this recovery path.
 
-When explicitly enabled, one release diagnostic waits until the current API and Streamlit
-children are healthy, then invokes the existing fully governed manual CIO diagnostic. The
-diagnostic is one-shot, paper-only, requires complete all-market discovery even while the
-long-running service remains in an explicit source transition, and is never restarted in
-a loop by this bootstrap. Its credential-safe aggregate audit is published through
-Streamlit static-file serving before and after the run so an old release cannot be
-mistaken for the current one.
+When explicitly enabled, the release diagnostic waits until the current API and
+Streamlit children are healthy, then invokes the existing fully governed manual CIO
+diagnostic. A failed cold-start discovery may be resumed a small bounded number of times
+so previously certified provider snapshots on the persistent disk can be reused and the
+next uncached market can be attempted. Every attempt remains paper-only, requires
+complete all-market discovery, preserves all fail-closed gates, and publishes a
+credential-safe aggregate audit. The bootstrap never creates an unbounded retry loop.
 """
 
 from __future__ import annotations
@@ -44,6 +44,12 @@ from operations.composite_readiness import component_heartbeat_path
 from operations.heartbeat import WorkerHeartbeatStore
 from operations.storage_pressure import reclaim_from_environment
 from run_render_service import prepare_render_environment, run_supervisor
+
+
+_DEFAULT_RELEASE_DIAGNOSTIC_MAX_ATTEMPTS = 4
+_MAX_RELEASE_DIAGNOSTIC_ATTEMPTS = 12
+_DEFAULT_RELEASE_DIAGNOSTIC_RETRY_SECONDS = 75.0
+_MAX_RELEASE_DIAGNOSTIC_RETRY_SECONDS = 600.0
 
 
 def _enabled(values: MutableMapping[str, str], name: str, *, default: bool) -> bool:
@@ -65,6 +71,24 @@ def _positive_float(
     value = float(raw)
     if value <= 0:
         raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _positive_int(
+    values: MutableMapping[str, str],
+    name: str,
+    *,
+    default: int,
+    maximum: int,
+) -> int:
+    raw = values.get(name)
+    if raw is None or not raw.strip():
+        return default
+    value = int(raw)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    if value > maximum:
+        raise ValueError(f"{name} must be at most {maximum}")
     return value
 
 
@@ -181,6 +205,28 @@ def _release_components_ready(
     return True
 
 
+def _release_diagnostic_retry_policy(
+    values: MutableMapping[str, str],
+) -> tuple[int, float]:
+    max_attempts = _positive_int(
+        values,
+        "CAPITAL_INTELLIGENCE_RELEASE_DIAGNOSTIC_MAX_ATTEMPTS",
+        default=_DEFAULT_RELEASE_DIAGNOSTIC_MAX_ATTEMPTS,
+        maximum=_MAX_RELEASE_DIAGNOSTIC_ATTEMPTS,
+    )
+    retry_seconds = _positive_float(
+        values,
+        "CAPITAL_INTELLIGENCE_RELEASE_DIAGNOSTIC_RETRY_SECONDS",
+        default=_DEFAULT_RELEASE_DIAGNOSTIC_RETRY_SECONDS,
+    )
+    if retry_seconds > _MAX_RELEASE_DIAGNOSTIC_RETRY_SECONDS:
+        raise ValueError(
+            "CAPITAL_INTELLIGENCE_RELEASE_DIAGNOSTIC_RETRY_SECONDS "
+            f"must be at most {_MAX_RELEASE_DIAGNOSTIC_RETRY_SECONDS:g}"
+        )
+    return max_attempts, retry_seconds
+
+
 def _run_release_diagnostic_after_readiness(
     values: MutableMapping[str, str],
     *,
@@ -215,33 +261,72 @@ def _run_release_diagnostic_after_readiness(
         )
         return
 
+    max_attempts, retry_seconds = _release_diagnostic_retry_policy(values)
     command = _release_diagnostic_command(diagnostic_values)
-    _log(
-        "manual_cio_release_diagnostic_starting",
-        command=list(command),
-        release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
-        complete_all_market_coverage_required=True,
-        source_transition_disabled_for_diagnostic=True,
-        paper_only=True,
-    )
-    try:
-        completed = subprocess.run(command, env=diagnostic_values, check=False)
-    except OSError as error:
+    for attempt in range(1, max_attempts + 1):
         _log(
-            "manual_cio_release_diagnostic_start_failed",
-            error_type=type(error).__name__,
+            "manual_cio_release_diagnostic_starting",
+            command=list(command),
+            release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+            attempt=attempt,
+            max_attempts=max_attempts,
+            complete_all_market_coverage_required=True,
+            source_transition_disabled_for_diagnostic=True,
+            certified_reference_cache_reuse_allowed=True,
             paper_only=True,
         )
+        try:
+            completed = subprocess.run(
+                command,
+                env=diagnostic_values,
+                check=False,
+            )
+        except OSError as error:
+            _log(
+                "manual_cio_release_diagnostic_start_failed",
+                error_type=type(error).__name__,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                paper_only=True,
+            )
+            _publish_release_diagnostic_audit(diagnostic_values)
+            return
+
         _publish_release_diagnostic_audit(diagnostic_values)
-        return
-    _publish_release_diagnostic_audit(diagnostic_values)
-    _log(
-        "manual_cio_release_diagnostic_finished",
-        return_code=completed.returncode,
-        release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
-        complete_all_market_coverage_required=True,
-        paper_only=True,
-    )
+        _log(
+            "manual_cio_release_diagnostic_finished",
+            return_code=completed.returncode,
+            release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+            attempt=attempt,
+            max_attempts=max_attempts,
+            complete_all_market_coverage_required=True,
+            paper_only=True,
+        )
+        if completed.returncode == 0:
+            return
+        if attempt >= max_attempts:
+            _log(
+                "manual_cio_release_diagnostic_attempts_exhausted",
+                return_code=completed.returncode,
+                release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+                attempts=max_attempts,
+                complete_all_market_coverage_required=True,
+                paper_only=True,
+            )
+            return
+
+        _log(
+            "manual_cio_release_diagnostic_retry_scheduled",
+            release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+            failed_attempt=attempt,
+            next_attempt=attempt + 1,
+            max_attempts=max_attempts,
+            retry_seconds=retry_seconds,
+            certified_reference_cache_reuse_allowed=True,
+            complete_all_market_coverage_required=True,
+            paper_only=True,
+        )
+        time.sleep(retry_seconds)
 
 
 def _start_release_diagnostic(
