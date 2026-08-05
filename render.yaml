@@ -17,7 +17,7 @@ services:
     disk:
       name: capital-intelligence-state
       mountPath: /app/database
-      sizeGB: 5
+      sizeGB: 10
     envVars:
       - key: CAPITAL_INTELLIGENCE_ENVIRONMENT
         value: production
@@ -39,9 +39,8 @@ services:
         value: /app/database/backups
       - key: CAPITAL_INTELLIGENCE_BACKUP_INTERVAL_HOURS
         value: "24"
-      # The five-gigabyte test disk cannot safely retain a month of full
-      # canonical-authority archives. Preserve the newest daily recovery point
-      # and reclaim older archives before any child process writes new state.
+      # The ten-gigabyte test disk preserves a bounded daily recovery point
+      # while maintaining capacity for canonical evidence and lineage growth.
       - key: CAPITAL_INTELLIGENCE_BACKUP_RETENTION_DAYS
         value: "1"
       - key: CAPITAL_INTELLIGENCE_STORAGE_RESERVE_MB
