@@ -2,8 +2,9 @@
 
 Twelve Data publishes plan-specific API credit limits. A 429 response can represent a
 transient minute-bucket exhaustion, so the production reference provider serializes its
-requests, honors a bounded ``Retry-After`` value when supplied, otherwise waits for the
-next UTC minute boundary, and retries a small fixed number of times.
+requests, spaces production catalog calls below the configured burst ceiling, honors a
+bounded ``Retry-After`` value when supplied, otherwise waits for the next UTC minute
+boundary, and retries a small fixed number of times.
 
 Successful responses that report ``api-credits-left: 0`` arm the same minute-boundary
 pause before the next request. Persistent throttling, daily quota exhaustion, malformed
@@ -13,6 +14,7 @@ headers, and all non-429 failures remain fail-closed in the underlying provider.
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -29,6 +31,11 @@ from providers.twelve_data_reference_runtime import (
 
 _DEFAULT_RATE_LIMIT_RETRIES = 2
 _DEFAULT_MAX_RATE_LIMIT_WAIT_SECONDS = 65.0
+_DEFAULT_MINIMUM_REQUEST_INTERVAL_SECONDS = 0.0
+_DEFAULT_PRODUCTION_REQUEST_INTERVAL_SECONDS = 8.0
+_PRODUCTION_INTERVAL_ENV = (
+    "CAPITAL_INTELLIGENCE_TWELVE_DATA_MINIMUM_REQUEST_INTERVAL_SECONDS"
+)
 
 
 def _response_status_code(response: Any) -> int | None:
@@ -51,31 +58,43 @@ def _response_header(response: Any, name: str) -> str | None:
 
 
 class TwelveDataRateLimitedReferenceProvider(TwelveDataRuntimeReferenceProvider):
-    """Serialize and boundedly retry Twelve Data reference requests on HTTP 429."""
+    """Serialize, pace, and boundedly retry Twelve Data reference requests."""
 
     def __init__(
         self,
         *args: Any,
         http_get: Callable[..., Any] | None = None,
         sleeper: Callable[[float], None] | None = None,
+        monotonic: Callable[[], float] | None = None,
         max_rate_limit_retries: int = _DEFAULT_RATE_LIMIT_RETRIES,
         max_rate_limit_wait_seconds: float = _DEFAULT_MAX_RATE_LIMIT_WAIT_SECONDS,
+        minimum_request_interval_seconds: float = (
+            _DEFAULT_MINIMUM_REQUEST_INTERVAL_SECONDS
+        ),
         **kwargs: Any,
     ) -> None:
         retries = int(max_rate_limit_retries)
         maximum_wait = float(max_rate_limit_wait_seconds)
+        minimum_interval = float(minimum_request_interval_seconds)
         if retries < 0:
             raise ValueError("max_rate_limit_retries must be non-negative")
         if not 1.0 <= maximum_wait <= 300.0:
             raise ValueError(
                 "max_rate_limit_wait_seconds must be between 1 and 300"
             )
+        if not 0.0 <= minimum_interval <= 60.0:
+            raise ValueError(
+                "minimum_request_interval_seconds must be between 0 and 60"
+            )
         self._raw_http_get = http_get or requests.get
         self._sleeper = sleeper or time.sleep
+        self._monotonic = monotonic or time.monotonic
         self.max_rate_limit_retries = retries
         self.max_rate_limit_wait_seconds = maximum_wait
+        self.minimum_request_interval_seconds = minimum_interval
         self._request_lock = Lock()
         self._pause_before_next_request = False
+        self._last_request_started_at: float | None = None
         super().__init__(*args, http_get=self._rate_limited_get, **kwargs)
 
     def _rate_limited_get(
@@ -92,6 +111,8 @@ class TwelveDataRateLimitedReferenceProvider(TwelveDataRuntimeReferenceProvider)
 
             response: Any = None
             for attempt in range(self.max_rate_limit_retries + 1):
+                self._pace_next_request()
+                self._last_request_started_at = self._monotonic()
                 response = self._raw_http_get(
                     url,
                     params=params,
@@ -105,6 +126,15 @@ class TwelveDataRateLimitedReferenceProvider(TwelveDataRuntimeReferenceProvider)
                     return response
                 self._sleeper(self._rate_limit_wait_seconds(response))
             return response
+
+    def _pace_next_request(self) -> None:
+        last_started_at = self._last_request_started_at
+        if last_started_at is None or self.minimum_request_interval_seconds <= 0.0:
+            return
+        elapsed = max(0.0, self._monotonic() - last_started_at)
+        remaining = self.minimum_request_interval_seconds - elapsed
+        if remaining > 0.0:
+            self._sleeper(remaining)
 
     def _rate_limit_wait_seconds(self, response: Any) -> float:
         retry_after = _response_header(response, "Retry-After")
@@ -155,7 +185,19 @@ def build_twelve_data_rate_limited_reference_provider(
 ) -> TwelveDataRateLimitedReferenceProvider:
     """Build the production reference provider with bounded 429 continuity."""
 
-    return TwelveDataRateLimitedReferenceProvider()
+    raw_interval = os.getenv(
+        _PRODUCTION_INTERVAL_ENV,
+        str(_DEFAULT_PRODUCTION_REQUEST_INTERVAL_SECONDS),
+    )
+    try:
+        minimum_interval = float(raw_interval)
+    except ValueError as error:
+        raise ValueError(
+            f"{_PRODUCTION_INTERVAL_ENV} must be numeric"
+        ) from error
+    return TwelveDataRateLimitedReferenceProvider(
+        minimum_request_interval_seconds=minimum_interval
+    )
 
 
 __all__ = [
