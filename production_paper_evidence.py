@@ -22,7 +22,7 @@ from intelligence.predictive_market import (
 from intelligence.predictive_scenario_merge import (
     reconcile_forward_intelligence,
 )
-from operations.paper_evidence_spool import (
+from operations.paper_evidence_spool_concurrent import (
     close_spooled_paper_evidence,
     collect_spooled_paper_evidence,
 )
