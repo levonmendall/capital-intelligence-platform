@@ -47,6 +47,7 @@
       "run_autonomous_paper_operator.py",
       "run_background_provider_validation.py",
       "run_backup.py",
+      "run_bounded_manual_cio_diagnostic.py",
       "run_composite_readiness_watchdog.py",
       "run_container_acceptance.py",
       "run_daily_operations.py",
