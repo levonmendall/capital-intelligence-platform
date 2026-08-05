@@ -89,6 +89,15 @@ def test_portfolio_opens_full_cio_report_from_visible_touch_target(
         page.get_by_text("Decision context", exact=True).wait_for()
         page.get_by_text("Monitoring and reversal conditions", exact=True).wait_for()
         page.get_by_text("Decision lineage", exact=True).wait_for()
+        export_button = page.locator('[data-testid="stDownloadButton"]').get_by_role(
+            "button",
+            name="Download decision JSON",
+            exact=True,
+        )
+        export_button.wait_for(state="visible", timeout=15_000)
+        export_box = export_button.bounding_box()
+        assert export_box is not None
+        assert export_box["height"] >= 44
         assert main_frame_navigations == []
         assert page.get_by_text("Capital structure", exact=True).count() == 0
         assert page.get_by_role(
