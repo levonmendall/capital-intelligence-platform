@@ -3,9 +3,35 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import run_background_provider_validation as worker
+
+
+class FakeProcess:
+    pid = 4321
+
+    def __init__(self, *, running: bool = True) -> None:
+        self.running = running
+        self.terminated = False
+        self.waited = False
+
+    def poll(self):
+        return None if self.running and not self.terminated else 0
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        del timeout
+        self.waited = True
+        self.running = False
+        return 0
+
+    def kill(self) -> None:
+        self.terminated = True
+        self.running = False
 
 
 def test_validate_once_persists_governed_report(monkeypatch, tmp_path: Path) -> None:
@@ -60,16 +86,44 @@ def test_loop_rejects_nonpositive_interval() -> None:
 
 def test_release_diagnostic_is_launched_as_a_separate_process(monkeypatch) -> None:
     calls = []
+    process = FakeProcess(running=False)
 
-    def run(command, *, env, check):
-        calls.append((command, env, check))
-        return SimpleNamespace(returncode=3)
+    def popen(command, *, env):
+        calls.append((command, env))
+        return process
 
-    monkeypatch.setattr(worker.subprocess, "run", run)
+    monkeypatch.setattr(worker.subprocess, "Popen", popen)
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_ENVIRONMENT", "production")
 
-    worker._run_release_diagnostic()
+    returned = worker._run_release_diagnostic()
 
+    assert returned is process
     assert calls[0][0][1:] == ("run_manual_cio_diagnostic.py",)
     assert calls[0][1]["CAPITAL_INTELLIGENCE_ENVIRONMENT"] == "production"
-    assert calls[0][2] is False
+
+
+def test_diagnostic_starts_before_first_provider_validation(monkeypatch) -> None:
+    events = []
+    stopping = Event()
+    process = FakeProcess()
+
+    def launch():
+        events.append("diagnostic")
+        return process
+
+    def validate():
+        events.append("validation")
+        stopping.set()
+        return SimpleNamespace(), Path("report.json")
+
+    monkeypatch.setattr(worker, "_run_release_diagnostic", launch)
+    monkeypatch.setattr(worker, "validate_once", validate)
+
+    assert worker.run_loop(
+        interval_seconds=60,
+        initial_delay_seconds=0,
+        stop_event=stopping,
+    ) == 0
+    assert events == ["diagnostic", "validation"]
+    assert process.terminated is True
+    assert process.waited is True
