@@ -1,17 +1,22 @@
-"""Disk-backed streaming evidence collection for broad paper-candidate analysis.
+"""Transient compressed evidence spool for broad paper-candidate analysis.
 
 Provider payloads are persisted per symbol before the next bounded batch is requested.
 The resulting mappings load one symbol at a time, preventing complete multi-year market
-histories and SEC fact sets from accumulating in process memory. The spool has no
-candidate, CIO, construction, execution, or real-money authority.
+histories and SEC fact sets from accumulating in process memory. Cycle-local spool files
+are disposable, compressed, and kept outside the canonical persistent-state directory by
+default. The spool has no candidate, CIO, construction, execution, or real-money authority.
 """
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
+import tempfile
+import zlib
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
@@ -21,10 +26,13 @@ from uuid import uuid4
 
 from data import CompanyFact
 
-_POLICY_VERSION = "paper-evidence-symbol-spool.v1"
+_POLICY_VERSION = "paper-evidence-symbol-spool.v2-transient-compressed"
 _DEFAULT_LISTED_BATCH_SIZE = 10
-_STALE_SPOOL_AGE = timedelta(days=2)
+_STALE_SPOOL_AGE = timedelta(hours=6)
 _TYPE_FIELD = "__capital_intelligence_type__"
+_ENCODING = "zlib-json-v1"
+_DEFAULT_MAX_MB = 4096
+_DEFAULT_RESERVE_MB = 256
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -58,31 +66,36 @@ def _json_hook(value: dict[str, object]) -> object:
     return value
 
 
-def _canonical_json(value: object) -> str:
+def _canonical_bytes(value: object) -> bytes:
     return json.dumps(
         value,
         default=_json_default,
         sort_keys=True,
         separators=(",", ":"),
         allow_nan=False,
-    )
+    ).encode("utf-8")
+
+
+def _positive_environment_mb(name: str, *, default: int, minimum: int) -> int:
+    raw = os.getenv(name, "").strip()
+    value = default if not raw else int(raw)
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
 
 
 def _spool_directory() -> Path:
     explicit = os.getenv("CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_DIR", "").strip()
     if explicit:
         return Path(explicit).expanduser()
-    data_dir = Path(
-        os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")
-    ).expanduser()
-    return data_dir / "paper_evidence_spool"
+    return Path(tempfile.gettempdir()) / "capital-intelligence" / "paper_evidence_spool"
 
 
 def _cleanup_stale_spools(directory: Path, *, now: datetime) -> None:
     cutoff = now.timestamp() - _STALE_SPOOL_AGE.total_seconds()
     for path in directory.glob("paper-evidence-*.db*"):
         try:
-            if path.stat().st_mtime < cutoff:
+            if path.is_file() and not path.is_symlink() and path.stat().st_mtime < cutoff:
                 path.unlink(missing_ok=True)
         except OSError:
             continue
@@ -118,7 +131,7 @@ class SQLiteEvidenceMapping(Mapping[str, object]):
 
 
 class SQLitePaperEvidenceSpool:
-    """Append-only cycle-local provider evidence persisted outside process memory."""
+    """Append-only, disposable, compressed cycle-local provider evidence."""
 
     policy_version = _POLICY_VERSION
 
@@ -126,16 +139,40 @@ class SQLitePaperEvidenceSpool:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._removed = False
+        self._maximum_bytes = (
+            _positive_environment_mb(
+                "CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_MAX_MB",
+                default=_DEFAULT_MAX_MB,
+                minimum=64,
+            )
+            * 1024
+            * 1024
+        )
+        self._reserve_bytes = (
+            _positive_environment_mb(
+                "CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_RESERVE_MB",
+                default=_DEFAULT_RESERVE_MB,
+                minimum=64,
+            )
+            * 1024
+            * 1024
+        )
         with sqlite3.connect(self.path) as connection:
-            connection.execute("PRAGMA journal_mode=DELETE")
-            connection.execute("PRAGMA synchronous=FULL")
+            # This database is a disposable cycle-local cache. Disabling the rollback
+            # journal avoids temporarily doubling very large SEC payload writes. A
+            # process interruption invalidates and removes the whole spool fail-closed.
+            connection.execute("PRAGMA journal_mode=OFF")
+            connection.execute("PRAGMA synchronous=OFF")
+            connection.execute("PRAGMA temp_store=MEMORY")
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS evidence_entries (
                     namespace TEXT NOT NULL,
                     symbol TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
+                    payload_blob BLOB NOT NULL,
+                    payload_encoding TEXT NOT NULL,
                     payload_hash TEXT NOT NULL,
+                    uncompressed_bytes INTEGER NOT NULL,
                     recorded_at TEXT NOT NULL,
                     PRIMARY KEY (namespace, symbol)
                 );
@@ -168,6 +205,22 @@ class SQLitePaperEvidenceSpool:
         )
         return cls(path)
 
+    def _ensure_capacity(self, additional_bytes: int) -> None:
+        current_bytes = self.path.stat().st_size if self.path.exists() else 0
+        if current_bytes + additional_bytes > self._maximum_bytes:
+            raise OSError(
+                errno.ENOSPC,
+                "temporary evidence spool reached its governed maximum size",
+                str(self.path),
+            )
+        free_bytes = shutil.disk_usage(self.path.parent).free
+        if free_bytes - additional_bytes < self._reserve_bytes:
+            raise OSError(
+                errno.ENOSPC,
+                "temporary evidence spool would breach its free-space reserve",
+                str(self.path),
+            )
+
     def append(
         self,
         namespace: str,
@@ -182,8 +235,10 @@ class SQLitePaperEvidenceSpool:
         normalized_symbol = str(symbol).strip().upper()
         if not normalized_namespace or not normalized_symbol:
             raise ValueError("namespace and symbol cannot be empty")
-        payload = _canonical_json(value)
-        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        raw_payload = _canonical_bytes(value)
+        digest = hashlib.sha256(raw_payload).hexdigest()
+        compressed_payload = zlib.compress(raw_payload, level=6)
+        self._ensure_capacity(len(compressed_payload) + 64 * 1024)
         timestamp = _aware(recorded_at, field_name="recorded_at")
         with sqlite3.connect(self.path) as connection:
             existing = connection.execute(
@@ -198,12 +253,14 @@ class SQLitePaperEvidenceSpool:
                     )
                 return
             connection.execute(
-                "INSERT INTO evidence_entries VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO evidence_entries VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     normalized_namespace,
                     normalized_symbol,
-                    payload,
+                    sqlite3.Binary(compressed_payload),
+                    _ENCODING,
                     digest,
+                    len(raw_payload),
                     timestamp.isoformat(),
                 ),
             )
@@ -213,13 +270,17 @@ class SQLitePaperEvidenceSpool:
             raise KeyError(symbol)
         with sqlite3.connect(self.path) as connection:
             row = connection.execute(
-                "SELECT payload_json FROM evidence_entries "
+                "SELECT payload_blob, payload_encoding FROM evidence_entries "
                 "WHERE namespace = ? AND symbol = ?",
                 (namespace, symbol),
             ).fetchone()
         if row is None:
             raise KeyError(symbol)
-        return json.loads(row[0], object_hook=_json_hook)
+        payload, encoding = row
+        if encoding != _ENCODING:
+            raise ValueError(f"unsupported evidence spool encoding: {encoding}")
+        compressed = bytes(payload)
+        return json.loads(zlib.decompress(compressed), object_hook=_json_hook)
 
     def keys(self, namespace: str) -> tuple[str, ...]:
         if self._removed:
@@ -333,17 +394,11 @@ def collect_spooled_paper_evidence(
                 for symbol in symbols:
                     if symbol in batch_bars:
                         spool.append(
-                            "bars",
-                            symbol,
-                            batch_bars[symbol],
-                            recorded_at=as_of,
+                            "bars", symbol, batch_bars[symbol], recorded_at=as_of
                         )
                     if symbol in batch_quotes:
                         spool.append(
-                            "quotes",
-                            symbol,
-                            batch_quotes[symbol],
-                            recorded_at=as_of,
+                            "quotes", symbol, batch_quotes[symbol], recorded_at=as_of
                         )
                 del batch_bars
                 del batch_quotes
@@ -373,18 +428,10 @@ def collect_spooled_paper_evidence(
                     )
                     continue
                 if symbol in symbol_bars:
-                    spool.append(
-                        "bars",
-                        symbol,
-                        symbol_bars[symbol],
-                        recorded_at=as_of,
-                    )
+                    spool.append("bars", symbol, symbol_bars[symbol], recorded_at=as_of)
                 if symbol in symbol_quotes:
                     spool.append(
-                        "quotes",
-                        symbol,
-                        symbol_quotes[symbol],
-                        recorded_at=as_of,
+                        "quotes", symbol, symbol_quotes[symbol], recorded_at=as_of
                     )
                 del symbol_bars
                 del symbol_quotes
@@ -409,22 +456,12 @@ def collect_spooled_paper_evidence(
                     filing_query_type(
                         cik=instrument.issuer_cik,
                         as_of=as_of,
-                        forms=(
-                            "10-K",
-                            "10-K/A",
-                            "20-F",
-                            "20-F/A",
-                            "40-F",
-                            "40-F/A",
-                        ),
+                        forms=("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"),
                         limit=10_000,
                     )
                 )
                 spool.append(
-                    "company_facts",
-                    instrument.symbol,
-                    facts,
-                    recorded_at=as_of,
+                    "company_facts", instrument.symbol, facts, recorded_at=as_of
                 )
                 del facts
 
