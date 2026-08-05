@@ -23,6 +23,8 @@ class _FakeStreamlit:
         self.download_button_calls: list[dict[str, object]] = []
         self.captions: list[str] = []
         self.container_keys: list[str] = []
+        self.infos: list[str] = []
+        self.warnings: list[str] = []
 
     @contextmanager
     def container(self, *, key: str):
@@ -64,6 +66,12 @@ class _FakeStreamlit:
 
     def caption(self, value: object) -> None:
         self.captions.append(str(value))
+
+    def info(self, value: object) -> None:
+        self.infos.append(str(value))
+
+    def warning(self, value: object) -> None:
+        self.warnings.append(str(value))
 
     def rerun(self) -> None:
         raise _RerunRequested()
@@ -164,71 +172,133 @@ def test_full_report_suppresses_obsolete_back_anchor() -> None:
     assert "report body" in markup
 
 
-def test_full_report_exposes_complete_current_decision_json() -> None:
+def test_full_report_resolves_exact_decision_json_from_history(monkeypatch) -> None:
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "release-abc")
     detail, calls = _detail_module()
     navigation.install(detail)
     streamlit_module = _FakeStreamlit()
     briefing = {
-        "decision_identifier": "decision-2026-08-05",
-        "cycle_identifier": "cycle-2026-08-05",
-        "snapshot_identifier": "snapshot-2026-08-05",
+        "decision_identifier": "decision:mcd",
+        "cycle_identifier": "cycle:current",
+        "snapshot_identifier": "snapshot:mcd",
         "as_of": "2026-08-05T15:27:47+00:00",
         "portfolio_decision": "No material change.",
     }
-    construction = {
-        "decision_identifier": "decision-2026-08-05",
+    current_construction = {
+        "cycle_identifier": "cycle:current",
         "as_of": "2026-08-05T15:27:47+00:00",
         "status": "feasible",
-        "trades": [{"symbol": "MCD", "side": "buy"}],
+        "trades": [],
     }
-    records = {
-        "cio_decision": {
-            "decision_identifier": "decision-2026-08-05",
-            "cycle_identifier": "cycle-2026-08-05",
-            "as_of": "2026-08-05T15:27:47+00:00",
-        },
-        "decision_evidence_snapshot": {
-            "snapshot_identifier": "snapshot-2026-08-05",
-            "cycle_identifier": "cycle-2026-08-05",
-            "as_of": "2026-08-05T15:27:47+00:00",
-        },
-        "decision_evaluation": {
-            "decision_identifier": "decision-2026-08-05",
-            "as_of": "2026-08-05T15:27:47+00:00",
-            "status": "pending_outcome",
-        },
+    histories = {
+        "cio_decision": [
+            {
+                "identifier": "decision:klac",
+                "cycle_identifier": "cycle:current",
+                "action": "hold",
+                "code_version": "release-abc",
+            },
+            {
+                "identifier": "decision:mcd",
+                "cycle_identifier": "cycle:current",
+                "as_of": "2026-08-05T15:27:47+00:00",
+                "action": "no_material_change",
+                "code_version": "release-abc",
+                "decision_horizon_days": 365,
+            },
+        ],
+        "decision_evidence_snapshot": [
+            {"decision_identifier": "decision:klac"},
+            {
+                "decision_identifier": "decision:mcd",
+                "snapshot_identifier": "snapshot:mcd",
+                "cycle_identifier": "cycle:current",
+                "as_of": "2026-08-05T15:27:47+00:00",
+            },
+        ],
+        "portfolio_construction": [
+            {"cycle_identifier": "cycle:older", "trades": [{"symbol": "OLD"}]},
+            current_construction,
+        ],
+        "decision_evaluation": [],
     }
-    app = SimpleNamespace(_latest=lambda event_type: records.get(event_type))
+    latest = {event_type: values[0] for event_type, values in histories.items() if values}
+    app = SimpleNamespace(
+        _latest=lambda event_type: latest.get(event_type),
+        _history=lambda event_type, limit=500: histories.get(event_type, [])[:limit],
+    )
 
     detail._render_full_report(
         app,
         streamlit_module,
         briefing=briefing,
-        construction=construction,
+        construction=current_construction,
         mandate={"holdings": []},
         deployed=0.0,
     )
 
     assert calls == ["full-report"]
-    assert "cio_report_export_control" in streamlit_module.container_keys
-    assert len(streamlit_module.download_button_calls) == 1
     download = streamlit_module.download_button_calls[0]
-    assert download["label"] == "Download decision JSON"
-    assert download["mime"] == "application/json"
-    assert download["key"] == "full-cio-report-decision-json-download"
-    assert download["use_container_width"] is True
-    assert download["disabled"] is False
-    assert str(download["file_name"]).startswith(
-        "cio-decision-decision-2026-08-05"
-    )
     payload = json.loads(str(download["data"]))
+    assert payload["decision_identifier"] == "decision:mcd"
+    assert payload["records"]["cio_decision"]["identifier"] == "decision:mcd"
+    assert payload["records"]["decision_evidence_snapshot"]["decision_identifier"] == "decision:mcd"
+    assert payload["records"]["portfolio_construction"] == current_construction
+    assert payload["records"]["decision_evaluation"] is None
+    assert payload["component_status"]["decision_evaluation"]["status"] == "pending_horizon"
+    assert payload["auditability"]["mixed_records_included"] is False
     assert payload["record_consistency"]["state"] == "aligned"
-    assert all(payload["record_presence"].values())
-    assert payload["records"]["daily_cio_briefing"] == briefing
-    assert payload["records"]["portfolio_construction"] == construction
-    assert payload["authority"]["execution_authority"] is False
-    assert payload["authority"]["real_money_authorized"] is False
-    assert any("Read-only export" in value for value in streamlit_module.captions)
+    assert not streamlit_module.warnings
+    assert any("exact CIO decision and cycle" in value for value in streamlit_module.captions)
+
+
+def test_full_report_surfaces_deferred_selected_action(monkeypatch) -> None:
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "release-abc")
+    detail, _ = _detail_module()
+    navigation.install(detail)
+    streamlit_module = _FakeStreamlit()
+    briefing = {
+        "decision_identifier": "decision:klac",
+        "cycle_identifier": "cycle:current",
+        "as_of": "2026-08-05T15:27:47+00:00",
+    }
+    decision = {
+        "identifier": "decision:klac",
+        "cycle_identifier": "cycle:current",
+        "as_of": "2026-08-05T15:27:47+00:00",
+        "action": "hold",
+        "deferred_action": "reduce",
+        "hysteresis_applied": True,
+        "code_version": "release-abc",
+        "decision_horizon_days": 365,
+    }
+    snapshot = {
+        "decision_identifier": "decision:klac",
+        "cycle_identifier": "cycle:current",
+        "as_of": "2026-08-05T15:27:47+00:00",
+    }
+    histories = {
+        "cio_decision": [decision],
+        "decision_evidence_snapshot": [snapshot],
+        "portfolio_construction": [],
+        "decision_evaluation": [],
+    }
+    app = SimpleNamespace(
+        _latest=lambda event_type: (histories.get(event_type) or [None])[0],
+        _history=lambda event_type, limit=500: histories.get(event_type, [])[:limit],
+    )
+
+    detail._render_full_report(
+        app,
+        streamlit_module,
+        briefing=briefing,
+        construction=None,
+        mandate={"holdings": []},
+        deployed=0.0,
+    )
+
+    assert any("Underlying selected action: Reduce" in value for value in streamlit_module.infos)
+    assert any("Effective current action: Hold" in value for value in streamlit_module.infos)
 
 
 def test_back_clears_session_state_and_legacy_query() -> None:
