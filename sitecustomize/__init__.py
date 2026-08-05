@@ -3,7 +3,7 @@
 Python imports ``sitecustomize`` during interpreter startup when this repository is on
 ``sys.path``. Two independent, narrow protections live here:
 
-* map deployment commit metadata into the canonical CIO code-version variable for
+* map Render's deployed commit into the canonical CIO code-version variable for
   append-only decision lineage; and
 * for the public headline collector only, map the canonical Render EODHD token name
   to the legacy source alias and redact provider secrets from JSON output.
@@ -32,13 +32,7 @@ _CREDENTIAL_ENVIRONMENT_NAMES = (
     "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN",
     "MARKETAUX_API_TOKEN",
 )
-_RELEASE_SOURCE_KEYS = (
-    "RENDER_GIT_COMMIT",
-    "GITHUB_SHA",
-    "SOURCE_VERSION",
-    "COMMIT_SHA",
-    "GIT_COMMIT",
-)
+_RENDER_RELEASE_ENVIRONMENT = "RENDER_GIT_COMMIT"
 _CODE_VERSION_ENVIRONMENT = "CAPITAL_INTELLIGENCE_CODE_VERSION"
 _REDACTED = "[REDACTED]"
 
@@ -46,22 +40,22 @@ _REDACTED = "[REDACTED]"
 def configure_code_version(
     environment: MutableMapping[str, str] | None = None,
 ) -> str | None:
-    """Populate canonical code-version lineage from deployment metadata.
+    """Populate canonical code-version lineage from Render deployment metadata.
 
-    An explicitly configured canonical value always wins. The function returns the
-    resolved value and leaves the environment unchanged when no release metadata is
-    available.
+    An explicitly configured canonical value always wins. Other environment-specific
+    commit variables are deliberately not promoted at interpreter startup because test
+    and build runners can change them between subprocesses. The function returns the
+    resolved value and leaves the environment unchanged when Render metadata is absent.
     """
 
     values = os.environ if environment is None else environment
     existing = str(values.get(_CODE_VERSION_ENVIRONMENT, "")).strip()
     if existing:
         return existing
-    for key in _RELEASE_SOURCE_KEYS:
-        candidate = str(values.get(key, "")).strip()
-        if candidate:
-            values[_CODE_VERSION_ENVIRONMENT] = candidate
-            return candidate
+    candidate = str(values.get(_RENDER_RELEASE_ENVIRONMENT, "")).strip()
+    if candidate:
+        values[_CODE_VERSION_ENVIRONMENT] = candidate
+        return candidate
     return None
 
 
