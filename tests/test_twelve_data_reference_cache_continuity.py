@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
-from data.observation import AvailabilityBasis, DataQualityState
-from data.provider_dataset import (
-    ProviderDatasetQuery,
-    ProviderDatasetSnapshot,
-    ProviderDatasetType,
-)
+from data.observation import DataQualityState
+from data.provider_dataset import ProviderDatasetQuery, ProviderDatasetType
 from providers.twelve_data_reference import TwelveDataReferenceError
 from providers.twelve_data_reference_rate_limited import (
     TwelveDataRateLimitedReferenceProvider,
@@ -20,128 +17,223 @@ from providers.twelve_data_reference_rate_limited import (
 UTC = timezone.utc
 
 
+class _Response:
+    def __init__(
+        self,
+        status_code: int,
+        payload: dict[str, Any],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self.headers = headers or {}
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+
 def _query(as_of: datetime) -> ProviderDatasetQuery:
     return ProviderDatasetQuery(
         dataset_type=ProviderDatasetType.SYMBOL_DIRECTORY,
-        provider_symbol="HK",
+        provider_symbol="SA",
         as_of=as_of,
-        limit=100,
+        limit=1_000,
     )
 
 
-def _snapshot(query: ProviderDatasetQuery, retrieved_at: datetime) -> ProviderDatasetSnapshot:
-    return ProviderDatasetSnapshot(
-        query=query,
-        provider="Twelve Data",
-        source_version="test-reference.v1",
-        observed_at=retrieved_at,
-        available_at=retrieved_at,
-        retrieved_at=retrieved_at,
-        quality_state=DataQualityState.FALLBACK,
-        availability_basis=AvailabilityBasis.RETRIEVAL_PROXY,
-        payload={
-            "active": [
+def _brazil_row() -> dict[str, str]:
+    return {
+        "symbol": "PETR4",
+        "name": "Petroleo Brasileiro SA Petrobras",
+        "currency": "BRL",
+        "exchange": "B3",
+        "mic_code": "BVMF",
+        "country": "Brazil",
+        "type": "Common Stock",
+    }
+
+
+def _successful_catalog(calls: list[str]):
+    def fetch(
+        _url: str,
+        *,
+        params: dict[str, object],
+        timeout: int,
+    ) -> _Response:
+        assert timeout > 0
+        mic = str(params.get("mic_code") or "")
+        calls.append(mic)
+        if mic == "BVMF":
+            return _Response(
+                200,
                 {
-                    "Code": "0005",
-                    "Name": "Test Holdings",
-                    "Exchange": "HK",
-                    "MIC": "XHKG",
-                    "Currency": "HKD",
-                    "CountryISO2": "HK",
-                    "Type": "Common Stock",
-                    "Figi": "",
-                    "CFI": "",
-                    "ISIN": "",
-                    "SourceProvider": "Twelve Data",
-                }
-            ],
-            "delisted": [],
-        },
-        provider_record_id="twelve-data:test:HK",
-        limitations=("Discovery only.",),
-    )
+                    "status": "ok",
+                    "count": 1,
+                    "data": [_brazil_row()],
+                },
+            )
+        if mic == "XBSP":
+            return _Response(
+                200,
+                {
+                    "status": "ok",
+                    "count": 0,
+                    "data": [],
+                },
+            )
+        raise AssertionError(f"unexpected Twelve Data selector: {params}")
+
+    return fetch
 
 
-def test_validated_cache_is_reused_with_cached_quality(tmp_path) -> None:
-    retrieved_at = datetime(2026, 8, 5, 20, 0, tzinfo=UTC)
-    now = retrieved_at + timedelta(minutes=10)
-    provider = TwelveDataRateLimitedReferenceProvider(
+def _provider(
+    *,
+    cache_directory,
+    now: datetime,
+    http_get,
+    cache_max_age_seconds: float = 259_200.0,
+) -> TwelveDataRateLimitedReferenceProvider:
+    return TwelveDataRateLimitedReferenceProvider(
         api_key="test-key",
-        cache_directory=tmp_path,
+        http_get=http_get,
         clock=lambda: now,
+        sleeper=lambda _seconds: None,
+        max_rate_limit_retries=0,
+        minimum_request_interval_seconds=0.0,
+        cache_directory=cache_directory,
+        cache_max_age_seconds=cache_max_age_seconds,
     )
-    original_query = _query(retrieved_at)
-    provider._store_cached_snapshot(_snapshot(original_query, retrieved_at))
 
-    cached = provider._load_cached_snapshot(_query(now))
 
+def test_complete_exchange_snapshot_is_reused_before_more_provider_calls(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 8, 5, 22, 0, tzinfo=UTC)
+    calls: list[str] = []
+    provider = _provider(
+        cache_directory=tmp_path,
+        now=now,
+        http_get=_successful_catalog(calls),
+    )
+
+    live = provider.fetch_dataset(_query(now))
+    cached = provider.fetch_dataset(_query(now))
+
+    assert calls == ["BVMF", "XBSP"]
     assert cached.quality_state is DataQualityState.CACHED
-    assert cached.query.as_of == now
-    assert cached.payload["active"][0]["Exchange"] == "HK"
-    assert "discovery-only authority" in cached.limitations[-1]
+    assert cached.payload == live.payload
+    assert cached.provider_record_id == live.provider_record_id
+    assert any(
+        "before making another provider request" in item
+        for item in cached.limitations
+    )
 
 
-def test_tampered_cached_payload_fails_closed(tmp_path) -> None:
-    retrieved_at = datetime(2026, 8, 5, 20, 0, tzinfo=UTC)
-    now = retrieved_at + timedelta(minutes=10)
+def test_fresh_snapshot_survives_provider_reconstruction(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 8, 5, 22, 0, tzinfo=UTC)
+    calls: list[str] = []
+    _provider(
+        cache_directory=tmp_path,
+        now=now,
+        http_get=_successful_catalog(calls),
+    ).fetch_dataset(_query(now))
+
+    def unexpected_request(*_args: Any, **_kwargs: Any) -> _Response:
+        raise AssertionError("fresh cache must prevent a remote catalog request")
+
+    later = now + timedelta(hours=1)
+    cached = _provider(
+        cache_directory=tmp_path,
+        now=later,
+        http_get=unexpected_request,
+    ).fetch_dataset(_query(later))
+
+    assert calls == ["BVMF", "XBSP"]
+    assert cached.quality_state is DataQualityState.CACHED
+    assert cached.payload["active"][0]["Code"] == "PETR4"
+    assert cached.retrieved_at == now
+
+
+def test_default_cache_directory_uses_governed_data_volume(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv(
+        "CAPITAL_INTELLIGENCE_TWELVE_DATA_REFERENCE_CACHE_DIRECTORY",
+        raising=False,
+    )
+
     provider = TwelveDataRateLimitedReferenceProvider(
         api_key="test-key",
-        cache_directory=tmp_path,
-        clock=lambda: now,
+        http_get=lambda *_args, **_kwargs: None,
+        clock=lambda: datetime(2026, 8, 5, 22, 0, tzinfo=UTC),
     )
-    query = _query(retrieved_at)
-    provider._store_cached_snapshot(_snapshot(query, retrieved_at))
-    path = provider._cache_path(query)
-    record = json.loads(path.read_text(encoding="utf-8"))
-    record["snapshot"]["payload"]["active"][0]["Code"] = "TAMPERED"
-    path.write_text(json.dumps(record), encoding="utf-8")
 
-    with pytest.raises(TwelveDataReferenceError, match="integrity"):
-        provider._load_cached_snapshot(_query(now))
-
-
-def test_expired_cached_catalog_fails_closed(tmp_path) -> None:
-    retrieved_at = datetime(2026, 8, 5, 20, 0, tzinfo=UTC)
-    now = retrieved_at + timedelta(minutes=2)
-    provider = TwelveDataRateLimitedReferenceProvider(
-        api_key="test-key",
-        cache_directory=tmp_path,
-        cache_max_age_seconds=60,
-        clock=lambda: now,
+    assert provider.cache_directory == (
+        tmp_path / "provider_cache" / "twelve_data_reference"
     )
-    query = _query(retrieved_at)
-    provider._store_cached_snapshot(_snapshot(query, retrieved_at))
-
-    with pytest.raises(TwelveDataReferenceError, match="expired"):
-        provider._load_cached_snapshot(_query(now))
 
 
-def test_market_mismatch_in_cached_catalog_fails_closed(tmp_path) -> None:
-    retrieved_at = datetime(2026, 8, 5, 20, 0, tzinfo=UTC)
-    now = retrieved_at + timedelta(minutes=10)
-    provider = TwelveDataRateLimitedReferenceProvider(
-        api_key="test-key",
+@pytest.mark.parametrize("failure_mode", ["stale", "corrupt"])
+def test_stale_or_corrupt_snapshot_cannot_mask_terminal_throttling(
+    tmp_path,
+    failure_mode: str,
+) -> None:
+    now = datetime(2026, 8, 5, 22, 0, tzinfo=UTC)
+    provider = _provider(
         cache_directory=tmp_path,
-        clock=lambda: now,
+        now=now,
+        http_get=_successful_catalog([]),
     )
-    query = _query(retrieved_at)
-    snapshot = _snapshot(query, retrieved_at)
-    provider._store_cached_snapshot(snapshot)
-    path = provider._cache_path(query)
-    record = json.loads(path.read_text(encoding="utf-8"))
-    record["snapshot"]["payload"]["active"][0]["Exchange"] = "SA"
-    payload = record["snapshot"]["payload"]
-    import hashlib
+    query = _query(now)
+    provider.fetch_dataset(query)
 
-    record["snapshot"]["content_hash"] = hashlib.sha256(
-        json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
-    path.write_text(json.dumps(record), encoding="utf-8")
+    cache_path = provider._cache_path(query)
+    if failure_mode == "corrupt":
+        envelope = json.loads(cache_path.read_text(encoding="utf-8"))
+        envelope["snapshot"]["payload"]["active"][0]["Name"] = "tampered"
+        cache_path.write_text(json.dumps(envelope), encoding="utf-8")
+        request_time = now + timedelta(minutes=1)
+        max_age_seconds = 259_200.0
+    else:
+        request_time = now + timedelta(hours=2)
+        max_age_seconds = 3_600.0
 
-    with pytest.raises(TwelveDataReferenceError, match="outside the requested market"):
-        provider._load_cached_snapshot(_query(now))
+    calls = 0
+
+    def throttled(
+        _url: str,
+        *,
+        params: dict[str, object],
+        timeout: int,
+    ) -> _Response:
+        nonlocal calls
+        calls += 1
+        assert params["mic_code"] == "BVMF"
+        assert timeout > 0
+        return _Response(
+            429,
+            {
+                "status": "error",
+                "message": "quota exhausted",
+            },
+        )
+
+    failing_provider = _provider(
+        cache_directory=tmp_path,
+        now=request_time,
+        http_get=throttled,
+        cache_max_age_seconds=max_age_seconds,
+    )
+
+    with pytest.raises(
+        TwelveDataReferenceError,
+        match=r"Twelve Data stock catalog returned HTTP 429",
+    ):
+        failing_provider.fetch_dataset(_query(request_time))
+
+    assert calls == 1
