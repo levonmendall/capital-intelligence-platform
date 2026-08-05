@@ -2,7 +2,7 @@ name: Verify Render CIO Diagnostic
 
 on:
   schedule:
-    - cron: "2,17,32,47 * * * *"
+    - cron: "12,42 * * * *"
   workflow_dispatch:
     inputs:
       expected_release:
