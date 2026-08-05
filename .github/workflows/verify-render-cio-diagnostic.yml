@@ -1,6 +1,12 @@
 name: Verify Render CIO Diagnostic
 
 on:
+  # Render reports deployment status back to GitHub. Verify only after the
+  # deployment has succeeded so this workflow can never block the release it
+  # needs to inspect.
+  deployment_status:
+  # Retain a deferred recovery path in case an external deployment-status event
+  # is delayed or omitted.
   schedule:
     - cron: "12,42 * * * *"
   workflow_dispatch:
@@ -19,11 +25,16 @@ concurrency:
 
 jobs:
   verify:
+    # Deployment providers may emit queued, in-progress, failure, and success
+    # statuses. Only a successful deployment is eligible for release auditing.
+    if: >-
+      github.event_name != 'deployment_status' ||
+      github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       AUDIT_URL: https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json
-      EXPECTED_RELEASE: ${{ github.event.inputs.expected_release || github.sha }}
+      EXPECTED_RELEASE: ${{ github.event.deployment.sha || github.event.inputs.expected_release || github.sha }}
       AUDIT_OUTPUT: /tmp/render-cio-diagnostic.json
       VERIFICATION_LOG: /tmp/render-cio-diagnostic-verification.log
     steps:
