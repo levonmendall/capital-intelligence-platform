@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
 
@@ -19,6 +20,8 @@ class _FakeStreamlit:
         self.pressed = pressed
         self.markdown_calls: list[str] = []
         self.button_calls: list[tuple[str, str]] = []
+        self.download_button_calls: list[dict[str, object]] = []
+        self.captions: list[str] = []
         self.container_keys: list[str] = []
 
     @contextmanager
@@ -34,6 +37,33 @@ class _FakeStreamlit:
         del kwargs
         self.button_calls.append((label, key))
         return key == self.pressed
+
+    def download_button(
+        self,
+        label: str,
+        *,
+        data: str,
+        file_name: str,
+        mime: str,
+        key: str,
+        use_container_width: bool,
+        disabled: bool,
+    ) -> bool:
+        self.download_button_calls.append(
+            {
+                "label": label,
+                "data": data,
+                "file_name": file_name,
+                "mime": mime,
+                "key": key,
+                "use_container_width": use_container_width,
+                "disabled": disabled,
+            }
+        )
+        return False
+
+    def caption(self, value: object) -> None:
+        self.captions.append(str(value))
 
     def rerun(self) -> None:
         raise _RerunRequested()
@@ -128,9 +158,77 @@ def test_full_report_suppresses_obsolete_back_anchor() -> None:
 
     assert calls == ["full-report"]
     assert ("← Back to Portfolio", "close_full_cio_report") in streamlit_module.button_calls
+    assert streamlit_module.download_button_calls[0]["disabled"] is True
     markup = "\n".join(streamlit_module.markdown_calls)
     assert "cio-report-back-link" not in markup
     assert "report body" in markup
+
+
+def test_full_report_exposes_complete_current_decision_json() -> None:
+    detail, calls = _detail_module()
+    navigation.install(detail)
+    streamlit_module = _FakeStreamlit()
+    briefing = {
+        "decision_identifier": "decision-2026-08-05",
+        "cycle_identifier": "cycle-2026-08-05",
+        "snapshot_identifier": "snapshot-2026-08-05",
+        "as_of": "2026-08-05T15:27:47+00:00",
+        "portfolio_decision": "No material change.",
+    }
+    construction = {
+        "decision_identifier": "decision-2026-08-05",
+        "as_of": "2026-08-05T15:27:47+00:00",
+        "status": "feasible",
+        "trades": [{"symbol": "MCD", "side": "buy"}],
+    }
+    records = {
+        "cio_decision": {
+            "decision_identifier": "decision-2026-08-05",
+            "cycle_identifier": "cycle-2026-08-05",
+            "as_of": "2026-08-05T15:27:47+00:00",
+        },
+        "decision_evidence_snapshot": {
+            "snapshot_identifier": "snapshot-2026-08-05",
+            "cycle_identifier": "cycle-2026-08-05",
+            "as_of": "2026-08-05T15:27:47+00:00",
+        },
+        "decision_evaluation": {
+            "decision_identifier": "decision-2026-08-05",
+            "as_of": "2026-08-05T15:27:47+00:00",
+            "status": "pending_outcome",
+        },
+    }
+    app = SimpleNamespace(_latest=lambda event_type: records.get(event_type))
+
+    detail._render_full_report(
+        app,
+        streamlit_module,
+        briefing=briefing,
+        construction=construction,
+        mandate={"holdings": []},
+        deployed=0.0,
+    )
+
+    assert calls == ["full-report"]
+    assert "cio_report_export_control" in streamlit_module.container_keys
+    assert len(streamlit_module.download_button_calls) == 1
+    download = streamlit_module.download_button_calls[0]
+    assert download["label"] == "Download decision JSON"
+    assert download["mime"] == "application/json"
+    assert download["key"] == "full-cio-report-decision-json-download"
+    assert download["use_container_width"] is True
+    assert download["disabled"] is False
+    assert str(download["file_name"]).startswith(
+        "cio-decision-decision-2026-08-05"
+    )
+    payload = json.loads(str(download["data"]))
+    assert payload["record_consistency"]["state"] == "aligned"
+    assert all(payload["record_presence"].values())
+    assert payload["records"]["daily_cio_briefing"] == briefing
+    assert payload["records"]["portfolio_construction"] == construction
+    assert payload["authority"]["execution_authority"] is False
+    assert payload["authority"]["real_money_authorized"] is False
+    assert any("Read-only export" in value for value in streamlit_module.captions)
 
 
 def test_back_clears_session_state_and_legacy_query() -> None:
