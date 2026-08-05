@@ -90,7 +90,7 @@ def _write_context(
         "paper_only": True,
         "real_money_authorized": False,
     }
-    (tmp_path / "production_context_publication_state.json").write_text(
+    (tmp_path / "production-context-publication-state.json").write_text(
         json.dumps(payload),
         encoding="utf-8",
     )
