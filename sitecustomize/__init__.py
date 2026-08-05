@@ -1,15 +1,15 @@
-"""Process-local credential safety for the public headline collector.
+"""Process-local deployment metadata and headline-credential safety.
 
 Python imports ``sitecustomize`` during interpreter startup when this repository is on
-``sys.path``.  The guard deliberately activates only for the headline collector (or an
-explicit test hook).  It provides two narrow production protections:
+``sys.path``. Two independent, narrow protections live here:
 
-* map the canonical Render EODHD token name to the legacy headline-source alias; and
-* redact configured provider secrets from every JSON payload written or printed by the
-  collector, including provider error messages that echo an API key.
+* map deployment commit metadata into the canonical CIO code-version variable for
+  append-only decision lineage; and
+* for the public headline collector only, map the canonical Render EODHD token name
+  to the legacy source alias and redact provider secrets from JSON output.
 
-The guard does not alter investment evidence, candidate selection, ranking, CIO authority,
-position sizing, construction, paper execution, or real-money permissions.
+These controls do not alter investment evidence, candidate selection, ranking, CIO
+authority, position sizing, construction, paper execution, or real-money permissions.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import json
 import os
 import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +32,37 @@ _CREDENTIAL_ENVIRONMENT_NAMES = (
     "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN",
     "MARKETAUX_API_TOKEN",
 )
+_RELEASE_SOURCE_KEYS = (
+    "RENDER_GIT_COMMIT",
+    "GITHUB_SHA",
+    "SOURCE_VERSION",
+    "COMMIT_SHA",
+    "GIT_COMMIT",
+)
+_CODE_VERSION_ENVIRONMENT = "CAPITAL_INTELLIGENCE_CODE_VERSION"
 _REDACTED = "[REDACTED]"
+
+
+def configure_code_version(
+    environment: MutableMapping[str, str] | None = None,
+) -> str | None:
+    """Populate canonical code-version lineage from deployment metadata.
+
+    An explicitly configured canonical value always wins. The function returns the
+    resolved value and leaves the environment unchanged when no release metadata is
+    available.
+    """
+
+    values = os.environ if environment is None else environment
+    existing = str(values.get(_CODE_VERSION_ENVIRONMENT, "")).strip()
+    if existing:
+        return existing
+    for key in _RELEASE_SOURCE_KEYS:
+        candidate = str(values.get(key, "")).strip()
+        if candidate:
+            values[_CODE_VERSION_ENVIRONMENT] = candidate
+            return candidate
+    return None
 
 
 def _enabled() -> bool:
@@ -114,5 +144,9 @@ def _activate() -> None:
     json.dump = safe_dump
 
 
+configure_code_version()
 if _enabled():
     _activate()
+
+
+__all__ = ["configure_code_version"]
