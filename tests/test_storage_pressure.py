@@ -87,6 +87,44 @@ def test_pressure_recovery_preserves_all_backups_when_reserve_exists(
     assert report.free_bytes_after == 2_000
 
 
+def test_recovery_removes_only_cycle_local_spool_files(monkeypatch, tmp_path) -> None:
+    state_root = tmp_path / "state"
+    backup_root = state_root / "backups"
+    spool_root = state_root / "paper_evidence_spool"
+    backup_root.mkdir(parents=True)
+    spool_root.mkdir(parents=True)
+    disposable = spool_root / "paper-evidence-cycle.db"
+    disposable_journal = spool_root / "paper-evidence-cycle.db-journal"
+    protected = spool_root / "portfolio.db"
+    disposable.write_bytes(b"temporary-evidence")
+    disposable_journal.write_bytes(b"temporary-journal")
+    protected.write_bytes(b"canonical")
+    monkeypatch.setattr(
+        storage_pressure.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(total=10_000, used=5_000, free=5_000),
+    )
+
+    report = storage_pressure.reclaim_backup_space(
+        state_root=state_root,
+        backup_directory=backup_root,
+        reserve_bytes=1_000,
+        disposable_spool_directories=(spool_root,),
+    )
+
+    assert not disposable.exists()
+    assert not disposable_journal.exists()
+    assert protected.read_bytes() == b"canonical"
+    assert report.removed_evidence_spool_bytes == len(b"temporary-evidence") + len(
+        b"temporary-journal"
+    )
+    assert set(report.removed_evidence_spool_files) == {
+        str(disposable),
+        str(disposable_journal),
+    }
+    assert report.to_dict()["canonical_authorities_deleted"] is False
+
+
 def test_environment_policy_uses_configured_reserve(monkeypatch, tmp_path) -> None:
     captured = {}
 
@@ -95,11 +133,13 @@ def test_environment_policy_uses_configured_reserve(monkeypatch, tmp_path) -> No
         return "report"
 
     monkeypatch.setattr(storage_pressure, "reclaim_backup_space", reclaim)
+    configured_spool = tmp_path / "transient-spool"
     values = {
         "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
         "CAPITAL_INTELLIGENCE_BACKUP_DIRECTORY": str(tmp_path / "archives"),
         "CAPITAL_INTELLIGENCE_STORAGE_RESERVE_MB": "1024",
         "CAPITAL_INTELLIGENCE_BACKUP_MINIMUM_ARCHIVES": "1",
+        "CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_DIR": str(configured_spool),
     }
 
     assert storage_pressure.reclaim_from_environment(values) == "report"
@@ -108,4 +148,8 @@ def test_environment_policy_uses_configured_reserve(monkeypatch, tmp_path) -> No
         "backup_directory": tmp_path / "archives",
         "reserve_bytes": 1024 * 1024 * 1024,
         "minimum_archives": 1,
+        "disposable_spool_directories": (
+            tmp_path / "paper_evidence_spool",
+            configured_spool,
+        ),
     }
