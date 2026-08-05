@@ -21,6 +21,7 @@ from api.routes import (
     authentication_router,
     business_cycle_router,
     credit_cycle_router,
+    cio_diagnostic_router,
     cio_router,
     daily_router,
     decisions_router,
@@ -157,6 +158,7 @@ def create_app(
     app.include_router(health_router)
     app.include_router(operations_router)
     app.include_router(provider_validation_router)
+    app.include_router(cio_diagnostic_router)
     if resolved_authentication.required:
         app.include_router(authentication_router)
         app.include_router(users_router)
