@@ -50,6 +50,21 @@ def _complete_payload(release: str) -> dict[str, object]:
     }
 
 
+def _failed_payload(release: str, detail: str = "provider throttled") -> dict[str, object]:
+    return {
+        **_complete_payload(release),
+        "state": "failed",
+        "ready": False,
+        "context_cycle_matches": False,
+        "comprehensive_discovery_complete": False,
+        "scheduled_market_coverage_complete": False,
+        "terminal_screening_complete": False,
+        "all_market_evaluation_complete": False,
+        "market_lanes": [],
+        "detail": detail,
+    }
+
+
 def test_poll_ignores_stale_release_and_persists_current_final_audit(
     tmp_path: Path,
 ) -> None:
@@ -76,6 +91,60 @@ def test_poll_ignores_stale_release_and_persists_current_final_audit(
     assert result["active_release"] == release
     assert sleeps == [0.25]
     assert json.loads(output.read_text(encoding="utf-8")) == result
+
+
+def test_poll_treats_failed_attempt_as_provisional_until_later_success(
+    tmp_path: Path,
+) -> None:
+    release = "release-current"
+    payloads = iter(
+        (
+            _failed_payload(release, "HK fallback returned HTTP 429"),
+            _complete_payload(release),
+        )
+    )
+    sleeps: list[float] = []
+    output = tmp_path / "audit.json"
+
+    result = poll_render_audit(
+        url="https://example.test/app/static/cio-diagnostic.json",
+        expected_release=release,
+        output_path=output,
+        maximum_attempts=2,
+        interval_seconds=0.25,
+        fetcher=lambda _url: next(payloads),
+        sleeper=sleeps.append,
+    )
+
+    assert result["state"] == "completed"
+    assert sleeps == [0.25]
+    assert json.loads(output.read_text(encoding="utf-8")) == result
+
+
+def test_poll_remains_bounded_when_all_attempts_stay_failed(
+    tmp_path: Path,
+) -> None:
+    release = "release-current"
+    failed = _failed_payload(release, "HK fallback returned HTTP 429")
+    sleeps: list[float] = []
+    output = tmp_path / "audit.json"
+
+    with pytest.raises(
+        RenderAuditVerificationError,
+        match="did not publish a current successful aggregate audit",
+    ):
+        poll_render_audit(
+            url="https://example.test/app/static/cio-diagnostic.json",
+            expected_release=release,
+            output_path=output,
+            maximum_attempts=2,
+            interval_seconds=0.25,
+            fetcher=lambda _url: failed,
+            sleeper=sleeps.append,
+        )
+
+    assert sleeps == [0.25]
+    assert json.loads(output.read_text(encoding="utf-8")) == failed
 
 
 def test_complete_all_market_audit_passes() -> None:
