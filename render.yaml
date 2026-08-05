@@ -24,6 +24,15 @@ services:
         value: production
       - key: CAPITAL_INTELLIGENCE_DATA_DIR
         value: /app/database
+      # Paper-evidence spools are cycle-local working files, not canonical state.
+      # Keep them off the persistent authority disk, compress each payload, and
+      # fail closed before the transient filesystem exhausts its safety reserve.
+      - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_DIR
+        value: /tmp/capital-intelligence/paper_evidence_spool
+      - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_MAX_MB
+        value: "4096"
+      - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_RESERVE_MB
+        value: "1024"
       - key: CAPITAL_INTELLIGENCE_LOG_LEVEL
         value: INFO
       - key: CAPITAL_INTELLIGENCE_JSON_LOGS
@@ -72,10 +81,12 @@ services:
       - key: CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_INTERVAL_SECONDS
         value: "3600"
       # During active troubleshooting, run one unique paper-only diagnostic CIO
-      # pass after the first provider-validation attempt for each deployed release.
-      # Only the calendar due check is bypassed; all evidence and CIO gates remain.
+      # pass for each deployed release. Only the calendar due check is bypassed;
+      # all evidence and CIO gates remain active and fail closed.
       - key: CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_ON_RELEASE
         value: "true"
+      - key: CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_TIMEOUT_SECONDS
+        value: "1800"
       # Provider validation still runs and persists its failed checks, but a
       # transient or entitlement-specific provider issue must not take the
       # authenticated console offline. REQUIRE_LIVE_PROVIDER remains the
