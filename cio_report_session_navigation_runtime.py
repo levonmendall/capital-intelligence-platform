@@ -1,9 +1,8 @@
-"""Keep CIO-report navigation tappable inside the authenticated Streamlit session.
+"""Keep CIO-report navigation inside the authenticated Streamlit session.
 
-Raw browser links replace the Streamlit session and can discard session-local
-authentication. A visual card layered over an invisible button is also unreliable
-on touch devices. This presentation-only adapter uses visible native Streamlit
-controls and stores report-open state in the existing authenticated session.
+The adapter also renders the exact-lineage decision as a plain-language investment
+memo before the technical decision record. It is presentation-only and cannot alter
+investment evidence, CIO authority, construction, execution, or portfolio state.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from html import escape
 from types import ModuleType
 from typing import Any, Callable, Mapping
 
+import cio_investment_memo as investment_memo
 from cio_decision_export import (
     build_cio_decision_export,
     cio_decision_export_filename,
@@ -24,7 +24,6 @@ from cio_decision_export import (
 _INSTALLED_STATE_KEY = "_capital_intelligence_cio_report_session_navigation_installed"
 _REPORT_STATE_KEY = "_capital_intelligence_full_cio_report_open"
 _VIEW_QUERY_KEY = "view"
-_VIEW_QUERY_VALUE = "cio-report"
 _HISTORY_LIMIT = 500
 
 _SESSION_NAVIGATION_CSS = """
@@ -37,14 +36,9 @@ _SESSION_NAVIGATION_CSS = """
     box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 14px 34px rgba(0,0,0,.18);
     overflow: hidden;
 }
-.st-key-cio_report_open_control .cio-report-link-shell {
-    margin: 0 !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
-}
+.st-key-cio_report_open_control .cio-report-link-shell,
 .st-key-cio_report_open_control .cio-report-link-card {
+    margin: 0 !important;
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
@@ -72,7 +66,6 @@ _SESSION_NAVIGATION_CSS = """
     font-size: .78rem !important;
     line-height: 1.25 !important;
     font-weight: 800 !important;
-    letter-spacing: .015em !important;
 }
 .st-key-cio_report_open_control [data-testid="stButton"] button:hover,
 .st-key-cio_report_open_control [data-testid="stButton"] button:focus-visible {
@@ -81,10 +74,7 @@ _SESSION_NAVIGATION_CSS = """
     box-shadow: 0 0 0 2px rgba(var(--surface-rgb), .15) !important;
     transform: translateY(-1px);
 }
-.st-key-cio_report_back_control {
-    width: fit-content;
-    margin: .28rem 0 .38rem;
-}
+.st-key-cio_report_back_control { width: fit-content; margin: .28rem 0 .38rem; }
 .st-key-cio_report_back_control [data-testid="stButton"] button {
     min-height: 2.75rem !important;
     padding: .35rem .25rem !important;
@@ -94,13 +84,6 @@ _SESSION_NAVIGATION_CSS = """
     box-shadow: none !important;
     font-size: .72rem !important;
     font-weight: 760 !important;
-    text-decoration: none !important;
-}
-.st-key-cio_report_back_control [data-testid="stButton"] button:hover,
-.st-key-cio_report_back_control [data-testid="stButton"] button:focus-visible {
-    color: var(--surface-accent) !important;
-    text-decoration: underline !important;
-    background: transparent !important;
 }
 .st-key-cio_report_export_control {
     margin: .35rem 0 .8rem;
@@ -120,20 +103,8 @@ _SESSION_NAVIGATION_CSS = """
     opacity: 1 !important;
     pointer-events: auto !important;
 }
-.st-key-cio_report_export_control [data-testid="stCaptionContainer"] {
-    margin-top: .4rem !important;
-}
 @media (max-width: 760px) {
-    .st-key-cio_report_open_control [data-testid="stButton"] {
-        padding: 0 .62rem .62rem !important;
-    }
-    .st-key-cio_report_open_control [data-testid="stButton"] button {
-        min-height: 3.15rem !important;
-        font-size: .76rem !important;
-    }
-    .st-key-cio_report_export_control {
-        padding: .62rem;
-    }
+    .st-key-cio_report_open_control [data-testid="stButton"] button,
     .st-key-cio_report_export_control [data-testid="stDownloadButton"] button {
         min-height: 3.15rem !important;
     }
@@ -143,8 +114,6 @@ _SESSION_NAVIGATION_CSS = """
 
 
 def _remove_legacy_route(streamlit_module: ModuleType) -> None:
-    """Remove only the obsolete report query parameter when it is present."""
-
     params = getattr(streamlit_module, "query_params", None)
     if params is None:
         return
@@ -155,8 +124,6 @@ def _remove_legacy_route(streamlit_module: ModuleType) -> None:
 
 
 def _set_report_view(streamlit_module: ModuleType, *, open_report: bool) -> None:
-    """Change the report view without replacing the authenticated browser session."""
-
     state = streamlit_module.session_state
     if open_report:
         state[_REPORT_STATE_KEY] = True
@@ -219,8 +186,6 @@ def _render_authenticated_link(
 
 
 def _latest_record(app: ModuleType, event_type: str) -> Mapping[str, Any] | None:
-    """Read one already-persisted display record without affecting the decision path."""
-
     loader = getattr(app, "_latest", None)
     if not callable(loader):
         return None
@@ -232,8 +197,6 @@ def _latest_record(app: ModuleType, event_type: str) -> Mapping[str, Any] | None
 
 
 def _history_records(app: ModuleType, event_type: str) -> tuple[Mapping[str, Any], ...]:
-    """Read recent persisted records newest-first for exact lineage selection."""
-
     loader = getattr(app, "_history", None)
     if not callable(loader):
         return ()
@@ -266,15 +229,12 @@ def _candidate_records(
     return tuple(records)
 
 
-def _render_decision_export(
+def _decision_bundle(
     app: ModuleType,
-    streamlit_module: ModuleType,
     *,
     briefing: Mapping[str, Any] | None,
     construction: Mapping[str, Any] | None,
 ) -> Mapping[str, Any]:
-    """Render an exact-lineage export on the authenticated full-report route."""
-
     selected = select_cio_decision_records(
         daily_cio_briefing=briefing,
         cio_decisions=_candidate_records(app, "cio_decision"),
@@ -289,7 +249,21 @@ def _render_decision_export(
         ),
         decision_evaluations=_candidate_records(app, "decision_evaluation"),
     )
-    bundle = build_cio_decision_export(**selected)
+    return build_cio_decision_export(**selected)
+
+
+def _render_decision_export(
+    app: ModuleType,
+    streamlit_module: ModuleType,
+    *,
+    briefing: Mapping[str, Any] | None,
+    construction: Mapping[str, Any] | None,
+) -> Mapping[str, Any]:
+    bundle = _decision_bundle(
+        app,
+        briefing=briefing,
+        construction=construction,
+    )
     record_presence = bundle.get("record_presence", {})
     export_available = bool(
         isinstance(record_presence, Mapping) and any(record_presence.values())
@@ -299,8 +273,12 @@ def _render_decision_export(
 
     with streamlit_module.container(key="cio_report_export_control"):
         if isinstance(actions, Mapping) and actions.get("deferred"):
-            selected_action = str(actions.get("selected_action") or "").replace("_", " ").title()
-            effective_action = str(actions.get("effective_action") or "").replace("_", " ").title()
+            selected_action = str(actions.get("selected_action") or "").replace(
+                "_", " "
+            ).title()
+            effective_action = str(actions.get("effective_action") or "").replace(
+                "_", " "
+            ).title()
             streamlit_module.info(
                 f"Underlying selected action: {selected_action}. "
                 f"Effective current action: {effective_action} — deferred by governed "
@@ -334,8 +312,6 @@ def _render_decision_export(
 
 
 class _BackAnchorSuppressingProxy:
-    """Delegate Streamlit calls while removing the obsolete full-page back anchor."""
-
     def __init__(self, streamlit_module: ModuleType) -> None:
         self._streamlit = streamlit_module
 
@@ -348,8 +324,23 @@ class _BackAnchorSuppressingProxy:
         return self._streamlit.markdown(content, *args, **kwargs)
 
 
+def _market_backdrop(
+    detail: ModuleType,
+    app: ModuleType,
+    briefing: Mapping[str, Any] | None,
+) -> str:
+    backdrop_module = getattr(detail, "backdrop", None)
+    loader = getattr(backdrop_module, "_current_market_backdrop", None)
+    if not callable(loader):
+        return ""
+    try:
+        return str(loader(app, briefing) or "")
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return ""
+
+
 def install(detail: ModuleType) -> None:
-    """Replace report anchors and overlays with visible session-native controls."""
+    """Install visible session navigation, exact export, and investment memo."""
 
     if getattr(detail, _INSTALLED_STATE_KEY, False):
         return
@@ -398,11 +389,18 @@ def install(detail: ModuleType) -> None:
                 type="tertiary",
             ):
                 _set_report_view(streamlit_module, open_report=False)
-        _render_decision_export(
+        bundle = _render_decision_export(
             app,
             streamlit_module,
             briefing=briefing,
             construction=construction,
+        )
+        posture, _ = detail._posture(mandate, deployed)
+        investment_memo.render_investment_memo(
+            streamlit_module,
+            bundle,
+            market_backdrop=_market_backdrop(detail, app, briefing),
+            portfolio_posture=posture,
         )
         original_full_report(
             app,

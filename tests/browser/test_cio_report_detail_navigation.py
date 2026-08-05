@@ -67,6 +67,7 @@ def test_portfolio_opens_full_cio_report_from_visible_touch_target(
         report_button.wait_for(state="visible", timeout=15_000)
         assert page.get_by_text("Monitoring and reversal conditions", exact=True).count() == 0
         assert page.get_by_text("Decision lineage", exact=True).count() == 0
+        assert page.get_by_text("CIO investment memo", exact=True).count() == 0
 
         capital_box = capital.bounding_box()
         button_box = report_button.bounding_box()
@@ -82,13 +83,29 @@ def test_portfolio_opens_full_cio_report_from_visible_touch_target(
         ) != "none"
 
         _activate(page, report_button, touch=touch)
-        page.get_by_text("Full CIO report", exact=True).first.wait_for(
-            state="visible",
-            timeout=15_000,
-        )
+        full_report = page.get_by_text("Full CIO report", exact=True).first
+        full_report.wait_for(state="visible", timeout=15_000)
+        memo = page.get_by_text("CIO investment memo", exact=True).first
+        memo.wait_for(state="visible", timeout=15_000)
+        page.get_by_text("The investment question", exact=True).wait_for()
+        page.get_by_text("Why the CIO reached this conclusion", exact=True).wait_for()
+        page.get_by_text("Bull case", exact=True).wait_for()
+        page.get_by_text("Bear case", exact=True).wait_for()
+        page.get_by_text("Portfolio impact", exact=True).wait_for()
+        page.get_by_text("What would change the decision", exact=True).wait_for()
         page.get_by_text("Decision context", exact=True).wait_for()
         page.get_by_text("Monitoring and reversal conditions", exact=True).wait_for()
         page.get_by_text("Decision lineage", exact=True).wait_for()
+
+        memo_box = memo.bounding_box()
+        report_box = full_report.bounding_box()
+        assert memo_box is not None
+        assert report_box is not None
+        assert memo_box["y"] < report_box["y"]
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        ) is True
+
         export_button = page.locator('[data-testid="stDownloadButton"]').get_by_role(
             "button",
             name="Download decision JSON",
@@ -121,5 +138,6 @@ def test_portfolio_opens_full_cio_report_from_visible_touch_target(
         ).wait_for()
         assert main_frame_navigations == []
         assert page.get_by_text("Full CIO report", exact=True).count() == 0
+        assert page.get_by_text("CIO investment memo", exact=True).count() == 0
         assert page.get_by_label("Email address").count() == 0
         browser.close()
