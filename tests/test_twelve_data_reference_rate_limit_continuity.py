@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from providers.twelve_data_reference_rate_limited import (
     TwelveDataRateLimitedReferenceProvider,
+    build_twelve_data_rate_limited_reference_provider,
 )
 
 
@@ -136,3 +137,68 @@ def test_non_rate_limit_failure_is_not_retried() -> None:
     assert result.status_code == 402
     assert calls == 1
     assert delays == []
+
+
+def test_sequential_reference_requests_are_proactively_paced() -> None:
+    elapsed = 100.0
+    delays: list[float] = []
+    calls = 0
+
+    def monotonic() -> float:
+        return elapsed
+
+    def sleeper(seconds: float) -> None:
+        nonlocal elapsed
+        delays.append(seconds)
+        elapsed += seconds
+
+    def http_get(*args, **kwargs) -> object:
+        nonlocal calls
+        calls += 1
+        return _response(200, **{"api-credits-left": "7"})
+
+    provider = TwelveDataRateLimitedReferenceProvider(
+        api_key="test-key",
+        http_get=http_get,
+        sleeper=sleeper,
+        monotonic=monotonic,
+        minimum_request_interval_seconds=8,
+    )
+
+    first = provider._rate_limited_get(
+        "https://example.test/stocks",
+        params={"mic_code": "BVMF"},
+        timeout=30,
+    )
+    second = provider._rate_limited_get(
+        "https://example.test/stocks",
+        params={"mic_code": "XHKG"},
+        timeout=30,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls == 2
+    assert delays == [8.0]
+
+
+def test_production_builder_enables_bounded_request_spacing(monkeypatch) -> None:
+    monkeypatch.delenv(
+        "CAPITAL_INTELLIGENCE_TWELVE_DATA_MINIMUM_REQUEST_INTERVAL_SECONDS",
+        raising=False,
+    )
+
+    provider = build_twelve_data_rate_limited_reference_provider()
+
+    assert provider.minimum_request_interval_seconds == 8.0
+
+
+def test_production_builder_honors_explicit_request_spacing(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_TWELVE_DATA_MINIMUM_REQUEST_INTERVAL_SECONDS",
+        "6.5",
+    )
+
+    provider = build_twelve_data_rate_limited_reference_provider()
+
+    assert provider.minimum_request_interval_seconds == 6.5
