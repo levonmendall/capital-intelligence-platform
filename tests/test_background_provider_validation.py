@@ -88,8 +88,8 @@ def test_release_diagnostic_is_launched_as_a_separate_process(monkeypatch) -> No
     calls = []
     process = FakeProcess(running=False)
 
-    def popen(command, *, env):
-        calls.append((command, env))
+    def popen(command, *, env, cwd):
+        calls.append((command, env, cwd))
         return process
 
     monkeypatch.setattr(worker.subprocess, "Popen", popen)
@@ -98,8 +98,9 @@ def test_release_diagnostic_is_launched_as_a_separate_process(monkeypatch) -> No
     returned = worker._run_release_diagnostic()
 
     assert returned is process
-    assert calls[0][0][1:] == ("run_manual_cio_diagnostic.py",)
+    assert Path(calls[0][0][1]).name == "run_bounded_manual_cio_diagnostic.py"
     assert calls[0][1]["CAPITAL_INTELLIGENCE_ENVIRONMENT"] == "production"
+    assert Path(calls[0][2]) == Path(calls[0][0][1]).parent
 
 
 def test_diagnostic_starts_before_first_provider_validation(monkeypatch) -> None:
