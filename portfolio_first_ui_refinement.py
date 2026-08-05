@@ -13,6 +13,12 @@ from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
 
+from cio_decision_export import (
+    build_cio_decision_export,
+    cio_decision_export_filename,
+    cio_decision_export_json,
+)
+
 
 _INSTALLED_STATE_KEY = "_capital_intelligence_portfolio_first_ui_installed"
 _NAVIGATION_KEY = "primary_surface_navigation_portfolio_first_v1"
@@ -283,6 +289,28 @@ def _render_cio_report(
                 unsafe_allow_html=True,
             )
         app.render_information_freshness(briefing=briefing, surface="portfolio")
+
+        export_bundle = build_cio_decision_export(
+            cio_decision=app._latest("cio_decision"),
+            daily_cio_briefing=briefing,
+            decision_evidence_snapshot=app._latest("decision_evidence_snapshot"),
+            portfolio_construction=construction,
+            decision_evaluation=app._latest("decision_evaluation"),
+        )
+        export_available = any(export_bundle["record_presence"].values())
+        st.download_button(
+            "Download decision JSON",
+            data=cio_decision_export_json(export_bundle),
+            file_name=cio_decision_export_filename(export_bundle),
+            mime="application/json",
+            key="portfolio-cio-decision-json-download",
+            use_container_width=True,
+            disabled=not export_available,
+        )
+        st.caption(
+            "Read-only export of the latest CIO decision, briefing, evidence snapshot, "
+            "construction, and evaluation. It cannot authorize or execute a trade."
+        )
 
 
 def _is_capital_metric_grid(rows: object, kwargs: Mapping[str, object]) -> bool:
