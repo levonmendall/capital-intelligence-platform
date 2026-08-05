@@ -1,4 +1,4 @@
-"""Regression coverage for bounded concurrent SEC company-fact collection."""
+"""Regression coverage for memory-bounded concurrent SEC company-fact collection."""
 
 from __future__ import annotations
 
@@ -8,9 +8,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from operations.paper_evidence_spool import close_spooled_paper_evidence
-from operations.paper_evidence_spool_concurrent import (
-    collect_spooled_paper_evidence,
-)
+from operations.paper_evidence_spool_concurrent import collect_spooled_paper_evidence
 
 
 AS_OF = datetime(2026, 8, 5, 1, 30, tzinfo=timezone.utc)
@@ -56,13 +54,18 @@ class SecProvider:
     def __init__(self, state: ConcurrencyState) -> None:
         self.state = state
 
-    def fetch_company_facts(self, _query):
+    def fetch_company_facts(self, query):
         with self.state.lock:
             self.state.active += 1
             self.state.maximum = max(self.state.maximum, self.state.active)
         try:
             time.sleep(0.03)
-            return ()
+            return (
+                {
+                    "cik": query.cik,
+                    "payload": "bounded-company-fact" * 100,
+                },
+            )
         finally:
             with self.state.lock:
                 self.state.active -= 1
@@ -78,18 +81,20 @@ def instrument(symbol: str, cik: str):
     )
 
 
-def test_company_facts_overlap_and_emit_progress(capsys, monkeypatch, tmp_path) -> None:
+def test_company_facts_overlap_without_unbounded_result_retention(
+    capsys,
+    monkeypatch,
+    tmp_path,
+) -> None:
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_DIR", str(tmp_path))
     state = ConcurrencyState()
+    instruments = tuple(
+        instrument(f"S{index:02d}", f"{index + 1:010d}") for index in range(12)
+    )
     universe = SimpleNamespace(
         identifier="concurrent-sec-test",
         limitations=(),
-        instruments=(
-            instrument("AAA", "0000000001"),
-            instrument("BBB", "0000000002"),
-            instrument("CCC", "0000000003"),
-            instrument("DDD", "0000000004"),
-        ),
+        instruments=instruments,
     )
 
     payload = collect_spooled_paper_evidence(
@@ -105,15 +110,19 @@ def test_company_facts_overlap_and_emit_progress(capsys, monkeypatch, tmp_path) 
         instrument_evaluation_scheduled=lambda _instrument, _as_of: True,
         history_days=30,
         listed_batch_size=4,
-        sec_workers=4,
+        sec_workers=2,
         sec_issuer_start_interval_seconds=0.0,
     )
     try:
-        assert state.maximum >= 2
-        assert set(payload["company_facts"]) == {"AAA", "BBB", "CCC", "DDD"}
+        assert state.maximum == 2
+        assert set(payload["company_facts"]) == {
+            instrument.symbol for instrument in instruments
+        }
         output = capsys.readouterr().out
         assert "paper_evidence_collection_started" in output
         assert "paper_evidence_company_facts_started" in output
+        assert '"maximum_in_flight_limit": 2' in output
+        assert '"maximum_in_flight_count": 2' in output
         assert "paper_evidence_company_facts_completed" in output
         assert "paper_evidence_collection_completed" in output
     finally:
@@ -141,10 +150,10 @@ def test_sec_worker_count_is_bounded(monkeypatch, tmp_path) -> None:
             candidate_asset_class=CandidateAssetClass,
             instrument_evaluation_scheduled=lambda _instrument, _as_of: True,
             history_days=30,
-            sec_workers=9,
+            sec_workers=5,
             sec_issuer_start_interval_seconds=0.0,
         )
     except ValueError as error:
-        assert "cannot exceed 8" in str(error)
+        assert "cannot exceed 4" in str(error)
     else:  # pragma: no cover - regression guard
-        raise AssertionError("expected SEC worker bound to reject 9 workers")
+        raise AssertionError("expected SEC worker bound to reject 5 workers")

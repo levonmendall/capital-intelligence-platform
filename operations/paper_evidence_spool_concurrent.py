@@ -1,10 +1,10 @@
-"""Bounded concurrent evidence collection for broad paper-candidate analysis.
+"""Memory-bounded concurrent evidence collection for broad paper-candidate analysis.
 
-The canonical spool remains append-only and disk-backed. This runtime collector overlaps
+The cycle-local spool remains append-only and disk-backed. This runtime collector overlaps
 issuer-level SEC requests while spacing issuer starts so simultaneous Render processes stay
-below the SEC fair-access request ceiling. Results are appended on the calling thread, so
-provider workers never write SQLite concurrently. The collector has no candidate, CIO,
-construction, execution, or real-money authority.
+below the SEC fair-access request ceiling. Only a bounded number of provider results may
+exist in memory at once, and all SQLite writes remain on the calling thread. The collector
+has no candidate, CIO, construction, execution, or real-money authority.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import json
 import threading
 import time
 from collections.abc import Mapping, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -23,7 +23,8 @@ from operations.paper_evidence_spool import (
 )
 
 _DEFAULT_LISTED_BATCH_SIZE = 10
-_DEFAULT_SEC_WORKERS = 4
+_DEFAULT_SEC_WORKERS = 2
+_MAXIMUM_SEC_WORKERS = 4
 _DEFAULT_SEC_ISSUER_START_INTERVAL_SECONDS = 0.45
 _PROGRESS_INTERVAL = 25
 
@@ -126,56 +127,87 @@ def _collect_company_facts(
 ) -> None:
     if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
         raise ValueError("SEC fact workers must be a positive integer")
-    if workers > 8:
-        raise ValueError("SEC fact workers cannot exceed 8")
+    if workers > _MAXIMUM_SEC_WORKERS:
+        raise ValueError(
+            f"SEC fact workers cannot exceed {_MAXIMUM_SEC_WORKERS}"
+        )
+
+    eligible = tuple(
+        instrument for instrument in instruments if instrument.issuer_cik is not None
+    )
+    total = len(eligible)
     gate = _IssuerStartGate(issuer_start_interval_seconds)
     executor = ThreadPoolExecutor(
         max_workers=workers,
         thread_name_prefix="sec-company-facts",
     )
-    futures: dict[Future[tuple[str, object]], object] = {}
+    pending: dict[Future[tuple[str, object]], object] = {}
+    instrument_iterator = iter(eligible)
+    maximum_in_flight = 0
+
+    def submit_next() -> bool:
+        nonlocal maximum_in_flight
+        try:
+            instrument = next(instrument_iterator)
+        except StopIteration:
+            return False
+        future = executor.submit(
+            _fetch_company_facts,
+            instrument,
+            as_of=as_of,
+            gate=gate,
+            sec_provider_factory=sec_provider_factory,
+            filing_query_type=filing_query_type,
+        )
+        pending[future] = instrument
+        maximum_in_flight = max(maximum_in_flight, len(pending))
+        return True
+
     try:
-        futures = {
-            executor.submit(
-                _fetch_company_facts,
-                instrument,
-                as_of=as_of,
-                gate=gate,
-                sec_provider_factory=sec_provider_factory,
-                filing_query_type=filing_query_type,
-            ): instrument
-            for instrument in instruments
-            if instrument.issuer_cik is not None
-        }
-        total = len(futures)
+        for _ in range(min(workers, total)):
+            submit_next()
         _log(
             "paper_evidence_company_facts_started",
             issuer_count=total,
             worker_count=workers,
+            maximum_in_flight_limit=workers,
             issuer_start_interval_seconds=issuer_start_interval_seconds,
         )
         completed = 0
-        for future in as_completed(futures):
-            symbol, facts = future.result()
-            spool.append(
-                "company_facts",
-                symbol,
-                facts,
-                recorded_at=as_of,
+        while pending:
+            completed_futures, _ = wait(
+                tuple(pending),
+                return_when=FIRST_COMPLETED,
             )
-            completed += 1
-            if completed % _PROGRESS_INTERVAL == 0 or completed == total:
-                _log(
-                    "paper_evidence_company_facts_progress",
-                    completed_issuer_count=completed,
-                    issuer_count=total,
-                )
+            for future in completed_futures:
+                pending.pop(future, None)
+                symbol, facts = future.result()
+                try:
+                    spool.append(
+                        "company_facts",
+                        symbol,
+                        facts,
+                        recorded_at=as_of,
+                    )
+                finally:
+                    del facts
+                completed += 1
+                submit_next()
+                if completed % _PROGRESS_INTERVAL == 0 or completed == total:
+                    _log(
+                        "paper_evidence_company_facts_progress",
+                        completed_issuer_count=completed,
+                        issuer_count=total,
+                        in_flight_count=len(pending),
+                        maximum_in_flight_count=maximum_in_flight,
+                    )
         _log(
             "paper_evidence_company_facts_completed",
             issuer_count=total,
+            maximum_in_flight_count=maximum_in_flight,
         )
     except Exception:
-        for future in futures:
+        for future in pending:
             future.cancel()
         raise
     finally:
