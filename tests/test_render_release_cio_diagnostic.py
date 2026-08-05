@@ -8,6 +8,7 @@ from operations.heartbeat import WorkerHeartbeatStore
 from run_render_service_nonblocking import (
     _release_components_ready,
     _release_diagnostic_command,
+    _release_diagnostic_environment,
     _start_release_diagnostic,
 )
 
@@ -28,6 +29,31 @@ def test_release_diagnostic_command_is_not_forced_by_default() -> None:
         {},
         python_executable="python-test",
     ) == ("python-test", "run_manual_cio_diagnostic.py")
+
+
+def test_release_diagnostic_requires_complete_live_all_market_scope() -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE": "true",
+        "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY": "false",
+        "CAPITAL_INTELLIGENCE_UNRELATED_SETTING": "preserved",
+    }
+
+    diagnostic = _release_diagnostic_environment(values)
+
+    assert diagnostic["CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE"] == "false"
+    assert diagnostic["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY"] == "true"
+    assert (
+        diagnostic["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_MARKET_DISCOVERY"]
+        == "true"
+    )
+    assert (
+        diagnostic["CAPITAL_INTELLIGENCE_DISCOVERY_REQUIRE_COMPLETE_MARKET_COVERAGE"]
+        == "true"
+    )
+    assert diagnostic["CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER"] == "true"
+    assert diagnostic["CAPITAL_INTELLIGENCE_PROVIDER_RUNTIME_MODE"] == "live"
+    assert diagnostic["CAPITAL_INTELLIGENCE_UNRELATED_SETTING"] == "preserved"
+    assert values["CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE"] == "true"
 
 
 def test_release_readiness_requires_current_healthy_api_and_streamlit(
