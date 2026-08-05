@@ -72,7 +72,14 @@ def build_cio_diagnostic_audit(
     settings: Any,
     values: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """Return only release, state, aggregate coverage, and market-lane counts."""
+    """Return only release, state, aggregate coverage, and market-lane counts.
+
+    Persisted production context is cycle-scoped evidence. It may be included only when
+    its cycle key exactly matches the current diagnostic request. A diagnostic that fails
+    before publishing its own context therefore reports fresh failure state with empty,
+    fail-closed aggregates instead of inheriting counts, sources, or limitations from an
+    older cycle.
+    """
 
     resolved = os.environ if values is None else values
     release = _release(resolved)
@@ -90,11 +97,15 @@ def build_cio_diagnostic_audit(
         }
 
     context_path: Path = _state_path(settings)
-    context = _load_json(context_path) or {}
+    persisted_context = _load_json(context_path) or {}
     cycle_matches = bool(
         diagnostic.cycle_key
-        and str(context.get("cycle_key") or "") == diagnostic.cycle_key
+        and str(persisted_context.get("cycle_key") or "")
+        == diagnostic.cycle_key
     )
+    # Never expose or evaluate persisted evidence from another diagnostic cycle.
+    context: Mapping[str, Any] = persisted_context if cycle_matches else {}
+
     scope_required = context.get("comprehensive_discovery_required") is True
     scope_state = str(
         context.get("comprehensive_discovery_scope_state") or "missing"
