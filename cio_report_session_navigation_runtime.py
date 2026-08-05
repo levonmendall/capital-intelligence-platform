@@ -13,6 +13,12 @@ from html import escape
 from types import ModuleType
 from typing import Any, Callable, Mapping
 
+from cio_decision_export import (
+    build_cio_decision_export,
+    cio_decision_export_filename,
+    cio_decision_export_json,
+)
+
 
 _INSTALLED_STATE_KEY = "_capital_intelligence_cio_report_session_navigation_installed"
 _REPORT_STATE_KEY = "_capital_intelligence_full_cio_report_open"
@@ -94,6 +100,27 @@ _SESSION_NAVIGATION_CSS = """
     text-decoration: underline !important;
     background: transparent !important;
 }
+.st-key-cio_report_export_control {
+    margin: .35rem 0 .8rem;
+    padding: .72rem;
+    border: 1px solid rgba(var(--surface-rgb), .24);
+    border-radius: .92rem;
+    background: linear-gradient(145deg, rgba(13,20,34,.92), rgba(8,13,24,.92));
+}
+.st-key-cio_report_export_control [data-testid="stDownloadButton"] button {
+    width: 100% !important;
+    min-height: 3rem !important;
+    border: 1px solid rgba(var(--surface-rgb), .48) !important;
+    border-radius: .78rem !important;
+    background: linear-gradient(135deg, rgba(var(--surface-rgb), .24), rgba(var(--surface-rgb-2), .14)) !important;
+    color: #f5f7ff !important;
+    font-weight: 800 !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+.st-key-cio_report_export_control [data-testid="stCaptionContainer"] {
+    margin-top: .4rem !important;
+}
 @media (max-width: 760px) {
     .st-key-cio_report_open_control [data-testid="stButton"] {
         padding: 0 .62rem .62rem !important;
@@ -101,6 +128,12 @@ _SESSION_NAVIGATION_CSS = """
     .st-key-cio_report_open_control [data-testid="stButton"] button {
         min-height: 3.15rem !important;
         font-size: .76rem !important;
+    }
+    .st-key-cio_report_export_control {
+        padding: .62rem;
+    }
+    .st-key-cio_report_export_control [data-testid="stDownloadButton"] button {
+        min-height: 3.15rem !important;
     }
 }
 </style>
@@ -183,6 +216,58 @@ def _render_authenticated_link(
             _set_report_view(streamlit_module, open_report=True)
 
 
+def _latest_record(app: ModuleType, event_type: str) -> Mapping[str, Any] | None:
+    """Read one already-persisted display record without affecting the decision path."""
+
+    loader = getattr(app, "_latest", None)
+    if not callable(loader):
+        return None
+    try:
+        value = loader(event_type)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    return value if isinstance(value, Mapping) else None
+
+
+def _render_decision_export(
+    app: ModuleType,
+    streamlit_module: ModuleType,
+    *,
+    briefing: Mapping[str, Any] | None,
+    construction: Mapping[str, Any] | None,
+) -> None:
+    """Render the export on the active authenticated full-report route."""
+
+    bundle = build_cio_decision_export(
+        cio_decision=_latest_record(app, "cio_decision"),
+        daily_cio_briefing=briefing,
+        decision_evidence_snapshot=_latest_record(
+            app,
+            "decision_evidence_snapshot",
+        ),
+        portfolio_construction=construction,
+        decision_evaluation=_latest_record(app, "decision_evaluation"),
+    )
+    record_presence = bundle.get("record_presence", {})
+    export_available = bool(
+        isinstance(record_presence, Mapping) and any(record_presence.values())
+    )
+    with streamlit_module.container(key="cio_report_export_control"):
+        streamlit_module.download_button(
+            "Download decision JSON",
+            data=cio_decision_export_json(bundle),
+            file_name=cio_decision_export_filename(bundle),
+            mime="application/json",
+            key="full-cio-report-decision-json-download",
+            use_container_width=True,
+            disabled=not export_available,
+        )
+        streamlit_module.caption(
+            "Read-only export of the current CIO decision, briefing, evidence snapshot, "
+            "construction, and evaluation. It cannot authorize or execute a trade."
+        )
+
+
 class _BackAnchorSuppressingProxy:
     """Delegate Streamlit calls while removing the obsolete full-page back anchor."""
 
@@ -248,6 +333,12 @@ def install(detail: ModuleType) -> None:
                 type="tertiary",
             ):
                 _set_report_view(streamlit_module, open_report=False)
+        _render_decision_export(
+            app,
+            streamlit_module,
+            briefing=briefing,
+            construction=construction,
+        )
         original_full_report(
             app,
             _BackAnchorSuppressingProxy(streamlit_module),
