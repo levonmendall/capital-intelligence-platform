@@ -23,7 +23,7 @@ from operations.manual_cio_diagnostic import (
 )
 
 
-_DEFAULT_TIMEOUT_SECONDS = 900.0
+_DEFAULT_TIMEOUT_SECONDS = 1800.0
 
 
 def _release(values: Mapping[str, str]) -> str:
