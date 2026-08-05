@@ -6,10 +6,10 @@ provider outages or slow responses are recorded in the readiness report while th
 authenticated console and health endpoint remain online.
 
 When explicitly enabled, the worker also launches one paper-only diagnostic CIO pass per
-release. The diagnostic is started independently before the first potentially slow
-provider-validation call, so a stalled provider probe cannot prevent troubleshooting.
-That pass bypasses only the calendar due check; every evidence, specialist, CIO,
-construction, and paper-execution control remains active and fail-closed.
+release. A dedicated watchdog emits an immediate run-start event and enforces a bounded
+operational deadline, so a child that stalls before producing its own result cannot remain
+silent indefinitely. The pass bypasses only the calendar due check; every evidence,
+specialist, CIO, construction, and paper-execution control remains active and fail-closed.
 """
 
 from __future__ import annotations
@@ -82,12 +82,16 @@ def validate_once() -> tuple[ProviderValidationReport, Path]:
 
 
 def _run_release_diagnostic() -> subprocess.Popen[bytes] | subprocess.Popen[str] | None:
-    """Start the bounded diagnostic without waiting on provider validation."""
+    """Start the observable, bounded diagnostic before provider validation."""
 
+    script = Path(__file__).resolve().with_name(
+        "run_bounded_manual_cio_diagnostic.py"
+    )
     try:
         process = subprocess.Popen(
-            (sys.executable, "run_manual_cio_diagnostic.py"),
+            (sys.executable, str(script)),
             env=dict(os.environ),
+            cwd=str(script.parent),
         )
     except OSError as error:
         _log(
