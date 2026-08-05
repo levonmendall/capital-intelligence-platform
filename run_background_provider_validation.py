@@ -6,9 +6,10 @@ provider outages or slow responses are recorded in the readiness report while th
 authenticated console and health endpoint remain online.
 
 When explicitly enabled, the worker also launches one paper-only diagnostic CIO pass per
-release after the first provider-validation attempt. That pass bypasses only the calendar
-due check; every evidence, specialist, CIO, construction, and paper-execution control
-remains active and fail-closed.
+release. The diagnostic is started independently before the first potentially slow
+provider-validation call, so a stalled provider probe cannot prevent troubleshooting.
+That pass bypasses only the calendar due check; every evidence, specialist, CIO,
+construction, and paper-execution control remains active and fail-closed.
 """
 
 from __future__ import annotations
@@ -80,25 +81,38 @@ def validate_once() -> tuple[ProviderValidationReport, Path]:
     return report, report_path
 
 
-def _run_release_diagnostic() -> None:
-    """Launch the bounded diagnostic without making it a web-service dependency."""
+def _run_release_diagnostic() -> subprocess.Popen[bytes] | subprocess.Popen[str] | None:
+    """Start the bounded diagnostic without waiting on provider validation."""
 
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             (sys.executable, "run_manual_cio_diagnostic.py"),
             env=dict(os.environ),
-            check=False,
         )
     except OSError as error:
         _log(
             "manual_cio_diagnostic_launch_failed",
             error_type=type(error).__name__,
         )
-        return
+        return None
     _log(
-        "manual_cio_diagnostic_process_finished",
-        return_code=completed.returncode,
+        "manual_cio_diagnostic_process_started",
+        pid=process.pid,
     )
+    return process
+
+
+def _terminate_diagnostic(
+    process: subprocess.Popen[bytes] | subprocess.Popen[str] | None,
+) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
 
 
 def run_loop(
@@ -144,7 +158,7 @@ def run_loop(
             signal.SIGINT: signal.signal(signal.SIGINT, request_stop),
         }
 
-    diagnostic_attempted = False
+    diagnostic_process: subprocess.Popen[bytes] | subprocess.Popen[str] | None = None
     try:
         _log(
             "provider_validation_worker_started",
@@ -153,6 +167,11 @@ def run_loop(
         )
         if stopping.wait(initial_delay):
             return 0
+
+        # The diagnostic must not sit behind a provider call that can be slow or
+        # stalled. It is independently idempotent per release and remains paper-only.
+        diagnostic_process = _run_release_diagnostic()
+
         while not stopping.is_set():
             try:
                 validate_once()
@@ -161,13 +180,11 @@ def run_loop(
                     "provider_validation_iteration_failed",
                     error_type=type(error).__name__,
                 )
-            if not diagnostic_attempted:
-                _run_release_diagnostic()
-                diagnostic_attempted = True
             if stopping.wait(interval):
                 break
         return 0
     finally:
+        _terminate_diagnostic(diagnostic_process)
         for handled_signal, previous in previous_handlers.items():
             signal.signal(handled_signal, previous)
         _log("provider_validation_worker_stopped")
