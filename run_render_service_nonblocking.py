@@ -23,7 +23,9 @@ When explicitly enabled, one release diagnostic waits until the current API and 
 children are healthy, then invokes the existing fully governed manual CIO diagnostic. The
 diagnostic is one-shot, paper-only, requires complete all-market discovery even while the
 long-running service remains in an explicit source transition, and is never restarted in
-a loop by this bootstrap.
+a loop by this bootstrap. Its credential-safe aggregate audit is published through
+Streamlit static-file serving before and after the run so an old release cannot be
+mistaken for the current one.
 """
 
 from __future__ import annotations
@@ -126,6 +128,39 @@ def _release_diagnostic_command(
     return tuple(command)
 
 
+def _release_diagnostic_audit_command(
+    *,
+    python_executable: str | None = None,
+) -> tuple[str, ...]:
+    return (
+        python_executable or sys.executable,
+        "publish_cio_diagnostic_audit.py",
+    )
+
+
+def _publish_release_diagnostic_audit(
+    values: MutableMapping[str, str],
+) -> int | None:
+    command = _release_diagnostic_audit_command()
+    try:
+        completed = subprocess.run(command, env=dict(values), check=False)
+    except OSError as error:
+        _log(
+            "manual_cio_release_audit_publication_failed",
+            error_type=type(error).__name__,
+            paper_only=True,
+        )
+        return None
+    _log(
+        "manual_cio_release_audit_publication_finished",
+        return_code=completed.returncode,
+        release=values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+        public_path="/app/static/cio-diagnostic.json",
+        paper_only=True,
+    )
+    return completed.returncode
+
+
 def _release_components_ready(
     values: MutableMapping[str, str],
     *,
@@ -151,6 +186,8 @@ def _run_release_diagnostic_after_readiness(
     *,
     not_before: datetime,
 ) -> None:
+    diagnostic_values = _release_diagnostic_environment(values)
+    _publish_release_diagnostic_audit(diagnostic_values)
     wait_seconds = _positive_float(
         values,
         "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_STARTUP_WAIT_SECONDS",
@@ -178,7 +215,6 @@ def _run_release_diagnostic_after_readiness(
         )
         return
 
-    diagnostic_values = _release_diagnostic_environment(values)
     command = _release_diagnostic_command(diagnostic_values)
     _log(
         "manual_cio_release_diagnostic_starting",
@@ -196,7 +232,9 @@ def _run_release_diagnostic_after_readiness(
             error_type=type(error).__name__,
             paper_only=True,
         )
+        _publish_release_diagnostic_audit(diagnostic_values)
         return
+    _publish_release_diagnostic_audit(diagnostic_values)
     _log(
         "manual_cio_release_diagnostic_finished",
         return_code=completed.returncode,
