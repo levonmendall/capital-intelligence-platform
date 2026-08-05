@@ -17,6 +17,7 @@ from cio_decision_export import (
     build_cio_decision_export,
     cio_decision_export_filename,
     cio_decision_export_json,
+    select_cio_decision_records,
 )
 
 
@@ -24,6 +25,7 @@ _INSTALLED_STATE_KEY = "_capital_intelligence_cio_report_session_navigation_inst
 _REPORT_STATE_KEY = "_capital_intelligence_full_cio_report_open"
 _VIEW_QUERY_KEY = "view"
 _VIEW_QUERY_VALUE = "cio-report"
+_HISTORY_LIMIT = 500
 
 _SESSION_NAVIGATION_CSS = """
 <style>
@@ -229,30 +231,91 @@ def _latest_record(app: ModuleType, event_type: str) -> Mapping[str, Any] | None
     return value if isinstance(value, Mapping) else None
 
 
+def _history_records(app: ModuleType, event_type: str) -> tuple[Mapping[str, Any], ...]:
+    """Read recent persisted records newest-first for exact lineage selection."""
+
+    loader = getattr(app, "_history", None)
+    if not callable(loader):
+        return ()
+    try:
+        values = loader(event_type, limit=_HISTORY_LIMIT)
+    except TypeError:
+        try:
+            values = loader(event_type)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return ()
+    except (OSError, RuntimeError, ValueError):
+        return ()
+    if not isinstance(values, (list, tuple)):
+        return ()
+    return tuple(value for value in values if isinstance(value, Mapping))
+
+
+def _candidate_records(
+    app: ModuleType,
+    event_type: str,
+    explicit: Mapping[str, Any] | None = None,
+) -> tuple[Mapping[str, Any], ...]:
+    records: list[Mapping[str, Any]] = []
+    if isinstance(explicit, Mapping):
+        records.append(explicit)
+    latest = _latest_record(app, event_type)
+    if latest is not None:
+        records.append(latest)
+    records.extend(_history_records(app, event_type))
+    return tuple(records)
+
+
 def _render_decision_export(
     app: ModuleType,
     streamlit_module: ModuleType,
     *,
     briefing: Mapping[str, Any] | None,
     construction: Mapping[str, Any] | None,
-) -> None:
-    """Render the export on the active authenticated full-report route."""
+) -> Mapping[str, Any]:
+    """Render an exact-lineage export on the authenticated full-report route."""
 
-    bundle = build_cio_decision_export(
-        cio_decision=_latest_record(app, "cio_decision"),
+    selected = select_cio_decision_records(
         daily_cio_briefing=briefing,
-        decision_evidence_snapshot=_latest_record(
+        cio_decisions=_candidate_records(app, "cio_decision"),
+        decision_evidence_snapshots=_candidate_records(
             app,
             "decision_evidence_snapshot",
         ),
-        portfolio_construction=construction,
-        decision_evaluation=_latest_record(app, "decision_evaluation"),
+        portfolio_constructions=_candidate_records(
+            app,
+            "portfolio_construction",
+            construction,
+        ),
+        decision_evaluations=_candidate_records(app, "decision_evaluation"),
     )
+    bundle = build_cio_decision_export(**selected)
     record_presence = bundle.get("record_presence", {})
     export_available = bool(
         isinstance(record_presence, Mapping) and any(record_presence.values())
     )
+    auditability = bundle.get("auditability", {})
+    actions = bundle.get("decision_actions", {})
+
     with streamlit_module.container(key="cio_report_export_control"):
+        if isinstance(actions, Mapping) and actions.get("deferred"):
+            selected_action = str(actions.get("selected_action") or "").replace("_", " ").title()
+            effective_action = str(actions.get("effective_action") or "").replace("_", " ").title()
+            streamlit_module.info(
+                f"Underlying selected action: {selected_action}. "
+                f"Effective current action: {effective_action} — deferred by governed "
+                "persistence or cooldown controls."
+            )
+        if (
+            isinstance(auditability, Mapping)
+            and auditability.get("status") != "auditable"
+        ):
+            issues = auditability.get("issues", [])
+            issue_text = "; ".join(str(item) for item in issues) or "lineage is incomplete"
+            streamlit_module.warning(
+                "This export is marked non-auditable and excludes unrelated records: "
+                + issue_text
+            )
         streamlit_module.download_button(
             "Download decision JSON",
             data=cio_decision_export_json(bundle),
@@ -263,9 +326,11 @@ def _render_decision_export(
             disabled=not export_available,
         )
         streamlit_module.caption(
-            "Read-only export of the current CIO decision, briefing, evidence snapshot, "
-            "construction, and evaluation. It cannot authorize or execute a trade."
+            "Read-only export of records matched to this exact CIO decision and cycle. "
+            "Unmatched construction or evaluation records are excluded. It cannot "
+            "authorize or execute a trade."
         )
+    return bundle
 
 
 class _BackAnchorSuppressingProxy:
