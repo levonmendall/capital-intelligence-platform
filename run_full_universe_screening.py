@@ -1,4 +1,4 @@
-"""Run one certified, complete, resumable Version 1 universe screening cycle."""
+"""Run one certified, complete, governed multi-asset universe screening cycle."""
 
 from __future__ import annotations
 
@@ -11,14 +11,21 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from api.config import ApiSettings
+from cio import RecommendationUniversePolicy
 from cio.persistence import SQLiteCIOJournal
 from data import (
+    MultiAssetUniverseBuilder,
     SQLiteProviderCertificationStore,
     SQLiteSecurityMasterOperationalStore,
     SQLiteSecurityMasterStore,
     SecurityMasterActivationPolicy,
     SecurityMasterIngestionService,
 )
+from governance.asset_class_scope import (
+    AssetClassScopeAuthority,
+    SQLiteAssetClassApprovalStore,
+)
+from governance.market_participation import CanonicalMarketParticipationAuthority
 from operations import OperationalSettings, SQLiteOperationalSLOStore
 from opportunity import AlternativeKind, AlternativeUse, OpportunitySetContext
 from providers import (
@@ -53,8 +60,6 @@ def _factory(value: str):
     return factory()
 
 
-
-
 def _metrics_provider(reference: str | None):
     if reference:
         return _factory(reference)
@@ -75,6 +80,7 @@ def _candidate_provider(reference: str | None):
         "configure --candidate-provider or "
         "CAPITAL_INTELLIGENCE_CANDIDATE_SCREENING_DATASET_BINDING"
     )
+
 
 def _context(payload: Mapping[str, Any]) -> OpportunitySetContext:
     alternatives = tuple(
@@ -100,13 +106,54 @@ def _path(value: str | None, *, default: Path) -> Path:
     return default if value is None else Path(value).expanduser()
 
 
+def _asset_class_governance_database(value: str | None) -> Path:
+    if value:
+        return Path(value).expanduser()
+    data_dir = Path(
+        os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")
+    ).expanduser()
+    return Path(
+        os.getenv(
+            "CAPITAL_INTELLIGENCE_ASSET_CLASS_GOVERNANCE_DATABASE",
+            str(data_dir / "asset_class_governance.db"),
+        )
+    ).expanduser()
+
+
+def build_multi_asset_universe_builder(
+    *,
+    asset_class_governance_database: str | None = None,
+) -> MultiAssetUniverseBuilder:
+    """Build the fail-closed universe authority used by every triggered screening run.
+
+    Provider coverage is not investment authority. Non-core markets enter the
+    eligible universe only when the point-in-time asset-class approval and exact
+    market/instrument paper-participation authority both permit allocation.
+    """
+
+    scope_authority = AssetClassScopeAuthority(
+        SQLiteAssetClassApprovalStore(
+            _asset_class_governance_database(asset_class_governance_database)
+        )
+    )
+    participation_authority = CanonicalMarketParticipationAuthority.load()
+    return MultiAssetUniverseBuilder(
+        RecommendationUniversePolicy(
+            asset_class_authority=scope_authority,
+            market_participation_authority=participation_authority,
+        )
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Run one complete Version 1 universe screening cycle. The command "
-            "fails closed unless a currently certified authoritative security-"
-            "master catalog is active, all point-in-time metrics are present, "
-            "and every eligible instrument reaches a terminal result."
+            "Run one complete governed multi-asset universe screening cycle. The "
+            "command fails closed unless a currently certified authoritative "
+            "security-master catalog is active, every approved market has complete "
+            "point-in-time metrics, every allocatable instrument has current "
+            "capability authority, and every eligible instrument reaches a terminal "
+            "screening result."
         )
     )
     parser.add_argument("--cycle-id", required=True)
@@ -132,6 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--partition-size", type=int, default=250)
     parser.add_argument("--maximum-partition-attempts", type=int, default=3)
     parser.add_argument("--security-master-database")
+    parser.add_argument("--asset-class-governance-database")
     parser.add_argument("--screening-database")
     parser.add_argument("--slo-database")
     parser.add_argument("--journal-database")
@@ -149,6 +197,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         context = _context(context_payload)
         metrics_provider = _metrics_provider(args.metrics_provider)
         candidate_provider = _candidate_provider(args.candidate_provider)
+        universe_builder = build_multi_asset_universe_builder(
+            asset_class_governance_database=(
+                args.asset_class_governance_database
+            )
+        )
     except (
         ImportError,
         AttributeError,
@@ -156,6 +209,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         OSError,
         TypeError,
         ValueError,
+        RuntimeError,
         json.JSONDecodeError,
     ) as error:
         parser.error(str(error))
@@ -193,6 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         candidate_provider=candidate_provider,
         screening_store=SQLiteFullUniverseScreeningStore(screening_path),
         slo_store=SQLiteOperationalSLOStore(slo_path),
+        universe_builder=universe_builder,
         journal=SQLiteCIOJournal(journal_path),
     )
     request = FullUniverseScreeningRequest(
