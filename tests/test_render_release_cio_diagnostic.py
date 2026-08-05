@@ -7,6 +7,7 @@ from operations.composite_readiness import component_heartbeat_path
 from operations.heartbeat import WorkerHeartbeatStore
 from run_render_service_nonblocking import (
     _release_components_ready,
+    _release_diagnostic_audit_command,
     _release_diagnostic_command,
     _release_diagnostic_environment,
     _start_release_diagnostic,
@@ -29,6 +30,12 @@ def test_release_diagnostic_command_is_not_forced_by_default() -> None:
         {},
         python_executable="python-test",
     ) == ("python-test", "run_manual_cio_diagnostic.py")
+
+
+def test_release_diagnostic_audit_command_uses_static_publisher() -> None:
+    assert _release_diagnostic_audit_command(
+        python_executable="python-test"
+    ) == ("python-test", "publish_cio_diagnostic_audit.py")
 
 
 def test_release_diagnostic_requires_complete_live_all_market_scope() -> None:
