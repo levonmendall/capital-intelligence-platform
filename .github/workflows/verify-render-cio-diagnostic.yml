@@ -1,6 +1,7 @@
 name: Verify Render CIO Diagnostic
 
 on:
+  deployment_status:
   schedule:
     - cron: "12,42 * * * *"
   workflow_dispatch:
@@ -14,16 +15,24 @@ permissions:
   contents: read
 
 concurrency:
-  group: verify-render-cio-diagnostic
+  group: verify-render-cio-diagnostic-${{ github.event.deployment.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
   verify:
+    if: >-
+      github.event_name != 'deployment_status' ||
+      (
+        github.event.deployment_status.state == 'success' &&
+        github.event.deployment.environment == 'main - capital-intelligence-platform' &&
+        github.event.deployment.production_environment == true &&
+        github.event.deployment.ref == 'main'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       AUDIT_URL: https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json
-      EXPECTED_RELEASE: ${{ github.event.inputs.expected_release || github.sha }}
+      EXPECTED_RELEASE: ${{ github.event.deployment.sha || github.event.inputs.expected_release || github.sha }}
       AUDIT_OUTPUT: /tmp/render-cio-diagnostic.json
       VERIFICATION_LOG: /tmp/render-cio-diagnostic-verification.log
     steps:
