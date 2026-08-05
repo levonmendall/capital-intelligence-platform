@@ -5,6 +5,7 @@ from api.routes.authentication import router as authentication_router
 from api.routes.business_cycle import router as business_cycle_router
 from api.routes.credit_cycle import router as credit_cycle_router
 from api.routes.cio import router as cio_router
+from api.routes.cio_diagnostic import router as cio_diagnostic_router
 from api.routes.daily import router as daily_router
 from api.routes.decisions import router as decisions_router
 from api.routes.environment import router as environment_router
@@ -29,6 +30,7 @@ __all__ = [
     "business_cycle_router",
     "credit_cycle_router",
     "cio_router",
+    "cio_diagnostic_router",
     "daily_router",
     "decisions_router",
     "environment_router",
