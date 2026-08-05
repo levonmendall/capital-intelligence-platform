@@ -13,6 +13,7 @@ from typing import Any
 
 
 _FINAL_STATES = frozenset({"completed", "failed"})
+_SUCCESS_STATE = "completed"
 _FORBIDDEN_KEYS = frozenset(
     {
         "holdings",
@@ -89,6 +90,24 @@ def audit_is_current_and_final(
     )
 
 
+def audit_is_current_success(
+    payload: Mapping[str, Any],
+    *,
+    expected_release: str,
+) -> bool:
+    """Return true only for a current successful aggregate release audit.
+
+    A current failed audit can be an intermediate result while the release bootstrap is
+    performing its next bounded cache-resume attempt. The verifier therefore keeps
+    polling until a completed audit appears or its own finite polling budget expires.
+    """
+
+    return (
+        audit_is_current_and_final(payload, expected_release=expected_release)
+        and str(payload.get("state") or "") == _SUCCESS_STATE
+    )
+
+
 def poll_render_audit(
     *,
     url: str,
@@ -122,22 +141,23 @@ def poll_render_audit(
         ) as error:
             last_detail = f"{type(error).__name__}: {error}"
         else:
-            if audit_is_current_and_final(
+            if audit_is_current_success(
                 payload,
                 expected_release=expected_release,
             ):
                 return payload
             last_detail = (
-                "audit is not current and final: "
+                "audit is not a current successful aggregate result: "
                 f"active_release={payload.get('active_release')!r}, "
                 f"release_matches={payload.get('release_matches')!r}, "
-                f"state={payload.get('state')!r}"
+                f"state={payload.get('state')!r}, "
+                f"detail={str(payload.get('detail') or '')[:1000]!r}"
             )
         if attempt < maximum_attempts:
             sleeper(interval_seconds)
     raise RenderAuditVerificationError(
-        "Render CIO diagnostic did not publish a current final audit after "
-        f"{maximum_attempts} attempts; last_detail={last_detail}"
+        "Render CIO diagnostic did not publish a current successful aggregate audit "
+        f"after {maximum_attempts} attempts; last_detail={last_detail}"
     )
 
 
