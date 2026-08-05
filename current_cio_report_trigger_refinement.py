@@ -1,7 +1,8 @@
 """Give the Portfolio CIO report an explicit current-report expansion trigger.
 
-Presentation only. This module changes the report trigger label and styling; it does
-not alter evidence, CIO authority, portfolio construction, execution, or state.
+Presentation only. This module changes the report trigger label, aligns the export to
+one decision lineage, and adds a plain-language reader summary. It does not alter
+evidence, CIO authority, portfolio construction, execution, or state.
 """
 
 from __future__ import annotations
@@ -9,6 +10,9 @@ from __future__ import annotations
 from functools import wraps
 from types import ModuleType
 from typing import Any, Mapping
+
+import cio_decision_reader_export
+import cio_report_backdrop_refinement
 
 
 _INSTALLED_STATE_KEY = "_capital_intelligence_current_cio_report_trigger_installed"
@@ -100,8 +104,93 @@ class _StreamlitReportTriggerProxy:
         return self._streamlit.expander(refined_label, *args, **kwargs)
 
 
+def _aligned_latest(
+    original_latest: object,
+    selected: Mapping[str, Mapping[str, Any] | None],
+):
+    """Return a read adapter that never substitutes an unrelated latest record."""
+
+    def latest(event_type: str) -> Mapping[str, Any] | None:
+        if event_type in selected:
+            return selected[event_type]
+        if callable(original_latest):
+            return original_latest(event_type)
+        return None
+
+    return latest
+
+
+def _install_export_reader(
+    portfolio_first: ModuleType,
+    app: ModuleType,
+    *,
+    briefing: Mapping[str, Any] | None,
+    construction: Mapping[str, Any] | None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Temporarily align and enrich the report's read-only JSON export."""
+
+    original_latest = getattr(app, "_latest", None)
+    original_builder = getattr(portfolio_first, "build_cio_decision_export", None)
+    original_serializer = getattr(portfolio_first, "cio_decision_export_json", None)
+    selected = cio_decision_reader_export.select_report_records(
+        app,
+        daily_cio_briefing=briefing,
+        portfolio_construction=construction,
+    )
+    market_context = cio_report_backdrop_refinement._current_market_backdrop(
+        app,
+        briefing,
+    )
+
+    if callable(original_latest):
+        app._latest = _aligned_latest(original_latest, selected)
+
+    if callable(original_builder):
+
+        @wraps(original_builder)
+        def build_export(*args: object, **kwargs: object) -> Mapping[str, Any]:
+            del args
+            aligned_kwargs = dict(kwargs)
+            aligned_kwargs.update(selected)
+            bundle = original_builder(**aligned_kwargs)
+            return cio_decision_reader_export.enrich_cio_decision_export(
+                bundle,
+                current_market_context=market_context,
+            )
+
+        portfolio_first.build_cio_decision_export = build_export
+
+    if callable(original_serializer):
+        portfolio_first.cio_decision_export_json = (
+            cio_decision_reader_export.cio_decision_reader_json
+        )
+
+    saved = {
+        "latest": original_latest,
+        "builder": original_builder,
+        "serializer": original_serializer,
+    }
+    return saved, {"selected": selected, "market_context": market_context}
+
+
+def _restore_export_reader(
+    portfolio_first: ModuleType,
+    app: ModuleType,
+    saved: Mapping[str, object],
+) -> None:
+    original_latest = saved.get("latest")
+    if callable(original_latest):
+        app._latest = original_latest
+    original_builder = saved.get("builder")
+    if callable(original_builder):
+        portfolio_first.build_cio_decision_export = original_builder
+    original_serializer = saved.get("serializer")
+    if callable(original_serializer):
+        portfolio_first.cio_decision_export_json = original_serializer
+
+
 def install(portfolio_first: ModuleType) -> None:
-    """Install the current-report title and expandable-link presentation once."""
+    """Install the current-report title and lineage-safe reader export once."""
 
     if getattr(portfolio_first, _INSTALLED_STATE_KEY, False):
         return
@@ -122,15 +211,28 @@ def install(portfolio_first: ModuleType) -> None:
             original_streamlit,
             _current_report_title(briefing),
         )
+        saved, reader_state = _install_export_reader(
+            portfolio_first,
+            app,
+            briefing=briefing,
+            construction=construction,
+        )
+        selected = reader_state.get("selected")
+        aligned_construction = (
+            selected.get("portfolio_construction")
+            if isinstance(selected, Mapping)
+            else construction
+        )
         try:
             original(
                 app,
                 briefing=briefing,
-                construction=construction,
+                construction=aligned_construction,
                 mandate=mandate,
                 deployed=deployed,
             )
         finally:
+            _restore_export_reader(portfolio_first, app, saved)
             portfolio_first.st = original_streamlit
 
     portfolio_first._render_cio_report = render_cio_report
