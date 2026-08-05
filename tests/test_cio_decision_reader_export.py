@@ -109,7 +109,7 @@ def test_reader_summary_is_plain_language_and_first_in_json() -> None:
     assert "1.4 percentage points" in summary["summary"]
     assert "17.3%" in summary["summary"]
     assert "75.2%" in summary["summary"]
-    assert "MCD ranked #1" in summary["why"]
+    assert any(item.startswith("MCD ranked #1") for item in summary["why"])
     assert "cost-adjusted expected return" not in summary["summary"]
     assert "opportunity edge" not in summary["summary"]
     assert summary["current_market_context"]["scope"] == "current_at_export_time"
