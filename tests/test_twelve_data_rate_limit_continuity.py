@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
@@ -107,6 +108,9 @@ def provider(
 ) -> TwelveDataRateLimitedReferenceProvider:
     queue = list(responses)
     calls = []
+    isolated_cache = TemporaryDirectory(
+        prefix="capital-intelligence-twelve-data-rate-limit-test-"
+    )
 
     def get(url, *, params, timeout):
         calls.append((url, params, timeout))
@@ -118,8 +122,10 @@ def provider(
         sleeper=sleeps.append,
         clock=lambda: now,
         max_rate_limit_retries=max_rate_limit_retries,
+        cache_directory=isolated_cache.name,
     )
     result.calls = calls  # type: ignore[attr-defined]
+    result._isolated_test_cache = isolated_cache  # type: ignore[attr-defined]
     return result
 
 
