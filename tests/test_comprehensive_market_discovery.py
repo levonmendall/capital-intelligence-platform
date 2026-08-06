@@ -128,7 +128,6 @@ def test_eodhd_cc_currency_rows_are_classified_as_crypto():
     assert record.provider_kind == "yahoo"
 
 
-
 def test_discovers_all_six_lanes_and_retains_holdings():
     result = discover_comprehensive_markets(
         as_of=AS_OF,
@@ -187,13 +186,31 @@ def test_expired_contracts_are_excluded_before_market_probe():
     assert any(item.catalog.symbol == "NEW" for item in result.selected)
 
 
-def test_complete_discovery_fails_closed_for_an_empty_lane():
+def test_absent_direct_fixed_income_catalog_is_not_a_required_empty_lane():
     def catalog(as_of):
         payload = dict(_catalog(as_of))
-        payload[CandidateAssetClass.FIXED_INCOME] = []
+        payload.pop(CandidateAssetClass.FIXED_INCOME)
         return payload
 
-    with pytest.raises(ComprehensiveMarketDiscoveryError, match="fixed_income"):
+    result = discover_comprehensive_markets(
+        as_of=AS_OF,
+        catalog_probe=catalog,
+        market_probe=_market,
+    )
+
+    assert CandidateAssetClass.FIXED_INCOME not in {
+        lane.asset_class for lane in result.lanes
+    }
+    assert len(result.lanes) == 5
+
+
+def test_complete_discovery_still_fails_closed_for_empty_required_lane():
+    def catalog(as_of):
+        payload = dict(_catalog(as_of))
+        payload[CandidateAssetClass.FX] = []
+        return payload
+
+    with pytest.raises(ComprehensiveMarketDiscoveryError, match="fx"):
         discover_comprehensive_markets(
             as_of=AS_OF,
             catalog_probe=catalog,
