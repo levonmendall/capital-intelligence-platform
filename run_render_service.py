@@ -13,6 +13,8 @@ The supervisor is intentionally fail-closed:
 * headline, historical, backup, and readiness-monitoring loops are restarted with
   bounded delay without taking the trading console down during a transient or
   persistently blocked operational condition;
+* an explicitly supplied release-diagnostic barrier starts only API and Streamlit until
+  the bounded all-market diagnostic finishes, avoiding duplicate heavyweight workers;
 * SIGTERM is forwarded to every child for an orderly deployment shutdown; and
 * no live-money authority is introduced.
 """
@@ -26,14 +28,18 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Mapping, MutableMapping, Sequence
+from typing import Mapping, MutableMapping
 
 from cryptography.fernet import Fernet
 from operations.composite_readiness import component_heartbeat_path
 from operations.heartbeat import WorkerHeartbeatStore
+
+
+_RELEASE_DIAGNOSTIC_STARTUP_CHILDREN = frozenset({"api", "streamlit"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,6 +283,40 @@ def managed_processes(
     )
 
 
+def _partition_startup_processes(
+    specs: Sequence[ManagedProcess],
+    *,
+    defer_non_web: bool,
+) -> tuple[tuple[ManagedProcess, ...], tuple[ManagedProcess, ...]]:
+    """Return immediate and deferred process groups for a release diagnostic.
+
+    A release diagnostic needs the API and Streamlit heartbeats, but starting the CIO
+    operator, collectors, backfill, backup, and readiness watchdog at the same time adds
+    avoidable Python/import working sets to the same 2 GB Render instance. Deferring only
+    those non-web children preserves public health and diagnostic observability while
+    preventing a duplicate heavyweight operating stack from competing for memory.
+    """
+
+    resolved = tuple(specs)
+    if not defer_non_web:
+        return resolved, ()
+
+    names = {spec.name for spec in resolved}
+    missing = _RELEASE_DIAGNOSTIC_STARTUP_CHILDREN.difference(names)
+    if missing:
+        raise ValueError(
+            "release diagnostic startup requires managed children: "
+            + ", ".join(sorted(missing))
+        )
+    immediate = tuple(
+        spec for spec in resolved if spec.name in _RELEASE_DIAGNOSTIC_STARTUP_CHILDREN
+    )
+    deferred = tuple(
+        spec for spec in resolved if spec.name not in _RELEASE_DIAGNOSTIC_STARTUP_CHILDREN
+    )
+    return immediate, deferred
+
+
 def _log(event: str, **details: object) -> None:
     payload = {
         "event": event,
@@ -315,6 +355,7 @@ def run_supervisor(
     *,
     environment: MutableMapping[str, str] | None = None,
     poll_seconds: float = 1.0,
+    deferred_start_ready: Callable[[], bool] | None = None,
 ) -> int:
     if poll_seconds <= 0:
         raise ValueError("poll_seconds must be positive")
@@ -334,6 +375,20 @@ def run_supervisor(
     )
 
     specs = managed_processes(port=port)
+    immediate_specs, deferred_specs = _partition_startup_processes(
+        specs,
+        defer_non_web=deferred_start_ready is not None,
+    )
+    active_specs = list(immediate_specs)
+    if deferred_specs:
+        _log(
+            "release_diagnostic_memory_isolation_armed",
+            immediate_children=[spec.name for spec in immediate_specs],
+            deferred_children=[spec.name for spec in deferred_specs],
+            public_service_available=True,
+            paper_only=True,
+        )
+
     state_root = Path(values["CAPITAL_INTELLIGENCE_DATA_DIR"])
     liveness_heartbeats = {
         name: WorkerHeartbeatStore(component_heartbeat_path(state_root, name))
@@ -342,6 +397,14 @@ def run_supervisor(
     children: dict[str, subprocess.Popen] = {}
     restart_after: dict[str, float] = {}
     stopping = False
+
+    def start_spec(spec: ManagedProcess) -> None:
+        children[spec.name] = _start(spec, environment=values)
+        if spec.name in liveness_heartbeats:
+            liveness_heartbeats[spec.name].write(
+                "starting",
+                detail=f"{spec.name} child process started",
+            )
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         del frame
@@ -355,22 +418,30 @@ def run_supervisor(
     }
     exit_code = 0
     try:
-        for spec in specs:
-            children[spec.name] = _start(spec, environment=values)
-            if spec.name in liveness_heartbeats:
-                liveness_heartbeats[spec.name].write(
-                    "starting",
-                    detail=f"{spec.name} child process started",
-                )
+        for spec in immediate_specs:
+            start_spec(spec)
 
         while not stopping:
+            if deferred_specs and deferred_start_ready is not None:
+                if deferred_start_ready():
+                    for spec in deferred_specs:
+                        start_spec(spec)
+                        active_specs.append(spec)
+                    _log(
+                        "release_diagnostic_memory_isolation_released",
+                        started_children=[spec.name for spec in deferred_specs],
+                        public_service_available=True,
+                        paper_only=True,
+                    )
+                    deferred_specs = ()
+
             now = time.monotonic()
-            for spec in specs:
+            for spec in tuple(active_specs):
                 process = children.get(spec.name)
                 if process is None:
                     due = restart_after.get(spec.name, 0.0)
                     if now >= due:
-                        children[spec.name] = _start(spec, environment=values)
+                        start_spec(spec)
                         restart_after.pop(spec.name, None)
                     continue
                 return_code = process.poll()
