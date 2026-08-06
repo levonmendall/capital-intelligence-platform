@@ -36,6 +36,14 @@ def _count(payload: Mapping[str, Any], name: str) -> int:
 
 
 def _market_lanes(payload: object) -> tuple[dict[str, object], ...]:
+    """Return credential-safe coverage counts for each governed discovery lane.
+
+    A successful comprehensive-discovery publication guarantees that every current
+    record in a scheduled nonempty catalog has a terminal selected-or-excluded outcome.
+    Market representation is therefore certified catalog coverage, not a requirement to
+    manufacture an investment candidate. Deep and selected counts remain diagnostics.
+    """
+
     if not isinstance(payload, Mapping):
         return ()
     lanes: list[dict[str, object]] = []
@@ -46,9 +54,7 @@ def _market_lanes(payload: object) -> tuple[dict[str, object], ...]:
         catalog = _count(raw, "catalog")
         deep = _count(raw, "deep")
         selected = _count(raw, "selected")
-        represented = (not scheduled) or (
-            catalog > 0 and deep > 0 and selected > 0
-        )
+        represented = (not scheduled) or catalog > 0
         lanes.append(
             {
                 "asset_class": str(asset_class),
