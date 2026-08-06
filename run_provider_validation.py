@@ -15,6 +15,56 @@ from operations.provider_validation import (
 
 
 _EODHD_DIRECTORY_CHECK = "eodhd_exchange_directory"
+_DATABENTO_TRANSIENT_CHECKS = frozenset(
+    {
+        "databento_account_entitlement",
+        "databento_opra_definitions",
+        "databento_opra_daily_bars",
+    }
+)
+_DATABENTO_OPRA_CHECKS = frozenset(
+    {
+        "databento_opra_definitions",
+        "databento_opra_daily_bars",
+    }
+)
+_DATABENTO_TRANSIENT_HTTP_MARKERS = (
+    "HTTP 500",
+    "HTTP 502",
+    "HTTP 503",
+    "HTTP 504",
+)
+
+
+def _transient_databento_server_degradation(
+    report: ProviderValidationReport,
+) -> bool:
+    """Return true only for an explicit provider-side Databento outage.
+
+    The metadata endpoint currently collapses its final transport failure into a generic
+    credential-safe message.  Therefore it can be deferred only when both independent
+    OPRA checks explicitly report a retryable Databento 5xx response in the same report.
+    Authentication denials, entitlement failures, missing keys, empty evidence, parsing
+    errors, and any future unknown Databento check remain release-blocking.
+    """
+
+    failed = tuple(
+        check
+        for check in report.checks
+        if check.provider == "DATABENTO" and check.required and not check.passed
+    )
+    if not failed:
+        return False
+    failed_names = {check.name for check in failed}
+    if not failed_names.issubset(_DATABENTO_TRANSIENT_CHECKS):
+        return False
+    if not _DATABENTO_OPRA_CHECKS.issubset(failed_names):
+        return False
+    by_name = {check.name: check for check in failed}
+    return all(
+        any(marker in by_name[name].detail for marker in _DATABENTO_TRANSIENT_HTTP_MARKERS)
+        for name in _DATABENTO_OPRA_CHECKS
+    )
 
 
 def release_preflight_report(
@@ -28,23 +78,49 @@ def release_preflight_report(
     governed discovery and the exact-release CIO audit, which may use certified
     provider-neutral or fallback catalogs. The check remains visible and failed when
     unavailable so provider degradation is never hidden.
+
+    A Databento provider-side 5xx outage may also be diagnostic at deployment preflight,
+    but only when both OPRA checks explicitly prove the same transient server condition.
+    The deployed CIO still requires complete option definitions and prices, remains
+    fail-closed, and cannot certify or recommend an option without authentic evidence.
     """
 
-    checks = tuple(
-        replace(
-            check,
-            required=False,
-            detail=(
-                f"{check.detail}; provider-specific exchange-directory availability "
-                "is diagnostic only because aggregate governed discovery and the "
-                "exact-release CIO audit enforce executable-market completeness"
-            ),
-        )
-        if check.name == _EODHD_DIRECTORY_CHECK
-        else check
-        for check in report.checks
-    )
-    return replace(report, checks=checks)
+    defer_databento = _transient_databento_server_degradation(report)
+    checks = []
+    for check in report.checks:
+        if check.name == _EODHD_DIRECTORY_CHECK:
+            checks.append(
+                replace(
+                    check,
+                    required=False,
+                    detail=(
+                        f"{check.detail}; provider-specific exchange-directory availability "
+                        "is diagnostic only because aggregate governed discovery and the "
+                        "exact-release CIO audit enforce executable-market completeness"
+                    ),
+                )
+            )
+            continue
+        if (
+            defer_databento
+            and check.name in _DATABENTO_TRANSIENT_CHECKS
+            and not check.passed
+        ):
+            checks.append(
+                replace(
+                    check,
+                    required=False,
+                    detail=(
+                        f"{check.detail}; explicit Databento provider-side 5xx degradation "
+                        "is diagnostic at deployment preflight only; the deployed exact-release "
+                        "CIO must still retrieve complete authentic option evidence and remains "
+                        "fail-closed"
+                    ),
+                )
+            )
+            continue
+        checks.append(check)
+    return replace(report, checks=tuple(checks))
 
 
 def _parser() -> argparse.ArgumentParser:
