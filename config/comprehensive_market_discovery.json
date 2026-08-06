@@ -1,7 +1,7 @@
 {
   "schema_version": "comprehensive-market-discovery.v1",
   "eodhd_exchange_codes": [
-    "LSE", "XETRA", "PA", "AS", "BR", "SW", "TO", "V", "AU", "HK", "TSE", "NSE", "BSE", "SG", "KO", "WAR", "SA", "MX", "FOREX", "CC"
+    "LSE", "XETRA", "PA", "AS", "BR", "SW", "TO", "V", "AU", "HK", "TSE", "NSE", "BSE", "SG", "KO", "WAR", "SA", "MX", "FOREX"
   ],
   "yahoo_exchange_suffixes": {
     "LSE": ".L",
