@@ -1,0 +1,30 @@
+name: Apply terminal market accounting patch
+
+on:
+  push:
+    branches:
+      - codex/certify-terminal-market-accounting
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[terminal-accounting-applied]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/certify-terminal-market-accounting
+      - name: Apply governed terminal-accounting repair
+        run: python tools/apply_terminal_market_accounting_patch.py
+      - name: Compile repaired files
+        run: python -m py_compile operations/comprehensive_market_discovery.py tests/test_comprehensive_market_discovery.py
+      - name: Commit repaired source and regressions
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add operations/comprehensive_market_discovery.py tests/test_comprehensive_market_discovery.py
+          git commit -m "Certify terminal all-market accounting [terminal-accounting-applied]"
+          git push origin HEAD:codex/certify-terminal-market-accounting
