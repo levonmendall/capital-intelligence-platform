@@ -47,6 +47,10 @@ from operations.provider_enriched_preselection import (
     provider_enriched_catalog_screening_signals,
     validate_provider_enriched_signals,
 )
+from operations.provider_preselection_publication_runtime import (
+    ProviderPreselectionPublicationError,
+    ensure_provider_preselection_publication,
+)
 
 
 _EVIDENCE_ONLY_EODHD_DIRECTORIES = frozenset({"BOND", "GBOND"})
@@ -279,6 +283,33 @@ def _lane_is_scheduled(asset_class: CandidateAssetClass, timestamp: datetime) ->
     return asset_class is CandidateAssetClass.CRYPTO
 
 
+def _has_substantive_provider_factor_authority(
+    signals: Mapping[str, CatalogScreeningSignal],
+) -> bool:
+    return any(
+        identifier.startswith("provider-factor:")
+        for signal in signals.values()
+        for identifier in signal.evidence_identifiers
+    )
+
+
+def _provider_publication_failure_reasons(
+    signals: Mapping[str, CatalogScreeningSignal],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                reason
+                for signal in signals.values()
+                for reason in signal.exclusion_reasons
+                if reason.startswith(
+                    "provider_enriched_preselection_publication_invalid:"
+                )
+            }
+        )
+    )
+
+
 def __getattr__(name: str):
     try:
         return getattr(_legacy, name)
@@ -453,15 +484,18 @@ def discover_comprehensive_markets(
 ) -> ComprehensiveMarketDiscoveryResult:
     """Screen complete catalogs and forward every eligible evidence-complete asset.
 
-    The uninjected canonical path consumes the persisted provider-enriched factor
-    publication and fails closed when applicable factor evidence is missing. Explicit
+    The uninjected canonical path builds or reuses the persisted provider-enriched
+    factor publication before screening and fails closed when that publication cannot
+    establish substantive factor authority for a scheduled market lane. Explicit
     catalog/market probes without a preselection probe remain a deterministic fixture
     seam for tests and rehearsals; they do not describe the production authority path.
 
     Candidate scores determine review order only. They never create a top-N cutoff.
     A scheduled lane may truthfully finish with no nominated asset when its certified
-    catalog is nonempty and every current record carries an explicit selection or
-    exclusion outcome. Empty catalogs and partially resolved lanes remain fail-closed.
+    catalog is nonempty, provider factor authority was actually established, and every
+    current record carries an explicit selection or exclusion outcome. Empty catalogs,
+    systemic evidence-publication failures, and partially resolved lanes remain
+    fail-closed.
     """
 
     timestamp = _legacy._aware(as_of, field_name="as_of")
@@ -482,6 +516,21 @@ def discover_comprehensive_markets(
         preselection_probe is None
         and (catalog_probe is not None or market_probe is not None)
     )
+    canonical_publication_required = (
+        catalog_probe is None
+        and market_probe is None
+        and preselection_probe is None
+    )
+    if canonical_publication_required:
+        try:
+            ensure_provider_preselection_publication(
+                catalogs,
+                as_of=timestamp,
+                policy=resolved,
+            )
+        except ProviderPreselectionPublicationError as error:
+            raise _legacy.ComprehensiveMarketDiscoveryError(str(error)) from error
+
     active_preselection_probe = (
         preselection_probe
         or (
@@ -530,6 +579,7 @@ def discover_comprehensive_markets(
                     "sources": [],
                     "candidate_count_limit_applied": False,
                     "provider_enriched_preselection_required": False,
+                    "provider_factor_authority_established": False,
                 }
             )
             continue
@@ -557,12 +607,27 @@ def discover_comprehensive_markets(
             raise _legacy.ComprehensiveMarketDiscoveryError(
                 f"{asset_class.value} preselection probe must return a mapping"
             )
+        provider_factor_authority_established = False
         if require_provider_factor_lineage:
             signals = validate_provider_enriched_signals(
                 ordinary,
                 signals,
                 required_factors=resolved.required_provider_preselection_factors,
             )
+            provider_factor_authority_established = (
+                not ordinary or _has_substantive_provider_factor_authority(signals)
+            )
+            if not provider_factor_authority_established:
+                publication_failures = _provider_publication_failure_reasons(signals)
+                detail = (
+                    "; " + ", ".join(publication_failures)
+                    if publication_failures
+                    else ""
+                )
+                raise _legacy.ComprehensiveMarketDiscoveryError(
+                    f"{asset_class.value} provider factor authority is unavailable "
+                    f"for the complete certified catalog{detail}"
+                )
 
         plan = build_preselection_plan(
             ordinary,
@@ -678,6 +743,11 @@ def discover_comprehensive_markets(
                 "provider_enriched_preselection_required": (
                     require_provider_factor_lineage
                 ),
+                "provider_factor_authority_established": (
+                    provider_factor_authority_established
+                    if require_provider_factor_lineage
+                    else None
+                ),
                 "preselection": plan.to_dict(),
                 "preselection_evidence": {
                     symbol: list(identifiers)
@@ -736,6 +806,7 @@ __all__ = tuple(
             "REQUIRED_PROVIDER_FACTORS",
             "provider_enriched_catalog_screening_signals",
             "load_certified_investable_catalog",
+            "ensure_provider_preselection_publication",
         )
     )
 )
