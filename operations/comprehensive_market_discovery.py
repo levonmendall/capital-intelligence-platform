@@ -1,429 +1,76 @@
-"""Complete certified-universe discovery with provider-enriched factor evidence.
+"""Terminally accounted certified-universe discovery.
 
-The original provider/catalog implementation is retained in the adjacent legacy
-module. This module replaces only the pre-committee selection architecture.
-
-The canonical runtime screens every instrument in each scheduled certified catalog.
-Provider-enriched factor evidence remains mandatory when applicable, but explicit,
-provider-certified not-applicable determinations are permitted. No rank, static lane,
-shortlist, or deep-analysis count limit may prevent an otherwise eligible and
-evidence-complete asset from reaching the formal opportunity, six-specialist, and CIO
-decision path. A provider-neutral complete catalog may add any classified investable
-instrument without a code-level asset-class whitelist.
-
-Sovereign benchmark-yield directories are evidence inputs, not executable security
-masters. Direct fixed income therefore becomes a discovery lane only when a certified
-provider-neutral catalog supplies actual instruments with the complete identity,
-lifecycle, pricing, liquidity, cost, custody, settlement, and execution stack.
+The prior implementation is preserved in
+``operations._comprehensive_market_discovery_v4``. This public module keeps the
+same API while requiring a terminal selected-or-excluded disposition for every
+instrument in each scheduled certified catalog. Comprehensive consideration does
+not require a market lane to manufacture a qualifying investment candidate.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from cio import CandidateAssetClass
-from operations import comprehensive_market_discovery_legacy as _legacy
-from operations.certified_investable_catalog import (
-    CertifiedInvestableCatalogError,
-    load_certified_investable_catalog,
-)
-from operations.comprehensive_market_discovery_legacy import *  # noqa: F401,F403
-from operations.market_discovery_preselection import (
-    CatalogScreeningSignal,
-    CutoffObservation,
-    CutoffOutcomeEvaluation,
-    PreselectionPlan,
-    build_cutoff_observations,
-    build_preselection_plan,
-    default_catalog_screening_signals,
-    evaluate_cutoff_outcomes,
-)
-from operations.provider_enriched_preselection import (
-    DEFAULT_PROVIDER_PRESELECTION_PATH,
-    REQUIRED_PROVIDER_FACTORS,
-    provider_enriched_catalog_screening_signals,
-    validate_provider_enriched_signals,
-)
+from operations import _comprehensive_market_discovery_v4 as _base
+from operations._comprehensive_market_discovery_v4 import *  # noqa: F401,F403
 
 
-_EVIDENCE_ONLY_EODHD_DIRECTORIES = frozenset({"BOND", "GBOND"})
-_DEFAULT_REQUIRED_DISCOVERY_LANES = tuple(
-    item
-    for item in _legacy._DISCOVERY_LANES
-    if item is not CandidateAssetClass.FIXED_INCOME
-)
+def _validate_terminal_lane_accounting(
+    *,
+    asset_class: CandidateAssetClass,
+    catalog_records: Sequence[_base._legacy.DiscoveryCatalogRecord],
+    selected: Sequence[_base._legacy.DiscoveredMarketInstrument],
+    exclusions: Sequence[tuple[str, str]],
+) -> tuple[int, int]:
+    """Require a terminal selected-or-excluded disposition for every record.
 
-
-def _reject_evidence_only_eodhd_directories(
-    config: _legacy.ComprehensiveMarketDiscoveryConfig,
-) -> None:
-    configured = tuple(
-        item
-        for item in config.eodhd_exchange_codes
-        if item in _EVIDENCE_ONLY_EODHD_DIRECTORIES
-    )
-    if configured:
-        raise _legacy.ComprehensiveMarketDiscoveryError(
-            "sovereign benchmark-yield directories cannot enter investable discovery: "
-            + ", ".join(configured)
-        )
-
-
-def load_comprehensive_market_discovery_config(
-    path: str | Path = _legacy.DEFAULT_DISCOVERY_CONFIG_PATH,
-) -> _legacy.ComprehensiveMarketDiscoveryConfig:
-    """Load discovery configuration and reject evidence-only bond directories."""
-
-    config = _legacy.load_comprehensive_market_discovery_config(path)
-    _reject_evidence_only_eodhd_directories(config)
-    return config
-
-
-def scheduled_discovery_lanes(as_of: datetime) -> frozenset[CandidateAssetClass]:
-    """Return default executable discovery lanes scheduled at ``as_of``.
-
-    Direct fixed income is intentionally absent until a certified instrument catalog
-    supplies an executable bond lane. Listed fixed-income funds remain covered by the
-    listed-instrument universe, while sovereign rates remain analytical evidence.
+    A scheduled lane may legitimately produce zero selected instruments when every
+    catalog instrument was evaluated and rejected by an unchanged policy gate. A
+    genuinely empty catalog, overlapping dispositions, unknown symbols, or any
+    unaccounted record remains fail-closed.
     """
 
-    return frozenset(
-        item
-        for item in _legacy.scheduled_discovery_lanes(as_of)
-        if item is not CandidateAssetClass.FIXED_INCOME
-    )
+    catalog_symbols = {item.symbol for item in catalog_records}
+    if not catalog_symbols:
+        raise _base._legacy.ComprehensiveMarketDiscoveryError(
+            "complete discovery cannot certify an empty requested lane: "
+            + asset_class.value
+        )
 
-
-def _catalog_from_eodhd(
-    *,
-    as_of: datetime,
-    config: _legacy.ComprehensiveMarketDiscoveryConfig,
-    provider,
-    policy: _legacy.ComprehensiveMarketDiscoveryPolicy,
-    requested_asset_classes: frozenset[CandidateAssetClass] | None = None,
-):
-    """Read executable directories while rejecting benchmark-yield catalogs."""
-
-    _reject_evidence_only_eodhd_directories(config)
-    return _legacy._catalog_from_eodhd(
-        as_of=as_of,
-        config=config,
-        provider=provider,
-        policy=policy,
-        requested_asset_classes=requested_asset_classes,
-    )
-
-
-def default_catalog_probe(
-    as_of: datetime,
-    *,
-    config: _legacy.ComprehensiveMarketDiscoveryConfig | None = None,
-    policy: _legacy.ComprehensiveMarketDiscoveryPolicy | None = None,
-    eodhd_provider=None,
-    databento_options_provider=None,
-):
-    """Collect the default executable catalogs without fabricating direct bonds."""
-
-    timestamp = _legacy._aware(as_of, field_name="as_of")
-    resolved_config = config or load_comprehensive_market_discovery_config()
-    _reject_evidence_only_eodhd_directories(resolved_config)
-    resolved_policy = policy or ComprehensiveMarketDiscoveryPolicy()
-    active_lanes = scheduled_discovery_lanes(timestamp)
-    provider = eodhd_provider or _legacy.build_eodhd_provider()
-    result = {
-        key: list(value)
-        for key, value in _catalog_from_eodhd(
-            as_of=timestamp,
-            config=resolved_config,
-            provider=provider,
-            policy=resolved_policy,
-            requested_asset_classes=active_lanes,
-        ).items()
+    selected_symbols = {item.catalog.symbol for item in selected}
+    excluded_symbols = {
+        str(symbol).strip().upper()
+        for symbol, reason in exclusions
+        if str(symbol).strip() and str(reason).strip()
     }
-    for asset_class in _DEFAULT_REQUIRED_DISCOVERY_LANES:
-        result.setdefault(asset_class, [])
-    if CandidateAssetClass.FUTURE in active_lanes:
-        result[CandidateAssetClass.FUTURE] = list(
-            _legacy._futures_catalog(as_of=timestamp, config=resolved_config)
+    unexpected = (selected_symbols | excluded_symbols).difference(catalog_symbols)
+    overlap = selected_symbols.intersection(excluded_symbols)
+    unaccounted = catalog_symbols.difference(selected_symbols | excluded_symbols)
+    if unexpected or overlap or unaccounted:
+        details = []
+        if unexpected:
+            details.append("unexpected=" + ",".join(sorted(unexpected)))
+        if overlap:
+            details.append("overlap=" + ",".join(sorted(overlap)))
+        if unaccounted:
+            details.append("unaccounted=" + ",".join(sorted(unaccounted)))
+        raise _base._legacy.ComprehensiveMarketDiscoveryError(
+            f"{asset_class.value} terminal discovery accounting is incomplete: "
+            + "; ".join(details)
         )
-    if CandidateAssetClass.OPTION in active_lanes:
-        result[CandidateAssetClass.OPTION] = list(
-            _legacy._option_catalog(
-                as_of=timestamp,
-                config=resolved_config,
-                policy=resolved_policy,
-                databento_options_provider=databento_options_provider,
-            )
-        )
-    return result
-
-
-def _optional_timestamp(value: object) -> datetime | None:
-    if value in (None, ""):
-        return None
-    parsed = _legacy._timestamp(value)
-    if parsed is None:
-        raise _legacy.ComprehensiveMarketDiscoveryError(
-            "certified catalog expiration_at must be a timezone-aware timestamp"
-        )
-    return parsed
-
-
-def _certified_catalog_record(
-    payload: Mapping[str, object],
-) -> _legacy.DiscoveryCatalogRecord:
-    """Normalize one provider-neutral certified catalog record."""
-
-    try:
-        asset_class = CandidateAssetClass(str(payload["asset_class"]))
-        provider_instrument_id = payload.get("provider_instrument_id")
-        if provider_instrument_id is not None:
-            provider_instrument_id = int(provider_instrument_id)
-        strike = payload.get("strike")
-        if strike is not None:
-            strike = float(strike)
-        return _legacy.DiscoveryCatalogRecord(
-            symbol=str(payload["symbol"]),
-            provider_symbol=str(payload.get("provider_symbol") or payload["symbol"]),
-            name=str(payload.get("name") or payload["symbol"]),
-            asset_class=asset_class,
-            economic_exposure=str(
-                payload.get("economic_exposure") or asset_class.value
-            ),
-            venue=str(payload["venue"]),
-            country_code=str(payload.get("country_code") or "GLOBAL"),
-            currency=str(payload.get("currency") or "USD"),
-            settlement_currency=str(
-                payload.get("settlement_currency")
-                or payload.get("currency")
-                or "USD"
-            ),
-            instrument_type=str(payload["instrument_type"]),
-            provider_kind=str(payload["provider_kind"]),
-            source_identifier=str(
-                payload.get("source_identifier")
-                or payload.get("instrument_identifier")
-            ),
-            instrument_identifier=str(payload["instrument_identifier"]),
-            contract_multiplier=float(payload.get("contract_multiplier", 1.0)),
-            quote_spread_bps=float(payload.get("quote_spread_bps", 5.0)),
-            expiration_at=_optional_timestamp(payload.get("expiration_at")),
-            underlying_symbol=(
-                None
-                if payload.get("underlying_symbol") in (None, "")
-                else str(payload["underlying_symbol"])
-            ),
-            strike=strike,
-            option_right=(
-                None
-                if payload.get("option_right") in (None, "")
-                else str(payload["option_right"]).strip().lower()
-            ),
-            provider_dataset=(
-                None
-                if payload.get("provider_dataset") in (None, "")
-                else str(payload["provider_dataset"])
-            ),
-            provider_stype_in=(
-                None
-                if payload.get("provider_stype_in") in (None, "")
-                else str(payload["provider_stype_in"])
-            ),
-            provider_instrument_id=provider_instrument_id,
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        raise _legacy.ComprehensiveMarketDiscoveryError(
-            "certified catalog contains an invalid instrument record"
-        ) from error
-
-
-def _merge_certified_catalog(
-    catalogs: Mapping[CandidateAssetClass, Sequence[_legacy.DiscoveryCatalogRecord]],
-    *,
-    as_of: datetime,
-) -> Mapping[CandidateAssetClass, tuple[_legacy.DiscoveryCatalogRecord, ...]]:
-    merged: dict[CandidateAssetClass, list[_legacy.DiscoveryCatalogRecord]] = {
-        key: list(value) for key, value in catalogs.items()
-    }
-    try:
-        external = load_certified_investable_catalog(as_of=as_of)
-    except CertifiedInvestableCatalogError as error:
-        raise _legacy.ComprehensiveMarketDiscoveryError(str(error)) from error
-    for payload in external:
-        record = _certified_catalog_record(payload)
-        merged.setdefault(record.asset_class, []).append(record)
-    return {
-        asset_class: _legacy._deduplicate(tuple(records))
-        for asset_class, records in merged.items()
-    }
-
-
-def _dynamic_discovery_lanes(
-    catalogs: Mapping[CandidateAssetClass, Sequence[_legacy.DiscoveryCatalogRecord]],
-) -> tuple[CandidateAssetClass, ...]:
-    required = set(_DEFAULT_REQUIRED_DISCOVERY_LANES)
-    required.update(
-        asset_class
-        for asset_class, records in catalogs.items()
-        if asset_class is not CandidateAssetClass.OTHER and bool(records)
-    )
-    return tuple(item for item in CandidateAssetClass if item in required)
-
-
-def _lane_is_scheduled(asset_class: CandidateAssetClass, timestamp: datetime) -> bool:
-    if timestamp.astimezone(_legacy._DISCOVERY_CALENDAR_TIMEZONE).weekday() < 5:
-        return True
-    return asset_class is CandidateAssetClass.CRYPTO
-
-
-def __getattr__(name: str):
-    try:
-        return getattr(_legacy, name)
-    except AttributeError as error:
-        raise AttributeError(
-            f"module 'operations.comprehensive_market_discovery' has no attribute {name!r}"
-        ) from error
+    return len(selected_symbols), len(excluded_symbols)
 
 
 @dataclass(frozen=True, slots=True)
-class ComprehensiveMarketDiscoveryPolicy(_legacy.ComprehensiveMarketDiscoveryPolicy):
-    """Govern discovery quality without imposing candidate-count cutoffs.
+class ComprehensiveMarketDiscoveryPolicy(_base.ComprehensiveMarketDiscoveryPolicy):
+    """Govern complete discovery with terminal instrument accounting."""
 
-    ``maximum_deep_candidates_per_lane`` and the inherited ``selected_*`` values remain
-    readable for backward-compatible configuration parsing, but the canonical runtime
-    does not apply them. Eligibility, evidence completeness, liquidity, lifecycle, and
-    point-in-time market checks are the only pre-committee exclusion authorities.
-    """
-
-    version: str = "comprehensive-liquid-market-discovery.v4-complete-qualified-universe"
-    maximum_deep_candidates_per_lane: int | None = None
-    preselection_shadow_candidates_per_lane: int = 0
-    preselection_freshness_days: int = 3
-    preselection_minimum_liquidity_score: float = 0.0
-    provider_preselection_path: str = str(DEFAULT_PROVIDER_PRESELECTION_PATH)
-    required_provider_preselection_factors: tuple[str, ...] = (
-        REQUIRED_PROVIDER_FACTORS
+    version: str = (
+        "comprehensive-liquid-market-discovery.v5-terminal-market-accounting"
     )
-
-    def __post_init__(self) -> None:
-        _legacy.ComprehensiveMarketDiscoveryPolicy(
-            version=self.version,
-            maximum_directory_records_per_source=self.maximum_directory_records_per_source,
-            maximum_deep_candidates_per_lane=1,
-            selected_global_equities=self.selected_global_equities,
-            selected_fx_pairs=self.selected_fx_pairs,
-            selected_crypto_assets=self.selected_crypto_assets,
-            selected_futures_contracts=self.selected_futures_contracts,
-            selected_bonds=self.selected_bonds,
-            selected_options=self.selected_options,
-            minimum_history_bars=self.minimum_history_bars,
-            history_days=self.history_days,
-            minimum_price=self.minimum_price,
-            minimum_daily_dollar_volume=self.minimum_daily_dollar_volume,
-            option_minimum_days_to_expiry=self.option_minimum_days_to_expiry,
-            option_maximum_days_to_expiry=self.option_maximum_days_to_expiry,
-            maximum_global_equity_weight=self.maximum_global_equity_weight,
-            maximum_fx_weight=self.maximum_fx_weight,
-            maximum_crypto_weight=self.maximum_crypto_weight,
-            maximum_future_weight=self.maximum_future_weight,
-            maximum_bond_weight=self.maximum_bond_weight,
-            maximum_option_weight=self.maximum_option_weight,
-        )
-        if self.maximum_deep_candidates_per_lane is not None:
-            value = self.maximum_deep_candidates_per_lane
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError(
-                    "maximum_deep_candidates_per_lane must be a positive integer or None"
-                )
-        for name in (
-            "preselection_shadow_candidates_per_lane",
-            "preselection_freshness_days",
-        ):
-            value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"{name} must be a non-negative integer")
-        if not 0.0 <= float(self.preselection_minimum_liquidity_score) <= 1.0:
-            raise ValueError(
-                "preselection_minimum_liquidity_score must be between 0 and 1"
-            )
-        if not isinstance(self.provider_preselection_path, str) or not (
-            self.provider_preselection_path.strip()
-        ):
-            raise ValueError("provider_preselection_path cannot be empty")
-        factors = tuple(self.required_provider_preselection_factors)
-        if not factors or len(set(factors)) != len(factors):
-            raise ValueError(
-                "required_provider_preselection_factors must be unique and non-empty"
-            )
-        unsupported = tuple(
-            item for item in factors if item not in REQUIRED_PROVIDER_FACTORS
-        )
-        if unsupported:
-            raise ValueError(
-                "unsupported provider preselection factors: "
-                + ", ".join(unsupported)
-            )
-
-
-@dataclass(frozen=True, slots=True)
-class DiscoveryLaneResult(_legacy.DiscoveryLaneResult):
-    continuity_count: int = 0
-    preselection: PreselectionPlan | None = None
-    preselection_evidence: tuple[tuple[str, tuple[str, ...]], ...] = ()
-    cutoff_observations: tuple[CutoffObservation, ...] = ()
-    cutoff_outcomes: tuple[CutoffOutcomeEvaluation, ...] = ()
-
-    def __post_init__(self) -> None:
-        _legacy.DiscoveryLaneResult.__post_init__(self)
-        if self.continuity_count < 0 or self.continuity_count > self.deep_analyzed_count:
-            raise ValueError("continuity_count is outside the deep-analysis cohort")
-        evidence_symbols = tuple(symbol for symbol, _ in self.preselection_evidence)
-        if len(set(evidence_symbols)) != len(evidence_symbols):
-            raise ValueError("preselection evidence contains duplicate symbols")
-
-
-@dataclass(frozen=True, slots=True)
-class ComprehensiveMarketDiscoveryResult(_legacy.ComprehensiveMarketDiscoveryResult):
-    lanes: tuple[DiscoveryLaneResult, ...]
-
-    def to_dict(self):
-        payload = _legacy.ComprehensiveMarketDiscoveryResult.to_dict(self)
-        for lane_payload, lane in zip(payload["lanes"], self.lanes, strict=True):
-            lane_payload.update(
-                {
-                    "continuity_count": lane.continuity_count,
-                    "candidate_count_limit_applied": False,
-                    "preselection": (
-                        None
-                        if lane.preselection is None
-                        else lane.preselection.to_dict()
-                    ),
-                    "preselection_evidence": {
-                        symbol: list(identifiers)
-                        for symbol, identifiers in lane.preselection_evidence
-                    },
-                    "cutoff_observations": [
-                        item.to_dict() for item in lane.cutoff_observations
-                    ],
-                    "cutoff_outcomes": [
-                        item.to_dict() for item in lane.cutoff_outcomes
-                    ],
-                }
-            )
-        return payload
-
-
-PreselectionProbe = Callable[
-    [
-        Sequence[_legacy.DiscoveryCatalogRecord],
-        datetime,
-        ComprehensiveMarketDiscoveryPolicy,
-    ],
-    Mapping[str, CatalogScreeningSignal],
-]
 
 
 def discover_comprehensive_markets(
@@ -432,34 +79,32 @@ def discover_comprehensive_markets(
     held_symbols: Sequence[str] = (),
     tracked_symbols: Sequence[str] = (),
     excluded_symbols: Sequence[str] = (),
-    catalog_probe: _legacy.CatalogProbe | None = None,
-    market_probe: _legacy.MarketProbe | None = None,
-    preselection_probe: PreselectionProbe | None = None,
-    prior_cutoff_observations: Sequence[CutoffObservation] = (),
+    catalog_probe: _base._legacy.CatalogProbe | None = None,
+    market_probe: _base._legacy.MarketProbe | None = None,
+    preselection_probe: _base.PreselectionProbe | None = None,
+    prior_cutoff_observations: Sequence[_base.CutoffObservation] = (),
     policy: ComprehensiveMarketDiscoveryPolicy | None = None,
-) -> ComprehensiveMarketDiscoveryResult:
+) -> _base.ComprehensiveMarketDiscoveryResult:
     """Screen complete catalogs and forward every eligible evidence-complete asset.
 
-    The uninjected canonical path consumes the persisted provider-enriched factor
-    publication and fails closed when applicable factor evidence is missing. Explicit
-    catalog/market probes without a preselection probe remain a deterministic fixture
-    seam for tests and rehearsals; they do not describe the production authority path.
-
     Candidate scores determine review order only. They never create a top-N cutoff.
+    Every scheduled catalog instrument must finish with a selected or excluded
+    disposition, but a lane is not required to force an investment candidate through
+    unchanged evidence, liquidity, lifecycle, or market-quality gates.
     """
 
-    timestamp = _legacy._aware(as_of, field_name="as_of")
+    timestamp = _base._legacy._aware(as_of, field_name="as_of")
     resolved = policy or ComprehensiveMarketDiscoveryPolicy()
     catalogs = (
         catalog_probe(timestamp)
         if catalog_probe is not None
-        else _merge_certified_catalog(
-            default_catalog_probe(timestamp, policy=resolved),
+        else _base._merge_certified_catalog(
+            _base.default_catalog_probe(timestamp, policy=resolved),
             as_of=timestamp,
         )
     )
     if not isinstance(catalogs, Mapping):
-        raise _legacy.ComprehensiveMarketDiscoveryError(
+        raise _base._legacy.ComprehensiveMarketDiscoveryError(
             "catalog probe must return a mapping"
         )
     fixture_preselection = (
@@ -469,9 +114,9 @@ def discover_comprehensive_markets(
     active_preselection_probe = (
         preselection_probe
         or (
-            default_catalog_screening_signals
+            _base.default_catalog_screening_signals
             if fixture_preselection
-            else provider_enriched_catalog_screening_signals
+            else _base.provider_enriched_catalog_screening_signals
         )
     )
     require_provider_factor_lineage = not fixture_preselection
@@ -483,15 +128,15 @@ def discover_comprehensive_markets(
     excluded = {
         str(item).strip().upper() for item in excluded_symbols if str(item).strip()
     }
-    lanes: list[DiscoveryLaneResult] = []
+    lanes: list[_base.DiscoveryLaneResult] = []
     manifest_material: list[dict[str, object]] = []
 
-    discovery_lanes = _dynamic_discovery_lanes(catalogs)
+    discovery_lanes = _base._dynamic_discovery_lanes(catalogs)
     for asset_class in discovery_lanes:
-        if not _lane_is_scheduled(asset_class, timestamp):
+        if not _base._lane_is_scheduled(asset_class, timestamp):
             reason = "weekend_market_closed"
             lanes.append(
-                DiscoveryLaneResult(
+                _base.DiscoveryLaneResult(
                     asset_class=asset_class,
                     catalog_count=0,
                     deep_analyzed_count=0,
@@ -519,35 +164,45 @@ def discover_comprehensive_markets(
 
         raw = catalogs.get(asset_class, ())
         if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
-            raise _legacy.ComprehensiveMarketDiscoveryError(
+            raise _base._legacy.ComprehensiveMarketDiscoveryError(
                 f"{asset_class.value} catalog must be a sequence"
             )
-        records = tuple(
-            item
-            for item in _legacy._deduplicate(tuple(raw))
-            if item.symbol not in excluded
-            and (
-                item.expiration_at is None
-                or item.expiration_at > timestamp + timedelta(days=7)
-            )
-        )
+        catalog_records = _base._legacy._deduplicate(tuple(raw))
+        records = []
+        catalog_exclusions: list[tuple[str, str]] = []
+        for item in catalog_records:
+            if item.symbol in excluded:
+                catalog_exclusions.append(
+                    (item.symbol, "explicit_discovery_exclusion")
+                )
+                continue
+            if (
+                item.expiration_at is not None
+                and item.expiration_at <= timestamp + timedelta(days=7)
+            ):
+                catalog_exclusions.append(
+                    (item.symbol, "catalog_lifecycle_inside_minimum_window")
+                )
+                continue
+            records.append(item)
+        records = tuple(records)
         state_symbols = held | tracked
         continuity = tuple(item for item in records if item.symbol in state_symbols)
         ordinary = tuple(item for item in records if item.symbol not in state_symbols)
 
         signals = active_preselection_probe(ordinary, timestamp, resolved)
         if not isinstance(signals, Mapping):
-            raise _legacy.ComprehensiveMarketDiscoveryError(
+            raise _base._legacy.ComprehensiveMarketDiscoveryError(
                 f"{asset_class.value} preselection probe must return a mapping"
             )
         if require_provider_factor_lineage:
-            signals = validate_provider_enriched_signals(
+            signals = _base.validate_provider_enriched_signals(
                 ordinary,
                 signals,
                 required_factors=resolved.required_provider_preselection_factors,
             )
 
-        plan = build_preselection_plan(
+        plan = _base.build_preselection_plan(
             ordinary,
             signals,
             as_of=timestamp,
@@ -563,12 +218,12 @@ def discover_comprehensive_markets(
             if symbol in ordinary_by_symbol
         )
         deep_records = tuple(dict.fromkeys((*continuity, *nominated)))
-        features = (market_probe or _legacy.default_market_probe)(
+        features = (market_probe or _base._legacy.default_market_probe)(
             deep_records, timestamp, resolved
         )
 
-        selected: list[_legacy.DiscoveredMarketInstrument] = []
-        exclusions = list(plan.exclusions)
+        selected: list[_base._legacy.DiscoveredMarketInstrument] = []
+        exclusions = [*catalog_exclusions, *plan.exclusions]
         for record in deep_records:
             item_features = features.get(record.symbol)
             if item_features is None:
@@ -592,14 +247,16 @@ def discover_comprehensive_markets(
                 exclusions.append((record.symbol, "liquidity_below_policy_floor"))
                 continue
             selected.append(
-                _legacy.DiscoveredMarketInstrument(
+                _base._legacy.DiscoveredMarketInstrument(
                     catalog=record,
                     features=item_features,
                     retained_for_state=record.symbol in state_symbols,
                 )
             )
 
-        selected.sort(key=lambda item: (item.score, item.catalog.symbol), reverse=True)
+        selected.sort(
+            key=lambda item: (item.score, item.catalog.symbol), reverse=True
+        )
         final = tuple(selected)
 
         current_prices = {
@@ -608,13 +265,13 @@ def discover_comprehensive_markets(
         for symbol, signal in signals.items():
             if signal.indicative_price is not None:
                 current_prices.setdefault(symbol, signal.indicative_price)
-        observations = build_cutoff_observations(
+        observations = _base.build_cutoff_observations(
             plan,
             asset_class=asset_class.value,
             signals=signals,
             selected_prices=current_prices,
         )
-        outcomes = evaluate_cutoff_outcomes(
+        outcomes = _base.evaluate_cutoff_outcomes(
             prior_cutoff_observations,
             asset_class=asset_class.value,
             current_prices=current_prices,
@@ -632,12 +289,20 @@ def discover_comprehensive_markets(
             if symbol in signals
         )
         source_identifiers = tuple(
-            dict.fromkeys(item.catalog.source_identifier for item in final)
+            dict.fromkeys(item.source_identifier for item in catalog_records)
+        )
+        terminal_selected_count, terminal_excluded_count = (
+            _validate_terminal_lane_accounting(
+                asset_class=asset_class,
+                catalog_records=catalog_records,
+                selected=final,
+                exclusions=exclusions,
+            )
         )
         lanes.append(
-            DiscoveryLaneResult(
+            _base.DiscoveryLaneResult(
                 asset_class=asset_class,
-                catalog_count=len(records),
+                catalog_count=len(catalog_records),
                 deep_analyzed_count=len(deep_records),
                 selected=final,
                 exclusions=tuple(exclusions),
@@ -654,9 +319,13 @@ def discover_comprehensive_markets(
                 "asset_class": asset_class.value,
                 "scheduled": True,
                 "schedule_reason": None,
-                "catalog": len(records),
+                "catalog": len(catalog_records),
+                "screenable": len(records),
                 "deep": len(deep_records),
                 "continuity": len(continuity),
+                "terminal_selected_count": terminal_selected_count,
+                "terminal_excluded_count": terminal_excluded_count,
+                "terminal_accounting_complete": True,
                 "candidate_count_limit_applied": False,
                 "provider_enriched_preselection_required": (
                     require_provider_factor_lineage
@@ -672,17 +341,7 @@ def discover_comprehensive_markets(
             }
         )
 
-    missing = tuple(
-        lane.asset_class.value
-        for lane in lanes
-        if lane.scheduled and not lane.selected
-    )
-    if missing:
-        raise _legacy.ComprehensiveMarketDiscoveryError(
-            "complete discovery cannot certify an empty requested lane: "
-            + ", ".join(missing)
-        )
-    fingerprint = _legacy._hash(
+    fingerprint = _base._legacy._hash(
         {
             "as_of": timestamp.isoformat(),
             "policy": resolved.version,
@@ -690,7 +349,7 @@ def discover_comprehensive_markets(
             "lanes": manifest_material,
         }
     )
-    return ComprehensiveMarketDiscoveryResult(
+    return _base.ComprehensiveMarketDiscoveryResult(
         identifier=(
             "comprehensive-market-discovery:"
             f"{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}:{fingerprint[:16]}"
@@ -702,18 +361,17 @@ def discover_comprehensive_markets(
     )
 
 
+def __getattr__(name: str):
+    return getattr(_base, name)
+
+
 __all__ = tuple(
     dict.fromkeys(
         (
-            *_legacy.__all__,
-            "CatalogScreeningSignal",
-            "CutoffObservation",
-            "CutoffOutcomeEvaluation",
-            "PreselectionPlan",
-            "PreselectionProbe",
-            "REQUIRED_PROVIDER_FACTORS",
-            "provider_enriched_catalog_screening_signals",
-            "load_certified_investable_catalog",
+            *_base.__all__,
+            "ComprehensiveMarketDiscoveryPolicy",
+            "discover_comprehensive_markets",
+            "_validate_terminal_lane_accounting",
         )
     )
 )
