@@ -95,7 +95,7 @@ def test_weekend_schedule_keeps_only_crypto_active():
     assert scheduled_discovery_lanes(WEEKEND_AS_OF) == frozenset(
         {CandidateAssetClass.CRYPTO}
     )
-    assert len(scheduled_discovery_lanes(WEEKDAY_AS_OF)) == 6
+    assert len(scheduled_discovery_lanes(WEEKDAY_AS_OF)) == 5
     assert us_equity_discovery_scheduled(WEEKEND_AS_OF) is False
     assert us_equity_discovery_scheduled(WEEKDAY_AS_OF) is True
 
