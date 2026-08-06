@@ -8,16 +8,18 @@ The process is:
 1. Load the complete certified provider catalogs and merge the optional
    provider-neutral `capital-intelligence-certified-investable-catalog.v1`
    publication.
-2. Apply lifecycle, metadata, freshness, provider-lineage, liquidity, and point-in-time
+2. Build or reuse the current governed provider-factor publication for the exact
+   certified catalog.
+3. Apply lifecycle, metadata, freshness, provider-lineage, liquidity, and point-in-time
    evidence checks.
-3. Obtain substantive provider-enriched value, momentum, carry, and
+4. Obtain substantive provider-enriched value, momentum, carry, and
    improving-conditions evidence wherever each factor is economically applicable.
-4. Deep-analyze every asset that remains eligible and evidence-complete.
-5. Forward every asset that passes the governed market and evidence checks into formal
+5. Deep-analyze every asset that remains eligible and evidence-complete.
+6. Forward every asset that passes the governed market and evidence checks into formal
    opportunity qualification.
-6. Send every formally qualified candidate through all six independent specialists and
+7. Send every formally qualified candidate through all six independent specialists and
    then to the CIO.
-7. Allow portfolio construction to determine feasible sizing only after the CIO has
+8. Allow portfolio construction to determine feasible sizing only after the CIO has
    considered the candidate.
 
 ## No candidate-count cutoff
@@ -42,6 +44,20 @@ retained only so older configuration files can still be read. They are not activ
 decision authorities. Discovery manifests explicitly record
 `candidate_count_limit_applied: false`.
 
+## Complete review does not require a forced candidate
+
+A scheduled lane may truthfully complete with zero nominated assets. That outcome is
+valid only when:
+
+- the current certified catalog for the lane is nonempty;
+- substantive provider-factor authority was established for the lane;
+- every current catalog record has one explicit selected or excluded outcome; and
+- no catalog record disappears between discovery, screening, and publication.
+
+A missing catalog, a systemic factor-publication failure, a lane with no substantive
+provider-factor lineage, or a partially resolved catalog remains fail-closed. This
+distinguishes “the market was fully reviewed and nothing qualified” from “the market was
+not evaluated.” It does not lower thresholds merely to produce a candidate or trade.
 
 ## No static asset-class or instrument-list authority
 
@@ -76,9 +92,17 @@ The canonical runtime does not populate value, momentum, carry, or
 improving-conditions scores from catalog completeness, symbol order, spread metadata,
 deterministic tie-breaking, or another synthetic proxy.
 
-Before comprehensive discovery runs, the provider pipeline must publish
-`database/provider-enriched-preselection.json` or set
-`CAPITAL_INTELLIGENCE_PROVIDER_PRESELECTION_PATH` to another governed publication.
+Before comprehensive screening begins, the canonical runtime builds or reuses
+`database/provider-enriched-preselection.json`, or the path configured through
+`CAPITAL_INTELLIGENCE_PROVIDER_PRESELECTION_PATH`. The publication is keyed to the exact
+certified-catalog fingerprint so an older or different universe cannot silently satisfy
+the current cycle.
+
+Directory markets use bounded exchange-wide provider snapshots to avoid per-security
+request fan-out. Derivative and other non-directory records use their provider-native
+point-in-time history probes. The publisher writes atomically to persistent state and
+has nomination-evidence authority only; it cannot qualify, size, authorize, execute, or
+promote an investment.
 
 The publication must use schema
 `capital-intelligence-provider-preselection.v1`. For each governed factor, it must
@@ -91,18 +115,20 @@ provide either:
   applicability-method version, point-in-time timestamp, and immutable evidence
   identifiers.
 
-At least one substantive factor must be scored for every new opportunity. A missing
-factor is not equivalent to a governed not-applicable determination. The loader creates
-separate `provider-factor:` and `provider-factor-not-applicable:` lineage identifiers
-and carries them into the discovery manifest. Missing, stale, future-known, malformed,
-or unprovenanced factor evidence makes the affected candidate ineligible. The system
-never substitutes a neutral score.
+At least one substantive factor must be scored for every published new-opportunity
+signal. A missing factor is not equivalent to a governed not-applicable determination.
+The loader creates separate `provider-factor:` and
+`provider-factor-not-applicable:` lineage identifiers and carries them into the
+discovery manifest. Missing, stale, future-known, malformed, or unprovenanced factor
+evidence makes the affected candidate ineligible. If an entire scheduled lane lacks
+substantive provider-factor lineage, the lane itself fails closed instead of being
+misreported as a valid all-excluded result. The system never substitutes a neutral
+score.
 
 Factor methodology remains asset-specific. Equity value can use normalized earnings or
 free-cash-flow yield, while bond, FX, crypto, futures, option, volatility, and alternative
 instruments require their own governed models. A factor that is not economically
 meaningful is documented as not applicable rather than being used to exclude the asset.
-
 
 ## Capability-based ownership and execution
 
