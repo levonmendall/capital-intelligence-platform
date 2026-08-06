@@ -203,8 +203,14 @@ def test_complete_certified_catalog_contract_accepts_any_classified_instrument(
     )
 
     records = load_certified_investable_catalog(as_of=AS_OF, path=path)
+    commodity = next(
+        item
+        for item in records
+        if item["instrument_identifier"] == "instrument:commodity:silver"
+    )
 
-    assert records[0]["asset_class"] == "commodity"
+    assert commodity["asset_class"] == "commodity"
+    assert any(item["asset_class"] == "crypto" for item in records)
 
 
 def test_benchmark_bond_directory_cannot_enter_investable_discovery() -> None:
