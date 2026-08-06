@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +11,7 @@ from operations.active_paper_universe import build_active_opportunity_engine
 from operations.certified_investable_catalog import load_certified_investable_catalog
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryConfig,
+    ComprehensiveMarketDiscoveryError,
     ComprehensiveMarketDiscoveryPolicy,
     DiscoveryCatalogRecord,
     DiscoveryMarketFeatures,
@@ -207,53 +207,31 @@ def test_complete_certified_catalog_contract_accepts_any_classified_instrument(
     assert records[0]["asset_class"] == "commodity"
 
 
-def test_provider_directory_compatibility_limit_does_not_truncate_catalog() -> None:
+def test_benchmark_bond_directory_cannot_enter_investable_discovery() -> None:
     class Provider:
-        def fetch_dataset(self, query):
-            assert query.limit == 1_000_000
-            return SimpleNamespace(
-                payload={
-                    "active": [
-                        {
-                            "Code": "EUR-BOND",
-                            "Name": "Euro Government Bond",
-                            "Type": "Bond",
-                            "Currency": "EUR",
-                            "CountryISO2": "DE",
-                            "Exchange": "BOND",
-                        },
-                        {
-                            "Code": "USD-BOND",
-                            "Name": "US Government Bond",
-                            "Type": "Bond",
-                            "Currency": "USD",
-                            "CountryISO2": "US",
-                            "Exchange": "BOND",
-                        },
-                    ]
-                },
-                provider_record_id="directory:BOND",
-            )
+        def fetch_dataset(self, _query):
+            raise AssertionError("evidence-only bond directory was queried")
 
-    result = _catalog_from_eodhd(
-        as_of=AS_OF,
-        config=ComprehensiveMarketDiscoveryConfig(
-            eodhd_exchange_codes=("BOND",),
-            futures_roots=(),
-            option_underlyings=(),
-            yahoo_exchange_suffixes=(),
-        ),
-        provider=Provider(),
-        policy=ComprehensiveMarketDiscoveryPolicy(
-            maximum_directory_records_per_source=1
-        ),
-        requested_asset_classes=frozenset({CandidateAssetClass.FIXED_INCOME}),
-    )
-
-    assert {item.currency for item in result[CandidateAssetClass.FIXED_INCOME]} == {
-        "EUR",
-        "USD",
-    }
+    with pytest.raises(
+        ComprehensiveMarketDiscoveryError,
+        match="benchmark-yield directories cannot enter investable discovery",
+    ):
+        _catalog_from_eodhd(
+            as_of=AS_OF,
+            config=ComprehensiveMarketDiscoveryConfig(
+                eodhd_exchange_codes=("BOND",),
+                futures_roots=(),
+                option_underlyings=(),
+                yahoo_exchange_suffixes=(),
+            ),
+            provider=Provider(),
+            policy=ComprehensiveMarketDiscoveryPolicy(
+                maximum_directory_records_per_source=1
+            ),
+            requested_asset_classes=frozenset(
+                {CandidateAssetClass.FIXED_INCOME}
+            ),
+        )
 
 
 @pytest.mark.parametrize(
@@ -298,7 +276,6 @@ def test_paper_instrument_eligibility_is_capability_based_not_class_whitelisted(
     assert profile.asset_class is asset_class
     assert profile.instrument_type == instrument_type
     assert profile.approval_state.value == "paper_eligible"
-
 
 
 def test_listed_adapter_accepts_capability_certified_new_instrument_structure() -> None:
@@ -356,8 +333,12 @@ def test_compatibility_discovery_does_not_reactivate_old_count_limits() -> None:
         for item in result.lanes
         if item.asset_class is CandidateAssetClass.INTERNATIONAL_EQUITY
     )
-    assert {item.catalog.symbol for item in lane.selected} == {"GLOBAL", "GLOBAL2"}
+    assert {item.catalog.symbol for item in lane.selected} == {
+        "GLOBAL",
+        "GLOBAL2",
+    }
     assert lane.deep_analyzed_count == 2
+
 
 def test_active_opportunity_engine_always_injects_exact_capability_authority() -> None:
     instrument = FreePaperPilotInstrument(

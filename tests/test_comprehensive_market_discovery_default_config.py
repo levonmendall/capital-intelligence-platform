@@ -1,28 +1,32 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from types import SimpleNamespace
+
+import pytest
 
 from cio import CandidateAssetClass
 from operations.comprehensive_market_discovery import (
+    ComprehensiveMarketDiscoveryConfig,
+    ComprehensiveMarketDiscoveryError,
     ComprehensiveMarketDiscoveryPolicy,
     _catalog_from_eodhd,
     load_comprehensive_market_discovery_config,
+    scheduled_discovery_lanes,
 )
 
 
 AS_OF = datetime(2026, 8, 5, 19, 30, tzinfo=timezone.utc)
 
 
-def test_default_discovery_uses_only_documented_gbond_directory() -> None:
+def test_default_discovery_excludes_benchmark_bond_directories() -> None:
     config = load_comprehensive_market_discovery_config()
 
-    assert "GBOND" in config.eodhd_exchange_codes
+    assert "GBOND" not in config.eodhd_exchange_codes
     assert "BOND" not in config.eodhd_exchange_codes
-    assert config.eodhd_exchange_codes.count("GBOND") == 1
+    assert CandidateAssetClass.FIXED_INCOME not in scheduled_discovery_lanes(AS_OF)
 
 
-def test_fixed_income_catalog_queries_gbond_not_legacy_bond_directory() -> None:
+def test_fixed_income_catalog_does_not_query_eodhd_without_real_bond_catalog() -> None:
     config = load_comprehensive_market_discovery_config()
 
     class Provider:
@@ -31,21 +35,7 @@ def test_fixed_income_catalog_queries_gbond_not_legacy_bond_directory() -> None:
 
         def fetch_dataset(self, query):
             self.queries.append(query.provider_symbol)
-            return SimpleNamespace(
-                payload={
-                    "active": [
-                        {
-                            "Code": "US10Y",
-                            "Name": "United States Government Bond 10Y",
-                            "Type": "Bond",
-                            "Currency": "USD",
-                            "CountryISO2": "US",
-                            "Exchange": "GBOND",
-                        }
-                    ]
-                },
-                provider_record_id="eodhd-symbol-directory:GBOND",
-            )
+            raise AssertionError("an evidence-only bond directory was queried")
 
     provider = Provider()
     catalogs = _catalog_from_eodhd(
@@ -56,9 +46,26 @@ def test_fixed_income_catalog_queries_gbond_not_legacy_bond_directory() -> None:
         requested_asset_classes=frozenset({CandidateAssetClass.FIXED_INCOME}),
     )
 
-    assert provider.queries == ["GBOND"]
-    assert len(catalogs[CandidateAssetClass.FIXED_INCOME]) == 1
-    record = catalogs[CandidateAssetClass.FIXED_INCOME][0]
-    assert record.asset_class is CandidateAssetClass.FIXED_INCOME
-    assert record.provider_symbol == "US10Y.GBOND"
-    assert record.economic_exposure == "government_bonds"
+    assert provider.queries == []
+    assert catalogs == {CandidateAssetClass.FIXED_INCOME: []}
+
+
+def test_explicit_gbond_configuration_fails_closed() -> None:
+    config = ComprehensiveMarketDiscoveryConfig(
+        eodhd_exchange_codes=("GBOND",),
+        futures_roots=(),
+        option_underlyings=(),
+        yahoo_exchange_suffixes=(),
+    )
+
+    with pytest.raises(
+        ComprehensiveMarketDiscoveryError,
+        match="benchmark-yield directories cannot enter investable discovery",
+    ):
+        _catalog_from_eodhd(
+            as_of=AS_OF,
+            config=config,
+            provider=object(),
+            policy=ComprehensiveMarketDiscoveryPolicy(),
+            requested_asset_classes=frozenset({CandidateAssetClass.FIXED_INCOME}),
+        )

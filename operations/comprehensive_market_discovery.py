@@ -10,12 +10,18 @@ shortlist, or deep-analysis count limit may prevent an otherwise eligible and
 evidence-complete asset from reaching the formal opportunity, six-specialist, and CIO
 decision path. A provider-neutral complete catalog may add any classified investable
 instrument without a code-level asset-class whitelist.
+
+Sovereign benchmark-yield directories are evidence inputs, not executable security
+masters. Direct fixed income therefore becomes a discovery lane only when a certified
+provider-neutral catalog supplies actual instruments with the complete identity,
+lifecycle, pricing, liquidity, cost, custody, settlement, and execution stack.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from cio import CandidateAssetClass
@@ -43,9 +49,116 @@ from operations.provider_enriched_preselection import (
 )
 
 
-# Preserve compatibility for existing provider-validation and regression code that
-# imports legacy private discovery helpers directly from this module.
-_catalog_from_eodhd = _legacy._catalog_from_eodhd
+_EVIDENCE_ONLY_EODHD_DIRECTORIES = frozenset({"BOND", "GBOND"})
+_DEFAULT_REQUIRED_DISCOVERY_LANES = tuple(
+    item
+    for item in _legacy._DISCOVERY_LANES
+    if item is not CandidateAssetClass.FIXED_INCOME
+)
+
+
+def _reject_evidence_only_eodhd_directories(
+    config: _legacy.ComprehensiveMarketDiscoveryConfig,
+) -> None:
+    configured = tuple(
+        item
+        for item in config.eodhd_exchange_codes
+        if item in _EVIDENCE_ONLY_EODHD_DIRECTORIES
+    )
+    if configured:
+        raise _legacy.ComprehensiveMarketDiscoveryError(
+            "sovereign benchmark-yield directories cannot enter investable discovery: "
+            + ", ".join(configured)
+        )
+
+
+def load_comprehensive_market_discovery_config(
+    path: str | Path = _legacy.DEFAULT_DISCOVERY_CONFIG_PATH,
+) -> _legacy.ComprehensiveMarketDiscoveryConfig:
+    """Load discovery configuration and reject evidence-only bond directories."""
+
+    config = _legacy.load_comprehensive_market_discovery_config(path)
+    _reject_evidence_only_eodhd_directories(config)
+    return config
+
+
+def scheduled_discovery_lanes(as_of: datetime) -> frozenset[CandidateAssetClass]:
+    """Return default executable discovery lanes scheduled at ``as_of``.
+
+    Direct fixed income is intentionally absent until a certified instrument catalog
+    supplies an executable bond lane. Listed fixed-income funds remain covered by the
+    listed-instrument universe, while sovereign rates remain analytical evidence.
+    """
+
+    return frozenset(
+        item
+        for item in _legacy.scheduled_discovery_lanes(as_of)
+        if item is not CandidateAssetClass.FIXED_INCOME
+    )
+
+
+def _catalog_from_eodhd(
+    *,
+    as_of: datetime,
+    config: _legacy.ComprehensiveMarketDiscoveryConfig,
+    provider,
+    policy: _legacy.ComprehensiveMarketDiscoveryPolicy,
+    requested_asset_classes: frozenset[CandidateAssetClass] | None = None,
+):
+    """Read executable directories while rejecting benchmark-yield catalogs."""
+
+    _reject_evidence_only_eodhd_directories(config)
+    return _legacy._catalog_from_eodhd(
+        as_of=as_of,
+        config=config,
+        provider=provider,
+        policy=policy,
+        requested_asset_classes=requested_asset_classes,
+    )
+
+
+def default_catalog_probe(
+    as_of: datetime,
+    *,
+    config: _legacy.ComprehensiveMarketDiscoveryConfig | None = None,
+    policy: _legacy.ComprehensiveMarketDiscoveryPolicy | None = None,
+    eodhd_provider=None,
+    databento_options_provider=None,
+):
+    """Collect the default executable catalogs without fabricating direct bonds."""
+
+    timestamp = _legacy._aware(as_of, field_name="as_of")
+    resolved_config = config or load_comprehensive_market_discovery_config()
+    _reject_evidence_only_eodhd_directories(resolved_config)
+    resolved_policy = policy or ComprehensiveMarketDiscoveryPolicy()
+    active_lanes = scheduled_discovery_lanes(timestamp)
+    provider = eodhd_provider or _legacy.build_eodhd_provider()
+    result = {
+        key: list(value)
+        for key, value in _catalog_from_eodhd(
+            as_of=timestamp,
+            config=resolved_config,
+            provider=provider,
+            policy=resolved_policy,
+            requested_asset_classes=active_lanes,
+        ).items()
+    }
+    for asset_class in _DEFAULT_REQUIRED_DISCOVERY_LANES:
+        result.setdefault(asset_class, [])
+    if CandidateAssetClass.FUTURE in active_lanes:
+        result[CandidateAssetClass.FUTURE] = list(
+            _legacy._futures_catalog(as_of=timestamp, config=resolved_config)
+        )
+    if CandidateAssetClass.OPTION in active_lanes:
+        result[CandidateAssetClass.OPTION] = list(
+            _legacy._option_catalog(
+                as_of=timestamp,
+                config=resolved_config,
+                policy=resolved_policy,
+                databento_options_provider=databento_options_provider,
+            )
+        )
+    return result
 
 
 def _optional_timestamp(value: object) -> datetime | None:
@@ -151,7 +264,7 @@ def _merge_certified_catalog(
 def _dynamic_discovery_lanes(
     catalogs: Mapping[CandidateAssetClass, Sequence[_legacy.DiscoveryCatalogRecord]],
 ) -> tuple[CandidateAssetClass, ...]:
-    required = set(_legacy._DISCOVERY_LANES)
+    required = set(_DEFAULT_REQUIRED_DISCOVERY_LANES)
     required.update(
         asset_class
         for asset_class, records in catalogs.items()
@@ -196,9 +309,6 @@ class ComprehensiveMarketDiscoveryPolicy(_legacy.ComprehensiveMarketDiscoveryPol
     )
 
     def __post_init__(self) -> None:
-        # Reuse the legacy validation for every inherited quality, lifecycle, history,
-        # sizing, and source-bound field. A harmless value is supplied for the retired
-        # deep-candidate count field because ``None`` now means no count cutoff.
         _legacy.ComprehensiveMarketDiscoveryPolicy(
             version=self.version,
             maximum_directory_records_per_source=self.maximum_directory_records_per_source,
@@ -344,7 +454,7 @@ def discover_comprehensive_markets(
         catalog_probe(timestamp)
         if catalog_probe is not None
         else _merge_certified_catalog(
-            _legacy.default_catalog_probe(timestamp, policy=resolved),
+            default_catalog_probe(timestamp, policy=resolved),
             as_of=timestamp,
         )
     )
@@ -437,8 +547,6 @@ def discover_comprehensive_markets(
                 required_factors=resolved.required_provider_preselection_factors,
             )
 
-        # Capacity equals the full ordinary catalog. The sleeve model still orders and
-        # explains candidates, but it cannot exclude an eligible asset by rank or count.
         plan = build_preselection_plan(
             ordinary,
             signals,
@@ -492,8 +600,6 @@ def discover_comprehensive_markets(
             )
 
         selected.sort(key=lambda item: (item.score, item.catalog.symbol), reverse=True)
-        # Ordering is informational only. Every asset that passed the governed checks is
-        # forwarded; inherited selected_* limits are not decision authorities.
         final = tuple(selected)
 
         current_prices = {
