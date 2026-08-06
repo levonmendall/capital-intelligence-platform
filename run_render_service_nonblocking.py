@@ -426,9 +426,12 @@ def run_nonblocking_render_service(
                     pid=validation_process.pid,
                 )
         diagnostic_thread = _start_release_diagnostic(values)
+        deferred_start_ready = _diagnostic_completion_gate(diagnostic_thread)
+        if deferred_start_ready is None:
+            return run_supervisor(environment=values)
         return run_supervisor(
             environment=values,
-            deferred_start_ready=_diagnostic_completion_gate(diagnostic_thread),
+            deferred_start_ready=deferred_start_ready,
         )
     finally:
         _terminate(validation_process)
