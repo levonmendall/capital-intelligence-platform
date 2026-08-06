@@ -31,7 +31,7 @@ def test_default_crypto_catalog_is_complete_and_multi_venue(monkeypatch) -> None
     monkeypatch.delenv(CRYPTO_VENUE_BINDINGS_ENV, raising=False)
 
     records = load_certified_investable_catalog(as_of=AS_OF)
-    crypto = tuple(item for item in records if item["asset_class"] == "CRYPTO")
+    crypto = tuple(item for item in records if item["asset_class"] == "crypto")
 
     assert {str(item["symbol"]) for item in crypto} == EXPECTED_SYMBOLS
     assert {
