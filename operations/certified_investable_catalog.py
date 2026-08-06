@@ -111,7 +111,7 @@ def _certified_crypto_records() -> tuple[Mapping[str, object], ...]:
                 "symbol": symbol,
                 "provider_symbol": binding.coinbase_product_id,
                 "name": f"{base_currency} / {quote_currency} spot crypto",
-                "asset_class": "CRYPTO",
+                "asset_class": "crypto",
                 "economic_exposure": "crypto",
                 "venue": "COINBASE_KRAKEN",
                 "country_code": "GLOBAL",
