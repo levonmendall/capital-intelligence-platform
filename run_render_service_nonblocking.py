@@ -25,7 +25,9 @@ diagnostic. A failed cold-start discovery may be resumed a small bounded number 
 so previously certified provider snapshots on the persistent disk can be reused and the
 next uncached market can be attempted. Every attempt remains paper-only, requires
 complete all-market discovery, preserves all fail-closed gates, and publishes a
-credential-safe aggregate audit. The bootstrap never creates an unbounded retry loop.
+credential-safe aggregate audit. While that bounded diagnostic is active, the supervisor
+keeps API and Streamlit available but defers the duplicate CIO operator and non-web
+workers so the diagnostic has safe memory headroom on the 2 GB Render instance.
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import MutableMapping, Sequence
+from collections.abc import Callable, MutableMapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -355,6 +357,16 @@ def _start_release_diagnostic(
     return thread
 
 
+def _diagnostic_completion_gate(
+    diagnostic_thread: threading.Thread | None,
+) -> Callable[[], bool] | None:
+    """Return a supervisor barrier that opens when the release diagnostic ends."""
+
+    if diagnostic_thread is None:
+        return None
+    return lambda: not diagnostic_thread.is_alive()
+
+
 def run_nonblocking_render_service(
     environment: MutableMapping[str, str] | None = None,
 ) -> int:
@@ -413,8 +425,11 @@ def run_nonblocking_render_service(
                     "provider_validation_worker_started",
                     pid=validation_process.pid,
                 )
-        _start_release_diagnostic(values)
-        return run_supervisor(environment=values)
+        diagnostic_thread = _start_release_diagnostic(values)
+        return run_supervisor(
+            environment=values,
+            deferred_start_ready=_diagnostic_completion_gate(diagnostic_thread),
+        )
     finally:
         _terminate(validation_process)
         _log("render_bootstrap_stopped")
