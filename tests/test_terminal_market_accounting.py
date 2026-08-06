@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from api.routes.cio_diagnostic import _market_lanes
 from cio import CandidateAssetClass
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryError,
@@ -193,3 +194,28 @@ def test_terminal_accounting_rejects_unaccounted_record() -> None:
             selected=(),
             exclusions=(),
         )
+
+
+def test_release_audit_represents_nonempty_all_excluded_lane() -> None:
+    lanes = _market_lanes(
+        {
+            "fx": {
+                "scheduled": True,
+                "catalog": 12,
+                "deep": 0,
+                "selected": 0,
+            }
+        }
+    )
+
+    assert lanes == (
+        {
+            "asset_class": "fx",
+            "scheduled": True,
+            "schedule_reason": None,
+            "catalog_count": 12,
+            "deep_analyzed_count": 0,
+            "selected_count": 0,
+            "represented": True,
+        },
+    )
