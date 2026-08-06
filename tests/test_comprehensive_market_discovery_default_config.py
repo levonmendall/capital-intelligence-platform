@@ -18,12 +18,14 @@ from operations.comprehensive_market_discovery import (
 AS_OF = datetime(2026, 8, 5, 19, 30, tzinfo=timezone.utc)
 
 
-def test_default_discovery_excludes_benchmark_bond_directories() -> None:
+def test_default_discovery_excludes_non_security_reference_directories() -> None:
     config = load_comprehensive_market_discovery_config()
 
     assert "GBOND" not in config.eodhd_exchange_codes
     assert "BOND" not in config.eodhd_exchange_codes
+    assert "CC" not in config.eodhd_exchange_codes
     assert CandidateAssetClass.FIXED_INCOME not in scheduled_discovery_lanes(AS_OF)
+    assert CandidateAssetClass.CRYPTO in scheduled_discovery_lanes(AS_OF)
 
 
 def test_fixed_income_catalog_does_not_query_eodhd_without_real_bond_catalog() -> None:
@@ -48,6 +50,30 @@ def test_fixed_income_catalog_does_not_query_eodhd_without_real_bond_catalog() -
 
     assert provider.queries == []
     assert catalogs == {CandidateAssetClass.FIXED_INCOME: []}
+
+
+def test_crypto_catalog_does_not_query_eodhd_cc_directory() -> None:
+    config = load_comprehensive_market_discovery_config()
+
+    class Provider:
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        def fetch_dataset(self, query):
+            self.queries.append(query.provider_symbol)
+            raise AssertionError("the paid CC reference directory was queried")
+
+    provider = Provider()
+    catalogs = _catalog_from_eodhd(
+        as_of=AS_OF,
+        config=config,
+        provider=provider,
+        policy=ComprehensiveMarketDiscoveryPolicy(),
+        requested_asset_classes=frozenset({CandidateAssetClass.CRYPTO}),
+    )
+
+    assert provider.queries == []
+    assert catalogs == {CandidateAssetClass.CRYPTO: []}
 
 
 def test_explicit_gbond_configuration_fails_closed() -> None:
