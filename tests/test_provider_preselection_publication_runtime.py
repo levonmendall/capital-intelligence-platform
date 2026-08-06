@@ -166,10 +166,10 @@ def test_publication_fails_closed_when_no_substantive_signal_is_available(
         provider_preselection_path=str(path)
     )
     record = _record(
-        asset_class=CandidateAssetClass.FUTURE,
-        symbol="ESZ26",
-        provider_symbol="ESZ26.CME",
-        source_identifier="configured-futures-root:ES:ESZ26",
+        asset_class=CandidateAssetClass.CRYPTO,
+        symbol="BTCUSD",
+        provider_symbol="BTC-USD",
+        source_identifier="certified-catalog:crypto:BTCUSD",
     )
 
     with pytest.raises(
@@ -177,7 +177,7 @@ def test_publication_fails_closed_when_no_substantive_signal_is_available(
         match="no substantive provider factor signal",
     ):
         ensure_provider_preselection_publication(
-            {CandidateAssetClass.FUTURE: [record]},
+            {CandidateAssetClass.CRYPTO: [record]},
             as_of=AS_OF,
             policy=policy,
             market_probe=lambda _records, _as_of, _policy: {},
