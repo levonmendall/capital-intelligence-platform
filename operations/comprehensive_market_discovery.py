@@ -384,6 +384,18 @@ class DiscoveryLaneResult(_legacy.DiscoveryLaneResult):
         if len(set(evidence_symbols)) != len(evidence_symbols):
             raise ValueError("preselection evidence contains duplicate symbols")
 
+    @property
+    def explicitly_resolved_count(self) -> int:
+        """Return unique selected or explicitly excluded current catalog records."""
+
+        excluded_symbols = {
+            symbol
+            for symbol, _reason in self.exclusions
+            if symbol != "__lane__"
+        }
+        selected_symbols = {item.catalog.symbol for item in self.selected}
+        return len(excluded_symbols | selected_symbols)
+
 
 @dataclass(frozen=True, slots=True)
 class ComprehensiveMarketDiscoveryResult(_legacy.ComprehensiveMarketDiscoveryResult):
@@ -395,6 +407,7 @@ class ComprehensiveMarketDiscoveryResult(_legacy.ComprehensiveMarketDiscoveryRes
             lane_payload.update(
                 {
                     "continuity_count": lane.continuity_count,
+                    "explicitly_resolved_count": lane.explicitly_resolved_count,
                     "candidate_count_limit_applied": False,
                     "preselection": (
                         None
@@ -446,6 +459,9 @@ def discover_comprehensive_markets(
     seam for tests and rehearsals; they do not describe the production authority path.
 
     Candidate scores determine review order only. They never create a top-N cutoff.
+    A scheduled lane may truthfully finish with no nominated asset when its certified
+    catalog is nonempty and every current record carries an explicit selection or
+    exclusion outcome. Empty catalogs and partially resolved lanes remain fail-closed.
     """
 
     timestamp = _legacy._aware(as_of, field_name="as_of")
@@ -509,6 +525,7 @@ def discover_comprehensive_markets(
                     "schedule_reason": reason,
                     "catalog": 0,
                     "deep": 0,
+                    "resolved": 0,
                     "selected": [],
                     "sources": [],
                     "candidate_count_limit_applied": False,
@@ -634,21 +651,20 @@ def discover_comprehensive_markets(
         source_identifiers = tuple(
             dict.fromkeys(item.catalog.source_identifier for item in final)
         )
-        lanes.append(
-            DiscoveryLaneResult(
-                asset_class=asset_class,
-                catalog_count=len(records),
-                deep_analyzed_count=len(deep_records),
-                selected=final,
-                exclusions=tuple(exclusions),
-                source_identifiers=source_identifiers,
-                continuity_count=len(continuity),
-                preselection=plan,
-                preselection_evidence=preselection_evidence,
-                cutoff_observations=observations,
-                cutoff_outcomes=outcomes,
-            )
+        lane = DiscoveryLaneResult(
+            asset_class=asset_class,
+            catalog_count=len(records),
+            deep_analyzed_count=len(deep_records),
+            selected=final,
+            exclusions=tuple(exclusions),
+            source_identifiers=source_identifiers,
+            continuity_count=len(continuity),
+            preselection=plan,
+            preselection_evidence=preselection_evidence,
+            cutoff_observations=observations,
+            cutoff_outcomes=outcomes,
         )
+        lanes.append(lane)
         manifest_material.append(
             {
                 "asset_class": asset_class.value,
@@ -656,6 +672,7 @@ def discover_comprehensive_markets(
                 "schedule_reason": None,
                 "catalog": len(records),
                 "deep": len(deep_records),
+                "resolved": lane.explicitly_resolved_count,
                 "continuity": len(continuity),
                 "candidate_count_limit_applied": False,
                 "provider_enriched_preselection_required": (
@@ -672,15 +689,20 @@ def discover_comprehensive_markets(
             }
         )
 
-    missing = tuple(
+    incomplete = tuple(
         lane.asset_class.value
         for lane in lanes
-        if lane.scheduled and not lane.selected
+        if lane.scheduled
+        and (
+            lane.catalog_count < 1
+            or lane.explicitly_resolved_count != lane.catalog_count
+        )
     )
-    if missing:
+    if incomplete:
         raise _legacy.ComprehensiveMarketDiscoveryError(
-            "complete discovery cannot certify an empty requested lane: "
-            + ", ".join(missing)
+            "complete discovery requires a nonempty certified catalog and an explicit "
+            "outcome for every current record in each requested lane: "
+            + ", ".join(incomplete)
         )
     fingerprint = _legacy._hash(
         {
