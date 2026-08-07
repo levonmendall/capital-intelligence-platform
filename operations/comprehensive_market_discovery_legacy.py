@@ -39,6 +39,7 @@ from providers.alpaca_paper import AlpacaPaperClient, create_alpaca_paper_client
 
 DEFAULT_DISCOVERY_CONFIG_PATH = Path("config/comprehensive_market_discovery.json")
 _PROVIDER_DIRECTORY_CERTIFICATION_LIMIT = 1_000_000
+_MAX_DEEP_MARKET_IO_WORKERS = 4
 
 _DISCOVERY_CALENDAR_TIMEZONE = ZoneInfo("America/New_York")
 _DISCOVERY_LANES = (
@@ -1132,15 +1133,27 @@ def default_market_probe(
     eodhd_provider: EODHDProvider | None = None,
     databento_options_provider: DatabentoOptionsProvider | None = None,
     alpaca_client: AlpacaPaperClient | None = None,
+    maximum_workers: int = _MAX_DEEP_MARKET_IO_WORKERS,
 ) -> Mapping[str, DiscoveryMarketFeatures]:
     timestamp = _aware(as_of, field_name="as_of")
+    if (
+        isinstance(maximum_workers, bool)
+        or not isinstance(maximum_workers, int)
+        or maximum_workers < 1
+    ):
+        raise ValueError("maximum_workers must be a positive integer")
+    ordered_records = tuple(records)
     provider = eodhd_provider or build_eodhd_provider()
     options_provider = databento_options_provider or DatabentoOptionsProvider()
     option_records = tuple(
-        item for item in records if item.asset_class is CandidateAssetClass.OPTION
+        item
+        for item in ordered_records
+        if item.asset_class is CandidateAssetClass.OPTION
     )
     option_histories: Mapping[str, tuple[object, ...]] = {}
-    alpaca_records = tuple(item for item in records if item.provider_kind == "alpaca")
+    alpaca_records = tuple(
+        item for item in ordered_records if item.provider_kind == "alpaca"
+    )
     alpaca_histories: dict[str, Sequence[Mapping[str, object]]] = {}
     if alpaca_records:
         client = alpaca_client or create_alpaca_paper_client()
@@ -1176,9 +1189,17 @@ def default_market_probe(
             )
         except (DatabentoOptionsError, OSError, TypeError, ValueError):
             option_histories = {}
-    result: dict[str, DiscoveryMarketFeatures] = {}
-    for record in records:
+
+    def load_record_rows(
+        record: DiscoveryCatalogRecord,
+    ) -> tuple[
+        tuple[dict[str, object], ...],
+        float,
+        tuple[object, ...],
+        tuple[str, ...],
+    ] | None:
         option_evidence: tuple[str, ...] = ()
+        option_rows: tuple[object, ...] = ()
         if record.asset_class is CandidateAssetClass.OPTION and record.underlying_symbol:
             underlying = DiscoveryCatalogRecord(
                 symbol=record.underlying_symbol,
@@ -1250,7 +1271,28 @@ def default_market_probe(
             # Databento and other provider-native records are ranked only after a
             # runtime probe supplies point-in-time bars. Missing evidence remains
             # an explicit exclusion rather than being synthesized.
+            return None
+        return rows, option_price, tuple(option_rows), option_evidence
+
+    worker_count = min(
+        _MAX_DEEP_MARKET_IO_WORKERS,
+        maximum_workers,
+        max(1, len(ordered_records)),
+    )
+    if len(ordered_records) > 1 and worker_count > 1:
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="deep-market-evidence",
+        ) as executor:
+            loaded_records = tuple(executor.map(load_record_rows, ordered_records))
+    else:
+        loaded_records = tuple(map(load_record_rows, ordered_records))
+
+    result: dict[str, DiscoveryMarketFeatures] = {}
+    for record, loaded in zip(ordered_records, loaded_records):
+        if loaded is None:
             continue
+        rows, option_price, option_rows, option_evidence = loaded
         if len(rows) < policy.minimum_history_bars:
             continue
         if record.asset_class is CandidateAssetClass.OPTION and option_price <= 0.0:

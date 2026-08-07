@@ -870,7 +870,15 @@ def ensure_provider_preselection_publication(
                 def collect_batch(
                     batch: tuple[DiscoveryCatalogRecord, ...],
                 ) -> Mapping[str, DiscoveryMarketFeatures]:
-                    return default_market_probe(batch, timestamp, resolved)
+                    # This stage already owns a four-way outer fan-out. Keep the
+                    # inner history loader serial so aggregate provider concurrency
+                    # remains bounded by the same governance-preserving cap.
+                    return default_market_probe(
+                        batch,
+                        timestamp,
+                        resolved,
+                        maximum_workers=1,
+                    )
 
                 if len(batches) > 1:
                     with ThreadPoolExecutor(

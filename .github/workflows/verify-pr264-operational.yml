@@ -12,7 +12,9 @@ on:
       - initialize.py
       - operations/certified_investable_catalog.py
       - operations/comprehensive_market_discovery.py
+      - operations/comprehensive_market_discovery_legacy.py
       - operations/provider_preselection_publication_runtime.py
+      - tests/test_deep_market_evidence_concurrency.py
       - operations/provider_validation.py
       - providers/crypto_venues.py
       - providers/databento.py
@@ -39,7 +41,9 @@ on:
       - initialize.py
       - operations/certified_investable_catalog.py
       - operations/comprehensive_market_discovery.py
+      - operations/comprehensive_market_discovery_legacy.py
       - operations/provider_preselection_publication_runtime.py
+      - tests/test_deep_market_evidence_concurrency.py
       - operations/provider_validation.py
       - providers/crypto_venues.py
       - providers/databento.py
@@ -89,6 +93,8 @@ jobs:
             providers/databento_options.py \
             operations/certified_investable_catalog.py \
             operations/comprehensive_market_discovery.py \
+            operations/comprehensive_market_discovery_legacy.py \
+            operations/provider_preselection_publication_runtime.py \
             operations/provider_validation.py \
             api/routes/provider_validation.py \
             initialize.py \
@@ -96,7 +102,9 @@ jobs:
             tests/test_certified_crypto_discovery_catalog.py \
             tests/test_comprehensive_market_discovery.py \
             tests/test_comprehensive_market_discovery_default_config.py \
+            tests/test_deep_market_evidence_concurrency.py \
             tests/test_databento_options.py \
+            tests/test_provider_preselection_publication_runtime.py \
             tests/test_provider_validation.py \
             tests/test_run_provider_validation_policy.py
       - name: Run PR264 deterministic regressions
@@ -107,7 +115,9 @@ jobs:
             tests/test_certified_crypto_discovery_catalog.py \
             tests/test_comprehensive_market_discovery.py \
             tests/test_comprehensive_market_discovery_default_config.py \
+            tests/test_deep_market_evidence_concurrency.py \
             tests/test_databento_options.py \
+            tests/test_provider_preselection_publication_runtime.py \
             tests/test_provider_validation.py \
             tests/test_run_provider_validation_policy.py
 
