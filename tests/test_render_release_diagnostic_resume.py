@@ -21,7 +21,6 @@ def _values(
     return {
         "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
         "CAPITAL_INTELLIGENCE_RELEASE": "test-release-sha",
-        "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_FORCE_ON_RELEASE": "true",
         "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_STARTUP_WAIT_SECONDS": "1",
         "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_STARTUP_POLL_SECONDS": "0.1",
         "CAPITAL_INTELLIGENCE_RELEASE_DIAGNOSTIC_MAX_ATTEMPTS": str(max_attempts),
@@ -71,7 +70,11 @@ def test_failed_cold_start_resumes_from_cache_and_stops_on_success(
     )
 
     assert len(commands) == 2
-    assert all(command[-1] == "--force" for command in commands)
+    assert commands[0][-1] == "run_bounded_manual_cio_diagnostic.py"
+    assert commands[1][-2:] == (
+        "run_bounded_manual_cio_diagnostic.py",
+        "--force",
+    )
     assert sleeps == [0.25]
     assert audit_calls == ["test-release-sha"] * 3
     assert all(

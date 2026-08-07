@@ -75,6 +75,26 @@ def test_watchdog_emits_start_and_finish_events(monkeypatch, capsys, tmp_path: P
     assert process.wait_calls == [17.0]
 
 
+def test_watchdog_passes_force_only_to_an_explicit_replacement(monkeypatch) -> None:
+    commands = []
+
+    def popen(command, *, env, cwd):
+        del env, cwd
+        commands.append(tuple(command))
+        return CompletedProcess()
+
+    monkeypatch.setattr(watchdog.subprocess, "Popen", popen)
+
+    assert watchdog.run_bounded_diagnostic(
+        force=True,
+        values={"CAPITAL_INTELLIGENCE_RELEASE": "release-retry"},
+        timeout_seconds=5,
+    ) == 3
+
+    assert commands[0][-1] == "--force"
+    assert Path(commands[0][-2]).name == "run_manual_cio_diagnostic.py"
+
+
 def test_watchdog_times_out_and_closes_claimed_request(monkeypatch, capsys) -> None:
     process = TimedOutProcess()
     existing = SimpleNamespace(

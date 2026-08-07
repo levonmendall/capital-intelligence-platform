@@ -115,6 +115,7 @@ def _close_timed_out_request(
 
 def run_bounded_diagnostic(
     *,
+    force: bool = False,
     values: Mapping[str, str] | None = None,
     timeout_seconds: float | None = None,
 ) -> int:
@@ -130,9 +131,12 @@ def run_bounded_diagnostic(
         release=release,
         timeout_seconds=timeout,
     )
+    command = [sys.executable, str(script)]
+    if force:
+        command.append("--force")
     try:
         process = subprocess.Popen(
-            (sys.executable, str(script)),
+            tuple(command),
             env=resolved,
             cwd=str(script.parent),
         )
@@ -172,10 +176,18 @@ def run_bounded_diagnostic(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run a replacement even when this release already has a final result.",
+    )
     parser.add_argument("--timeout-seconds", type=float)
     args = parser.parse_args(argv)
     try:
-        return run_bounded_diagnostic(timeout_seconds=args.timeout_seconds)
+        return run_bounded_diagnostic(
+            force=args.force,
+            timeout_seconds=args.timeout_seconds,
+        )
     except (OSError, TypeError, ValueError, RuntimeError) as error:
         _log(
             "manual_cio_diagnostic_watchdog_failed",

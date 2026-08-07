@@ -5,11 +5,9 @@ and paper implementation. This worker is deliberately noncritical to web availab
 provider outages or slow responses are recorded in the readiness report while the
 authenticated console and health endpoint remain online.
 
-When explicitly enabled, the worker also launches one paper-only diagnostic CIO pass per
-release. A dedicated watchdog emits an immediate run-start event and enforces a bounded
-operational deadline, so a child that stalls before producing its own result cannot remain
-silent indefinitely. The pass bypasses only the calendar due check; every evidence,
-specialist, CIO, construction, and paper-execution control remains active and fail-closed.
+Release-triggered CIO diagnostics are owned exclusively by the Render bootstrap. Keeping
+this worker limited to provider validation prevents two independent processes from
+claiming or closing the same durable diagnostic request.
 """
 
 from __future__ import annotations
@@ -18,10 +16,7 @@ import argparse
 import json
 import os
 import signal
-import subprocess
-import sys
 import time
-from pathlib import Path
 from threading import Event
 from types import FrameType
 from typing import Sequence
@@ -81,44 +76,6 @@ def validate_once() -> tuple[ProviderValidationReport, Path]:
     return report, report_path
 
 
-def _run_release_diagnostic() -> subprocess.Popen[bytes] | subprocess.Popen[str] | None:
-    """Start the observable, bounded diagnostic before provider validation."""
-
-    script = Path(__file__).resolve().with_name(
-        "run_bounded_manual_cio_diagnostic.py"
-    )
-    try:
-        process = subprocess.Popen(
-            (sys.executable, str(script)),
-            env=dict(os.environ),
-            cwd=str(script.parent),
-        )
-    except OSError as error:
-        _log(
-            "manual_cio_diagnostic_launch_failed",
-            error_type=type(error).__name__,
-        )
-        return None
-    _log(
-        "manual_cio_diagnostic_process_started",
-        pid=process.pid,
-    )
-    return process
-
-
-def _terminate_diagnostic(
-    process: subprocess.Popen[bytes] | subprocess.Popen[str] | None,
-) -> None:
-    if process is None or process.poll() is not None:
-        return
-    process.terminate()
-    try:
-        process.wait(timeout=20)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=5)
-
-
 def run_loop(
     *,
     interval_seconds: float | None = None,
@@ -162,7 +119,6 @@ def run_loop(
             signal.SIGINT: signal.signal(signal.SIGINT, request_stop),
         }
 
-    diagnostic_process: subprocess.Popen[bytes] | subprocess.Popen[str] | None = None
     try:
         _log(
             "provider_validation_worker_started",
@@ -171,10 +127,6 @@ def run_loop(
         )
         if stopping.wait(initial_delay):
             return 0
-
-        # The diagnostic must not sit behind a provider call that can be slow or
-        # stalled. It is independently idempotent per release and remains paper-only.
-        diagnostic_process = _run_release_diagnostic()
 
         while not stopping.is_set():
             try:
@@ -188,7 +140,6 @@ def run_loop(
                 break
         return 0
     finally:
-        _terminate_diagnostic(diagnostic_process)
         for handled_signal, previous in previous_handlers.items():
             signal.signal(handled_signal, previous)
         _log("provider_validation_worker_stopped")

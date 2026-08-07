@@ -48,7 +48,7 @@ def test_release_diagnostic_runs_after_bounded_readiness_wait_expires(monkeypatc
 
     assert len(executed) == 1
     command, diagnostic_environment = executed[0]
-    assert command[-1] == "run_manual_cio_diagnostic.py"
+    assert command[-1] == "run_bounded_manual_cio_diagnostic.py"
     assert diagnostic_environment["CAPITAL_INTELLIGENCE_RELEASE"] == "release-under-test"
     assert diagnostic_environment["CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE"] == "false"
     assert diagnostic_environment["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY"] == "true"
