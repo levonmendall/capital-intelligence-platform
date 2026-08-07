@@ -31,7 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      AUDIT_URL: https://capital-intelligence-platform.onrender.com/v1/operations/cio-diagnostic
+      # Render exposes Streamlit on the public service port. The internal FastAPI
+      # child listens only on 127.0.0.1:8000, so public certification must read
+      # the credential-safe audit from Streamlit's enabled static-file surface.
+      AUDIT_URL: https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json
       EXPECTED_RELEASE: ${{ github.event.deployment.sha || github.event.inputs.expected_release || github.sha }}
       AUDIT_OUTPUT: /tmp/render-cio-diagnostic.json
       VERIFICATION_LOG: /tmp/render-cio-diagnostic-verification.log
