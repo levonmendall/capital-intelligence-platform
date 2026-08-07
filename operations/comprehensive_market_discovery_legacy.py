@@ -864,6 +864,9 @@ def _option_catalog(
             "Databento OPRA credentials are required for defined-risk option discovery"
         )
     result: list[DiscoveryCatalogRecord] = []
+    underlying_quote_failures: list[str] = []
+    provider_failures: list[tuple[str, str]] = []
+    empty_selection_failures: list[str] = []
     for underlying in config.option_underlyings:
         underlying_record = DiscoveryCatalogRecord(
             symbol=underlying,
@@ -886,6 +889,7 @@ def _option_catalog(
             http_get=http_get,
         )
         if not rows:
+            underlying_quote_failures.append(underlying)
             continue
         underlying_price = float(rows[-1]["c"])
         try:
@@ -896,8 +900,16 @@ def _option_catalog(
                 minimum_days_to_expiry=policy.option_minimum_days_to_expiry,
                 maximum_days_to_expiry=policy.option_maximum_days_to_expiry,
             )
-        except (DatabentoOptionsError, OSError, TypeError, ValueError):
+        except DatabentoOptionsError as error:
+            provider_failures.append(
+                (underlying, str(error).strip() or type(error).__name__)
+            )
             continue
+        except (OSError, TypeError, ValueError) as error:
+            provider_failures.append((underlying, type(error).__name__))
+            continue
+        if not selections:
+            empty_selection_failures.append(underlying)
         for selection in selections:
             definition = selection.definition
             bar = selection.bar
@@ -933,6 +945,21 @@ def _option_catalog(
                     option_right=definition.option_right,
                 )
             )
+    if not result:
+        failure_samples = "; ".join(
+            f"{underlying}={detail}" for underlying, detail in provider_failures[:3]
+        )
+        suffix = (
+            f"; provider_failure_sample={failure_samples}" if failure_samples else ""
+        )
+        raise ComprehensiveMarketDiscoveryError(
+            "Databento OPRA option discovery produced no priced contracts across "
+            f"{len(config.option_underlyings)} configured underlyings; "
+            f"underlying_quote_unavailable={len(underlying_quote_failures)}; "
+            f"provider_errors={len(provider_failures)}; "
+            f"no_eligible_priced_contracts={len(empty_selection_failures)}"
+            f"{suffix}"
+        )
     return result
 
 
