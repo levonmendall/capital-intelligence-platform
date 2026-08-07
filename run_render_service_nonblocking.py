@@ -21,13 +21,16 @@ are never deleted by this recovery path.
 
 When explicitly enabled, the release diagnostic waits until the current API and
 Streamlit children are healthy, then invokes the existing fully governed manual CIO
-diagnostic. A failed cold-start discovery may be resumed a small bounded number of times
-so previously certified provider snapshots on the persistent disk can be reused and the
-next uncached market can be attempted. Every attempt remains paper-only, requires
-complete all-market discovery, preserves all fail-closed gates, and publishes a
-credential-safe aggregate audit. While that bounded diagnostic is active, the supervisor
-keeps API and Streamlit available but defers the duplicate CIO operator and non-web
-workers so the diagnostic has safe memory headroom on the 2 GB Render instance.
+diagnostic. If the bounded readiness observation expires, the diagnostic is still
+attempted rather than abandoning exact-release certification; all downstream evidence,
+provider, discovery, CIO, construction, and paper-only gates remain fail closed. A failed
+cold-start discovery may be resumed a small bounded number of times so previously
+certified provider snapshots on the persistent disk can be reused and the next uncached
+market can be attempted. Every attempt remains paper-only, requires complete all-market
+discovery, preserves all fail-closed gates, and publishes a credential-safe aggregate
+audit. While that bounded diagnostic is active, the supervisor keeps API and Streamlit
+available but defers the duplicate CIO operator and non-web workers so the diagnostic has
+safe memory headroom on the 2 GB Render instance.
 """
 
 from __future__ import annotations
@@ -256,12 +259,15 @@ def _run_release_diagnostic_after_readiness(
         time.sleep(poll_seconds)
     else:
         _log(
-            "manual_cio_release_diagnostic_not_started",
-            reason="current release API and Streamlit readiness was not observed",
+            "manual_cio_release_diagnostic_readiness_wait_expired",
+            reason=(
+                "current release API and Streamlit readiness was not observed; "
+                "continuing with the fully governed fail-closed diagnostic"
+            ),
             startup_wait_seconds=wait_seconds,
+            complete_all_market_coverage_required=True,
             paper_only=True,
         )
-        return
 
     max_attempts, retry_seconds = _release_diagnostic_retry_policy(values)
     command = _release_diagnostic_command(diagnostic_values)
