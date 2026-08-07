@@ -58,7 +58,7 @@ jobs:
             --url "$AUDIT_URL" \
             --expected-release "$EXPECTED_RELEASE" \
             --output "$AUDIT_OUTPUT" \
-            --maximum-attempts 120 \
+            --maximum-attempts 150 \
             --interval-seconds 15 \
             2>&1 | tee "$VERIFICATION_LOG"
 
