@@ -329,6 +329,7 @@ def test_default_fallback_probe_is_bounded_concurrent_and_restores_record_order(
     active = 0
     peak = 0
     stages: list[str] = []
+    requested_worker_counts: list[int] = []
 
     def feature(record: DiscoveryCatalogRecord) -> DiscoveryMarketFeatures:
         return DiscoveryMarketFeatures(
@@ -345,8 +346,9 @@ def test_default_fallback_probe_is_bounded_concurrent_and_restores_record_order(
             evidence_identifiers=(record.source_identifier,),
         )
 
-    def default_probe(batch, _as_of, _policy):
+    def default_probe(batch, _as_of, _policy, *, maximum_workers):
         nonlocal active, peak
+        requested_worker_counts.append(maximum_workers)
         with lock:
             active += 1
             peak = max(peak, active)
@@ -374,6 +376,7 @@ def test_default_fallback_probe_is_bounded_concurrent_and_restores_record_order(
 
     assert result.signal_count == 4
     assert peak == 4
+    assert requested_worker_counts == [1, 1, 1, 1]
     assert stages == [
         "provider_preselection_fallback_probe",
         "provider_preselection_fallback_probe_complete",
