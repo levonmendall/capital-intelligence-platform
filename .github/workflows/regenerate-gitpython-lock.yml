@@ -1,0 +1,46 @@
+name: Regenerate GitPython lock hotfix
+
+on:
+  push:
+    branches:
+      - fix/gitpython-3.1.58-security
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: fix/gitpython-3.1.58-security
+          persist-credentials: true
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip 'pip-tools>=7.5,<8'
+      - name: Regenerate only the vulnerable transitive pin
+        run: >-
+          pip-compile
+          --generate-hashes
+          --output-file=requirements.lock
+          --strip-extras
+          --upgrade-package gitpython
+          requirements.txt
+      - name: Require fixed GitPython
+        run: |
+          grep -q '^gitpython==3\.1\.58 \\' requirements.lock
+          git diff --exit-code -- requirements.txt || exit 1
+      - name: Commit regenerated lock
+        run: |
+          if git diff --quiet -- requirements.lock; then
+            echo 'No lock change required'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add requirements.lock
+          git commit -m 'Update GitPython lock to 3.1.58'
+          git push origin HEAD:fix/gitpython-3.1.58-security
