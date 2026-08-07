@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: verify-render-cio-diagnostic-${{ github.event.deployment.sha || github.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   verify:
