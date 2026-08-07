@@ -100,3 +100,19 @@ def test_release_diagnostic_is_not_armed_when_disabled() -> None:
     }
 
     assert _start_release_diagnostic(values) is None
+
+
+def test_production_diagnostic_and_exact_release_verifier_share_completion_window() -> None:
+    render_config = Path("render.yaml").read_text(encoding="utf-8")
+    verifier = Path(".github/workflows/verify-render-cio-diagnostic.yml").read_text(
+        encoding="utf-8"
+    )
+
+    # Production previously completed the same governed path in 31m23s. Keep the
+    # diagnostic bounded, but do not kill a healthy comprehensive pass at 30m.
+    assert "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_TIMEOUT_SECONDS\n        value: \"2100\"" in render_config
+    # 150 x 15s = 37m30s, so exact-release verification remains open beyond the
+    # 35-minute diagnostic deadline without weakening any certification predicate.
+    assert "--maximum-attempts 150" in verifier
+    assert "--interval-seconds 15" in verifier
+    assert "timeout-minutes: 40" in verifier
