@@ -24,6 +24,7 @@ import json
 import math
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -43,6 +44,7 @@ from operations.provider_enriched_preselection import (
     PROVIDER_PRESELECTION_SCHEMA,
     REQUIRED_PROVIDER_FACTORS,
 )
+from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress
 
 
 _EODHD_API_BASE = "https://eodhd.com/api"
@@ -51,6 +53,7 @@ _EODHD_SOURCE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _PUBLICATION_METHOD_VERSION = "provider-preselection-runtime.v1"
+_MAX_PROVIDER_IO_WORKERS = 4
 
 
 class ProviderPreselectionPublicationError(RuntimeError):
@@ -559,6 +562,107 @@ def _bulk_signal(
     return payload
 
 
+def _exchange_bulk_signals(
+    item: tuple[str, tuple[tuple[DiscoveryCatalogRecord, str], ...]],
+    *,
+    as_of: datetime,
+    api_token: str,
+    http_get: Callable[..., Any],
+) -> tuple[
+    str,
+    tuple[tuple[str, dict[str, object]], ...],
+    str | None,
+    str | None,
+]:
+    """Collect one independent exchange while retaining deterministic publication.
+
+    The returned payload contains only normalized signals and credential-safe failure
+    detail. Raw provider rows remain local to this worker and are released before the
+    result is joined, bounding memory to the worker cap instead of retaining every
+    exchange snapshot at once.
+    """
+
+    exchange, members = item
+    try:
+        rows, observed_at, evidence_identifier = _bulk_snapshot(
+            exchange,
+            as_of=as_of,
+            api_token=api_token,
+            http_get=http_get,
+        )
+    except ProviderPreselectionPublicationError as error:
+        return exchange, (), None, str(error)
+    by_code: dict[str, Mapping[str, object]] = {}
+    for row in rows:
+        for key in _row_keys(row):
+            by_code.setdefault(key, row)
+    normalized: list[tuple[str, dict[str, object]]] = []
+    for record, code in members:
+        candidates = tuple(
+            dict.fromkeys(
+                (
+                    code,
+                    code.split(".", 1)[0],
+                    record.provider_symbol.upper(),
+                    record.provider_symbol.upper().split(".", 1)[0],
+                )
+            )
+        )
+        row = next((by_code[key] for key in candidates if key in by_code), None)
+        if row is None:
+            continue
+        signal = _bulk_signal(
+            record,
+            row,
+            observed_at=observed_at,
+            evidence_identifier=evidence_identifier,
+        )
+        if signal is not None:
+            normalized.append((record.symbol, signal))
+    return exchange, tuple(normalized), evidence_identifier, None
+
+
+def _fallback_probe_batches(
+    records: Sequence[DiscoveryCatalogRecord],
+    *,
+    maximum_batches: int = _MAX_PROVIDER_IO_WORKERS,
+) -> tuple[tuple[DiscoveryCatalogRecord, ...], ...]:
+    """Partition fallback I/O without breaking provider-native batch requests."""
+
+    ordered = tuple(records)
+    if not ordered:
+        return ()
+    options = tuple(
+        item for item in ordered if item.asset_class is CandidateAssetClass.OPTION
+    )
+    alpaca = tuple(
+        item
+        for item in ordered
+        if item.asset_class is not CandidateAssetClass.OPTION
+        and item.provider_kind == "alpaca"
+    )
+    ordinary = tuple(
+        item
+        for item in ordered
+        if item.asset_class is not CandidateAssetClass.OPTION
+        and item.provider_kind != "alpaca"
+    )
+    batches: list[tuple[DiscoveryCatalogRecord, ...]] = []
+    if options:
+        batches.append(options)
+    if alpaca:
+        batches.append(alpaca)
+    remaining = max(1, int(maximum_batches) - len(batches))
+    ordinary_batch_count = min(remaining, len(ordinary))
+    if ordinary_batch_count:
+        batch_size = (len(ordinary) + ordinary_batch_count - 1) // ordinary_batch_count
+        batches.extend(
+            ordinary[start : start + batch_size]
+            for start in range(0, len(ordinary), batch_size)
+        )
+    return tuple(batch for batch in batches if batch)
+
+
 def _feature_signal(
     record: DiscoveryCatalogRecord,
     features: DiscoveryMarketFeatures,
@@ -702,61 +806,96 @@ def ensure_provider_preselection_publication(
             "is unavailable."
         )
     if api_token:
-        for exchange, members in sorted(grouped.items()):
-            try:
-                rows, observed_at, evidence_identifier = _bulk_snapshot(
-                    exchange,
-                    as_of=timestamp,
-                    api_token=api_token,
-                    http_get=http_get,
+        exchange_groups = tuple(
+            (exchange, tuple(members))
+            for exchange, members in sorted(grouped.items())
+        )
+        record_manual_cio_diagnostic_progress(
+            "provider_preselection_bulk_snapshots",
+            metrics={"configured_exchanges": len(exchange_groups)},
+        )
+
+        def collect_exchange(
+            item: tuple[str, tuple[tuple[DiscoveryCatalogRecord, str], ...]],
+        ) -> tuple[
+            str,
+            tuple[tuple[str, dict[str, object]], ...],
+            str | None,
+            str | None,
+        ]:
+            return _exchange_bulk_signals(
+                item,
+                as_of=timestamp,
+                api_token=api_token,
+                http_get=http_get,
+            )
+
+        if len(exchange_groups) > 1:
+            with ThreadPoolExecutor(
+                max_workers=min(_MAX_PROVIDER_IO_WORKERS, len(exchange_groups)),
+                thread_name_prefix="provider-preselection-bulk",
+            ) as executor:
+                exchange_results = tuple(
+                    executor.map(collect_exchange, exchange_groups)
                 )
-            except ProviderPreselectionPublicationError as error:
-                limitations.append(str(error))
+        else:
+            exchange_results = tuple(map(collect_exchange, exchange_groups))
+        for _exchange, normalized, evidence_identifier, error_detail in exchange_results:
+            if error_detail is not None:
+                limitations.append(error_detail)
                 continue
-            sources.append(evidence_identifier)
-            by_code: dict[str, Mapping[str, object]] = {}
-            for row in rows:
-                for key in _row_keys(row):
-                    by_code.setdefault(key, row)
-            for record, code in members:
-                candidates = tuple(
-                    dict.fromkeys(
-                        (
-                            code,
-                            code.split(".", 1)[0],
-                            record.provider_symbol.upper(),
-                            record.provider_symbol.upper().split(".", 1)[0],
-                        )
-                    )
-                )
-                row = next((by_code[key] for key in candidates if key in by_code), None)
-                if row is None:
-                    continue
-                signal = _bulk_signal(
-                    record,
-                    row,
-                    observed_at=observed_at,
-                    evidence_identifier=evidence_identifier,
-                )
-                if signal is not None:
-                    signals[record.symbol] = signal
+            if evidence_identifier is not None:
+                sources.append(evidence_identifier)
+            for symbol, signal in normalized:
+                signals[symbol] = signal
+        record_manual_cio_diagnostic_progress(
+            "provider_preselection_bulk_snapshots_complete",
+            metrics={"evidence_complete_records": len(signals)},
+        )
 
     probe_records = tuple(
         item for item in fallback_records if item.symbol not in signals
     )
     if probe_records:
+        record_manual_cio_diagnostic_progress(
+            "provider_preselection_fallback_probe",
+            metrics={"catalog_records": len(probe_records)},
+        )
         try:
-            features = (market_probe or default_market_probe)(
-                probe_records,
-                timestamp,
-                resolved,
-            )
+            if market_probe is not None:
+                features = market_probe(probe_records, timestamp, resolved)
+            else:
+                batches = _fallback_probe_batches(probe_records)
+
+                def collect_batch(
+                    batch: tuple[DiscoveryCatalogRecord, ...],
+                ) -> Mapping[str, DiscoveryMarketFeatures]:
+                    return default_market_probe(batch, timestamp, resolved)
+
+                if len(batches) > 1:
+                    with ThreadPoolExecutor(
+                        max_workers=min(_MAX_PROVIDER_IO_WORKERS, len(batches)),
+                        thread_name_prefix="provider-preselection-fallback",
+                    ) as executor:
+                        partial_features = tuple(executor.map(collect_batch, batches))
+                else:
+                    partial_features = tuple(map(collect_batch, batches))
+                features = {}
+                for record in probe_records:
+                    for partial in partial_features:
+                        if record.symbol in partial:
+                            features[record.symbol] = partial[record.symbol]
+                            break
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             limitations.append(
                 "provider-native derivative/alternate factor probe failed: "
                 f"{type(error).__name__}"
             )
             features = {}
+        record_manual_cio_diagnostic_progress(
+            "provider_preselection_fallback_probe_complete",
+            metrics={"evidence_complete_records": len(features)},
+        )
         for record in probe_records:
             item = features.get(record.symbol)
             if item is None:
