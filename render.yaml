@@ -25,14 +25,16 @@ services:
       - key: CAPITAL_INTELLIGENCE_DATA_DIR
         value: /app/database
       # Paper-evidence spools are cycle-local working files, not canonical state.
-      # Keep them off the persistent authority disk, compress each payload, and
-      # fail closed before the transient filesystem exhausts its safety reserve.
+      # Render provides a 2 GB /tmp filesystem on this service. Keep the spool
+      # below 1 GB and preserve at least 768 MB free so application-level ENOSPC
+      # is raised before Render's hard temporary-storage limit can terminate the
+      # instance. Comprehensive scope remains fail-closed rather than truncated.
       - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_DIR
         value: /tmp/capital-intelligence/paper_evidence_spool
       - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_MAX_MB
-        value: "4096"
-      - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_RESERVE_MB
         value: "1024"
+      - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_RESERVE_MB
+        value: "768"
       - key: CAPITAL_INTELLIGENCE_LOG_LEVEL
         value: INFO
       - key: CAPITAL_INTELLIGENCE_JSON_LOGS
