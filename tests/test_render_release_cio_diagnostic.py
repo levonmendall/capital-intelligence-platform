@@ -67,6 +67,12 @@ def test_release_diagnostic_requires_complete_live_all_market_scope() -> None:
     )
     assert diagnostic["CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER"] == "true"
     assert diagnostic["CAPITAL_INTELLIGENCE_PROVIDER_RUNTIME_MODE"] == "live"
+    assert (
+        diagnostic[
+            "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED"
+        ]
+        == "true"
+    )
     assert diagnostic["CAPITAL_INTELLIGENCE_UNRELATED_SETTING"] == "preserved"
     assert values["CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE"] == "true"
 

@@ -25,6 +25,7 @@ from operations.manual_cio_diagnostic import (
     claim_manual_cio_diagnostic,
     finish_manual_cio_diagnostic,
     latest_manual_cio_diagnostic,
+    record_manual_cio_diagnostic_progress,
     request_manual_cio_diagnostic,
 )
 from paper_execution_runtime import attempt_paper_execution
@@ -211,20 +212,36 @@ def run_diagnostic_once(
     detail: str | None = None
     succeeded = False
     try:
+        record_manual_cio_diagnostic_progress(
+            "canonical_portfolio_initialization",
+            values=resolved,
+        )
         ensure_canonical_portfolio_store(settings.portfolio_database)
         worker = build_worker(settings)
         context_preparer = recording_context_preparer(
             prepare_production_context_for_cycle
         )
         now = datetime.now(timezone.utc)
+        record_manual_cio_diagnostic_progress(
+            "public_information_collection",
+            values=resolved,
+        )
         collect_public_live_information_if_due(now=now, force=True)
         invalidate_reuse_preserving_success(settings)
+        record_manual_cio_diagnostic_progress(
+            "production_context_preparation",
+            values=resolved,
+        )
         context = context_preparer(settings=settings, scheduled_for=now)
         cycle_key = context.cycle_key
         if not context.ready:
             detail = context.detail
         else:
             cycle_now = datetime.now(timezone.utc)
+            record_manual_cio_diagnostic_progress(
+                "six_specialist_committee_cio_cycle",
+                values=resolved,
+            )
             result = worker.run_triggered(
                 claimed.trigger_key,
                 now=cycle_now,
@@ -241,6 +258,10 @@ def run_diagnostic_once(
             detail = result.detail
             succeeded = result.status == "completed"
             if succeeded:
+                record_manual_cio_diagnostic_progress(
+                    "paper_implementation_boundary",
+                    values=resolved,
+                )
                 construction, briefing = _payloads(
                     settings,
                     expected_as_of=context.decision_as_of,

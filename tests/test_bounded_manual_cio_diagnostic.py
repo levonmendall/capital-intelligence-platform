@@ -102,6 +102,10 @@ def test_watchdog_times_out_and_closes_claimed_request(monkeypatch, capsys) -> N
         state="in_progress",
         cycle_key="canonical-cio:test:event:manual",
         snapshot_identifier=None,
+        detail=(
+            "governed_progress=deep_market_evidence:international_equity; "
+            "decision_eligible_records=417"
+        ),
     )
     finish_calls = []
 
@@ -131,6 +135,10 @@ def test_watchdog_times_out_and_closes_claimed_request(monkeypatch, capsys) -> N
     assert process.killed is False
     assert finish_calls[0][0] is existing
     assert finish_calls[0][1]["succeeded"] is False
+    assert "last_governed_progress=deep_market_evidence:international_equity" in (
+        finish_calls[0][1]["detail"]
+    )
+    assert "decision_eligible_records=417" in finish_calls[0][1]["detail"]
     output = capsys.readouterr().out
     assert "manual_cio_diagnostic_timed_out" in output
     assert "request-123" in output

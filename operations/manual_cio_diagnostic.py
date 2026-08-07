@@ -20,6 +20,65 @@ from uuid import uuid4
 _SCHEMA_VERSION = "manual-cio-diagnostic.v1"
 _ACTIVE_STATES = frozenset({"pending", "in_progress"})
 _FINAL_STATES = frozenset({"completed", "failed"})
+_PROGRESS_ENABLED = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED"
+_PROGRESS_STAGES = frozenset(
+    {
+        "canonical_portfolio_initialization",
+        "public_information_collection",
+        "production_context_preparation",
+        "six_specialist_committee_cio_cycle",
+        "paper_implementation_boundary",
+        "comprehensive_catalog_discovery",
+        "catalog_eodhd_directories",
+        "catalog_eodhd_directories_complete",
+        "catalog_databento_options",
+        "catalog_databento_options_complete",
+        "comprehensive_catalog_discovery_complete",
+        "certified_catalog_merge_complete",
+        "provider_preselection_publication",
+        "provider_preselection_publication_complete",
+        "comprehensive_market_discovery_complete",
+    }
+)
+_PROGRESS_LANE_STAGES = frozenset(
+    {
+        "terminal_screening",
+        "deep_market_evidence",
+        "deep_market_evidence_complete",
+        "terminal_accounting_complete",
+    }
+)
+_PROGRESS_LANES = frozenset(
+    {
+        "us_equity",
+        "us_etf",
+        "cash_equivalent",
+        "fixed_income",
+        "international_equity",
+        "commodity",
+        "fx",
+        "crypto",
+        "real_estate",
+        "future",
+        "option",
+        "volatility",
+        "alternative",
+        "other",
+    }
+)
+_PROGRESS_METRICS = frozenset(
+    {
+        "configured_exchanges",
+        "configured_underlyings",
+        "catalog_records",
+        "continuity_records",
+        "decision_eligible_records",
+        "evidence_complete_records",
+        "excluded",
+        "selected",
+        "scheduled_lanes",
+    }
+)
 
 
 def _utc_now() -> datetime:
@@ -173,6 +232,57 @@ def latest_manual_cio_diagnostic(
     return _read(diagnostic_request_path(values))
 
 
+def record_manual_cio_diagnostic_progress(
+    stage: str,
+    *,
+    metrics: Mapping[str, int] | None = None,
+    values: Mapping[str, str] | None = None,
+) -> ManualCIODiagnosticRequest | None:
+    """Persist credential-safe progress for the active release diagnostic only.
+
+    This mutable file is operational coordination state, not investment evidence or
+    canonical lineage. Progress is enabled only in the release-diagnostic child
+    environment, so normal scheduled discovery cannot annotate an unrelated request.
+    The payload accepts only a constrained stage name and nonnegative integer metrics,
+    so provider payloads, symbols, credentials, or exception text cannot enter the
+    public terminal audit through this path.
+    """
+
+    resolved = os.environ if values is None else values
+    enabled = resolved.get(_PROGRESS_ENABLED, "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return None
+    normalized_stage = str(stage).strip().lower()
+    lane_stage = normalized_stage.split(":", 1)
+    if normalized_stage not in _PROGRESS_STAGES and not (
+        len(lane_stage) == 2
+        and lane_stage[0] in _PROGRESS_LANE_STAGES
+        and lane_stage[1] in _PROGRESS_LANES
+    ):
+        raise ValueError("manual CIO diagnostic progress stage is invalid")
+    normalized_metrics: list[tuple[str, int]] = []
+    for raw_name, raw_value in sorted((metrics or {}).items()):
+        name = str(raw_name).strip().lower()
+        if name not in _PROGRESS_METRICS:
+            raise ValueError("manual CIO diagnostic progress metric name is invalid")
+        if isinstance(raw_value, bool) or not isinstance(raw_value, int) or raw_value < 0:
+            raise ValueError("manual CIO diagnostic progress metrics must be nonnegative integers")
+        normalized_metrics.append((name, raw_value))
+
+    path = diagnostic_request_path(resolved)
+    existing = _read(path)
+    if existing is None or existing.state != "in_progress":
+        return None
+    message = f"governed_progress={normalized_stage}"
+    if normalized_metrics:
+        message += "; " + "; ".join(
+            f"{name}={value}" for name, value in normalized_metrics
+        )
+    updated = replace(existing, detail=message)
+    _write(path, updated)
+    return updated
+
+
 def request_manual_cio_diagnostic(
     *,
     requested_by: str,
@@ -245,5 +355,6 @@ __all__ = [
     "diagnostic_request_path",
     "finish_manual_cio_diagnostic",
     "latest_manual_cio_diagnostic",
+    "record_manual_cio_diagnostic_progress",
     "request_manual_cio_diagnostic",
 ]
