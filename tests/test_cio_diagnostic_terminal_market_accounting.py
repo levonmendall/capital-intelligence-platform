@@ -23,7 +23,6 @@ def test_complete_lane_may_be_fully_excluded_without_selected_candidate() -> Non
             "catalog_count": 17,
             "deep_analyzed_count": 0,
             "selected_count": 0,
-            "terminal_accounting_complete": True,
             "represented": True,
         },
     )
@@ -43,7 +42,6 @@ def test_empty_scheduled_catalog_remains_fail_closed() -> None:
         comprehensive_discovery_complete=True,
     )
 
-    assert lanes[0]["terminal_accounting_complete"] is False
     assert lanes[0]["represented"] is False
 
 
@@ -61,7 +59,6 @@ def test_incomplete_comprehensive_scope_cannot_certify_nonempty_lane() -> None:
         comprehensive_discovery_complete=False,
     )
 
-    assert lanes[0]["terminal_accounting_complete"] is False
     assert lanes[0]["represented"] is False
 
 
@@ -79,5 +76,4 @@ def test_unscheduled_lane_is_not_required_for_current_cycle() -> None:
         comprehensive_discovery_complete=False,
     )
 
-    assert lanes[0]["terminal_accounting_complete"] is True
     assert lanes[0]["represented"] is True
