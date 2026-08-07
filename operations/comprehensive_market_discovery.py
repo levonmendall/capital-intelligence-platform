@@ -9,6 +9,8 @@ not require a market lane to manufacture a qualifying investment candidate.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Mapping, Sequence
@@ -21,6 +23,52 @@ from operations.provider_preselection_publication_runtime import (
     ensure_provider_preselection_publication,
 )
 from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress
+
+
+_MANIFEST_ENCODER = json.JSONEncoder(
+    allow_nan=False,
+    separators=(",", ":"),
+    sort_keys=True,
+)
+
+
+class _StreamingManifestFingerprint:
+    """Hash lane material without retaining a second complete discovery graph.
+
+    The emitted byte stream is exactly the compact, sorted JSON produced by the
+    legacy ``_hash`` helper. This changes only peak memory: fingerprints and all
+    governed discovery outputs remain identical for identical inputs.
+    """
+
+    __slots__ = ("_digest", "_first_lane", "_policy")
+
+    def __init__(self, *, as_of: datetime, policy: str) -> None:
+        self._digest = hashlib.sha256()
+        self._first_lane = True
+        self._policy = policy
+        self._digest.update(b'{"as_of":')
+        self._update(as_of.isoformat())
+        self._digest.update(
+            b',"candidate_count_limit_applied":false,"lanes":['
+        )
+
+    def _update(self, value: object) -> None:
+        for chunk in _MANIFEST_ENCODER.iterencode(value):
+            self._digest.update(chunk.encode("utf-8"))
+
+    def append(self, lane_material: Mapping[str, object]) -> None:
+        if not self._first_lane:
+            self._digest.update(b",")
+        self._first_lane = False
+        self._update(lane_material)
+
+    def hexdigest(self) -> str:
+        completed = self._digest.copy()
+        completed.update(b'],"policy":')
+        for chunk in _MANIFEST_ENCODER.iterencode(self._policy):
+            completed.update(chunk.encode("utf-8"))
+        completed.update(b"}")
+        return completed.hexdigest()
 
 
 def _validate_terminal_lane_accounting(
@@ -200,7 +248,10 @@ def discover_comprehensive_markets(
         str(item).strip().upper() for item in excluded_symbols if str(item).strip()
     }
     lanes: list[_base.DiscoveryLaneResult] = []
-    manifest_material: list[dict[str, object]] = []
+    manifest_fingerprint = _StreamingManifestFingerprint(
+        as_of=timestamp,
+        policy=resolved.version,
+    )
 
     discovery_lanes = _base._dynamic_discovery_lanes(catalogs)
     for asset_class in discovery_lanes:
@@ -218,7 +269,7 @@ def discover_comprehensive_markets(
                     schedule_reason=reason,
                 )
             )
-            manifest_material.append(
+            manifest_fingerprint.append(
                 {
                     "asset_class": asset_class.value,
                     "scheduled": False,
@@ -423,7 +474,7 @@ def discover_comprehensive_markets(
                 cutoff_outcomes=outcomes,
             )
         )
-        manifest_material.append(
+        manifest_fingerprint.append(
             {
                 "asset_class": asset_class.value,
                 "scheduled": True,
@@ -455,14 +506,7 @@ def discover_comprehensive_markets(
             }
         )
 
-    fingerprint = _base._legacy._hash(
-        {
-            "as_of": timestamp.isoformat(),
-            "policy": resolved.version,
-            "candidate_count_limit_applied": False,
-            "lanes": manifest_material,
-        }
-    )
+    fingerprint = manifest_fingerprint.hexdigest()
     record_manual_cio_diagnostic_progress(
         "comprehensive_market_discovery_complete",
         metrics={"scheduled_lanes": sum(1 for lane in lanes if lane.scheduled)},
