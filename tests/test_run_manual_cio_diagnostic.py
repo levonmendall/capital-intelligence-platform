@@ -160,4 +160,5 @@ def test_successful_diagnostic_uses_triggered_cycle_and_paper_controls(
     assert record is not None
     assert record.state == "completed"
     assert record.snapshot_identifier == "briefing-123"
-    assert record.cycle_key == "canonical-cio:test:event:manual"
+    assert record.cycle_key == context.cycle_key
+    assert record.cycle_key != "canonical-cio:test:event:manual"
