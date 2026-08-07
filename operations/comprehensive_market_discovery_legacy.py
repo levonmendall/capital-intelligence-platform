@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -863,11 +864,14 @@ def _option_catalog(
         raise ComprehensiveMarketDiscoveryError(
             "Databento OPRA credentials are required for defined-risk option discovery"
         )
-    result: list[DiscoveryCatalogRecord] = []
-    underlying_quote_failures: list[str] = []
-    provider_failures: list[tuple[str, str]] = []
-    empty_selection_failures: list[str] = []
-    for underlying in config.option_underlyings:
+
+    def discover_underlying(
+        underlying: str,
+    ) -> tuple[
+        tuple[DiscoveryCatalogRecord, ...],
+        str | None,
+        str | None,
+    ]:
         underlying_record = DiscoveryCatalogRecord(
             symbol=underlying,
             provider_symbol=underlying,
@@ -889,8 +893,7 @@ def _option_catalog(
             http_get=http_get,
         )
         if not rows:
-            underlying_quote_failures.append(underlying)
-            continue
+            return (), "underlying_quote_unavailable", None
         underlying_price = float(rows[-1]["c"])
         try:
             selections = provider.select_contracts(
@@ -901,19 +904,16 @@ def _option_catalog(
                 maximum_days_to_expiry=policy.option_maximum_days_to_expiry,
             )
         except DatabentoOptionsError as error:
-            provider_failures.append(
-                (underlying, str(error).strip() or type(error).__name__)
-            )
-            continue
+            return (), "provider_error", str(error).strip() or type(error).__name__
         except (OSError, TypeError, ValueError) as error:
-            provider_failures.append((underlying, type(error).__name__))
-            continue
+            return (), "provider_error", type(error).__name__
         if not selections:
-            empty_selection_failures.append(underlying)
+            return (), "no_eligible_priced_contracts", None
+        records: list[DiscoveryCatalogRecord] = []
         for selection in selections:
             definition = selection.definition
             bar = selection.bar
-            result.append(
+            records.append(
                 DiscoveryCatalogRecord(
                     symbol=definition.symbol,
                     provider_symbol=definition.raw_symbol,
@@ -945,6 +945,39 @@ def _option_catalog(
                     option_right=definition.option_right,
                 )
             )
+        return tuple(records), None, None
+
+    underlyings = tuple(config.option_underlyings)
+    worker_count = min(4, len(underlyings))
+    outcomes: tuple[
+        tuple[tuple[DiscoveryCatalogRecord, ...], str | None, str | None], ...
+    ] = ()
+    if worker_count:
+        # Databento permits substantially more historical connections than this
+        # conservative cap. ``executor.map`` restores configured underlying order, so
+        # parallel I/O cannot change catalog order, fingerprints, or investment behavior.
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="option-discovery",
+        ) as executor:
+            outcomes = tuple(executor.map(discover_underlying, underlyings))
+
+    result: list[DiscoveryCatalogRecord] = []
+    underlying_quote_failures: list[str] = []
+    provider_failures: list[tuple[str, str]] = []
+    empty_selection_failures: list[str] = []
+    for underlying, (records, failure_kind, failure_detail) in zip(
+        underlyings,
+        outcomes,
+        strict=True,
+    ):
+        result.extend(records)
+        if failure_kind == "underlying_quote_unavailable":
+            underlying_quote_failures.append(underlying)
+        elif failure_kind == "provider_error":
+            provider_failures.append((underlying, failure_detail or "provider error"))
+        elif failure_kind == "no_eligible_priced_contracts":
+            empty_selection_failures.append(underlying)
     if not result:
         failure_samples = "; ".join(
             f"{underlying}={detail}" for underlying, detail in provider_failures[:3]

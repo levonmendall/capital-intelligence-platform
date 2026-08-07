@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from threading import Barrier
+from time import sleep
 
 import pytest
 
@@ -10,7 +12,12 @@ from operations.comprehensive_market_discovery_legacy import (
     ComprehensiveMarketDiscoveryPolicy,
     _option_catalog,
 )
-from providers.databento_options import DatabentoOptionsError
+from providers.databento_options import (
+    DatabentoOptionBar,
+    DatabentoOptionDefinition,
+    DatabentoOptionSelection,
+    DatabentoOptionsError,
+)
 
 
 AS_OF = datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc)
@@ -107,3 +114,48 @@ def test_empty_option_catalog_distinguishes_quotes_from_contract_selection() -> 
     assert "provider_errors=0" in detail
     assert "no_eligible_priced_contracts=1" in detail
     assert "provider_failure_sample=" not in detail
+
+
+def test_option_underlyings_run_concurrently_but_restore_configured_order() -> None:
+    rendezvous = Barrier(2)
+    completion_order: list[str] = []
+
+    class Provider:
+        configured = True
+
+        @staticmethod
+        def select_contracts(underlying, **_kwargs):
+            rendezvous.wait(timeout=2)
+            if underlying == "SPY":
+                sleep(0.05)
+            completion_order.append(underlying)
+            expiration = AS_OF + timedelta(days=60)
+            definition = DatabentoOptionDefinition(
+                symbol=f"{underlying}261006C00625000",
+                raw_symbol=f"{underlying}   261006C00625000",
+                instrument_id=1 if underlying == "SPY" else 2,
+                underlying=underlying,
+                option_right="call",
+                expiration_at=expiration,
+                strike=625.0,
+                contract_multiplier=100.0,
+                session_date=(AS_OF - timedelta(days=1)).date(),
+            )
+            bar = DatabentoOptionBar(
+                raw_symbol=definition.raw_symbol,
+                observed_at=AS_OF - timedelta(days=1),
+                close=12.5,
+                volume=100.0,
+            )
+            return (DatabentoOptionSelection(definition=definition, bar=bar),)
+
+    result = _option_catalog(
+        as_of=AS_OF,
+        config=_config("SPY", "QQQ"),
+        policy=ComprehensiveMarketDiscoveryPolicy(),
+        http_get=_yahoo_get,
+        databento_options_provider=Provider(),
+    )
+
+    assert completion_order == ["QQQ", "SPY"]
+    assert [item.underlying_symbol for item in result] == ["SPY", "QQQ"]
