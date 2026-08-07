@@ -99,6 +99,12 @@ def _close_timed_out_request(
         return None, None
     if existing.state != "in_progress":
         return existing.request_id, existing.state
+    existing_detail = getattr(existing, "detail", None)
+    last_progress = (
+        existing_detail
+        if existing_detail and existing_detail.startswith("governed_progress=")
+        else "governed_progress=unavailable"
+    )
     finished = finish_manual_cio_diagnostic(
         existing,
         succeeded=False,
@@ -106,7 +112,8 @@ def _close_timed_out_request(
         snapshot_identifier=existing.snapshot_identifier,
         detail=(
             "Manual CIO diagnostic exceeded its governed operational deadline of "
-            f"{timeout_seconds:g} seconds and was terminated fail-closed."
+            f"{timeout_seconds:g} seconds and was terminated fail-closed; "
+            f"last_{last_progress}."
         ),
         values=values,
     )

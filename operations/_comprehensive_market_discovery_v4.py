@@ -41,6 +41,7 @@ from operations.market_discovery_preselection import (
     default_catalog_screening_signals,
     evaluate_cutoff_outcomes,
 )
+from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress
 from operations.provider_enriched_preselection import (
     DEFAULT_PROVIDER_PRESELECTION_PATH,
     REQUIRED_PROVIDER_FACTORS,
@@ -133,6 +134,10 @@ def default_catalog_probe(
     resolved_policy = policy or ComprehensiveMarketDiscoveryPolicy()
     active_lanes = scheduled_discovery_lanes(timestamp)
     provider = eodhd_provider or _legacy.build_eodhd_provider()
+    record_manual_cio_diagnostic_progress(
+        "catalog_eodhd_directories",
+        metrics={"configured_exchanges": len(resolved_config.eodhd_exchange_codes)},
+    )
     result = {
         key: list(value)
         for key, value in _catalog_from_eodhd(
@@ -143,6 +148,10 @@ def default_catalog_probe(
             requested_asset_classes=active_lanes,
         ).items()
     }
+    record_manual_cio_diagnostic_progress(
+        "catalog_eodhd_directories_complete",
+        metrics={"catalog_records": sum(len(items) for items in result.values())},
+    )
     for asset_class in _DEFAULT_REQUIRED_DISCOVERY_LANES:
         result.setdefault(asset_class, [])
     if CandidateAssetClass.FUTURE in active_lanes:
@@ -150,6 +159,10 @@ def default_catalog_probe(
             _legacy._futures_catalog(as_of=timestamp, config=resolved_config)
         )
     if CandidateAssetClass.OPTION in active_lanes:
+        record_manual_cio_diagnostic_progress(
+            "catalog_databento_options",
+            metrics={"configured_underlyings": len(resolved_config.option_underlyings)},
+        )
         result[CandidateAssetClass.OPTION] = list(
             _legacy._option_catalog(
                 as_of=timestamp,
@@ -158,6 +171,14 @@ def default_catalog_probe(
                 databento_options_provider=databento_options_provider,
             )
         )
+        record_manual_cio_diagnostic_progress(
+            "catalog_databento_options_complete",
+            metrics={"catalog_records": len(result[CandidateAssetClass.OPTION])},
+        )
+    record_manual_cio_diagnostic_progress(
+        "comprehensive_catalog_discovery_complete",
+        metrics={"catalog_records": sum(len(items) for items in result.values())},
+    )
     return result
 
 

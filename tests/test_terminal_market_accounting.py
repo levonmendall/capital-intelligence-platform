@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import operations.comprehensive_market_discovery as discovery
 from cio import CandidateAssetClass
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryError,
@@ -193,3 +194,36 @@ def test_terminal_accounting_rejects_unaccounted_record() -> None:
             selected=(),
             exclusions=(),
         )
+
+
+def test_diagnostic_progress_follows_catalog_evidence_and_terminal_accounting(
+    monkeypatch,
+) -> None:
+    observed: list[tuple[str, dict[str, int]]] = []
+
+    def record(stage, *, metrics=None, values=None):
+        del values
+        observed.append((stage, dict(metrics or {})))
+        return None
+
+    monkeypatch.setitem(
+        discovery.discover_comprehensive_markets.__globals__,
+        "record_manual_cio_diagnostic_progress",
+        record,
+    )
+
+    result = discovery.discover_comprehensive_markets(
+        as_of=AS_OF,
+        catalog_probe=_catalog,
+        market_probe=_market,
+    )
+
+    assert result.lanes
+    stages = [stage for stage, _metrics in observed]
+    assert stages[0] == "comprehensive_catalog_discovery"
+    assert stages[1] == "certified_catalog_merge_complete"
+    assert "deep_market_evidence:international_equity" in stages
+    assert "terminal_accounting_complete:international_equity" in stages
+    assert stages[-1] == "comprehensive_market_discovery_complete"
+    deep_metrics = dict(observed)["deep_market_evidence:international_equity"]
+    assert deep_metrics == {"decision_eligible_records": 1}

@@ -20,6 +20,7 @@ from operations.provider_preselection_publication_runtime import (
     ProviderPreselectionPublicationError,
     ensure_provider_preselection_publication,
 )
+from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress
 
 
 def _validate_terminal_lane_accounting(
@@ -131,6 +132,9 @@ def discover_comprehensive_markets(
 
     timestamp = _base._legacy._aware(as_of, field_name="as_of")
     resolved = policy or ComprehensiveMarketDiscoveryPolicy()
+    record_manual_cio_diagnostic_progress(
+        "comprehensive_catalog_discovery",
+    )
     catalogs = (
         catalog_probe(timestamp)
         if catalog_probe is not None
@@ -138,6 +142,16 @@ def discover_comprehensive_markets(
             _base.default_catalog_probe(timestamp, policy=resolved),
             as_of=timestamp,
         )
+    )
+    record_manual_cio_diagnostic_progress(
+        "certified_catalog_merge_complete",
+        metrics={
+            "catalog_records": sum(
+                len(items)
+                for items in catalogs.values()
+                if isinstance(items, Sequence)
+            )
+        },
     )
     if not isinstance(catalogs, Mapping):
         raise _base._legacy.ComprehensiveMarketDiscoveryError(
@@ -154,10 +168,16 @@ def discover_comprehensive_markets(
     )
     if canonical_publication_required:
         try:
+            record_manual_cio_diagnostic_progress(
+                "provider_preselection_publication",
+            )
             ensure_provider_preselection_publication(
                 catalogs,
                 as_of=timestamp,
                 policy=resolved,
+            )
+            record_manual_cio_diagnostic_progress(
+                "provider_preselection_publication_complete",
             )
         except ProviderPreselectionPublicationError as error:
             raise _base._legacy.ComprehensiveMarketDiscoveryError(str(error)) from error
@@ -242,6 +262,13 @@ def discover_comprehensive_markets(
         continuity = tuple(item for item in records if item.symbol in state_symbols)
         ordinary = tuple(item for item in records if item.symbol not in state_symbols)
 
+        record_manual_cio_diagnostic_progress(
+            f"terminal_screening:{asset_class.value}",
+            metrics={
+                "catalog_records": len(catalog_records),
+                "continuity_records": len(continuity),
+            },
+        )
         signals = active_preselection_probe(ordinary, timestamp, resolved)
         if not isinstance(signals, Mapping):
             raise _base._legacy.ComprehensiveMarketDiscoveryError(
@@ -285,8 +312,16 @@ def discover_comprehensive_markets(
             if symbol in ordinary_by_symbol
         )
         deep_records = tuple(dict.fromkeys((*continuity, *nominated)))
+        record_manual_cio_diagnostic_progress(
+            f"deep_market_evidence:{asset_class.value}",
+            metrics={"decision_eligible_records": len(deep_records)},
+        )
         features = (market_probe or _base._legacy.default_market_probe)(
             deep_records, timestamp, resolved
+        )
+        record_manual_cio_diagnostic_progress(
+            f"deep_market_evidence_complete:{asset_class.value}",
+            metrics={"evidence_complete_records": len(features)},
         )
 
         selected: list[_base._legacy.DiscoveredMarketInstrument] = []
@@ -366,6 +401,13 @@ def discover_comprehensive_markets(
                 exclusions=exclusions,
             )
         )
+        record_manual_cio_diagnostic_progress(
+            f"terminal_accounting_complete:{asset_class.value}",
+            metrics={
+                "excluded": terminal_excluded_count,
+                "selected": terminal_selected_count,
+            },
+        )
         lanes.append(
             _base.DiscoveryLaneResult(
                 asset_class=asset_class,
@@ -420,6 +462,10 @@ def discover_comprehensive_markets(
             "candidate_count_limit_applied": False,
             "lanes": manifest_material,
         }
+    )
+    record_manual_cio_diagnostic_progress(
+        "comprehensive_market_discovery_complete",
+        metrics={"scheduled_lanes": sum(1 for lane in lanes if lane.scheduled)},
     )
     return _base.ComprehensiveMarketDiscoveryResult(
         identifier=(

@@ -137,6 +137,7 @@ def _release_diagnostic_environment(
             "CAPITAL_INTELLIGENCE_REQUIRE_LIVE_PROVIDER": "true",
             "CAPITAL_INTELLIGENCE_PROVIDER_RUNTIME_MODE": "live",
             "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED": "true",
+            "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED": "true",
         }
     )
     return diagnostic
