@@ -867,35 +867,13 @@ def _option_catalog(
         )
 
     def discover_underlying(
-        underlying: str,
+        item: tuple[str, float],
     ) -> tuple[
         tuple[DiscoveryCatalogRecord, ...],
         str | None,
         str | None,
     ]:
-        underlying_record = DiscoveryCatalogRecord(
-            symbol=underlying,
-            provider_symbol=underlying,
-            name=underlying,
-            asset_class=CandidateAssetClass.INTERNATIONAL_EQUITY,
-            economic_exposure="us_equity",
-            venue="US",
-            country_code="US",
-            currency="USD",
-            settlement_currency="USD",
-            instrument_type="common_stock",
-            provider_kind="yahoo",
-            source_identifier=f"yahoo-chart:{underlying}",
-        )
-        rows = _yahoo_rows(
-            underlying_record,
-            as_of=as_of,
-            history_days=15,
-            http_get=http_get,
-        )
-        if not rows:
-            return (), "underlying_quote_unavailable", None
-        underlying_price = float(rows[-1]["c"])
+        underlying, underlying_price = item
         try:
             selections = provider.select_contracts(
                 underlying,
@@ -949,7 +927,38 @@ def _option_catalog(
         return tuple(records), None, None
 
     underlyings = tuple(config.option_underlyings)
-    worker_count = min(4, len(underlyings))
+    priced_underlyings: list[tuple[str, float]] = []
+    underlying_quote_failures: list[str] = []
+    # Yahoo's public chart endpoint is the governed underlying-price source for this
+    # lane. Keep these lightweight reads sequential so the bounded Databento fan-out
+    # cannot turn them into a burst that the public endpoint rejects as one cohort.
+    for underlying in underlyings:
+        underlying_record = DiscoveryCatalogRecord(
+            symbol=underlying,
+            provider_symbol=underlying,
+            name=underlying,
+            asset_class=CandidateAssetClass.INTERNATIONAL_EQUITY,
+            economic_exposure="us_equity",
+            venue="US",
+            country_code="US",
+            currency="USD",
+            settlement_currency="USD",
+            instrument_type="common_stock",
+            provider_kind="yahoo",
+            source_identifier=f"yahoo-chart:{underlying}",
+        )
+        rows = _yahoo_rows(
+            underlying_record,
+            as_of=as_of,
+            history_days=15,
+            http_get=http_get,
+        )
+        if not rows:
+            underlying_quote_failures.append(underlying)
+            continue
+        priced_underlyings.append((underlying, float(rows[-1]["c"])))
+
+    worker_count = min(4, len(priced_underlyings))
     outcomes: tuple[
         tuple[tuple[DiscoveryCatalogRecord, ...], str | None, str | None], ...
     ] = ()
@@ -961,21 +970,18 @@ def _option_catalog(
             max_workers=worker_count,
             thread_name_prefix="option-discovery",
         ) as executor:
-            outcomes = tuple(executor.map(discover_underlying, underlyings))
+            outcomes = tuple(executor.map(discover_underlying, priced_underlyings))
 
     result: list[DiscoveryCatalogRecord] = []
-    underlying_quote_failures: list[str] = []
     provider_failures: list[tuple[str, str]] = []
     empty_selection_failures: list[str] = []
-    for underlying, (records, failure_kind, failure_detail) in zip(
-        underlyings,
+    for (underlying, _price), (records, failure_kind, failure_detail) in zip(
+        priced_underlyings,
         outcomes,
         strict=True,
     ):
         result.extend(records)
-        if failure_kind == "underlying_quote_unavailable":
-            underlying_quote_failures.append(underlying)
-        elif failure_kind == "provider_error":
+        if failure_kind == "provider_error":
             provider_failures.append((underlying, failure_detail or "provider error"))
         elif failure_kind == "no_eligible_priced_contracts":
             empty_selection_failures.append(underlying)
