@@ -84,11 +84,13 @@ services:
         value: "3600"
       # During active troubleshooting, run one unique paper-only diagnostic CIO
       # pass for each deployed release. Only the calendar due check is bypassed;
-      # all evidence and CIO gates remain active and fail closed.
+      # all evidence and CIO gates remain active and fail closed. The last complete
+      # unbounded production pass required 31m23s, so retain a bounded 35-minute
+      # operational window rather than terminating a healthy governed pass at 30m.
       - key: CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_ON_RELEASE
         value: "true"
       - key: CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_TIMEOUT_SECONDS
-        value: "1800"
+        value: "2100"
       # Provider validation still runs and persists its failed checks, but a
       # transient or entitlement-specific provider issue must not take the
       # authenticated console offline. REQUIRE_LIVE_PROVIDER remains the
