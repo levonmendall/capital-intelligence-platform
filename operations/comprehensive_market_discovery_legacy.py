@@ -1274,29 +1274,17 @@ def default_market_probe(
             return None
         return rows, option_price, tuple(option_rows), option_evidence
 
-    worker_count = min(
-        _MAX_DEEP_MARKET_IO_WORKERS,
-        maximum_workers,
-        max(1, len(ordered_records)),
-    )
-    if len(ordered_records) > 1 and worker_count > 1:
-        with ThreadPoolExecutor(
-            max_workers=worker_count,
-            thread_name_prefix="deep-market-evidence",
-        ) as executor:
-            loaded_records = tuple(executor.map(load_record_rows, ordered_records))
-    else:
-        loaded_records = tuple(map(load_record_rows, ordered_records))
-
-    result: dict[str, DiscoveryMarketFeatures] = {}
-    for record, loaded in zip(ordered_records, loaded_records):
+    def build_record_features(
+        record: DiscoveryCatalogRecord,
+    ) -> tuple[str, DiscoveryMarketFeatures] | None:
+        loaded = load_record_rows(record)
         if loaded is None:
-            continue
+            return None
         rows, option_price, option_rows, option_evidence = loaded
         if len(rows) < policy.minimum_history_bars:
-            continue
+            return None
         if record.asset_class is CandidateAssetClass.OPTION and option_price <= 0.0:
-            continue
+            return None
         closes = [float(item["c"]) for item in rows]
         volumes = [float(item["v"]) for item in rows]
         daily = [
@@ -1304,7 +1292,9 @@ def default_market_probe(
             for index in range(1, len(closes))
             if closes[index - 1] > 0.0
         ]
-        volatility = pstdev(daily[-252:]) * math.sqrt(252.0) if len(daily) > 1 else 0.0
+        volatility = (
+            pstdev(daily[-252:]) * math.sqrt(252.0) if len(daily) > 1 else 0.0
+        )
         peak = closes[0]
         drawdown = 0.0
         for close in closes:
@@ -1324,7 +1314,7 @@ def default_market_probe(
             if record.asset_class is CandidateAssetClass.OPTION and option_rows
             else rows[-1]["t"]
         )
-        result[record.symbol] = DiscoveryMarketFeatures(
+        return record.symbol, DiscoveryMarketFeatures(
             price=price,
             observed_at=observed_at,
             one_month_return=_period_return(closes, 21),
@@ -1341,6 +1331,25 @@ def default_market_probe(
                 *option_evidence,
             ),
         )
+
+    worker_count = min(
+        _MAX_DEEP_MARKET_IO_WORKERS,
+        maximum_workers,
+        max(1, len(ordered_records)),
+    )
+    result: dict[str, DiscoveryMarketFeatures] = {}
+    if len(ordered_records) > 1 and worker_count > 1:
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="deep-market-evidence",
+        ) as executor:
+            for built in executor.map(build_record_features, ordered_records):
+                if built is not None:
+                    result[built[0]] = built[1]
+    else:
+        for built in map(build_record_features, ordered_records):
+            if built is not None:
+                result[built[0]] = built[1]
     return result
 
 

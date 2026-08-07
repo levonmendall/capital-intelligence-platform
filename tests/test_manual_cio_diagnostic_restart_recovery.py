@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import run_manual_cio_diagnostic as diagnostic
 from operations.manual_cio_diagnostic import (
     claim_manual_cio_diagnostic,
@@ -11,10 +13,12 @@ from operations.manual_cio_diagnostic import (
 )
 
 
-def test_new_release_recovers_interrupted_prior_process(
+@pytest.mark.parametrize("prior_release", ("release-old", "release-new"))
+def test_release_start_recovers_interrupted_prior_process(
     monkeypatch,
     tmp_path: Path,
     capsys,
+    prior_release: str,
 ) -> None:
     values = {
         "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
@@ -22,7 +26,7 @@ def test_new_release_recovers_interrupted_prior_process(
         "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_ON_RELEASE": "true",
     }
     prior, created = request_manual_cio_diagnostic(
-        requested_by="render-release:release-old",
+        requested_by=f"render-release:{prior_release}",
         values=values,
     )
     assert created is True

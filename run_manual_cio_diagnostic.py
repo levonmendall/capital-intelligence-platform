@@ -140,11 +140,13 @@ def run_diagnostic_once(
         return 0
 
     existing = latest_manual_cio_diagnostic(values=resolved)
+    recovered_interrupted_request = False
     # An in-progress record observed during a fresh process startup belongs to a
     # process that did not survive the preceding restart/deploy. Close it truthfully
     # before requesting the current release's diagnostic so troubleshooting cannot
     # become permanently wedged on durable coordination state.
     if existing is not None and existing.state == "in_progress":
+        recovered_interrupted_request = True
         interrupted = finish_manual_cio_diagnostic(
             existing,
             succeeded=False,
@@ -166,6 +168,7 @@ def run_diagnostic_once(
 
     if (
         not force
+        and not recovered_interrupted_request
         and existing is not None
         and existing.requested_by == requester
         and existing.state in {"completed", "failed"}
