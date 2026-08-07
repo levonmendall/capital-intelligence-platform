@@ -36,6 +36,10 @@ _PROGRESS_STAGES = frozenset(
         "comprehensive_catalog_discovery_complete",
         "certified_catalog_merge_complete",
         "provider_preselection_publication",
+        "provider_preselection_bulk_snapshots",
+        "provider_preselection_bulk_snapshots_complete",
+        "provider_preselection_fallback_probe",
+        "provider_preselection_fallback_probe_complete",
         "provider_preselection_publication_complete",
         "comprehensive_market_discovery_complete",
     }
