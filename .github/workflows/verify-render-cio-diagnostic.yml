@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      AUDIT_URL: https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json
+      AUDIT_URL: https://capital-intelligence-platform.onrender.com/v1/operations/cio-diagnostic
       EXPECTED_RELEASE: ${{ github.event.deployment.sha || github.event.inputs.expected_release || github.sha }}
       AUDIT_OUTPUT: /tmp/render-cio-diagnostic.json
       VERIFICATION_LOG: /tmp/render-cio-diagnostic-verification.log
