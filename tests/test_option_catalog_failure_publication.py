@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from threading import Barrier
+from threading import Barrier, Lock
 from time import sleep
 
 import pytest
@@ -116,46 +116,73 @@ def test_empty_option_catalog_distinguishes_quotes_from_contract_selection() -> 
     assert "provider_failure_sample=" not in detail
 
 
-def test_option_underlyings_run_concurrently_but_restore_configured_order() -> None:
-    rendezvous = Barrier(2)
+def test_option_quotes_are_serial_and_databento_is_bounded_parallel() -> None:
+    underlyings = ("SPY", "QQQ", "IWM", "DIA", "TLT")
+    rendezvous = Barrier(4)
+    lock = Lock()
     completion_order: list[str] = []
+    yahoo_active = 0
+    yahoo_peak = 0
+    databento_active = 0
+    databento_peak = 0
+
+    def yahoo_get(*_args, **_kwargs):
+        nonlocal yahoo_active, yahoo_peak
+        yahoo_active += 1
+        yahoo_peak = max(yahoo_peak, yahoo_active)
+        try:
+            sleep(0.01)
+            return _YahooResponse()
+        finally:
+            yahoo_active -= 1
 
     class Provider:
         configured = True
 
         @staticmethod
         def select_contracts(underlying, **_kwargs):
-            rendezvous.wait(timeout=2)
-            if underlying == "SPY":
-                sleep(0.05)
-            completion_order.append(underlying)
-            expiration = AS_OF + timedelta(days=60)
-            definition = DatabentoOptionDefinition(
-                symbol=f"{underlying}261006C00625000",
-                raw_symbol=f"{underlying}   261006C00625000",
-                instrument_id=1 if underlying == "SPY" else 2,
-                underlying=underlying,
-                option_right="call",
-                expiration_at=expiration,
-                strike=625.0,
-                contract_multiplier=100.0,
-                session_date=(AS_OF - timedelta(days=1)).date(),
-            )
-            bar = DatabentoOptionBar(
-                raw_symbol=definition.raw_symbol,
-                observed_at=AS_OF - timedelta(days=1),
-                close=12.5,
-                volume=100.0,
-            )
-            return (DatabentoOptionSelection(definition=definition, bar=bar),)
+            nonlocal databento_active, databento_peak
+            with lock:
+                databento_active += 1
+                databento_peak = max(databento_peak, databento_active)
+            try:
+                if underlying != underlyings[-1]:
+                    rendezvous.wait(timeout=2)
+                if underlying == "SPY":
+                    sleep(0.05)
+                completion_order.append(underlying)
+                expiration = AS_OF + timedelta(days=60)
+                definition = DatabentoOptionDefinition(
+                    symbol=f"{underlying}261006C00625000",
+                    raw_symbol=f"{underlying}   261006C00625000",
+                    instrument_id=underlyings.index(underlying) + 1,
+                    underlying=underlying,
+                    option_right="call",
+                    expiration_at=expiration,
+                    strike=625.0,
+                    contract_multiplier=100.0,
+                    session_date=(AS_OF - timedelta(days=1)).date(),
+                )
+                bar = DatabentoOptionBar(
+                    raw_symbol=definition.raw_symbol,
+                    observed_at=AS_OF - timedelta(days=1),
+                    close=12.5,
+                    volume=100.0,
+                )
+                return (DatabentoOptionSelection(definition=definition, bar=bar),)
+            finally:
+                with lock:
+                    databento_active -= 1
 
     result = _option_catalog(
         as_of=AS_OF,
-        config=_config("SPY", "QQQ"),
+        config=_config(*underlyings),
         policy=ComprehensiveMarketDiscoveryPolicy(),
-        http_get=_yahoo_get,
+        http_get=yahoo_get,
         databento_options_provider=Provider(),
     )
 
-    assert completion_order == ["QQQ", "SPY"]
-    assert [item.underlying_symbol for item in result] == ["SPY", "QQQ"]
+    assert yahoo_peak == 1
+    assert databento_peak == 4
+    assert completion_order.index("QQQ") < completion_order.index("SPY")
+    assert [item.underlying_symbol for item in result] == list(underlyings)
