@@ -80,6 +80,27 @@ def _release(values: Mapping[str, str]) -> str:
     ).strip()
 
 
+def _diagnostic_audit_cycle_key(
+    *,
+    context_cycle_key: str,
+    execution_cycle_key: str | None,
+) -> str:
+    """Keep release-audit lineage anchored to the prepared production context.
+
+    Triggered CIO execution may derive an event-suffixed cycle key.  That key identifies
+    the downstream trigger, but it must not replace the production-context key used to
+    join comprehensive discovery evidence into the release diagnostic audit.
+    """
+
+    canonical = context_cycle_key.strip()
+    if not canonical:
+        raise ValueError("production context cycle key is required for diagnostic lineage")
+    # Resolve the execution key deliberately so callers cannot accidentally reintroduce
+    # it as the audit join key merely because it is available on the triggered result.
+    _ = execution_cycle_key
+    return canonical
+
+
 def _redact(value: str | None, values: Mapping[str, str]) -> str | None:
     if value is None:
         return None
@@ -231,7 +252,10 @@ def run_diagnostic_once(
                 decision_as_of=context.decision_as_of,
             )
             worker.dispatch_pending()
-            cycle_key = result.cycle_key
+            cycle_key = _diagnostic_audit_cycle_key(
+                context_cycle_key=context.cycle_key,
+                execution_cycle_key=result.cycle_key,
+            )
             snapshot_identifier = result.snapshot_identifier
             detail = result.detail
             succeeded = result.status == "completed"
