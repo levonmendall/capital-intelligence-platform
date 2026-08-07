@@ -145,10 +145,14 @@ def _release_diagnostic_environment(
 def _release_diagnostic_command(
     values: MutableMapping[str, str],
     *,
+    force: bool = False,
     python_executable: str | None = None,
 ) -> tuple[str, ...]:
-    command = [python_executable or sys.executable, "run_manual_cio_diagnostic.py"]
-    if _enabled(
+    command = [
+        python_executable or sys.executable,
+        "run_bounded_manual_cio_diagnostic.py",
+    ]
+    if force or _enabled(
         values,
         "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_FORCE_ON_RELEASE",
         default=False,
@@ -270,8 +274,11 @@ def _run_release_diagnostic_after_readiness(
         )
 
     max_attempts, retry_seconds = _release_diagnostic_retry_policy(values)
-    command = _release_diagnostic_command(diagnostic_values)
     for attempt in range(1, max_attempts + 1):
+        command = _release_diagnostic_command(
+            diagnostic_values,
+            force=attempt > 1,
+        )
         _log(
             "manual_cio_release_diagnostic_starting",
             command=list(command),

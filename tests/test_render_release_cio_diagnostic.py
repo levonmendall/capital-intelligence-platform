@@ -22,14 +22,22 @@ def test_release_diagnostic_command_honors_force_flag() -> None:
     assert _release_diagnostic_command(
         values,
         python_executable="python-test",
-    ) == ("python-test", "run_manual_cio_diagnostic.py", "--force")
+    ) == ("python-test", "run_bounded_manual_cio_diagnostic.py", "--force")
 
 
 def test_release_diagnostic_command_is_not_forced_by_default() -> None:
     assert _release_diagnostic_command(
         {},
         python_executable="python-test",
-    ) == ("python-test", "run_manual_cio_diagnostic.py")
+    ) == ("python-test", "run_bounded_manual_cio_diagnostic.py")
+
+
+def test_release_diagnostic_retry_forces_a_replacement() -> None:
+    assert _release_diagnostic_command(
+        {},
+        force=True,
+        python_executable="python-test",
+    ) == ("python-test", "run_bounded_manual_cio_diagnostic.py", "--force")
 
 
 def test_release_diagnostic_audit_command_uses_static_publisher() -> None:
