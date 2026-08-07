@@ -12,6 +12,7 @@ on:
       - initialize.py
       - operations/certified_investable_catalog.py
       - operations/comprehensive_market_discovery.py
+      - operations/provider_preselection_publication_runtime.py
       - operations/provider_validation.py
       - providers/crypto_venues.py
       - providers/databento.py
@@ -38,6 +39,7 @@ on:
       - initialize.py
       - operations/certified_investable_catalog.py
       - operations/comprehensive_market_discovery.py
+      - operations/provider_preselection_publication_runtime.py
       - operations/provider_validation.py
       - providers/crypto_venues.py
       - providers/databento.py
