@@ -231,7 +231,12 @@ def run_diagnostic_once(
                 decision_as_of=context.decision_as_of,
             )
             worker.dispatch_pending()
-            cycle_key = result.cycle_key
+            # Keep the diagnostic lineage anchored to the persisted production
+            # context. ``result.cycle_key`` identifies the triggered scheduler
+            # invocation, while the public certification audit intentionally
+            # correlates the request to the exact context publication that supplied
+            # governed evidence to that invocation. Overwriting this key made a
+            # successful decision appear to have no matching all-market context.
             snapshot_identifier = result.snapshot_identifier
             detail = result.detail
             succeeded = result.status == "completed"
