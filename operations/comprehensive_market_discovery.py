@@ -16,6 +16,10 @@ from typing import Mapping, Sequence
 from cio import CandidateAssetClass
 from operations import _comprehensive_market_discovery_v4 as _base
 from operations._comprehensive_market_discovery_v4 import *  # noqa: F401,F403
+from operations.provider_preselection_publication_runtime import (
+    ProviderPreselectionPublicationError,
+    ensure_provider_preselection_publication,
+)
 
 
 def _validate_terminal_lane_accounting(
@@ -64,12 +68,39 @@ def _validate_terminal_lane_accounting(
     return len(selected_symbols), len(excluded_symbols)
 
 
+def _has_substantive_provider_factor_authority(
+    signals: Mapping[str, _base.CatalogScreeningSignal],
+) -> bool:
+    return any(
+        identifier.startswith("provider-factor:")
+        for signal in signals.values()
+        for identifier in signal.evidence_identifiers
+    )
+
+
+def _provider_publication_failure_reasons(
+    signals: Mapping[str, _base.CatalogScreeningSignal],
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                reason
+                for signal in signals.values()
+                for reason in signal.exclusion_reasons
+                if reason.startswith(
+                    "provider_enriched_preselection_publication_invalid:"
+                )
+            }
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ComprehensiveMarketDiscoveryPolicy(_base.ComprehensiveMarketDiscoveryPolicy):
     """Govern complete discovery with terminal instrument accounting."""
 
     version: str = (
-        "comprehensive-liquid-market-discovery.v5-terminal-market-accounting"
+        "comprehensive-liquid-market-discovery.v6-provider-publication-authority"
     )
 
 
@@ -91,6 +122,11 @@ def discover_comprehensive_markets(
     Every scheduled catalog instrument must finish with a selected or excluded
     disposition, but a lane is not required to force an investment candidate through
     unchanged evidence, liquidity, lifecycle, or market-quality gates.
+
+    The canonical uninjected path builds or reuses the exact-catalog provider-factor
+    publication before preselection. A zero-candidate lane can certify only when that
+    lane contains substantive provider-factor lineage; systemic publication outages
+    remain fail-closed rather than being misclassified as normal asset exclusions.
     """
 
     timestamp = _base._legacy._aware(as_of, field_name="as_of")
@@ -111,6 +147,21 @@ def discover_comprehensive_markets(
         preselection_probe is None
         and (catalog_probe is not None or market_probe is not None)
     )
+    canonical_publication_required = (
+        catalog_probe is None
+        and market_probe is None
+        and preselection_probe is None
+    )
+    if canonical_publication_required:
+        try:
+            ensure_provider_preselection_publication(
+                catalogs,
+                as_of=timestamp,
+                policy=resolved,
+            )
+        except ProviderPreselectionPublicationError as error:
+            raise _base._legacy.ComprehensiveMarketDiscoveryError(str(error)) from error
+
     active_preselection_probe = (
         preselection_probe
         or (
@@ -158,6 +209,7 @@ def discover_comprehensive_markets(
                     "sources": [],
                     "candidate_count_limit_applied": False,
                     "provider_enriched_preselection_required": False,
+                    "provider_factor_authority_established": False,
                 }
             )
             continue
@@ -195,12 +247,27 @@ def discover_comprehensive_markets(
             raise _base._legacy.ComprehensiveMarketDiscoveryError(
                 f"{asset_class.value} preselection probe must return a mapping"
             )
+        provider_factor_authority_established = False
         if require_provider_factor_lineage:
             signals = _base.validate_provider_enriched_signals(
                 ordinary,
                 signals,
                 required_factors=resolved.required_provider_preselection_factors,
             )
+            provider_factor_authority_established = (
+                not ordinary or _has_substantive_provider_factor_authority(signals)
+            )
+            if not provider_factor_authority_established:
+                publication_failures = _provider_publication_failure_reasons(signals)
+                detail = (
+                    "; " + ", ".join(publication_failures)
+                    if publication_failures
+                    else ""
+                )
+                raise _base._legacy.ComprehensiveMarketDiscoveryError(
+                    f"{asset_class.value} provider factor authority is unavailable "
+                    f"for the complete certified catalog{detail}"
+                )
 
         plan = _base.build_preselection_plan(
             ordinary,
@@ -330,6 +397,11 @@ def discover_comprehensive_markets(
                 "provider_enriched_preselection_required": (
                     require_provider_factor_lineage
                 ),
+                "provider_factor_authority_established": (
+                    provider_factor_authority_established
+                    if require_provider_factor_lineage
+                    else None
+                ),
                 "preselection": plan.to_dict(),
                 "preselection_evidence": {
                     symbol: list(identifiers)
@@ -372,6 +444,7 @@ __all__ = tuple(
             "ComprehensiveMarketDiscoveryPolicy",
             "discover_comprehensive_markets",
             "_validate_terminal_lane_accounting",
+            "ensure_provider_preselection_publication",
         )
     )
 )

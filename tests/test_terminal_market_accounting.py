@@ -131,7 +131,7 @@ def test_complete_discovery_certifies_fully_rejected_lane() -> None:
         "point_in_time_market_evidence_unavailable",
     ) in fx_lane.exclusions
     assert fx_lane.source_identifiers == ("source:EURUSD",)
-    assert result.policy_version.endswith("v5-terminal-market-accounting")
+    assert result.policy_version.endswith("v6-provider-publication-authority")
 
 
 def test_complete_discovery_certifies_lifecycle_only_exclusions() -> None:
