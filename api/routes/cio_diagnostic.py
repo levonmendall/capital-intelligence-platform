@@ -35,13 +35,19 @@ def _count(payload: Mapping[str, Any], name: str) -> int:
     return max(0, parsed)
 
 
-def _market_lanes(payload: object) -> tuple[dict[str, object], ...]:
-    """Return credential-safe coverage counts for governed discovery lanes.
+def _market_lanes(
+    payload: object,
+    *,
+    comprehensive_discovery_complete: bool,
+) -> tuple[dict[str, object], ...]:
+    """Return lane coverage without requiring a qualifying investment candidate.
 
-    A successfully published comprehensive-discovery context already guarantees
-    terminal selected-or-excluded accounting for every current record. The release
-    audit therefore measures whether the scheduled certified catalog was represented,
-    not whether the system manufactured a candidate after governed exclusions.
+    Comprehensive discovery v5 fails closed before publication unless every symbol in a
+    scheduled nonempty certified catalog has a terminal selected-or-excluded disposition.
+    Therefore a persisted complete discovery scope plus a nonempty scheduled lane catalog
+    is terminal coverage evidence even when unchanged policy gates exclude every symbol.
+    Requiring ``deep > 0`` or ``selected > 0`` here would incorrectly turn a legitimate
+    all-excluded market evaluation into an incomplete-market claim.
     """
 
     if not isinstance(payload, Mapping):
@@ -54,7 +60,9 @@ def _market_lanes(payload: object) -> tuple[dict[str, object], ...]:
         catalog = _count(raw, "catalog")
         deep = _count(raw, "deep")
         selected = _count(raw, "selected")
-        represented = (not scheduled) or catalog > 0
+        represented = (not scheduled) or (
+            comprehensive_discovery_complete and catalog > 0
+        )
         lanes.append(
             {
                 "asset_class": str(asset_class),
@@ -125,7 +133,10 @@ def build_cio_diagnostic_audit(
         instrument_count > 0
         and candidate_count + exclusion_count == instrument_count
     )
-    lanes = _market_lanes(context.get("comprehensive_discovery_lane_counts"))
+    lanes = _market_lanes(
+        context.get("comprehensive_discovery_lane_counts"),
+        comprehensive_discovery_complete=scope_complete,
+    )
     scheduled_lanes = tuple(item for item in lanes if item["scheduled"] is True)
     scheduled_market_coverage_complete = bool(scheduled_lanes) and all(
         item["represented"] is True for item in scheduled_lanes
