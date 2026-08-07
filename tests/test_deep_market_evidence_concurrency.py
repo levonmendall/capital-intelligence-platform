@@ -87,6 +87,43 @@ def test_deep_market_history_retrieval_is_capped_and_deterministic(
     )
 
 
+def test_deep_market_raw_histories_are_released_after_feature_compaction(
+    monkeypatch,
+) -> None:
+    records = tuple(_record(index) for index in range(12))
+    lock = threading.Lock()
+    counts = {"live": 0, "peak": 0}
+
+    class TrackedRow(dict):
+        def __init__(self, value) -> None:
+            super().__init__(value)
+            with lock:
+                counts["live"] += 1
+                counts["peak"] = max(counts["peak"], counts["live"])
+
+        def __del__(self) -> None:
+            with lock:
+                counts["live"] -= 1
+
+    def yahoo_rows(record, **_kwargs):
+        index = int(record.symbol.rsplit("_", 1)[-1])
+        return tuple(TrackedRow(item) for item in _history(index))
+
+    monkeypatch.setattr(discovery_legacy, "_yahoo_rows", yahoo_rows)
+
+    result = discovery_legacy.default_market_probe(
+        records,
+        AS_OF,
+        ComprehensiveMarketDiscoveryPolicy(),
+        eodhd_provider=object(),
+        maximum_workers=4,
+    )
+
+    assert tuple(result) == tuple(record.symbol for record in records)
+    assert counts["peak"] <= 4 * 253
+    assert counts["live"] == 0
+
+
 @pytest.mark.parametrize("maximum_workers", (0, -1, True, 1.5))
 def test_deep_market_history_retrieval_rejects_invalid_worker_limits(
     maximum_workers,
