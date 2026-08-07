@@ -60,12 +60,9 @@ def _market_lanes(
         catalog = _count(raw, "catalog")
         deep = _count(raw, "deep")
         selected = _count(raw, "selected")
-        terminal_accounting_complete = (
+        represented = (not scheduled) or (
             comprehensive_discovery_complete and catalog > 0
-            if scheduled
-            else True
         )
-        represented = (not scheduled) or terminal_accounting_complete
         lanes.append(
             {
                 "asset_class": str(asset_class),
@@ -78,7 +75,6 @@ def _market_lanes(
                 "catalog_count": catalog,
                 "deep_analyzed_count": deep,
                 "selected_count": selected,
-                "terminal_accounting_complete": terminal_accounting_complete,
                 "represented": represented,
             }
         )
@@ -143,7 +139,7 @@ def build_cio_diagnostic_audit(
     )
     scheduled_lanes = tuple(item for item in lanes if item["scheduled"] is True)
     scheduled_market_coverage_complete = bool(scheduled_lanes) and all(
-        item["terminal_accounting_complete"] is True for item in scheduled_lanes
+        item["represented"] is True for item in scheduled_lanes
     )
     expected_requester = f"render-release:{release}"
     release_matches = (
