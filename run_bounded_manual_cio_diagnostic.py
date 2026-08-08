@@ -21,6 +21,7 @@ from operations.manual_cio_diagnostic import (
     finish_manual_cio_diagnostic,
     latest_manual_cio_diagnostic,
 )
+from operations.storage_pressure import reclaim_from_environment
 
 
 _DEFAULT_TIMEOUT_SECONDS = 1800.0
@@ -85,6 +86,27 @@ def _terminate(process: subprocess.Popen[bytes] | subprocess.Popen[str]) -> int 
             return process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             return process.returncode
+
+
+def _reclaim_disposable_working_storage(values: Mapping[str, str]) -> None:
+    """Remove only disposable cycle-local spool files after the child has stopped."""
+
+    try:
+        report = reclaim_from_environment(values)
+    except (OSError, TypeError, ValueError) as error:
+        _log(
+            "manual_cio_diagnostic_disposable_storage_recovery_failed",
+            error_type=type(error).__name__,
+            canonical_authorities_deleted=False,
+        )
+        return
+    _log(
+        "manual_cio_diagnostic_disposable_storage_reclaimed",
+        removed_evidence_spool_files=list(report.removed_evidence_spool_files),
+        removed_evidence_spool_bytes=report.removed_evidence_spool_bytes,
+        reserve_satisfied=report.reserve_satisfied,
+        canonical_authorities_deleted=False,
+    )
 
 
 def _close_timed_out_request(
@@ -163,6 +185,7 @@ def run_bounded_diagnostic(
             values=resolved,
             timeout_seconds=timeout,
         )
+        _reclaim_disposable_working_storage(resolved)
         _log(
             "manual_cio_diagnostic_timed_out",
             release=release,
@@ -173,6 +196,7 @@ def run_bounded_diagnostic(
         )
         return 124
 
+    _reclaim_disposable_working_storage(resolved)
     _log(
         "manual_cio_diagnostic_process_finished",
         release=release,
