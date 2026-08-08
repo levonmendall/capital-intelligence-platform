@@ -1,0 +1,130 @@
+name: Apply governed option underlying quote repair v2
+
+on:
+  push:
+    branches:
+      - repair/option-underlying-quote-redundancy
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[option-quote-repair]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: repair/option-underlying-quote-redundancy
+          fetch-depth: 0
+      - name: Apply narrow production data repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if old not in text:
+                  raise RuntimeError(f'missing patch anchor: {label}')
+              return text.replace(old, new, 1)
+
+          legacy_path = Path('operations/comprehensive_market_discovery_legacy.py')
+          text = legacy_path.read_text(encoding='utf-8')
+
+          text = replace_once(
+              text,
+              'from providers.alpaca_paper import AlpacaPaperClient, create_alpaca_paper_client\n',
+              '''from providers.alpaca_paper import (\n    AlpacaPaperClient,\n    AlpacaPaperProviderError,\n    create_alpaca_paper_client,\n)\n''',
+              'alpaca import',
+          )
+          text = replace_once(
+              text,
+              '''    databento_options_provider: DatabentoOptionsProvider | None = None,\n) -> Sequence[DiscoveryCatalogRecord]:\n''',
+              '''    databento_options_provider: DatabentoOptionsProvider | None = None,\n    alpaca_client: AlpacaPaperClient | None = None,\n) -> Sequence[DiscoveryCatalogRecord]:\n''',
+              'option catalog signature',
+          )
+          text = replace_once(
+              text,
+              '''    def discover_underlying(\n        item: tuple[str, float],\n    ) -> tuple[\n''',
+              '''    def discover_underlying(\n        item: tuple[str, float, str],\n    ) -> tuple[\n''',
+              'option worker item type',
+          )
+          text = replace_once(
+              text,
+              '        underlying, underlying_price = item\n',
+              '        underlying, underlying_price, quote_source_identifier = item\n',
+              'option worker unpack',
+          )
+          text = replace_once(
+              text,
+              '''                    source_identifier=(\n                        "databento-opra-definition:"\n                        f"{definition.session_date.isoformat()}:"\n                        f"{definition.symbol}:bar:{bar.observed_at.isoformat()}"\n                    ),\n''',
+              '''                    source_identifier=(\n                        "databento-opra-definition:"\n                        f"{definition.session_date.isoformat()}:"\n                        f"{definition.symbol}:bar:{bar.observed_at.isoformat()}:"\n                        f"underlying:{quote_source_identifier}"\n                    ),\n''',
+              'option quote lineage',
+          )
+
+          old_quotes = '''    underlyings = tuple(config.option_underlyings)\n    priced_underlyings: list[tuple[str, float]] = []\n    underlying_quote_failures: list[str] = []\n    # Yahoo's public chart endpoint is the governed underlying-price source for this\n    # lane. Keep these lightweight reads sequential so the bounded Databento fan-out\n    # cannot turn them into a burst that the public endpoint rejects as one cohort.\n    for underlying in underlyings:\n        underlying_record = DiscoveryCatalogRecord(\n            symbol=underlying,\n            provider_symbol=underlying,\n            name=underlying,\n            asset_class=CandidateAssetClass.INTERNATIONAL_EQUITY,\n            economic_exposure="us_equity",\n            venue="US",\n            country_code="US",\n            currency="USD",\n            settlement_currency="USD",\n            instrument_type="common_stock",\n            provider_kind="yahoo",\n            source_identifier=f"yahoo-chart:{underlying}",\n        )\n        rows = _yahoo_rows(\n            underlying_record,\n            as_of=as_of,\n            history_days=15,\n            http_get=http_get,\n        )\n        if not rows:\n            underlying_quote_failures.append(underlying)\n            continue\n        priced_underlyings.append((underlying, float(rows[-1]["c"])))\n\n    worker_count = min(4, len(priced_underlyings))\n'''
+          new_quotes = '''    underlyings = tuple(config.option_underlyings)\n    priced_underlyings: list[tuple[str, float, str]] = []\n    underlying_quote_failures: list[str] = []\n\n    # Render production can lose Yahoo chart access for the complete configured\n    # option cohort even with serialized calls. Use the already-governed,\n    # authenticated Alpaca IEX paper-data channel first for these U.S. listed\n    # underlyings and retain Yahoo as an independent fallback. Neither source may\n    # synthesize a price; absence from both remains fail closed.\n    alpaca_histories: Mapping[str, Sequence[Mapping[str, object]]] = {}\n    quote_client = alpaca_client\n    if quote_client is None:\n        try:\n            quote_client = create_alpaca_paper_client()\n        except (AlpacaPaperProviderError, OSError, TypeError, ValueError):\n            quote_client = None\n    if quote_client is not None and underlyings:\n        try:\n            alpaca_histories = quote_client.historical_bars(\n                underlyings,\n                start=as_of - timedelta(days=15),\n                end=as_of,\n                timeframe="1Day",\n            )\n        except (AlpacaPaperProviderError, OSError, TypeError, ValueError):\n            alpaca_histories = {}\n\n    for underlying in underlyings:\n        latest_alpaca_price = 0.0\n        latest_alpaca_observed: datetime | None = None\n        for raw in alpaca_histories.get(underlying, ()):\n            if not isinstance(raw, Mapping):\n                continue\n            observed = _timestamp(raw.get("t"))\n            close = _number(raw.get("c"))\n            if observed is None or observed > as_of or close <= 0.0:\n                continue\n            if latest_alpaca_observed is None or observed > latest_alpaca_observed:\n                latest_alpaca_observed = observed\n                latest_alpaca_price = close\n        if latest_alpaca_observed is not None and latest_alpaca_price > 0.0:\n            priced_underlyings.append(\n                (\n                    underlying,\n                    latest_alpaca_price,\n                    "alpaca-iex-daily:"\n                    f"{underlying}:{latest_alpaca_observed.isoformat()}:"\n                    f"{latest_alpaca_price:.10g}",\n                )\n            )\n            continue\n\n        underlying_record = DiscoveryCatalogRecord(\n            symbol=underlying,\n            provider_symbol=underlying,\n            name=underlying,\n            asset_class=CandidateAssetClass.INTERNATIONAL_EQUITY,\n            economic_exposure="us_equity",\n            venue="US",\n            country_code="US",\n            currency="USD",\n            settlement_currency="USD",\n            instrument_type="common_stock",\n            provider_kind="yahoo",\n            source_identifier=f"yahoo-chart:{underlying}",\n        )\n        rows = _yahoo_rows(\n            underlying_record,\n            as_of=as_of,\n            history_days=15,\n            http_get=http_get,\n        )\n        if not rows:\n            underlying_quote_failures.append(underlying)\n            continue\n        yahoo_observed = rows[-1]["t"]\n        yahoo_price = float(rows[-1]["c"])\n        priced_underlyings.append(\n            (\n                underlying,\n                yahoo_price,\n                f"yahoo-chart:{underlying}:{yahoo_observed.isoformat()}:"\n                f"{yahoo_price:.10g}",\n            )\n        )\n\n    worker_count = min(4, len(priced_underlyings))\n'''
+          text = replace_once(text, old_quotes, new_quotes, 'catalog quote source block')
+
+          text = replace_once(
+              text,
+              '''    for (underlying, _price), (records, failure_kind, failure_detail) in zip(\n        priced_underlyings,\n        outcomes,\n        strict=True,\n    ):\n''',
+              '''    for (underlying, _price, _quote_source), (\n        records,\n        failure_kind,\n        failure_detail,\n    ) in zip(\n        priced_underlyings,\n        outcomes,\n        strict=True,\n    ):\n''',
+              'option outcomes unpack',
+          )
+
+          old_alpaca = '''    alpaca_records = tuple(\n        item for item in ordered_records if item.provider_kind == "alpaca"\n    )\n    alpaca_histories: dict[str, Sequence[Mapping[str, object]]] = {}\n    if alpaca_records:\n        client = alpaca_client or create_alpaca_paper_client()\n        alpaca_symbols = tuple(item.provider_symbol for item in alpaca_records)\n        for start in range(0, len(alpaca_symbols), 200):\n            batch = alpaca_symbols[start : start + 200]\n            try:\n                histories = client.historical_bars(\n                    batch,\n                    start=timestamp - timedelta(days=policy.history_days),\n                    end=timestamp,\n                    timeframe="1Day",\n                )\n            except (OSError, TypeError, ValueError):\n                histories = {}\n            for symbol, values in histories.items():\n                alpaca_histories[str(symbol).strip().upper()] = values\n'''
+          new_alpaca = '''    alpaca_records = tuple(\n        item for item in ordered_records if item.provider_kind == "alpaca"\n    )\n    option_underlying_symbols = tuple(\n        dict.fromkeys(\n            item.underlying_symbol.upper()\n            for item in option_records\n            if item.underlying_symbol\n        )\n    )\n    alpaca_histories: dict[str, Sequence[Mapping[str, object]]] = {}\n    alpaca_symbols = tuple(\n        dict.fromkeys(\n            (\n                *(item.provider_symbol for item in alpaca_records),\n                *option_underlying_symbols,\n            )\n        )\n    )\n    if alpaca_symbols:\n        client = alpaca_client\n        if client is None:\n            try:\n                client = create_alpaca_paper_client()\n            except (AlpacaPaperProviderError, OSError, TypeError, ValueError):\n                client = None\n        if client is not None:\n            for start in range(0, len(alpaca_symbols), 200):\n                batch = alpaca_symbols[start : start + 200]\n                try:\n                    histories = client.historical_bars(\n                        batch,\n                        start=timestamp - timedelta(days=policy.history_days),\n                        end=timestamp,\n                        timeframe="1Day",\n                    )\n                except (AlpacaPaperProviderError, OSError, TypeError, ValueError):\n                    histories = {}\n                for symbol, values in histories.items():\n                    alpaca_histories[str(symbol).strip().upper()] = values\n'''
+          text = replace_once(text, old_alpaca, new_alpaca, 'deep evidence alpaca batch')
+
+          text = replace_once(
+              text,
+              '''            rows = _yahoo_rows(\n                underlying,\n                as_of=timestamp,\n                history_days=policy.history_days,\n                http_get=http_get,\n            )\n            option_rows = option_histories.get(record.provider_symbol.upper(), ())\n''',
+              '''            parsed_underlying_rows: list[dict[str, object]] = []\n            for raw in alpaca_histories.get(record.underlying_symbol.upper(), ()):\n                if not isinstance(raw, Mapping):\n                    continue\n                observed = _timestamp(raw.get("t"))\n                close = _number(raw.get("c"))\n                volume = _number(raw.get("v"))\n                if observed is None or observed > timestamp or close <= 0.0:\n                    continue\n                parsed_underlying_rows.append(\n                    {"t": observed, "c": close, "v": max(0.0, volume)}\n                )\n            rows = tuple(parsed_underlying_rows)\n            if not rows:\n                rows = _yahoo_rows(\n                    underlying,\n                    as_of=timestamp,\n                    history_days=policy.history_days,\n                    http_get=http_get,\n                )\n            option_rows = option_histories.get(record.provider_symbol.upper(), ())\n''',
+              'deep option underlying fallback',
+          )
+          legacy_path.write_text(text, encoding='utf-8')
+
+          test_path = Path('tests/test_option_catalog_failure_publication.py')
+          tests = test_path.read_text(encoding='utf-8')
+          tests = replace_once(
+              tests,
+              '''def _yahoo_get(*_args, **_kwargs) -> _YahooResponse:\n    return _YahooResponse()\n\n\n''',
+              '''def _yahoo_get(*_args, **_kwargs) -> _YahooResponse:\n    return _YahooResponse()\n\n\nclass _UnavailableAlpacaClient:\n    @staticmethod\n    def historical_bars(*_args, **_kwargs):\n        raise ValueError("Alpaca unavailable in this failure-path test")\n\n\n''',
+              'test alpaca failure helper',
+          )
+          indented = '''            databento_options_provider=Provider(),\n        )\n'''
+          if tests.count(indented) != 2:
+              raise RuntimeError(f'unexpected indented option call count: {tests.count(indented)}')
+          tests = tests.replace(
+              indented,
+              '''            databento_options_provider=Provider(),\n            alpaca_client=_UnavailableAlpacaClient(),\n        )\n''',
+              2,
+          )
+          direct = '''        databento_options_provider=Provider(),\n    )\n'''
+          if tests.count(direct) != 1:
+              raise RuntimeError(f'unexpected direct option call count: {tests.count(direct)}')
+          tests = tests.replace(
+              direct,
+              '''        databento_options_provider=Provider(),\n        alpaca_client=_UnavailableAlpacaClient(),\n    )\n''',
+              1,
+          )
+          tests += '''\n\ndef test_option_catalog_uses_authenticated_alpaca_when_yahoo_is_unavailable() -> None:\n    underlyings = ("SPY", "QQQ")\n    received_prices: dict[str, float] = {}\n\n    class AlpacaClient:\n        @staticmethod\n        def historical_bars(symbols, **_kwargs):\n            return {\n                symbol: (\n                    {\n                        "t": (AS_OF - timedelta(days=1)).isoformat(),\n                        "c": 500.0 + index,\n                        "v": 1_000_000.0,\n                    },\n                )\n                for index, symbol in enumerate(symbols)\n            }\n\n    class Provider:\n        configured = True\n\n        @staticmethod\n        def select_contracts(underlying, *, underlying_price, **_kwargs):\n            received_prices[underlying] = underlying_price\n            expiration = AS_OF + timedelta(days=60)\n            definition = DatabentoOptionDefinition(\n                symbol=f"{underlying}261006C00500000",\n                raw_symbol=f"{underlying}   261006C00500000",\n                instrument_id=underlyings.index(underlying) + 1,\n                underlying=underlying,\n                option_right="call",\n                expiration_at=expiration,\n                strike=500.0,\n                contract_multiplier=100.0,\n                session_date=(AS_OF - timedelta(days=1)).date(),\n            )\n            bar = DatabentoOptionBar(\n                raw_symbol=definition.raw_symbol,\n                observed_at=AS_OF - timedelta(days=1),\n                close=10.0,\n                volume=100.0,\n            )\n            return (DatabentoOptionSelection(definition=definition, bar=bar),)\n\n    def yahoo_must_not_run(*_args, **_kwargs):\n        raise AssertionError("Yahoo should be fallback-only when Alpaca has valid bars")\n\n    result = _option_catalog(\n        as_of=AS_OF,\n        config=_config(*underlyings),\n        policy=ComprehensiveMarketDiscoveryPolicy(),\n        http_get=yahoo_must_not_run,\n        databento_options_provider=Provider(),\n        alpaca_client=AlpacaClient(),\n    )\n\n    assert received_prices == {"SPY": 500.0, "QQQ": 501.0}\n    assert [item.underlying_symbol for item in result] == list(underlyings)\n    assert all("underlying:alpaca-iex-daily:" in item.source_identifier for item in result)\n'''
+          test_path.write_text(tests, encoding='utf-8')
+
+          for workflow in (
+              Path('.github/workflows/repair-option-underlying-quotes.yml'),
+              Path('.github/workflows/repair-option-underlying-quotes-v2.yml'),
+          ):
+              workflow.unlink(missing_ok=True)
+          PY
+      - name: Compile active repair paths
+        run: python -m compileall -q operations/comprehensive_market_discovery_legacy.py tests/test_option_catalog_failure_publication.py
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add operations/comprehensive_market_discovery_legacy.py tests/test_option_catalog_failure_publication.py .github/workflows/repair-option-underlying-quotes.yml .github/workflows/repair-option-underlying-quotes-v2.yml
+          git commit -m "Repair option underlying quote redundancy [option-quote-repair]"
+          git push origin HEAD:repair/option-underlying-quote-redundancy
