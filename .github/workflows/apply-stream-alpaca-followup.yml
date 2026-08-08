@@ -1,0 +1,43 @@
+name: Apply Alpaca batch-reference follow-up
+
+on:
+  push:
+    branches:
+      - repair/stream-alpaca-deep-evidence
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[alpaca-ref-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: repair/stream-alpaca-deep-evidence
+          fetch-depth: 0
+      - name: Release final loop reference
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('operations/comprehensive_market_discovery_legacy.py')
+          source = path.read_text()
+          old = '''            for symbol, values in histories.items():\n                key = str(symbol).strip().upper()\n                alpaca_histories[key] = values\n                transient_keys.add(key)\n            try:\n'''
+          new = '''            for symbol, values in histories.items():\n                key = str(symbol).strip().upper()\n                alpaca_histories[key] = values\n                transient_keys.add(key)\n                # Do not let the loop variable retain the final raw history after\n                # its batch mapping is cleared.\n                del values\n            try:\n'''
+          if old not in source:
+              raise SystemExit('target block not found')
+          path.write_text(source.replace(old, new, 1))
+          PY
+          python -m compileall -q operations/comprehensive_market_discovery_legacy.py
+          git diff --check
+      - name: Commit follow-up
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-stream-alpaca-followup.yml
+          git add operations/comprehensive_market_discovery_legacy.py
+          git commit -m "Release final Alpaca batch reference [alpaca-ref-applied]"
+          git push origin HEAD:repair/stream-alpaca-deep-evidence
