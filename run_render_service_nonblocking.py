@@ -19,18 +19,21 @@ stale backup temporary files while preserving at least the configured newest arc
 Canonical databases, portfolio state, evidence, lineage, reports, and research records
 are never deleted by this recovery path.
 
-When explicitly enabled, the release diagnostic waits until the current API and
-Streamlit children are healthy, then invokes the existing fully governed manual CIO
-diagnostic. If the bounded readiness observation expires, the diagnostic is still
-attempted rather than abandoning exact-release certification; all downstream evidence,
-provider, discovery, CIO, construction, and paper-only gates remain fail closed. A failed
-cold-start discovery may be resumed a small bounded number of times so previously
-certified provider snapshots on the persistent disk can be reused and the next uncached
-market can be attempted. Every attempt remains paper-only, requires complete all-market
-discovery, preserves all fail-closed gates, and publishes a credential-safe aggregate
-audit. While that bounded diagnostic is active, the supervisor keeps API and Streamlit
-available but defers the duplicate CIO operator and non-web workers so the diagnostic has
-safe memory headroom on the 2 GB Render instance.
+When explicitly enabled, the release diagnostic first primes the durable current-release
+pending request so the first public audit cannot inherit a prior release's terminal state.
+The primer has no decision or execution authority and never claims the request. The
+release diagnostic then waits until the current API and Streamlit children are healthy,
+and invokes the existing fully governed manual CIO diagnostic. If the bounded readiness
+observation expires, the diagnostic is still attempted rather than abandoning
+exact-release certification; all downstream evidence, provider, discovery, CIO,
+construction, and paper-only gates remain fail closed. A failed cold-start discovery may
+be resumed a small bounded number of times so previously certified provider snapshots on
+the persistent disk can be reused and the next uncached market can be attempted. Every
+attempt remains paper-only, requires complete all-market discovery, preserves all
+fail-closed gates, and publishes a credential-safe aggregate audit. While that bounded
+diagnostic is active, the supervisor keeps API and Streamlit available but defers the
+duplicate CIO operator and non-web workers so the diagnostic has safe memory headroom on
+the 2 GB Render instance.
 """
 
 from __future__ import annotations
@@ -48,6 +51,7 @@ from pathlib import Path
 from operations.composite_readiness import component_heartbeat_path
 from operations.heartbeat import WorkerHeartbeatStore
 from operations.storage_pressure import reclaim_from_environment
+from prime_release_cio_diagnostic import prime_release_diagnostic_request
 from run_render_service import prepare_render_environment, run_supervisor
 
 
@@ -354,6 +358,10 @@ def _start_release_diagnostic(
         default=False,
     ):
         return None
+    # Prime synchronously before the diagnostic thread can publish the first audit.
+    # This only creates/preserves operational coordination state; it never claims the
+    # request or acquires CIO, construction, or execution authority.
+    prime_release_diagnostic_request(values)
     not_before = datetime.now(timezone.utc)
     thread = threading.Thread(
         name="manual-cio-release-diagnostic",
