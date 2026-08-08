@@ -24,17 +24,19 @@ services:
         value: production
       - key: CAPITAL_INTELLIGENCE_DATA_DIR
         value: /app/database
-      # Paper-evidence spools are cycle-local working files, not canonical state.
-      # Render provides a 2 GB /tmp filesystem on this service. Keep the spool
-      # below 1 GB and preserve at least 768 MB free so application-level ENOSPC
-      # is raised before Render's hard temporary-storage limit can terminate the
-      # instance. Comprehensive scope remains fail-closed rather than truncated.
+      # Paper-evidence spools are cycle-local, disposable working files and are not
+      # canonical state. Render enforces a hard 2 GB /tmp quota that has repeatedly
+      # terminated comprehensive all-market diagnostics despite application-level
+      # spool bounds. Keep this disposable working set on a dedicated non-authority
+      # directory of the 10 GB persistent volume, where disk_usage reflects the
+      # governed capacity. Compression, the 4 GB ceiling, the 1 GB free-space
+      # reserve, startup cleanup, and fail-closed evidence requirements remain active.
       - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_DIR
-        value: /tmp/capital-intelligence/paper_evidence_spool
+        value: /app/database/runtime_transient/paper_evidence_spool
       - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_MAX_MB
-        value: "1024"
+        value: "4096"
       - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_RESERVE_MB
-        value: "768"
+        value: "1024"
       - key: CAPITAL_INTELLIGENCE_LOG_LEVEL
         value: INFO
       - key: CAPITAL_INTELLIGENCE_JSON_LOGS
