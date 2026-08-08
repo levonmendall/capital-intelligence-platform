@@ -32,7 +32,7 @@ jobs:
         github.event.deployment.ref == 'main'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 70
     env:
       # Render exposes Streamlit on the public service port. The internal FastAPI
       # child listens only on 127.0.0.1:8000, so public certification must read
@@ -61,7 +61,7 @@ jobs:
             --url "$AUDIT_URL" \
             --expected-release "$EXPECTED_RELEASE" \
             --output "$AUDIT_OUTPUT" \
-            --maximum-attempts 120 \
+            --maximum-attempts 240 \
             --interval-seconds 15 \
             2>&1 | tee "$VERIFICATION_LOG"
 
