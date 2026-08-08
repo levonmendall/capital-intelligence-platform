@@ -47,6 +47,7 @@ from operations.equity_discovery import (
 from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     load_free_paper_pilot_universe,
+    load_current_active_paper_universe,
     weekday_market_evaluation_scheduled,
     write_active_paper_universe,
 )
@@ -322,6 +323,69 @@ def _mark_portfolio(snapshot, build_result, *, decision_as_of: datetime):
             for position in snapshot.positions
         ),
     )
+
+
+def _reconcile_canonical_holding_evidence_scope(
+    *,
+    settings: ApiSettings,
+    universe,
+    portfolio,
+):
+    """Carry omitted canonical holdings only into mandatory monitoring evidence.
+
+    Fresh discovery remains the sole nomination authority. If a currently held
+    instrument is absent from that cycle's discovered universe, its instrument
+    contract must come from the most recent certified active paper universe. The
+    caller marks every carried symbol evidence-only, so it cannot become a new
+    candidate merely because the portfolio already owns it. Missing prior certified
+    metadata remains fail-closed.
+    """
+
+    governed_symbols = {item.symbol for item in universe.instruments}
+    missing = tuple(
+        sorted(
+            {position.symbol for position in portfolio.positions} - governed_symbols
+        )
+    )
+    if not missing:
+        return universe, ()
+    try:
+        _publication_identifier, prior_universe = load_current_active_paper_universe(
+            active_path=settings.portfolio_database.with_name(
+                "active-paper-universe.json"
+            )
+        )
+    except (OSError, TypeError, ValueError) as error:
+        raise ProductionPaperEvidenceError(
+            "canonical holdings are absent from fresh discovery and the prior "
+            "certified active paper universe is unavailable"
+        ) from error
+    prior_by_symbol = prior_universe.symbol_map
+    unresolved = tuple(symbol for symbol in missing if symbol not in prior_by_symbol)
+    if unresolved:
+        raise ProductionPaperEvidenceError(
+            "canonical holdings cannot be reconciled to certified instrument "
+            f"metadata: {list(unresolved)}"
+        )
+    carried = tuple(prior_by_symbol[symbol] for symbol in missing)
+    reconciled = replace(
+        universe,
+        identifier=(
+            universe.identifier
+            + "+canonical-holding-monitor:"
+            + ",".join(missing)
+        ),
+        instruments=tuple((*universe.instruments, *carried)),
+        limitations=tuple(
+            dict.fromkeys(
+                (
+                    *universe.limitations,
+                    "Canonical holdings omitted by fresh discovery retain mandatory point-in-time monitoring and exit continuity from the most recent certified active paper universe; carry-forward cannot nominate a new candidate or authorize an increased position.",
+                )
+            )
+        ),
+    )
+    return reconciled, missing
 
 
 def prepare_governed_production_context_for_cycle(
@@ -640,12 +704,34 @@ def prepare_governed_production_context_for_cycle(
         ),
     )
 
+    try:
+        universe, evidence_only_holding_symbols = (
+            _reconcile_canonical_holding_evidence_scope(
+                settings=settings,
+                universe=universe,
+                portfolio=tentative,
+            )
+        )
+    except (ProductionPaperEvidenceError, OSError, TypeError, ValueError) as error:
+        return _blocked(
+            cycle_key=cycle_key,
+            scheduled_for=scheduled,
+            decision_as_of=decision_as_of,
+            detail=(
+                "Canonical holding evidence scope failed closed: "
+                f"{type(error).__name__}: {error}"
+            ),
+            instrument_count=len(universe.instruments),
+        )
+
     cash_expected_return = round(max(-1.0, min(1.0, cash_value / 100.0)), 8)
     try:
         evidence_payload = collect_paper_evidence(
             universe,
             decision_as_of,
             probe=evidence_probe,
+            required_holding_symbols=held_symbols,
+            holding_only_symbols=evidence_only_holding_symbols,
         )
     except Exception as error:
         return _blocked(

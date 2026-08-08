@@ -149,7 +149,12 @@ def _synchronize_runtime_bindings() -> None:
     _implementation.SECEdgarProvider = SECEdgarProvider
 
 
-def _default_probe(universe, decision_as_of):
+def _default_probe(
+    universe,
+    decision_as_of,
+    *,
+    required_holding_symbols=(),
+):
     """Collect every scheduled instrument without retaining all raw history in RAM."""
 
     _synchronize_runtime_bindings()
@@ -165,6 +170,7 @@ def _default_probe(universe, decision_as_of):
         candidate_asset_class=CandidateAssetClass,
         instrument_evaluation_scheduled=instrument_evaluation_scheduled,
         history_days=_HISTORY_DAYS,
+        required_holding_symbols=required_holding_symbols,
     )
 
 

@@ -227,6 +227,7 @@ def collect_spooled_paper_evidence(
     candidate_asset_class: type,
     instrument_evaluation_scheduled: Callable[[object, datetime], bool],
     history_days: int,
+    required_holding_symbols: Sequence[str] = (),
     listed_batch_size: int = _DEFAULT_LISTED_BATCH_SIZE,
     sec_workers: int = _DEFAULT_SEC_WORKERS,
     sec_issuer_start_interval_seconds: float = (
@@ -236,13 +237,27 @@ def collect_spooled_paper_evidence(
     """Collect full evidence scope through bounded provider batches and lazy storage."""
 
     as_of = _aware(decision_as_of, field_name="decision_as_of")
+    required = frozenset(
+        str(symbol).strip().upper()
+        for symbol in required_holding_symbols
+        if str(symbol).strip()
+    )
+    universe_symbols = {item.symbol for item in universe.instruments}
+    unknown_required = sorted(required - universe_symbols)
+    if unknown_required:
+        raise ValueError(
+            f"required holding evidence is outside the governed paper universe: {unknown_required}"
+        )
     scheduled_instruments = tuple(
         item
         for item in universe.instruments
-        if instrument_evaluation_scheduled(item, as_of)
+        if instrument_evaluation_scheduled(item, as_of) or item.symbol in required
     )
     scheduled_closed_symbols = tuple(
-        item.symbol for item in universe.instruments if item not in scheduled_instruments
+        item.symbol
+        for item in universe.instruments
+        if not instrument_evaluation_scheduled(item, as_of)
+        and item.symbol not in required
     )
     listed_instruments = tuple(
         item for item in scheduled_instruments if not item.uses_direct_market_provider
