@@ -35,7 +35,11 @@ from providers.databento_options import (
     DatabentoOptionsProvider,
 )
 from providers.eodhd import EODHDProvider, EODHDProviderError, build_eodhd_provider
-from providers.alpaca_paper import AlpacaPaperClient, create_alpaca_paper_client
+from providers.alpaca_paper import (
+    AlpacaPaperClient,
+    AlpacaPaperProviderError,
+    create_alpaca_paper_client,
+)
 
 DEFAULT_DISCOVERY_CONFIG_PATH = Path("config/comprehensive_market_discovery.json")
 _PROVIDER_DIRECTORY_CERTIFICATION_LIMIT = 1_000_000
@@ -859,6 +863,7 @@ def _option_catalog(
     policy: ComprehensiveMarketDiscoveryPolicy,
     http_get: Callable[..., Any] = requests.get,
     databento_options_provider: DatabentoOptionsProvider | None = None,
+    alpaca_client: AlpacaPaperClient | None = None,
 ) -> Sequence[DiscoveryCatalogRecord]:
     provider = databento_options_provider or DatabentoOptionsProvider()
     if not provider.configured:
@@ -867,13 +872,13 @@ def _option_catalog(
         )
 
     def discover_underlying(
-        item: tuple[str, float],
+        item: tuple[str, float, str],
     ) -> tuple[
         tuple[DiscoveryCatalogRecord, ...],
         str | None,
         str | None,
     ]:
-        underlying, underlying_price = item
+        underlying, underlying_price, quote_source_identifier = item
         try:
             selections = provider.select_contracts(
                 underlying,
@@ -914,7 +919,8 @@ def _option_catalog(
                     source_identifier=(
                         "databento-opra-definition:"
                         f"{definition.session_date.isoformat()}:"
-                        f"{definition.symbol}:bar:{bar.observed_at.isoformat()}"
+                        f"{definition.symbol}:bar:{bar.observed_at.isoformat()}:"
+                        f"underlying:{quote_source_identifier}"
                     ),
                     contract_multiplier=definition.contract_multiplier,
                     quote_spread_bps=15.0,
@@ -927,12 +933,57 @@ def _option_catalog(
         return tuple(records), None, None
 
     underlyings = tuple(config.option_underlyings)
-    priced_underlyings: list[tuple[str, float]] = []
+    priced_underlyings: list[tuple[str, float, str]] = []
     underlying_quote_failures: list[str] = []
-    # Yahoo's public chart endpoint is the governed underlying-price source for this
-    # lane. Keep these lightweight reads sequential so the bounded Databento fan-out
-    # cannot turn them into a burst that the public endpoint rejects as one cohort.
+
+    # Render production can lose Yahoo chart access for the complete configured
+    # option cohort even with serialized calls. Use the already-governed,
+    # authenticated Alpaca IEX paper-data channel first for these U.S. listed
+    # underlyings and retain Yahoo as an independent fallback. Neither source may
+    # synthesize a price; absence from both remains fail closed.
+    alpaca_histories: Mapping[str, Sequence[Mapping[str, object]]] = {}
+    quote_client = alpaca_client
+    if quote_client is None:
+        try:
+            quote_client = create_alpaca_paper_client()
+        except (AlpacaPaperProviderError, OSError, TypeError, ValueError):
+            quote_client = None
+    if quote_client is not None and underlyings:
+        try:
+            alpaca_histories = quote_client.historical_bars(
+                underlyings,
+                start=as_of - timedelta(days=15),
+                end=as_of,
+                timeframe="1Day",
+            )
+        except (AlpacaPaperProviderError, OSError, TypeError, ValueError):
+            alpaca_histories = {}
+
     for underlying in underlyings:
+        latest_alpaca_price = 0.0
+        latest_alpaca_observed: datetime | None = None
+        for raw in alpaca_histories.get(underlying, ()):
+            if not isinstance(raw, Mapping):
+                continue
+            observed = _timestamp(raw.get("t"))
+            close = _number(raw.get("c"))
+            if observed is None or observed > as_of or close <= 0.0:
+                continue
+            if latest_alpaca_observed is None or observed > latest_alpaca_observed:
+                latest_alpaca_observed = observed
+                latest_alpaca_price = close
+        if latest_alpaca_observed is not None and latest_alpaca_price > 0.0:
+            priced_underlyings.append(
+                (
+                    underlying,
+                    latest_alpaca_price,
+                    "alpaca-iex-daily:"
+                    f"{underlying}:{latest_alpaca_observed.isoformat()}:"
+                    f"{latest_alpaca_price:.10g}",
+                )
+            )
+            continue
+
         underlying_record = DiscoveryCatalogRecord(
             symbol=underlying,
             provider_symbol=underlying,
@@ -956,7 +1007,16 @@ def _option_catalog(
         if not rows:
             underlying_quote_failures.append(underlying)
             continue
-        priced_underlyings.append((underlying, float(rows[-1]["c"])))
+        yahoo_observed = rows[-1]["t"]
+        yahoo_price = float(rows[-1]["c"])
+        priced_underlyings.append(
+            (
+                underlying,
+                yahoo_price,
+                f"yahoo-chart:{underlying}:{yahoo_observed.isoformat()}:"
+                f"{yahoo_price:.10g}",
+            )
+        )
 
     worker_count = min(4, len(priced_underlyings))
     outcomes: tuple[
@@ -975,7 +1035,11 @@ def _option_catalog(
     result: list[DiscoveryCatalogRecord] = []
     provider_failures: list[tuple[str, str]] = []
     empty_selection_failures: list[str] = []
-    for (underlying, _price), (records, failure_kind, failure_detail) in zip(
+    for (underlying, _price, _quote_source), (
+        records,
+        failure_kind,
+        failure_detail,
+    ) in zip(
         priced_underlyings,
         outcomes,
         strict=True,
@@ -1160,23 +1224,43 @@ def default_market_probe(
     alpaca_records = tuple(
         item for item in ordered_records if item.provider_kind == "alpaca"
     )
+    option_underlying_symbols = tuple(
+        dict.fromkeys(
+            item.underlying_symbol.upper()
+            for item in option_records
+            if item.underlying_symbol
+        )
+    )
     alpaca_histories: dict[str, Sequence[Mapping[str, object]]] = {}
-    if alpaca_records:
-        client = alpaca_client or create_alpaca_paper_client()
-        alpaca_symbols = tuple(item.provider_symbol for item in alpaca_records)
-        for start in range(0, len(alpaca_symbols), 200):
-            batch = alpaca_symbols[start : start + 200]
+    alpaca_symbols = tuple(
+        dict.fromkeys(
+            (
+                *(item.provider_symbol for item in alpaca_records),
+                *option_underlying_symbols,
+            )
+        )
+    )
+    if alpaca_symbols:
+        client = alpaca_client
+        if client is None:
             try:
-                histories = client.historical_bars(
-                    batch,
-                    start=timestamp - timedelta(days=policy.history_days),
-                    end=timestamp,
-                    timeframe="1Day",
-                )
-            except (OSError, TypeError, ValueError):
-                histories = {}
-            for symbol, values in histories.items():
-                alpaca_histories[str(symbol).strip().upper()] = values
+                client = create_alpaca_paper_client()
+            except (AlpacaPaperProviderError, OSError, TypeError, ValueError):
+                client = None
+        if client is not None:
+            for start in range(0, len(alpaca_symbols), 200):
+                batch = alpaca_symbols[start : start + 200]
+                try:
+                    histories = client.historical_bars(
+                        batch,
+                        start=timestamp - timedelta(days=policy.history_days),
+                        end=timestamp,
+                        timeframe="1Day",
+                    )
+                except (AlpacaPaperProviderError, OSError, TypeError, ValueError):
+                    histories = {}
+                for symbol, values in histories.items():
+                    alpaca_histories[str(symbol).strip().upper()] = values
     if option_records and options_provider.configured:
         try:
             option_instruments = tuple(
@@ -1221,12 +1305,26 @@ def default_market_probe(
                 provider_kind="yahoo",
                 source_identifier=record.source_identifier,
             )
-            rows = _yahoo_rows(
-                underlying,
-                as_of=timestamp,
-                history_days=policy.history_days,
-                http_get=http_get,
-            )
+            parsed_underlying_rows: list[dict[str, object]] = []
+            for raw in alpaca_histories.get(record.underlying_symbol.upper(), ()):
+                if not isinstance(raw, Mapping):
+                    continue
+                observed = _timestamp(raw.get("t"))
+                close = _number(raw.get("c"))
+                volume = _number(raw.get("v"))
+                if observed is None or observed > timestamp or close <= 0.0:
+                    continue
+                parsed_underlying_rows.append(
+                    {"t": observed, "c": close, "v": max(0.0, volume)}
+                )
+            rows = tuple(parsed_underlying_rows)
+            if not rows:
+                rows = _yahoo_rows(
+                    underlying,
+                    as_of=timestamp,
+                    history_days=policy.history_days,
+                    http_get=http_get,
+                )
             option_rows = option_histories.get(record.provider_symbol.upper(), ())
             option_price = float(option_rows[-1].close) if option_rows else 0.0
             if option_rows:
