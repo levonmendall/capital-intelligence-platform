@@ -1458,6 +1458,9 @@ def default_market_probe(
                 key = str(symbol).strip().upper()
                 alpaca_histories[key] = values
                 transient_keys.add(key)
+                # Do not let the loop variable retain the final raw history after
+                # its batch mapping is cleared.
+                del values
             try:
                 for record in batch_records:
                     built = build_record_features(record)
