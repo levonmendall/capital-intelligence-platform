@@ -1,0 +1,145 @@
+name: Apply canonical holding evidence repair
+
+on:
+  push:
+    branches:
+      - repair/canonical-holding-evidence-scope
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply narrow governance-preserving repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one replacement, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Reconcile a canonical holding omitted by fresh discovery from the last
+          # certified active universe. This is monitoring/exit continuity only; the
+          # carried instrument is explicitly barred from fresh candidate nomination.
+          path = 'production_context_publication_governed.py'
+          replace_once(
+              path,
+              '    load_free_paper_pilot_universe,\n    weekday_market_evaluation_scheduled,\n    write_active_paper_universe,\n',
+              '    load_free_paper_pilot_universe,\n    load_current_active_paper_universe,\n    weekday_market_evaluation_scheduled,\n    write_active_paper_universe,\n',
+          )
+          p = Path(path)
+          text = p.read_text(encoding='utf-8')
+          marker = '\n\ndef prepare_governed_production_context_for_cycle(\n'
+          if text.count(marker) != 1:
+              raise SystemExit('governed context prepare marker not unique')
+          helper = '''\n\ndef _reconcile_canonical_holding_evidence_scope(\n    *,\n    settings: ApiSettings,\n    universe,\n    portfolio,\n):\n    """Carry omitted canonical holdings only into mandatory monitoring evidence.\n\n    Fresh discovery remains the sole nomination authority. If a currently held\n    instrument is absent from that cycle's discovered universe, its instrument\n    contract must come from the most recent certified active paper universe. The\n    caller marks every carried symbol evidence-only, so it cannot become a new\n    candidate merely because the portfolio already owns it. Missing prior certified\n    metadata remains fail-closed.\n    """\n\n    governed_symbols = {item.symbol for item in universe.instruments}\n    missing = tuple(\n        sorted(\n            {position.symbol for position in portfolio.positions} - governed_symbols\n        )\n    )\n    if not missing:\n        return universe, ()\n    try:\n        _publication_identifier, prior_universe = load_current_active_paper_universe(\n            active_path=settings.portfolio_database.with_name(\n                "active-paper-universe.json"\n            )\n        )\n    except (OSError, TypeError, ValueError) as error:\n        raise ProductionPaperEvidenceError(\n            "canonical holdings are absent from fresh discovery and the prior "\n            "certified active paper universe is unavailable"\n        ) from error\n    prior_by_symbol = prior_universe.symbol_map\n    unresolved = tuple(symbol for symbol in missing if symbol not in prior_by_symbol)\n    if unresolved:\n        raise ProductionPaperEvidenceError(\n            "canonical holdings cannot be reconciled to certified instrument "\n            f"metadata: {list(unresolved)}"\n        )\n    carried = tuple(prior_by_symbol[symbol] for symbol in missing)\n    reconciled = replace(\n        universe,\n        identifier=(\n            universe.identifier\n            + "+canonical-holding-monitor:"\n            + ",".join(missing)\n        ),\n        instruments=tuple((*universe.instruments, *carried)),\n        limitations=tuple(\n            dict.fromkeys(\n                (\n                    *universe.limitations,\n                    "Canonical holdings omitted by fresh discovery retain mandatory point-in-time monitoring and exit continuity from the most recent certified active paper universe; carry-forward cannot nominate a new candidate or authorize an increased position.",\n                )\n            )\n        ),\n    )\n    return reconciled, missing\n'''
+          p.write_text(text.replace(marker, helper + marker, 1), encoding='utf-8')
+
+          replace_once(
+              path,
+              '    cash_expected_return = round(max(-1.0, min(1.0, cash_value / 100.0)), 8)\n    try:\n        evidence_payload = collect_paper_evidence(\n            universe,\n            decision_as_of,\n            probe=evidence_probe,\n        )\n',
+              '    try:\n        universe, evidence_only_holding_symbols = (\n            _reconcile_canonical_holding_evidence_scope(\n                settings=settings,\n                universe=universe,\n                portfolio=tentative,\n            )\n        )\n    except (ProductionPaperEvidenceError, OSError, TypeError, ValueError) as error:\n        return _blocked(\n            cycle_key=cycle_key,\n            scheduled_for=scheduled,\n            decision_as_of=decision_as_of,\n            detail=(\n                "Canonical holding evidence scope failed closed: "\n                f"{type(error).__name__}: {error}"\n            ),\n            instrument_count=len(universe.instruments),\n        )\n\n    cash_expected_return = round(max(-1.0, min(1.0, cash_value / 100.0)), 8)\n    try:\n        evidence_payload = collect_paper_evidence(\n            universe,\n            decision_as_of,\n            probe=evidence_probe,\n            required_holding_symbols=held_symbols,\n            holding_only_symbols=evidence_only_holding_symbols,\n        )\n',
+          )
+
+          # Thread required holdings through the bounded spool even when their market
+          # is closed, while retaining a separate evidence-only marker.
+          path = 'production_paper_evidence_impl.py'
+          replace_once(
+              path,
+              'def _default_probe(\n    universe: FreePaperPilotUniverse,\n    decision_as_of: datetime,\n) -> Mapping[str, object]:\n    as_of = _aware(decision_as_of, field_name="decision_as_of")\n    scheduled_instruments = tuple(\n        item\n        for item in universe.instruments\n        if instrument_evaluation_scheduled(item, as_of)\n    )\n    scheduled_closed_symbols = tuple(\n        item.symbol\n        for item in universe.instruments\n        if item not in scheduled_instruments\n    )\n',
+              'def _default_probe(\n    universe: FreePaperPilotUniverse,\n    decision_as_of: datetime,\n    *,\n    required_holding_symbols: Sequence[str] = (),\n) -> Mapping[str, object]:\n    as_of = _aware(decision_as_of, field_name="decision_as_of")\n    required = frozenset(\n        str(symbol).strip().upper()\n        for symbol in required_holding_symbols\n        if str(symbol).strip()\n    )\n    universe_symbols = {item.symbol for item in universe.instruments}\n    unknown_required = sorted(required - universe_symbols)\n    if unknown_required:\n        raise ProductionPaperEvidenceError(\n            f"required holding evidence is outside the governed paper universe: {unknown_required}"\n        )\n    scheduled_instruments = tuple(\n        item\n        for item in universe.instruments\n        if instrument_evaluation_scheduled(item, as_of) or item.symbol in required\n    )\n    scheduled_closed_symbols = tuple(\n        item.symbol\n        for item in universe.instruments\n        if not instrument_evaluation_scheduled(item, as_of)\n        and item.symbol not in required\n    )\n',
+          )
+          replace_once(
+              path,
+              'def collect_paper_evidence(\n    universe: FreePaperPilotUniverse,\n    decision_as_of: datetime,\n    *,\n    probe: EvidenceProbe | None = None,\n) -> Mapping[str, object]:\n',
+              'def collect_paper_evidence(\n    universe: FreePaperPilotUniverse,\n    decision_as_of: datetime,\n    *,\n    probe: EvidenceProbe | None = None,\n    required_holding_symbols: Sequence[str] = (),\n    holding_only_symbols: Sequence[str] = (),\n) -> Mapping[str, object]:\n',
+          )
+          replace_once(
+              path,
+              '    as_of = _aware(decision_as_of, field_name="decision_as_of")\n    payload = (probe or _default_probe)(universe, as_of)\n    if not isinstance(payload, Mapping):\n',
+              '    as_of = _aware(decision_as_of, field_name="decision_as_of")\n    required = frozenset(\n        str(symbol).strip().upper()\n        for symbol in required_holding_symbols\n        if str(symbol).strip()\n    )\n    holding_only = frozenset(\n        str(symbol).strip().upper()\n        for symbol in holding_only_symbols\n        if str(symbol).strip()\n    )\n    universe_symbols = {item.symbol for item in universe.instruments}\n    unknown_required = sorted(required - universe_symbols)\n    if unknown_required:\n        raise ProductionPaperEvidenceError(\n            f"required holding evidence is outside the governed paper universe: {unknown_required}"\n        )\n    if not holding_only.issubset(required):\n        raise ProductionPaperEvidenceError(\n            "holding-only evidence symbols must be canonical required holdings"\n        )\n    payload = (\n        probe(universe, as_of)\n        if probe is not None\n        else _default_probe(\n            universe,\n            as_of,\n            required_holding_symbols=tuple(sorted(required)),\n        )\n    )\n    if not isinstance(payload, Mapping):\n',
+          )
+          replace_once(
+              path,
+              '    normalized = dict(payload)\n    normalized["_live_collection"] = probe is None\n    return normalized\n',
+              '    normalized = dict(payload)\n    raw_closed = normalized.get("_scheduled_closed_symbols", ())\n    if isinstance(raw_closed, Sequence) and not isinstance(raw_closed, (str, bytes)):\n        normalized["_scheduled_closed_symbols"] = tuple(\n            str(symbol).strip().upper()\n            for symbol in raw_closed\n            if str(symbol).strip()\n            and str(symbol).strip().upper() not in required\n        )\n    normalized["_holding_only_symbols"] = tuple(sorted(holding_only))\n    normalized["_live_collection"] = probe is None\n    return normalized\n',
+          )
+          replace_once(
+              path,
+              '    scheduled_closed_symbols = frozenset(\n        str(symbol).strip().upper()\n        for symbol in raw_scheduled_closed_symbols\n        if str(symbol).strip()\n    )\n    direct_market_errors = {\n',
+              '    scheduled_closed_symbols = frozenset(\n        str(symbol).strip().upper()\n        for symbol in raw_scheduled_closed_symbols\n        if str(symbol).strip()\n    )\n    raw_holding_only_symbols = payload.get("_holding_only_symbols", ())\n    if not isinstance(raw_holding_only_symbols, Sequence) or isinstance(\n        raw_holding_only_symbols,\n        (str, bytes),\n    ):\n        raise ProductionPaperEvidenceError(\n            "holding-only symbol detail must be a sequence"\n        )\n    holding_only_symbols = frozenset(\n        str(symbol).strip().upper()\n        for symbol in raw_holding_only_symbols\n        if str(symbol).strip()\n    )\n    direct_market_errors = {\n',
+          )
+          replace_once(
+              path,
+              '    unknown_scheduled_closed = sorted(\n        scheduled_closed_symbols - set(instrument_by_symbol)\n    )\n    if unknown_scheduled_closed:\n        raise ProductionPaperEvidenceError(\n            "scheduled-closed symbols are outside the governed paper universe: "\n            f"{unknown_scheduled_closed}"\n        )\n    unknown_holdings = sorted(\n        {item.symbol for item in portfolio.positions} - set(instrument_by_symbol)\n    )\n',
+              '    unknown_scheduled_closed = sorted(\n        scheduled_closed_symbols - set(instrument_by_symbol)\n    )\n    if unknown_scheduled_closed:\n        raise ProductionPaperEvidenceError(\n            "scheduled-closed symbols are outside the governed paper universe: "\n            f"{unknown_scheduled_closed}"\n        )\n    unknown_holding_only = sorted(\n        holding_only_symbols - set(instrument_by_symbol)\n    )\n    if unknown_holding_only:\n        raise ProductionPaperEvidenceError(\n            "holding-only symbols are outside the governed paper universe: "\n            f"{unknown_holding_only}"\n        )\n    canonical_holding_symbols = {item.symbol for item in portfolio.positions}\n    invalid_holding_only = sorted(holding_only_symbols - canonical_holding_symbols)\n    if invalid_holding_only:\n        raise ProductionPaperEvidenceError(\n            "holding-only evidence cannot admit non-held instruments: "\n            f"{invalid_holding_only}"\n        )\n    unknown_holdings = sorted(\n        canonical_holding_symbols - set(instrument_by_symbol)\n    )\n',
+          )
+          replace_once(
+              path,
+              '    company_candidates_present = any(\n        instrument.symbol in features_by_symbol\n        and instrument.execution_asset_class is CandidateAssetClass.US_EQUITY\n',
+              '    company_candidates_present = any(\n        instrument.symbol in features_by_symbol\n        and instrument.symbol not in holding_only_symbols\n        and instrument.execution_asset_class is CandidateAssetClass.US_EQUITY\n',
+          )
+          replace_once(
+              path,
+              '    for instrument in universe.instruments:\n        features = features_by_symbol.get(instrument.symbol)\n        if features is None:\n            continue\n        try:\n',
+              '    for instrument in universe.instruments:\n        features = features_by_symbol.get(instrument.symbol)\n        if features is None:\n            continue\n        if instrument.symbol in holding_only_symbols:\n            exclusions.append(\n                (\n                    instrument.instrument_identifier,\n                    (\n                        "Current holding received mandatory point-in-time monitoring evidence but fresh candidate nomination is not authorized in this cycle.",\n                    ),\n                )\n            )\n            continue\n        try:\n',
+          )
+
+          path = 'production_paper_evidence.py'
+          replace_once(
+              path,
+              'def _default_probe(universe, decision_as_of):\n',
+              'def _default_probe(\n    universe,\n    decision_as_of,\n    *,\n    required_holding_symbols=(),\n):\n',
+          )
+          replace_once(
+              path,
+              '        history_days=_HISTORY_DAYS,\n    )\n',
+              '        history_days=_HISTORY_DAYS,\n        required_holding_symbols=required_holding_symbols,\n    )\n',
+          )
+
+          path = 'operations/paper_evidence_spool_concurrent.py'
+          replace_once(
+              path,
+              '    history_days: int,\n    listed_batch_size: int = _DEFAULT_LISTED_BATCH_SIZE,\n',
+              '    history_days: int,\n    required_holding_symbols: Sequence[str] = (),\n    listed_batch_size: int = _DEFAULT_LISTED_BATCH_SIZE,\n',
+          )
+          replace_once(
+              path,
+              '    as_of = _aware(decision_as_of, field_name="decision_as_of")\n    scheduled_instruments = tuple(\n        item\n        for item in universe.instruments\n        if instrument_evaluation_scheduled(item, as_of)\n    )\n    scheduled_closed_symbols = tuple(\n        item.symbol for item in universe.instruments if item not in scheduled_instruments\n    )\n',
+              '    as_of = _aware(decision_as_of, field_name="decision_as_of")\n    required = frozenset(\n        str(symbol).strip().upper()\n        for symbol in required_holding_symbols\n        if str(symbol).strip()\n    )\n    universe_symbols = {item.symbol for item in universe.instruments}\n    unknown_required = sorted(required - universe_symbols)\n    if unknown_required:\n        raise ValueError(\n            f"required holding evidence is outside the governed paper universe: {unknown_required}"\n        )\n    scheduled_instruments = tuple(\n        item\n        for item in universe.instruments\n        if instrument_evaluation_scheduled(item, as_of) or item.symbol in required\n    )\n    scheduled_closed_symbols = tuple(\n        item.symbol\n        for item in universe.instruments\n        if not instrument_evaluation_scheduled(item, as_of)\n        and item.symbol not in required\n    )\n',
+          )
+
+          test = Path('tests/test_canonical_holding_evidence_reconciliation.py')
+          test.write_text('''from datetime import datetime, timezone\nfrom pathlib import Path\nfrom types import SimpleNamespace\n\nimport production_context_publication_governed as governed\nimport production_paper_evidence_impl as evidence\nfrom cio import CandidateAssetClass\nfrom operations.free_paper_pilot import FreePaperPilotInstrument, FreePaperPilotUniverse\n\n\ndef _instrument(symbol: str, *, asset_class=CandidateAssetClass.US_EQUITY, instrument_type="common_stock"):\n    return FreePaperPilotInstrument(\n        symbol=symbol,\n        instrument_identifier=f"instrument:test:{symbol.lower()}",\n        name=symbol,\n        execution_asset_class=asset_class,\n        economic_exposure="us_equity",\n        venue="NYSE",\n        country_code="US",\n        currency="USD",\n        instrument_type=instrument_type,\n        maximum_weight=0.05,\n        issuer_cik="0000063908" if instrument_type == "common_stock" else None,\n    )\n\n\ndef _universe(identifier: str, instruments):\n    return FreePaperPilotUniverse(\n        identifier=identifier,\n        objective="test",\n        portfolio_code="COMPOUNDING",\n        reporting_currency="USD",\n        quote_provider="ALPACA_IEX",\n        execution_mode="paper",\n        minimum_cash_weight=0.0,\n        maximum_batch_turnover=1.0,\n        maximum_single_instrument_weight=0.10,\n        maximum_crypto_proxy_weight=0.10,\n        maximum_volatility_proxy_weight=0.10,\n        maximum_quote_age_minutes=30,\n        required_exposure_classes=(),\n        instruments=tuple(instruments),\n        limitations=(),\n    )\n\n\ndef test_missing_canonical_holding_is_carried_only_from_prior_certified_universe(monkeypatch, tmp_path):\n    current = _universe("current", (_instrument("VTI", asset_class=CandidateAssetClass.US_ETF, instrument_type="fund"),))\n    mcd = _instrument("MCD")\n    prior = _universe("prior", (*current.instruments, mcd))\n    monkeypatch.setattr(\n        governed,\n        "load_current_active_paper_universe",\n        lambda **_kwargs: ("eligible:prior", prior),\n    )\n    reconciled, evidence_only = governed._reconcile_canonical_holding_evidence_scope(\n        settings=SimpleNamespace(portfolio_database=tmp_path / "portfolio.db"),\n        universe=current,\n        portfolio=SimpleNamespace(positions=(SimpleNamespace(symbol="MCD"),)),\n    )\n    assert evidence_only == ("MCD",)\n    assert set(reconciled.symbol_map) == {"VTI", "MCD"}\n    assert reconciled.symbol_map["MCD"] == mcd\n\n\ndef test_holding_only_evidence_cannot_become_a_candidate(monkeypatch):\n    as_of = datetime(2026, 8, 8, 18, 0, tzinfo=timezone.utc)\n    mcd = _instrument("MCD")\n    universe = _universe("current+hold", (mcd,))\n    feature = SimpleNamespace(\n        symbol="MCD",\n        current_price=100.0,\n        latest_observed_at=as_of,\n        average_daily_dollar_volume=100_000_000.0,\n    )\n    monkeypatch.setattr(evidence, "_macro_context", lambda *_args, **_kwargs: (SimpleNamespace(), {}, ("macro",)))\n    monkeypatch.setattr(evidence, "_features", lambda *_args, **_kwargs: feature)\n    monkeypatch.setattr(evidence, "_holding_evidence", lambda *_args, **_kwargs: "holding-evidence")\n    portfolio = SimpleNamespace(\n        as_of=as_of,\n        positions=(SimpleNamespace(symbol="MCD", market_value=100.0),),\n        nav=1_000.0,\n    )\n    result = evidence.build_paper_evidence(\n        universe=universe,\n        decision_as_of=as_of,\n        cash_expected_return=0.04,\n        portfolio=portfolio,\n        payload={\n            "bars": {"MCD": object()},\n            "quotes": {"MCD": object()},\n            "macro": {},\n            "company_facts": {},\n            "_scheduled_closed_symbols": (),\n            "_holding_only_symbols": ("MCD",),\n        },\n    )\n    assert result.candidates == ()\n    assert result.candidate_evidence == ()\n    assert result.holding_evidence == ("holding-evidence",)\n    assert result.exclusions[0][0] == mcd.instrument_identifier\n\n\ndef test_holding_only_marker_rejects_non_held_instrument(monkeypatch):\n    as_of = datetime(2026, 8, 8, 18, 0, tzinfo=timezone.utc)\n    mcd = _instrument("MCD")\n    universe = _universe("current+hold", (mcd,))\n    monkeypatch.setattr(evidence, "_macro_context", lambda *_args, **_kwargs: (SimpleNamespace(), {}, ("macro",)))\n    portfolio = SimpleNamespace(as_of=as_of, positions=(), nav=1_000.0)\n    try:\n        evidence.build_paper_evidence(\n            universe=universe,\n            decision_as_of=as_of,\n            cash_expected_return=0.04,\n            portfolio=portfolio,\n            payload={\n                "bars": {},\n                "quotes": {},\n                "macro": {},\n                "_scheduled_closed_symbols": (),\n                "_holding_only_symbols": ("MCD",),\n            },\n        )\n    except evidence.ProductionPaperEvidenceError as error:\n        assert "cannot admit non-held instruments" in str(error)\n    else:\n        raise AssertionError("non-held holding-only marker must fail closed")\n''', encoding='utf-8')
+          PY
+      - name: Install locked dependencies
+        run: python -m pip install -r requirements.lock
+      - name: Focused regression and compile gate
+        run: |
+          python -m compileall -q production_context_publication_governed.py production_paper_evidence.py production_paper_evidence_impl.py operations/paper_evidence_spool_concurrent.py tests/test_canonical_holding_evidence_reconciliation.py
+          python -m pytest -q tests/test_canonical_holding_evidence_reconciliation.py
+          git diff --check
+      - name: Commit validated repair and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/apply-canonical-holding-evidence-repair.yml
+          git config user.name "levonmendall"
+          git config user.email "levon_mendall@yahoo.com"
+          git add production_context_publication_governed.py production_paper_evidence.py production_paper_evidence_impl.py operations/paper_evidence_spool_concurrent.py tests/test_canonical_holding_evidence_reconciliation.py .github/workflows/apply-canonical-holding-evidence-repair.yml
+          git commit -m "Preserve canonical holding evidence across discovery gaps"
+          git push origin HEAD:repair/canonical-holding-evidence-scope
