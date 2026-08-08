@@ -12,7 +12,7 @@ services:
     numInstances: 1
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: python run_render_service_nonblocking.py
+    dockerCommand: python run_render_service_workspace.py
     healthCheckPath: /_stcore/health
     disk:
       name: capital-intelligence-state
@@ -24,17 +24,23 @@ services:
         value: production
       - key: CAPITAL_INTELLIGENCE_DATA_DIR
         value: /app/database
-      # Paper-evidence spools are cycle-local working files, not canonical state.
-      # Render provides a 2 GB /tmp filesystem on this service. Keep the spool
-      # below 1 GB and preserve at least 768 MB free so application-level ENOSPC
-      # is raised before Render's hard temporary-storage limit can terminate the
-      # instance. Comprehensive scope remains fail-closed rather than truncated.
+      # Render enforces a hard 2 GB /tmp quota. Python backup creation,
+      # encrypted-backup verification/restoration, provider temporaries, and
+      # comprehensive evidence spooling can legitimately exceed that quota in
+      # aggregate. Route disposable tempfile users to a non-authority workspace
+      # on the governed 10 GB disk; the bootstrap creates and cleans only exact
+      # disposable workspace patterns before importing the production service.
+      - key: TMPDIR
+        value: /app/database/runtime_transient
+      # Paper-evidence spools remain cycle-local, compressed, disposable working
+      # files rather than canonical state. Their own 4 GB ceiling and 1 GB
+      # filesystem reserve remain fail-closed and do not reduce market coverage.
       - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_DIR
-        value: /tmp/capital-intelligence/paper_evidence_spool
+        value: /app/database/runtime_transient/paper_evidence_spool
       - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_MAX_MB
-        value: "1024"
+        value: "4096"
       - key: CAPITAL_INTELLIGENCE_EVIDENCE_SPOOL_RESERVE_MB
-        value: "768"
+        value: "1024"
       - key: CAPITAL_INTELLIGENCE_LOG_LEVEL
         value: INFO
       - key: CAPITAL_INTELLIGENCE_JSON_LOGS

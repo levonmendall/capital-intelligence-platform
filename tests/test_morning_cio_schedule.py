@@ -68,7 +68,7 @@ def test_render_refreshes_public_information_before_cio_reviews() -> None:
         "        value: \"900\""
     ) in source
     assert "autoDeployTrigger: checksPass" in source
-    assert "dockerCommand: python run_render_service_nonblocking.py" in source
+    assert "dockerCommand: python run_render_service_workspace.py" in source
     assert (
         "- key: CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP\n"
         "        value: \"false\""

@@ -6,7 +6,7 @@
     "backfill": ["{python}", "run_historical_backfill.py", "--loop"],
     "headlines": ["{python}", "run_public_headline_collector.py", "--loop"],
     "operator": ["{python}", "run_autonomous_paper_operator.py", "--loop"],
-    "render": ["{python}", "run_render_service_nonblocking.py"],
+    "render": ["{python}", "run_render_service_workspace.py"],
     "ui": ["{python}", "-m", "streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"],
     "validate": ["{python}", "run_release_validation.py"]
   },
@@ -57,6 +57,7 @@
       "run_release_validation.py",
       "run_render_service.py",
       "run_render_service_nonblocking.py",
+      "run_render_service_workspace.py",
       "run_restore.py"
     ],
     "specialized_supported": [

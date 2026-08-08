@@ -21,7 +21,7 @@ def test_render_blueprint_defines_one_paid_disk_backed_operating_service() -> No
     assert "plan: starter" not in source
     assert "autoDeployTrigger: checksPass" in source
     assert "numInstances: 1" in source
-    assert "dockerCommand: python run_render_service_nonblocking.py" in source
+    assert "dockerCommand: python run_render_service_workspace.py" in source
     assert "healthCheckPath: /_stcore/health" in source
     assert "mountPath: /app/database" in source
     assert "sizeGB: 5" in source
