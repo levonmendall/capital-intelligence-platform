@@ -170,7 +170,7 @@ def test_transition_mode_is_explicit_and_disabled_by_default(monkeypatch) -> Non
 def test_render_blueprint_uses_nonblocking_bootstrap() -> None:
     text = Path("render.yaml").read_text(encoding="utf-8")
 
-    assert "dockerCommand: python run_render_service_nonblocking.py" in text
+    assert "dockerCommand: python run_render_service_workspace.py" in text
     assert "sizeGB: 10" in text
     assert "CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP\n        value: \"false\"" in text
     assert "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_BACKGROUND_ENABLED" in text
