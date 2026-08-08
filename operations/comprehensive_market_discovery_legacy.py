@@ -1232,35 +1232,31 @@ def default_market_probe(
         )
     )
     alpaca_histories: dict[str, Sequence[Mapping[str, object]]] = {}
-    alpaca_symbols = tuple(
-        dict.fromkeys(
-            (
-                *(item.provider_symbol for item in alpaca_records),
-                *option_underlying_symbols,
-            )
-        )
-    )
-    if alpaca_symbols:
-        client = alpaca_client
-        if client is None:
+    # Only option-underlying histories are retained across the probe. Ordinary
+    # Alpaca instrument histories are streamed in bounded batches below so the
+    # complete all-market scan never accumulates millions of raw bars in memory.
+    alpaca_symbols = option_underlying_symbols
+    client = alpaca_client
+    if (alpaca_symbols or alpaca_records) and client is None:
+        try:
+            client = create_alpaca_paper_client()
+        except (AlpacaPaperProviderError, OSError, TypeError, ValueError):
+            client = None
+    if alpaca_symbols and client is not None:
+        for start_index in range(0, len(alpaca_symbols), 200):
+            batch = alpaca_symbols[start_index : start_index + 200]
             try:
-                client = create_alpaca_paper_client()
+                histories = client.historical_bars(
+                    batch,
+                    start=timestamp - timedelta(days=policy.history_days),
+                    end=timestamp,
+                    timeframe="1Day",
+                )
             except (AlpacaPaperProviderError, OSError, TypeError, ValueError):
-                client = None
-        if client is not None:
-            for start in range(0, len(alpaca_symbols), 200):
-                batch = alpaca_symbols[start : start + 200]
-                try:
-                    histories = client.historical_bars(
-                        batch,
-                        start=timestamp - timedelta(days=policy.history_days),
-                        end=timestamp,
-                        timeframe="1Day",
-                    )
-                except (AlpacaPaperProviderError, OSError, TypeError, ValueError):
-                    histories = {}
-                for symbol, values in histories.items():
-                    alpaca_histories[str(symbol).strip().upper()] = values
+                histories = {}
+            for symbol, values in histories.items():
+                alpaca_histories[str(symbol).strip().upper()] = values
+
     if option_records and options_provider.configured:
         try:
             option_instruments = tuple(
@@ -1436,25 +1432,68 @@ def default_market_probe(
             ),
         )
 
+    result: dict[str, DiscoveryMarketFeatures] = {}
+
+    # Alpaca can return hundreds of daily bars for every symbol. Building one
+    # cumulative mapping for a complete equity universe retains millions of raw
+    # dictionaries and exceeds the 2-GB production envelope. Process each provider
+    # batch through the existing feature builder, then drop its raw histories before
+    # requesting the next batch. This preserves the exact feature/evidence contract.
+    if alpaca_records and client is not None:
+        option_underlying_set = set(option_underlying_symbols)
+        for start_index in range(0, len(alpaca_records), 200):
+            batch_records = alpaca_records[start_index : start_index + 200]
+            batch_symbols = tuple(item.provider_symbol for item in batch_records)
+            try:
+                histories = client.historical_bars(
+                    batch_symbols,
+                    start=timestamp - timedelta(days=policy.history_days),
+                    end=timestamp,
+                    timeframe="1Day",
+                )
+            except (AlpacaPaperProviderError, OSError, TypeError, ValueError):
+                histories = {}
+            transient_keys: set[str] = set()
+            for symbol, values in histories.items():
+                key = str(symbol).strip().upper()
+                alpaca_histories[key] = values
+                transient_keys.add(key)
+            try:
+                for record in batch_records:
+                    built = build_record_features(record)
+                    if built is not None:
+                        result[built[0]] = built[1]
+            finally:
+                for key in transient_keys:
+                    if key not in option_underlying_set:
+                        alpaca_histories.pop(key, None)
+                del histories
+
+    remaining_records = tuple(
+        item for item in ordered_records if item.provider_kind != "alpaca"
+    )
     worker_count = min(
         _MAX_DEEP_MARKET_IO_WORKERS,
         maximum_workers,
-        max(1, len(ordered_records)),
+        max(1, len(remaining_records)),
     )
-    result: dict[str, DiscoveryMarketFeatures] = {}
-    if len(ordered_records) > 1 and worker_count > 1:
+    if len(remaining_records) > 1 and worker_count > 1:
         with ThreadPoolExecutor(
             max_workers=worker_count,
             thread_name_prefix="deep-market-evidence",
         ) as executor:
-            for built in executor.map(build_record_features, ordered_records):
+            for built in executor.map(build_record_features, remaining_records):
                 if built is not None:
                     result[built[0]] = built[1]
     else:
-        for built in map(build_record_features, ordered_records):
+        for built in map(build_record_features, remaining_records):
             if built is not None:
                 result[built[0]] = built[1]
-    return result
+    return {
+        record.symbol: result[record.symbol]
+        for record in ordered_records
+        if record.symbol in result
+    }
 
 
 def _deduplicate(records: Sequence[DiscoveryCatalogRecord]) -> tuple[DiscoveryCatalogRecord, ...]:

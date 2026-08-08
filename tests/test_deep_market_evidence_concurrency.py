@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -136,3 +137,72 @@ def test_deep_market_history_retrieval_rejects_invalid_worker_limits(
             eodhd_provider=object(),
             maximum_workers=maximum_workers,
         )
+
+
+def test_alpaca_histories_are_released_between_provider_batches() -> None:
+    records = tuple(
+        DiscoveryCatalogRecord(
+            symbol=f"ALPACA_{index}",
+            provider_symbol=f"ALPACA-{index}",
+            name=f"Alpaca {index}",
+            asset_class=CandidateAssetClass.INTERNATIONAL_EQUITY,
+            economic_exposure="international_equity",
+            venue="US",
+            country_code="US",
+            currency="USD",
+            settlement_currency="USD",
+            instrument_type="common_stock",
+            provider_kind="alpaca",
+            source_identifier=f"alpaca-assets:ALPACA-{index}",
+        )
+        for index in range(401)
+    )
+    counts = {"live": 0, "peak": 0, "calls": 0}
+
+    class TrackedRows(list):
+        def __init__(self, values) -> None:
+            super().__init__(values)
+            counts["live"] += 1
+            counts["peak"] = max(counts["peak"], counts["live"])
+
+        def __del__(self) -> None:
+            counts["live"] -= 1
+
+    class Client:
+        def historical_bars(self, symbols, **_kwargs):
+            gc.collect()
+            assert counts["live"] == 0, "prior Alpaca batch is still retained"
+            counts["calls"] += 1
+            payload = {}
+            for symbol in symbols:
+                index = int(str(symbol).rsplit("-", 1)[-1])
+                payload[str(symbol)] = TrackedRows(
+                    [
+                        {
+                            "t": AS_OF - timedelta(days=2 - offset),
+                            "c": 100.0 + index + offset / 100.0,
+                            "v": 1_000_000.0 + index,
+                        }
+                        for offset in range(3)
+                    ]
+                )
+            return payload
+
+    result = discovery_legacy.default_market_probe(
+        records,
+        AS_OF,
+        ComprehensiveMarketDiscoveryPolicy(
+            minimum_history_bars=3,
+            history_days=10,
+        ),
+        eodhd_provider=object(),
+        alpaca_client=Client(),
+        maximum_workers=4,
+    )
+
+    gc.collect()
+    assert counts["calls"] == 3
+    assert counts["peak"] <= 200
+    assert counts["live"] == 0
+    assert tuple(result) == tuple(record.symbol for record in records)
+    assert all(result[record.symbol].history_bars == 3 for record in records)
