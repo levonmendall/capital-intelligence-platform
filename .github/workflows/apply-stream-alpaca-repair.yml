@@ -1,0 +1,59 @@
+name: Apply streaming Alpaca deep-evidence repair
+
+on:
+  push:
+    branches:
+      - repair/stream-alpaca-deep-evidence
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[stream-alpaca-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: repair/stream-alpaca-deep-evidence
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply bounded-memory repair and focused regression
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('operations/comprehensive_market_discovery_legacy.py')
+          source = source_path.read_text()
+
+          start = source.index('    alpaca_histories: dict[str, Sequence[Mapping[str, object]]] = {}')
+          end = source.index('    if option_records and options_provider.configured:', start)
+          source = source[:start] + '''    alpaca_histories: dict[str, Sequence[Mapping[str, object]]] = {}\n    # Only option-underlying histories are retained across the probe. Ordinary\n    # Alpaca instrument histories are streamed in bounded batches below so the\n    # complete all-market scan never accumulates millions of raw bars in memory.\n    alpaca_symbols = option_underlying_symbols\n    client = alpaca_client\n    if (alpaca_symbols or alpaca_records) and client is None:\n        try:\n            client = create_alpaca_paper_client()\n        except (AlpacaPaperProviderError, OSError, TypeError, ValueError):\n            client = None\n    if alpaca_symbols and client is not None:\n        for start_index in range(0, len(alpaca_symbols), 200):\n            batch = alpaca_symbols[start_index : start_index + 200]\n            try:\n                histories = client.historical_bars(\n                    batch,\n                    start=timestamp - timedelta(days=policy.history_days),\n                    end=timestamp,\n                    timeframe="1Day",\n                )\n            except (AlpacaPaperProviderError, OSError, TypeError, ValueError):\n                histories = {}\n            for symbol, values in histories.items():\n                alpaca_histories[str(symbol).strip().upper()] = values\n\n''' + source[end:]
+
+          marker_start = source.index('    worker_count = min(\n', source.index('    def build_record_features('))
+          marker_end = source.index('\n\n\ndef _deduplicate(', marker_start)
+          replacement = '''    result: dict[str, DiscoveryMarketFeatures] = {}\n\n    # Alpaca can return hundreds of daily bars for every symbol. Building one\n    # cumulative mapping for a complete equity universe retains millions of raw\n    # dictionaries and exceeds the 2-GB production envelope. Process each provider\n    # batch through the existing feature builder, then drop its raw histories before\n    # requesting the next batch. This preserves the exact feature/evidence contract.\n    if alpaca_records and client is not None:\n        option_underlying_set = set(option_underlying_symbols)\n        for start_index in range(0, len(alpaca_records), 200):\n            batch_records = alpaca_records[start_index : start_index + 200]\n            batch_symbols = tuple(item.provider_symbol for item in batch_records)\n            try:\n                histories = client.historical_bars(\n                    batch_symbols,\n                    start=timestamp - timedelta(days=policy.history_days),\n                    end=timestamp,\n                    timeframe="1Day",\n                )\n            except (AlpacaPaperProviderError, OSError, TypeError, ValueError):\n                histories = {}\n            transient_keys: set[str] = set()\n            for symbol, values in histories.items():\n                key = str(symbol).strip().upper()\n                alpaca_histories[key] = values\n                transient_keys.add(key)\n            try:\n                for record in batch_records:\n                    built = build_record_features(record)\n                    if built is not None:\n                        result[built[0]] = built[1]\n            finally:\n                for key in transient_keys:\n                    if key not in option_underlying_set:\n                        alpaca_histories.pop(key, None)\n                del histories\n\n    remaining_records = tuple(\n        item for item in ordered_records if item.provider_kind != "alpaca"\n    )\n    worker_count = min(\n        _MAX_DEEP_MARKET_IO_WORKERS,\n        maximum_workers,\n        max(1, len(remaining_records)),\n    )\n    if len(remaining_records) > 1 and worker_count > 1:\n        with ThreadPoolExecutor(\n            max_workers=worker_count,\n            thread_name_prefix="deep-market-evidence",\n        ) as executor:\n            for built in executor.map(build_record_features, remaining_records):\n                if built is not None:\n                    result[built[0]] = built[1]\n    else:\n        for built in map(build_record_features, remaining_records):\n            if built is not None:\n                result[built[0]] = built[1]\n    return {\n        record.symbol: result[record.symbol]\n        for record in ordered_records\n        if record.symbol in result\n    }'''
+          source = source[:marker_start] + replacement + source[marker_end:]
+          source_path.write_text(source)
+
+          test_path = Path('tests/test_deep_market_evidence_concurrency.py')
+          tests = test_path.read_text()
+          if 'import gc\n' not in tests:
+              tests = tests.replace('from __future__ import annotations\n\n', 'from __future__ import annotations\n\nimport gc\n')
+          tests += '''\n\ndef test_alpaca_histories_are_released_between_provider_batches() -> None:\n    records = tuple(\n        DiscoveryCatalogRecord(\n            symbol=f"ALPACA_{index}",\n            provider_symbol=f"ALPACA-{index}",\n            name=f"Alpaca {index}",\n            asset_class=CandidateAssetClass.INTERNATIONAL_EQUITY,\n            economic_exposure="international_equity",\n            venue="US",\n            country_code="US",\n            currency="USD",\n            settlement_currency="USD",\n            instrument_type="common_stock",\n            provider_kind="alpaca",\n            source_identifier=f"alpaca-assets:ALPACA-{index}",\n        )\n        for index in range(401)\n    )\n    counts = {"live": 0, "peak": 0, "calls": 0}\n\n    class TrackedRows(list):\n        def __init__(self, values) -> None:\n            super().__init__(values)\n            counts["live"] += 1\n            counts["peak"] = max(counts["peak"], counts["live"])\n\n        def __del__(self) -> None:\n            counts["live"] -= 1\n\n    class Client:\n        def historical_bars(self, symbols, **_kwargs):\n            gc.collect()\n            assert counts["live"] == 0, "prior Alpaca batch is still retained"\n            counts["calls"] += 1\n            payload = {}\n            for symbol in symbols:\n                index = int(str(symbol).rsplit("-", 1)[-1])\n                payload[str(symbol)] = TrackedRows(\n                    [\n                        {\n                            "t": AS_OF - timedelta(days=2 - offset),\n                            "c": 100.0 + index + offset / 100.0,\n                            "v": 1_000_000.0 + index,\n                        }\n                        for offset in range(3)\n                    ]\n                )\n            return payload\n\n    result = discovery_legacy.default_market_probe(\n        records,\n        AS_OF,\n        ComprehensiveMarketDiscoveryPolicy(\n            minimum_history_bars=3,\n            history_days=10,\n        ),\n        eodhd_provider=object(),\n        alpaca_client=Client(),\n        maximum_workers=4,\n    )\n\n    gc.collect()\n    assert counts["calls"] == 3\n    assert counts["peak"] <= 200\n    assert counts["live"] == 0\n    assert tuple(result) == tuple(record.symbol for record in records)\n    assert all(result[record.symbol].history_bars == 3 for record in records)\n'''
+          test_path.write_text(tests)
+          PY
+          python -m compileall -q operations/comprehensive_market_discovery_legacy.py tests/test_deep_market_evidence_concurrency.py
+          git diff --check
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-stream-alpaca-repair.yml
+          git add operations/comprehensive_market_discovery_legacy.py tests/test_deep_market_evidence_concurrency.py
+          git commit -m "Stream Alpaca deep-market histories [stream-alpaca-applied]"
+          git push origin HEAD:repair/stream-alpaca-deep-evidence
