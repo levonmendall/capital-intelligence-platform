@@ -55,6 +55,12 @@ def _yahoo_get(*_args, **_kwargs) -> _YahooResponse:
     return _YahooResponse()
 
 
+class _UnavailableAlpacaClient:
+    @staticmethod
+    def historical_bars(*_args, **_kwargs):
+        raise ValueError("Alpaca unavailable in this failure-path test")
+
+
 def test_empty_option_catalog_preserves_credential_safe_provider_cause() -> None:
     class Provider:
         configured = True
@@ -70,6 +76,7 @@ def test_empty_option_catalog_preserves_credential_safe_provider_cause() -> None
             policy=ComprehensiveMarketDiscoveryPolicy(),
             http_get=_yahoo_get,
             databento_options_provider=Provider(),
+            alpaca_client=_UnavailableAlpacaClient(),
         )
 
     detail = str(captured.value)
@@ -107,6 +114,7 @@ def test_empty_option_catalog_distinguishes_quotes_from_contract_selection() -> 
             policy=ComprehensiveMarketDiscoveryPolicy(),
             http_get=yahoo_get,
             databento_options_provider=Provider(),
+            alpaca_client=_UnavailableAlpacaClient(),
         )
 
     detail = str(captured.value)
@@ -180,9 +188,71 @@ def test_option_quotes_are_serial_and_databento_is_bounded_parallel() -> None:
         policy=ComprehensiveMarketDiscoveryPolicy(),
         http_get=yahoo_get,
         databento_options_provider=Provider(),
+        alpaca_client=_UnavailableAlpacaClient(),
     )
 
     assert yahoo_peak == 1
     assert databento_peak == 4
     assert completion_order.index("QQQ") < completion_order.index("SPY")
     assert [item.underlying_symbol for item in result] == list(underlyings)
+
+
+def test_option_catalog_uses_authenticated_alpaca_when_yahoo_is_unavailable() -> None:
+    underlyings = ("SPY", "QQQ")
+    received_prices: dict[str, float] = {}
+
+    class AlpacaClient:
+        @staticmethod
+        def historical_bars(symbols, **_kwargs):
+            return {
+                symbol: (
+                    {
+                        "t": (AS_OF - timedelta(days=1)).isoformat(),
+                        "c": 500.0 + index,
+                        "v": 1_000_000.0,
+                    },
+                )
+                for index, symbol in enumerate(symbols)
+            }
+
+    class Provider:
+        configured = True
+
+        @staticmethod
+        def select_contracts(underlying, *, underlying_price, **_kwargs):
+            received_prices[underlying] = underlying_price
+            expiration = AS_OF + timedelta(days=60)
+            definition = DatabentoOptionDefinition(
+                symbol=f"{underlying}261006C00500000",
+                raw_symbol=f"{underlying}   261006C00500000",
+                instrument_id=underlyings.index(underlying) + 1,
+                underlying=underlying,
+                option_right="call",
+                expiration_at=expiration,
+                strike=500.0,
+                contract_multiplier=100.0,
+                session_date=(AS_OF - timedelta(days=1)).date(),
+            )
+            bar = DatabentoOptionBar(
+                raw_symbol=definition.raw_symbol,
+                observed_at=AS_OF - timedelta(days=1),
+                close=10.0,
+                volume=100.0,
+            )
+            return (DatabentoOptionSelection(definition=definition, bar=bar),)
+
+    def yahoo_must_not_run(*_args, **_kwargs):
+        raise AssertionError("Yahoo should be fallback-only when Alpaca has valid bars")
+
+    result = _option_catalog(
+        as_of=AS_OF,
+        config=_config(*underlyings),
+        policy=ComprehensiveMarketDiscoveryPolicy(),
+        http_get=yahoo_must_not_run,
+        databento_options_provider=Provider(),
+        alpaca_client=AlpacaClient(),
+    )
+
+    assert received_prices == {"SPY": 500.0, "QQQ": 501.0}
+    assert [item.underlying_symbol for item in result] == list(underlyings)
+    assert all("underlying:alpaca-iex-daily:" in item.source_identifier for item in result)
