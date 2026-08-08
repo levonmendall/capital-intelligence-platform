@@ -121,17 +121,31 @@ def _evidence_digest(value: object) -> str:
 def _default_probe(
     universe: FreePaperPilotUniverse,
     decision_as_of: datetime,
+    *,
+    required_holding_symbols: Sequence[str] = (),
 ) -> Mapping[str, object]:
     as_of = _aware(decision_as_of, field_name="decision_as_of")
+    required = frozenset(
+        str(symbol).strip().upper()
+        for symbol in required_holding_symbols
+        if str(symbol).strip()
+    )
+    universe_symbols = {item.symbol for item in universe.instruments}
+    unknown_required = sorted(required - universe_symbols)
+    if unknown_required:
+        raise ProductionPaperEvidenceError(
+            f"required holding evidence is outside the governed paper universe: {unknown_required}"
+        )
     scheduled_instruments = tuple(
         item
         for item in universe.instruments
-        if instrument_evaluation_scheduled(item, as_of)
+        if instrument_evaluation_scheduled(item, as_of) or item.symbol in required
     )
     scheduled_closed_symbols = tuple(
         item.symbol
         for item in universe.instruments
-        if item not in scheduled_instruments
+        if not instrument_evaluation_scheduled(item, as_of)
+        and item.symbol not in required
     )
     listed_instruments = tuple(
         item
@@ -235,13 +249,43 @@ def collect_paper_evidence(
     decision_as_of: datetime,
     *,
     probe: EvidenceProbe | None = None,
+    required_holding_symbols: Sequence[str] = (),
+    holding_only_symbols: Sequence[str] = (),
 ) -> Mapping[str, object]:
     """Collect one immutable evidence payload through an injectable provider boundary."""
 
     if not isinstance(universe, FreePaperPilotUniverse):
         raise TypeError("universe must be FreePaperPilotUniverse")
     as_of = _aware(decision_as_of, field_name="decision_as_of")
-    payload = (probe or _default_probe)(universe, as_of)
+    required = frozenset(
+        str(symbol).strip().upper()
+        for symbol in required_holding_symbols
+        if str(symbol).strip()
+    )
+    holding_only = frozenset(
+        str(symbol).strip().upper()
+        for symbol in holding_only_symbols
+        if str(symbol).strip()
+    )
+    universe_symbols = {item.symbol for item in universe.instruments}
+    unknown_required = sorted(required - universe_symbols)
+    if unknown_required:
+        raise ProductionPaperEvidenceError(
+            f"required holding evidence is outside the governed paper universe: {unknown_required}"
+        )
+    if not holding_only.issubset(required):
+        raise ProductionPaperEvidenceError(
+            "holding-only evidence symbols must be canonical required holdings"
+        )
+    payload = (
+        probe(universe, as_of)
+        if probe is not None
+        else _default_probe(
+            universe,
+            as_of,
+            required_holding_symbols=tuple(sorted(required)),
+        )
+    )
     if not isinstance(payload, Mapping):
         raise ProductionPaperEvidenceError("paper evidence probe must return a mapping")
     for field_name in ("bars", "quotes", "macro"):
@@ -250,6 +294,15 @@ def collect_paper_evidence(
                 f"paper evidence payload is missing {field_name}"
             )
     normalized = dict(payload)
+    raw_closed = normalized.get("_scheduled_closed_symbols", ())
+    if isinstance(raw_closed, Sequence) and not isinstance(raw_closed, (str, bytes)):
+        normalized["_scheduled_closed_symbols"] = tuple(
+            str(symbol).strip().upper()
+            for symbol in raw_closed
+            if str(symbol).strip()
+            and str(symbol).strip().upper() not in required
+        )
+    normalized["_holding_only_symbols"] = tuple(sorted(holding_only))
     normalized["_live_collection"] = probe is None
     return normalized
 
@@ -1406,6 +1459,19 @@ def build_paper_evidence(
         for symbol in raw_scheduled_closed_symbols
         if str(symbol).strip()
     )
+    raw_holding_only_symbols = payload.get("_holding_only_symbols", ())
+    if not isinstance(raw_holding_only_symbols, Sequence) or isinstance(
+        raw_holding_only_symbols,
+        (str, bytes),
+    ):
+        raise ProductionPaperEvidenceError(
+            "holding-only symbol detail must be a sequence"
+        )
+    holding_only_symbols = frozenset(
+        str(symbol).strip().upper()
+        for symbol in raw_holding_only_symbols
+        if str(symbol).strip()
+    )
     direct_market_errors = {
         str(symbol).strip().upper(): str(detail).strip()
         for symbol, detail in raw_direct_market_errors.items()
@@ -1442,8 +1508,23 @@ def build_paper_evidence(
             "scheduled-closed symbols are outside the governed paper universe: "
             f"{unknown_scheduled_closed}"
         )
+    unknown_holding_only = sorted(
+        holding_only_symbols - set(instrument_by_symbol)
+    )
+    if unknown_holding_only:
+        raise ProductionPaperEvidenceError(
+            "holding-only symbols are outside the governed paper universe: "
+            f"{unknown_holding_only}"
+        )
+    canonical_holding_symbols = {item.symbol for item in portfolio.positions}
+    invalid_holding_only = sorted(holding_only_symbols - canonical_holding_symbols)
+    if invalid_holding_only:
+        raise ProductionPaperEvidenceError(
+            "holding-only evidence cannot admit non-held instruments: "
+            f"{invalid_holding_only}"
+        )
     unknown_holdings = sorted(
-        {item.symbol for item in portfolio.positions} - set(instrument_by_symbol)
+        canonical_holding_symbols - set(instrument_by_symbol)
     )
     if unknown_holdings:
         raise ProductionPaperEvidenceError(
@@ -1512,6 +1593,7 @@ def build_paper_evidence(
     benchmark = features_by_symbol.get("VTI")
     company_candidates_present = any(
         instrument.symbol in features_by_symbol
+        and instrument.symbol not in holding_only_symbols
         and instrument.execution_asset_class is CandidateAssetClass.US_EQUITY
         and instrument.instrument_type == "common_stock"
         for instrument in universe.instruments
@@ -1523,6 +1605,16 @@ def build_paper_evidence(
     for instrument in universe.instruments:
         features = features_by_symbol.get(instrument.symbol)
         if features is None:
+            continue
+        if instrument.symbol in holding_only_symbols:
+            exclusions.append(
+                (
+                    instrument.instrument_identifier,
+                    (
+                        "Current holding received mandatory point-in-time monitoring evidence but fresh candidate nomination is not authorized in this cycle.",
+                    ),
+                )
+            )
             continue
         try:
             if (
