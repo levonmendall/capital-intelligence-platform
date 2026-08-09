@@ -12,6 +12,8 @@ Canonical path:
 
 `ForwardOpportunityDiscoveryEngine` consumes an already governed `EventMarketAssessment` and an explicitly mapped set of eligible investable exposures. It converts causal transmissions into ranked research hypotheses. It does not infer an instrument from a name or ticker and cannot authorize capital. Every hypothesis is marked `research_only=True` and `authorizes_capital=False`; it must enter the existing qualification funnel before specialist or CIO consideration.
 
+The repository does not currently maintain a canonical exposure-to-instrument taxonomy for generic causal targets such as `commodity_consumers` or `growth_equities`. The discovery engine therefore requires an explicit governed `ResearchExposure` mapping rather than inventing securities from text. This is intentional: adding a guessed mapping would silently broaden the investable universe and create false research candidates.
+
 ## Certified expectations intelligence
 
 `ExpectationsIntelligenceEngine` accepts point-in-time observations for analyst EPS/revenue expectations, revisions, dispersion, company guidance, macro consensus, policy probabilities, yield/inflation expectations, options-implied expectations, credit-implied expectations, commodity curves and event probabilities.
@@ -49,13 +51,17 @@ Provider-neutral dataset types are `positioning` and `derivative_positioning`.
 - alternative return while capital waits;
 - thesis decay.
 
-The result maps to the existing advisory timing postures (`act_now`, `wait_for_event`, `reassess`). It cannot issue an order or override qualification, CIO or construction.
+The result maps to the existing advisory timing postures (`act_now`, `wait_for_event`, `reassess`). It cannot issue an order or override qualification, CIO or construction. The calculation activates only when a governed caller supplies point-in-time `ValueOfWaitingInputs`; the system does not invent event-resolution probabilities or post-event entry costs when those inputs are absent.
 
-## Production integration boundary
+## Production persistence and configured providers
 
 `build_predictive_market_intelligence` accepts optional `ForwardResearchEvidence`. Certified research evidence enriches the existing `ForwardDecisionContext`, persists through the existing `ForwardIntelligenceBundle`, joins evidence lineage, and is routed through the same six-specialist advisory path.
 
-When no certified research evidence is supplied, the existing predictive-market behavior is unchanged. This keeps current production operational while preventing the system from claiming analyst consensus, dealer positioning, alternative data or nowcasts that have not actually been collected and certified.
+`ConfiguredForwardResearchProvider` uses the repository's existing configuration-driven dataset transport. A binding referenced by `CAPITAL_INTELLIGENCE_FORWARD_RESEARCH_DATASET_BINDING` can activate any configured combination of expectations, event expectations, positioning, derivative positioning and leading-indicator datasets without adding vendor-specific schemas to investment logic.
+
+The active `production_paper_evidence` facade creates this provider at the start of each production evidence build. When configured, each candidate receives certified research evidence before the predictive/FDI bundle is persisted. A configured feed that fails retrieval or validation fails closed; when no binding is configured, the provider remains absent and the current proxy/unavailable behavior is unchanged.
+
+Provider interfaces are production-wired, but the code does not claim that external consensus, dealer, institutional-flow or alternative-data subscriptions exist until an actual certified binding and credentials are supplied.
 
 ## Governance invariants
 
