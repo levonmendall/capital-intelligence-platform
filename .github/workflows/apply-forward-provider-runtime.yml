@@ -1,0 +1,38 @@
+name: Apply forward provider production runtime
+on:
+  push:
+    branches:
+      - agent/forward-opportunity-final-20260809
+permissions:
+  contents: write
+jobs:
+  apply-test-cleanup:
+    if: github.event.head_commit.message == 'Validate forward provider production runtime'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/forward-opportunity-final-20260809
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply runtime integration
+        run: python .github/apply_forward_provider_runtime.py
+      - name: Install locked runtime dependencies
+        run: python -m pip install --require-hashes -r requirements.lock
+      - name: Install development dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Compile and test forward runtime
+        run: |
+          python -m py_compile production_paper_evidence.py providers/forward_research.py intelligence/forward_research.py intelligence/predictive_market.py
+          pytest -q tests/test_forward_research.py tests/test_predictive_forward_decision_context.py tests/test_predictive_market_intelligence.py tests/test_forward_decision_intelligence_v2.py
+      - name: Commit clean runtime integration
+        run: |
+          rm .github/apply_forward_provider_runtime.py
+          rm .github/workflows/apply-forward-provider-runtime.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Activate configured forward research in paper evidence"
+          git push origin HEAD:agent/forward-opportunity-final-20260809
