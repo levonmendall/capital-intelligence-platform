@@ -31,7 +31,7 @@ def test_screening_append_commits_while_reader_transaction_is_open(tmp_path):
 
         assert len(events) == 1
         assert events[0].event_identifier == "screening:test-cycle:start"
-        assert store.verify_integrity() is None
+        assert store.verify_integrity() is True
     finally:
         reader.rollback()
         reader.close()
