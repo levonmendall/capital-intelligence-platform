@@ -15,8 +15,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: verify-render-cio-diagnostic-${{ github.event.deployment.sha || github.sha }}
-  cancel-in-progress: false
+  # Keep deployment-triggered certification independent from routine scheduled
+  # verification. New scheduled/manual checks for the same exact release should
+  # replace stale ones instead of queueing indefinitely behind a hung poll.
+  group: verify-render-cio-diagnostic-${{ github.event.deployment.sha || github.sha }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'deployment_status' }}
 
 jobs:
   verify:
@@ -29,7 +32,7 @@ jobs:
         github.event.deployment.ref == 'main'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 65
     env:
       # Render exposes Streamlit on the public service port. The internal FastAPI
       # child listens only on 127.0.0.1:8000, so public certification must read
@@ -51,15 +54,21 @@ jobs:
           python-version: "3.12"
 
       - name: Poll and verify deployed all-market CIO diagnostic
+        timeout-minutes: 58
         shell: bash
         run: |
           set -o pipefail
-          python verify_render_cio_diagnostic.py \
-            --url "$AUDIT_URL" \
-            --expected-release "$EXPECTED_RELEASE" \
-            --output "$AUDIT_OUTPUT" \
-            --maximum-attempts 240 \
-            --interval-seconds 15 \
+          # The verifier normally completes within 240 x 15s (~60m), but an
+          # individual network read can otherwise outlive that logical retry
+          # budget. Give the polling subprocess its own hard wall-clock boundary
+          # so artifact upload and job cleanup still have time to run.
+          timeout --signal=TERM --kill-after=30s 56m \
+            python verify_render_cio_diagnostic.py \
+              --url "$AUDIT_URL" \
+              --expected-release "$EXPECTED_RELEASE" \
+              --output "$AUDIT_OUTPUT" \
+              --maximum-attempts 220 \
+              --interval-seconds 15 \
             2>&1 | tee "$VERIFICATION_LOG"
 
       - name: Upload redacted production diagnostic evidence
