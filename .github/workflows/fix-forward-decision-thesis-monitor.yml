@@ -1,4 +1,4 @@
-name: Diagnose Forward Decision candidate exclusion
+name: Apply Forward Decision asset applicability fix
 
 on:
   push:
@@ -8,72 +8,39 @@ on:
       - .github/workflows/fix-forward-decision-thesis-monitor.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  patch-test-commit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/forward-decision-intelligence-v2
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
+      - name: Apply asset applicability fix
+        run: python .github/fix_forward_decision_thesis_monitor.py
       - name: Install locked runtime dependencies
         run: python -m pip install --require-hashes -r requirements.lock
       - name: Install development dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Reproduce and print exact exclusion
+      - name: Run focused regressions
         run: |
-          python - <<'PY'
-          import json
-          import shutil
-          from datetime import datetime, timezone
-          from pathlib import Path
-          from types import SimpleNamespace
-
-          from production_context_publication_governed import prepare_governed_production_context_for_cycle
-          from screening import SQLiteFullUniverseScreeningStore
-          from tests.test_optional_comprehensive_discovery_isolation import _unentitled_lse
-          from tests.test_production_context_publication_runtime import (
-              _bootstrap_cash_portfolio,
-              _equity_discovery_probe,
-              _evidence,
-              _readiness,
-              _settings,
-          )
-
-          tmp = Path('/tmp/fdi-exclusion-diagnostic')
-          shutil.rmtree(tmp, ignore_errors=True)
-          tmp.mkdir(parents=True)
-          settings = _settings(tmp)
-          scheduled_for = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
-          decision_time = datetime(2026, 8, 3, 14, 5, tzinfo=timezone.utc)
-          _bootstrap_cash_portfolio(
-              settings,
-              as_of=datetime(2026, 8, 3, 13, 30, tzinfo=timezone.utc),
-          )
-          result = prepare_governed_production_context_for_cycle(
-              settings=settings,
-              scheduled_for=scheduled_for,
-              readiness_probe=lambda _universe: _readiness(decision_time),
-              cash_probe=lambda: SimpleNamespace(date='2026-07-31', value=4.25),
-              evidence_probe=lambda _universe, _as_of: _evidence(decision_time),
-              equity_discovery_probe=_equity_discovery_probe,
-              comprehensive_discovery_probe=_unentitled_lse,
-              comprehensive_discovery_required=False,
-              clock=lambda: decision_time,
-          )
-          state = json.loads((tmp / 'production-context-publication-state.json').read_text())
-          publication = SQLiteFullUniverseScreeningStore(
-              settings.full_universe_screening_database
-          ).publication(state['screening_cycle_identifier'])
-          print('RESULT', result)
-          print('STATE_COUNTS', state['instrument_count'], state['candidate_count'], state['exclusion_count'])
-          print('EXCLUSIONS')
-          print(json.dumps(publication.exclusions, indent=2, sort_keys=True, default=str))
-          if result.candidate_count != 14 or publication.excluded_count != 1:
-              raise SystemExit('diagnostic reproduction changed unexpectedly')
-          PY
+          python -m pytest -q \
+            tests/test_predictive_forward_decision_context.py \
+            tests/test_optional_comprehensive_discovery_isolation.py \
+            tests/test_forward_decision_intelligence_v2.py \
+            tests/test_production_context_publication_runtime.py
+      - name: Commit fix and remove temporary diagnostics
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-forward-decision-thesis-monitor.yml .github/fix_forward_decision_thesis_monitor.py
+          git add intelligence/predictive_market.py tests/test_predictive_forward_decision_context.py
+          git diff --cached --check
+          git commit -m "Respect Forward Decision asset applicability"
+          git push origin HEAD:agent/forward-decision-intelligence-v2
