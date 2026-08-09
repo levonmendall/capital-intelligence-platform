@@ -12,4 +12,4 @@ def test_render_cio_verifier_polls_public_static_audit_endpoint() -> None:
     ) in workflow
     assert "/v1/operations/cio-diagnostic" not in workflow
     assert "--expected-release \"$EXPECTED_RELEASE\"" in workflow
-    assert "--maximum-attempts 240" in workflow
+    assert "--maximum-attempts 220" in workflow
