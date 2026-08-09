@@ -4,7 +4,7 @@ from pathlib import Path
 BLUEPRINT = Path("render.yaml")
 
 
-def test_render_runs_three_intraday_cio_reviews() -> None:
+def test_render_runs_four_global_cio_reviews() -> None:
     source = BLUEPRINT.read_text(encoding="utf-8")
 
     assert source.count("- key: CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE\n") == 1
@@ -14,7 +14,7 @@ def test_render_runs_three_intraday_cio_reviews() -> None:
     ) in source
     assert (
         "- key: CAPITAL_INTELLIGENCE_SCHEDULER_TIMES\n"
-        "        value: 07:00,10:00,12:45"
+        "        value: 00:00,06:00,10:00,13:15"
     ) in source
     assert (
         "- key: CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS\n"
