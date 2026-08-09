@@ -19,6 +19,7 @@ import educational_market_briefing_ui
 import environment_actionable_learning_refinement
 import environment_driver_education_runtime
 import environment_story_placement_refinement
+import history_ui_refinement
 import live_operating_console
 import operating_intelligence_ui
 import operating_status
@@ -66,51 +67,25 @@ _RENDER_SURFACE_NAMES = (
 
 
 def _synchronous_renderer(renderer: Callable[..., Any]) -> Callable[..., Any]:
-    """Return the explicit Render target or the callable beneath a fragment."""
-
     explicit_target = getattr(renderer, _RENDER_SYNC_TARGET_ATTRIBUTE, None)
     if callable(explicit_target):
         return explicit_target
     return getattr(renderer, "__wrapped__", renderer)
 
 
-def _portfolio_first_sync_renderer(
-    renderer: Callable[..., Any],
-) -> Callable[..., Any]:
-    """Preserve the Portfolio-first hierarchy after Render removes fragments.
-
-    The Portfolio-first Streamlit fragment intentionally wraps the original
-    Portfolio renderer so the remaining governed controls can be reused below
-    the new opening. Streamlit copies the wrapped function's ``__wrapped__``
-    attribute onto the fragment wrapper, so generic unwrapping resolves to the
-    old renderer and silently skips the new opening. This explicit synchronous
-    bridge calls the Portfolio-first helpers directly and retains the original
-    renderer only for the lower, de-duplicated controls.
-    """
-
+def _portfolio_first_sync_renderer(renderer: Callable[..., Any]) -> Callable[..., Any]:
     original = getattr(renderer, "__wrapped__", renderer)
 
-    def render_portfolio(
-        dependencies: object,
-        *,
-        principal: object | None,
-    ) -> None:
+    def render_portfolio(dependencies: object, *, principal: object | None) -> None:
         construction = app_impl._latest("portfolio_construction")
         briefing = app_impl._latest("daily_cio_briefing")
-        mandate = dependencies.get_mandate_details(
-            app_impl.CANONICAL_PORTFOLIO_CODE
-        )
+        mandate = dependencies.get_mandate_details(app_impl.CANONICAL_PORTFOLIO_CODE)
         if mandate is None:
             st.warning("The canonical paper portfolio is unavailable.")
             return
-
-        st.markdown(
-            portfolio_first_ui_refinement._CSS,
-            unsafe_allow_html=True,
-        )
+        st.markdown(portfolio_first_ui_refinement._CSS, unsafe_allow_html=True)
         _nav, _cash, deployed = portfolio_first_ui_refinement._capital_structure(
-            app_impl,
-            mandate=mandate,
+            app_impl, mandate=mandate
         )
         portfolio_first_ui_refinement._render_cio_report(
             app_impl,
@@ -120,10 +95,7 @@ def _portfolio_first_sync_renderer(
             deployed=deployed,
         )
         portfolio_first_ui_refinement._render_remaining_portfolio(
-            app_impl,
-            original,
-            dependencies,
-            principal=principal,
+            app_impl, original, dependencies, principal=principal
         )
 
     return render_portfolio
@@ -144,23 +116,15 @@ def _log_slow_surface(surface_name: str, render_thread_id: int) -> None:
     )
 
 
-def _guarded_renderer(
-    surface_name: str,
-    renderer: Callable[..., Any],
-) -> Callable[..., Any]:
-    """Render one surface synchronously and never leave a silent blank page."""
-
+def _guarded_renderer(surface_name: str, renderer: Callable[..., Any]) -> Callable[..., Any]:
     target = _synchronous_renderer(renderer)
 
     @functools.wraps(target, updated=())
     def guarded(*args: Any, **kwargs: Any) -> Any:
         started_at = time.monotonic()
         render_thread_id = threading.get_ident()
-        _LOGGER.info("primary Streamlit surface render started: %s", surface_name)
         slow_warning = threading.Timer(
-            8.0,
-            _log_slow_surface,
-            args=(surface_name, render_thread_id),
+            8.0, _log_slow_surface, args=(surface_name, render_thread_id)
         )
         slow_warning.daemon = True
         slow_warning.start()
@@ -168,16 +132,13 @@ def _guarded_renderer(
             return target(*args, **kwargs)
         except Exception as error:
             _LOGGER.exception(
-                "primary Streamlit surface failed to render: %s",
-                surface_name,
+                "primary Streamlit surface failed to render: %s", surface_name
             )
             st.error(
                 "This surface could not be rendered. The application remains online "
                 "and the failure has been recorded for diagnosis."
             )
-            st.caption(
-                f"Surface: {surface_name} · Error class: {type(error).__name__}"
-            )
+            st.caption(f"Surface: {surface_name} · Error class: {type(error).__name__}")
             return None
         finally:
             slow_warning.cancel()
@@ -195,11 +156,6 @@ def _guarded_renderer(
 
 
 def prepare_render_data_runtime() -> None:
-    """Keep all provider, file, and operating-store latency off the UI thread."""
-
-    # app_impl resolves these globals when it creates session dependencies and
-    # renders the four surfaces. None of these display adapters can mutate or
-    # authorize the canonical operating stores.
     app_impl._latest = load_journal_latest_nonblocking
     app_impl._history = load_journal_history_nonblocking
     app_impl._latest_theses = load_latest_theses_nonblocking
@@ -211,40 +167,25 @@ def prepare_render_data_runtime() -> None:
     app_impl.load_live_market_console = load_live_market_console_nonblocking
     app_impl.load_dashboard_data = load_dashboard_data_nonblocking
 
-    # The concise educational surfaces resolve these functions through the
-    # operating_intelligence_ui module at call time.
     operating_intelligence_ui.get_mandate_details = get_mandate_details_nonblocking
-    operating_intelligence_ui.load_live_market_console = (
-        load_live_market_console_nonblocking
-    )
+    operating_intelligence_ui.load_live_market_console = load_live_market_console_nonblocking
     operating_intelligence_ui.load_dashboard_data = load_dashboard_data_nonblocking
     operating_intelligence_ui.load_public_event_snapshot = (
         load_public_event_snapshot_nonblocking
     )
-    operating_intelligence_ui.load_opportunity_scan = (
-        load_opportunity_scan_nonblocking
-    )
+    operating_intelligence_ui.load_opportunity_scan = load_opportunity_scan_nonblocking
     operating_intelligence_ui.load_decision_accountability = (
         load_decision_accountability_nonblocking
     )
-
-    # Other active presentation helpers import these modules directly.
     educational_market_briefing_ui.load_public_event_snapshot = (
         load_public_event_snapshot_nonblocking
     )
-    operating_status.load_cio_operating_status = (
-        load_cio_operating_status_nonblocking
-    )
-    live_operating_console.load_live_market_console = (
-        load_live_market_console_nonblocking
-    )
-
+    operating_status.load_cio_operating_status = load_cio_operating_status_nonblocking
+    live_operating_console.load_live_market_console = load_live_market_console_nonblocking
     prewarm_render_data()
 
 
 def prepare_render_surface_runtime() -> None:
-    """Replace auto-refresh fragments with stable full-run renderers on Render."""
-
     for attribute_name in _RENDER_SURFACE_NAMES:
         renderer = getattr(app_impl, attribute_name)
         if getattr(renderer, "_capital_intelligence_guarded_surface", False):
@@ -261,8 +202,7 @@ def prepare_render_surface_runtime() -> None:
         guarded = _guarded_renderer(attribute_name.removeprefix("_render_"), renderer)
         if not getattr(guarded, "_capital_intelligence_fragment_removed", False):
             _LOGGER.warning(
-                "surface renderer did not expose a fragment wrapper: %s",
-                attribute_name,
+                "surface renderer did not expose a fragment wrapper: %s", attribute_name
             )
         setattr(app_impl, attribute_name, guarded)
 
@@ -290,12 +230,8 @@ def main() -> None:
         operating_intelligence_ui,
         environment_story_placement_refinement,
     )
-    today_development_card_format_runtime.install(
-        environment_story_placement_refinement
-    )
-    environment_driver_education_runtime.install(
-        environment_story_placement_refinement
-    )
+    today_development_card_format_runtime.install(environment_story_placement_refinement)
+    environment_driver_education_runtime.install(environment_story_placement_refinement)
     environment_actionable_learning_refinement.install(
         environment_story_placement_refinement
     )
@@ -321,14 +257,10 @@ def main() -> None:
         app_impl,
         environment_story_placement_refinement,
     )
-    # Render has its own entrypoint. Install the same presentation-only Portfolio
-    # refinement here after all other surface patches so the production console
-    # does not silently retain the older Portfolio-first renderer.
     portfolio_ui_refinement.install(app_impl)
+    history_ui_refinement.install(app_impl)
     prepare_render_surface_runtime()
-    create_streamlit_application(
-        deployment=deployment_context_from_environment()
-    )
+    create_streamlit_application(deployment=deployment_context_from_environment())
 
 
 if __name__ == "__main__":
