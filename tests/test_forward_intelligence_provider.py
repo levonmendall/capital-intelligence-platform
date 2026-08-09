@@ -198,13 +198,17 @@ def test_configured_provider_materializes_all_phase5_engines():
     assert bundle is not None
     assert len(bundle.signals) == 5
     assert bundle.trend_stage in {TrendStage.CONFIRMED, TrendStage.BROADENING}
-    assert bundle.theme_stage in {ThemeStage.ACCELERATING, ThemeStage.SUPPLY_CONSTRAINED, ThemeStage.BROADENING}
+    assert bundle.theme_stage in {
+        ThemeStage.ACCELERATING,
+        ThemeStage.SUPPLY_CONSTRAINED,
+        ThemeStage.BROADENING,
+    }
     assert bundle.policy_regime is PolicyRegime.RATE_CUTTING
     assert isinstance(bundle.currency_regime, CurrencyRegime)
     assert {
-        "strategic-business.v1",
-        "market-trend.v1",
-        "structural-theme.v1",
+        "strategic-business-transmission.v1",
+        "market-cycle-trend.v1",
+        "structural-theme-transmission.v1",
         "monetary-policy-transmission.v1",
         "currency-market-transmission.v1",
     }.issubset(set(bundle.model_versions))
