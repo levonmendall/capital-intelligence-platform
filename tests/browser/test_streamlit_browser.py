@@ -273,11 +273,15 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
                 assert health.count() == 1
             if surface == "Today":
                 page.get_by_text(RETAINED_STORY_TITLE, exact=True).wait_for()
-                page.get_by_text("No new qualifying stories", exact=True).wait_for()
-                # The retained-story state is the Today-specific freshness signal.
-                # A separate provider-health strip may be present, but it is not
-                # required for the retained-feed contract.
-                assert page.locator('.information-health[role="status"]').count() <= 1
+                page.get_by_text(
+                    "Sources current · no new qualifying developments; prior verified context retained",
+                    exact=True,
+                ).wait_for()
+                page.get_by_text("CIO / research funnel", exact=True).wait_for()
+                assert page.get_by_text("No new qualifying stories", exact=True).count() == 0
+                # Today now owns one coherent source-health strip rather than a
+                # second provider-health widget with potentially conflicting copy.
+                assert page.locator('.information-health[role="status"]').count() == 0
             if surface == "Portfolio":
                 _assert_portfolio_opening_hierarchy(page)
             if surface == "Environment":
