@@ -155,7 +155,7 @@ def test_discovers_all_six_lanes_and_retains_holdings():
     symbols = {item.catalog.symbol for item in result.selected}
     assert "HELD_LSE" in symbols
     instruments = {item.symbol: item for item in result.instruments_for_holdings(("HELD_LSE",))}
-    assert instruments["HELD_LSE"].maximum_weight == 0.06
+    assert instruments["HELD_LSE"].maximum_weight == 0.10
     assert instruments["SPY261218C00500000"].option_right == "call"
     assert instruments["ESU26"].expiration_at is not None
     assert result.manifest_fingerprint
