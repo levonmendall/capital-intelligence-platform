@@ -2,9 +2,10 @@
 
 The full report's authenticated download route builds its own exact-lineage decision
 bundle.  This adapter ensures that bundle receives the same read-only cycle-level
-completeness enrichment as the Portfolio report path.  It cannot alter evidence,
-rank candidates, change CIO authority, size or construct positions, execute trades,
-or authorize real money.
+completeness enrichment as the Portfolio report path, followed by governance
+reconciliation that cannot change the underlying investment decision.  It cannot
+alter evidence, rank candidates, change CIO authority, size or construct positions,
+execute trades, or authorize real money.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from types import ModuleType
 from typing import Any, Mapping
 
 import cio_report_completeness_enrichment
+import cio_report_governance_refinement
 
 
 _INSTALLED_STATE_KEY = "_capital_intelligence_canonical_cio_export_enrichment_installed"
@@ -39,7 +41,8 @@ def install(session_navigation: ModuleType) -> None:
             briefing=briefing,
             construction=construction,
         )
-        return cio_report_completeness_enrichment.enrich_report_bundle(app, bundle)
+        enriched = cio_report_completeness_enrichment.enrich_report_bundle(app, bundle)
+        return cio_report_governance_refinement.refine_report_bundle(enriched)
 
     session_navigation._decision_bundle = decision_bundle
     setattr(session_navigation, _INSTALLED_STATE_KEY, True)
