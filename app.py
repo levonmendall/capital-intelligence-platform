@@ -19,6 +19,7 @@ import surface_route_isolation_runtime
 import today_development_card_format_runtime
 import today_event_alignment_runtime
 import today_story_retention_runtime
+import today_trust_ui_runtime
 import ui_experience_refinement
 import ui_refinement
 from secure_app import create_streamlit_application
@@ -42,6 +43,12 @@ def main() -> None:
     surface_content_refinement.install(app_impl)
     environment_story_placement_refinement.install(app_impl)
     today_story_retention_runtime.install(
+        app_impl,
+        educational_market_briefing_ui,
+        operating_intelligence_ui,
+        environment_story_placement_refinement,
+    )
+    today_trust_ui_runtime.install(
         app_impl,
         educational_market_briefing_ui,
         operating_intelligence_ui,
