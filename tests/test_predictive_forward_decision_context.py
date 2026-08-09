@@ -102,10 +102,20 @@ def test_cash_equivalent_filters_non_applicable_predictive_dimensions():
 
 
 def test_certified_forward_research_reaches_predictive_fdi_and_lineage():
-    candidate = _candidate()
+    base = _candidate()
+    candidate = replace(
+        base,
+        instrument=replace(
+            base.instrument,
+            instrument_id="instrument:equity:test",
+            symbol="TEST",
+            name="Test Equity",
+            asset_class=CandidateAssetClass.US_EQUITY,
+        ),
+    )
     expectations = ExpectationsIntelligenceEngine().analyze((
         CertifiedExpectationObservation(
-            identifier="consensus:spy",
+            identifier="consensus:test",
             subject_identifier=candidate.identifier,
             kind=ExpectationEvidenceKind.MACRO_CONSENSUS,
             as_of=AS_OF,
@@ -118,7 +128,7 @@ def test_certified_forward_research_reaches_predictive_fdi_and_lineage():
     ))
     positioning = PositioningIntelligenceEngine().analyze((
         PositioningObservation(
-            identifier="options:spy",
+            identifier="options:test",
             subject_identifier=candidate.identifier,
             kind=PositioningEvidenceKind.OPTIONS_OPEN_INTEREST,
             as_of=AS_OF,
