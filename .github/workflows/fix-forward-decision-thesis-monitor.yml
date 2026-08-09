@@ -21,8 +21,10 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-      - name: Install dependencies
-        run: python -m pip install -r requirements.lock -r requirements-dev.txt
+      - name: Install locked runtime dependencies
+        run: python -m pip install --require-hashes -r requirements.lock
+      - name: Install development dependencies
+        run: python -m pip install -r requirements-dev.txt
       - name: Reproduce and print exact exclusion
         run: |
           python - <<'PY'
