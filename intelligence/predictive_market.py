@@ -24,6 +24,7 @@ from math import isfinite, sqrt
 from statistics import fmean, pstdev
 from typing import Any, Mapping, Sequence
 
+from cio.models import CandidateDecisionRecord
 from committee.specialists import MarketSpecialistContext
 from intelligence.forward import (
     ForwardIntelligenceBundle,
@@ -982,12 +983,16 @@ def build_predictive_market_intelligence(
             )
         ),
     )
-    decision_context = build_predictive_forward_decision_context(
-        candidate=candidate,
-        flow=flow,
-        expectations=expectations,
-        market=enriched_market,
-        existing_forward_intelligence=existing_forward_intelligence,
+    decision_context = (
+        build_predictive_forward_decision_context(
+            candidate=candidate,
+            flow=flow,
+            expectations=expectations,
+            market=enriched_market,
+            existing_forward_intelligence=existing_forward_intelligence,
+        )
+        if isinstance(candidate, CandidateDecisionRecord)
+        else None
     )
     predictive_bundle = ForwardIntelligenceBundle(
         identifier=f"forward-intelligence:predictive-market:{getattr(candidate, 'identifier')}:{getattr(candidate, 'as_of').isoformat()}",
@@ -996,7 +1001,11 @@ def build_predictive_market_intelligence(
         signals=(flow.signal, expectations.signal),
         scenarios=expectations.scenarios,
         diagnostics=tuple(dict.fromkeys((*flow.diagnostics, *expectations.diagnostics))),
-        model_versions=(CapitalFlowEngine.version, MarketExpectationsEngine.version, decision_context.schema_version),
+        model_versions=(
+            CapitalFlowEngine.version,
+            MarketExpectationsEngine.version,
+            *((decision_context.schema_version,) if decision_context is not None else ()),
+        ),
         decision_context=decision_context,
         schema_version="forward-intelligence.v2-predictive-market",
     )
