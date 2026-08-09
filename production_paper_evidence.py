@@ -4,7 +4,8 @@ The complete implementation remains in ``production_paper_evidence_impl``. This
 facade preserves the historical module-level monkeypatch boundary used by tests and
 operations while restoring derivative-risk truth, streaming full provider evidence
 through a disk-backed cycle spool, and enriching every governed candidate with
-point-in-time capital-flow, market-expectations, and global opportunity intelligence.
+point-in-time capital-flow, certified forward research, Phase-5 intelligence,
+governed event transmission, and global opportunity intelligence.
 """
 
 from __future__ import annotations
@@ -34,6 +35,13 @@ from operations.paper_evidence_spool_concurrent import (
     collect_spooled_paper_evidence,
 )
 from providers.alpaca_paper_resilient import create_complete_alpaca_paper_client
+from providers.event_forward import (
+    build_configured_event_forward_provider,
+    build_governed_event_forward,
+)
+from providers.forward_intelligence import (
+    build_configured_forward_intelligence_provider,
+)
 from providers.forward_research import build_configured_forward_research_provider
 from providers.sec_company_facts_availability import (
     install_company_facts_availability_boundary,
@@ -101,6 +109,15 @@ def _flow_key(symbol: str, as_of) -> tuple[str, str]:
 
 def _production_build_active() -> bool:
     return bool(getattr(_FLOW_STATE, "production_build", False))
+
+
+def _collapse_forward_versions(bundle):
+    if bundle is None or len(bundle.model_versions) <= 1:
+        return bundle
+    return replace(
+        bundle,
+        model_versions=("forward-bundle[" + "|".join(bundle.model_versions) + "]",),
+    )
 
 
 def _compatibility_flow_observation(features, as_of) -> CapitalFlowObservation:
@@ -228,6 +245,19 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
                 f"point-in-time capital-flow evidence is unavailable for {features.symbol}"
             )
         observation = _compatibility_flow_observation(features, candidate.as_of)
+
+    existing_forward = evidence.forward_intelligence
+    forward_intelligence_provider = getattr(
+        _FLOW_STATE, "forward_intelligence_provider", None
+    )
+    if forward_intelligence_provider is not None:
+        phase5_forward = forward_intelligence_provider.fetch(candidate)
+        if phase5_forward is not None:
+            existing_forward = reconcile_forward_intelligence(
+                existing_forward,
+                phase5_forward,
+            )
+
     forward_research_provider = getattr(
         _FLOW_STATE, "forward_research_provider", None
     )
@@ -241,24 +271,30 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
         features=features,
         flow_observation=observation,
         market=evidence.market,
-        existing_forward_intelligence=evidence.forward_intelligence,
+        existing_forward_intelligence=existing_forward,
         research_evidence=research_evidence,
     )
-    persisted_forward = predictive.forward_intelligence
-    if len(persisted_forward.model_versions) > 1:
-        composite_version = "forward-bundle[" + "|".join(
-            persisted_forward.model_versions
-        ) + "]"
-        persisted_forward = replace(
-            persisted_forward,
-            model_versions=(composite_version,),
-        )
+    persisted_forward = _collapse_forward_versions(
+        predictive.forward_intelligence
+    )
+    existing_forward_ids = (
+        () if existing_forward is None else existing_forward.evidence_identifiers
+    )
+    existing_forward_versions = (
+        () if existing_forward is None else existing_forward.model_versions
+    )
+    phase5_lineage_versions = (
+        (("phase5_forward", "|".join(existing_forward_versions)),)
+        if existing_forward_versions
+        else ()
+    )
     lineage = replace(
         evidence.lineage,
         evidence_identifiers=tuple(
             dict.fromkeys(
                 (
                     *evidence.lineage.evidence_identifiers,
+                    *existing_forward_ids,
                     *predictive.evidence_identifiers,
                 )
             )
@@ -267,6 +303,7 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
             dict.fromkeys(
                 (
                     *evidence.lineage.model_versions,
+                    *phase5_lineage_versions,
                     *predictive.model_versions,
                 )
             )
@@ -331,6 +368,7 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
             dict.fromkeys(
                 (
                     *candidate.evidence_identifiers,
+                    *existing_forward_ids,
                     *predictive.evidence_identifiers,
                 )
             )
@@ -339,6 +377,7 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
             dict.fromkeys(
                 (
                     *candidate.model_versions,
+                    *existing_forward_versions,
                     *(version for _name, version in predictive.model_versions),
                 )
             )
@@ -379,7 +418,7 @@ def _company_candidate_and_evidence(instrument, features, *args, **kwargs):
 
 
 def _enrich_global_opportunity_result(result, *, universe, decision_as_of):
-    """Add cross-sectional leadership evidence without changing candidate economics."""
+    """Add global leadership and certified event evidence without changing authority."""
 
     candidates_by_symbol = {
         item.instrument.symbol.upper(): item for item in result.candidates
@@ -419,14 +458,42 @@ def _enrich_global_opportunity_result(result, *, universe, decision_as_of):
 
     radar_engine = GlobalBullMarketRadarEngine()
     radar = radar_engine.scan(tuple(observations))
-    graph = CanonicalExposureGraph.from_instruments(
-        universe.instruments,
-        as_of=decision_as_of,
+    forward_intelligence_provider = getattr(
+        _FLOW_STATE, "forward_intelligence_provider", None
+    )
+    graph = (
+        CanonicalExposureGraph.from_instruments(
+            universe.instruments,
+            as_of=decision_as_of,
+        )
+        if forward_intelligence_provider is None
+        else forward_intelligence_provider.exposure_graph(
+            universe.instruments,
+            as_of=decision_as_of,
+        )
     )
     sweep_engine = PersistentOpportunitySweep()
     sweep = sweep_engine.run(radar, graph)
     assessments = radar.by_candidate
     nominations = sweep.by_candidate
+
+    event_provider = getattr(_FLOW_STATE, "event_forward_provider", None)
+    event_result = None
+    if event_provider is not None:
+        features_by_symbol = {
+            symbol: _feature_registry()[_flow_key(symbol, decision_as_of)]
+            for symbol in candidates_by_symbol
+            if _flow_key(symbol, decision_as_of) in _feature_registry()
+        }
+        event_result = build_governed_event_forward(
+            provider=event_provider,
+            graph=graph,
+            candidates=tuple(result.candidates),
+            features_by_symbol=features_by_symbol,
+            as_of=decision_as_of,
+        )
+    event_by_candidate = {} if event_result is None else event_result.by_candidate
+
     evidence_by_candidate = {
         item.candidate_identifier: item for item in result.candidate_evidence
     }
@@ -444,9 +511,15 @@ def _enrich_global_opportunity_result(result, *, universe, decision_as_of):
         graph_evidence_identifier = (
             f"governed-universe:{candidate.instrument.instrument_id}"
         )
+        event_bundle = event_by_candidate.get(candidate.identifier)
+        event_ids = () if event_bundle is None else event_bundle.evidence_identifiers
         local_evidence_ids = tuple(
             dict.fromkeys(
-                (*assessment.evidence_identifiers, graph_evidence_identifier)
+                (
+                    *assessment.evidence_identifiers,
+                    graph_evidence_identifier,
+                    *event_ids,
+                )
             )
         )
         market_risks = list(evidence.market.risks)
@@ -494,16 +567,23 @@ def _enrich_global_opportunity_result(result, *, universe, decision_as_of):
                 forward_intelligence,
                 radar_bundle,
             )
-            if len(forward_intelligence.model_versions) > 1:
-                forward_intelligence = replace(
-                    forward_intelligence,
-                    model_versions=(
-                        "forward-bundle["
-                        + "|".join(forward_intelligence.model_versions)
-                        + "]",
-                    ),
-                )
+        if event_bundle is not None:
+            forward_intelligence = reconcile_forward_intelligence(
+                forward_intelligence,
+                event_bundle,
+            )
+        forward_intelligence = _collapse_forward_versions(forward_intelligence)
 
+        lineage_versions = [
+            *evidence.lineage.model_versions,
+            ("global_opportunity_radar", radar_engine.version),
+            ("persistent_opportunity_sweep", sweep_engine.version),
+            ("canonical_exposure_graph", graph.version),
+        ]
+        if event_bundle is not None:
+            lineage_versions.append(
+                ("governed_event_forward", "|".join(event_bundle.model_versions))
+            )
         lineage = replace(
             evidence.lineage,
             evidence_identifiers=tuple(
@@ -511,16 +591,7 @@ def _enrich_global_opportunity_result(result, *, universe, decision_as_of):
                     (*evidence.lineage.evidence_identifiers, *local_evidence_ids)
                 )
             ),
-            model_versions=tuple(
-                dict.fromkeys(
-                    (
-                        *evidence.lineage.model_versions,
-                        ("global_opportunity_radar", radar_engine.version),
-                        ("persistent_opportunity_sweep", sweep_engine.version),
-                        ("canonical_exposure_graph", graph.version),
-                    )
-                )
-            ),
+            model_versions=tuple(dict.fromkeys(lineage_versions)),
         )
         stage_evidence = (
             f"Global radar stage={assessment.stage.value}; rank={assessment.rank}; score={assessment.score:.0%}; "
@@ -536,38 +607,37 @@ def _enrich_global_opportunity_result(result, *, universe, decision_as_of):
             candidate_contradictions.append(
                 f"Global opportunity radar classifies current leadership as {assessment.stage.value}."
             )
+        monitoring = [
+            *candidate.monitoring_indicators,
+            "global_opportunity_rank",
+            "global_bull_market_stage",
+            "cross_sectional_relative_strength",
+            "cross_sectional_breadth",
+            "leadership_acceleration",
+        ]
+        model_versions = [
+            *candidate.model_versions,
+            radar_engine.version,
+            sweep_engine.version,
+            graph.version,
+        ]
+        supporting = [*candidate.supporting_evidence, stage_evidence]
+        if event_bundle is not None:
+            monitoring.append("governed_event_forward_context")
+            model_versions.extend(event_bundle.model_versions)
+            supporting.append(
+                "Certified decision-information passed event quality, causal transmission, and market-confirmation gates for this candidate."
+            )
         enriched_candidate = replace(
             candidate,
-            supporting_evidence=tuple(
-                dict.fromkeys((*candidate.supporting_evidence, stage_evidence))
-            ),
+            supporting_evidence=tuple(dict.fromkeys(supporting)),
             key_risks=tuple(dict.fromkeys(candidate_risks)),
             contradictory_evidence=tuple(dict.fromkeys(candidate_contradictions)),
-            monitoring_indicators=tuple(
-                dict.fromkeys(
-                    (
-                        *candidate.monitoring_indicators,
-                        "global_opportunity_rank",
-                        "global_bull_market_stage",
-                        "cross_sectional_relative_strength",
-                        "cross_sectional_breadth",
-                        "leadership_acceleration",
-                    )
-                )
-            ),
+            monitoring_indicators=tuple(dict.fromkeys(monitoring)),
             evidence_identifiers=tuple(
                 dict.fromkeys((*candidate.evidence_identifiers, *local_evidence_ids))
             ),
-            model_versions=tuple(
-                dict.fromkeys(
-                    (
-                        *candidate.model_versions,
-                        radar_engine.version,
-                        sweep_engine.version,
-                        graph.version,
-                    )
-                )
-            ),
+            model_versions=tuple(dict.fromkeys(model_versions)),
         )
         enriched_governed = replace(
             evidence,
@@ -592,6 +662,10 @@ def build_paper_evidence(*args, **kwargs):
     _FLOW_STATE.forward_research_provider = (
         build_configured_forward_research_provider()
     )
+    _FLOW_STATE.forward_intelligence_provider = (
+        build_configured_forward_intelligence_provider()
+    )
+    _FLOW_STATE.event_forward_provider = build_configured_event_forward_provider()
     _FLOW_STATE.production_build = True
     try:
         result = _ORIGINAL_BUILD_PAPER_EVIDENCE(*args, **kwargs)
@@ -609,6 +683,8 @@ def build_paper_evidence(*args, **kwargs):
         _FLOW_STATE.observations = {}
         _FLOW_STATE.features = {}
         _FLOW_STATE.forward_research_provider = None
+        _FLOW_STATE.forward_intelligence_provider = None
+        _FLOW_STATE.event_forward_provider = None
 
 
 _implementation._default_probe = _default_probe

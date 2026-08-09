@@ -1,14 +1,16 @@
 """Configured provider adapter for certified forward-research evidence.
 
 The adapter activates only dataset types explicitly bound in a configured provider
-file.  Missing bindings remain unavailable and do not become synthetic evidence.
+file. Missing bindings remain unavailable and do not become synthetic evidence.
 A configured binding that is present but fails retrieval/validation raises, so a
 claimed certified feed cannot silently degrade into the market proxy.
 """
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
+from typing import Mapping
 
 from data.provider_dataset import ProviderDatasetQuery, ProviderDatasetType
 from intelligence.forward_research import (
@@ -16,6 +18,8 @@ from intelligence.forward_research import (
     ForwardResearchEvidence,
     GovernedNowcastingEngine,
     PositioningIntelligenceEngine,
+    ValueOfWaitingEngine,
+    ValueOfWaitingInputs,
     expectation_observations_from_snapshot,
     nowcast_observations_from_snapshot,
     positioning_observations_from_snapshot,
@@ -63,19 +67,50 @@ class ConfiguredForwardResearchProvider:
             )
         )
 
+    @staticmethod
+    def _event_components(snapshot):
+        """Return expectation rows plus one explicit value-of-waiting contract.
+
+        EVENT_EXPECTATIONS supports the legacy list payload and the governed object
+        form ``{"expectations": [...], "value_of_waiting": {...}}``.  Timing inputs
+        are never inferred from price or consensus fields.
+        """
+
+        payload = snapshot.payload
+        if not isinstance(payload, Mapping):
+            return snapshot, None
+        if "expectations" not in payload and "value_of_waiting" not in payload:
+            return snapshot, None
+        expectation_rows = payload.get("expectations", [])
+        if not isinstance(expectation_rows, list):
+            raise TypeError("event expectations must be an array")
+        raw_wait = payload.get("value_of_waiting")
+        if raw_wait is not None and not isinstance(raw_wait, Mapping):
+            raise TypeError("value_of_waiting must be an object")
+        return replace(snapshot, payload=expectation_rows), raw_wait
+
     def fetch(self, candidate) -> ForwardResearchEvidence | None:
         symbol = candidate.instrument.symbol
         as_of = candidate.as_of
         expectation_observations = []
+        raw_wait = None
         for dataset_type in (
             ProviderDatasetType.EXPECTATIONS,
             ProviderDatasetType.EVENT_EXPECTATIONS,
         ):
             snapshot = self._snapshot(dataset_type, symbol=symbol, as_of=as_of)
-            if snapshot is not None:
-                expectation_observations.extend(
-                    expectation_observations_from_snapshot(snapshot)
-                )
+            if snapshot is None:
+                continue
+            if dataset_type is ProviderDatasetType.EVENT_EXPECTATIONS:
+                expectation_snapshot, candidate_wait = self._event_components(snapshot)
+                if candidate_wait is not None:
+                    if raw_wait is not None:
+                        raise ValueError("multiple value-of-waiting contracts are ambiguous")
+                    raw_wait = (snapshot, candidate_wait)
+                snapshot = expectation_snapshot
+            expectation_observations.extend(
+                expectation_observations_from_snapshot(snapshot)
+            )
         positioning_observations = []
         for dataset_type in (
             ProviderDatasetType.POSITIONING,
@@ -119,12 +154,40 @@ class ConfiguredForwardResearchProvider:
                 grouped.items(), key=lambda item: item[0].value
             )
         )
-        if expectations is None and positioning is None and not nowcasts:
+        value_of_waiting = None
+        if raw_wait is not None:
+            snapshot, row = raw_wait
+            evidence_ids = [f"provider-dataset:{snapshot.provider}:{snapshot.content_hash}"]
+            raw_ids = row.get("evidence_identifiers", [])
+            if not isinstance(raw_ids, list):
+                raise TypeError("value-of-waiting evidence_identifiers must be an array")
+            evidence_ids.extend(str(item).strip() for item in raw_ids if str(item).strip())
+            value_of_waiting = ValueOfWaitingEngine().assess(
+                ValueOfWaitingInputs(
+                    as_of=as_of,
+                    invest_now_expected_return=float(row["invest_now_expected_return"]),
+                    downside_if_unresolved=float(row["downside_if_unresolved"]),
+                    probability_uncertainty_resolves=float(row["probability_uncertainty_resolves"]),
+                    expected_upside_lost_by_waiting=float(row["expected_upside_lost_by_waiting"]),
+                    expected_post_event_entry_drag=float(row["expected_post_event_entry_drag"]),
+                    transaction_cost_return=float(row["transaction_cost_return"]),
+                    alternative_return_while_waiting=float(row["alternative_return_while_waiting"]),
+                    thesis_decay_return=float(row["thesis_decay_return"]),
+                    evidence_identifiers=tuple(dict.fromkeys(evidence_ids)),
+                )
+            )
+        if (
+            expectations is None
+            and positioning is None
+            and not nowcasts
+            and value_of_waiting is None
+        ):
             return None
         return ForwardResearchEvidence(
             expectations=expectations,
             positioning=positioning,
             nowcasts=nowcasts,
+            value_of_waiting=value_of_waiting,
         )
 
 

@@ -1,0 +1,199 @@
+"""Governed decision-information to event/market forward-intelligence bridge.
+
+Only canonical ``DecisionInformationRecord`` values from the configured licensed
+provider enter this bridge.  The educational/public headline collector is not a
+decision authority.  Events must pass source quality, novelty/materiality and
+market-confirmation gates before their causal transmission can enrich an existing
+candidate.  The bridge cannot create candidates or authorize capital.
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from datetime import timedelta
+from statistics import fmean
+
+from intelligence.event_market_forward import EventToForwardEngine, MarketObservation
+from intelligence.event_quality import assess_event_clusters, semantic_event_key
+from intelligence.forward import ForwardIntelligenceBundle
+from intelligence.global_opportunity import CanonicalExposureGraph
+from providers.configured_information import (
+    ConfiguredDecisionInformationProvider,
+    build_configured_decision_information_provider,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class GovernedEventForwardResult:
+    bundles: tuple[ForwardIntelligenceBundle, ...]
+    assessment_identifiers: tuple[str, ...]
+    hypothesis_identifiers: tuple[str, ...]
+    diagnostics: tuple[str, ...]
+    authorizes_capital: bool = False
+    schema_version: str = "governed-event-forward-result.v1"
+
+    @property
+    def by_candidate(self) -> dict[str, ForwardIntelligenceBundle]:
+        return {item.candidate_identifier: item for item in self.bundles}
+
+
+def _lookback_days() -> int:
+    raw = os.getenv("CAPITAL_INTELLIGENCE_DECISION_INFORMATION_LOOKBACK_DAYS", "7")
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError("decision-information lookback days must be an integer") from error
+    if not 1 <= value <= 30:
+        raise ValueError("decision-information lookback days must be between 1 and 30")
+    return value
+
+
+def _confirmation(values: tuple[float, ...]) -> float:
+    if not values:
+        return 0.0
+    # The event-quality gate defines 2% as full market confirmation.  We retain
+    # direction for EventToForwardEngine and use absolute magnitude only for the
+    # prior cluster admission gate.
+    return round(min(1.0, max(abs(item) for item in values) / 0.02), 8)
+
+
+def build_governed_event_forward(
+    *,
+    provider: ConfiguredDecisionInformationProvider,
+    graph: CanonicalExposureGraph,
+    candidates: tuple[object, ...],
+    features_by_symbol: dict[str, object],
+    as_of,
+) -> GovernedEventForwardResult:
+    records = provider.records(
+        start_at=as_of - timedelta(days=_lookback_days()),
+        as_of=as_of,
+    )
+    if not records:
+        return GovernedEventForwardResult((), (), (), ("No certified current decision-information records were available.",))
+
+    candidate_by_instrument = {
+        str(item.instrument.instrument_id): item for item in candidates
+    }
+    candidate_by_symbol = {
+        str(item.instrument.symbol).upper(): item for item in candidates
+    }
+
+    confirmation_map: dict[str, float] = {}
+    record_payloads = []
+    for record in records:
+        payload = record.to_dict()
+        record_payloads.append(payload)
+        values: list[float] = []
+        for raw in (*record.instruments, *record.entities, *record.sectors):
+            symbol = str(raw).upper()
+            if symbol in features_by_symbol:
+                values.append(float(features_by_symbol[symbol].one_month_return))
+            for exposure in graph.research_exposures(str(raw)):
+                feature = features_by_symbol.get(exposure.symbol.upper())
+                if feature is not None:
+                    values.append(float(feature.one_month_return))
+        confirmation_map[semantic_event_key(payload)] = _confirmation(tuple(values))
+
+    clusters = assess_event_clusters(
+        record_payloads,
+        market_confirmation=confirmation_map,
+    )
+    records_by_identifier = {item.identifier: item for item in records}
+    engine = EventToForwardEngine()
+    bundle_by_candidate: dict[str, ForwardIntelligenceBundle] = {}
+    assessment_ids: list[str] = []
+    hypothesis_ids: list[str] = []
+
+    for cluster, _representative_payload in clusters:
+        record = records_by_identifier.get(cluster.representative_identifier)
+        if record is None or not cluster.eligible_for_analysis:
+            continue
+        drivers = engine.catalog.match(record, minimum_score=engine.policy.minimum_rule_score)
+        target_identifiers = tuple(
+            dict.fromkeys(
+                transmission.target_identifier
+                for driver in drivers
+                for transmission in driver.transmissions
+            )
+        )
+        observations: list[MarketObservation] = []
+        candidate_exposure_map: dict[str, tuple[str, ...]] = {}
+        for target in target_identifiers:
+            exposures = graph.research_exposures(target)
+            candidate_ids: list[str] = []
+            returns: list[float] = []
+            evidence_ids: list[str] = []
+            for exposure in exposures:
+                candidate = candidate_by_instrument.get(exposure.instrument_identifier)
+                if candidate is None:
+                    candidate = candidate_by_symbol.get(exposure.symbol.upper())
+                feature = features_by_symbol.get(exposure.symbol.upper())
+                if candidate is None or feature is None:
+                    continue
+                candidate_ids.append(candidate.identifier)
+                returns.append(float(feature.one_month_return))
+                evidence_ids.extend(exposure.evidence_identifiers)
+                evidence_ids.extend(feature.evidence_identifiers)
+            if candidate_ids:
+                candidate_exposure_map[target] = tuple(dict.fromkeys(candidate_ids))
+            if returns:
+                observations.append(
+                    MarketObservation(
+                        identifier=f"event-confirmation:{cluster.identifier}:{target}",
+                        exposure_identifier=target,
+                        observed_at=as_of,
+                        return_change=round(fmean(returns), 8),
+                        evidence_identifiers=tuple(dict.fromkeys(evidence_ids)),
+                    )
+                )
+        assessment = engine.assess(
+            record,
+            event_cluster=cluster,
+            observations=tuple(observations),
+            assessed_at=as_of,
+        )
+        assessment_ids.append(assessment.identifier)
+        hypotheses = graph.discover_event_opportunities(assessment)
+        hypothesis_ids.extend(item.identifier for item in hypotheses)
+        for bundle in engine.build_forward_bundles(
+            assessment,
+            candidate_exposure_map=candidate_exposure_map,
+        ):
+            existing = bundle_by_candidate.get(bundle.candidate_identifier)
+            if existing is None:
+                bundle_by_candidate[bundle.candidate_identifier] = bundle
+                continue
+            # Same-candidate events remain distinct evidence signals.  Use the
+            # canonical predictive merge helper to deduplicate scenario labels and
+            # preserve every source identifier.
+            from intelligence.predictive_scenario_merge import reconcile_forward_intelligence
+
+            bundle_by_candidate[bundle.candidate_identifier] = reconcile_forward_intelligence(
+                existing,
+                bundle,
+            )
+
+    return GovernedEventForwardResult(
+        bundles=tuple(bundle_by_candidate[key] for key in sorted(bundle_by_candidate)),
+        assessment_identifiers=tuple(dict.fromkeys(assessment_ids)),
+        hypothesis_identifiers=tuple(dict.fromkeys(hypothesis_ids)),
+        diagnostics=(
+            f"Evaluated {len(records)} certified decision-information records across {len(clusters)} event clusters.",
+            f"Escalated forward evidence to {len(bundle_by_candidate)} already-governed candidates.",
+            "Educational/public headline records remain outside investment authority.",
+        ),
+    )
+
+
+def build_configured_event_forward_provider() -> ConfiguredDecisionInformationProvider | None:
+    if not os.getenv("CAPITAL_INTELLIGENCE_DECISION_INFORMATION_DATASET_BINDING", "").strip():
+        return None
+    return build_configured_decision_information_provider()
+
+
+__all__ = [
+    "GovernedEventForwardResult",
+    "build_configured_event_forward_provider",
+    "build_governed_event_forward",
+]
