@@ -25,6 +25,7 @@ import operating_status
 import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
 import portfolio_first_ui_refinement
+import portfolio_ui_refinement
 import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
@@ -248,7 +249,10 @@ def prepare_render_surface_runtime() -> None:
         renderer = getattr(app_impl, attribute_name)
         if getattr(renderer, "_capital_intelligence_guarded_surface", False):
             continue
-        if attribute_name == "_render_portfolio":
+        if (
+            attribute_name == "_render_portfolio"
+            and getattr(renderer, "__module__", "") != "portfolio_ui_refinement"
+        ):
             setattr(
                 renderer,
                 _RENDER_SYNC_TARGET_ATTRIBUTE,
@@ -317,6 +321,10 @@ def main() -> None:
         app_impl,
         environment_story_placement_refinement,
     )
+    # Render has its own entrypoint. Install the same presentation-only Portfolio
+    # refinement here after all other surface patches so the production console
+    # does not silently retain the older Portfolio-first renderer.
+    portfolio_ui_refinement.install(app_impl)
     prepare_render_surface_runtime()
     create_streamlit_application(
         deployment=deployment_context_from_environment()
