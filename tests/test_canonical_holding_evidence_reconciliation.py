@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import production_context_publication_governed as governed
@@ -97,6 +98,7 @@ def test_holding_only_evidence_cannot_become_a_candidate(monkeypatch):
     assert result.candidates == ()
     assert result.candidate_evidence == ()
     assert result.holding_evidence == ("holding-evidence",)
+    assert result.holding_marks == (("MCD", 100.0),)
     assert result.exclusions[0][0] == mcd.instrument_identifier
 
 
@@ -124,3 +126,75 @@ def test_holding_only_marker_rejects_non_held_instrument(monkeypatch):
         assert "cannot admit non-held instruments" in str(error)
     else:
         raise AssertionError("non-held holding-only marker must fail closed")
+
+
+@dataclass(frozen=True)
+class _TestPosition:
+    symbol: str
+    mark_price: float
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class _TestSnapshot:
+    positions: tuple[_TestPosition, ...]
+
+
+def test_mark_portfolio_uses_certified_holding_mark_without_candidate_nomination():
+    as_of = datetime(2026, 8, 8, 18, 0, tzinfo=timezone.utc)
+    snapshot = _TestSnapshot(
+        positions=(
+            _TestPosition(
+                symbol="MCD",
+                mark_price=95.0,
+                updated_at=as_of - timedelta(days=1),
+            ),
+        )
+    )
+    build_result = SimpleNamespace(
+        candidates=(),
+        holding_marks=(("MCD", 100.0),),
+    )
+
+    marked = governed._mark_portfolio(
+        snapshot,
+        build_result,
+        decision_as_of=as_of,
+    )
+
+    assert marked.positions[0].mark_price == 100.0
+    assert marked.positions[0].updated_at == as_of
+    assert build_result.candidates == ()
+
+
+def test_mark_portfolio_rejects_mark_for_non_holding():
+    as_of = datetime(2026, 8, 8, 18, 0, tzinfo=timezone.utc)
+    snapshot = _TestSnapshot(
+        positions=(_TestPosition("MCD", 95.0, as_of - timedelta(days=1)),)
+    )
+    build_result = SimpleNamespace(
+        candidates=(),
+        holding_marks=(("VTI", 200.0),),
+    )
+
+    try:
+        governed._mark_portfolio(snapshot, build_result, decision_as_of=as_of)
+    except governed.ProductionPaperEvidenceError as error:
+        assert "non-held instruments" in str(error)
+    else:
+        raise AssertionError("non-held holding mark must fail closed")
+
+
+def test_mark_portfolio_still_fails_closed_without_certified_holding_mark():
+    as_of = datetime(2026, 8, 8, 18, 0, tzinfo=timezone.utc)
+    snapshot = _TestSnapshot(
+        positions=(_TestPosition("MCD", 95.0, as_of - timedelta(days=1)),)
+    )
+    build_result = SimpleNamespace(candidates=(), holding_marks=())
+
+    try:
+        governed._mark_portfolio(snapshot, build_result, decision_as_of=as_of)
+    except governed.ProductionPaperEvidenceError as error:
+        assert "current marks are unavailable" in str(error)
+    else:
+        raise AssertionError("missing certified holding mark must fail closed")
