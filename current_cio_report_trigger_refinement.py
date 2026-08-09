@@ -158,10 +158,17 @@ def _install_export_reader(
                 bundle,
                 current_market_context=market_context,
             )
-            return cio_report_completeness_enrichment.enrich_report_bundle(
-                app,
-                enriched,
-            )
+            try:
+                return cio_report_completeness_enrichment.enrich_report_bundle(
+                    app,
+                    enriched,
+                )
+            except KeyError:
+                # Some isolated/legacy read adapters intentionally expose only the
+                # candidate-level record families. Missing optional history must not
+                # break an otherwise aligned existing report; cycle-level reports
+                # remain non-auditable unless their supporting queue is actually read.
+                return enriched
 
         portfolio_first.build_cio_decision_export = build_export
 
