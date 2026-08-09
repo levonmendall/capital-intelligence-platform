@@ -79,6 +79,8 @@ Scenario probabilities remain normalized by the existing reconciliation policy. 
 
 The active production-context reconstruction must pass persisted forward intelligence into `CandidateCycleContext`; otherwise stored forward evidence would not reach specialist synthesis. v2 treats this as a required runtime invariant.
 
+Forward Decision v2 is attached by `build_predictive_market_intelligence` when the input is a canonical `CandidateDecisionRecord`. Legacy signal-only helper calls that use lightweight candidate-like objects remain supported without a v2 decision packet rather than being assigned a fabricated asset class. Governed production paper evidence supplies canonical candidate records, so this compatibility boundary does not omit v2 from the live CIO path.
+
 ## Provider boundary
 
 The contracts support earnings calendars, consensus/dispersion, options surfaces and flow interpretation, institutional positioning, alternative data, corporate actions, macro-event expectations and other sources when certified data is present. The code does not invent provider subscriptions, credentials, coverage, buyer/seller classification, dealer Greeks, consensus estimates or historical observations. Missing data remains unavailable until governed collection and certification supply it.
