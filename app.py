@@ -11,6 +11,7 @@ import environment_story_placement_refinement
 import operating_intelligence_ui
 import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
+import portfolio_ui_refinement
 import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
@@ -51,6 +52,8 @@ def main() -> None:
         environment_story_placement_refinement,
         replace_story_fragments=True,
     )
+    # Install last so Portfolio remains a single, presentation-only source of truth.
+    portfolio_ui_refinement.install(app_impl)
     create_streamlit_application()
 
 
