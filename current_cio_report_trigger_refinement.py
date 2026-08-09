@@ -13,6 +13,7 @@ from typing import Any, Mapping
 
 import cio_decision_reader_export
 import cio_report_backdrop_refinement
+import cio_report_completeness_enrichment
 
 
 _INSTALLED_STATE_KEY = "_capital_intelligence_current_cio_report_trigger_installed"
@@ -153,9 +154,13 @@ def _install_export_reader(
             aligned_kwargs = dict(kwargs)
             aligned_kwargs.update(selected)
             bundle = original_builder(**aligned_kwargs)
-            return cio_decision_reader_export.enrich_cio_decision_export(
+            enriched = cio_decision_reader_export.enrich_cio_decision_export(
                 bundle,
                 current_market_context=market_context,
+            )
+            return cio_report_completeness_enrichment.enrich_report_bundle(
+                app,
+                enriched,
             )
 
         portfolio_first.build_cio_decision_export = build_export
