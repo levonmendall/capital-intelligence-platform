@@ -1,4 +1,4 @@
-name: Apply Forward Decision Intelligence v2 patch
+name: Validate Forward Decision Intelligence v2
 
 on:
   push:
@@ -8,90 +8,22 @@ on:
       - .github/workflows/forward-decision-v2-patch.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          ref: agent/forward-decision-intelligence-v2
-          fetch-depth: 0
-      - name: Apply integration patch
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path: str, old: str, new: str) -> None:
-              target = Path(path)
-              text = target.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one match, found {count}: {old[:80]!r}")
-              target.write_text(text.replace(old, new, 1))
-
-          replace_once(
-              "intelligence/forward.py",
-              "from cio.models import (\n    ScenarioAdjustment,\n    SpecialistPosition,\n    SpecialistRole,\n)\n",
-              "from cio.models import (\n    ScenarioAdjustment,\n    SpecialistPosition,\n    SpecialistRole,\n)\nfrom intelligence.forward_decision import ForwardDecisionContext\n",
-          )
-          replace_once(
-              "intelligence/forward.py",
-              "    currency_regime: CurrencyRegime | None = None\n    schema_version: str = \"forward-intelligence.v1\"\n",
-              "    currency_regime: CurrencyRegime | None = None\n    decision_context: ForwardDecisionContext | None = None\n    schema_version: str = \"forward-intelligence.v2\"\n",
-          )
-          replace_once(
-              "intelligence/forward.py",
-              "            if value is not None and not isinstance(value, enum_type):\n                raise TypeError(f\"{field_name} must be {enum_type.__name__} or None\")\n\n    @property\n    def evidence_identifiers(self) -> tuple[str, ...]:\n        return tuple(\n            dict.fromkeys(\n                identifier\n                for item in self.signals\n                for identifier in item.evidence_identifiers\n            )\n        )\n",
-              "            if value is not None and not isinstance(value, enum_type):\n                raise TypeError(f\"{field_name} must be {enum_type.__name__} or None\")\n        if self.decision_context is not None:\n            if not isinstance(self.decision_context, ForwardDecisionContext):\n                raise TypeError(\"decision_context must be ForwardDecisionContext or None\")\n            if self.decision_context.candidate_identifier != self.candidate_identifier:\n                raise ValueError(\"decision context does not match candidate\")\n            if self.decision_context.as_of != self.as_of:\n                raise ValueError(\"decision context must share bundle as_of\")\n\n    @property\n    def evidence_identifiers(self) -> tuple[str, ...]:\n        context_identifiers = (\n            () if self.decision_context is None else self.decision_context.evidence_identifiers\n        )\n        return tuple(\n            dict.fromkeys(\n                tuple(\n                    identifier\n                    for item in self.signals\n                    for identifier in item.evidence_identifiers\n                )\n                + context_identifiers\n            )\n        )\n",
-          )
-          replace_once(
-              "intelligence/forward.py",
-              "    def enrich_analysis(self, analysis: SpecialistAnalysis) -> SpecialistAnalysis:\n        channel = {\n",
-              "    def enrich_analysis(self, analysis: SpecialistAnalysis) -> SpecialistAnalysis:\n        if self.decision_context is not None:\n            analysis = self.decision_context.enrich_analysis(analysis)\n        channel = {\n",
-          )
-          replace_once(
-              "intelligence/forward.py",
-              "            \"currency_regime\": (\n                None if self.currency_regime is None else self.currency_regime.value\n            ),\n            \"schema_version\": self.schema_version,\n",
-              "            \"currency_regime\": (\n                None if self.currency_regime is None else self.currency_regime.value\n            ),\n            \"decision_context\": (\n                None if self.decision_context is None else self.decision_context.to_dict()\n            ),\n            \"schema_version\": self.schema_version,\n",
-          )
-          replace_once(
-              "intelligence/forward.py",
-              "            currency_regime=(\n                None\n                if payload.get(\"currency_regime\") is None\n                else CurrencyRegime(str(payload[\"currency_regime\"]))\n            ),\n            schema_version=str(payload.get(\"schema_version\", \"forward-intelligence.v1\")),\n",
-              "            currency_regime=(\n                None\n                if payload.get(\"currency_regime\") is None\n                else CurrencyRegime(str(payload[\"currency_regime\"]))\n            ),\n            decision_context=(\n                None\n                if payload.get(\"decision_context\") is None\n                else ForwardDecisionContext.from_dict(dict(payload[\"decision_context\"]))\n            ),\n            schema_version=str(payload.get(\"schema_version\", \"forward-intelligence.v1\")),\n",
-          )
-          replace_once(
-              "intelligence/forward.py",
-              "    monetary: MonetaryAssessment | None = None,\n    currency: CurrencyAssessment | None = None,\n) -> ForwardIntelligenceBundle:\n",
-              "    monetary: MonetaryAssessment | None = None,\n    currency: CurrencyAssessment | None = None,\n    decision_context: ForwardDecisionContext | None = None,\n) -> ForwardIntelligenceBundle:\n",
-          )
-          replace_once(
-              "intelligence/forward.py",
-              "    versions = tuple(\n        dict.fromkeys(\n            item\n            for assessment, item in (\n                (business, StrategicBusinessEngine.version),\n                (trend, MarketTrendEngine.version),\n                (theme, StructuralThemeEngine.version),\n                (monetary, MonetaryPolicyTransmissionEngine.version),\n                (currency, CurrencyTransmissionEngine.version),\n            )\n            if assessment is not None\n        )\n    )\n    return ForwardIntelligenceBundle(\n",
-              "    versions = tuple(\n        dict.fromkeys(\n            item\n            for assessment, item in (\n                (business, StrategicBusinessEngine.version),\n                (trend, MarketTrendEngine.version),\n                (theme, StructuralThemeEngine.version),\n                (monetary, MonetaryPolicyTransmissionEngine.version),\n                (currency, CurrencyTransmissionEngine.version),\n            )\n            if assessment is not None\n        )\n    )\n    if decision_context is not None:\n        versions = tuple(dict.fromkeys((*versions, decision_context.schema_version)))\n    return ForwardIntelligenceBundle(\n",
-          )
-          replace_once(
-              "intelligence/forward.py",
-              "        currency_regime=None if currency is None else currency.regime,\n    )\n",
-              "        currency_regime=None if currency is None else currency.regime,\n        decision_context=decision_context,\n    )\n",
-          )
-          replace_once(
-              "application/production_context_runtime.py",
-              "                asset_valuation=(\n                    candidate_evidence[candidate_identifier].asset_valuation\n                ),\n            )\n",
-              "                asset_valuation=(\n                    candidate_evidence[candidate_identifier].asset_valuation\n                ),\n                forward_intelligence=(\n                    candidate_evidence[candidate_identifier].forward_intelligence\n                ),\n            )\n",
-          )
-          replace_once(
-              "intelligence/__init__.py",
-              "    \"build_forward_intelligence_bundle\": (\"intelligence.forward\", \"build_forward_intelligence_bundle\"),\n}",
-              "    \"build_forward_intelligence_bundle\": (\"intelligence.forward\", \"build_forward_intelligence_bundle\"),\n    \"CatalystEvent\": (\"intelligence.forward_decision\", \"CatalystEvent\"),\n    \"DecisionTiming\": (\"intelligence.forward_decision\", \"DecisionTiming\"),\n    \"DecisionTimingPosture\": (\"intelligence.forward_decision\", \"DecisionTimingPosture\"),\n    \"EvidenceAvailability\": (\"intelligence.forward_decision\", \"EvidenceAvailability\"),\n    \"EventScenario\": (\"intelligence.forward_decision\", \"EventScenario\"),\n    \"ForwardDecisionContext\": (\"intelligence.forward_decision\", \"ForwardDecisionContext\"),\n    \"ForwardDecisionDimension\": (\"intelligence.forward_decision\", \"ForwardDecisionDimension\"),\n    \"ForwardDimensionAssessment\": (\"intelligence.forward_decision\", \"ForwardDimensionAssessment\"),\n    \"ReturnDistribution\": (\"intelligence.forward_decision\", \"ReturnDistribution\"),\n    \"ThesisMonitor\": (\"intelligence.forward_decision\", \"ThesisMonitor\"),\n    \"applicable_dimensions\": (\"intelligence.forward_decision\", \"applicable_dimensions\"),\n    \"build_forward_decision_context\": (\"intelligence.forward_decision\", \"build_forward_decision_context\"),\n}",
-          )
-          PY
-      - name: Commit integration
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add intelligence/forward.py intelligence/__init__.py application/production_context_runtime.py
-          git diff --cached --check
-          git commit -m "Integrate Forward Decision Intelligence v2"
-          git push origin HEAD:agent/forward-decision-intelligence-v2
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Compile changed modules
+        run: python -m py_compile intelligence/forward.py intelligence/forward_decision.py application/production_context_runtime.py
+      - name: Forward decision focused tests
+        run: python -m pytest -q tests/test_forward_decision_intelligence_v2.py tests/test_forward_intelligence.py tests/test_forward_intelligence_integration.py
+      - name: Canonical CIO and production-context regressions
+        run: python -m pytest -q tests/test_canonical_cio_cycle.py tests/test_canonical_production_context_adapter.py
