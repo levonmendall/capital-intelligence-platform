@@ -12,8 +12,10 @@ WORKFLOW = (
 def test_render_cio_verifier_allows_comprehensive_diagnostic_to_finish() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "timeout-minutes: 70" in workflow
-    assert "--maximum-attempts 240" in workflow
+    assert "timeout-minutes: 65" in workflow
+    assert "timeout-minutes: 58" in workflow
+    assert "timeout --signal=TERM --kill-after=30s 56m" in workflow
+    assert "--maximum-attempts 220" in workflow
     assert "--interval-seconds 15" in workflow
 
 
