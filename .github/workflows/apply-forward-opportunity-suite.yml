@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   apply-test-commit:
-    if: github.event.head_commit.message == 'Retry forward opportunity suite transport'
+    if: github.event.head_commit.message == 'Handle forward suite blob compression'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,12 +24,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python - <<'PY'
-          import os, urllib.request, zlib
+          import base64, bz2, gzip, json, lzma, os, urllib.request, zlib
           url = 'https://api.github.com/repos/levonmendall/capital-intelligence-platform-/git/blobs/e22a169b672599704b955e2e2a18434b86ea76a4'
           request = urllib.request.Request(url, headers={'Authorization': f"Bearer {os.environ['GH_TOKEN']}", 'Accept': 'application/vnd.github.raw+json'})
           with urllib.request.urlopen(request) as response:
-              compressed = response.read()
-          exec(zlib.decompress(compressed).decode('utf-8'))
+              data = response.read()
+          if data.lstrip().startswith(b'{'):
+              payload = json.loads(data.decode('utf-8'))
+              data = base64.b64decode(payload['content'])
+          attempts = (
+              lambda value: zlib.decompress(value),
+              lambda value: zlib.decompress(value, -15),
+              gzip.decompress,
+              bz2.decompress,
+              lzma.decompress,
+          )
+          script = None
+          for decoder in attempts:
+              try:
+                  script = decoder(data).decode('utf-8')
+                  break
+              except Exception:
+                  pass
+          if script is None:
+              raise RuntimeError(f'unsupported patch blob encoding; first_bytes={data[:12].hex()}')
+          exec(script)
           PY
       - name: Install locked runtime dependencies
         run: python -m pip install --require-hashes -r requirements.lock
