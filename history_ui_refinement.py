@@ -29,8 +29,7 @@ def _decision_title(item: dict[str, Any]) -> str:
 
 
 def install(app_impl: Any) -> None:
-    """Replace History with a concise story-first surface; preserve audit detail on demand."""
-    original = app_impl._render_history
+    """Replace History with a concise story-first surface while preserving audit access."""
 
     @st.fragment(run_every="30s")
     def render_history(dependencies: Any) -> None:
@@ -50,9 +49,9 @@ def install(app_impl: Any) -> None:
         )
         latest_decision = _decision_title(latest) if latest else "Awaiting the first governed CIO decision."
         app_impl.status_list((
-            ("Latest CIO decision", latest_decision, app_impl.format_datetime(latest.get("as_of"))),
-            ("Last portfolio action", (f"{latest_trade.get('side','')} {latest_trade.get('symbol','')}".strip() if latest_trade else "No paper trade recorded."), app_impl.format_datetime(latest_trade.get("created_at"))),
-            ("Outcome state", app_impl._plain_text(latest_eval.get("outcome"), "Awaiting matured evaluation."), app_impl._plain_text(latest_eval.get("process_verdict"), "No process verdict yet.")),
+            ("Outcome status", app_impl._plain_text(latest_eval.get("outcome"), "Awaiting matured evaluation."), app_impl._plain_text(latest_eval.get("process_verdict"), "No process verdict yet.")),
+            ("Execution status", (f"{latest_trade.get('side','')} {latest_trade.get('symbol','')}".strip() if latest_trade else "No paper trade recorded."), app_impl.format_datetime(latest_trade.get("created_at"))),
+            ("Learning state", "Observation-only until decision horizons mature." if not evaluations else "Governed review is available.", f"{len(theses)} living thesis record{'s' if len(theses) != 1 else ''} monitored."),
         ), variant="history")
 
         app_impl.page_header("Decision history", "What the CIO decided and when capital actually moved.", "01")
@@ -68,9 +67,9 @@ def install(app_impl: Any) -> None:
             st.markdown('<div class="history-timeline">' + ''.join(rows) + '</div>', unsafe_allow_html=True)
 
         with st.expander("Latest decision context", expanded=False):
-            app_impl.text_card("CIO conclusion", latest_decision)
-            app_impl.text_card("What changed", app_impl._plain_text(latest.get("what_changed"), "No material change was recorded for the latest decision."))
-            app_impl.text_card("Portfolio implication", app_impl._plain_text(latest.get("why_it_matters"), "No additional portfolio implication was recorded."))
+            app_impl.text_card("Most recent decision", latest_decision)
+            app_impl.text_card("What changed at that decision", app_impl._plain_text(latest.get("what_changed"), "No material change was recorded for the latest decision."))
+            app_impl.text_card("Why it mattered to the portfolio", app_impl._plain_text(latest.get("why_it_matters"), "No additional portfolio implication was recorded."))
 
         app_impl.page_header("Learning & outcomes", "What prior decisions subsequently did and whether that evidence may inform future review.", "02")
         app_impl.metric_grid((
@@ -81,13 +80,21 @@ def install(app_impl: Any) -> None:
         ), variant="history")
         app_impl.callout_card("Learning boundary", "Learning informs review; it never authorizes a trade.", "Historical evidence can affect governed review only through the live CIO process.")
 
+        app_impl.page_header(
+            "Detailed decision trail",
+            "Complete institutional record of decisions, outcomes, theses, and paper execution.",
+            "03",
+        )
+        app_impl.activity_rail((
+            ("Decision", latest_decision, app_impl.format_datetime(latest.get("as_of"))),
+            ("Outcome", latest_eval.get("outcome") or "Awaiting matured evaluation.", latest_eval.get("process_verdict") or "No process verdict"),
+            ("Execution", (f"{latest_trade.get('side','')} {latest_trade.get('symbol','')}".strip() or "No paper trade recorded."), app_impl.format_datetime(latest_trade.get("created_at"))),
+        ))
+
         with st.expander("Governance & audit", expanded=False):
             st.caption("Technical replay, calibration, report archive, exact lineage, and complete institutional records.")
             app_impl.render_history_decision_accountability()
             app_impl.render_operating_report_history()
             app_impl.render_cio_report_archive()
-            with st.expander("Complete decision, outcome, thesis, and execution record", expanded=False):
-                # Retain the canonical detailed renderer behind explicit audit intent.
-                original(dependencies)
 
     app_impl._render_history = render_history
