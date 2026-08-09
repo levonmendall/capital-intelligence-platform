@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.parametrize("viewport_name", ("desktop", "iphone"))
-def test_today_is_a_ranked_responsive_investor_briefing(
+def test_today_is_a_compact_responsive_investor_briefing(
     live_streamlit,
     viewport_name,
 ) -> None:
@@ -32,51 +32,86 @@ def test_today_is_a_ranked_responsive_investor_briefing(
         navigation.get_by_role("radio", name="Today", exact=True).click()
         page.get_by_role("heading", name="Today", exact=True).wait_for()
 
-        hero = page.locator(".ci-today")
-        hero.wait_for(state="visible")
-        page.get_by_text("What is moving the investment conversation", exact=True).wait_for()
-        page.get_by_text("Research radar", exact=True).first.wait_for()
+        page.get_by_text("Market state", exact=True).wait_for()
+        page.get_by_text("Briefing health", exact=True).wait_for()
+        page.get_by_text("CIO / research funnel", exact=True).wait_for()
+        page.get_by_text("What to watch next", exact=True).wait_for()
+        page.get_by_text("U.S. listed session", exact=False).wait_for()
+        page.get_by_text("direct spot crypto trades 24/7", exact=False).wait_for()
 
-        assert page.locator(".story-today.process-lens-grid").count() == 0
+        assert page.locator(".ci-trust-strip").count() == 1
+        assert page.locator(".ci-funnel").count() == 1
+        assert page.get_by_text("Research radar", exact=True).count() == 0
+        assert page.get_by_text("What is moving the investment conversation", exact=True).count() == 0
         assert page.get_by_text("How the Today surface works", exact=True).count() == 0
-        assert page.get_by_text("CIO RESPONSE", exact=False).count() == 0
-        assert page.get_by_text("PORTFOLIO EFFECT", exact=False).count() == 0
+
+        explanation = page.get_by_text("Why these developments matter", exact=True)
+        sources = page.get_by_text("Sources and timing", exact=True)
+        explanation.wait_for()
+        sources.wait_for()
+        assert page.locator('[data-testid="stExpander"]').filter(
+            has_text="Why these developments matter"
+        ).locator('[data-testid="stExpanderDetails"]').is_hidden()
+        assert page.locator('[data-testid="stExpander"]').filter(
+            has_text="Sources and timing"
+        ).locator('[data-testid="stExpanderDetails"]').is_hidden()
 
         layout = page.evaluate(
             """() => {
-                const hero = document.querySelector('.ci-today').getBoundingClientRect();
-                const grids = Array.from(document.querySelectorAll(
-                    '.ci-three,.ci-story-grid,.ci-pair,.ci-radar'
-                )).map(element => {
-                    const box = element.getBoundingClientRect();
-                    const style = getComputedStyle(element);
-                    return {
-                        display: style.display,
-                        columns: style.gridTemplateColumns,
-                        left: box.left,
-                        right: box.right,
-                        scrollWidth: element.scrollWidth,
-                        clientWidth: element.clientWidth
-                    };
-                });
+                const selectors = [
+                    '.ci-trust-strip',
+                    '.ci-development-list',
+                    '.ci-impact',
+                    '.ci-funnel',
+                    '.ci-watch-compact'
+                ];
+                const regions = selectors.flatMap(selector =>
+                    Array.from(document.querySelectorAll(selector)).map(element => {
+                        const box = element.getBoundingClientRect();
+                        const style = getComputedStyle(element);
+                        return {
+                            selector,
+                            display: style.display,
+                            columns: style.gridTemplateColumns,
+                            left: box.left,
+                            right: box.right,
+                            scrollWidth: element.scrollWidth,
+                            clientWidth: element.clientWidth
+                        };
+                    })
+                );
+                const nav = document.querySelector(
+                    'div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark)'
+                );
+                const navBox = nav ? nav.getBoundingClientRect() : null;
                 return {
                     viewportWidth: window.innerWidth,
                     documentWidth: document.documentElement.scrollWidth,
-                    heroLeft: hero.left,
-                    heroRight: hero.right,
-                    grids
+                    regions,
+                    navHeight: navBox ? navBox.height : null,
+                    brandVisible: !!document.querySelector(
+                        'div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) .nav-brand-mark'
+                    ) && getComputedStyle(document.querySelector(
+                        'div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) .nav-brand-mark'
+                    )).display !== 'none'
                 };
             }"""
         )
         assert layout["documentWidth"] <= layout["viewportWidth"] + 2
-        assert layout["heroLeft"] >= -1
-        assert layout["heroRight"] <= layout["viewportWidth"] + 1
-        assert all(grid["display"] == "grid" for grid in layout["grids"])
-        assert all(grid["scrollWidth"] <= grid["clientWidth"] + 2 for grid in layout["grids"])
+        assert layout["regions"]
+        assert all(region["display"] == "grid" for region in layout["regions"])
+        assert all(region["left"] >= -1 for region in layout["regions"])
+        assert all(
+            region["right"] <= layout["viewportWidth"] + 1
+            for region in layout["regions"]
+        )
+        assert all(
+            region["scrollWidth"] <= region["clientWidth"] + 2
+            for region in layout["regions"]
+        )
 
         if viewport_name == "iphone":
-            assert all(
-                len([value for value in grid["columns"].split(" ") if value]) == 1
-                for grid in layout["grids"]
-            )
+            assert layout["navHeight"] is not None
+            assert layout["navHeight"] < 52
+            assert layout["brandVisible"] is False
         browser.close()
