@@ -38,6 +38,7 @@ from intelligence.forward_decision import (
     ForwardDecisionDimension,
     ForwardDimensionAssessment,
     ThesisMonitor,
+    applicable_dimensions,
     build_forward_decision_context,
 )
 
@@ -854,6 +855,10 @@ def build_predictive_forward_decision_context(
         invalidation_conditions=tuple(getattr(candidate, "invalidation_conditions", ()) or ()),
         monitor_evidence=tuple(getattr(candidate, "monitoring_indicators", ()) or ()),
     )
+    applicable = applicable_dimensions(asset_class)
+    assessments = [
+        item for item in assessments if item.dimension in applicable
+    ]
     return build_forward_decision_context(
         identifier=f"forward-decision:{candidate_identifier}:{as_of.isoformat()}",
         candidate_identifier=candidate_identifier,

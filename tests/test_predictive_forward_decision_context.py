@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
+from cio import CandidateAssetClass
 from committee.specialists import MarketSpecialistContext
 from intelligence.forward import ForwardIntelligenceBundle
 from intelligence.forward_decision import DecisionTimingPosture, EvidenceAvailability, ForwardDecisionDimension
@@ -55,3 +57,35 @@ def test_market_flow_proxy_does_not_claim_institutional_or_derivatives_coverage(
     flow = CapitalFlowEngine().analyze(_flow_observation(candidate))
     assert "proxy" in flow.signal.name
     assert any("dealer inventory" in item for item in flow.signal.contradictory_evidence)
+
+
+def test_cash_equivalent_filters_non_applicable_predictive_dimensions():
+    base = _candidate()
+    candidate = replace(
+        base,
+        instrument=replace(
+            base.instrument,
+            asset_class=CandidateAssetClass.CASH_EQUIVALENT,
+        ),
+    )
+    result = build_predictive_market_intelligence(
+        candidate=candidate,
+        features=SimpleNamespace(
+            momentum=0.15,
+            six_month_return=0.12,
+            twelve_month_return=0.18,
+            annualized_volatility=0.24,
+            rolling_annual_median=0.10,
+        ),
+        flow_observation=_flow_observation(candidate),
+        market=_market(),
+        existing_forward_intelligence=None,
+    )
+    context = result.forward_intelligence.decision_context
+    assert context is not None
+    dimensions = {item.dimension: item for item in context.dimensions}
+    assert dimensions[ForwardDecisionDimension.EXPECTATIONS].availability is EvidenceAvailability.AVAILABLE
+    assert dimensions[ForwardDecisionDimension.CATALYSTS].availability is EvidenceAvailability.NOT_APPLICABLE
+    assert dimensions[ForwardDecisionDimension.POSITIONING].availability is EvidenceAvailability.NOT_APPLICABLE
+    assert dimensions[ForwardDecisionDimension.MICROSTRUCTURE].availability is EvidenceAvailability.NOT_APPLICABLE
+    assert dimensions[ForwardDecisionDimension.REFLEXIVITY].availability is EvidenceAvailability.NOT_APPLICABLE
