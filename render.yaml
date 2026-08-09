@@ -123,10 +123,14 @@ services:
         value: "24"
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE
         value: America/Los_Angeles
+      # Four authoritative full CIO cycles distribute decision authority across
+      # Asia/overnight, Europe/U.S. premarket, the U.S. session, and the U.S.
+      # close. Fifteen-minute collection and material-event escalation continue
+      # between these governed full-market cycles.
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_HOUR
-        value: "7"
+        value: "0"
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_TIMES
-        value: 07:00,10:00,12:45
+        value: 00:00,06:00,10:00,13:15
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS
         value: "60"
       - key: CAPITAL_INTELLIGENCE_SCHEDULER_SCAN_SECONDS
