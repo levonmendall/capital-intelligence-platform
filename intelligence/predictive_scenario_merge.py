@@ -100,6 +100,7 @@ def reconcile_forward_intelligence(
         trend_stage=existing.trend_stage or predictive.trend_stage,
         policy_regime=existing.policy_regime or predictive.policy_regime,
         currency_regime=existing.currency_regime or predictive.currency_regime,
+        decision_context=predictive.decision_context or existing.decision_context,
         schema_version="forward-intelligence.v2-predictive-market",
     )
 

@@ -30,6 +30,16 @@ from intelligence.forward import (
     ForwardScenario,
     ForwardSignal,
 )
+from intelligence.forward_decision import (
+    DecisionTiming,
+    DecisionTimingPosture,
+    EvidenceAvailability,
+    ForwardDecisionContext,
+    ForwardDecisionDimension,
+    ForwardDimensionAssessment,
+    ThesisMonitor,
+    build_forward_decision_context,
+)
 
 
 def _text(value: object, *, field_name: str) -> str:
@@ -689,6 +699,172 @@ class MarketExpectationsEngine:
         )
 
 
+
+def build_predictive_forward_decision_context(
+    *,
+    candidate: object,
+    flow: CapitalFlowAssessment,
+    expectations: MarketExpectationsAssessment,
+    market: MarketSpecialistContext,
+    existing_forward_intelligence: ForwardIntelligenceBundle | None,
+) -> ForwardDecisionContext:
+    """Map certified current evidence into a truthful common v2 packet."""
+    candidate_identifier = _text(getattr(candidate, "identifier"), field_name="candidate identifier")
+    as_of = _aware(getattr(candidate, "as_of"), field_name="candidate as_of")
+    asset_class = getattr(getattr(candidate, "instrument"), "asset_class")
+    candidate_ids = tuple(getattr(candidate, "evidence_identifiers", ()) or ())
+    if not candidate_ids:
+        raise ValueError("forward decision context requires candidate evidence identifiers")
+    evidence_quality = float(getattr(getattr(candidate, "evidence_quality"), "score"))
+    existing_signals = () if existing_forward_intelligence is None else existing_forward_intelligence.signals
+
+    def from_signals(dimension, *, summary, channels=(), name_terms=()):
+        selected = tuple(
+            signal for signal in existing_signals
+            if (channels and any(channel in signal.channels for channel in channels))
+            or (name_terms and any(term in f"{signal.name} {signal.identifier}".lower() for term in name_terms))
+        )
+        identifiers = tuple(dict.fromkeys(identifier for signal in selected for identifier in signal.evidence_identifiers))
+        if not selected or not identifiers:
+            return None
+        return ForwardDimensionAssessment(
+            dimension=dimension,
+            availability=EvidenceAvailability.PARTIAL,
+            summary=summary,
+            confidence=min(signal.confidence for signal in selected),
+            evidence=tuple(dict.fromkeys(item for signal in selected for item in signal.evidence)),
+            contradictory_evidence=tuple(dict.fromkeys(item for signal in selected for item in signal.contradictory_evidence)),
+            assumptions=tuple(dict.fromkeys(item for signal in selected for item in signal.assumptions)),
+            risks=tuple(dict.fromkeys(item for signal in selected for item in signal.risks)),
+            change_conditions=tuple(dict.fromkeys(item for signal in selected for item in signal.change_conditions)),
+            evidence_identifiers=identifiers,
+        )
+
+    assessments = [item for item in (
+        from_signals(ForwardDecisionDimension.REGIME, summary="Governed Phase-5 macro and currency signals provide partial regime context", channels=("macro", "currency")),
+        from_signals(ForwardDecisionDimension.FUNDAMENTALS, summary="Governed Phase-5 signals provide partial business and valuation trajectory context", channels=("fundamental",)),
+        from_signals(ForwardDecisionDimension.CROSS_ASSET, summary="Governed macro, currency and forecast signals provide partial cross-asset confirmation", channels=("macro", "currency", "forecast")),
+        from_signals(ForwardDecisionDimension.STRUCTURAL, summary="Governed structural-theme evidence provides partial value-chain transmission context", name_terms=("structural", "theme", "value-chain", "bottleneck")),
+    ) if item is not None]
+
+    assessments.append(ForwardDimensionAssessment(
+        dimension=ForwardDecisionDimension.EXPECTATIONS,
+        availability=EvidenceAvailability.AVAILABLE,
+        summary=f"Evidence-backed outlook versus market-implied proxy gives expected surprise {expectations.expected_surprise:+.2%}; estimated priced-in score {expectations.priced_in_score:.0%}",
+        confidence=expectations.confidence,
+        evidence=expectations.diagnostics,
+        contradictory_evidence=expectations.signal.contradictory_evidence,
+        assumptions=expectations.signal.assumptions,
+        risks=expectations.signal.risks,
+        change_conditions=expectations.signal.change_conditions,
+        evidence_identifiers=expectations.signal.evidence_identifiers,
+        market_expectation=f"Market-implied proxy; estimated priced-in score {expectations.priced_in_score:.0%}",
+        internal_expectation=f"Evidence-backed expected surprise {expectations.expected_surprise:+.2%}",
+    ))
+
+    catalysts = tuple(getattr(candidate, "primary_catalysts", ()) or ())
+    if catalysts:
+        assessments.append(ForwardDimensionAssessment(
+            dimension=ForwardDecisionDimension.CATALYSTS,
+            availability=EvidenceAvailability.PARTIAL,
+            summary="Candidate catalysts are governed but no certified dated event calendar is attached; event timing and collision risk remain unresolved",
+            confidence=min(0.75, evidence_quality),
+            evidence=tuple(f"Candidate catalyst: {item}" for item in catalysts),
+            assumptions=("Catalyst descriptions remain relevant through the next governed review",),
+            risks=("Undated catalysts cannot support pre-event versus post-event timing decisions",),
+            change_conditions=("Reassess when a certified event date or revised catalyst becomes available",),
+            evidence_identifiers=candidate_ids,
+        ))
+
+    assessments.extend((
+        ForwardDimensionAssessment(
+            dimension=ForwardDecisionDimension.POSITIONING,
+            availability=EvidenceAvailability.PARTIAL,
+            summary=f"Price-and-volume market-behavior proxy indicates {flow.state.value}; complete institutional, fund, futures, dealer and cross-border positioning is not claimed",
+            confidence=flow.confidence,
+            evidence=flow.diagnostics,
+            contradictory_evidence=flow.signal.contradictory_evidence,
+            assumptions=flow.signal.assumptions,
+            risks=flow.signal.risks,
+            change_conditions=flow.signal.change_conditions,
+            evidence_identifiers=flow.signal.evidence_identifiers,
+        ),
+        ForwardDimensionAssessment(
+            dimension=ForwardDecisionDimension.MICROSTRUCTURE,
+            availability=EvidenceAvailability.PARTIAL,
+            summary="Liquidity and price/volume confirmation provide a partial market-structure view; order-book and dealer inventory evidence are not asserted",
+            confidence=min(flow.confidence, float(market.confidence)),
+            evidence=tuple(dict.fromkeys((*market.evidence, *flow.diagnostics))),
+            contradictory_evidence=("No complete order-book, dealer inventory, or venue-fragmentation model is claimed",),
+            assumptions=flow.signal.assumptions,
+            risks=tuple(dict.fromkeys((*market.risks, *flow.signal.risks))),
+            change_conditions=flow.signal.change_conditions,
+            evidence_identifiers=tuple(dict.fromkeys((*market.evidence_identifiers, *flow.signal.evidence_identifiers))),
+        ),
+        ForwardDimensionAssessment(
+            dimension=ForwardDecisionDimension.REFLEXIVITY,
+            availability=EvidenceAvailability.PARTIAL,
+            summary=f"Crowding/reversal proxies imply {flow.reversal_risk:.0%} reversal risk; forced-flow mechanics remain incomplete without certified dealer/leverage data",
+            confidence=flow.confidence,
+            evidence=flow.diagnostics,
+            contradictory_evidence=("Short-covering and crowding are inferred from market behavior rather than complete owner/dealer books",),
+            assumptions=flow.signal.assumptions,
+            risks=flow.signal.risks,
+            change_conditions=flow.signal.change_conditions,
+            evidence_identifiers=flow.signal.evidence_identifiers,
+        ),
+    ))
+
+    scenario_evidence = tuple(
+        f"{point.label}: probability={point.probability:.1%}, return={point.total_return:+.2%}"
+        for point in getattr(candidate, "scenario_distribution")
+    )
+    assessments.append(ForwardDimensionAssessment(
+        dimension=ForwardDecisionDimension.PATH_RISK,
+        availability=EvidenceAvailability.AVAILABLE,
+        summary=f"Canonical candidate distribution spans bear/base/bull outcomes with expected downside {float(getattr(candidate, 'expected_downside')):+.2%} over {int(getattr(candidate, 'decision_horizon_days'))} days",
+        confidence=evidence_quality,
+        evidence=scenario_evidence,
+        contradictory_evidence=tuple(getattr(candidate, "contradictory_evidence", ()) or ()),
+        assumptions=tuple(getattr(candidate, "critical_assumptions", ()) or ()),
+        risks=tuple(getattr(candidate, "key_risks", ()) or ()),
+        change_conditions=tuple(getattr(candidate, "invalidation_conditions", ()) or ()),
+        evidence_identifiers=candidate_ids,
+    ))
+    assessments.append(ForwardDimensionAssessment(
+        dimension=ForwardDecisionDimension.PORTFOLIO_CONTEXT,
+        availability=EvidenceAvailability.PARTIAL,
+        summary=f"Pre-committee edge versus governed opportunity-cost baseline is {float(getattr(candidate, 'opportunity_edge')):+.2%}; current weight {float(getattr(candidate, 'current_portfolio_weight')):.2%}. Final best-alternative comparison remains downstream.",
+        confidence=evidence_quality,
+        evidence=(f"Net expected return={float(getattr(candidate, 'net_expected_return')):+.2%}", f"Opportunity-cost return={float(getattr(candidate, 'opportunity_cost_return')):+.2%}"),
+        assumptions=("Final portfolio competition and constraints remain authoritative downstream",),
+        risks=("An attractive standalone candidate can still be inferior to another use of portfolio capital",),
+        change_conditions=("Reassess after changes in opportunity cost, holdings, cash hurdle, or competing candidates",),
+        evidence_identifiers=candidate_ids,
+    ))
+
+    timing = DecisionTiming(
+        posture=DecisionTimingPosture.NO_TIMING_EDGE,
+        rationale="No certified dated catalyst calendar is attached, so v2 does not invent a pre-event/post-event timing edge",
+        next_reassessment_at=_aware(getattr(candidate, "review_at"), field_name="candidate review_at"),
+    )
+    thesis_monitor = ThesisMonitor(
+        thesis="Governed candidate thesis: " + "; ".join(catalysts[:2]),
+        must_remain_true=tuple(getattr(candidate, "critical_assumptions", ()) or ()),
+        invalidation_conditions=tuple(getattr(candidate, "invalidation_conditions", ()) or ()),
+        monitor_evidence=tuple(getattr(candidate, "monitoring_indicators", ()) or ()),
+    )
+    return build_forward_decision_context(
+        identifier=f"forward-decision:{candidate_identifier}:{as_of.isoformat()}",
+        candidate_identifier=candidate_identifier,
+        as_of=as_of,
+        asset_class=asset_class,
+        assessments=tuple(assessments),
+        timing=timing,
+        thesis_monitor=thesis_monitor,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PredictiveMarketIntelligence:
     flow: CapitalFlowAssessment
@@ -725,6 +901,7 @@ def merge_forward_intelligence(
         trend_stage=existing.trend_stage or predictive.trend_stage,
         policy_regime=existing.policy_regime or predictive.policy_regime,
         currency_regime=existing.currency_regime or predictive.currency_regime,
+        decision_context=predictive.decision_context or existing.decision_context,
         schema_version="forward-intelligence.v2-predictive-market",
     )
 
@@ -800,6 +977,13 @@ def build_predictive_market_intelligence(
             )
         ),
     )
+    decision_context = build_predictive_forward_decision_context(
+        candidate=candidate,
+        flow=flow,
+        expectations=expectations,
+        market=enriched_market,
+        existing_forward_intelligence=existing_forward_intelligence,
+    )
     predictive_bundle = ForwardIntelligenceBundle(
         identifier=f"forward-intelligence:predictive-market:{getattr(candidate, 'identifier')}:{getattr(candidate, 'as_of').isoformat()}",
         candidate_identifier=str(getattr(candidate, "identifier")),
@@ -807,7 +991,8 @@ def build_predictive_market_intelligence(
         signals=(flow.signal, expectations.signal),
         scenarios=expectations.scenarios,
         diagnostics=tuple(dict.fromkeys((*flow.diagnostics, *expectations.diagnostics))),
-        model_versions=(CapitalFlowEngine.version, MarketExpectationsEngine.version),
+        model_versions=(CapitalFlowEngine.version, MarketExpectationsEngine.version, decision_context.schema_version),
+        decision_context=decision_context,
         schema_version="forward-intelligence.v2-predictive-market",
     )
     bundle = merge_forward_intelligence(
@@ -844,6 +1029,7 @@ __all__ = [
     "MarketExpectationsEngine",
     "MarketExpectationsObservation",
     "PredictiveMarketIntelligence",
+    "build_predictive_forward_decision_context",
     "build_predictive_market_intelligence",
     "merge_forward_intelligence",
 ]

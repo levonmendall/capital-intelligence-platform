@@ -125,8 +125,8 @@ class ForwardDimensionAssessment:
             value = getattr(self, name)
             if value is not None:
                 object.__setattr__(self, name, _text(value, field_name=name))
-        if self.availability is EvidenceAvailability.AVAILABLE and not self.evidence_identifiers:
-            raise ValueError("available forward dimensions require governed evidence identifiers")
+        if self.availability in {EvidenceAvailability.AVAILABLE, EvidenceAvailability.PARTIAL} and not self.evidence_identifiers:
+            raise ValueError("available/partial forward dimensions require governed evidence identifiers")
         if self.availability in {EvidenceAvailability.UNAVAILABLE, EvidenceAvailability.NOT_APPLICABLE}:
             if self.evidence_identifiers:
                 raise ValueError("unavailable/not-applicable dimensions cannot claim evidence identifiers")
