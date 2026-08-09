@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
 from tests.browser.test_streamlit_browser import BASELINE, live_streamlit
 
+
+ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.skipif(
     os.getenv("CAPITAL_INTELLIGENCE_BROWSER_TESTS") != "1",
@@ -19,6 +22,28 @@ def _assert_hidden_or_absent(locator) -> None:
     assert locator.count() <= 1
     if locator.count() == 1:
         assert locator.first.is_visible() is False
+
+
+def test_render_entrypoint_preserves_portfolio_refinement_contract() -> None:
+    """Keep Render on the same final Portfolio renderer as the canonical UI."""
+
+    source = (ROOT / "render_app.py").read_text(encoding="utf-8")
+    assert "import portfolio_ui_refinement" in source
+
+    main_source = source[source.index("def main() -> None:") :]
+    install_call = "portfolio_ui_refinement.install(app_impl)"
+    prepare_call = "prepare_render_surface_runtime()"
+    create_call = "create_streamlit_application("
+    assert install_call in main_source
+    assert main_source.index(install_call) < main_source.index(prepare_call)
+    assert main_source.index(prepare_call) < main_source.index(create_call)
+
+    runtime_source = source[
+        source.index("def prepare_render_surface_runtime() -> None:") :
+        source.index("def deployment_context_from_environment()")
+    ]
+    assert 'getattr(renderer, "__module__", "") != "portfolio_ui_refinement"' in runtime_source
+    assert "_portfolio_first_sync_renderer(renderer)" in runtime_source
 
 
 @pytest.mark.parametrize("viewport_name", ("desktop", "iphone"))
