@@ -42,6 +42,10 @@ from intelligence.forward_decision import (
     applicable_dimensions,
     build_forward_decision_context,
 )
+from intelligence.forward_research import (
+    ForwardResearchEvidence,
+    enrich_forward_decision_context,
+)
 
 
 def _text(value: object, *, field_name: str) -> str:
@@ -919,6 +923,7 @@ def build_predictive_market_intelligence(
     flow_observation: CapitalFlowObservation,
     market: MarketSpecialistContext,
     existing_forward_intelligence: ForwardIntelligenceBundle | None,
+    research_evidence: ForwardResearchEvidence | None = None,
 ) -> PredictiveMarketIntelligence:
     flow = CapitalFlowEngine().analyze(flow_observation)
     expectations_observation = MarketExpectationsEngine.observe(
@@ -994,6 +999,11 @@ def build_predictive_market_intelligence(
         if isinstance(candidate, CandidateDecisionRecord)
         else None
     )
+    if decision_context is not None:
+        decision_context = enrich_forward_decision_context(
+            decision_context,
+            research_evidence,
+        )
     predictive_bundle = ForwardIntelligenceBundle(
         identifier=f"forward-intelligence:predictive-market:{getattr(candidate, 'identifier')}:{getattr(candidate, 'as_of').isoformat()}",
         candidate_identifier=str(getattr(candidate, "identifier")),
@@ -1004,6 +1014,7 @@ def build_predictive_market_intelligence(
         model_versions=(
             CapitalFlowEngine.version,
             MarketExpectationsEngine.version,
+            *((research_evidence.schema_version,) if research_evidence is not None else ()),
             *((decision_context.schema_version,) if decision_context is not None else ()),
         ),
         decision_context=decision_context,
@@ -1018,6 +1029,7 @@ def build_predictive_market_intelligence(
             (
                 *flow.signal.evidence_identifiers,
                 *expectations.signal.evidence_identifiers,
+                *(research_evidence.evidence_identifiers if research_evidence is not None else ()),
             )
         )
     )
@@ -1030,6 +1042,7 @@ def build_predictive_market_intelligence(
         model_versions=(
             ("capital_flow", CapitalFlowEngine.version),
             ("market_expectations", MarketExpectationsEngine.version),
+            *(((("forward_research", research_evidence.schema_version),)) if research_evidence is not None else ()),
         ),
     )
 

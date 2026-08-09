@@ -27,6 +27,7 @@ from operations.paper_evidence_spool_concurrent import (
     collect_spooled_paper_evidence,
 )
 from providers.alpaca_paper_resilient import create_complete_alpaca_paper_client
+from providers.forward_research import build_configured_forward_research_provider
 from providers.sec_company_facts_availability import (
     install_company_facts_availability_boundary,
 )
@@ -210,12 +211,21 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
                 f"point-in-time capital-flow evidence is unavailable for {features.symbol}"
             )
         observation = _compatibility_flow_observation(features, candidate.as_of)
+    forward_research_provider = getattr(
+        _FLOW_STATE, "forward_research_provider", None
+    )
+    research_evidence = (
+        None
+        if forward_research_provider is None
+        else forward_research_provider.fetch(candidate)
+    )
     predictive = build_predictive_market_intelligence(
         candidate=candidate,
         features=features,
         flow_observation=observation,
         market=evidence.market,
         existing_forward_intelligence=evidence.forward_intelligence,
+        research_evidence=research_evidence,
     )
     persisted_forward = predictive.forward_intelligence
     if len(persisted_forward.model_versions) > 1:
@@ -354,12 +364,16 @@ def _company_candidate_and_evidence(instrument, features, *args, **kwargs):
 def build_paper_evidence(*args, **kwargs):
     _synchronize_runtime_bindings()
     _FLOW_STATE.observations = {}
+    _FLOW_STATE.forward_research_provider = (
+        build_configured_forward_research_provider()
+    )
     _FLOW_STATE.production_build = True
     try:
         return _ORIGINAL_BUILD_PAPER_EVIDENCE(*args, **kwargs)
     finally:
         _FLOW_STATE.production_build = False
         _FLOW_STATE.observations = {}
+        _FLOW_STATE.forward_research_provider = None
 
 
 _implementation._default_probe = _default_probe
