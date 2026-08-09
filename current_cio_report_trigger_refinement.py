@@ -50,7 +50,7 @@ div[data-testid="stExpander"]:has(.portfolio-cio-report-marker) summary:focus-vi
     }
 
     div[data-testid="stExpander"]:has(.portfolio-cio-report-marker) summary p::after {
-        font-size: .62rem;
+        font-size: .62rem !important;
     }
 }
 </style>
@@ -254,11 +254,15 @@ def install(portfolio_first: ModuleType) -> None:
     # this isolated trigger intentionally use a smaller fake module, so keep
     # their scope unchanged while attaching the dedicated route in the app.
     if hasattr(portfolio_first, "_capital_structure"):
+        import cio_report_canonical_export_enrichment
         import cio_report_detail_runtime
         import cio_report_session_navigation_runtime
 
         cio_report_detail_runtime.install(portfolio_first)
         cio_report_session_navigation_runtime.install(cio_report_detail_runtime)
+        cio_report_canonical_export_enrichment.install(
+            cio_report_session_navigation_runtime
+        )
 
 
 __all__ = ["install", "_current_report_title"]
