@@ -353,6 +353,7 @@ class PaperEvidenceBuildResult:
     holding_evidence: tuple[ProductionHoldingEvidence, ...]
     exclusions: tuple[tuple[str, tuple[str, ...]], ...]
     macro: MacroSpecialistContext
+    holding_marks: tuple[tuple[str, float], ...] = ()
 
     @property
     def candidate_evidence_by_identifier(self) -> dict[str, ProductionCandidateEvidence]:
@@ -1710,12 +1711,17 @@ def build_paper_evidence(
                 )
             )
     holding_evidence = tuple(holding_values)
+    holding_marks = tuple(
+        (position.symbol, features_by_symbol[position.symbol].current_price)
+        for position in portfolio.positions
+    )
     return PaperEvidenceBuildResult(
         candidates=tuple(candidates),
         candidate_evidence=tuple(candidate_evidence),
         holding_evidence=holding_evidence,
         exclusions=tuple(exclusions),
         macro=macro,
+        holding_marks=holding_marks,
     )
 
 

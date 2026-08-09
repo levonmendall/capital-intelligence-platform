@@ -299,10 +299,53 @@ def _tentative_portfolio(
 
 
 def _mark_portfolio(snapshot, build_result, *, decision_as_of: datetime):
-    prices = {
+    candidate_prices = {
         item.instrument.symbol: item.current_price
         for item in build_result.candidates
     }
+    canonical_symbols = {position.symbol for position in snapshot.positions}
+    raw_holding_marks = getattr(build_result, "holding_marks", ())
+    holding_prices: dict[str, float] = {}
+    try:
+        for item in raw_holding_marks:
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise TypeError("holding mark entries must be (symbol, price) pairs")
+            symbol, raw_price = item
+            normalized_symbol = str(symbol).strip().upper()
+            if not normalized_symbol or isinstance(raw_price, bool):
+                raise TypeError("holding mark symbol and price are invalid")
+            price = float(raw_price)
+            if not isfinite(price) or price <= 0.0:
+                raise ValueError("holding mark prices must be finite and positive")
+            if normalized_symbol in holding_prices:
+                raise ValueError("holding mark symbols must be unique")
+            holding_prices[normalized_symbol] = price
+    except (TypeError, ValueError) as error:
+        raise ProductionPaperEvidenceError(
+            f"certified holding marks are invalid: {error}"
+        ) from error
+
+    unexpected = sorted(set(holding_prices) - canonical_symbols)
+    if unexpected:
+        raise ProductionPaperEvidenceError(
+            "certified holding marks include non-held instruments: "
+            f"{unexpected}"
+        )
+    conflicting = sorted(
+        symbol
+        for symbol in canonical_symbols
+        if symbol in candidate_prices
+        and symbol in holding_prices
+        and candidate_prices[symbol] != holding_prices[symbol]
+    )
+    if conflicting:
+        raise ProductionPaperEvidenceError(
+            "candidate and mandatory holding marks disagree for canonical holdings: "
+            f"{conflicting}"
+        )
+
+    prices = dict(candidate_prices)
+    prices.update(holding_prices)
     missing = sorted(
         position.symbol
         for position in snapshot.positions
