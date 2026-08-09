@@ -12,13 +12,13 @@ from screening.orchestration import (
     FullUniverseScreeningPublication,
     FullUniverseScreeningRun,
     InstrumentScreeningResult,
-    SQLiteFullUniverseScreeningStore,
     ScreeningDisposition,
     ScreeningEvent,
     ScreeningEventType,
     UniverseMetricsProvider,
     candidate_from_payload,
 )
+from screening.resilient_store import SQLiteFullUniverseScreeningStore
 
 __all__ = [
     "CandidateScreeningDecision",
