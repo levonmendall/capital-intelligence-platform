@@ -154,6 +154,10 @@ class PersistentCashCycleDiagnostic:
     contributing_reasons: tuple[CashNoActionReason, ...]
     observations: tuple[CandidateFunnelObservation, ...]
     policy_versions: tuple[str, ...]
+    decision_eligible_ratio: float = 0.0
+    specialist_review_ratio: float = 0.0
+    capital_deployment_review_required: bool = False
+    capital_deployment_review_reason: str | None = None
     schema_version: str = "persistent-cash-diagnostic.v1"
 
     def to_dict(self) -> dict[str, Any]:
@@ -172,6 +176,13 @@ class PersistentCashCycleDiagnostic:
             "contributing_reasons": [item.value for item in self.contributing_reasons],
             "observations": [item.to_dict() for item in self.observations],
             "policy_versions": list(self.policy_versions),
+            "capital_deployment_review": {
+                "decision_eligible_ratio": self.decision_eligible_ratio,
+                "specialist_review_ratio": self.specialist_review_ratio,
+                "required": self.capital_deployment_review_required,
+                "reason": self.capital_deployment_review_reason,
+                "trade_forcing_authority": False,
+            },
             "authority": {
                 "diagnostic_only": True,
                 "cio_authority_changed": False,
@@ -229,6 +240,57 @@ def _decision_reasons(decision: CIODecision) -> tuple[CashNoActionReason, ...]:
     if decision.action in {CIOAction.HOLD, CIOAction.NO_MATERIAL_CHANGE}:
         reasons.append(CashNoActionReason.NO_ATTRACTIVE_OPPORTUNITY)
     return _ordered_unique(reasons)
+
+
+def _capital_deployment_review(
+    *,
+    cash_weight: float,
+    eligible_count: int,
+    decision_eligible_count: int,
+    specialist_review_count: int,
+) -> tuple[float, float, bool, str | None]:
+    """Flag suspicious high-cash funnel compression without authorizing a trade."""
+
+    decision_ratio = (
+        0.0 if eligible_count <= 0 else decision_eligible_count / eligible_count
+    )
+    specialist_ratio = (
+        0.0
+        if decision_eligible_count <= 0
+        else specialist_review_count / decision_eligible_count
+    )
+    decision_ratio = round(decision_ratio, 8)
+    specialist_ratio = round(specialist_ratio, 8)
+    if cash_weight < 0.80:
+        return decision_ratio, specialist_ratio, False, None
+
+    if eligible_count >= 10 and decision_eligible_count < 3:
+        return (
+            decision_ratio,
+            specialist_ratio,
+            True,
+            f"Cash remains {cash_weight:.1%} while only {decision_eligible_count} of "
+            f"{eligible_count} eligible instruments became decision-eligible; review discovery "
+            "and research-admission breadth before concluding that cash is the best use of capital.",
+        )
+
+    minimum_specialist_reviews = min(5, max(1, (decision_eligible_count + 9) // 10))
+    if decision_eligible_count >= 3 and specialist_review_count < minimum_specialist_reviews:
+        return (
+            decision_ratio,
+            specialist_ratio,
+            True,
+            f"Cash remains {cash_weight:.1%} while only {specialist_review_count} of "
+            f"{decision_eligible_count} decision-eligible candidates reached six-specialist review; "
+            "review research qualification and funnel breadth before attributing cash to opportunity scarcity.",
+        )
+
+    return (
+        decision_ratio,
+        specialist_ratio,
+        False,
+        "High cash is observable, but the governed research funnel is broad enough that no narrow-funnel review is required.",
+    )
 
 
 def build_persistent_cash_diagnostic(
@@ -362,6 +424,21 @@ def build_persistent_cash_diagnostic(
         for stage in _STAGE_ORDER
     )
     target_cash = None if construction is None else construction.target_cash_weight
+    effective_cash_weight = (
+        cash_weight_before if target_cash is None else target_cash
+    )
+    count_by_stage = dict(counts)
+    (
+        decision_eligible_ratio,
+        specialist_review_ratio,
+        capital_deployment_review_required,
+        capital_deployment_review_reason,
+    ) = _capital_deployment_review(
+        cash_weight=effective_cash_weight,
+        eligible_count=count_by_stage.get(FunnelStage.ELIGIBLE_UNIVERSE, 0),
+        decision_eligible_count=count_by_stage.get(FunnelStage.DECISION_ELIGIBLE, 0),
+        specialist_review_count=count_by_stage.get(FunnelStage.SIX_SPECIALIST_ANALYSIS, 0),
+    )
     stayed_cash = cash_weight_before >= 0.999999 and (
         target_cash is None or target_cash >= 0.999999
     )
@@ -397,6 +474,10 @@ def build_persistent_cash_diagnostic(
         contributing_reasons=cash_reasons if stayed_cash else (),
         observations=tuple(observations),
         policy_versions=policy_versions,
+        decision_eligible_ratio=decision_eligible_ratio,
+        specialist_review_ratio=specialist_review_ratio,
+        capital_deployment_review_required=capital_deployment_review_required,
+        capital_deployment_review_reason=capital_deployment_review_reason,
     )
 
 
