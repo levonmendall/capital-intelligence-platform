@@ -145,6 +145,18 @@ def _funnel(
         if not isinstance(briefing, Mapping)
         else briefing.get("decision_identifier")
     )
+    raw_decision_count = (
+        None
+        if not isinstance(briefing, Mapping)
+        else briefing.get("cio_decision_count")
+    )
+    cio_decision_records = (
+        raw_decision_count
+        if isinstance(raw_decision_count, int)
+        and not isinstance(raw_decision_count, bool)
+        and raw_decision_count >= 0
+        else (1 if decision_identifier else 0)
+    )
     trades = (
         ()
         if not isinstance(construction, Mapping)
@@ -159,7 +171,7 @@ def _funnel(
         "eligible_instruments": eligible,
         "candidate_records": candidates,
         "qualified_for_specialists": qualified,
-        "cio_decision_records": 1 if decision_identifier else 0,
+        "cio_decision_records": cio_decision_records,
         "construction_available": construction is not None,
         "proposed_trade_count": len(trades),
         "nonzero_final_target_count": len(target_weights),
