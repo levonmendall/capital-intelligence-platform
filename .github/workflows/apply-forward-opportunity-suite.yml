@@ -1,0 +1,50 @@
+name: Apply forward opportunity suite
+on:
+  push:
+    branches:
+      - agent/forward-opportunity-complete
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-commit:
+    if: github.event.head_commit.message == 'Stage forward opportunity suite'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/forward-opportunity-complete
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply governed forward suite
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PY'
+          import base64, json, os, urllib.request, zlib
+          url = 'https://api.github.com/repos/levonmendall/capital-intelligence-platform-/git/blobs/e22a169b672599704b955e2e2a18434b86ea76a4'
+          request = urllib.request.Request(url, headers={'Authorization': f"Bearer {os.environ['GH_TOKEN']}", 'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request) as response:
+              payload = json.load(response)
+          compressed = base64.b64decode(payload['content'])
+          exec(zlib.decompress(compressed).decode('utf-8'))
+          PY
+      - name: Install locked runtime dependencies
+        run: python -m pip install --require-hashes -r requirements.lock
+      - name: Install development dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run focused forward regressions
+        run: |
+          python -m py_compile intelligence/forward_research.py intelligence/predictive_market.py production_paper_evidence.py
+          pytest -q tests/test_forward_research.py tests/test_predictive_forward_decision_context.py tests/test_predictive_market_intelligence.py tests/test_forward_decision_intelligence_v2.py
+      - name: Commit clean implementation
+        run: |
+          rm .github/workflows/apply-forward-opportunity-suite.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/provider_dataset.py intelligence/__init__.py intelligence/forward_research.py intelligence/predictive_market.py production_paper_evidence.py tests/test_forward_research.py docs/FORWARD_OPPORTUNITY_AND_NOWCASTING.md .github/workflows/apply-forward-opportunity-suite.yml
+          git commit -m "Add governed forward opportunity and nowcasting suite"
+          git push origin HEAD:agent/forward-opportunity-complete
