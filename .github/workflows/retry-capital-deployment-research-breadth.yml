@@ -1,0 +1,38 @@
+name: Retry capital deployment correction with test dependency
+
+on:
+  push:
+    branches:
+      - fix/capital-deployment-research-breadth
+    paths:
+      - .github/workflows/retry-capital-deployment-research-breadth.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair-validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add pytest to one-shot validator
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/apply-capital-deployment-research-breadth.yml')
+          text = path.read_text()
+          old = '        run: |\n          python -m compileall -q opportunity/engine.py'
+          new = '        run: |\n          python -m pip install -q pytest\n          python -m compileall -q opportunity/engine.py'
+          if text.count(old) != 1:
+              raise SystemExit('validator insertion point is not unique')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          rm .github/workflows/retry-capital-deployment-research-breadth.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/apply-capital-deployment-research-breadth.yml .github/workflows/retry-capital-deployment-research-breadth.yml
+          git commit -m "Fix capital deployment patch validator"
+          git push origin HEAD:fix/capital-deployment-research-breadth
