@@ -84,16 +84,21 @@ def test_today_is_a_compact_responsive_investor_briefing(
                     'div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark)'
                 );
                 const navBox = nav ? nav.getBoundingClientRect() : null;
+                const brand = nav ? nav.querySelector('.nav-brand-mark') : null;
+                const brandBox = brand ? brand.getBoundingClientRect() : null;
                 return {
                     viewportWidth: window.innerWidth,
                     documentWidth: document.documentElement.scrollWidth,
                     regions,
                     navHeight: navBox ? navBox.height : null,
-                    brandVisible: !!document.querySelector(
-                        'div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) .nav-brand-mark'
-                    ) && getComputedStyle(document.querySelector(
-                        'div[data-testid="stHorizontalBlock"]:has(.nav-brand-mark) .nav-brand-mark'
-                    )).display !== 'none'
+                    brandVisible: Boolean(
+                        brand &&
+                        brand.getClientRects().length > 0 &&
+                        brandBox &&
+                        brandBox.width > 1 &&
+                        brandBox.height > 1 &&
+                        getComputedStyle(brand).visibility !== 'hidden'
+                    )
                 };
             }"""
         )
