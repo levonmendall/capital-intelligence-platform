@@ -67,6 +67,12 @@ The v2 context only adds evidence, assumptions, risks, change conditions, limita
 
 A common packet is retained across equities, ETFs, fixed income, commodities, FX, crypto, real estate, futures, options, volatility, alternatives and cash equivalents, but irrelevant dimensions are explicitly `not_applicable`. This prevents an FX candidate from failing because it has no earnings date while still requiring relevant regime, expectations, derivatives, positioning, cross-asset, path-risk and portfolio evidence.
 
+Predictive evidence is filtered through this applicability matrix before canonical context construction. An irrelevant generic observation therefore cannot exclude an otherwise governed candidate; for example, a cash equivalent may carry general catalyst text upstream while `catalysts_events`, positioning, microstructure and reflexivity remain `not_applicable` in its canonical v2 packet.
+
+## Numeric compatibility
+
+Scenario probabilities remain normalized by the existing reconciliation policy. Because persisted `PayoffDistributionPoint` probabilities are rounded to eight decimals, a derived sum of successful outcomes is bounded to `[0, 1]` after summation to prevent floating-point artifacts such as `1.00000001` from violating the probability contract. This is a numeric integrity guard only; it does not change scenario weights, qualification thresholds, or investment authority.
+
 ## Production persistence
 
 `ForwardDecisionContext` is serialized inside the existing `ForwardIntelligenceBundle`. Its evidence identifiers are included in the bundle lineage so production storage, replay and historical evaluation preserve the exact information available at the decision timestamp.
