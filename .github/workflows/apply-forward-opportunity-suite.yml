@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   apply-test-commit:
-    if: github.event.head_commit.message == 'Handle forward suite blob compression'
+    if: github.event.head_commit.message == 'Decode forward suite staging blob'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,12 +19,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install temporary blob decoders
+        run: python -m pip install --quiet brotli zstandard lz4
       - name: Apply governed forward suite
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python - <<'PY'
-          import base64, bz2, gzip, json, lzma, os, urllib.request, zlib
+          import base64, brotli, bz2, gzip, json, lzma, os, urllib.request, zlib, zstandard
+          import lz4.frame
           url = 'https://api.github.com/repos/levonmendall/capital-intelligence-platform-/git/blobs/e22a169b672599704b955e2e2a18434b86ea76a4'
           request = urllib.request.Request(url, headers={'Authorization': f"Bearer {os.environ['GH_TOKEN']}", 'Accept': 'application/vnd.github.raw+json'})
           with urllib.request.urlopen(request) as response:
@@ -33,21 +36,29 @@ jobs:
               payload = json.loads(data.decode('utf-8'))
               data = base64.b64decode(payload['content'])
           attempts = (
-              lambda value: zlib.decompress(value),
-              lambda value: zlib.decompress(value, -15),
-              gzip.decompress,
-              bz2.decompress,
-              lzma.decompress,
+              ('zlib', lambda value: zlib.decompress(value)),
+              ('raw-deflate', lambda value: zlib.decompress(value, -15)),
+              ('gzip', gzip.decompress),
+              ('bz2', bz2.decompress),
+              ('lzma', lzma.decompress),
+              ('brotli', brotli.decompress),
+              ('zstd', lambda value: zstandard.ZstdDecompressor().decompress(value)),
+              ('lz4', lz4.frame.decompress),
           )
           script = None
-          for decoder in attempts:
+          codec = None
+          for name, decoder in attempts:
               try:
-                  script = decoder(data).decode('utf-8')
+                  candidate = decoder(data).decode('utf-8')
+                  compile(candidate, '<forward-suite-patch>', 'exec')
+                  script = candidate
+                  codec = name
                   break
               except Exception:
                   pass
           if script is None:
               raise RuntimeError(f'unsupported patch blob encoding; first_bytes={data[:12].hex()}')
+          print(f'decoded staging patch with {codec}')
           exec(script)
           PY
       - name: Install locked runtime dependencies
