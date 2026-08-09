@@ -23,7 +23,7 @@ BASELINE = json.loads(
 )
 SURFACE_BODY_TEXT = {
     "Today": "Investment world today",
-    "Environment": "Economy and investing",
+    "Environment": "Current environment",
     "Portfolio": "Current holdings",
     "History": "Outcome status",
 }
@@ -259,9 +259,10 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
             _assert_surface_body(page, surface)
             _assert_public_boundary(page)
             if surface == "Environment":
-                health = page.locator('.information-health[role="status"]')
-                health.wait_for(state="visible")
-                assert health.count() == 1
+                # Healthy Environment freshness is intentionally demoted into the
+                # compact source chips and collapsed source detail. A prominent
+                # information-health strip should not consume the primary surface.
+                assert page.locator('.information-health[role="status"]').count() == 0
             if surface == "Today":
                 page.get_by_text(RETAINED_STORY_TITLE, exact=True).wait_for()
                 page.get_by_text(

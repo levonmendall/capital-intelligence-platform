@@ -19,6 +19,8 @@ from typing import Any, Callable, Sequence
 
 import streamlit as st
 
+import environment_mobile_clarity_runtime
+
 
 _LOGGER = logging.getLogger("capital_intelligence.surface_routes")
 _ACTIVE_SURFACE_KEY = "_capital_intelligence_active_primary_surface"
@@ -138,6 +140,12 @@ def install(
     guarded full-page bridge and consumes the explicit target attributes.
     """
 
+    # This boundary runs after the older Environment storytelling/refinement
+    # stack, making it the safest place to establish one final compact renderer
+    # without changing evidence or decision authority. Minimal test/read adapters
+    # intentionally omit the full story styling API and retain their own renderer.
+    if hasattr(story_ui, "_styles"):
+        environment_mobile_clarity_runtime.install(story_ui)
     _install_navigation_tracking(app_impl)
     _guard_story_renderer(story_ui, "_render_today", "Today")
     _guard_story_renderer(story_ui, "_render_environment", "Environment")
