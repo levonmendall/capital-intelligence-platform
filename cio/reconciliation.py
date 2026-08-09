@@ -286,10 +286,16 @@ class SpecialistReturnReconciler:
             alternative,
             horizon_days=candidate.decision_horizon_days,
         )
-        success_probability = sum(
-            item.probability
-            for item in outcome_tuple
-            if item.total_return - implementation_cost > horizon_alternative
+        success_probability = max(
+            0.0,
+            min(
+                1.0,
+                sum(
+                    item.probability
+                    for item in outcome_tuple
+                    if item.total_return - implementation_cost > horizon_alternative
+                ),
+            ),
         )
         evidence_origins = {
             *baseline_origins,

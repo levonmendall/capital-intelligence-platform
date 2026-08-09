@@ -204,6 +204,9 @@ class RepositoryProductionCanonicalCIOContextProvider(_StoredContextProvider):
                 asset_valuation=(
                     candidate_evidence[candidate_identifier].asset_valuation
                 ),
+                forward_intelligence=(
+                    candidate_evidence[candidate_identifier].forward_intelligence
+                ),
             )
             for candidate_identifier in qualified_ids
         )

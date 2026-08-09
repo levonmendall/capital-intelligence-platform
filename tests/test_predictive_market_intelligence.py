@@ -198,6 +198,7 @@ def test_predictive_signals_enrich_existing_market_and_forward_contract() -> Non
 
     assert result.market.positioning != 0.0
     assert "predictive-market" in result.forward_intelligence.identifier
+    assert result.forward_intelligence.decision_context is None
     assert {signal.name for signal in result.forward_intelligence.signals} == {
         f"{result.flow.state.value.replace('_', ' ')} capital-flow proxy",
         "market expectations gap",

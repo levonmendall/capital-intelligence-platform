@@ -20,6 +20,7 @@ from cio.models import (
     SpecialistPosition,
     SpecialistRole,
 )
+from intelligence.forward_decision import ForwardDecisionContext
 
 
 def _text(value: object, *, field_name: str) -> str:
@@ -331,7 +332,8 @@ class ForwardIntelligenceBundle:
     trend_stage: TrendStage | None = None
     policy_regime: PolicyRegime | None = None
     currency_regime: CurrencyRegime | None = None
-    schema_version: str = "forward-intelligence.v1"
+    decision_context: ForwardDecisionContext | None = None
+    schema_version: str = "forward-intelligence.v2"
 
     def __post_init__(self) -> None:
         for field_name in ("identifier", "candidate_identifier", "schema_version"):
@@ -373,14 +375,27 @@ class ForwardIntelligenceBundle:
             value = getattr(self, field_name)
             if value is not None and not isinstance(value, enum_type):
                 raise TypeError(f"{field_name} must be {enum_type.__name__} or None")
+        if self.decision_context is not None:
+            if not isinstance(self.decision_context, ForwardDecisionContext):
+                raise TypeError("decision_context must be ForwardDecisionContext or None")
+            if self.decision_context.candidate_identifier != self.candidate_identifier:
+                raise ValueError("decision context does not match candidate")
+            if self.decision_context.as_of != self.as_of:
+                raise ValueError("decision context must share bundle as_of")
 
     @property
     def evidence_identifiers(self) -> tuple[str, ...]:
+        context_identifiers = (
+            () if self.decision_context is None else self.decision_context.evidence_identifiers
+        )
         return tuple(
             dict.fromkeys(
-                identifier
-                for item in self.signals
-                for identifier in item.evidence_identifiers
+                tuple(
+                    identifier
+                    for item in self.signals
+                    for identifier in item.evidence_identifiers
+                )
+                + context_identifiers
             )
         )
 
@@ -409,6 +424,8 @@ class ForwardIntelligenceBundle:
         )
 
     def enrich_analysis(self, analysis: SpecialistAnalysis) -> SpecialistAnalysis:
+        if self.decision_context is not None:
+            analysis = self.decision_context.enrich_analysis(analysis)
         channel = {
             SpecialistRole.MACRO_ECONOMIC: "macro",
             SpecialistRole.MARKET: "market",
@@ -567,6 +584,9 @@ class ForwardIntelligenceBundle:
             "currency_regime": (
                 None if self.currency_regime is None else self.currency_regime.value
             ),
+            "decision_context": (
+                None if self.decision_context is None else self.decision_context.to_dict()
+            ),
             "schema_version": self.schema_version,
         }
 
@@ -601,6 +621,11 @@ class ForwardIntelligenceBundle:
                 None
                 if payload.get("currency_regime") is None
                 else CurrencyRegime(str(payload["currency_regime"]))
+            ),
+            decision_context=(
+                None
+                if payload.get("decision_context") is None
+                else ForwardDecisionContext.from_dict(dict(payload["decision_context"]))
             ),
             schema_version=str(payload.get("schema_version", "forward-intelligence.v1")),
         )
@@ -1390,6 +1415,7 @@ def build_forward_intelligence_bundle(
     theme: ThemeAssessment | None = None,
     monetary: MonetaryAssessment | None = None,
     currency: CurrencyAssessment | None = None,
+    decision_context: ForwardDecisionContext | None = None,
 ) -> ForwardIntelligenceBundle:
     signals = tuple(
         item
@@ -1436,6 +1462,8 @@ def build_forward_intelligence_bundle(
             if assessment is not None
         )
     )
+    if decision_context is not None:
+        versions = tuple(dict.fromkeys((*versions, decision_context.schema_version)))
     return ForwardIntelligenceBundle(
         identifier=identifier,
         candidate_identifier=candidate_identifier,
@@ -1448,6 +1476,7 @@ def build_forward_intelligence_bundle(
         trend_stage=None if trend is None else trend.stage,
         policy_regime=None if monetary is None else monetary.regime,
         currency_regime=None if currency is None else currency.regime,
+        decision_context=decision_context,
     )
 
 

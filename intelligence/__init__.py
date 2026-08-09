@@ -323,6 +323,18 @@ _EXPORTS = {
     "TrendAssessment": ("intelligence.forward", "TrendAssessment"),
     "TrendStage": ("intelligence.forward", "TrendStage"),
     "build_forward_intelligence_bundle": ("intelligence.forward", "build_forward_intelligence_bundle"),
+    "CatalystEvent": ("intelligence.forward_decision", "CatalystEvent"),
+    "DecisionTiming": ("intelligence.forward_decision", "DecisionTiming"),
+    "DecisionTimingPosture": ("intelligence.forward_decision", "DecisionTimingPosture"),
+    "EvidenceAvailability": ("intelligence.forward_decision", "EvidenceAvailability"),
+    "EventScenario": ("intelligence.forward_decision", "EventScenario"),
+    "ForwardDecisionContext": ("intelligence.forward_decision", "ForwardDecisionContext"),
+    "ForwardDecisionDimension": ("intelligence.forward_decision", "ForwardDecisionDimension"),
+    "ForwardDimensionAssessment": ("intelligence.forward_decision", "ForwardDimensionAssessment"),
+    "ReturnDistribution": ("intelligence.forward_decision", "ReturnDistribution"),
+    "ThesisMonitor": ("intelligence.forward_decision", "ThesisMonitor"),
+    "applicable_dimensions": ("intelligence.forward_decision", "applicable_dimensions"),
+    "build_forward_decision_context": ("intelligence.forward_decision", "build_forward_decision_context"),
 }
 
 __all__ = list(_EXPORTS)
