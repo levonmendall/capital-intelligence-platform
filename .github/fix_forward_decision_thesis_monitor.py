@@ -13,6 +13,16 @@ if text.count(old_return) != 1:
     raise SystemExit("forward-decision applicability patch target mismatch")
 path.write_text(text.replace(old_return, new_return, 1))
 
+reconciliation_path = Path("cio/reconciliation.py")
+reconciliation = reconciliation_path.read_text()
+old_probability = '''        success_probability = sum(\n            item.probability\n            for item in outcome_tuple\n            if item.total_return - implementation_cost > horizon_alternative\n        )\n'''
+new_probability = '''        success_probability = max(\n            0.0,\n            min(\n                1.0,\n                sum(\n                    item.probability\n                    for item in outcome_tuple\n                    if item.total_return - implementation_cost > horizon_alternative\n                ),\n            ),\n        )\n'''
+if reconciliation.count(old_probability) != 1:
+    raise SystemExit("reconciliation probability patch target mismatch")
+reconciliation_path.write_text(
+    reconciliation.replace(old_probability, new_probability, 1)
+)
+
 test_path = Path("tests/test_predictive_forward_decision_context.py")
 test = test_path.read_text()
 if "from dataclasses import replace\n" not in test:
