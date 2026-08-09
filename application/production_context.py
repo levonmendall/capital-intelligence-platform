@@ -1320,6 +1320,7 @@ def _market_to_dict(value: MarketSpecialistContext) -> dict[str, Any]:
         "evidence": list(value.evidence),
         "risks": list(value.risks),
         "entry_conditions": list(value.entry_conditions),
+        "evidence_identifiers": list(value.evidence_identifiers),
     }
 
 
@@ -1338,6 +1339,9 @@ def _market_from_dict(payload: Mapping[str, Any]) -> MarketSpecialistContext:
         risks=tuple(str(item) for item in payload["risks"]),
         entry_conditions=tuple(
             str(item) for item in payload["entry_conditions"]
+        ),
+        evidence_identifiers=tuple(
+            str(item) for item in payload.get("evidence_identifiers", ())
         ),
     )
 
