@@ -1,0 +1,130 @@
+name: Apply capital deployment research breadth correction
+
+on:
+  push:
+    branches:
+      - fix/capital-deployment-research-breadth
+    paths:
+      - .github/workflows/apply-capital-deployment-research-breadth.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply focused corrections
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one replacement target, found {count}")
+              target.write_text(text.replace(old, new, 1))
+
+          # 1. Make the opportunity engine a research-attention gate for ordinary
+          # economic soft failures. Final CIO allocation standards remain unchanged.
+          replace_once(
+              "opportunity/engine.py",
+              '    version: str = "opportunity-qualification.v7-economic-consistency"\n',
+              '    version: str = "opportunity-qualification.v8-research-breadth"\n',
+          )
+          replace_once(
+              "opportunity/engine.py",
+              '    alternative_uncertainty_penalty: float = 0.0075\n    alternative_liquidity_penalty: float = 0.005\n\n    expected_return_weight: float = 0.18\n',
+              '    alternative_uncertainty_penalty: float = 0.0075\n    alternative_liquidity_penalty: float = 0.005\n\n    # Research-attention thresholds are intentionally broader than the final\n    # allocation standards. They may route a candidate to the six specialists,\n    # but they never authorize positive capital.\n    research_return_shortfall_tolerance: float = 0.03\n    research_robust_edge_shortfall_tolerance: float = 0.03\n    minimum_research_probability_of_success: float = 0.30\n    minimum_research_net_expected_return: float = -0.02\n\n    expected_return_weight: float = 0.18\n',
+          )
+          replace_once(
+              "opportunity/engine.py",
+              '            "minimum_evidence_dimension",\n            "minimum_liquidity_score",\n        ):\n',
+              '            "minimum_evidence_dimension",\n            "minimum_liquidity_score",\n            "minimum_research_probability_of_success",\n        ):\n',
+          )
+          replace_once(
+              "opportunity/engine.py",
+              '        if self.alternative_liquidity_penalty < 0.0:\n            raise ValueError("alternative_liquidity_penalty cannot be negative")\n        weights = self.weights\n',
+              '        if self.alternative_liquidity_penalty < 0.0:\n            raise ValueError("alternative_liquidity_penalty cannot be negative")\n        for field_name in (\n            "research_return_shortfall_tolerance",\n            "research_robust_edge_shortfall_tolerance",\n        ):\n            if float(getattr(self, field_name)) < 0.0:\n                raise ValueError(f"{field_name} cannot be negative")\n        if self.minimum_research_net_expected_return <= -1.0:\n            raise ValueError("minimum_research_net_expected_return must exceed -100%")\n        weights = self.weights\n',
+          )
+          replace_once(
+              "opportunity/engine.py",
+              '''            exploratory_viable = (\n                robustness.robust_edge > -0.01\n                and robustness.effective_probability_of_success >= 0.40\n            )\n            if not minimally_positive and not exploratory_viable:\n''',
+              '''            research_viable = (\n                robustness.evidence_adjusted_return\n                >= effective_opportunity_cost\n                - self.policy.research_return_shortfall_tolerance\n                and robustness.robust_edge\n                >= -self.policy.research_robust_edge_shortfall_tolerance\n                and robustness.effective_probability_of_success\n                >= self.policy.minimum_research_probability_of_success\n                and candidate.net_expected_return\n                >= self.policy.minimum_research_net_expected_return\n            )\n            if not minimally_positive and not research_viable:\n''',
+          )
+
+          # 2. Discovery nominates instruments; it must not impose tiny final-size
+          # ceilings that pre-empt the CIO policy matrix and construction engine.
+          replace_once(
+              "operations/comprehensive_market_discovery_legacy.py",
+              '    version: str = "comprehensive-liquid-market-discovery.v1"\n',
+              '    version: str = "comprehensive-liquid-market-discovery.v2-sizing-boundary"\n',
+          )
+          for old, new in (
+              ('    maximum_global_equity_weight: float = 0.03\n', '    maximum_global_equity_weight: float = 0.10\n'),
+              ('    maximum_fx_weight: float = 0.05\n', '    maximum_fx_weight: float = 0.10\n'),
+              ('    maximum_crypto_weight: float = 0.025\n', '    maximum_crypto_weight: float = 0.05\n'),
+              ('    maximum_bond_weight: float = 0.05\n', '    maximum_bond_weight: float = 0.10\n'),
+              ('    maximum_option_weight: float = 0.01\n', '    maximum_option_weight: float = 0.03\n'),
+          ):
+              replace_once("operations/comprehensive_market_discovery_legacy.py", old, new)
+          replace_once(
+              "operations/comprehensive_market_discovery_legacy.py",
+              '            raise ValueError("exploratory discovery weights cannot exceed 10%")\n',
+              '            raise ValueError("discovery nomination ceilings cannot exceed the construction-safe 10% boundary")\n',
+          )
+
+          # 3. High residual cash becomes an explicit diagnostic review trigger,
+          # never a mandate to trade or a substitute for CIO qualification.
+          replace_once(
+              "evaluation/persistent_cash.py",
+              '    observations: tuple[CandidateFunnelObservation, ...]\n    policy_versions: tuple[str, ...]\n    schema_version: str = "persistent-cash-diagnostic.v1"\n',
+              '    observations: tuple[CandidateFunnelObservation, ...]\n    policy_versions: tuple[str, ...]\n    decision_eligible_ratio: float = 0.0\n    specialist_review_ratio: float = 0.0\n    capital_deployment_review_required: bool = False\n    capital_deployment_review_reason: str | None = None\n    schema_version: str = "persistent-cash-diagnostic.v1"\n',
+          )
+          replace_once(
+              "evaluation/persistent_cash.py",
+              '            "policy_versions": list(self.policy_versions),\n            "authority": {\n',
+              '            "policy_versions": list(self.policy_versions),\n            "capital_deployment_review": {\n                "decision_eligible_ratio": self.decision_eligible_ratio,\n                "specialist_review_ratio": self.specialist_review_ratio,\n                "required": self.capital_deployment_review_required,\n                "reason": self.capital_deployment_review_reason,\n                "trade_forcing_authority": False,\n            },\n            "authority": {\n',
+          )
+          replace_once(
+              "evaluation/persistent_cash.py",
+              '''def build_persistent_cash_diagnostic(\n''',
+              '''def _capital_deployment_review(\n    *,\n    cash_weight: float,\n    eligible_count: int,\n    decision_eligible_count: int,\n    specialist_review_count: int,\n) -> tuple[float, float, bool, str | None]:\n    """Flag suspicious high-cash funnel compression without authorizing a trade."""\n\n    decision_ratio = (\n        0.0 if eligible_count <= 0 else decision_eligible_count / eligible_count\n    )\n    specialist_ratio = (\n        0.0\n        if decision_eligible_count <= 0\n        else specialist_review_count / decision_eligible_count\n    )\n    decision_ratio = round(decision_ratio, 8)\n    specialist_ratio = round(specialist_ratio, 8)\n    if cash_weight < 0.80:\n        return decision_ratio, specialist_ratio, False, None\n\n    if eligible_count >= 10 and decision_eligible_count < 3:\n        return (\n            decision_ratio,\n            specialist_ratio,\n            True,\n            f"Cash remains {cash_weight:.1%} while only {decision_eligible_count} of "\n            f"{eligible_count} eligible instruments became decision-eligible; review discovery "\n            "and research-admission breadth before concluding that cash is the best use of capital.",\n        )\n\n    minimum_specialist_reviews = min(5, max(1, (decision_eligible_count + 9) // 10))\n    if decision_eligible_count >= 3 and specialist_review_count < minimum_specialist_reviews:\n        return (\n            decision_ratio,\n            specialist_ratio,\n            True,\n            f"Cash remains {cash_weight:.1%} while only {specialist_review_count} of "\n            f"{decision_eligible_count} decision-eligible candidates reached six-specialist review; "\n            "review research qualification and funnel breadth before attributing cash to opportunity scarcity.",\n        )\n\n    return (\n        decision_ratio,\n        specialist_ratio,\n        False,\n        "High cash is observable, but the governed research funnel is broad enough that no narrow-funnel review is required.",\n    )\n\n\ndef build_persistent_cash_diagnostic(\n''',
+          )
+          replace_once(
+              "evaluation/persistent_cash.py",
+              '''    target_cash = None if construction is None else construction.target_cash_weight\n    stayed_cash = cash_weight_before >= 0.999999 and (\n        target_cash is None or target_cash >= 0.999999\n    )\n''',
+              '''    target_cash = None if construction is None else construction.target_cash_weight\n    effective_cash_weight = (\n        cash_weight_before if target_cash is None else target_cash\n    )\n    count_by_stage = dict(counts)\n    (\n        decision_eligible_ratio,\n        specialist_review_ratio,\n        capital_deployment_review_required,\n        capital_deployment_review_reason,\n    ) = _capital_deployment_review(\n        cash_weight=effective_cash_weight,\n        eligible_count=count_by_stage.get(FunnelStage.ELIGIBLE_UNIVERSE, 0),\n        decision_eligible_count=count_by_stage.get(FunnelStage.DECISION_ELIGIBLE, 0),\n        specialist_review_count=count_by_stage.get(FunnelStage.SIX_SPECIALIST_ANALYSIS, 0),\n    )\n    stayed_cash = cash_weight_before >= 0.999999 and (\n        target_cash is None or target_cash >= 0.999999\n    )\n''',
+          )
+          replace_once(
+              "evaluation/persistent_cash.py",
+              '''        observations=tuple(observations),\n        policy_versions=policy_versions,\n    )\n''',
+              '''        observations=tuple(observations),\n        policy_versions=policy_versions,\n        decision_eligible_ratio=decision_eligible_ratio,\n        specialist_review_ratio=specialist_review_ratio,\n        capital_deployment_review_required=capital_deployment_review_required,\n        capital_deployment_review_reason=capital_deployment_review_reason,\n    )\n''',
+          )
+
+          Path("tests/test_capital_deployment_architecture.py").write_text('''"""Regression coverage for research breadth and capital-deployment boundaries."""\n\nfrom cio import CandidateAssetClass\nfrom evaluation.persistent_cash import _capital_deployment_review\nfrom operations.comprehensive_market_discovery_legacy import (\n    ComprehensiveMarketDiscoveryPolicy,\n)\nfrom opportunity.engine import OpportunityQualificationPolicy\nfrom portfolio.construction_models import PortfolioConstructionPolicy\n\n\ndef test_research_attention_is_broader_than_final_conviction() -> None:\n    policy = OpportunityQualificationPolicy()\n\n    assert policy.research_return_shortfall_tolerance == 0.03\n    assert policy.research_robust_edge_shortfall_tolerance == 0.03\n    assert policy.minimum_research_probability_of_success == 0.30\n    assert policy.minimum_research_probability_of_success < policy.minimum_probability_of_success\n    assert policy.minimum_research_net_expected_return < policy.minimum_net_expected_return\n\n\ndef test_discovery_does_not_impose_tiny_routine_position_caps() -> None:\n    policy = ComprehensiveMarketDiscoveryPolicy()\n\n    assert policy.maximum_weight(CandidateAssetClass.INTERNATIONAL_EQUITY) == 0.10\n    assert policy.maximum_weight(CandidateAssetClass.FX) == 0.10\n    assert policy.maximum_weight(CandidateAssetClass.CRYPTO) == 0.05\n    assert policy.maximum_weight(CandidateAssetClass.FIXED_INCOME) == 0.10\n    assert policy.maximum_weight(CandidateAssetClass.OPTION) == 0.03\n    assert policy.maximum_weight(CandidateAssetClass.FUTURE) == 0.05\n    assert PortfolioConstructionPolicy().maximum_position_weight == 0.10\n\n\ndef test_high_cash_and_narrow_decision_funnel_triggers_review_only() -> None:\n    decision_ratio, specialist_ratio, required, reason = _capital_deployment_review(\n        cash_weight=0.92,\n        eligible_count=500,\n        decision_eligible_count=1,\n        specialist_review_count=0,\n    )\n\n    assert decision_ratio == 0.002\n    assert specialist_ratio == 0.0\n    assert required is True\n    assert reason is not None and "review discovery" in reason\n\n\ndef test_high_cash_and_weak_specialist_conversion_triggers_review_only() -> None:\n    _, specialist_ratio, required, reason = _capital_deployment_review(\n        cash_weight=0.88,\n        eligible_count=100,\n        decision_eligible_count=20,\n        specialist_review_count=0,\n    )\n\n    assert specialist_ratio == 0.0\n    assert required is True\n    assert reason is not None and "six-specialist review" in reason\n\n\ndef test_cash_review_never_fires_from_cash_level_alone() -> None:\n    _, _, required, reason = _capital_deployment_review(\n        cash_weight=0.60,\n        eligible_count=500,\n        decision_eligible_count=1,\n        specialist_review_count=0,\n    )\n\n    assert required is False\n    assert reason is None\n''')
+          PY
+
+      - name: Validate focused behavior
+        shell: bash
+        run: |
+          python -m compileall -q opportunity/engine.py operations/comprehensive_market_discovery_legacy.py evaluation/persistent_cash.py tests/test_capital_deployment_architecture.py
+          python -m pytest -q tests/test_capital_deployment_architecture.py tests/test_opportunity_engine.py tests/test_persistent_cash_diagnostic.py
+          git diff --check
+
+      - name: Commit source and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/apply-capital-deployment-research-breadth.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add opportunity/engine.py operations/comprehensive_market_discovery_legacy.py evaluation/persistent_cash.py tests/test_capital_deployment_architecture.py .github/workflows/apply-capital-deployment-research-breadth.yml
+          git commit -m "Broaden research funnel and restore sizing authority boundaries"
+          git push origin HEAD:fix/capital-deployment-research-breadth
