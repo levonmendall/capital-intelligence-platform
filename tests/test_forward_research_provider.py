@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 
+from cio import CandidateAssetClass
 from data.provider_dataset import ProviderDatasetType
 from intelligence.forward_decision import EvidenceAvailability, ForwardDecisionDimension, build_forward_decision_context
 from intelligence.forward_research import enrich_forward_decision_context
@@ -70,13 +72,16 @@ def _provider():
 
 def test_configured_forward_provider_materializes_certified_research():
     base = _candidate()
-    candidate = base.__class__(**{
-        **{field: getattr(base, field) for field in base.__dataclass_fields__},
-        "instrument": base.instrument.__class__(**{
-            **{field: getattr(base.instrument, field) for field in base.instrument.__dataclass_fields__},
-            "asset_class": type(base.instrument.asset_class).US_EQUITY,
-        }),
-    })
+    candidate = replace(
+        base,
+        instrument=replace(
+            base.instrument,
+            instrument_id="instrument:configured-forward-test",
+            symbol="TEST",
+            name="Configured Forward Test Equity",
+            asset_class=CandidateAssetClass.US_EQUITY,
+        ),
+    )
     research = _provider().fetch(candidate)
     assert research is not None
     assert research.expectations is not None
