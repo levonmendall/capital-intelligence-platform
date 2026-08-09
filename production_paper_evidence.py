@@ -283,6 +283,11 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
     existing_forward_versions = (
         () if existing_forward is None else existing_forward.model_versions
     )
+    phase5_lineage_versions = (
+        (("phase5_forward", "|".join(existing_forward_versions)),)
+        if existing_forward_versions
+        else ()
+    )
     lineage = replace(
         evidence.lineage,
         evidence_identifiers=tuple(
@@ -298,7 +303,7 @@ def _predictive_candidate_and_evidence(candidate, evidence, features):
             dict.fromkeys(
                 (
                     *evidence.lineage.model_versions,
-                    *(("phase5_forward", "|".join(existing_forward_versions)),) if existing_forward_versions else ()),
+                    *phase5_lineage_versions,
                     *predictive.model_versions,
                 )
             )
