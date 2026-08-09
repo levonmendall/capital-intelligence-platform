@@ -24,7 +24,7 @@ BASELINE = json.loads(
 SURFACE_BODY_TEXT = {
     "Today": "Investment world today",
     "Environment": "Economy and investing",
-    "Portfolio": "Capital structure",
+    "Portfolio": "Current holdings",
     "History": "Outcome status",
 }
 RETAINED_STORY_TITLE = "Federal Reserve policy decision changes the rate outlook"
@@ -166,38 +166,29 @@ def _assert_surface_body(page, surface: str) -> None:
     )
 
 
-def _assert_hidden_or_absent(locator) -> None:
-    assert locator.count() <= 1
-    if locator.count() == 1:
-        assert locator.first.is_visible() is False
-
-
 def _assert_portfolio_opening_hierarchy(page) -> None:
-    capital_structure = page.get_by_text("Capital structure", exact=True).first
-    current_report = page.get_by_text("Current CIO report", exact=False).first
-    capital_structure.wait_for(state="visible", timeout=15_000)
-    current_report.wait_for(state="visible", timeout=15_000)
+    holdings = page.get_by_text("Current holdings", exact=True).first
+    cio_decision = page.get_by_text("CIO decision", exact=True).first
+    holdings.wait_for(state="visible", timeout=15_000)
+    cio_decision.wait_for(state="visible", timeout=15_000)
 
-    capital_box = capital_structure.bounding_box()
-    report_box = current_report.bounding_box()
-    assert capital_box is not None
-    assert report_box is not None
-    assert capital_box["y"] < report_box["y"]
+    holdings_box = holdings.bounding_box()
+    decision_box = cio_decision.bounding_box()
+    assert holdings_box is not None
+    assert decision_box is not None
+    assert holdings_box["y"] < decision_box["y"]
 
-    report_summary = page.locator('[data-testid="stExpander"] summary').filter(
-        has_text="Current CIO report"
-    ).first
-    report_summary.wait_for(state="visible", timeout=15_000)
-    report_container = report_summary.locator("xpath=..")
-    assert report_container.get_attribute("open") is None
-
-    # Freshness warnings and timestamps may exist in the report's hidden DOM,
-    # but they must not be visible before the user expands the CIO report.
-    _assert_hidden_or_absent(page.locator('.information-health[role="status"]'))
-    _assert_hidden_or_absent(
-        page.get_by_text("Portfolio record timestamps", exact=True)
+    page.get_by_text("Capital deployment", exact=True).first.wait_for(
+        state="visible", timeout=15_000
     )
-    assert page.get_by_text("Portfolio posture", exact=True).count() == 0
+    page.get_by_text("Outstanding portfolio actions", exact=True).first.wait_for(
+        state="visible", timeout=15_000
+    )
+    controls = page.locator('[data-testid="stExpander"] summary').filter(
+        has_text="Paper implementation & controls"
+    ).first
+    controls.wait_for(state="visible", timeout=15_000)
+    assert controls.locator("xpath=..").get_attribute("open") is None
 
 
 def _layout_snapshot(page) -> dict[str, object]:
@@ -264,7 +255,7 @@ def test_public_four_screen_browser_and_visual_contract(live_streamlit, viewport
         assert navigation.count() == 1
         for surface in ("Today", "Environment", "Portfolio", "History"):
             navigation.get_by_role("radio", name=surface, exact=True).click()
-            page.get_by_role("heading", name=surface, exact=True).wait_for()
+            page.locator(".compact-surface-head h1").filter(has_text=surface).first.wait_for()
             _assert_surface_body(page, surface)
             _assert_public_boundary(page)
             if surface == "Environment":
