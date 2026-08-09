@@ -33,7 +33,7 @@ def _clamp(value: float) -> float:
 class OpportunityQualificationPolicy:
     """Versioned committee-attention and opportunity-ranking rules."""
 
-    version: str = "opportunity-qualification.v7-economic-consistency"
+    version: str = "opportunity-qualification.v8-research-breadth"
     minimum_net_expected_return: float = 0.03
     minimum_probability_of_success: float = 0.52
     minimum_evidence_score: float = 0.70
@@ -45,6 +45,14 @@ class OpportunityQualificationPolicy:
     opportunity_cost_tolerance: float = 0.005
     alternative_uncertainty_penalty: float = 0.0075
     alternative_liquidity_penalty: float = 0.005
+
+    # Research-attention thresholds are intentionally broader than the final
+    # allocation standards. They may route a candidate to the six specialists,
+    # but they never authorize positive capital.
+    research_return_shortfall_tolerance: float = 0.03
+    research_robust_edge_shortfall_tolerance: float = 0.03
+    minimum_research_probability_of_success: float = 0.30
+    minimum_research_net_expected_return: float = -0.02
 
     expected_return_weight: float = 0.18
     probability_weight: float = 0.08
@@ -68,6 +76,7 @@ class OpportunityQualificationPolicy:
             "minimum_evidence_score",
             "minimum_evidence_dimension",
             "minimum_liquidity_score",
+            "minimum_research_probability_of_success",
         ):
             value = float(getattr(self, field_name))
             if not 0.0 <= value <= 1.0:
@@ -84,6 +93,14 @@ class OpportunityQualificationPolicy:
             raise ValueError("alternative_uncertainty_penalty cannot be negative")
         if self.alternative_liquidity_penalty < 0.0:
             raise ValueError("alternative_liquidity_penalty cannot be negative")
+        for field_name in (
+            "research_return_shortfall_tolerance",
+            "research_robust_edge_shortfall_tolerance",
+        ):
+            if float(getattr(self, field_name)) < 0.0:
+                raise ValueError(f"{field_name} cannot be negative")
+        if self.minimum_research_net_expected_return <= -1.0:
+            raise ValueError("minimum_research_net_expected_return must exceed -100%")
         weights = self.weights
         if abs(sum(weights.values()) - 1.0) > 0.000001:
             raise ValueError("opportunity ranking weights must sum to 1.0")
@@ -448,11 +465,18 @@ class OpportunityEngine:
                 if wrapper and minimally_positive
                 else AnalysisLane.EXPLORATION
             )
-            exploratory_viable = (
-                robustness.robust_edge > -0.01
-                and robustness.effective_probability_of_success >= 0.40
+            research_viable = (
+                robustness.evidence_adjusted_return
+                >= effective_opportunity_cost
+                - self.policy.research_return_shortfall_tolerance
+                and robustness.robust_edge
+                >= -self.policy.research_robust_edge_shortfall_tolerance
+                and robustness.effective_probability_of_success
+                >= self.policy.minimum_research_probability_of_success
+                and candidate.net_expected_return
+                >= self.policy.minimum_research_net_expected_return
             )
-            if not minimally_positive and not exploratory_viable:
+            if not minimally_positive and not research_viable:
                 return (
                     CandidateQualification(
                         candidate_identifier=candidate.identifier,

@@ -144,7 +144,7 @@ def _period_return(closes: Sequence[float], periods: int) -> float:
 
 @dataclass(frozen=True, slots=True)
 class ComprehensiveMarketDiscoveryPolicy:
-    version: str = "comprehensive-liquid-market-discovery.v1"
+    version: str = "comprehensive-liquid-market-discovery.v2-sizing-boundary"
     maximum_directory_records_per_source: int | None = None
     maximum_deep_candidates_per_lane: int = 80
     selected_global_equities: int = 20
@@ -159,12 +159,12 @@ class ComprehensiveMarketDiscoveryPolicy:
     minimum_daily_dollar_volume: float = 1_000_000.0
     option_minimum_days_to_expiry: int = 30
     option_maximum_days_to_expiry: int = 365
-    maximum_global_equity_weight: float = 0.03
-    maximum_fx_weight: float = 0.05
-    maximum_crypto_weight: float = 0.025
+    maximum_global_equity_weight: float = 0.10
+    maximum_fx_weight: float = 0.10
+    maximum_crypto_weight: float = 0.05
     maximum_future_weight: float = 0.05
-    maximum_bond_weight: float = 0.05
-    maximum_option_weight: float = 0.01
+    maximum_bond_weight: float = 0.10
+    maximum_option_weight: float = 0.03
 
     def __post_init__(self) -> None:
         if not self.version.strip():
@@ -219,7 +219,7 @@ class ComprehensiveMarketDiscoveryPolicy:
                 "maximum_option_weight",
             )
         ):
-            raise ValueError("exploratory discovery weights cannot exceed 10%")
+            raise ValueError("discovery nomination ceilings cannot exceed the construction-safe 10% boundary")
 
     def selected_limit(self, asset_class: CandidateAssetClass) -> int:
         return {
