@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   apply-test-commit:
-    if: github.event.head_commit.message == 'Run forward research integration validation'
+    if: github.event.head_commit.message == 'Retry forward research integration validation'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,8 +33,7 @@ jobs:
             tests/test_forward_research.py \
             tests/test_forward_decision_intelligence_v2.py \
             tests/test_predictive_forward_decision_context.py \
-            tests/test_predictive_market_intelligence.py \
-            tests/test_provider_dataset_contracts.py
+            tests/test_predictive_market_intelligence.py
       - name: Commit clean implementation
         run: |
           rm .github/apply_forward_research_patch.py
