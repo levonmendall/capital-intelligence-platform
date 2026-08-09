@@ -76,6 +76,7 @@ class DailyCIOBriefing:
     material_developments: tuple[str, ...]
     candidate_identifier: str | None = None
     decision_identifier: str | None = None
+    cio_decision_count: int = 0
     construction_status: ConstructionStatus | None = None
     thesis_identifiers: tuple[str, ...] = ()
 
@@ -95,6 +96,13 @@ class DailyCIOBriefing:
         _aware(self.as_of, field_name="as_of")
         if not isinstance(self.status, DailyCIOStatus):
             raise TypeError("status must be a DailyCIOStatus")
+        if isinstance(self.cio_decision_count, bool) or not isinstance(
+            self.cio_decision_count,
+            int,
+        ):
+            raise TypeError("cio_decision_count must be an integer")
+        if self.cio_decision_count < 0:
+            raise ValueError("cio_decision_count cannot be negative")
         if self.confidence is not None:
             if isinstance(self.confidence, bool) or not isinstance(
                 self.confidence,
@@ -151,6 +159,7 @@ class DailyCIOBriefing:
             "material_developments": list(self.material_developments),
             "candidate_identifier": self.candidate_identifier,
             "decision_identifier": self.decision_identifier,
+            "cio_decision_count": self.cio_decision_count,
             "construction_status": (
                 None
                 if self.construction_status is None
@@ -287,6 +296,7 @@ class DailyCIOBriefingBuilder:
                     f"CIO cycle classification is {cycle_disposition.classification.replace('_', ' ')}",
                 ),
                 decision_identifier=cycle_disposition.identifier,
+                cio_decision_count=1,
                 thesis_identifiers=tuple(
                     item.identifier for item in theses
                 ),
@@ -380,6 +390,7 @@ class DailyCIOBriefingBuilder:
             material_developments=material,
             candidate_identifier=primary.candidate_identifier,
             decision_identifier=primary.identifier,
+            cio_decision_count=len(decisions),
             construction_status=(
                 None if construction is None else construction.status
             ),
