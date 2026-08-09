@@ -6,7 +6,12 @@ from datetime import datetime, timezone
 
 from cio import CandidateAssetClass
 from data.provider_dataset import ProviderDatasetType
-from intelligence.forward_decision import EvidenceAvailability, ForwardDecisionDimension, build_forward_decision_context
+from intelligence.forward_decision import (
+    DecisionTimingPosture,
+    EvidenceAvailability,
+    ForwardDecisionDimension,
+    build_forward_decision_context,
+)
 from intelligence.forward_research import enrich_forward_decision_context
 from providers.configured_dataset import (
     ConfiguredDatasetBinding,
@@ -30,6 +35,27 @@ def _provider():
             "uncertainty": 0.25,
             "confidence": 0.8,
         }],
+        "/events": {
+            "expectations": [{
+                "identifier": "event-probability",
+                "kind": "event_probability",
+                "market_expectation": 0.50,
+                "internal_expectation": 0.65,
+                "uncertainty": 0.10,
+                "confidence": 0.75,
+            }],
+            "value_of_waiting": {
+                "invest_now_expected_return": 0.06,
+                "downside_if_unresolved": -0.18,
+                "probability_uncertainty_resolves": 0.65,
+                "expected_upside_lost_by_waiting": 0.02,
+                "expected_post_event_entry_drag": 0.005,
+                "transaction_cost_return": 0.001,
+                "alternative_return_while_waiting": 0.002,
+                "thesis_decay_return": 0.0,
+                "evidence_identifiers": ["event:earnings"],
+            },
+        },
         "/positioning": [{
             "identifier": "dealer-gamma",
             "kind": "dealer_gamma",
@@ -60,6 +86,7 @@ def _provider():
             base_url="https://example.test",
             bindings=(
                 ConfiguredDatasetBinding(ProviderDatasetType.EXPECTATIONS, "/expectations"),
+                ConfiguredDatasetBinding(ProviderDatasetType.EVENT_EXPECTATIONS, "/events"),
                 ConfiguredDatasetBinding(ProviderDatasetType.DERIVATIVE_POSITIONING, "/positioning"),
                 ConfiguredDatasetBinding(ProviderDatasetType.LEADING_INDICATORS, "/leading"),
             ),
@@ -87,6 +114,8 @@ def test_configured_forward_provider_materializes_certified_research():
     assert research.expectations is not None
     assert research.positioning is not None and research.positioning.derivative_coverage
     assert len(research.nowcasts) == 1
+    assert research.value_of_waiting is not None
+    assert research.value_of_waiting.posture is DecisionTimingPosture.WAIT_FOR_EVENT
     context = build_forward_decision_context(
         identifier="fd:test",
         candidate_identifier=candidate.identifier,
@@ -98,3 +127,5 @@ def test_configured_forward_provider_materializes_certified_research():
     assert dimensions[ForwardDecisionDimension.EXPECTATIONS].availability is EvidenceAvailability.AVAILABLE
     assert dimensions[ForwardDecisionDimension.DERIVATIVES].availability is EvidenceAvailability.AVAILABLE
     assert dimensions[ForwardDecisionDimension.ALTERNATIVE_DATA].availability is EvidenceAvailability.AVAILABLE
+    assert enriched.timing is not None
+    assert enriched.timing.posture is DecisionTimingPosture.WAIT_FOR_EVENT
