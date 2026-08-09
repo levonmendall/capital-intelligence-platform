@@ -13,6 +13,7 @@ _CSS = r"""
   .history-timeline { gap: .45rem !important; }
   .history-event { padding: .8rem .9rem !important; }
 }
+.history-intro { color:#91a0ba; font-size:.92rem; line-height:1.55; margin:.15rem 0 1rem; }
 .history-timeline { display:flex; flex-direction:column; gap:.65rem; margin:.35rem 0 1rem; }
 .history-event { border:1px solid rgba(133,157,201,.22); border-radius:16px; padding:.9rem 1rem; background:rgba(7,15,29,.62); }
 .history-event strong { display:block; color:#f5f7ff; font-size:1rem; line-height:1.3; }
@@ -42,10 +43,12 @@ def install(app_impl: Any) -> None:
         latest_trade = trades[0] if trades else {}
         latest_eval = evaluations[0] if evaluations else {}
 
-        app_impl.page_header(
-            "History",
-            "The CIO's decisions, portfolio actions, outcomes, and learning.",
-            "INSTITUTIONAL MEMORY",
+        # The application shell already owns the canonical History h1. Keep the
+        # refinement descriptive rather than emitting a second exact History
+        # heading, which creates an ambiguous accessibility tree on iPhone.
+        st.markdown(
+            '<div class="history-intro">The CIO\'s decisions, portfolio actions, outcomes, and learning.</div>',
+            unsafe_allow_html=True,
         )
         latest_decision = _decision_title(latest) if latest else "Awaiting the first governed CIO decision."
         app_impl.status_list((
