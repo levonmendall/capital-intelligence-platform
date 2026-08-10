@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: render-production-telemetry-${{ github.event.deployment.sha || github.event.inputs.expected_release || github.sha }}-${{ github.event_name }}
@@ -48,29 +49,57 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Capture deployment progress
-        if: github.event_name == 'deployment_status'
+      - name: Capture and publish production progress
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
+
+          watch_seconds=0
+          if [[ "$GITHUB_EVENT_NAME" == "deployment_status" ]]; then
+            watch_seconds=2100
+          fi
+          status_target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          publish_live_status() {
+            local snapshot="$1"
+            local status_json=""
+            local status_state=""
+            local status_description=""
+
+            if ! status_json="$(printf '%s\n' "$snapshot" | python scripts/render_telemetry_commit_status.py)"; then
+              echo "::warning::Credential-safe telemetry status formatting failed"
+              return 0
+            fi
+
+            IFS=$'\t' read -r status_state status_description < <(
+              printf '%s\n' "$status_json" | python -c 'import json, sys; payload=json.load(sys.stdin); print(f"{payload[\"state\"]}\t{payload[\"description\"]}")'
+            )
+
+            if ! gh api \
+              --method POST \
+              "repos/${GITHUB_REPOSITORY}/statuses/${EXPECTED_RELEASE}" \
+              -f state="$status_state" \
+              -f context="render/cio-telemetry" \
+              -f description="$status_description" \
+              -f target_url="$status_target_url" \
+              >/dev/null; then
+              echo "::warning::Unable to publish live Render telemetry commit status"
+            fi
+          }
+
           python scripts/capture_render_production_telemetry.py \
             --url "$TELEMETRY_URL" \
             --expected-release "$EXPECTED_RELEASE" \
             --output "$TELEMETRY_OUTPUT" \
             --timeline-output "$TELEMETRY_TIMELINE" \
-            --watch-seconds 2100 \
-            --interval-seconds 30
-
-      - name: Capture current production snapshot
-        if: github.event_name != 'deployment_status'
-        shell: bash
-        run: |
-          set -o pipefail
-          python scripts/capture_render_production_telemetry.py \
-            --url "$TELEMETRY_URL" \
-            --expected-release "$EXPECTED_RELEASE" \
-            --output "$TELEMETRY_OUTPUT" \
-            --timeline-output "$TELEMETRY_TIMELINE"
+            --watch-seconds "$watch_seconds" \
+            --interval-seconds 30 \
+          | while IFS= read -r snapshot; do
+              printf '%s\n' "$snapshot"
+              publish_live_status "$snapshot"
+            done
 
       - name: Publish safe telemetry summary
         if: always()
