@@ -68,7 +68,7 @@ If an already-governed source theme explicitly names another symbol as a next be
 
 `AI demand -> compute -> semiconductors -> memory/HBM -> networking -> power/cooling -> grid equipment -> commodities`
 
-The successor signal can increase global research/ranking attention by at most ten percentage points, but it does **not** change expected return, robust edge, evidence quality, or investment authority. Candidate-specific fundamentals, expectations, valuation, leadership, risk, six-specialist analysis, and CIO qualification must still establish the actual investment case.
+The successor signal can increase global research/ranking attention by at most ten percentage points, but it does **not** change expected return or robust edge and cannot independently create investment authority. Candidate-specific fundamentals, expectations, valuation, leadership, risk, six-specialist analysis, and CIO qualification must still establish the actual investment case.
 
 Unknown beneficiary symbols are ignored rather than invented. Relationships therefore remain explicit and point-in-time instead of being guessed from names, text similarity, or price action.
 
@@ -89,7 +89,7 @@ Ordinary uncertainty is expressed through position size:
 - `qualified`: ordinary full-conviction sizing within existing caps;
 - `high_conviction`: larger eligible sizing within existing construction caps.
 
-Ordinary specialist disagreement, an `observe` ensemble, non-preferred posture, marginal success probability, modest full-conviction return shortfall, or slightly negative stressed edge can reduce a position to exploratory/provisional rather than automatically creating cash. The candidate must still have positive reconciled economics and positive robust edge versus the best governed alternative.
+Ordinary specialist disagreement, an `observe` ensemble, non-preferred posture, marginal success probability, or a modest full-conviction return shortfall can reduce a position to exploratory/provisional rather than automatically creating cash. Positive rotation capital still requires positive reconciled economics versus the best governed alternative, positive robust edge, and a **nonnegative stressed edge**. Adverse probability stress that makes the edge negative therefore cannot be bypassed merely to reduce cash.
 
 ## Derisk and rotate
 
@@ -118,7 +118,17 @@ After each completed cycle, `SQLiteGlobalRotationStore` persists an independent 
 - `hard_constraint_forced`;
 - `unexplained_residual`.
 
-`unexplained_residual` is reserved for the case in which a reviewed deployment opportunity existed, excess cash remained, no final construction block explains it, and the CIO took no positive action. That state is an explicit process diagnostic rather than a valid default-cash conclusion.
+The accountability record also persists conviction-stage counts, candidate-level hard-block counts, soft-constraint counts, indicated conviction weight, construction blocks, and the final construction expected-return improvement when available. An empty queue caused by evidence/capability/operational failure and a reviewed set later blocked entirely by hard CIO controls are explicitly classified as forced cash rather than an economic cash win.
+
+`unexplained_residual` is reserved for the case in which a reviewed deployment opportunity existed, excess cash remained, no final construction block or complete hard-block explanation exists, and the CIO took no positive action. That state is an explicit process diagnostic rather than a valid default-cash conclusion.
+
+## Persistence boundary
+
+Canonical CIO persistence is not extended or rewritten by global rotation. `cio/persistence.py` remains the existing append-only CIO journal contract for candidates, queues, specialist packets, CIO decisions, theses, construction lineage, daily briefings, and historical learning reconstruction.
+
+Global rotation uses the separate `SQLiteGlobalRotationStore` table and independent hash chain in `portfolio/global_rotation_persistence.py`. It may share the same SQLite database file, but it does not update or delete canonical CIO journal rows. Regression coverage verifies that canonical CIO journal append/read/integrity operations still work before and after the global-rotation store is initialized.
+
+This boundary is intentional: future global-rotation diagnostics must be added to the side store or another governed extension rather than truncating or replacing canonical CIO persistence.
 
 ## Joint portfolio competition
 
