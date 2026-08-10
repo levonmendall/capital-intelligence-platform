@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
+from cio.models import CIOAction
 from portfolio.global_rotation import (
     CashCompetitionState,
     GlobalOpportunityDomain,
@@ -47,6 +49,29 @@ def _context(*, cash_state=CashCompetitionState.DEPLOYMENT_OPPORTUNITY):
     )
 
 
+def _decision_marker(
+    *,
+    stage: str,
+    target: float | None,
+    hard=(),
+    soft=(),
+    action=CIOAction.WATCH,
+):
+    payload = {
+        "conviction_stage": stage,
+        "conviction_target_weight": target,
+        "hard_blockers": list(hard),
+        "soft_constraints": list(soft),
+    }
+    return SimpleNamespace(
+        action=action,
+        monitoring_indicators=(
+            "global-rotation-context.v1:"
+            + json.dumps(payload, sort_keys=True, separators=(",", ":")),
+        ),
+    )
+
+
 def test_cash_accountability_marks_unexplained_abstention_when_opportunity_existed():
     result = SimpleNamespace(decisions=(), construction=None, cycle_disposition=None)
     accountability = build_global_cash_accountability(
@@ -68,6 +93,7 @@ def test_cash_accountability_distinguishes_construction_block_from_unexplained_c
         construction=SimpleNamespace(
             target_cash_weight=0.80,
             blocks=("tail-risk limit",),
+            expected_return_improvement=0.0,
         ),
         cycle_disposition=None,
     )
@@ -81,6 +107,66 @@ def test_cash_accountability_distinguishes_construction_block_from_unexplained_c
         is ResidualCashClassification.HARD_CONSTRAINT_FORCED
     )
     assert accountability.construction_block_count == 1
+    assert accountability.construction_expected_return_improvement == 0.0
+
+
+def test_post_specialist_hard_blockers_explain_cash_without_calling_it_economic():
+    decision = _decision_marker(
+        stage="blocked",
+        target=None,
+        hard=("portfolio implementation blocks remain unresolved",),
+        soft=("growth ensemble remains at observe",),
+    )
+    result = SimpleNamespace(
+        decisions=(decision,),
+        construction=None,
+        cycle_disposition=None,
+    )
+    accountability = build_global_cash_accountability(
+        cycle_identifier="cycle:post-specialist-block",
+        context=_context(),
+        result=result,
+    )
+    assert (
+        accountability.classification
+        is ResidualCashClassification.HARD_CONSTRAINT_FORCED
+    )
+    assert accountability.hard_blocked_candidate_count == 1
+    assert accountability.hard_blocker_count == 1
+    assert accountability.soft_constraint_count == 1
+    assert accountability.conviction_stage_counts == (("blocked", 1),)
+    assert accountability.indicated_conviction_weight == 0.0
+
+
+def test_conviction_diagnostics_record_deployable_weight_and_stage():
+    decision = _decision_marker(
+        stage="provisional",
+        target=0.025,
+        soft=("success probability is below the full-conviction threshold",),
+        action=CIOAction.BUY,
+    )
+    result = SimpleNamespace(
+        decisions=(decision,),
+        construction=SimpleNamespace(
+            target_cash_weight=0.775,
+            blocks=(),
+            expected_return_improvement=0.004,
+        ),
+        cycle_disposition=None,
+    )
+    accountability = build_global_cash_accountability(
+        cycle_identifier="cycle:provisional",
+        context=_context(),
+        result=result,
+    )
+    assert (
+        accountability.classification
+        is ResidualCashClassification.DEPLOYED_WITH_RESIDUAL
+    )
+    assert accountability.conviction_stage_counts == (("provisional", 1),)
+    assert accountability.indicated_conviction_weight == 0.025
+    assert accountability.soft_constraint_count == 1
+    assert accountability.construction_expected_return_improvement == 0.004
 
 
 def test_evidence_or_authority_empty_queue_is_forced_cash_not_economic_win():
