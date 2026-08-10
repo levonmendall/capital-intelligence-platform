@@ -55,8 +55,9 @@ class GlobalCashAccountability:
     strongest_domain: str | None
     strongest_score: float | None
     strongest_expected_return_edge: float | None
+    cycle_disposition_classification: str | None
     explanation: str
-    policy_version: str = "global-cash-accountability.v1"
+    policy_version: str = "global-cash-accountability.v2"
     investment_authority: bool = False
 
     def __post_init__(self) -> None:
@@ -84,6 +85,12 @@ class GlobalCashAccountability:
             raise TypeError("pre_cio_cash_state must be CashCompetitionState")
         if not isinstance(self.classification, ResidualCashClassification):
             raise TypeError("classification must be ResidualCashClassification")
+        if self.cycle_disposition_classification is not None:
+            if (
+                not isinstance(self.cycle_disposition_classification, str)
+                or not self.cycle_disposition_classification.strip()
+            ):
+                raise ValueError("cycle_disposition_classification must be text or None")
         if not isinstance(self.explanation, str) or not self.explanation.strip():
             raise ValueError("explanation cannot be empty")
         if self.investment_authority:
@@ -105,6 +112,7 @@ class GlobalCashAccountability:
             "strongest_domain": self.strongest_domain,
             "strongest_score": self.strongest_score,
             "strongest_expected_return_edge": self.strongest_expected_return_edge,
+            "cycle_disposition_classification": self.cycle_disposition_classification,
             "explanation": self.explanation,
             "policy_version": self.policy_version,
             "investment_authority": False,
@@ -122,7 +130,13 @@ def build_global_cash_accountability(
     final_cash = (
         context.current_cash_weight
         if construction is None
-        else float(getattr(construction, "target_cash_weight", context.current_cash_weight))
+        else float(
+            getattr(
+                construction,
+                "target_cash_weight",
+                context.current_cash_weight,
+            )
+        )
     )
     final_cash = max(0.0, min(1.0, final_cash))
     residual = max(0.0, final_cash - context.minimum_cash_weight)
@@ -131,31 +145,56 @@ def build_global_cash_accountability(
         getattr(item, "action", None) in {CIOAction.BUY, CIOAction.INCREASE}
         for item in decisions
     )
-    blocks = tuple(getattr(construction, "blocks", ()) or ()) if construction is not None else ()
+    blocks = (
+        tuple(getattr(construction, "blocks", ()) or ())
+        if construction is not None
+        else ()
+    )
     strongest = context.strongest
+    disposition = getattr(result, "cycle_disposition", None)
+    disposition_classification = getattr(disposition, "classification", None)
+    if disposition_classification is not None:
+        disposition_classification = str(disposition_classification).strip() or None
 
     if residual <= 1e-8:
         classification = ResidualCashClassification.REQUIRED_RESERVE
-        explanation = "No cash remains beyond the governed minimum reserve after final construction."
-    elif context.cash_competition_state is CashCompetitionState.CASH_LEADING_ESTIMATE:
-        classification = ResidualCashClassification.ECONOMIC_WIN_ESTIMATE
         explanation = (
-            "No pre-CIO globally ranked candidate cleared the positive-edge and minimum global-opportunity score required to challenge marginal cash."
+            "No cash remains beyond the governed minimum reserve after final construction."
+        )
+    elif disposition_classification == "evidence_or_authority_block":
+        classification = ResidualCashClassification.HARD_CONSTRAINT_FORCED
+        explanation = (
+            "Excess cash remained because the governed empty-queue disposition found "
+            "an evidence, capability-authority, operational, or unmapped qualification "
+            "block. Cash did not win an economic comparison; deployment was unavailable."
         )
     elif blocks:
         classification = ResidualCashClassification.HARD_CONSTRAINT_FORCED
         explanation = (
-            "Final construction retained excess cash because one or more explicit portfolio construction constraints blocked additional deployment."
+            "Final construction retained excess cash because one or more explicit "
+            "portfolio construction constraints blocked additional deployment."
         )
     elif positive_count > 0:
         classification = ResidualCashClassification.DEPLOYED_WITH_RESIDUAL
         explanation = (
-            "The CIO deployed capital into positive opportunities, but approved conviction/risk sizing left residual cash above the minimum reserve; that residual remains subject to future global competition."
+            "The CIO deployed capital into positive opportunities, but approved "
+            "conviction/risk sizing left residual cash above the minimum reserve; that "
+            "residual remains subject to future global competition."
+        )
+    elif context.cash_competition_state is CashCompetitionState.CASH_LEADING_ESTIMATE:
+        classification = ResidualCashClassification.ECONOMIC_WIN_ESTIMATE
+        explanation = (
+            "Among candidates that survived governed qualification, none cleared the "
+            "positive-edge and minimum global-opportunity score required to challenge "
+            "marginal cash. This is an economic estimate, not a default-cash rule."
         )
     else:
         classification = ResidualCashClassification.UNEXPLAINED_RESIDUAL
         explanation = (
-            "A pre-CIO deployment opportunity existed, no final construction block explains the residual, and no positive CIO action deployed capital. This is an explicit abstention diagnostic requiring review rather than a valid default-cash conclusion."
+            "A pre-CIO deployment opportunity existed, no final construction block "
+            "explains the residual, and no positive CIO action deployed capital. This "
+            "is an explicit abstention diagnostic requiring review rather than a valid "
+            "default-cash conclusion."
         )
 
     return GlobalCashAccountability(
@@ -177,6 +216,7 @@ def build_global_cash_accountability(
         strongest_expected_return_edge=(
             None if strongest is None else strongest.expected_return_edge
         ),
+        cycle_disposition_classification=disposition_classification,
         explanation=explanation,
     )
 
@@ -240,13 +280,17 @@ class SQLiteGlobalRotationStore:
             "real_money_authorized": False,
         }
         payload_json = json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
         )
         event_identifier = f"global-rotation:{cycle_identifier}"
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                "SELECT payload_json, content_hash FROM global_rotation_events WHERE event_identifier = ?",
+                "SELECT payload_json, content_hash FROM global_rotation_events "
+                "WHERE event_identifier = ?",
                 (event_identifier,),
             ).fetchone()
             if existing is not None:
@@ -257,11 +301,14 @@ class SQLiteGlobalRotationStore:
                 connection.rollback()
                 return str(existing["content_hash"])
             previous = connection.execute(
-                "SELECT sequence, content_hash FROM global_rotation_events ORDER BY sequence DESC LIMIT 1"
+                "SELECT sequence, content_hash FROM global_rotation_events "
+                "ORDER BY sequence DESC LIMIT 1"
             ).fetchone()
             sequence = int(previous["sequence"]) + 1 if previous is not None else 1
             previous_hash = (
-                str(previous["content_hash"]) if previous is not None else self._GENESIS
+                str(previous["content_hash"])
+                if previous is not None
+                else self._GENESIS
             )
             content_hash = hashlib.sha256(
                 json.dumps(
