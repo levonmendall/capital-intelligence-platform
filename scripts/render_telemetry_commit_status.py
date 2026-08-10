@@ -95,7 +95,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         state, description = status_for_snapshot(payload)
     except InvalidTelemetrySnapshot:
         return 2
-    print(json.dumps({"state": state, "description": description}, sort_keys=True))
+    print(state)
+    print(description)
     return 0
 
 
