@@ -1,8 +1,10 @@
 """Production canonical cycle for global opportunity rotation.
 
 The cycle enriches already-governed candidates with mispriced-change and corroborated
-global-leadership economics, builds one cross-asset marginal-capital context, and
-supplies it to the existing CIO. Final construction and paper execution are unchanged.
+global-leadership economics, freezes the authoritative opportunity queue before global
+capital competition, builds one cross-asset marginal-capital context from candidates
+that actually reached governed review, and supplies it to the existing CIO. Final
+construction and paper execution are unchanged.
 """
 from __future__ import annotations
 
@@ -111,6 +113,64 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         if self.global_rotation_store is None and self.journal is not None:
             self.global_rotation_store = SQLiteGlobalRotationStore(self.journal.path)
 
+    def _freeze_authoritative_queue(self, *, kwargs, candidates, portfolio):
+        """Use the same qualification inputs as the canonical cycle before rotation.
+
+        This prevents evidence/authority-rejected instruments from being described as
+        deployable global opportunities merely because their raw price/fundamental score
+        is strong. The resulting queue is passed unchanged into the base cycle.
+        """
+
+        supplied_queue = kwargs.get("authoritative_opportunity_queue")
+        if supplied_queue is not None:
+            return dict(kwargs), supplied_queue
+        opportunity_context = kwargs.get("opportunity_context")
+        if opportunity_context is None:
+            return dict(kwargs), None
+        generated_ranking = self.prepare_ranking_inputs(
+            candidates,
+            portfolio,
+            minimum_cash_weight=self.construction_engine.policy.minimum_cash_weight,
+        )
+        supplied_ranking = {
+            item.candidate_identifier: item
+            for item in opportunity_context.ranking_inputs
+        }
+        supplied_ranking.update(
+            {
+                item.candidate_identifier: item
+                for item in generated_ranking
+                if item.candidate_identifier not in supplied_ranking
+            }
+        )
+        frozen_context = replace(
+            opportunity_context,
+            ranking_inputs=tuple(supplied_ranking.values()),
+        )
+        queue = self.opportunity_engine.build_queue(candidates, frozen_context)
+        return (
+            {
+                **kwargs,
+                "opportunity_context": frozen_context,
+                "authoritative_opportunity_queue": queue,
+            },
+            queue,
+        )
+
+    @staticmethod
+    def _rotation_candidates(candidates, queue):
+        """Return governed reviewed candidates with the true queue opportunity cost."""
+
+        if queue is None:
+            return candidates
+        return tuple(
+            replace(
+                item.candidate,
+                opportunity_cost_return=item.qualification.effective_opportunity_cost,
+            )
+            for item in tuple(getattr(queue, "ranked", ()) or ())
+        )
+
     def run(self, **kwargs) -> GlobalOpportunityRotationCanonicalCIOCycleResult:
         contexts = kwargs.get("specialist_contexts")
         candidates = kwargs.get("candidates")
@@ -125,8 +185,17 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
             raise TypeError("portfolio must be supplied")
 
         enriched_contexts = enrich_global_rotation_contexts(contexts)
-        rotation_context = build_global_rotation_context(
+        prepared_kwargs, authoritative_queue = self._freeze_authoritative_queue(
+            kwargs=kwargs,
             candidates=candidates,
+            portfolio=portfolio,
+        )
+        reviewed_candidates = self._rotation_candidates(
+            candidates,
+            authoritative_queue,
+        )
+        rotation_context = build_global_rotation_context(
+            candidates=reviewed_candidates,
             specialist_contexts=enriched_contexts,
             portfolio=portfolio,
             minimum_cash_weight=self.construction_engine.policy.minimum_cash_weight,
@@ -140,11 +209,11 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         try:
             preview = build_global_rotation_preview(
                 cycle_identifier=cycle_identifier,
-                candidates=candidates,
+                candidates=reviewed_candidates,
                 portfolio=portfolio,
                 construction_engine=self.construction_engine,
                 rotation_context=rotation_context,
-                authoritative_queue=kwargs.get("authoritative_opportunity_queue"),
+                authoritative_queue=authoritative_queue,
             )
         except Exception:
             # Additional portfolio context must never become a hidden veto. The final
@@ -160,7 +229,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         try:
             base_result = super().run(
                 **{
-                    **kwargs,
+                    **prepared_kwargs,
                     "specialist_contexts": enriched_contexts,
                 }
             )
