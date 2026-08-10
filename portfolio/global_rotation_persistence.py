@@ -21,6 +21,8 @@ from portfolio.global_rotation_models import (
     GlobalRotationContext,
 )
 
+_GLOBAL_CONTEXT_PREFIX = "global-rotation-context.v1:"
+
 
 class ResidualCashClassification(str, Enum):
     REQUIRED_RESERVE = "required_reserve"
@@ -39,6 +41,19 @@ def _finite(value: object, *, field_name: str) -> float:
     return round(result, 8)
 
 
+def _decision_rotation_payload(decision: object) -> dict[str, Any]:
+    for marker in tuple(getattr(decision, "monitoring_indicators", ()) or ()):
+        if not isinstance(marker, str) or not marker.startswith(_GLOBAL_CONTEXT_PREFIX):
+            continue
+        try:
+            payload = json.loads(marker[len(_GLOBAL_CONTEXT_PREFIX):])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class GlobalCashAccountability:
     cycle_identifier: str
@@ -49,6 +64,12 @@ class GlobalCashAccountability:
     positive_cio_action_count: int
     construction_block_count: int
     ranked_opportunity_count: int
+    hard_blocked_candidate_count: int
+    hard_blocker_count: int
+    soft_constraint_count: int
+    conviction_stage_counts: tuple[tuple[str, int], ...]
+    indicated_conviction_weight: float
+    construction_expected_return_improvement: float | None
     pre_cio_cash_state: CashCompetitionState
     classification: ResidualCashClassification
     strongest_candidate_identifier: str | None
@@ -57,7 +78,7 @@ class GlobalCashAccountability:
     strongest_expected_return_edge: float | None
     cycle_disposition_classification: str | None
     explanation: str
-    policy_version: str = "global-cash-accountability.v2"
+    policy_version: str = "global-cash-accountability.v3"
     investment_authority: bool = False
 
     def __post_init__(self) -> None:
@@ -68,19 +89,46 @@ class GlobalCashAccountability:
             "required_cash_weight",
             "final_cash_weight",
             "residual_excess_cash_weight",
+            "indicated_conviction_weight",
         ):
             value = _finite(getattr(self, name), field_name=name)
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"{name} must be between zero and one")
             object.__setattr__(self, name, value)
+        if self.construction_expected_return_improvement is not None:
+            object.__setattr__(
+                self,
+                "construction_expected_return_improvement",
+                _finite(
+                    self.construction_expected_return_improvement,
+                    field_name="construction_expected_return_improvement",
+                ),
+            )
         for name in (
             "positive_cio_action_count",
             "construction_block_count",
             "ranked_opportunity_count",
+            "hard_blocked_candidate_count",
+            "hard_blocker_count",
+            "soft_constraint_count",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer")
+        if not isinstance(self.conviction_stage_counts, tuple) or not all(
+            isinstance(item, tuple)
+            and len(item) == 2
+            and isinstance(item[0], str)
+            and item[0].strip()
+            and isinstance(item[1], int)
+            and not isinstance(item[1], bool)
+            and item[1] >= 0
+            for item in self.conviction_stage_counts
+        ):
+            raise ValueError("conviction_stage_counts must contain (stage, count) pairs")
+        stages = tuple(item[0] for item in self.conviction_stage_counts)
+        if len(stages) != len(set(stages)):
+            raise ValueError("conviction stages must be unique")
         if not isinstance(self.pre_cio_cash_state, CashCompetitionState):
             raise TypeError("pre_cio_cash_state must be CashCompetitionState")
         if not isinstance(self.classification, ResidualCashClassification):
@@ -106,6 +154,12 @@ class GlobalCashAccountability:
             "positive_cio_action_count": self.positive_cio_action_count,
             "construction_block_count": self.construction_block_count,
             "ranked_opportunity_count": self.ranked_opportunity_count,
+            "hard_blocked_candidate_count": self.hard_blocked_candidate_count,
+            "hard_blocker_count": self.hard_blocker_count,
+            "soft_constraint_count": self.soft_constraint_count,
+            "conviction_stage_counts": [list(item) for item in self.conviction_stage_counts],
+            "indicated_conviction_weight": self.indicated_conviction_weight,
+            "construction_expected_return_improvement": self.construction_expected_return_improvement,
             "pre_cio_cash_state": self.pre_cio_cash_state.value,
             "classification": self.classification.value,
             "strongest_candidate_identifier": self.strongest_candidate_identifier,
@@ -156,6 +210,38 @@ def build_global_cash_accountability(
     if disposition_classification is not None:
         disposition_classification = str(disposition_classification).strip() or None
 
+    rotation_payloads = tuple(
+        payload
+        for payload in (_decision_rotation_payload(item) for item in decisions)
+        if payload
+    )
+    stage_counts: dict[str, int] = {}
+    hard_blocked_candidate_count = 0
+    hard_blocker_count = 0
+    soft_constraint_count = 0
+    indicated_conviction_weight = 0.0
+    for payload in rotation_payloads:
+        stage = str(payload.get("conviction_stage", "unavailable"))
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+        hard = tuple(payload.get("hard_blockers", ()) or ())
+        soft = tuple(payload.get("soft_constraints", ()) or ())
+        hard_blocker_count += len(hard)
+        soft_constraint_count += len(soft)
+        if hard:
+            hard_blocked_candidate_count += 1
+        target = payload.get("conviction_target_weight")
+        if isinstance(target, (int, float)) and not isinstance(target, bool):
+            indicated_conviction_weight += max(0.0, float(target))
+    indicated_conviction_weight = min(1.0, indicated_conviction_weight)
+    construction_improvement = (
+        None
+        if construction is None
+        else getattr(construction, "expected_return_improvement", None)
+    )
+
+    all_reviewed_hard_blocked = bool(context.signals) and (
+        hard_blocked_candidate_count >= len(context.signals)
+    )
     if residual <= 1e-8:
         classification = ResidualCashClassification.REQUIRED_RESERVE
         explanation = (
@@ -181,6 +267,14 @@ def build_global_cash_accountability(
             "conviction/risk sizing left residual cash above the minimum reserve; that "
             "residual remains subject to future global competition."
         )
+    elif all_reviewed_hard_blocked:
+        classification = ResidualCashClassification.HARD_CONSTRAINT_FORCED
+        explanation = (
+            "Every candidate that reached global CIO review was subsequently blocked by "
+            "one or more hard evidence, implementation, funding, or downside controls. "
+            "Cash therefore remained because deployment was prohibited, not because soft "
+            "uncertainty was treated as a default veto."
+        )
     elif context.cash_competition_state is CashCompetitionState.CASH_LEADING_ESTIMATE:
         classification = ResidualCashClassification.ECONOMIC_WIN_ESTIMATE
         explanation = (
@@ -191,10 +285,10 @@ def build_global_cash_accountability(
     else:
         classification = ResidualCashClassification.UNEXPLAINED_RESIDUAL
         explanation = (
-            "A pre-CIO deployment opportunity existed, no final construction block "
-            "explains the residual, and no positive CIO action deployed capital. This "
-            "is an explicit abstention diagnostic requiring review rather than a valid "
-            "default-cash conclusion."
+            "A pre-CIO deployment opportunity existed, no final construction block or "
+            "complete set of hard CIO blockers explains the residual, and no positive "
+            "CIO action deployed capital. This is an explicit abstention diagnostic "
+            "requiring review rather than a valid default-cash conclusion."
         )
 
     return GlobalCashAccountability(
@@ -206,6 +300,16 @@ def build_global_cash_accountability(
         positive_cio_action_count=positive_count,
         construction_block_count=len(blocks),
         ranked_opportunity_count=len(context.signals),
+        hard_blocked_candidate_count=hard_blocked_candidate_count,
+        hard_blocker_count=hard_blocker_count,
+        soft_constraint_count=soft_constraint_count,
+        conviction_stage_counts=tuple(sorted(stage_counts.items())),
+        indicated_conviction_weight=round(indicated_conviction_weight, 8),
+        construction_expected_return_improvement=(
+            None
+            if construction_improvement is None
+            else float(construction_improvement)
+        ),
         pre_cio_cash_state=context.cash_competition_state,
         classification=classification,
         strongest_candidate_identifier=(
