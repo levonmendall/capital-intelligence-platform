@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from math import isfinite
-from typing import Any, Mapping
+from typing import Any
 
 from cio.models import CandidateAssetClass, CIOAction
 from intelligence.forward_decision import ForwardDecisionDimension
@@ -88,7 +88,6 @@ def _expectations(context: object) -> tuple[str, str, float | None, float | None
     market = _text(getattr(dimension, "market_expectation", None))
     internal = _text(getattr(dimension, "internal_expectation", None))
     evidence_ids = _texts(getattr(dimension, "evidence_identifiers", ()))
-    confidence = _finite(getattr(dimension, "confidence", 0.0))
     forward = getattr(context, "forward_intelligence", None)
     expected_surprise = None
     priced_in = None
@@ -103,10 +102,15 @@ def _expectations(context: object) -> tuple[str, str, float | None, float | None
         expected_surprise = _finite(getattr(expectations, "expected_surprise", 0.0))
         priced_in = _finite(getattr(expectations, "priced_in_score", 0.0))
         evidence_ids = tuple(
-            dict.fromkeys((*evidence_ids, *_texts(getattr(expectations, "evidence_identifiers", ()))))
+            dict.fromkeys(
+                (
+                    *evidence_ids,
+                    *_texts(getattr(expectations, "evidence_identifiers", ())),
+                )
+            )
         )
         break
-    return market, internal, expected_surprise, priced_in, evidence_ids + ((f"expectations-confidence:{confidence:.8f}",) if confidence else ())
+    return market, internal, expected_surprise, priced_in, evidence_ids
 
 
 class DecisionIntelligenceState(str, Enum):
@@ -306,12 +310,17 @@ def _scenario_text(candidate: object, name: str) -> str:
     if scenario is None:
         return "unavailable"
     label = _text(getattr(scenario, "label", name))
-    expected_return = _finite(getattr(scenario, "total_return", getattr(scenario, "return_impact", 0.0)))
+    expected_return = _finite(
+        getattr(scenario, "total_return", getattr(scenario, "return_impact", 0.0))
+    )
     probability = _finite(getattr(scenario, "probability", 0.0))
     return f"{label}: return {expected_return:+.2%}, probability {probability:.0%}"
 
 
-def _risk_summary(risk_assessment: object | None, joint_assessment: object | None) -> tuple[str, ...]:
+def _risk_summary(
+    risk_assessment: object | None,
+    joint_assessment: object | None,
+) -> tuple[str, ...]:
     values: list[str] = []
     for prefix, owner in (("candidate", risk_assessment), ("joint", joint_assessment)):
         if owner is None:
@@ -325,7 +334,11 @@ def _risk_summary(risk_assessment: object | None, joint_assessment: object | Non
             "risk_score",
         ):
             value = getattr(owner, name, None)
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(float(value)):
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and isfinite(float(value))
+            ):
                 values.append(f"{prefix}_{name}={float(value):.6f}")
         values.extend(_texts(getattr(owner, "reasons", ())))
         values.extend(_texts(getattr(owner, "risks", ())))
@@ -369,18 +382,26 @@ def build_candidate_decision_intelligence_packet(
         else getattr(candidate, "current_portfolio_weight", 0.0)
     )
     target_weight = _target_weight(construction, symbol, current_weight)
-    changed = abs(target_weight - current_weight) > 0.000001
+    weight_change = target_weight - current_weight
+    changed = abs(weight_change) > 0.000001
     action = getattr(decision, "action", None)
-    as_of = _aware(getattr(decision, "as_of", getattr(candidate, "as_of")), field_name="as_of")
+    as_of = _aware(
+        getattr(decision, "as_of", getattr(candidate, "as_of")),
+        field_name="as_of",
+    )
     portfolio_value = _finite(getattr(portfolio, "portfolio_value", 0.0))
     cash_return = _finite(getattr(portfolio, "cash_expected_return", 0.0))
     cash_weight = _finite(getattr(portfolio, "cash_weight", 0.0))
 
     construction_after_cost = _finite(
-        getattr(construction, "expected_return_after_cost", 0.0) if construction is not None else 0.0
+        getattr(construction, "expected_return_after_cost", 0.0)
+        if construction is not None
+        else 0.0
     )
     construction_improvement = _finite(
-        getattr(construction, "expected_return_improvement", 0.0) if construction is not None else 0.0
+        getattr(construction, "expected_return_improvement", 0.0)
+        if construction is not None
+        else 0.0
     )
     expected_dollar_added = portfolio_value * construction_improvement
     objective = CompoundingObjectiveSnapshot(
@@ -397,12 +418,32 @@ def build_candidate_decision_intelligence_packet(
         getattr(candidate, "net_expected_return", getattr(candidate, "expected_return", 0.0))
     )
     alternative_return = _finite(
-        getattr(candidate, "opportunity_cost_return", cash_return), fallback=cash_return
+        getattr(
+            evaluation_snapshot,
+            "effective_opportunity_cost",
+            getattr(candidate, "opportunity_cost_return", cash_return),
+        ),
+        fallback=cash_return,
     )
     alternative_identifier = _text(
-        getattr(evaluation_snapshot, "best_original_alternative_identifier", None),
+        getattr(evaluation_snapshot, "best_alternative_identifier", None),
         fallback="cash_or_best_governed_alternative",
     )
+    opportunity_edge = _finite(
+        getattr(
+            evaluation_snapshot,
+            "opportunity_edge",
+            candidate_return - alternative_return,
+        ),
+        fallback=candidate_return - alternative_return,
+    )
+    # Candidate contribution is intentionally local rather than copying the complete
+    # construction result into every packet. A reduction in a negative-edge holding
+    # correctly produces positive expected value because both weight_change and edge
+    # are negative. The whole-portfolio construction improvement remains separately
+    # recorded in ``objective``.
+    candidate_marginal_improvement = weight_change * opportunity_edge if changed else 0.0
+    candidate_expected_dollar_added = portfolio_value * candidate_marginal_improvement
     opportunity = GlobalOpportunityComparison(
         candidate_identifier=_text(getattr(candidate, "identifier")),
         symbol=symbol,
@@ -413,13 +454,19 @@ def build_candidate_decision_intelligence_packet(
         best_alternative_identifier=alternative_identifier,
         best_alternative_expected_return=alternative_return,
         edge_over_cash=candidate_return - cash_return,
-        edge_over_best_alternative=candidate_return - alternative_return,
-        marginal_portfolio_improvement=construction_improvement,
-        expected_dollar_value_added=expected_dollar_added,
+        edge_over_best_alternative=opportunity_edge,
+        marginal_portfolio_improvement=candidate_marginal_improvement,
+        expected_dollar_value_added=candidate_expected_dollar_added,
         changes_portfolio=changed,
     )
 
-    market_expectation, internal_expectation, expected_surprise, priced_in, expectation_ids = _expectations(specialist_context)
+    (
+        market_expectation,
+        internal_expectation,
+        expected_surprise,
+        priced_in,
+        expectation_ids,
+    ) = _expectations(specialist_context)
     forward = getattr(specialist_context, "forward_intelligence", None)
     decision_context = None if forward is None else getattr(forward, "decision_context", None)
     forward_summaries = []
@@ -429,7 +476,8 @@ def build_candidate_decision_intelligence_packet(
             summary = _text(getattr(dimension, "summary", None))
             availability = _enum_value(getattr(dimension, "availability", "unknown"))
             forward_summaries.append(
-                f"{_enum_value(getattr(dimension, 'dimension', 'unknown'))} [{availability}]: {summary}"
+                f"{_enum_value(getattr(dimension, 'dimension', 'unknown'))} "
+                f"[{availability}]: {summary}"
             )
             forward_ids.extend(_texts(getattr(dimension, "evidence_identifiers", ())))
 
@@ -439,13 +487,17 @@ def build_candidate_decision_intelligence_packet(
     forecast = getattr(specialist_context, "forecast", None)
     if forecast is not None:
         specialist_disagreements.extend(_texts(getattr(forecast, "limitations", ())))
-        specialist_disagreements.extend(_texts(getattr(forecast, "contradictory_evidence", ())))
+        specialist_disagreements.extend(
+            _texts(getattr(forecast, "contradictory_evidence", ()))
+        )
 
     candidate_ids = _texts(getattr(candidate, "evidence_identifiers", ()))
     decision_ids = _texts(getattr(decision, "evidence_identifiers", ()))
     snapshot_ids = _texts(getattr(evaluation_snapshot, "evidence_identifiers", ()))
     source_ids = tuple(
-        dict.fromkeys((*candidate_ids, *decision_ids, *snapshot_ids, *forward_ids, *expectation_ids))
+        dict.fromkeys(
+            (*candidate_ids, *decision_ids, *snapshot_ids, *forward_ids, *expectation_ids)
+        )
     )
 
     explanation = DecisionExplanationChain(
@@ -474,7 +526,13 @@ def build_candidate_decision_intelligence_packet(
         bear_case=_scenario_text(candidate, "bear_case"),
         specialist_disagreements=tuple(dict.fromkeys(specialist_disagreements)),
         key_risks=_texts(getattr(candidate, "key_risks", ())),
-        invalidation_conditions=_texts(getattr(candidate, "thesis_invalidation_conditions", getattr(candidate, "invalidation_conditions", ()))),
+        invalidation_conditions=_texts(
+            getattr(
+                candidate,
+                "thesis_invalidation_conditions",
+                getattr(candidate, "invalidation_conditions", ()),
+            )
+        ),
         monitoring_indicators=_texts(getattr(candidate, "monitoring_indicators", ())),
         evidence_identifiers=source_ids,
     )
@@ -489,7 +547,9 @@ def build_candidate_decision_intelligence_packet(
     rationale = _texts(getattr(decision, "rationale", ()))
     if not rationale:
         rationale = (_text(getattr(decision, "reason", None)),)
-    confidence = _finite(getattr(decision, "confidence", getattr(decision, "final_confidence", 0.0)))
+    confidence = _finite(
+        getattr(decision, "confidence", getattr(decision, "final_confidence", 0.0))
+    )
     candidate_identifier = _text(getattr(candidate, "identifier"))
     return CandidateDecisionIntelligencePacket(
         identifier=f"decision-intelligence-v3:{cycle_identifier}:{candidate_identifier}",
