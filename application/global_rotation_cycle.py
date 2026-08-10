@@ -4,7 +4,7 @@ The cycle enriches already-governed candidates with mispriced-change and corrobo
 global-leadership economics, propagates explicitly modeled structural-theme successor
 attention, freezes the authoritative opportunity queue, performs a non-authoritative
 all-candidate six-specialist preliminary pass for joint portfolio preview, and then
-runs the unchanged final CIO/construction authority path.
+reuses those immutable packets in the unchanged final CIO/construction authority path.
 """
 from __future__ import annotations
 
@@ -15,7 +15,10 @@ from application.compounding_cycle import (
     CompoundingCanonicalCIOCycle,
     CompoundingCanonicalCIOCycleResult,
 )
-from application.global_rotation_preliminary import assess_preliminary_global_conviction
+from application.global_rotation_preliminary import (
+    PrecomputedSpecialistService,
+    assess_preliminary_global_conviction,
+)
 from application.global_rotation_preview import build_global_rotation_preview
 from cio import HistoricalLearningContext
 from cio.global_rotation_authority import GlobalRotationChiefInvestmentOfficer
@@ -139,6 +142,10 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
             policy_authority=authority,
             **kwargs,
         )
+        if not isinstance(self.specialist_service, PrecomputedSpecialistService):
+            self.specialist_service = PrecomputedSpecialistService(
+                self.specialist_service
+            )
         self.global_rotation_store = global_rotation_store
         if self.global_rotation_store is None and self.journal is not None:
             self.global_rotation_store = SQLiteGlobalRotationStore(self.journal.path)
@@ -207,10 +214,9 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
     ) -> dict[str, object]:
         """Build every six-specialist packet before any final CIO synthesis.
 
-        This pass is intentionally non-persistent and non-authoritative. The canonical
-        base cycle recalculates and persists its normal packets exactly once before final
-        decisions. The preliminary packets exist only to prevent the joint portfolio
-        preview from sizing raw candidates before specialist risk/reconciliation input.
+        This pass is non-persistent and non-authoritative. The exact immutable packets
+        are reused by the base cycle, which persists them once in its normal order. This
+        avoids doubling specialist work across a potentially large all-market set.
         """
 
         if queue is None or not tuple(getattr(queue, "ranked", ()) or ()):
@@ -409,6 +415,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         if callable(setter):
             setter(rotation_context)
 
+        preliminary_packets: dict[str, object] = {}
         conviction_targets = None
         try:
             preliminary_packets = self._preliminary_specialist_packets(
@@ -426,6 +433,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
             # The preview must never become a hidden action veto. The canonical final
             # cycle below performs its own complete six-specialist analysis and fails
             # closed there if a required authoritative input is actually invalid.
+            preliminary_packets = {}
             _LOGGER.exception(
                 "specialist-informed global preview unavailable for %s; falling back to bounded leadership preview",
                 cycle_identifier,
@@ -452,12 +460,13 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         if preview is not None and callable(preview_setter):
             preview_setter(preview)
         try:
-            base_result = super().run(
-                **{
-                    **prepared_kwargs,
-                    "specialist_contexts": enriched_contexts,
-                }
-            )
+            with self.specialist_service.bind_packets(preliminary_packets):
+                base_result = super().run(
+                    **{
+                        **prepared_kwargs,
+                        "specialist_contexts": enriched_contexts,
+                    }
+                )
             accountability = build_global_cash_accountability(
                 cycle_identifier=cycle_identifier,
                 context=rotation_context,
