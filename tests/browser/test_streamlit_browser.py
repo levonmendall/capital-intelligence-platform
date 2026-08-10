@@ -167,21 +167,30 @@ def _assert_surface_body(page, surface: str) -> None:
 
 
 def _assert_portfolio_opening_hierarchy(page) -> None:
+    """Guard the Portfolio command-center order, not the retired card order."""
+
+    cio_positioning = page.get_by_text("LATEST CIO POSITIONING", exact=True).first
+    benchmarks = page.get_by_text("Performance vs benchmarks", exact=True).first
+    allocation = page.get_by_text("Current → target allocation", exact=True).first
     holdings = page.get_by_text("Current holdings", exact=True).first
-    cio_decision = page.get_by_text("CIO decision", exact=True).first
-    holdings.wait_for(state="visible", timeout=15_000)
-    cio_decision.wait_for(state="visible", timeout=15_000)
 
-    holdings_box = holdings.bounding_box()
-    decision_box = cio_decision.bounding_box()
-    assert holdings_box is not None
-    assert decision_box is not None
-    assert holdings_box["y"] < decision_box["y"]
+    for locator in (cio_positioning, benchmarks, allocation, holdings):
+        locator.wait_for(state="visible", timeout=15_000)
 
-    page.get_by_text("Capital deployment", exact=True).first.wait_for(
+    positions = []
+    for locator in (cio_positioning, benchmarks, allocation, holdings):
+        box = locator.bounding_box()
+        assert box is not None
+        positions.append(box["y"])
+    assert positions == sorted(positions)
+
+    page.get_by_text("Performance attribution", exact=True).first.wait_for(
         state="visible", timeout=15_000
     )
-    page.get_by_text("Outstanding portfolio actions", exact=True).first.wait_for(
+    page.get_by_text("Risk & exposure", exact=True).first.wait_for(
+        state="visible", timeout=15_000
+    )
+    page.get_by_text("Pending implementation", exact=True).first.wait_for(
         state="visible", timeout=15_000
     )
     controls = page.locator('[data-testid="stExpander"] summary').filter(
