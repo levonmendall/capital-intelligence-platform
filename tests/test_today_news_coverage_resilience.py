@@ -116,6 +116,7 @@ def test_deployment_and_discovery_windows_support_continuous_today_coverage() ->
     supervisor = Path("run_render_service.py").read_text(encoding="utf-8")
     collector = Path("run_public_headline_collector.py").read_text(encoding="utf-8")
     retention_source = Path("today_story_retention_runtime.py").read_text(encoding="utf-8")
+    today_source = Path("today_trust_ui_runtime.py").read_text(encoding="utf-8")
 
     # GDELT remains one broad discovery input, but no longer the only one.
     assert source["parameters"]["timespan"] == "24h"
@@ -139,9 +140,12 @@ def test_deployment_and_discovery_windows_support_continuous_today_coverage() ->
     assert "EODHD_API_KEY" in collector
     assert "MARKETAUX_API_TOKEN" in collector
 
-    # Today always renders useful content without manufacturing a headline.
-    assert "No new story earned investor attention" not in retention_source
-    assert "No new qualifying stories" in retention_source
-    assert "Live market pulse" in retention_source
-    assert "Headline providers are refreshing; market context remains live." in retention_source
+    # Retention owns lifecycle only; the canonical Today renderer owns truthful
+    # empty/current presentation without manufacturing a headline.
     assert "timedelta(hours=72)" in retention_source
+    assert "original publication timestamps" in retention_source
+    assert "No new story earned investor attention" not in today_source
+    assert "Sources current · no new qualifying developments; prior verified context retained" in today_source
+    assert "Sources current · no new development cleared the relevance controls" in today_source
+    assert "No new development earned a current briefing slot." in today_source
+    assert "empty or low-relevance headline set as an investment signal" in today_source
