@@ -1,15 +1,64 @@
 """Pre-final-CIO global conviction assessment for simultaneous portfolio preview.
 
-This module intentionally duplicates the deterministic reconciliation/robustness inputs
-used by the canonical CIO so all six specialist packets can be considered together
-before final candidate-by-candidate CIO synthesis. It has no action, construction, or
-execution authority and never writes canonical CIO persistence.
+The global cycle computes all six-specialist packets before final CIO synthesis so the
+joint portfolio preview is specialist-informed. The same immutable packets are then
+reused by the canonical final pass through a context-local cache, avoiding a second
+specialist analysis across a potentially large all-market candidate set. Nothing here
+has action, construction, execution, or canonical persistence authority.
 """
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
+from typing import Iterator
 
 from portfolio.global_rotation import GlobalConvictionDecision
+
+
+class PrecomputedSpecialistService:
+    """Context-local packet reuse around an existing specialist service.
+
+    The delegate remains the only packet producer. A bound packet may be reused only
+    for the same candidate and the same historical-learning context. This keeps the
+    preliminary and final CIO passes identical without mutating the canonical journal
+    or creating a second specialist implementation.
+    """
+
+    def __init__(self, delegate) -> None:
+        self.delegate = delegate
+        self._active_packets: ContextVar[dict[str, object]] = ContextVar(
+            f"global_rotation_specialist_packets_{id(self)}",
+            default={},
+        )
+
+    def __getattr__(self, name: str):
+        return getattr(self.delegate, name)
+
+    @contextmanager
+    def bind_packets(self, packets: dict[str, object]) -> Iterator[None]:
+        if not isinstance(packets, dict):
+            raise TypeError("packets must be a dict")
+        token = self._active_packets.set(dict(packets))
+        try:
+            yield
+        finally:
+            self._active_packets.reset(token)
+
+    def analyze(self, candidate, context):
+        packet = self._active_packets.get().get(candidate.identifier)
+        if packet is None:
+            return self.delegate.analyze(candidate, context)
+        validate = getattr(packet, "validate_against", None)
+        if callable(validate):
+            validate(candidate)
+        packet_learning = getattr(packet, "historical_learning", None)
+        context_learning = getattr(context, "historical_learning", None)
+        if packet_learning != context_learning:
+            raise ValueError(
+                "precomputed specialist packet historical-learning context changed "
+                "between preliminary and final CIO passes"
+            )
+        return packet
 
 
 def assess_preliminary_global_conviction(
@@ -101,4 +150,7 @@ def assess_preliminary_global_conviction(
     )
 
 
-__all__ = ["assess_preliminary_global_conviction"]
+__all__ = [
+    "PrecomputedSpecialistService",
+    "assess_preliminary_global_conviction",
+]
