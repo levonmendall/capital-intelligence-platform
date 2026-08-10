@@ -66,13 +66,13 @@ def build_global_rotation_preview(
     requested: list[tuple[str, float]] = []
     current_by_id: dict[str, float] = {}
     for fallback_rank, candidate in enumerate(reviewed, start=1):
-        profile = portfolio.profile(candidate.identifier)
         current = float(portfolio.current_weight(candidate.instrument.symbol))
         current_by_id[candidate.identifier] = current
         action, target = _requested_target(candidate, current, rotation_context)
         requested.append((candidate.identifier, target))
         if target <= 0.0 and current <= 0.0:
             continue
+        profile = portfolio.profile(candidate.identifier)
         annualized = ConstructionIntent.annualized_return(
             candidate.net_expected_return,
             horizon_days=candidate.decision_horizon_days,
