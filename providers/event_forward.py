@@ -16,6 +16,7 @@ calibrated without reconstructing them from hindsight.
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from datetime import timedelta
@@ -37,6 +38,8 @@ from providers.public_decision_information import (
     build_public_decision_information_provider,
 )
 
+_LOGGER = logging.getLogger("capital_intelligence.causal_intelligence")
+
 
 @dataclass(frozen=True, slots=True)
 class GovernedEventForwardResult:
@@ -57,10 +60,18 @@ class GovernedEventForwardResult:
             raise ValueError("event-forward assessments must be unique")
         if self.assessments and set(assessment_ids) != set(self.assessment_identifiers):
             raise ValueError("assessment identifiers must match retained assessments")
+        known_assessment_ids = set(assessment_ids)
         for assessment_identifier, target_identifier, candidate_identifier in self.candidate_exposure_links:
-            if not all(str(value).strip() for value in (assessment_identifier, target_identifier, candidate_identifier)):
+            if not all(
+                str(value).strip()
+                for value in (
+                    assessment_identifier,
+                    target_identifier,
+                    candidate_identifier,
+                )
+            ):
                 raise ValueError("candidate exposure links cannot contain empty values")
-            if self.assessments and assessment_identifier not in set(assessment_ids):
+            if self.assessments and assessment_identifier not in known_assessment_ids:
                 raise ValueError("candidate exposure link references an unknown assessment")
 
     @property
@@ -86,6 +97,27 @@ def _confirmation(values: tuple[float, ...]) -> float:
     # direction for EventToForwardEngine and use absolute magnitude only for the
     # prior cluster admission gate.
     return round(min(1.0, max(abs(item) for item in values) / 0.02), 8)
+
+
+def _persist_causal_lineage(result: GovernedEventForwardResult) -> None:
+    """Best-effort empirical lineage write with no decision authority."""
+
+    if not result.assessments:
+        return
+    try:
+        from evaluation.causal_intelligence_runtime import (
+            persist_governed_event_forward_result,
+        )
+
+        persist_governed_event_forward_result(result)
+    except Exception:
+        # The event-forward bundle has already been determined. Losing a research
+        # calibration sidecar must be visible operationally, but it cannot remove or
+        # alter the governed evidence that the CIO receives.
+        _LOGGER.exception(
+            "causal intelligence lineage persistence failed for %s assessment(s)",
+            len(result.assessments),
+        )
 
 
 def build_governed_event_forward(
@@ -226,7 +258,7 @@ def build_governed_event_forward(
                 reconcile_forward_intelligence(existing, bundle)
             )
 
-    return GovernedEventForwardResult(
+    result = GovernedEventForwardResult(
         bundles=tuple(
             bundle_by_candidate[key] for key in sorted(bundle_by_candidate)
         ),
@@ -240,6 +272,8 @@ def build_governed_event_forward(
         assessments=tuple(assessments),
         candidate_exposure_links=tuple(dict.fromkeys(candidate_exposure_links)),
     )
+    _persist_causal_lineage(result)
+    return result
 
 
 def build_configured_event_forward_provider() -> DecisionInformationProvider | None:
