@@ -4,7 +4,7 @@ Render's service plan enforces a hard 2 GB /tmp quota. Comprehensive evidence
 collection and encrypted-backup verification can legitimately require larger
 cycle-local working sets. This entrypoint creates the configured TMPDIR on the
 persistent service disk and removes only abandoned, explicitly disposable
-backup staging directories before importing the existing governed bootstrap.
+backup staging directories before importing the governed memory-safe bootstrap.
 It has no investment, CIO, construction, execution, or real-money authority.
 """
 
@@ -45,7 +45,7 @@ def prepare_runtime_workspace(values: dict[str, str] | None = None) -> Path:
 
 def main() -> int:
     prepare_runtime_workspace()
-    from run_render_service_nonblocking import main as run_service
+    from run_render_service_memory_safe import main as run_service
 
     return run_service()
 
