@@ -166,7 +166,7 @@ def _policy_inputs(
     *,
     evidence_vetoes=(),
     implementation_blocks=(),
-    stressed_edge=-0.002,
+    stressed_edge=0.0,
     funding_source="cash",
     opposition_count=0,
     ensemble_stage="participate",
@@ -233,6 +233,13 @@ def test_soft_uncertainty_becomes_provisional_position_not_cash():
     assert decision.stage is ConvictionStage.PROVISIONAL
     assert decision.authorized is True
     assert 0.0 < decision.target_weight <= 0.03
+
+
+def test_negative_stressed_edge_never_receives_positive_rotation_capital():
+    decision = GlobalConvictionPolicy().assess(**_policy_inputs(stressed_edge=-0.0001))
+    assert decision.stage is ConvictionStage.UNRESOLVED
+    assert decision.authorized is False
+    assert decision.target_weight is None
 
 
 def test_hard_evidence_veto_remains_zero_capital():
