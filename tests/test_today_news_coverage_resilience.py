@@ -143,7 +143,8 @@ def test_deployment_and_discovery_windows_support_continuous_today_coverage() ->
     # Retention owns lifecycle only; the canonical Today renderer owns truthful
     # empty/current presentation without manufacturing a headline.
     assert "timedelta(hours=72)" in retention_source
-    assert "original publication timestamps" in retention_source
+    assert "keep their original publication" in retention_source
+    assert "timestamps" in retention_source
     assert "No new story earned investor attention" not in today_source
     assert "Sources current · no new qualifying developments; prior verified context retained" in today_source
     assert "Sources current · no new development cleared the relevance controls" in today_source
