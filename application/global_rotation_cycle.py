@@ -154,7 +154,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         opportunity_context = kwargs.get("opportunity_context")
         if opportunity_context is None:
             return dict(kwargs), None
-        generated_ranking = self.prepare_ranking_inputs(
+        generated_ranking = self._ranking_inputs(
             candidates,
             portfolio,
             minimum_cash_weight=self.construction_engine.policy.minimum_cash_weight,
