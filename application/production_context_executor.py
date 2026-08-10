@@ -10,13 +10,18 @@ operational adapters.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from application import production_context_executor_impl as _implementation
+from application.decision_intelligence_v3_runtime import (
+    append_post_cycle_decision_intelligence,
+)
 from application.marginal_targeting_runtime import (
     install_construction_backed_marginal_targeting,
 )
 
+_LOGGER = logging.getLogger("capital_intelligence.decision_intelligence_v3")
 _ORIGINAL_CANDIDATE_AUTHORITY_UNIVERSE = (
     _implementation._candidate_authority_universe
 )
@@ -83,9 +88,25 @@ class ProductionCanonicalCIOExecutor(
     def run(self, *, as_of: datetime):
         _synchronize_runtime_bindings()
         original_provider = self.context_provider
-        self.context_provider = _SingleLoadContextProvider(original_provider)
+        cached_provider = _SingleLoadContextProvider(original_provider)
+        self.context_provider = cached_provider
         try:
-            return super().run(as_of=as_of)
+            result = super().run(as_of=as_of)
+            # Decision Intelligence v3 is downstream and read-only. A persistence
+            # failure may reduce explainability/measurement coverage, but it must not
+            # invalidate or change a CIO decision already produced by the canonical
+            # authority path.
+            try:
+                append_post_cycle_decision_intelligence(
+                    result=result,
+                    context=cached_provider._cached_context,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "post-cycle decision-intelligence persistence failed for %s",
+                    getattr(result, "identifier", "unknown"),
+                )
+            return result
         finally:
             self.context_provider = original_provider
 
