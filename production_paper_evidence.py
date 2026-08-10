@@ -15,6 +15,7 @@ from dataclasses import replace
 
 import intelligence.predictive_market as _predictive_market
 import production_paper_evidence_impl as _implementation
+from governance.decision_readiness import CandidateDecisionReadinessPolicy
 from intelligence.global_opportunity import (
     BullMarketStage,
     CanonicalExposureGraph,
@@ -673,10 +674,13 @@ def build_paper_evidence(*args, **kwargs):
         decision_as_of = kwargs.get("decision_as_of")
         if universe is None or decision_as_of is None:
             return result
-        return _enrich_global_opportunity_result(
+        enriched = _enrich_global_opportunity_result(
             result,
             universe=universe,
             decision_as_of=decision_as_of,
+        )
+        return CandidateDecisionReadinessPolicy().filter_paper_evidence_result(
+            enriched
         )
     finally:
         _FLOW_STATE.production_build = False
