@@ -18,6 +18,7 @@ from api.repositories import (
 )
 from api.routes import (
     alerts_router,
+    ask_cio_router,
     authentication_router,
     business_cycle_router,
     credit_cycle_router,
@@ -109,7 +110,7 @@ def create_app(
             "analytical engines, evidence governance, CIO decisions, replays, "
             "authorized portfolios, and selective material-change delivery. "
             "The investment process uses one objective: maximize long-term "
-            "compounded portfolio returns."
+            "compounded portfolio dollar value after costs."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -164,6 +165,7 @@ def create_app(
         app.include_router(users_router)
         app.include_router(alerts_router, dependencies=protected)
     app.include_router(cio_router, dependencies=protected)
+    app.include_router(ask_cio_router, dependencies=protected)
     app.include_router(daily_router, dependencies=protected)
     app.include_router(environment_router, dependencies=protected)
     app.include_router(business_cycle_router, dependencies=protected)
