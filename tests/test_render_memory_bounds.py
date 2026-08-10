@@ -33,11 +33,15 @@ def test_provider_validation_fails_memory_safe_when_coordination_is_unreadable(m
     assert provider_worker._diagnostic_active() is True
 
 
-def test_provider_worker_does_not_eagerly_load_heavy_validation_stack() -> None:
-    # The loop process must stay lightweight while the release diagnostic owns memory.
-    assert "validate_live_providers" not in provider_worker.__dict__
-    source = inspect.getsource(provider_worker.validate_once)
-    assert "from operations.provider_validation import" in source
+def test_provider_worker_keeps_heavy_validation_imports_lazy() -> None:
+    # Preserve the public monkeypatch seam without importing the provider stack until a
+    # validation pass actually begins after the diagnostic memory lane is released.
+    validate_source = inspect.getsource(provider_worker.validate_live_providers)
+    write_source = inspect.getsource(provider_worker.write_provider_validation_report)
+    once_source = inspect.getsource(provider_worker.validate_once)
+    assert "from operations.provider_validation import" in validate_source
+    assert "from operations.provider_validation import" in write_source
+    assert "from operations.provider_validation import" not in once_source
 
 
 def test_diagnostic_container_high_water_stops_before_kernel_oom(monkeypatch) -> None:
