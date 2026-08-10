@@ -4,13 +4,20 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from cio.global_rotation_authority import GlobalRotationChiefInvestmentOfficer
-from cio.models import CIOAction, CandidateAssetClass, CandidateDecisionRecord, CandidateInstrument, EvidenceQuality
+from cio.models import (
+    CIOAction,
+    CandidateAssetClass,
+    CandidateDecisionRecord,
+    CandidateInstrument,
+    EvidenceQuality,
+)
 from intelligence.forward import ForwardIntelligenceBundle, ForwardSignal, TrendStage
 from intelligence.global_leadership import (
     GlobalLeadershipState,
     assess_global_leadership_economics,
     enrich_bundle_with_global_leadership_economics,
 )
+from intelligence.mispriced_change import MispricedChangeState
 from portfolio.global_rotation import (
     CashCompetitionState,
     ConvictionStage,
@@ -118,7 +125,7 @@ def test_leadership_needs_forward_mispricing_corroboration(monkeypatch):
         module,
         "assess_mispriced_change",
         lambda _bundle: SimpleNamespace(
-            state=SimpleNamespace(value="constructive_mispriced_change") if False else __import__("intelligence.mispriced_change", fromlist=["MispricedChangeState"]).MispricedChangeState.CONSTRUCTIVE,
+            state=MispricedChangeState.CONSTRUCTIVE,
             score=0.55,
             confidence=0.8,
             evidence_identifiers=("evidence:mispricing",),
@@ -128,14 +135,17 @@ def test_leadership_needs_forward_mispricing_corroboration(monkeypatch):
     assert assessment.state is GlobalLeadershipState.EMERGING
     assert 0.0 < assessment.interaction_return_adjustment <= 0.01
     enriched = enrich_bundle_with_global_leadership_economics(_bundle())
-    added = [item for item in enriched.signals if item.identifier.startswith("signal:global-leadership-economics:")]
+    added = [
+        item
+        for item in enriched.signals
+        if item.identifier.startswith("signal:global-leadership-economics:")
+    ]
     assert len(added) == 1
     assert added[0].expected_return_impact <= 0.01
 
 
 def test_momentum_without_forward_economics_is_not_promoted(monkeypatch):
     import intelligence.global_leadership as module
-    from intelligence.mispriced_change import MispricedChangeState
 
     monkeypatch.setattr(
         module,
@@ -152,7 +162,17 @@ def test_momentum_without_forward_economics_is_not_promoted(monkeypatch):
     assert assessment.interaction_return_adjustment == 0.0
 
 
-def _policy_inputs(*, evidence_vetoes=(), stressed_edge=-0.002):
+def _policy_inputs(
+    *,
+    evidence_vetoes=(),
+    implementation_blocks=(),
+    stressed_edge=-0.002,
+    funding_source="cash",
+    opposition_count=0,
+    ensemble_stage="participate",
+    preferred=True,
+    discouraged=False,
+):
     return dict(
         candidate=_candidate(),
         signal=GlobalOpportunitySignal(
@@ -172,13 +192,13 @@ def _policy_inputs(*, evidence_vetoes=(), stressed_edge=-0.002):
         universe=SimpleNamespace(direct_recommendation_allowed=True),
         specialists=SimpleNamespace(
             evidence_vetoes=evidence_vetoes,
-            implementation_blocks=(),
+            implementation_blocks=implementation_blocks,
             portfolio_recommendation=SimpleNamespace(
                 recommended_position_weight=0.08,
-                funding_source="cash",
+                funding_source=funding_source,
             ),
             historical_learning=SimpleNamespace(effective_position_multiplier=1.0),
-            independent_opposition_count=lambda _threshold: 0,
+            independent_opposition_count=lambda _threshold: opposition_count,
         ),
         robustness=SimpleNamespace(
             effective_probability_of_success=0.50,
@@ -186,7 +206,9 @@ def _policy_inputs(*, evidence_vetoes=(), stressed_edge=-0.002):
             robust_edge=0.01,
             stressed_edge=stressed_edge,
             evidence_adjusted_return=0.045,
-            reasons=("evidence-adjusted geometric return does not clear the best alternative by the required margin",),
+            reasons=(
+                "evidence-adjusted geometric return does not clear the best alternative by the required margin",
+            ),
         ),
         reconciliation=SimpleNamespace(
             expected_return=0.06,
@@ -200,8 +222,8 @@ def _policy_inputs(*, evidence_vetoes=(), stressed_edge=-0.002):
             minimum_opportunity_edge=0.005,
             maximum_position_weight=0.10,
         ),
-        ensemble=SimpleNamespace(stage=SimpleNamespace(value="participate")),
-        directive=SimpleNamespace(preferred=True, discouraged=False),
+        ensemble=SimpleNamespace(stage=SimpleNamespace(value=ensemble_stage)),
+        directive=SimpleNamespace(preferred=preferred, discouraged=discouraged),
         material_opposition_threshold=0.75,
     )
 
@@ -219,6 +241,45 @@ def test_hard_evidence_veto_remains_zero_capital():
     )
     assert decision.stage is ConvictionStage.BLOCKED
     assert decision.target_weight is None
+
+
+def test_hard_implementation_block_remains_zero_capital():
+    decision = GlobalConvictionPolicy().assess(
+        **_policy_inputs(implementation_blocks=("cannot implement safely",))
+    )
+    assert decision.stage is ConvictionStage.BLOCKED
+    assert decision.target_weight is None
+
+
+def test_missing_exact_funding_source_remains_zero_capital():
+    decision = GlobalConvictionPolicy().assess(**_policy_inputs(funding_source=""))
+    assert decision.stage is ConvictionStage.BLOCKED
+    assert decision.target_weight is None
+
+
+def test_ordinary_specialist_opposition_reduces_size_instead_of_forcing_cash():
+    inputs = _policy_inputs(opposition_count=1, stressed_edge=0.01)
+    inputs["robustness"] = SimpleNamespace(
+        effective_probability_of_success=0.61,
+        probability_of_loss=0.35,
+        robust_edge=0.02,
+        stressed_edge=0.01,
+        evidence_adjusted_return=0.07,
+        reasons=(),
+    )
+    decision = GlobalConvictionPolicy().assess(**inputs)
+    assert decision.stage is ConvictionStage.PROVISIONAL
+    assert decision.authorized is True
+    assert decision.target_weight <= 0.03
+
+
+def test_observe_ensemble_reduces_viable_opportunity_to_exploratory_not_zero():
+    decision = GlobalConvictionPolicy().assess(
+        **_policy_inputs(ensemble_stage="observe")
+    )
+    assert decision.stage is ConvictionStage.EXPLORATORY
+    assert decision.authorized is True
+    assert decision.target_weight <= 0.01
 
 
 def test_fx_is_first_class_currency_domain_and_excess_cash_is_competed():
@@ -247,12 +308,32 @@ def test_confirmed_deterioration_derisks_and_names_cross_asset_replacement():
     cio = GlobalRotationChiefInvestmentOfficer()
     held = SimpleNamespace(identifier="held", current_portfolio_weight=0.08)
     held_signal = GlobalOpportunitySignal(
-        "held", GlobalOpportunityDomain.EQUITY, 2, 0.35, "deteriorating", 0.60,
-        "deteriorating", -0.50, -0.04, -0.02, 0.90, ("evidence:held",),
+        "held",
+        GlobalOpportunityDomain.EQUITY,
+        2,
+        0.35,
+        "deteriorating",
+        0.60,
+        "deteriorating",
+        -0.50,
+        -0.04,
+        -0.02,
+        0.90,
+        ("evidence:held",),
     )
     replacement = GlobalOpportunitySignal(
-        "usd", GlobalOpportunityDomain.CURRENCY, 1, 0.80, "leading", 0.80,
-        "constructive_mispriced_change", 0.50, 0.05, 0.04, 0.90, ("evidence:usd",),
+        "usd",
+        GlobalOpportunityDomain.CURRENCY,
+        1,
+        0.80,
+        "leading",
+        0.80,
+        "constructive_mispriced_change",
+        0.50,
+        0.05,
+        0.04,
+        0.90,
+        ("evidence:usd",),
     )
     cio.set_global_rotation_context(
         GlobalRotationContext(
@@ -270,7 +351,13 @@ def test_confirmed_deterioration_derisks_and_names_cross_asset_replacement():
         action=CIOAction.HOLD,
         position_weight=None,
         reason="holding review.",
-        conviction=GlobalConvictionDecision(ConvictionStage.QUALIFIED, 0.07, (), (), ("ok",)),
+        conviction=GlobalConvictionDecision(
+            ConvictionStage.QUALIFIED,
+            0.07,
+            (),
+            (),
+            ("ok",),
+        ),
     )
     assert action is CIOAction.REDUCE
     assert target == 0.04
