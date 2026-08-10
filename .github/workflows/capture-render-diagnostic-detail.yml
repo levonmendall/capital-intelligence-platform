@@ -1,0 +1,48 @@
+name: Capture Render Diagnostic Detail
+
+on:
+  push:
+    branches:
+      - diagnostic/render-cio-failure-detail
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch public Render CIO diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json"
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error --location \
+              --connect-timeout 15 --max-time 30 \
+              -H 'Accept: application/json' \
+              "$url" -o /tmp/cio-diagnostic.json; then
+              break
+            fi
+            if [[ "$attempt" == "5" ]]; then
+              exit 1
+            fi
+            sleep 5
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('/tmp/cio-diagnostic.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          print(json.dumps(data, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload public diagnostic snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-cio-diagnostic-detail-${{ github.run_id }}
+          path: /tmp/cio-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 1
