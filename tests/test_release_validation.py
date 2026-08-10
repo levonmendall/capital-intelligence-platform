@@ -168,22 +168,21 @@ def test_release_runner_classifies_timeout_and_does_not_continue(
 
     report = ReleaseValidationRunner(
         steps=(
-            ReleaseValidationStep("timeout", ("python", "hang.py"), 1),
-            ReleaseValidationStep("must_not_run", ("python", "later.py"), 10),
+            ReleaseValidationStep("timeout", ("python", "slow.py"), 1),
+            ReleaseValidationStep("later", ("python", "later.py"), 1),
         ),
         report_path=tmp_path / "release.json",
         working_directory=tmp_path,
         environment={},
-        maximum_diagnostic_characters=200,
         run_command=run,
         clock=Clock(),
         monotonic=Monotonic(),
     ).run()
 
-    assert report["status"] == "failed"
     assert calls == 1
-    result = report["steps"][0]
-    assert result["return_code"] is None
-    assert result["failure_reason"] == "timeout"
-    assert "partial stdout" in result["stdout"]
-    assert "timeout detail" in result["stderr"]
+    assert report["status"] == "failed"
+    assert report["timed_out_steps"] == 1
+    assert report["steps"][0]["status"] == "timed_out"
+    assert report["steps"][0]["return_code"] is None
+    assert report["steps"][0]["stdout"] == "partial stdout"
+    assert report["steps"][0]["stderr"] == "timeout detail"
