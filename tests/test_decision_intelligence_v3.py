@@ -23,6 +23,7 @@ from intelligence.decision_intelligence_v3 import (
     build_candidate_decision_intelligence_packet,
 )
 from intelligence.information_completeness import CandidateInformationCompleteness
+from intelligence.value_of_information import ValueOfInformationEngine
 
 
 NOW = datetime(2026, 8, 10, 4, 30, tzinfo=timezone.utc)
@@ -55,7 +56,7 @@ class _CompletenessEngine:
         )
 
 
-def test_wrapper_discloses_underlying_crypto_intelligence_gap_without_silent_reclassification():
+def _crypto_wrapper_readiness():
     candidate = SimpleNamespace(
         identifier="candidate:ibit",
         instrument=SimpleNamespace(
@@ -63,9 +64,13 @@ def test_wrapper_discloses_underlying_crypto_intelligence_gap_without_silent_rec
             economic_exposure_class=CandidateAssetClass.CRYPTO,
         ),
     )
-    readiness = CandidateDecisionReadinessPolicy(_CompletenessEngine()).assess(
+    return CandidateDecisionReadinessPolicy(_CompletenessEngine()).assess(
         candidate, object()
     )
+
+
+def test_wrapper_discloses_underlying_crypto_intelligence_gap_without_silent_reclassification():
+    readiness = _crypto_wrapper_readiness()
     assert readiness.decision_ready is True
     assert readiness.asset_class is CandidateAssetClass.US_ETF
     assert readiness.economic_exposure_class is CandidateAssetClass.CRYPTO
@@ -73,6 +78,21 @@ def test_wrapper_discloses_underlying_crypto_intelligence_gap_without_silent_rec
     assert UnderwritingDimension.ONCHAIN in readiness.deep_missing
     assert UnderwritingDimension.POSITIONING in readiness.deep_missing
     assert readiness.investment_authority is False
+
+
+def test_value_of_information_prioritizes_underlying_economic_gaps():
+    priorities = ValueOfInformationEngine().prioritize(
+        readiness=_crypto_wrapper_readiness()
+    )
+    dimensions = {item.dimension for item in priorities}
+    assert UnderwritingDimension.ONCHAIN in dimensions
+    assert UnderwritingDimension.POSITIONING in dimensions
+    onchain = next(
+        item for item in priorities if item.dimension is UnderwritingDimension.ONCHAIN
+    )
+    assert onchain.blocking is False
+    assert any("economic-exposure" in item for item in onchain.rationale)
+    assert onchain.authorizes_capital is False
 
 
 def _packet() -> CandidateDecisionIntelligencePacket:
@@ -96,8 +116,8 @@ def _packet() -> CandidateDecisionIntelligencePacket:
         best_alternative_expected_return=0.04,
         edge_over_cash=0.11,
         edge_over_best_alternative=0.11,
-        marginal_portfolio_improvement=0.01,
-        expected_dollar_value_added=2_500.0,
+        marginal_portfolio_improvement=0.011,
+        expected_dollar_value_added=2_750.0,
         changes_portfolio=True,
     )
     explanation = DecisionExplanationChain(
@@ -168,7 +188,9 @@ def test_append_only_packet_store_and_wealth_validation(tmp_path):
 def test_ask_cio_is_read_only_and_answers_from_latest_packet(tmp_path):
     store = SQLiteDecisionIntelligenceV3Store(tmp_path / "ask-cio.db")
     store.append_packet(_packet())
-    answer = AskCIOService(store).answer("What is the best opportunity for the next dollar?")
+    answer = AskCIOService(store).answer(
+        "What is the best opportunity for the next dollar?"
+    )
     assert answer.intent == "best_opportunity"
     assert "ABC" in answer.answer
     assert answer.investment_authority is False
@@ -177,7 +199,7 @@ def test_ask_cio_is_read_only_and_answers_from_latest_packet(tmp_path):
     assert "evidence:1" in answer.evidence_identifiers
 
 
-def test_packet_builder_translates_compounding_to_dollar_value():
+def test_packet_builder_separates_portfolio_and_candidate_dollar_value():
     instrument = SimpleNamespace(
         symbol="ABC",
         name="ABC Corp",
@@ -221,7 +243,9 @@ def test_packet_builder_translates_compounding_to_dollar_value():
         expected_return_improvement=0.01,
     )
     snapshot = SimpleNamespace(
-        best_original_alternative_identifier="cash",
+        best_alternative_identifier="cash",
+        effective_opportunity_cost=0.04,
+        opportunity_edge=0.11,
         evidence_identifiers=("snapshot-evidence",),
     )
     packet = build_candidate_decision_intelligence_packet(
@@ -234,6 +258,11 @@ def test_packet_builder_translates_compounding_to_dollar_value():
         evaluation_snapshot=snapshot,
     )
     assert packet.objective.portfolio_value == 250_000.0
+    # Whole-portfolio construction improvement remains global.
     assert packet.objective.expected_dollar_value_added == pytest.approx(2_500.0)
+    # Candidate attribution uses 10% weight change x 11% opportunity edge.
+    assert packet.opportunity.marginal_portfolio_improvement == pytest.approx(0.011)
+    assert packet.opportunity.expected_dollar_value_added == pytest.approx(2_750.0)
+    assert packet.opportunity.best_alternative_identifier == "cash"
     assert packet.opportunity.proposed_target_weight == pytest.approx(0.10)
     assert packet.investment_authority is False
