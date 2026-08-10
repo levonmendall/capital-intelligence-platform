@@ -1,39 +1,10 @@
-"""Start the Render web service before live-provider validation completes.
+"""Start Render web availability while isolating release-diagnostic memory.
 
-Core datastore and market-scope initialization still completes synchronously. Slow or
-unavailable external providers are validated by a separate noncritical worker, allowing
-Streamlit to open Render's health-check port promptly. Existing readiness gates continue
-to prevent CIO analysis and paper implementation from using missing or stale provider
-evidence.
-
-During the explicitly configured bond-source transition, comprehensive direct-market
-discovery becomes an optional expansion rather than a prerequisite for the entire CIO
-cycle. The governed publication already records that degraded scope and cannot represent
-it as complete all-market coverage. The canonical listed-wrapper bond alternatives,
-broad U.S.-security discovery, six-specialist review, CIO authority, portfolio
-construction, paper-only execution, and real-money prohibition remain unchanged.
-
-Before any child process starts, the bootstrap also checks the persistent disk reserve.
-When the disk is under pressure it may remove only oldest canonical backup archives and
-stale backup temporary files while preserving at least the configured newest archive.
-Canonical databases, portfolio state, evidence, lineage, reports, and research records
-are never deleted by this recovery path.
-
-When explicitly enabled, the release diagnostic first primes the durable current-release
-pending request so the first public audit cannot inherit a prior release's terminal state.
-The primer has no decision or execution authority and never claims the request. The
-release diagnostic then waits until the current API and Streamlit children are healthy,
-and invokes the existing fully governed manual CIO diagnostic. If the bounded readiness
-observation expires, the diagnostic is still attempted rather than abandoning
-exact-release certification; all downstream evidence, provider, discovery, CIO,
-construction, and paper-only gates remain fail closed. A failed cold-start discovery may
-be resumed a small bounded number of times so previously certified provider snapshots on
-the persistent disk can be reused and the next uncached market can be attempted. Every
-attempt remains paper-only, requires complete all-market discovery, preserves all
-fail-closed gates, and publishes a credential-safe aggregate audit. While that bounded
-diagnostic is active, the supervisor keeps API and Streamlit available but defers the
-duplicate CIO operator and non-web workers so the diagnostic has safe memory headroom on
-the 2 GB Render instance.
+The release-triggered comprehensive CIO diagnostic preserves every evidence, discovery,
+specialist, CIO, construction, and paper-only gate. On constrained Render instances the
+bootstrap primes diagnostic coordination before the provider worker starts, defers the
+normal heavyweight operating stack, and treats a memory-bound diagnostic as terminal for
+that release attempt instead of immediately forcing the same workload to run again.
 """
 
 from __future__ import annotations
@@ -59,6 +30,7 @@ _DEFAULT_RELEASE_DIAGNOSTIC_MAX_ATTEMPTS = 4
 _MAX_RELEASE_DIAGNOSTIC_ATTEMPTS = 12
 _DEFAULT_RELEASE_DIAGNOSTIC_RETRY_SECONDS = 75.0
 _MAX_RELEASE_DIAGNOSTIC_RETRY_SECONDS = 600.0
+_RESOURCE_LIMIT_RETURN_CODES = frozenset({125})
 
 
 def _enabled(values: MutableMapping[str, str], name: str, *, default: bool) -> bool:
@@ -241,6 +213,12 @@ def _release_diagnostic_retry_policy(
     return max_attempts, retry_seconds
 
 
+def _release_diagnostic_retryable(return_code: int) -> bool:
+    """Never force-repeat a diagnostic that stopped to preserve service memory."""
+
+    return int(return_code) not in _RESOURCE_LIMIT_RETURN_CODES
+
+
 def _run_release_diagnostic_after_readiness(
     values: MutableMapping[str, str],
     *,
@@ -324,6 +302,18 @@ def _run_release_diagnostic_after_readiness(
         )
         if completed.returncode == 0:
             return
+        if not _release_diagnostic_retryable(completed.returncode):
+            _log(
+                "manual_cio_release_diagnostic_resource_limit_terminal",
+                return_code=completed.returncode,
+                release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+                attempt=attempt,
+                retries_suppressed=True,
+                complete_all_market_coverage_required=True,
+                service_availability_preserved=True,
+                paper_only=True,
+            )
+            return
         if attempt >= max_attempts:
             _log(
                 "manual_cio_release_diagnostic_attempts_exhausted",
@@ -358,9 +348,9 @@ def _start_release_diagnostic(
         default=False,
     ):
         return None
-    # Prime synchronously before the diagnostic thread can publish the first audit.
-    # This only creates/preserves operational coordination state; it never claims the
-    # request or acquires CIO, construction, or execution authority.
+    # Prime synchronously before any background provider worker starts. The worker can
+    # therefore see the pending state before it has an opportunity to import or execute
+    # the heavy provider-validation path.
     prime_release_diagnostic_request(values)
     not_before = datetime.now(timezone.utc)
     thread = threading.Thread(
@@ -382,8 +372,6 @@ def _start_release_diagnostic(
 def _diagnostic_completion_gate(
     diagnostic_thread: threading.Thread | None,
 ) -> Callable[[], bool] | None:
-    """Return a supervisor barrier that opens when the release diagnostic ends."""
-
     if diagnostic_thread is None:
         return None
     return lambda: not diagnostic_thread.is_alive()
@@ -431,6 +419,10 @@ def run_nonblocking_render_service(
 
     validation_process: subprocess.Popen[bytes] | subprocess.Popen[str] | None = None
     try:
+        # Arm/prime the release diagnostic first. This closes the startup race in which
+        # provider validation could begin before durable diagnostic coordination existed.
+        diagnostic_thread = _start_release_diagnostic(values)
+
         if background_enabled:
             try:
                 validation_process = subprocess.Popen(
@@ -446,8 +438,9 @@ def run_nonblocking_render_service(
                 _log(
                     "provider_validation_worker_started",
                     pid=validation_process.pid,
+                    diagnostic_coordination_primed=diagnostic_thread is not None,
                 )
-        diagnostic_thread = _start_release_diagnostic(values)
+
         deferred_start_ready = _diagnostic_completion_gate(diagnostic_thread)
         if deferred_start_ready is None:
             return run_supervisor(environment=values)
