@@ -13,6 +13,8 @@ from typing import Mapping, Sequence
 import pandas as pd
 import streamlit as st
 
+from compounding_aspiration import build_compounding_aspiration
+
 _INSTALLED = "_portfolio_clarity_refinement_installed"
 
 
@@ -23,6 +25,28 @@ def _text(value: object, fallback: str = "Unavailable") -> str:
 
 def _percent(value: float, *, decimals: int = 2) -> str:
     return f"{value:.{decimals}%}"
+
+
+def _render_compounding_aspiration() -> None:
+    aspiration = build_compounding_aspiration()
+    st.markdown(
+        '<section class="portfolio-aspiration-card">'
+        '<div class="portfolio-aspiration-head">'
+        '<div><span class="portfolio-aspiration-kicker">COMPOUNDING ASPIRATION</span>'
+        f'<strong>{escape(aspiration.label)}</strong></div>'
+        '<span class="portfolio-reference-badge">REFERENCE ONLY</span>'
+        '</div>'
+        '<div class="portfolio-aspiration-metrics">'
+        f'<div><small>Monthly stretch</small><strong>{escape(_percent(aspiration.monthly_reference_rate, decimals=1))}</strong></div>'
+        f'<div><small>12-month reference</small><strong>{escape(_percent(aspiration.annualized_reference_rate, decimals=1))}</strong></div>'
+        '</div>'
+        '<p>A demanding trajectory for reviewing whether the process is capturing enough high-quality opportunity. '
+        'It does not change qualification hurdles, ranking, sizing, construction, execution, or the ability to remain in cash.</p>'
+        '<p class="portfolio-aspiration-response"><strong>If performance trails it:</strong> review opportunity capture, evidence quality, '
+        'construction efficiency, and possible false conservatism rather than increasing risk to catch up.</p>'
+        '</section>',
+        unsafe_allow_html=True,
+    )
 
 
 def _holding_cards(app: ModuleType, holdings: Sequence[Mapping[str, object]], cash: float, nav: float) -> None:
@@ -94,10 +118,11 @@ def install(app: ModuleType) -> None:
 
     st.markdown(
         """<style>
-        .portfolio-position-card,.portfolio-action-card{border:1px solid rgba(145,160,190,.22);border-radius:22px;background:rgba(8,15,30,.72);padding:18px 20px;margin:10px 0;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}
+        .portfolio-position-card,.portfolio-action-card,.portfolio-aspiration-card{border:1px solid rgba(145,160,190,.22);border-radius:22px;background:rgba(8,15,30,.72);padding:18px 20px;margin:10px 0;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}
         .portfolio-position-card{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:14px;align-items:center}.portfolio-position-card>div{display:flex;flex-direction:column;gap:4px}.portfolio-position-card span,.portfolio-action-card small,.portfolio-action-card p{color:#91a0b9;font-size:.82rem}.portfolio-position-card strong{color:#f3f6ff}.portfolio-position-card.cash{border-color:rgba(55,211,210,.18)}
+        .portfolio-aspiration-card{border-color:rgba(55,211,210,.18);margin:16px 0 20px}.portfolio-aspiration-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.portfolio-aspiration-head>div{display:flex;flex-direction:column;gap:5px}.portfolio-aspiration-kicker{font-size:.68rem;letter-spacing:.16em;color:#37d3d2}.portfolio-aspiration-head strong{color:#f3f6ff;font-size:1rem}.portfolio-reference-badge{white-space:nowrap;border:1px solid rgba(55,211,210,.24);border-radius:999px;padding:5px 8px;color:#8de9e8;font-size:.63rem;letter-spacing:.1em}.portfolio-aspiration-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:14px 0}.portfolio-aspiration-metrics>div{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.025)}.portfolio-aspiration-metrics small{color:#91a0b9;font-size:.72rem}.portfolio-aspiration-metrics strong{color:#f3f6ff}.portfolio-aspiration-card p{margin:8px 0 0;color:#aab5c9;font-size:.82rem;line-height:1.55}.portfolio-aspiration-response{padding-top:8px;border-top:1px solid rgba(145,160,190,.12)}
         .portfolio-action-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.portfolio-action-head span{font-size:.78rem;letter-spacing:.12em;color:#a57bff}.portfolio-action-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.portfolio-action-metrics>div{display:flex;flex-direction:column;gap:5px;padding:11px;border-radius:14px;background:rgba(255,255,255,.025)}.portfolio-action-card p{margin:14px 2px 0}
-        @media(max-width:700px){.portfolio-position-card{grid-template-columns:1fr 1fr}.portfolio-position-card>div:last-child{grid-column:1/-1}.portfolio-action-card{padding:16px}.portfolio-action-metrics{gap:6px}.portfolio-action-metrics>div{padding:9px 7px}.portfolio-action-metrics strong{font-size:.9rem}}
+        @media(max-width:700px){.portfolio-position-card{grid-template-columns:1fr 1fr}.portfolio-position-card>div:last-child{grid-column:1/-1}.portfolio-action-card,.portfolio-aspiration-card{padding:16px}.portfolio-action-metrics{gap:6px}.portfolio-action-metrics>div{padding:9px 7px}.portfolio-action-metrics strong{font-size:.9rem}.portfolio-aspiration-head{gap:10px}.portfolio-reference-badge{font-size:.57rem}.portfolio-aspiration-card p{font-size:.78rem}}
         </style>""",
         unsafe_allow_html=True,
     )
@@ -143,6 +168,7 @@ def install(app: ModuleType) -> None:
             ),
             variant="portfolio",
         )
+        _render_compounding_aspiration()
 
         _holding_cards(app, holdings, cash, nav)
 
