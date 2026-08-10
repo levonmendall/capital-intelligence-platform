@@ -73,6 +73,11 @@ def test_diagnostic_container_high_water_stops_before_kernel_oom(monkeypatch) ->
         "_cgroup_memory_kib",
         lambda: (1_800_000, 2_000_000),
     )
+    monkeypatch.setattr(
+        diagnostic_watchdog.os,
+        "killpg",
+        lambda _pid, _sig: (_ for _ in ()).throw(ProcessLookupError()),
+    )
 
     return_code, timed_out, memory_limited, process_peak, container_peak = (
         diagnostic_watchdog._wait_with_resource_bounds(
