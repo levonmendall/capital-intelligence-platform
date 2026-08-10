@@ -1,10 +1,11 @@
 """Construction-backed marginal target selection for the production CIO cycle.
 
 The historical cycle used the largest feasible position as a ranking proxy and asked
-construction to trim it later.  This runtime binding instead evaluates a deterministic
-grid of candidate target weights with the canonical construction engine, including the
-unchanged portfolio, and freezes the target that produces the strongest feasible
-after-cost portfolio.  It does not change CIO thresholds or execution authority.
+construction to trim it later. This runtime binding instead evaluates a deterministic,
+bounded grid of candidate target weights with the canonical construction engine,
+including the unchanged portfolio, and freezes the target that produces the strongest
+feasible after-cost portfolio. It does not change CIO thresholds or execution
+authority.
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from thesis import StructuredThesisConditionScorer
 
 _EPSILON = 1e-7
 _INSTALL_MARKER = "_construction_backed_marginal_targeting_v1"
+_TARGET_SEARCH_STEPS = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,8 +43,10 @@ def _candidate_targets(*, current_weight: float, maximum_weight: float) -> tuple
     current = max(0.0, min(maximum, float(current_weight)))
     if maximum <= _EPSILON:
         return (0.0,)
-    # At most 21 evenly spaced evaluations plus the exact current and maximum.
-    steps = 20
+    # Comprehensive discovery can produce a large qualified set. Eight intervals
+    # preserve meaningful intermediate targets while bounding construction work to
+    # at most nine grid points plus an exact off-grid current weight.
+    steps = _TARGET_SEARCH_STEPS
     values = {0.0, round(current, 8), round(maximum, 8)}
     values.update(round(maximum * index / steps, 8) for index in range(1, steps))
     return tuple(sorted(values))
