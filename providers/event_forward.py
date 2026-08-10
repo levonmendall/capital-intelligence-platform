@@ -1,13 +1,18 @@
 """Governed decision-information to event/market forward-intelligence bridge.
 
-Only canonical ``DecisionInformationRecord`` values enter this bridge.  Explicitly
-configured licensed datasets remain preferred.  When no licensed binding is present,
+Only canonical ``DecisionInformationRecord`` values enter this bridge. Explicitly
+configured licensed datasets remain preferred. When no licensed binding is present,
 a conservative subset of the already-collected official/regulatory public record set
 may supply supporting evidence through ``PublicDecisionInformationProvider``.
-Educational headlines remain outside decision evidence.  Every event must still pass
+Educational headlines remain outside decision evidence. Every event must still pass
 source quality, novelty/materiality, causal-transmission, exposure, and
-market-confirmation gates before it can enrich an existing candidate.  The bridge
+market-confirmation gates before it can enrich an existing candidate. The bridge
 cannot create candidates or authorize capital.
+
+The result also retains the exact governed ``EventMarketAssessment`` objects and their
+canonical candidate-exposure links as research lineage. That lineage is read-only and
+exists so the causal hypotheses the CIO actually saw can later be resolved and
+calibrated without reconstructing them from hindsight.
 """
 from __future__ import annotations
 
@@ -17,7 +22,11 @@ from datetime import timedelta
 from statistics import fmean
 
 from data.decision_information import DecisionInformationProvider
-from intelligence.event_market_forward import EventToForwardEngine, MarketObservation
+from intelligence.event_market_forward import (
+    EventMarketAssessment,
+    EventToForwardEngine,
+    MarketObservation,
+)
 from intelligence.event_quality import assess_event_clusters, semantic_event_key
 from intelligence.forward import ForwardIntelligenceBundle
 from intelligence.global_opportunity import CanonicalExposureGraph
@@ -35,8 +44,24 @@ class GovernedEventForwardResult:
     assessment_identifiers: tuple[str, ...]
     hypothesis_identifiers: tuple[str, ...]
     diagnostics: tuple[str, ...]
+    assessments: tuple[EventMarketAssessment, ...] = ()
+    candidate_exposure_links: tuple[tuple[str, str, str], ...] = ()
     authorizes_capital: bool = False
-    schema_version: str = "governed-event-forward-result.v2-public-certified-fallback"
+    schema_version: str = "governed-event-forward-result.v3-causal-lineage"
+
+    def __post_init__(self) -> None:
+        if self.authorizes_capital:
+            raise ValueError("event-forward research lineage cannot authorize capital")
+        assessment_ids = tuple(item.identifier for item in self.assessments)
+        if len(assessment_ids) != len(set(assessment_ids)):
+            raise ValueError("event-forward assessments must be unique")
+        if self.assessments and set(assessment_ids) != set(self.assessment_identifiers):
+            raise ValueError("assessment identifiers must match retained assessments")
+        for assessment_identifier, target_identifier, candidate_identifier in self.candidate_exposure_links:
+            if not all(str(value).strip() for value in (assessment_identifier, target_identifier, candidate_identifier)):
+                raise ValueError("candidate exposure links cannot contain empty values")
+            if self.assessments and assessment_identifier not in set(assessment_ids):
+                raise ValueError("candidate exposure link references an unknown assessment")
 
     @property
     def by_candidate(self) -> dict[str, ForwardIntelligenceBundle]:
@@ -57,7 +82,7 @@ def _lookback_days() -> int:
 def _confirmation(values: tuple[float, ...]) -> float:
     if not values:
         return 0.0
-    # The event-quality gate defines 2% as full market confirmation.  We retain
+    # The event-quality gate defines 2% as full market confirmation. We retain
     # direction for EventToForwardEngine and use absolute magnitude only for the
     # prior cluster admission gate.
     return round(min(1.0, max(abs(item) for item in values) / 0.02), 8)
@@ -113,8 +138,10 @@ def build_governed_event_forward(
     records_by_identifier = {item.identifier: item for item in records}
     engine = EventToForwardEngine()
     bundle_by_candidate: dict[str, ForwardIntelligenceBundle] = {}
+    assessments: list[EventMarketAssessment] = []
     assessment_ids: list[str] = []
     hypothesis_ids: list[str] = []
+    candidate_exposure_links: list[tuple[str, str, str]] = []
 
     for cluster, _representative_payload in clusters:
         record = records_by_identifier.get(cluster.representative_identifier)
@@ -167,7 +194,17 @@ def build_governed_event_forward(
             observations=tuple(observations),
             assessed_at=as_of,
         )
+        assessments.append(assessment)
         assessment_ids.append(assessment.identifier)
+        for target_identifier, candidate_identifiers in candidate_exposure_map.items():
+            candidate_exposure_links.extend(
+                (
+                    assessment.identifier,
+                    target_identifier,
+                    candidate_identifier,
+                )
+                for candidate_identifier in candidate_identifiers
+            )
         hypotheses = graph.discover_event_opportunities(assessment)
         hypothesis_ids.extend(item.identifier for item in hypotheses)
         for bundle in engine.build_forward_bundles(
@@ -200,13 +237,15 @@ def build_governed_event_forward(
             f"Escalated forward evidence to {len(bundle_by_candidate)} already-governed candidates.",
             "Public records enter only through the strict public-decision-information policy; educational headlines remain outside investment authority.",
         ),
+        assessments=tuple(assessments),
+        candidate_exposure_links=tuple(dict.fromkeys(candidate_exposure_links)),
     )
 
 
 def build_configured_event_forward_provider() -> DecisionInformationProvider | None:
     """Prefer licensed configured evidence; otherwise use strict public evidence.
 
-    The fallback is intentionally not equivalent to a licensed newswire.  It admits
+    The fallback is intentionally not equivalent to a licensed newswire. It admits
     only records satisfying ``PublicDecisionInformationPolicy`` and remains
     supporting evidence subject to all downstream event-forward gates.
     """
