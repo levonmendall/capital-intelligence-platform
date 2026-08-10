@@ -63,14 +63,13 @@ def test_portfolio_surface_labels_the_aspiration_as_non_authoritative() -> None:
     assert "rather than increasing risk to catch up" in source
 
 
-def test_authority_modules_do_not_import_the_aspiration() -> None:
+def test_active_authority_modules_do_not_import_the_aspiration() -> None:
     authority_paths = (
-        Path("canonical_cio.py"),
-        Path("portfolio_construction.py"),
-        Path("paper_execution_orchestration.py"),
+        Path("application/cio_cycle.py"),
+        Path("portfolio/construction_api.py"),
+        Path("portfolio/execution.py"),
     )
-    existing = [path for path in authority_paths if path.exists()]
 
-    assert existing, "expected at least one canonical authority module to be present"
-    for path in existing:
+    for path in authority_paths:
+        assert path.exists(), f"expected canonical authority module {path}"
         assert "compounding_aspiration" not in path.read_text(encoding="utf-8"), path
