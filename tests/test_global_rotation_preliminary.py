@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from application.global_rotation_preliminary import assess_preliminary_global_conviction
+from application.global_rotation_preliminary import (
+    PrecomputedSpecialistService,
+    assess_preliminary_global_conviction,
+)
 from portfolio.global_rotation import ConvictionStage, GlobalConvictionDecision
 
 
@@ -47,6 +50,34 @@ class _FakeRobustAssessor:
             evidence_adjusted_return=0.07,
             reasons=(),
         )
+
+
+def test_precomputed_specialist_service_reuses_packet_only_inside_bound_context():
+    learning = object()
+    candidate = SimpleNamespace(identifier="candidate:AAA")
+    context = SimpleNamespace(historical_learning=learning)
+    packet = SimpleNamespace(
+        historical_learning=learning,
+        validate_against=lambda value: None
+        if value is candidate
+        else (_ for _ in ()).throw(AssertionError("candidate changed")),
+    )
+
+    class Delegate:
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, _candidate, _context):
+            self.calls += 1
+            return "delegated"
+
+    delegate = Delegate()
+    service = PrecomputedSpecialistService(delegate)
+    assert service.analyze(candidate, context) == "delegated"
+    with service.bind_packets({candidate.identifier: packet}):
+        assert service.analyze(candidate, context) is packet
+    assert service.analyze(candidate, context) == "delegated"
+    assert delegate.calls == 2
 
 
 def test_preliminary_conviction_uses_authoritative_alternative_and_six_specialist_packet():
