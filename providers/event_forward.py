@@ -1,10 +1,13 @@
 """Governed decision-information to event/market forward-intelligence bridge.
 
-Only canonical ``DecisionInformationRecord`` values from the configured licensed
-provider enter this bridge.  The educational/public headline collector is not a
-decision authority.  Events must pass source quality, novelty/materiality and
-market-confirmation gates before their causal transmission can enrich an existing
-candidate.  The bridge cannot create candidates or authorize capital.
+Only canonical ``DecisionInformationRecord`` values enter this bridge.  Explicitly
+configured licensed datasets remain preferred.  When no licensed binding is present,
+a conservative subset of the already-collected official/regulatory public record set
+may supply supporting evidence through ``PublicDecisionInformationProvider``.
+Educational headlines remain outside decision evidence.  Every event must still pass
+source quality, novelty/materiality, causal-transmission, exposure, and
+market-confirmation gates before it can enrich an existing candidate.  The bridge
+cannot create candidates or authorize capital.
 """
 from __future__ import annotations
 
@@ -13,13 +16,16 @@ from dataclasses import dataclass
 from datetime import timedelta
 from statistics import fmean
 
+from data.decision_information import DecisionInformationProvider
 from intelligence.event_market_forward import EventToForwardEngine, MarketObservation
 from intelligence.event_quality import assess_event_clusters, semantic_event_key
 from intelligence.forward import ForwardIntelligenceBundle
 from intelligence.global_opportunity import CanonicalExposureGraph
 from providers.configured_information import (
-    ConfiguredDecisionInformationProvider,
     build_configured_decision_information_provider,
+)
+from providers.public_decision_information import (
+    build_public_decision_information_provider,
 )
 
 
@@ -30,7 +36,7 @@ class GovernedEventForwardResult:
     hypothesis_identifiers: tuple[str, ...]
     diagnostics: tuple[str, ...]
     authorizes_capital: bool = False
-    schema_version: str = "governed-event-forward-result.v1"
+    schema_version: str = "governed-event-forward-result.v2-public-certified-fallback"
 
     @property
     def by_candidate(self) -> dict[str, ForwardIntelligenceBundle]:
@@ -59,7 +65,7 @@ def _confirmation(values: tuple[float, ...]) -> float:
 
 def build_governed_event_forward(
     *,
-    provider: ConfiguredDecisionInformationProvider,
+    provider: DecisionInformationProvider,
     graph: CanonicalExposureGraph,
     candidates: tuple[object, ...],
     features_by_symbol: dict[str, object],
@@ -70,7 +76,12 @@ def build_governed_event_forward(
         as_of=as_of,
     )
     if not records:
-        return GovernedEventForwardResult((), (), (), ("No certified current decision-information records were available.",))
+        return GovernedEventForwardResult(
+            (),
+            (),
+            (),
+            ("No certified current decision-information records were available.",),
+        )
 
     candidate_by_instrument = {
         str(item.instrument.instrument_id): item for item in candidates
@@ -109,7 +120,10 @@ def build_governed_event_forward(
         record = records_by_identifier.get(cluster.representative_identifier)
         if record is None or not cluster.eligible_for_analysis:
             continue
-        drivers = engine.catalog.match(record, minimum_score=engine.policy.minimum_rule_score)
+        drivers = engine.catalog.match(
+            record,
+            minimum_score=engine.policy.minimum_rule_score,
+        )
         target_identifiers = tuple(
             dict.fromkeys(
                 transmission.target_identifier
@@ -164,32 +178,45 @@ def build_governed_event_forward(
             if existing is None:
                 bundle_by_candidate[bundle.candidate_identifier] = bundle
                 continue
-            # Same-candidate events remain distinct evidence signals.  Use the
-            # canonical predictive merge helper to deduplicate scenario labels and
-            # preserve every source identifier.
-            from intelligence.predictive_scenario_merge import reconcile_forward_intelligence
+            # Same-candidate events remain distinct evidence signals. Use the
+            # canonical predictive merge helper to preserve every source id while
+            # deduplicating scenario labels.
+            from intelligence.predictive_scenario_merge import (
+                reconcile_forward_intelligence,
+            )
 
-            bundle_by_candidate[bundle.candidate_identifier] = reconcile_forward_intelligence(
-                existing,
-                bundle,
+            bundle_by_candidate[bundle.candidate_identifier] = (
+                reconcile_forward_intelligence(existing, bundle)
             )
 
     return GovernedEventForwardResult(
-        bundles=tuple(bundle_by_candidate[key] for key in sorted(bundle_by_candidate)),
+        bundles=tuple(
+            bundle_by_candidate[key] for key in sorted(bundle_by_candidate)
+        ),
         assessment_identifiers=tuple(dict.fromkeys(assessment_ids)),
         hypothesis_identifiers=tuple(dict.fromkeys(hypothesis_ids)),
         diagnostics=(
             f"Evaluated {len(records)} certified decision-information records across {len(clusters)} event clusters.",
             f"Escalated forward evidence to {len(bundle_by_candidate)} already-governed candidates.",
-            "Educational/public headline records remain outside investment authority.",
+            "Public records enter only through the strict public-decision-information policy; educational headlines remain outside investment authority.",
         ),
     )
 
 
-def build_configured_event_forward_provider() -> ConfiguredDecisionInformationProvider | None:
-    if not os.getenv("CAPITAL_INTELLIGENCE_DECISION_INFORMATION_DATASET_BINDING", "").strip():
-        return None
-    return build_configured_decision_information_provider()
+def build_configured_event_forward_provider() -> DecisionInformationProvider | None:
+    """Prefer licensed configured evidence; otherwise use strict public evidence.
+
+    The fallback is intentionally not equivalent to a licensed newswire.  It admits
+    only records satisfying ``PublicDecisionInformationPolicy`` and remains
+    supporting evidence subject to all downstream event-forward gates.
+    """
+
+    if os.getenv(
+        "CAPITAL_INTELLIGENCE_DECISION_INFORMATION_DATASET_BINDING",
+        "",
+    ).strip():
+        return build_configured_decision_information_provider()
+    return build_public_decision_information_provider()
 
 
 __all__ = [
