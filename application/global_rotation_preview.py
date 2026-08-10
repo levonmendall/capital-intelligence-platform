@@ -1,10 +1,12 @@
 """Build a simultaneous construction preview from global opportunity ranks.
 
-The preview is non-authoritative. It asks whether a basket of globally ranked
-opportunities is jointly feasible before the CIO evaluates each candidate. Final CIO
-actions and final construction remain independent authorities.
+The preview is non-authoritative. When six-specialist preliminary conviction targets
+are available, it previews those bounded targets together rather than raw candidate
+maximums. Final CIO actions and final construction remain independent authorities.
 """
 from __future__ import annotations
+
+from collections.abc import Mapping
 
 from cio.joint_preview import JointPortfolioPreview
 from cio.models import CIOAction
@@ -27,13 +29,44 @@ def _reviewed(candidates, queue):
     )
 
 
-def _requested_target(candidate, current: float, context: GlobalRotationContext) -> tuple[CIOAction, float]:
+def _action_for_target(*, current: float, target: float) -> CIOAction:
+    if current <= 0.0:
+        return CIOAction.BUY
+    if target < current - 0.00000001:
+        return CIOAction.REDUCE
+    if target > current + 0.00000001:
+        return CIOAction.INCREASE
+    return CIOAction.HOLD
+
+
+def _requested_target(
+    candidate,
+    current: float,
+    context: GlobalRotationContext,
+    conviction_targets: Mapping[str, float | None] | None,
+) -> tuple[CIOAction, float]:
+    # Existing-holding deterioration remains visible even if a preliminary positive
+    # conviction target is unavailable. Final CIO holding logic remains authoritative.
     if current > 0.0 and candidate.net_expected_return <= -0.05:
         return CIOAction.EXIT, 0.0
     if current > 0.0 and candidate.net_expected_return < 0.0:
         return CIOAction.REDUCE, round(current / 2.0, 8)
-    signal = context.by_candidate.get(candidate.identifier)
+
     maximum = float(candidate.maximum_position_weight)
+    if conviction_targets is not None and candidate.identifier in conviction_targets:
+        proposed = conviction_targets[candidate.identifier]
+        target = (
+            current
+            if proposed is None and current > 0.0
+            else 0.0
+            if proposed is None
+            else min(maximum, max(0.0, float(proposed)))
+        )
+        return _action_for_target(current=current, target=target), round(target, 8)
+
+    # Compatibility fallback for callers without a complete six-specialist preliminary
+    # pass. This remains bounded by the globally ranked score and cannot create authority.
+    signal = context.by_candidate.get(candidate.identifier)
     if signal is None or signal.expected_return_edge <= 0.0:
         target = current if current > 0.0 else 0.0
     elif signal.score < 0.40:
@@ -44,8 +77,7 @@ def _requested_target(candidate, current: float, context: GlobalRotationContext)
         target = min(maximum, 0.03)
     else:
         target = min(maximum, 0.10)
-    action = CIOAction.INCREASE if current > 0.0 else CIOAction.BUY
-    return action, target
+    return _action_for_target(current=current, target=target), round(target, 8)
 
 
 def build_global_rotation_preview(
@@ -56,11 +88,14 @@ def build_global_rotation_preview(
     construction_engine: object,
     rotation_context: GlobalRotationContext,
     authoritative_queue=None,
+    conviction_targets: Mapping[str, float | None] | None = None,
 ) -> JointPortfolioPreview:
     """Preview globally ranked candidate targets together using canonical construction."""
 
     if not isinstance(rotation_context, GlobalRotationContext):
         raise TypeError("rotation_context must be GlobalRotationContext")
+    if conviction_targets is not None and not isinstance(conviction_targets, Mapping):
+        raise TypeError("conviction_targets must be a mapping or None")
     reviewed, ranks, alternatives = _reviewed(candidates, authoritative_queue)
     intents: list[ConstructionIntent] = []
     requested: list[tuple[str, float]] = []
@@ -68,8 +103,15 @@ def build_global_rotation_preview(
     for fallback_rank, candidate in enumerate(reviewed, start=1):
         current = float(portfolio.current_weight(candidate.instrument.symbol))
         current_by_id[candidate.identifier] = current
-        action, target = _requested_target(candidate, current, rotation_context)
+        action, target = _requested_target(
+            candidate,
+            current,
+            rotation_context,
+            conviction_targets,
+        )
         requested.append((candidate.identifier, target))
+        if action is CIOAction.HOLD:
+            continue
         if target <= 0.0 and current <= 0.0:
             continue
         profile = portfolio.profile(candidate.identifier)
