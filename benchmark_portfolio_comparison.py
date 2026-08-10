@@ -16,7 +16,6 @@ from pathlib import Path
 
 from evaluation import PaperOperationEvidenceEvaluator, SQLitePaperOperationEvidenceStore
 
-
 CANONICAL_BENCHMARK_LABEL = "80% VTI / 20% SGOV"
 CANONICAL_BENCHMARK_DETAIL = (
     "Frozen paper-experiment benchmark: 80% VTI and 20% SGOV, valued from the "
@@ -51,22 +50,13 @@ class BenchmarkPortfolioComparison:
 
 def unavailable_comparison(detail: str = "Benchmark evidence is not available yet.") -> BenchmarkPortfolioComparison:
     return BenchmarkPortfolioComparison(
-        state="unavailable",
-        detail=detail,
-        period_start=None,
-        period_end=None,
-        observation_count=0,
-        rows=(),
-        system_maximum_drawdown=None,
-        evidence_status=None,
-        evaluated_at=None,
+        state="unavailable", detail=detail, period_start=None, period_end=None,
+        observation_count=0, rows=(), system_maximum_drawdown=None,
+        evidence_status=None, evaluated_at=None,
     )
 
 
-def load_benchmark_portfolio_comparison(
-    database: str | Path | None = None,
-) -> BenchmarkPortfolioComparison:
-    """Synchronously load a truthful same-window comparison from immutable evidence."""
+def _load_sync(database: str | Path | None = None) -> BenchmarkPortfolioComparison:
     data_dir = Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")).expanduser()
     path = Path(database).expanduser() if database is not None else data_dir / "paper_operation_evidence.db"
     if not path.exists():
@@ -74,7 +64,6 @@ def load_benchmark_portfolio_comparison(
             "No paper-operation benchmark observations have been recorded yet. "
             "The comparison will appear after point-in-time portfolio and reference returns exist."
         )
-
     store = SQLitePaperOperationEvidenceStore(path, initialize=False)
     try:
         store.verify_integrity()
@@ -86,8 +75,7 @@ def load_benchmark_portfolio_comparison(
                     "The paper-operation evidence store exists but contains no benchmark observations yet."
                 )
             report = PaperOperationEvidenceEvaluator().evaluate(
-                observations,
-                evaluated_at=datetime.now(timezone.utc),
+                observations, evaluated_at=datetime.now(timezone.utc)
             )
     except Exception as error:
         return unavailable_comparison(
@@ -97,40 +85,22 @@ def load_benchmark_portfolio_comparison(
 
     system_return = float(report.compounded_portfolio_return)
     references = (
-        (
-            CANONICAL_BENCHMARK_LABEL,
-            float(report.compounded_benchmark_return),
-            CANONICAL_BENCHMARK_DETAIL,
-            "canonical_benchmark",
-        ),
-        (
-            "Passive reference portfolio",
-            float(report.compounded_passive_return),
-            "The passive reference frozen in the recorded paper-operation evidence.",
-            "passive_reference",
-        ),
-        (
-            "Cash reference",
-            float(report.compounded_cash_return),
-            "The cash return recorded over the same point-in-time observation window.",
-            "cash_reference",
-        ),
+        (CANONICAL_BENCHMARK_LABEL, float(report.compounded_benchmark_return), CANONICAL_BENCHMARK_DETAIL, "canonical_benchmark"),
+        ("Passive reference portfolio", float(report.compounded_passive_return), "The passive reference frozen in the recorded paper-operation evidence.", "passive_reference"),
+        ("Cash reference", float(report.compounded_cash_return), "The cash return recorded over the same point-in-time observation window.", "cash_reference"),
     )
     rows = (
         BenchmarkPortfolioRow(
-            label="System paper portfolio",
-            compounded_return=system_return,
+            label="System paper portfolio", compounded_return=system_return,
             excess_vs_system=0.0,
             detail="The canonical governed paper portfolio after recorded implementation costs.",
             kind="system",
         ),
         *tuple(
             BenchmarkPortfolioRow(
-                label=label,
-                compounded_return=value,
+                label=label, compounded_return=value,
                 excess_vs_system=round(value - system_return, 12),
-                detail=detail,
-                kind=kind,
+                detail=detail, kind=kind,
             )
             for label, value, detail, kind in references
         ),
@@ -161,7 +131,7 @@ _CACHE_TTL_SECONDS = 30.0
 def _refresh_default_comparison() -> None:
     global _CACHE_VALUE, _CACHE_UPDATED_AT, _CACHE_REFRESHING
     try:
-        value = load_benchmark_portfolio_comparison()
+        value = _load_sync()
         with _CACHE_LOCK:
             _CACHE_VALUE = value
             _CACHE_UPDATED_AT = time.monotonic()
@@ -171,7 +141,7 @@ def _refresh_default_comparison() -> None:
 
 
 def load_benchmark_portfolio_comparison_nonblocking() -> BenchmarkPortfolioComparison:
-    """Return cached evidence immediately while SQLite verification refreshes off-thread."""
+    """Return immediately while integrity-checked SQLite evidence refreshes off-thread."""
     global _CACHE_REFRESHING
     now = time.monotonic()
     with _CACHE_LOCK:
@@ -180,12 +150,11 @@ def load_benchmark_portfolio_comparison_nonblocking() -> BenchmarkPortfolioCompa
         stale = _CACHE_VALUE
         if not _CACHE_REFRESHING:
             _CACHE_REFRESHING = True
-            thread = threading.Thread(
+            threading.Thread(
                 target=_refresh_default_comparison,
                 name="render-benchmark-comparison-refresh",
                 daemon=True,
-            )
-            thread.start()
+            ).start()
         if stale is not None:
             return stale
     return unavailable_comparison(
@@ -194,8 +163,16 @@ def load_benchmark_portfolio_comparison_nonblocking() -> BenchmarkPortfolioCompa
     )
 
 
+def load_benchmark_portfolio_comparison(
+    database: str | Path | None = None,
+) -> BenchmarkPortfolioComparison:
+    """Use nonblocking display reads by default; explicit database reads stay deterministic."""
+    if database is None:
+        return load_benchmark_portfolio_comparison_nonblocking()
+    return _load_sync(database)
+
+
 def reset_benchmark_portfolio_comparison_cache() -> None:
-    """Reset display cache for deterministic tests."""
     global _CACHE_VALUE, _CACHE_UPDATED_AT, _CACHE_REFRESHING
     with _CACHE_LOCK:
         _CACHE_VALUE = None
@@ -204,12 +181,9 @@ def reset_benchmark_portfolio_comparison_cache() -> None:
 
 
 __all__ = [
-    "BenchmarkPortfolioComparison",
-    "BenchmarkPortfolioRow",
-    "CANONICAL_BENCHMARK_DETAIL",
-    "CANONICAL_BENCHMARK_LABEL",
+    "BenchmarkPortfolioComparison", "BenchmarkPortfolioRow",
+    "CANONICAL_BENCHMARK_DETAIL", "CANONICAL_BENCHMARK_LABEL",
     "load_benchmark_portfolio_comparison",
     "load_benchmark_portfolio_comparison_nonblocking",
-    "reset_benchmark_portfolio_comparison_cache",
-    "unavailable_comparison",
+    "reset_benchmark_portfolio_comparison_cache", "unavailable_comparison",
 ]
