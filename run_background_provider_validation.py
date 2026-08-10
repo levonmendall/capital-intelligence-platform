@@ -7,7 +7,10 @@ authenticated console and health endpoint remain online.
 
 Release-triggered CIO diagnostics are owned exclusively by the Render bootstrap. Keeping
 this worker limited to provider validation prevents two independent processes from
-claiming or closing the same durable diagnostic request.
+claiming or closing the same durable diagnostic request. Provider validation also yields
+its heavy provider-read window while any manual CIO diagnostic is pending or in progress,
+so comprehensive discovery receives an exclusive memory lane on constrained Render
+instances without reducing market coverage.
 """
 
 from __future__ import annotations
@@ -17,10 +20,12 @@ import json
 import os
 import signal
 import time
+from pathlib import Path
 from threading import Event
 from types import FrameType
 from typing import Sequence
 
+from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
 from operations.provider_validation import (
     ProviderValidationReport,
     validate_live_providers,
@@ -29,6 +34,8 @@ from operations.provider_validation import (
 
 _DEFAULT_INTERVAL_SECONDS = 3600.0
 _DEFAULT_INITIAL_DELAY_SECONDS = 5.0
+_DEFAULT_DIAGNOSTIC_POLL_SECONDS = 5.0
+_ACTIVE_DIAGNOSTIC_STATES = frozenset({"pending", "in_progress"})
 
 
 def _seconds(name: str, default: float) -> float:
@@ -59,6 +66,58 @@ def _log(event: str, **details: object) -> None:
         ),
         flush=True,
     )
+
+
+def _diagnostic_active() -> bool:
+    """Fail memory-safe when diagnostic coordination cannot be read."""
+
+    try:
+        request = latest_manual_cio_diagnostic()
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        _log(
+            "provider_validation_diagnostic_gate_unavailable",
+            error_type=type(error).__name__,
+            provider_validation_deferred=True,
+        )
+        return True
+    return request is not None and request.state in _ACTIVE_DIAGNOSTIC_STATES
+
+
+def _wait_for_diagnostic_memory_lane(
+    stopping: Event,
+    *,
+    poll_seconds: float | None = None,
+) -> bool:
+    """Wait until no governed diagnostic owns the heavy-memory lane.
+
+    Returns False when shutdown was requested while waiting. The coordination file is
+    operational state only and has no investment or execution authority.
+    """
+
+    poll = (
+        _seconds(
+            "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_DIAGNOSTIC_POLL_SECONDS",
+            _DEFAULT_DIAGNOSTIC_POLL_SECONDS,
+        )
+        if poll_seconds is None
+        else float(poll_seconds)
+    )
+    if poll <= 0:
+        raise ValueError("diagnostic poll seconds must be positive")
+    deferred_logged = False
+    while _diagnostic_active():
+        if not deferred_logged:
+            _log(
+                "provider_validation_deferred_for_cio_diagnostic",
+                complete_market_coverage_preserved=True,
+                paper_only=True,
+            )
+            deferred_logged = True
+        if stopping.wait(poll):
+            return False
+    if deferred_logged:
+        _log("provider_validation_resumed_after_cio_diagnostic")
+    return True
 
 
 def validate_once() -> tuple[ProviderValidationReport, Path]:
@@ -129,6 +188,8 @@ def run_loop(
             return 0
 
         while not stopping.is_set():
+            if not _wait_for_diagnostic_memory_lane(stopping):
+                break
             try:
                 validate_once()
             except Exception as error:  # Worker boundary: never expose provider details.
