@@ -44,7 +44,7 @@ def _requested_target(candidate, current: float, context: GlobalRotationContext)
         target = min(maximum, 0.03)
     else:
         target = min(maximum, 0.10)
-    action = CIOAction.INCREASE if current > 0.0 and target > current else CIOAction.BUY
+    action = CIOAction.INCREASE if current > 0.0 else CIOAction.BUY
     return action, target
 
 
@@ -79,7 +79,7 @@ def build_global_rotation_preview(
         )
         alternative = alternatives.get(candidate.identifier, candidate.opportunity_cost_return)
         signal = rotation_context.by_candidate.get(candidate.identifier)
-        priority = fallback_rank if signal is None else signal.rank
+        priority = ranks.get(candidate.identifier, fallback_rank) if signal is None else signal.rank
         intents.append(
             ConstructionIntent(
                 candidate_identifier=candidate.identifier,
@@ -95,7 +95,7 @@ def build_global_rotation_preview(
                 average_daily_dollar_volume=candidate.instrument.average_daily_dollar_volume,
                 transaction_cost_bps=candidate.transaction_cost_bps,
                 slippage_bps=candidate.slippage_bps,
-                priority_rank=ranks.get(candidate.identifier, priority),
+                priority_rank=priority,
                 instrument_identifier=candidate.instrument.instrument_id,
                 uses_derivatives=candidate.instrument.uses_derivatives,
                 derivative_lifecycle=profile.derivative_lifecycle,
