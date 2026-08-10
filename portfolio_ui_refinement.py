@@ -69,11 +69,17 @@ def _portfolio_state(mandate: Mapping[str, object]) -> dict[str, object]:
     )
     nav = _number(mandate.get("nav"))
     cash = _number(mandate.get("cash_base_total", mandate.get("cash")))
-    holdings_value = sum(_number(item.get("market_value")) for item in holdings)
+    holdings_value = round(
+        sum(_number(item.get("market_value")) for item in holdings),
+        8,
+    )
     invested = max(holdings_value, 0.0)
     deployed = 0.0 if nav <= 0.0 else invested / nav
     cash_weight = 0.0 if nav <= 0.0 else cash / nav
-    reconciliation_residual = nav - cash - holdings_value
+    # Portfolio values are canonical decimal-money values. Round the display
+    # reconciliation to their preserved precision so binary floating-point noise
+    # cannot manufacture a false variance on an exactly balanced snapshot.
+    reconciliation_residual = round(nav - cash - holdings_value, 8)
     tolerance = max(0.01, abs(nav) * 1e-8)
     return {
         "holdings": holdings,
