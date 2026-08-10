@@ -31,7 +31,6 @@ from opportunity.relative_value import (
     RelativeValueLeg,
     RelativeValueLegSide,
 )
-from portfolio.construction_api import PortfolioAsset
 from tests.cio_test_fixtures import AS_OF, build_candidate
 
 
@@ -97,29 +96,22 @@ def test_decision_readiness_filters_asset_specific_critical_gaps() -> None:
     assert all(item.authorizes_capital is False for item in priorities)
 
 
-def test_marginal_targeting_respects_portfolio_constraint_instead_of_max_weight() -> None:
-    candidate = build_candidate(symbol="NEWC")
+def test_marginal_targeting_respects_liquidity_instead_of_max_weight() -> None:
+    base_candidate = build_candidate(symbol="NEWC")
+    candidate = replace(
+        base_candidate,
+        instrument=replace(
+            base_candidate.instrument,
+            average_daily_dollar_volume=5_000.0,
+        ),
+    )
     portfolio = CyclePortfolioState(
         identifier="portfolio:marginal-test",
         as_of=AS_OF,
         portfolio_value=250_000.0,
-        cash_weight=0.76,
+        cash_weight=1.0,
         cash_expected_return=0.04,
-        positions=(
-            PortfolioAsset(
-                symbol="OLD",
-                current_weight=0.24,
-                expected_return=0.07,
-                sector="technology",
-                factor_loadings=(),
-                correlation_bucket="growth",
-                average_daily_dollar_volume=100_000_000.0,
-                transaction_cost_bps=2.0,
-                slippage_bps=2.0,
-                funding_eligible=True,
-                instrument_identifier="instrument:old",
-            ),
-        ),
+        positions=(),
         exposure_profiles=(
             CandidateExposureProfile(
                 candidate_identifier=candidate.identifier,
@@ -139,8 +131,10 @@ def test_marginal_targeting_respects_portfolio_constraint_instead_of_max_weight(
     )
     ranking = cycle.prepare_ranking_inputs((candidate,), portfolio)[0]
 
+    # Default execution policy allows 10% of ADV per day for three days:
+    # 5,000 * 10% * 3 / 250,000 = 0.6% maximum executable portfolio weight.
     assert preview.proposed_position_weight is not None
-    assert 0.0 < preview.proposed_position_weight <= 0.010001
+    assert 0.0 < preview.proposed_position_weight <= 0.006001
     assert preview.proposed_position_weight < candidate.maximum_position_weight
     assert ranking.marginal_portfolio_contribution > 0.0
 
