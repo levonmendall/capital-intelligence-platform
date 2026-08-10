@@ -1,19 +1,15 @@
-"""Atomic paper implementation for governed relative-value expressions.
+"""Crash-safe atomic paper implementation for governed relative-value expressions.
 
-This module composes the existing ``MultiAssetPaperExecutionOrchestrator`` rather than
-creating another execution authority.  All quotes, session checks, eligible-universe
-checks, cost models, fill logic, and reconciliation therefore remain canonical.
+This module composes the existing multi-asset paper executor.  It introduces no new
+quote, session, eligibility, cost, fill, reconciliation, shorting, construction, or
+investment authority.  The complete expression is first simulated in isolated SQLite
+stores.  Only a fully filled and reconciled simulation may enter a two-phase
+PREPARED -> canonical portfolio append -> COMPLETED commit.
 
-The key additional invariant is atomicity: the complete multi-leg construction is
-simulated in an isolated paper ledger.  The real canonical portfolio is appended only
-when every leg is fully filled and the simulated ending portfolio reconciles.  A held,
-rejected, or partial leg commits nothing and the next attempt starts from the unchanged
-canonical portfolio.
-
-No naked-short authority is added.  A short economic leg must either reduce an
-already-owned implementation instrument or use a separately certified defined-risk
-long implementation (for example an inverse/defined-risk instrument) that the
-ordinary executor is already authorized to buy.
+If a process dies after the portfolio append but before COMPLETED is recorded, a retry
+recognizes the deterministic committed snapshot and finalizes the same attempt without
+duplicating portfolio state.  Any held, rejected, partial, stale, or ambiguous state
+fails closed. Naked paper shorts remain unsupported.
 """
 from __future__ import annotations
 
@@ -32,11 +28,11 @@ from opportunity.relative_value import (
     RelativeValueCandidateExpression,
     RelativeValueLegSide,
 )
-from portfolio.construction_api import PortfolioConstructionResult, TradeSide
+from portfolio.construction_models import PortfolioConstructionResult, TradeSide
+from portfolio.multi_asset_controls import MultiAssetInstrumentProfile
 from portfolio.multi_asset_execution import (
     MultiAssetExecutionError,
     MultiAssetExecutionStatus,
-    MultiAssetInstrumentProfile,
     MultiAssetOrderStatus,
     MultiAssetPaperExecutionOrchestrator,
     SQLiteMultiAssetPaperExecutionStore,
@@ -45,10 +41,11 @@ from portfolio.state import CanonicalPortfolioSnapshot, SQLiteCanonicalPortfolio
 
 
 class AtomicRelativeValueExecutionError(RuntimeError):
-    """Raised when an atomic expression cannot be safely paper implemented."""
+    pass
 
 
 class AtomicRelativeValueExecutionStatus(str, Enum):
+    PREPARED = "prepared"
     COMPLETED = "completed"
     HELD = "held"
     FAILED = "failed"
@@ -56,8 +53,6 @@ class AtomicRelativeValueExecutionStatus(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class RelativeValuePaperLegImplementation:
-    """Certified mapping from one economic leg to one executable paper instrument."""
-
     leg_instrument_identifier: str
     leg_symbol: str
     economic_side: RelativeValueLegSide
@@ -84,16 +79,15 @@ class RelativeValuePaperLegImplementation:
         if not isinstance(self.execution_side, TradeSide):
             raise TypeError("execution_side must be TradeSide")
         if not self.evidence_identifiers:
-            raise ValueError("relative-value implementation requires evidence lineage")
+            raise ValueError("implementation requires evidence lineage")
         if self.economic_side is RelativeValueLegSide.LONG:
             if self.execution_side is not TradeSide.BUY:
-                raise ValueError("long economic legs must use BUY paper implementations")
+                raise ValueError("long economic legs must use BUY implementations")
             if self.defined_risk_short_implementation:
-                raise ValueError("long economic legs cannot be short implementations")
+                raise ValueError("long legs cannot be marked short implementations")
         elif self.execution_side is TradeSide.BUY and not self.defined_risk_short_implementation:
             raise ValueError(
-                "a short economic leg bought as an implementation must be explicitly "
-                "certified as defined-risk/inverse short exposure"
+                "short economic BUY implementation must be explicitly certified as defined-risk/inverse"
             )
 
 
@@ -114,7 +108,7 @@ class AtomicRelativeValueExecutionAttempt:
     canonical_state_changed: bool
     investment_authority: bool = False
     real_money_authorized: bool = False
-    schema_version: str = "atomic-relative-value-paper-execution-attempt.v1"
+    schema_version: str = "atomic-relative-value-paper-execution-attempt.v2"
 
     def __post_init__(self) -> None:
         for name in (
@@ -134,14 +128,14 @@ class AtomicRelativeValueExecutionAttempt:
         if self.attempt < 1:
             raise ValueError("attempt must be positive")
         if self.investment_authority or self.real_money_authorized:
-            raise ValueError("atomic paper execution cannot authorize capital or real money")
+            raise ValueError("paper execution cannot authorize capital or real money")
         if self.status is AtomicRelativeValueExecutionStatus.COMPLETED:
             if not self.canonical_state_changed:
-                raise ValueError("completed atomic execution must publish one canonical state")
+                raise ValueError("completed attempt must publish canonical state")
             if self.ending_snapshot_identifier == self.beginning_snapshot_identifier:
-                raise ValueError("completed atomic execution must change snapshot identity")
+                raise ValueError("completed attempt must change snapshot identity")
         elif self.canonical_state_changed:
-            raise ValueError("non-completed atomic execution cannot change canonical state")
+            raise ValueError("only COMPLETED may report canonical state change")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -174,23 +168,15 @@ class AtomicRelativeValueExecutionAttempt:
             status=AtomicRelativeValueExecutionStatus(str(payload["status"])),
             beginning_snapshot_identifier=str(payload["beginning_snapshot_identifier"]),
             ending_snapshot_identifier=str(payload["ending_snapshot_identifier"]),
-            underlying_batch_identifier=(
-                None
-                if payload.get("underlying_batch_identifier") is None
-                else str(payload["underlying_batch_identifier"])
-            ),
-            implementation_identifiers=tuple(
-                str(item) for item in payload.get("implementation_identifiers", ())
-            ),
-            reasons=tuple(str(item) for item in payload.get("reasons", ())),
+            underlying_batch_identifier=(None if payload.get("underlying_batch_identifier") is None else str(payload["underlying_batch_identifier"])),
+            implementation_identifiers=tuple(str(x) for x in payload.get("implementation_identifiers", ())),
+            reasons=tuple(str(x) for x in payload.get("reasons", ())),
             attempt=int(payload["attempt"]),
             canonical_state_changed=bool(payload["canonical_state_changed"]),
         )
 
 
 class SQLiteAtomicRelativeValueExecutionStore:
-    """Append-only, hash-chained atomic-expression attempt history."""
-
     _TABLE = "atomic_relative_value_execution_events"
     _GENESIS = "0" * 64
 
@@ -209,7 +195,7 @@ class SQLiteAtomicRelativeValueExecutionStore:
                     previous_hash TEXT NOT NULL,
                     content_hash TEXT NOT NULL UNIQUE
                 );
-                CREATE INDEX IF NOT EXISTS atomic_relative_value_execution_lookup
+                CREATE INDEX IF NOT EXISTS atomic_rv_execution_lookup
                     ON {self._TABLE}(execution_identifier, sequence);
                 CREATE TRIGGER IF NOT EXISTS {self._TABLE}_no_update
                 BEFORE UPDATE ON {self._TABLE}
@@ -230,33 +216,16 @@ class SQLiteAtomicRelativeValueExecutionStore:
         return json.dumps(dict(payload), sort_keys=True, separators=(",", ":"), allow_nan=False)
 
     @classmethod
-    def _hash(
-        cls,
-        *,
-        sequence: int,
-        event_identifier: str,
-        execution_identifier: str,
-        occurred_at: str,
-        payload_json: str,
-        previous_hash: str,
-    ) -> str:
-        raw = "|".join(
-            (
-                str(sequence),
-                event_identifier,
-                execution_identifier,
-                occurred_at,
-                payload_json,
-                previous_hash,
-            )
-        )
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    def _content_hash(cls, sequence: int, event_identifier: str, execution_identifier: str, occurred_at: str, payload_json: str, previous_hash: str) -> str:
+        return hashlib.sha256(
+            "|".join((str(sequence), event_identifier, execution_identifier, occurred_at, payload_json, previous_hash)).encode("utf-8")
+        ).hexdigest()
 
     def append(self, attempt: AtomicRelativeValueExecutionAttempt) -> int:
-        if not isinstance(attempt, AtomicRelativeValueExecutionAttempt):
-            raise TypeError("attempt must be AtomicRelativeValueExecutionAttempt")
         payload_json = self._canonical(attempt.to_dict())
-        event_identifier = f"event:{attempt.identifier}:attempt:{attempt.attempt}"
+        event_identifier = (
+            f"event:{attempt.identifier}:attempt:{attempt.attempt}:{attempt.status.value}"
+        )
         occurred_at = attempt.attempted_at.astimezone(timezone.utc).isoformat()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -267,7 +236,7 @@ class SQLiteAtomicRelativeValueExecutionStore:
             if existing is not None:
                 if str(existing["payload_json"]) != payload_json:
                     raise AtomicRelativeValueExecutionError(
-                        "atomic execution event already exists with different content"
+                        "atomic event identifier already exists with different content"
                     )
                 return int(existing["sequence"])
             tail = connection.execute(
@@ -275,56 +244,35 @@ class SQLiteAtomicRelativeValueExecutionStore:
             ).fetchone()
             sequence = 1 if tail is None else int(tail["sequence"]) + 1
             previous_hash = self._GENESIS if tail is None else str(tail["content_hash"])
-            content_hash = self._hash(
-                sequence=sequence,
-                event_identifier=event_identifier,
-                execution_identifier=attempt.identifier,
-                occurred_at=occurred_at,
-                payload_json=payload_json,
-                previous_hash=previous_hash,
-            )
+            content_hash = self._content_hash(sequence, event_identifier, attempt.identifier, occurred_at, payload_json, previous_hash)
             connection.execute(
-                f"INSERT INTO {self._TABLE}(sequence, event_identifier, execution_identifier, occurred_at, payload_json, previous_hash, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    sequence,
-                    event_identifier,
-                    attempt.identifier,
-                    occurred_at,
-                    payload_json,
-                    previous_hash,
-                    content_hash,
-                ),
+                f"INSERT INTO {self._TABLE}(sequence,event_identifier,execution_identifier,occurred_at,payload_json,previous_hash,content_hash) VALUES (?,?,?,?,?,?,?)",
+                (sequence, event_identifier, attempt.identifier, occurred_at, payload_json, previous_hash, content_hash),
             )
         return sequence
 
     def latest(self, execution_identifier: str) -> AtomicRelativeValueExecutionAttempt | None:
         with self._connect() as connection:
             row = connection.execute(
-                f"SELECT payload_json FROM {self._TABLE} WHERE execution_identifier = ? ORDER BY sequence DESC LIMIT 1",
+                f"SELECT payload_json FROM {self._TABLE} WHERE execution_identifier=? ORDER BY sequence DESC LIMIT 1",
                 (str(execution_identifier),),
             ).fetchone()
-        return None if row is None else AtomicRelativeValueExecutionAttempt.from_dict(
-            json.loads(str(row["payload_json"]))
-        )
+        return None if row is None else AtomicRelativeValueExecutionAttempt.from_dict(json.loads(str(row["payload_json"])))
 
     def verify_integrity(self) -> bool:
         with self._connect() as connection:
-            rows = connection.execute(
-                f"SELECT * FROM {self._TABLE} ORDER BY sequence"
-            ).fetchall()
+            rows = connection.execute(f"SELECT * FROM {self._TABLE} ORDER BY sequence").fetchall()
         previous_hash = self._GENESIS
-        for expected_sequence, row in enumerate(rows, start=1):
-            if int(row["sequence"]) != expected_sequence:
-                raise AtomicRelativeValueExecutionError("atomic execution sequence is not contiguous")
-            if str(row["previous_hash"]) != previous_hash:
-                raise AtomicRelativeValueExecutionError("atomic execution hash chain is broken")
-            expected_hash = self._hash(
-                sequence=expected_sequence,
-                event_identifier=str(row["event_identifier"]),
-                execution_identifier=str(row["execution_identifier"]),
-                occurred_at=str(row["occurred_at"]),
-                payload_json=str(row["payload_json"]),
-                previous_hash=previous_hash,
+        for expected, row in enumerate(rows, 1):
+            if int(row["sequence"]) != expected or str(row["previous_hash"]) != previous_hash:
+                raise AtomicRelativeValueExecutionError("atomic execution hash chain is invalid")
+            expected_hash = self._content_hash(
+                expected,
+                str(row["event_identifier"]),
+                str(row["execution_identifier"]),
+                str(row["occurred_at"]),
+                str(row["payload_json"]),
+                previous_hash,
             )
             if str(row["content_hash"]) != expected_hash:
                 raise AtomicRelativeValueExecutionError("atomic execution content hash is invalid")
@@ -333,17 +281,9 @@ class SQLiteAtomicRelativeValueExecutionStore:
 
 
 class AtomicRelativeValuePaperExecutionOrchestrator:
-    """Commit an all-or-nothing relative-value paper expression."""
+    version = "atomic-relative-value-paper-execution.v2-two-phase"
 
-    version = "atomic-relative-value-paper-execution.v1"
-
-    def __init__(
-        self,
-        *,
-        base_executor: MultiAssetPaperExecutionOrchestrator,
-        store: SQLiteAtomicRelativeValueExecutionStore,
-        weight_tolerance: float = 0.000001,
-    ) -> None:
+    def __init__(self, *, base_executor: MultiAssetPaperExecutionOrchestrator, store: SQLiteAtomicRelativeValueExecutionStore, weight_tolerance: float = 0.000001) -> None:
         if not isinstance(base_executor, MultiAssetPaperExecutionOrchestrator):
             raise TypeError("base_executor must be MultiAssetPaperExecutionOrchestrator")
         if not isinstance(store, SQLiteAtomicRelativeValueExecutionStore):
@@ -352,131 +292,146 @@ class AtomicRelativeValuePaperExecutionOrchestrator:
         self.store = store
         self.weight_tolerance = float(weight_tolerance)
         if not 0.0 < self.weight_tolerance <= 0.001:
-            raise ValueError("weight_tolerance must be positive and no more than 10 bps")
+            raise ValueError("weight_tolerance must be positive and <= 10 bps")
 
-    def execute(
-        self,
-        *,
-        expression: RelativeValueCandidateExpression,
-        construction: PortfolioConstructionResult,
-        decision_identifier: str,
-        portfolio: CanonicalPortfolioSnapshot,
-        profiles: Mapping[str, MultiAssetInstrumentProfile],
-        implementations: tuple[RelativeValuePaperLegImplementation, ...],
-        as_of: datetime,
-    ) -> AtomicRelativeValueExecutionAttempt:
-        admission = RelativeValueAdmissionPolicy().assess(expression)
-        if not admission.paper_execution_eligible:
-            raise AtomicRelativeValueExecutionError(
-                "relative-value expression is not paper-execution eligible: "
-                + "; ".join(admission.reasons)
-            )
-        if expression.as_of > as_of:
-            raise AtomicRelativeValueExecutionError("relative-value expression is future-known")
-        if construction.as_of > as_of or portfolio.as_of > as_of:
-            raise AtomicRelativeValueExecutionError("construction/portfolio cannot be future-known")
-        if not construction.trades:
-            raise AtomicRelativeValueExecutionError("relative-value execution requires construction trades")
+    @staticmethod
+    def _execution_identifier(expression: RelativeValueCandidateExpression, construction: PortfolioConstructionResult) -> str:
+        return f"atomic-rv:{expression.identifier}:{construction.request_identifier}"
 
-        execution_identifier = (
-            f"atomic-rv:{expression.identifier}:{construction.request_identifier}"
-        )
-        previous = self.store.latest(execution_identifier)
-        if previous is not None and previous.status is AtomicRelativeValueExecutionStatus.COMPLETED:
+    @staticmethod
+    def _committed_identifier(beginning_identifier: str, execution_identifier: str) -> str:
+        digest = hashlib.sha256(execution_identifier.encode("utf-8")).hexdigest()[:16]
+        return f"{beginning_identifier}:atomic-rv:{digest}"
+
+    def _terminal(self, previous: AtomicRelativeValueExecutionAttempt | None, latest_real: CanonicalPortfolioSnapshot | None, portfolio: CanonicalPortfolioSnapshot, execution_identifier: str, as_of: datetime) -> AtomicRelativeValueExecutionAttempt | None:
+        if previous is None:
+            return None
+        if previous.status is AtomicRelativeValueExecutionStatus.COMPLETED:
             return previous
-        if previous is not None and portfolio.identifier != previous.beginning_snapshot_identifier:
+        if previous.status is AtomicRelativeValueExecutionStatus.PREPARED:
+            if latest_real is not None and latest_real.identifier == previous.ending_snapshot_identifier:
+                completed = replace(
+                    previous,
+                    attempted_at=as_of,
+                    status=AtomicRelativeValueExecutionStatus.COMPLETED,
+                    reasons=tuple(dict.fromkeys((*previous.reasons, "recovered completed canonical commit after PREPARED state"))),
+                    canonical_state_changed=True,
+                )
+                self.store.append(completed)
+                return completed
+            if latest_real is None or latest_real.identifier != previous.beginning_snapshot_identifier:
+                raise AtomicRelativeValueExecutionError(
+                    "ambiguous canonical portfolio after PREPARED atomic execution; refusing retry"
+                )
+            if portfolio.identifier != previous.beginning_snapshot_identifier:
+                raise AtomicRelativeValueExecutionError(
+                    "PREPARED retry must use the unchanged beginning portfolio"
+                )
+            return None
+        if portfolio.identifier != previous.beginning_snapshot_identifier:
             raise AtomicRelativeValueExecutionError(
                 "atomic retry must start from the exact unchanged beginning portfolio"
             )
-        attempt_number = 1 if previous is None else previous.attempt + 1
+        return None
 
+    def _validate_structure(self, *, expression: RelativeValueCandidateExpression, construction: PortfolioConstructionResult, portfolio: CanonicalPortfolioSnapshot, profiles: Mapping[str, MultiAssetInstrumentProfile], implementations: tuple[RelativeValuePaperLegImplementation, ...]) -> dict[str, MultiAssetInstrumentProfile]:
         normalized_profiles = {str(key).upper(): value for key, value in profiles.items()}
-        implementation_by_leg = {
-            item.leg_instrument_identifier: item for item in implementations
-        }
+        implementation_by_leg = {item.leg_instrument_identifier: item for item in implementations}
         if len(implementation_by_leg) != len(implementations):
-            raise AtomicRelativeValueExecutionError("relative-value leg implementations must be unique")
-        expected_leg_ids = {item.instrument_identifier for item in expression.legs}
-        if set(implementation_by_leg) != expected_leg_ids:
-            raise AtomicRelativeValueExecutionError(
-                "atomic implementations must exactly cover relative-value legs"
-            )
-        implementation_by_symbol = {
-            item.execution_symbol.upper(): item for item in implementations
-        }
+            raise AtomicRelativeValueExecutionError("leg implementations must be unique")
+        if set(implementation_by_leg) != {item.instrument_identifier for item in expression.legs}:
+            raise AtomicRelativeValueExecutionError("implementations must exactly cover expression legs")
+        implementation_by_symbol = {item.execution_symbol.upper(): item for item in implementations}
         if len(implementation_by_symbol) != len(implementations):
-            raise AtomicRelativeValueExecutionError(
-                "atomic implementations must use unique execution symbols"
-            )
+            raise AtomicRelativeValueExecutionError("implementation execution symbols must be unique")
         trade_by_symbol = {item.symbol.upper(): item for item in construction.trades}
-        if set(trade_by_symbol) != set(implementation_by_symbol):
-            raise AtomicRelativeValueExecutionError(
-                "construction trades must exactly match atomic implementation symbols"
-            )
-        if set(normalized_profiles) != set(trade_by_symbol):
-            raise AtomicRelativeValueExecutionError(
-                "execution profiles must exactly match atomic construction symbols"
-            )
-
-        # Preserve the expression's relative gross weights when construction scales the
-        # complete structure up or down. This prevents an execution bridge from turning
-        # a relative-value thesis into a different directional portfolio.
+        if set(trade_by_symbol) != set(implementation_by_symbol) or set(normalized_profiles) != set(trade_by_symbol):
+            raise AtomicRelativeValueExecutionError("construction trades, implementations, and profiles must exactly match")
         expression_gross = sum(float(item.gross_weight) for item in expression.legs)
         construction_gross = sum(float(item.trade_weight) for item in construction.trades)
         if expression_gross <= 0.0 or construction_gross <= 0.0:
             raise AtomicRelativeValueExecutionError("relative-value gross exposure must be positive")
         owned = {item.symbol.upper(): item for item in portfolio.positions}
         for leg in expression.legs:
-            implementation = implementation_by_leg[leg.instrument_identifier]
-            trade = trade_by_symbol[implementation.execution_symbol.upper()]
-            profile = normalized_profiles[implementation.execution_symbol.upper()]
-            if implementation.leg_symbol.upper() != leg.symbol.upper():
-                raise AtomicRelativeValueExecutionError("implementation leg symbol does not match expression")
-            if implementation.economic_side is not leg.side:
-                raise AtomicRelativeValueExecutionError("implementation economic side does not match expression")
-            if trade.side is not implementation.execution_side:
-                raise AtomicRelativeValueExecutionError("construction side does not match certified implementation")
-            if profile.instrument_identifier != implementation.execution_instrument_identifier:
-                raise AtomicRelativeValueExecutionError("profile instrument does not match certified implementation")
+            impl = implementation_by_leg[leg.instrument_identifier]
+            trade = trade_by_symbol[impl.execution_symbol.upper()]
+            profile = normalized_profiles[impl.execution_symbol.upper()]
+            if impl.leg_symbol.upper() != leg.symbol.upper() or impl.economic_side is not leg.side:
+                raise AtomicRelativeValueExecutionError("implementation does not match expression leg")
+            if trade.side is not impl.execution_side or profile.instrument_identifier != impl.execution_instrument_identifier:
+                raise AtomicRelativeValueExecutionError("construction/profile does not match certified implementation")
             expected_ratio = float(leg.gross_weight) / expression_gross
             actual_ratio = float(trade.trade_weight) / construction_gross
             if abs(expected_ratio - actual_ratio) > self.weight_tolerance:
-                raise AtomicRelativeValueExecutionError(
-                    f"{leg.symbol} construction distorts relative-value leg proportions"
-                )
+                raise AtomicRelativeValueExecutionError(f"{leg.symbol} construction distorts relative-value proportions")
             if leg.side is RelativeValueLegSide.SHORT:
-                if implementation.execution_side is TradeSide.SELL:
-                    position = owned.get(implementation.execution_symbol.upper())
-                    if position is None:
+                if impl.execution_side is TradeSide.SELL:
+                    if impl.execution_symbol.upper() not in owned:
                         raise AtomicRelativeValueExecutionError(
-                            "short economic leg cannot open a naked paper short; SELL is allowed only against an existing canonical position"
+                            "naked paper shorts are unsupported; SELL short leg must reduce an owned position"
                         )
-                else:
-                    if not implementation.defined_risk_short_implementation:
-                        raise AtomicRelativeValueExecutionError(
-                            "short economic BUY implementation lacks defined-risk/inverse certification"
-                        )
-                    if not bool(profile.defined_risk):
-                        raise AtomicRelativeValueExecutionError(
-                            "short economic BUY implementation profile is not defined-risk"
-                        )
+                elif not (impl.defined_risk_short_implementation and bool(profile.defined_risk)):
+                    raise AtomicRelativeValueExecutionError(
+                        "short economic BUY leg requires certified defined-risk/inverse implementation"
+                    )
+        return normalized_profiles
 
-        latest_before = self.base_executor.portfolio_store.latest(portfolio.portfolio_code)
-        if latest_before is None or latest_before.identifier != portfolio.identifier:
+    def _record_noncommit(self, *, execution_identifier: str, expression: RelativeValueCandidateExpression, decision_identifier: str, construction: PortfolioConstructionResult, portfolio: CanonicalPortfolioSnapshot, as_of: datetime, implementations: tuple[RelativeValuePaperLegImplementation, ...], attempt: int, status: AtomicRelativeValueExecutionStatus, reasons: tuple[str, ...], batch_identifier: str | None) -> AtomicRelativeValueExecutionAttempt:
+        result = AtomicRelativeValueExecutionAttempt(
+            identifier=execution_identifier,
+            expression_identifier=expression.identifier,
+            decision_identifier=decision_identifier,
+            construction_identifier=construction.request_identifier,
+            attempted_at=as_of,
+            status=status,
+            beginning_snapshot_identifier=portfolio.identifier,
+            ending_snapshot_identifier=portfolio.identifier,
+            underlying_batch_identifier=batch_identifier,
+            implementation_identifiers=tuple(x.implementation_certification_identifier for x in implementations),
+            reasons=reasons,
+            attempt=attempt,
+            canonical_state_changed=False,
+        )
+        self.store.append(result)
+        return result
+
+    def execute(self, *, expression: RelativeValueCandidateExpression, construction: PortfolioConstructionResult, decision_identifier: str, portfolio: CanonicalPortfolioSnapshot, profiles: Mapping[str, MultiAssetInstrumentProfile], implementations: tuple[RelativeValuePaperLegImplementation, ...], as_of: datetime) -> AtomicRelativeValueExecutionAttempt:
+        admission = RelativeValueAdmissionPolicy().assess(expression)
+        if not admission.paper_execution_eligible:
             raise AtomicRelativeValueExecutionError(
-                "canonical portfolio advanced before atomic simulation began"
+                "relative-value expression is not paper-execution eligible: " + "; ".join(admission.reasons)
             )
+        if expression.as_of > as_of or construction.as_of > as_of or portfolio.as_of > as_of:
+            raise AtomicRelativeValueExecutionError("relative-value execution cannot use future-known state")
+        if not construction.trades:
+            raise AtomicRelativeValueExecutionError("relative-value execution requires construction trades")
+
+        execution_identifier = self._execution_identifier(expression, construction)
+        latest_real = self.base_executor.portfolio_store.latest(portfolio.portfolio_code)
+        previous = self.store.latest(execution_identifier)
+        terminal = self._terminal(previous, latest_real, portfolio, execution_identifier, as_of)
+        if terminal is not None:
+            return terminal
+        if latest_real is None or latest_real.identifier != portfolio.identifier:
+            raise AtomicRelativeValueExecutionError("canonical portfolio advanced before atomic simulation")
+        attempt = 1 if previous is None else previous.attempt + 1
+        normalized_profiles = self._validate_structure(
+            expression=expression,
+            construction=construction,
+            portfolio=portfolio,
+            profiles=profiles,
+            implementations=implementations,
+        )
 
         with tempfile.TemporaryDirectory(prefix="capital-intelligence-atomic-rv-") as raw_tmp:
             tmp = Path(raw_tmp)
-            temp_portfolio_store = SQLiteCanonicalPortfolioStore(tmp / "portfolio.db")
-            temp_portfolio_store.append(portfolio)
-            temp_execution_store = SQLiteMultiAssetPaperExecutionStore(tmp / "execution.db")
+            temp_portfolio = SQLiteCanonicalPortfolioStore(tmp / "portfolio.db")
+            temp_portfolio.append(portfolio)
             simulator = MultiAssetPaperExecutionOrchestrator(
                 session_provider=self.base_executor.session_provider,
                 quote_provider=self.base_executor.quote_provider,
-                store=temp_execution_store,
-                portfolio_store=temp_portfolio_store,
+                store=SQLiteMultiAssetPaperExecutionStore(tmp / "execution.db"),
+                portfolio_store=temp_portfolio,
                 universe_store=self.base_executor.universe_store,
                 policy=self.base_executor.policy,
             )
@@ -489,26 +444,19 @@ class AtomicRelativeValuePaperExecutionOrchestrator:
                     as_of=as_of,
                 )
             except MultiAssetExecutionError as error:
-                attempt = AtomicRelativeValueExecutionAttempt(
-                    identifier=execution_identifier,
-                    expression_identifier=expression.identifier,
+                return self._record_noncommit(
+                    execution_identifier=execution_identifier,
+                    expression=expression,
                     decision_identifier=decision_identifier,
-                    construction_identifier=construction.request_identifier,
-                    attempted_at=as_of,
+                    construction=construction,
+                    portfolio=portfolio,
+                    as_of=as_of,
+                    implementations=implementations,
+                    attempt=attempt,
                     status=AtomicRelativeValueExecutionStatus.FAILED,
-                    beginning_snapshot_identifier=portfolio.identifier,
-                    ending_snapshot_identifier=portfolio.identifier,
-                    underlying_batch_identifier=None,
-                    implementation_identifiers=tuple(
-                        item.implementation_certification_identifier
-                        for item in implementations
-                    ),
-                    reasons=(str(error), "real canonical portfolio was not changed"),
-                    attempt=attempt_number,
-                    canonical_state_changed=False,
+                    reasons=(str(error), "real canonical portfolio unchanged"),
+                    batch_identifier=None,
                 )
-                self.store.append(attempt)
-                return attempt
 
             all_filled = bool(batch.order_results) and all(
                 item.status is MultiAssetOrderStatus.FILLED
@@ -516,66 +464,28 @@ class AtomicRelativeValuePaperExecutionOrchestrator:
                 <= self.base_executor.policy.reconciliation_tolerance
                 for item in batch.order_results
             )
-            fully_reconciled = bool(
-                batch.reconciliation.reconciled
-                and batch.reconciliation.accounting_reconciled
-            )
-            if (
-                batch.status is not MultiAssetExecutionStatus.COMPLETED
-                or not all_filled
-                or not fully_reconciled
-            ):
-                reasons = tuple(
-                    dict.fromkeys(
-                        (
-                            f"underlying batch status={batch.status.value}",
-                            *(
-                                f"{item.symbol}: {item.status.value}: {item.reason}"
-                                for item in batch.order_results
-                                if item.status is not MultiAssetOrderStatus.FILLED
-                                or abs(item.requested_base_amount - item.filled_base_amount)
-                                > self.base_executor.policy.reconciliation_tolerance
-                            ),
-                            "atomic requirement not satisfied; provisional fills were discarded",
-                            "real canonical portfolio was not changed",
-                        )
-                    )
-                )
-                status = (
-                    AtomicRelativeValueExecutionStatus.HELD
-                    if batch.status is MultiAssetExecutionStatus.HELD
-                    else AtomicRelativeValueExecutionStatus.FAILED
-                )
-                attempt = AtomicRelativeValueExecutionAttempt(
-                    identifier=execution_identifier,
-                    expression_identifier=expression.identifier,
+            reconciled = bool(batch.reconciliation.reconciled and batch.reconciliation.accounting_reconciled)
+            if batch.status is not MultiAssetExecutionStatus.COMPLETED or not all_filled or not reconciled:
+                status = AtomicRelativeValueExecutionStatus.HELD if batch.status is MultiAssetExecutionStatus.HELD else AtomicRelativeValueExecutionStatus.FAILED
+                return self._record_noncommit(
+                    execution_identifier=execution_identifier,
+                    expression=expression,
                     decision_identifier=decision_identifier,
-                    construction_identifier=construction.request_identifier,
-                    attempted_at=as_of,
+                    construction=construction,
+                    portfolio=portfolio,
+                    as_of=as_of,
+                    implementations=implementations,
+                    attempt=attempt,
                     status=status,
-                    beginning_snapshot_identifier=portfolio.identifier,
-                    ending_snapshot_identifier=portfolio.identifier,
-                    underlying_batch_identifier=batch.identifier,
-                    implementation_identifiers=tuple(
-                        item.implementation_certification_identifier
-                        for item in implementations
+                    reasons=(
+                        f"underlying batch status={batch.status.value}",
+                        "atomic requirement not satisfied; all provisional fills discarded",
+                        "real canonical portfolio unchanged",
                     ),
-                    reasons=reasons,
-                    attempt=attempt_number,
-                    canonical_state_changed=False,
-                )
-                self.store.append(attempt)
-                return attempt
-
-            latest_after = self.base_executor.portfolio_store.latest(portfolio.portfolio_code)
-            if latest_after is None or latest_after.identifier != portfolio.identifier:
-                raise AtomicRelativeValueExecutionError(
-                    "canonical portfolio advanced during atomic simulation; refusing commit"
+                    batch_identifier=batch.identifier,
                 )
 
-            committed_identifier = (
-                f"{portfolio.identifier}:atomic-rv:{hashlib.sha256(execution_identifier.encode('utf-8')).hexdigest()[:16]}"
-            )
+            committed_identifier = self._committed_identifier(portfolio.identifier, execution_identifier)
             committed_snapshot = replace(
                 batch.ending_snapshot,
                 identifier=committed_identifier,
@@ -586,38 +496,49 @@ class AtomicRelativeValuePaperExecutionOrchestrator:
                             expression.identifier,
                             construction.request_identifier,
                             self.version,
-                            *(item.implementation_certification_identifier for item in implementations),
+                            *(x.implementation_certification_identifier for x in implementations),
                             *expression.evidence_identifiers,
                             *expression.model_versions,
                         )
                     )
                 ),
             )
-            self.base_executor.portfolio_store.append(committed_snapshot)
 
-        attempt = AtomicRelativeValueExecutionAttempt(
+        prepared = AtomicRelativeValueExecutionAttempt(
             identifier=execution_identifier,
             expression_identifier=expression.identifier,
             decision_identifier=decision_identifier,
             construction_identifier=construction.request_identifier,
             attempted_at=as_of,
-            status=AtomicRelativeValueExecutionStatus.COMPLETED,
+            status=AtomicRelativeValueExecutionStatus.PREPARED,
             beginning_snapshot_identifier=portfolio.identifier,
             ending_snapshot_identifier=committed_snapshot.identifier,
             underlying_batch_identifier=batch.identifier,
-            implementation_identifiers=tuple(
-                item.implementation_certification_identifier for item in implementations
-            ),
+            implementation_identifiers=tuple(x.implementation_certification_identifier for x in implementations),
+            reasons=("all legs fully filled and reconciled in isolated canonical paper executor", "canonical commit prepared but not yet published"),
+            attempt=attempt,
+            canonical_state_changed=False,
+        )
+        self.store.append(prepared)
+
+        latest_before_commit = self.base_executor.portfolio_store.latest(portfolio.portfolio_code)
+        if latest_before_commit is None or latest_before_commit.identifier != portfolio.identifier:
+            raise AtomicRelativeValueExecutionError(
+                "canonical portfolio advanced after PREPARED; refusing atomic commit"
+            )
+        self.base_executor.portfolio_store.append(committed_snapshot)
+        completed = replace(
+            prepared,
+            status=AtomicRelativeValueExecutionStatus.COMPLETED,
             reasons=(
-                "all relative-value legs were fully filled in the isolated canonical paper executor",
-                "the complete simulated portfolio reconciled before one canonical snapshot was committed",
-                "no naked-short authority was introduced",
+                *prepared.reasons,
+                "one reconciled canonical portfolio snapshot committed atomically",
+                "no naked-short authority introduced",
             ),
-            attempt=attempt_number,
             canonical_state_changed=True,
         )
-        self.store.append(attempt)
-        return attempt
+        self.store.append(completed)
+        return completed
 
 
 __all__ = [
