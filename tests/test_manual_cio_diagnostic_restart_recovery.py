@@ -35,6 +35,10 @@ def test_release_start_recovers_interrupted_prior_process(
     assert claimed.request_id == prior.request_id
     assert claimed.state == "in_progress"
 
+    # The production diagnostic deliberately keeps application imports out of module
+    # startup. Load only its lightweight coordination/configuration boundary before
+    # monkeypatching the deterministic test doubles.
+    diagnostic._load_coordination_dependencies()
     settings = SimpleNamespace(
         portfolio_database=tmp_path / "portfolio.db",
         journal_database=tmp_path / "journal.db",
