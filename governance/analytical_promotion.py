@@ -246,14 +246,23 @@ class ConservativeAnalyticalPromotion:
         policy: PortfolioConstructionPolicy,
         overlay: ConservativeRiskOverlay,
         certification: AnalyticalPromotionCertification,
+        *,
+        as_of: datetime,
     ) -> PortfolioConstructionPolicy:
-        """Tighten canonical construction policy; never relax an existing limit."""
+        """Tighten canonical construction policy at a decision timestamp.
+
+        The observation may precede certification; the certification itself must already
+        exist and remain valid at ``as_of``. This preserves the point-in-time boundary
+        while allowing replay-tested analytics to become usable only after certification.
+        """
         if not isinstance(policy, PortfolioConstructionPolicy):
             raise TypeError("policy must be PortfolioConstructionPolicy")
         certification.require_usable(
-            as_of=overlay.as_of,
+            as_of=as_of,
             artifact_identifier=overlay.identifier,
         )
+        if overlay.as_of > as_of:
+            raise ValueError("risk overlay is future-known")
         return replace(
             policy,
             version=f"{policy.version}|{ConservativeAnalyticalPromotion.version}",
