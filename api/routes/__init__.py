@@ -1,6 +1,7 @@
 """Versioned API routers."""
 
 from api.routes.alerts import router as alerts_router
+from api.routes.ask_cio import router as ask_cio_router
 from api.routes.authentication import router as authentication_router
 from api.routes.business_cycle import router as business_cycle_router
 from api.routes.credit_cycle import router as credit_cycle_router
@@ -26,6 +27,7 @@ from api.routes.valuation import router as valuation_router
 
 __all__ = [
     "alerts_router",
+    "ask_cio_router",
     "authentication_router",
     "business_cycle_router",
     "credit_cycle_router",

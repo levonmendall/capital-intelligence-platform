@@ -1,0 +1,115 @@
+"""Post-cycle Decision Intelligence v3 persistence binding.
+
+This runtime is intentionally downstream of the authoritative CIO and construction
+cycle. Failure to write an explanation/measurement packet is logged by the caller and
+can never alter the already-computed CIO decision or canonical portfolio state.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from evaluation.decision_intelligence_v3 import SQLiteDecisionIntelligenceV3Store
+from intelligence.decision_intelligence_v3 import (
+    build_candidate_decision_intelligence_packet,
+)
+
+
+def _by_candidate(values: object) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for item in tuple(values or ()):
+        identifier = str(getattr(item, "candidate_identifier", "")).strip()
+        if identifier:
+            result[identifier] = item
+    return result
+
+
+def _joint_for_candidate(values: object, candidate_identifier: str):
+    for item in tuple(values or ()):
+        direct = str(getattr(item, "candidate_identifier", "")).strip()
+        if direct == candidate_identifier:
+            return item
+        identifiers = tuple(
+            str(value).strip()
+            for value in tuple(getattr(item, "candidate_identifiers", ()) or ())
+        )
+        if candidate_identifier in identifiers:
+            return item
+    return None
+
+
+def _thesis_for_candidate(values: object, candidate_identifier: str):
+    for item in tuple(values or ()):
+        for name in ("candidate_identifier", "asset_identifier", "identifier"):
+            value = str(getattr(item, name, "")).strip()
+            if value == candidate_identifier:
+                return item
+    return None
+
+
+def _database_path() -> Path:
+    return Path(
+        os.getenv(
+            "CAPITAL_INTELLIGENCE_DECISION_INTELLIGENCE_V3_DB",
+            "database/decision-intelligence-v3.db",
+        )
+    ).expanduser()
+
+
+def append_post_cycle_decision_intelligence(
+    *,
+    result: object,
+    context: object,
+    path: str | Path | None = None,
+) -> tuple[str, ...]:
+    """Persist one read-only packet for every candidate that reached the CIO."""
+
+    if result is None or context is None:
+        return ()
+    cycle_identifier = str(getattr(result, "identifier", "")).strip()
+    if not cycle_identifier:
+        raise ValueError("cycle result must have an identifier")
+
+    ranked = tuple(getattr(getattr(result, "opportunity_queue"), "ranked", ()) or ())
+    candidates = {
+        str(getattr(getattr(item, "candidate"), "identifier")): getattr(item, "candidate")
+        for item in ranked
+    }
+    contexts = _by_candidate(getattr(context, "specialist_contexts", ()))
+    decisions = tuple(getattr(result, "decisions", ()) or ())
+    risk = _by_candidate(getattr(result, "risk_assessments", ()))
+    snapshots = _by_candidate(getattr(result, "evaluation_snapshots", ()))
+    joint = tuple(getattr(result, "joint_candidate_assessments", ()) or ())
+    theses = tuple(getattr(result, "theses", ()) or ())
+    portfolio = getattr(context, "portfolio")
+    construction = getattr(result, "construction", None)
+
+    store = SQLiteDecisionIntelligenceV3Store(path or _database_path())
+    hashes: list[str] = []
+    for decision in decisions:
+        candidate_identifier = str(
+            getattr(decision, "candidate_identifier", "")
+        ).strip()
+        candidate = candidates.get(candidate_identifier)
+        specialist_context = contexts.get(candidate_identifier)
+        if candidate is None or specialist_context is None:
+            # The canonical cycle itself owns coverage validation. The downstream
+            # read model must never infer a candidate/context that was not present.
+            continue
+        packet = build_candidate_decision_intelligence_packet(
+            cycle_identifier=cycle_identifier,
+            candidate=candidate,
+            specialist_context=specialist_context,
+            portfolio=portfolio,
+            decision=decision,
+            construction=construction,
+            risk_assessment=risk.get(candidate_identifier),
+            joint_assessment=_joint_for_candidate(joint, candidate_identifier),
+            thesis=_thesis_for_candidate(theses, candidate_identifier),
+            evaluation_snapshot=snapshots.get(candidate_identifier),
+        )
+        hashes.append(store.append_packet(packet))
+    return tuple(hashes)
+
+
+__all__ = ["append_post_cycle_decision_intelligence"]
