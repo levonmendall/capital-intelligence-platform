@@ -1,9 +1,9 @@
 """Candidate-level information completeness diagnostics.
 
 This module converts existing candidate/evidence objects into the asset-underwriting
-matrix so CIO reports can disclose what is available, partial, and missing. It is
-observability only and cannot relax an evidence veto or manufacture unavailable
-evidence.
+matrix so CIO reports can disclose what is available, partial, and missing. It never
+manufactures unavailable evidence. Decision gating is owned separately by
+``governance.decision_readiness``.
 """
 from __future__ import annotations
 
@@ -15,6 +15,40 @@ from intelligence.asset_underwriting import (
     UnderwritingDimension,
 )
 from intelligence.forward_decision import EvidenceAvailability, ForwardDecisionDimension
+from portfolio.derivative_lifecycle import DerivativeLifecycleAuthority
+
+
+_DRIVER_DIMENSIONS: dict[str, tuple[UnderwritingDimension, ...]] = {
+    "cash_flow": (UnderwritingDimension.CASH_FLOW,),
+    "capital_allocation": (UnderwritingDimension.CORPORATE_ACTIONS,),
+    "currency": (UnderwritingDimension.CURRENCY,),
+    "carry": (UnderwritingDimension.CARRY,),
+    "yield": (UnderwritingDimension.CARRY,),
+    "roll_down": (UnderwritingDimension.CARRY, UnderwritingDimension.CURVE),
+    "curve_carry": (UnderwritingDimension.CARRY, UnderwritingDimension.CURVE),
+    "roll_yield": (UnderwritingDimension.CARRY, UnderwritingDimension.CURVE),
+    "spread": (UnderwritingDimension.CREDIT,),
+    "default_loss": (UnderwritingDimension.CREDIT,),
+    "credit_quality": (UnderwritingDimension.CREDIT,),
+    "inventory": (UnderwritingDimension.PHYSICAL_BALANCE,),
+    "production": (UnderwritingDimension.PHYSICAL_BALANCE,),
+    "demand": (UnderwritingDimension.PHYSICAL_BALANCE,),
+    "capacity": (UnderwritingDimension.PHYSICAL_BALANCE,),
+    "outages": (UnderwritingDimension.PHYSICAL_BALANCE,),
+    "weather": (UnderwritingDimension.PHYSICAL_BALANCE,),
+    "network_activity": (UnderwritingDimension.ONCHAIN,),
+    "issuance": (UnderwritingDimension.ONCHAIN,),
+    "exchange_balances": (UnderwritingDimension.ONCHAIN,),
+    "stablecoin_liquidity": (UnderwritingDimension.ONCHAIN,),
+    "protocol_risk": (UnderwritingDimension.ONCHAIN,),
+    "funding": (UnderwritingDimension.POSITIONING,),
+    "open_interest": (UnderwritingDimension.POSITIONING,),
+    "positioning": (UnderwritingDimension.POSITIONING,),
+    "implied_realized_gap": (UnderwritingDimension.DERIVATIVES,),
+    "skew": (UnderwritingDimension.DERIVATIVES,),
+    "term_structure": (UnderwritingDimension.DERIVATIVES,),
+    "convexity": (UnderwritingDimension.DERIVATIVES,),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,11 +58,35 @@ class CandidateInformationCompleteness:
     available_reasons: tuple[str, ...]
     missing_reasons: tuple[str, ...]
     investment_authority: bool = False
-    schema_version: str = "candidate-information-completeness.v1"
+    schema_version: str = "candidate-information-completeness.v2"
+
+
+def _available_forward_dimensions(evidence: object) -> tuple[ForwardDecisionDimension, ...]:
+    forward = getattr(evidence, "forward_intelligence", None)
+    context = None if forward is None else getattr(forward, "decision_context", None)
+    if context is None:
+        return ()
+    return tuple(
+        item.dimension
+        for item in context.dimensions
+        if item.availability is EvidenceAvailability.AVAILABLE
+    )
+
+
+def _certified_asset_underwriting(evidence: object):
+    for name in (
+        "asset_specific_underwriting",
+        "asset_underwriting",
+        "economic_underwriting",
+    ):
+        value = getattr(evidence, name, None)
+        if value is not None and bool(getattr(value, "decision_certified", False)):
+            return value
+    return None
 
 
 class CandidateInformationCompletenessEngine:
-    version = "candidate-information-completeness.v1"
+    version = "candidate-information-completeness.v2"
 
     def assess(self, candidate: object, evidence: object) -> CandidateInformationCompleteness:
         instrument = getattr(candidate, "instrument")
@@ -54,6 +112,7 @@ class CandidateInformationCompletenessEngine:
         if float(getattr(instrument, "analytical_coverage", 0.0)) >= 0.50:
             available.add(UnderwritingDimension.HISTORY)
             reasons.append("analytical history coverage is at least 50%")
+
         company = getattr(evidence, "company", None)
         if company is not None:
             available.update(
@@ -68,21 +127,53 @@ class CandidateInformationCompletenessEngine:
             available.add(UnderwritingDimension.VALUATION)
             reasons.append("asset-specific valuation packet is present")
 
+        forward_dimensions = set(_available_forward_dimensions(evidence))
+        forward_mapping = {
+            ForwardDecisionDimension.FUNDAMENTALS: UnderwritingDimension.FUNDAMENTALS,
+            ForwardDecisionDimension.POSITIONING: UnderwritingDimension.POSITIONING,
+            ForwardDecisionDimension.DERIVATIVES: UnderwritingDimension.DERIVATIVES,
+            ForwardDecisionDimension.CORPORATE_ACTIONS: UnderwritingDimension.CORPORATE_ACTIONS,
+        }
+        for source_dimension, target_dimension in forward_mapping.items():
+            if source_dimension in forward_dimensions:
+                available.add(target_dimension)
+                reasons.append(
+                    f"certified {source_dimension.value} forward evidence is available"
+                )
+
         forward = getattr(evidence, "forward_intelligence", None)
-        context = None if forward is None else getattr(forward, "decision_context", None)
-        if context is not None:
-            by_dimension = {item.dimension: item for item in context.dimensions}
-            positioning = by_dimension.get(ForwardDecisionDimension.POSITIONING)
-            if positioning is not None and positioning.availability is EvidenceAvailability.AVAILABLE:
-                available.add(UnderwritingDimension.POSITIONING)
-                reasons.append("certified positioning research is available")
-            derivatives = by_dimension.get(ForwardDecisionDimension.DERIVATIVES)
-            if derivatives is not None and derivatives.availability is EvidenceAvailability.AVAILABLE:
-                available.add(UnderwritingDimension.DERIVATIVES)
-                reasons.append("certified derivatives research is available")
         if forward is not None and getattr(forward, "currency_regime", None) is not None:
             available.add(UnderwritingDimension.CURRENCY)
             reasons.append("certified currency transmission regime is present")
+
+        underwriting = _certified_asset_underwriting(evidence)
+        if underwriting is not None:
+            observed = tuple(str(item) for item in getattr(underwriting, "observed_drivers", ()))
+            for driver in observed:
+                for dimension in _DRIVER_DIMENSIONS.get(driver, ()):
+                    available.add(dimension)
+            if observed:
+                reasons.append(
+                    "decision-certified asset-specific underwriting drivers are present"
+                )
+
+        exposure_profile = getattr(evidence, "exposure_profile", None)
+        lifecycle = (
+            None if exposure_profile is None else getattr(exposure_profile, "derivative_lifecycle", None)
+        )
+        if bool(getattr(instrument, "uses_derivatives", False)):
+            if lifecycle is not None:
+                assessment = DerivativeLifecycleAuthority().assess(
+                    lifecycle,
+                    instrument_identifier=getattr(instrument, "instrument_id"),
+                    as_of=getattr(candidate, "as_of"),
+                )
+                if assessment.authorized:
+                    available.add(UnderwritingDimension.EXECUTION)
+                    reasons.append("derivative lifecycle and execution controls are complete")
+        elif UnderwritingDimension.IDENTITY in available and UnderwritingDimension.LIQUIDITY in available:
+            available.add(UnderwritingDimension.EXECUTION)
+            reasons.append("non-derivative execution identity and liquidity evidence are present")
 
         coverage = AssetUnderwritingPolicy().assess(
             asset_class,
@@ -95,7 +186,7 @@ class CandidateInformationCompletenessEngine:
         return CandidateInformationCompleteness(
             candidate_identifier=str(getattr(candidate, "identifier")),
             coverage=coverage,
-            available_reasons=tuple(reasons),
+            available_reasons=tuple(dict.fromkeys(reasons)),
             missing_reasons=missing_reasons,
         )
 
