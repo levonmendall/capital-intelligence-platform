@@ -64,18 +64,23 @@ jobs:
 
           publish_live_status() {
             local snapshot="$1"
-            local status_json=""
+            local status_output=""
             local status_state=""
             local status_description=""
+            local -a status_lines=()
 
-            if ! status_json="$(printf '%s\n' "$snapshot" | python scripts/render_telemetry_commit_status.py)"; then
+            if ! status_output="$(printf '%s\n' "$snapshot" | python scripts/render_telemetry_commit_status.py)"; then
               echo "::warning::Credential-safe telemetry status formatting failed"
               return 0
             fi
 
-            IFS=$'\t' read -r status_state status_description < <(
-              printf '%s\n' "$status_json" | python -c 'import json, sys; payload=json.load(sys.stdin); print(f"{payload[\"state\"]}\t{payload[\"description\"]}")'
-            )
+            mapfile -t status_lines <<< "$status_output"
+            if [[ "${#status_lines[@]}" -ne 2 ]]; then
+              echo "::warning::Credential-safe telemetry status had an unexpected shape"
+              return 0
+            fi
+            status_state="${status_lines[0]}"
+            status_description="${status_lines[1]}"
 
             if ! gh api \
               --method POST \
