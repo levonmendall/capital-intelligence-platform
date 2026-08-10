@@ -2,9 +2,9 @@
 
 The cycle enriches already-governed candidates with mispriced-change and corroborated
 global-leadership economics, propagates explicitly modeled structural-theme successor
-attention, freezes the authoritative opportunity queue before global capital
-competition, and supplies that cross-asset context to the existing CIO. Final
-construction and paper execution are unchanged.
+attention, freezes the authoritative opportunity queue, performs a non-authoritative
+all-candidate six-specialist preliminary pass for joint portfolio preview, and then
+runs the unchanged final CIO/construction authority path.
 """
 from __future__ import annotations
 
@@ -15,9 +15,12 @@ from application.compounding_cycle import (
     CompoundingCanonicalCIOCycle,
     CompoundingCanonicalCIOCycleResult,
 )
+from application.global_rotation_preliminary import assess_preliminary_global_conviction
 from application.global_rotation_preview import build_global_rotation_preview
+from cio import HistoricalLearningContext
 from cio.global_rotation_authority import GlobalRotationChiefInvestmentOfficer
 from cio.policy_authority import CanonicalDecisionPolicyAuthority
+from committee.specialists import CandidateSpecialistContext
 from intelligence.global_leadership import enrich_bundle_with_global_leadership_economics
 from intelligence.mispriced_change import enrich_bundle_with_mispriced_change
 from intelligence.theme_successor import propagate_theme_successors
@@ -141,12 +144,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
             self.global_rotation_store = SQLiteGlobalRotationStore(self.journal.path)
 
     def _freeze_authoritative_queue(self, *, kwargs, candidates, portfolio):
-        """Use the same qualification inputs as the canonical cycle before rotation.
-
-        This prevents evidence/authority-rejected instruments from being described as
-        deployable global opportunities merely because their raw price/fundamental score
-        is strong. The resulting queue is passed unchanged into the base cycle.
-        """
+        """Use the same qualification inputs as the canonical cycle before rotation."""
 
         supplied_queue = kwargs.get("authoritative_opportunity_queue")
         if supplied_queue is not None:
@@ -198,6 +196,185 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
             for item in tuple(getattr(queue, "ranked", ()) or ())
         )
 
+    def _preliminary_specialist_packets(
+        self,
+        *,
+        cycle_identifier: str,
+        queue,
+        specialist_contexts,
+        portfolio,
+        opportunity_context,
+    ) -> dict[str, object]:
+        """Build every six-specialist packet before any final CIO synthesis.
+
+        This pass is intentionally non-persistent and non-authoritative. The canonical
+        base cycle recalculates and persists its normal packets exactly once before final
+        decisions. The preliminary packets exist only to prevent the joint portfolio
+        preview from sizing raw candidates before specialist risk/reconciliation input.
+        """
+
+        if queue is None or not tuple(getattr(queue, "ranked", ()) or ()):
+            return {}
+        context_map = {
+            item.candidate_identifier: item for item in specialist_contexts
+        }
+        if len(context_map) != len(specialist_contexts):
+            raise ValueError("specialist candidate contexts must be unique")
+        ranked_values = tuple(queue.ranked)
+        risk_assessments = tuple(
+            self.risk_intelligence_engine.assess(
+                ranked.candidate,
+                portfolio_value=portfolio.portfolio_value,
+                proposed_weight=max(
+                    portfolio.current_weight(ranked.candidate.instrument.symbol),
+                    min(
+                        ranked.candidate.maximum_position_weight,
+                        portfolio.current_weight(ranked.candidate.instrument.symbol)
+                        + max(
+                            0.0,
+                            portfolio.cash_weight
+                            - self.construction_engine.policy.minimum_cash_weight,
+                        ),
+                    ),
+                ),
+                alternative_return=ranked.qualification.effective_opportunity_cost,
+                invalidation_clarity=(
+                    0.50
+                    if opportunity_context.ranking_input(ranked.candidate.identifier)
+                    is None
+                    else opportunity_context.ranking_input(
+                        ranked.candidate.identifier
+                    ).invalidation_clarity_score
+                ),
+            )
+            for ranked in ranked_values
+        )
+        risk_by_candidate = {
+            item.candidate_identifier: item for item in risk_assessments
+        }
+        joint_assessments = self.joint_candidate_engine.assess(
+            tuple(item.candidate for item in ranked_values),
+            risk_assessments,
+            tuple(
+                portfolio.profile(item.candidate.identifier)
+                for item in ranked_values
+            ),
+        )
+        joint_by_candidate: dict[str, list[object]] = {}
+        for item in joint_assessments:
+            joint_by_candidate.setdefault(
+                item.first_candidate_identifier, []
+            ).append(item)
+            joint_by_candidate.setdefault(
+                item.second_candidate_identifier, []
+            ).append(item)
+
+        packets: dict[str, object] = {}
+        for ranked in ranked_values:
+            candidate = ranked.candidate
+            base_context = context_map.get(candidate.identifier)
+            if base_context is None:
+                raise KeyError(
+                    f"missing specialist context for {candidate.identifier}"
+                )
+            portfolio_context = self._preview_portfolio(
+                candidate=candidate,
+                rank=ranked.rank,
+                portfolio=portfolio,
+                effective_opportunity_cost=(
+                    ranked.qualification.effective_opportunity_cost
+                ),
+            )
+            candidate_risk = risk_by_candidate[candidate.identifier]
+            pair_evidence = tuple(
+                (
+                    f"Joint candidate relation={item.relation.value}; "
+                    f"tail dependence={item.tail_dependence:.0%}; "
+                    f"{item.explanation}"
+                )
+                for item in joint_by_candidate.get(candidate.identifier, ())
+            )
+            portfolio_context = replace(
+                portfolio_context,
+                constraint_evidence=tuple(
+                    dict.fromkeys(
+                        portfolio_context.constraint_evidence
+                        + candidate_risk.diagnostics
+                        + pair_evidence
+                    )
+                ),
+                implementation_blocks=tuple(
+                    dict.fromkeys(
+                        portfolio_context.implementation_blocks
+                        + candidate_risk.hard_blocks
+                    )
+                ),
+                review_conditions=tuple(
+                    dict.fromkeys(
+                        portfolio_context.review_conditions
+                        + (
+                            "Reassess candidate expected shortfall, conditional loss, recovery time, stress liquidity, thesis fragility, and joint portfolio relationships",
+                        )
+                    )
+                ),
+            )
+            if cycle_identifier.startswith("historical-canonical-cycle:"):
+                historical_learning = HistoricalLearningContext.not_applicable(
+                    candidate_identifier=candidate.identifier,
+                    as_of=base_context.analysis_completed_at,
+                    reason=(
+                        "Historical replay cannot consume a manifest generated from its "
+                        "own future results."
+                    ),
+                )
+            else:
+                historical_learning = self.historical_learning_resolver.resolve(
+                    candidate,
+                    as_of=base_context.analysis_completed_at,
+                    macro_regime=base_context.macro.regime,
+                    market_regime=base_context.market.market_regime,
+                )
+            specialist_context = CandidateSpecialistContext(
+                candidate_identifier=candidate.identifier,
+                analysis_completed_at=base_context.analysis_completed_at,
+                macro=base_context.macro,
+                market=base_context.market,
+                portfolio=portfolio_context,
+                forecast=base_context.forecast,
+                company=base_context.company,
+                asset_valuation=base_context.asset_valuation,
+                forward_intelligence=base_context.forward_intelligence,
+                historical_learning=historical_learning,
+            )
+            packets[candidate.identifier] = self.specialist_service.analyze(
+                candidate,
+                specialist_context,
+            )
+        return packets
+
+    def _preliminary_conviction_targets(
+        self,
+        *,
+        queue,
+        packets,
+    ) -> dict[str, float | None]:
+        if queue is None:
+            return {}
+        targets: dict[str, float | None] = {}
+        for ranked in tuple(getattr(queue, "ranked", ()) or ()):
+            packet = packets.get(ranked.candidate.identifier)
+            if packet is None:
+                continue
+            conviction = assess_preliminary_global_conviction(
+                self.cio,
+                candidate=ranked.candidate,
+                ranked=ranked,
+                specialists=packet,
+            )
+            if conviction is not None:
+                targets[ranked.candidate.identifier] = conviction.target_weight
+        return targets
+
     def run(self, **kwargs) -> GlobalOpportunityRotationCanonicalCIOCycleResult:
         contexts = kwargs.get("specialist_contexts")
         candidates = kwargs.get("candidates")
@@ -232,6 +409,28 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         if callable(setter):
             setter(rotation_context)
 
+        conviction_targets = None
+        try:
+            preliminary_packets = self._preliminary_specialist_packets(
+                cycle_identifier=cycle_identifier,
+                queue=authoritative_queue,
+                specialist_contexts=enriched_contexts,
+                portfolio=portfolio,
+                opportunity_context=prepared_kwargs.get("opportunity_context"),
+            )
+            conviction_targets = self._preliminary_conviction_targets(
+                queue=authoritative_queue,
+                packets=preliminary_packets,
+            )
+        except Exception:
+            # The preview must never become a hidden action veto. The canonical final
+            # cycle below performs its own complete six-specialist analysis and fails
+            # closed there if a required authoritative input is actually invalid.
+            _LOGGER.exception(
+                "specialist-informed global preview unavailable for %s; falling back to bounded leadership preview",
+                cycle_identifier,
+            )
+
         preview = None
         try:
             preview = build_global_rotation_preview(
@@ -241,10 +440,9 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                 construction_engine=self.construction_engine,
                 rotation_context=rotation_context,
                 authoritative_queue=authoritative_queue,
+                conviction_targets=conviction_targets,
             )
         except Exception:
-            # Additional portfolio context must never become a hidden veto. The final
-            # constructor still fails closed after the CIO makes any positive decision.
             _LOGGER.exception(
                 "global joint portfolio preview unavailable for %s; continuing without pre-CIO cap",
                 cycle_identifier,
