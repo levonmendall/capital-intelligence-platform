@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -54,8 +55,8 @@ def test_watchdog_emits_start_and_finish_events(monkeypatch, capsys, tmp_path: P
     process = CompletedProcess()
     calls = []
 
-    def popen(command, *, env, cwd):
-        calls.append((command, env, cwd))
+    def popen(command, *, env, cwd, start_new_session):
+        calls.append((command, env, cwd, start_new_session))
         return process
 
     monkeypatch.setattr(watchdog.subprocess, "Popen", popen)
@@ -72,15 +73,18 @@ def test_watchdog_emits_start_and_finish_events(monkeypatch, capsys, tmp_path: P
     assert "release-observable" in output
     assert Path(calls[0][0][1]).name == "run_manual_cio_diagnostic.py"
     assert Path(calls[0][2]) == Path(calls[0][0][1]).parent
+    assert calls[0][3] is (os.name == "posix")
     assert process.wait_calls == [17.0]
 
 
 def test_watchdog_passes_force_only_to_an_explicit_replacement(monkeypatch) -> None:
     commands = []
+    sessions = []
 
-    def popen(command, *, env, cwd):
+    def popen(command, *, env, cwd, start_new_session):
         del env, cwd
         commands.append(tuple(command))
+        sessions.append(start_new_session)
         return CompletedProcess()
 
     monkeypatch.setattr(watchdog.subprocess, "Popen", popen)
@@ -93,6 +97,7 @@ def test_watchdog_passes_force_only_to_an_explicit_replacement(monkeypatch) -> N
 
     assert commands[0][-1] == "--force"
     assert Path(commands[0][-2]).name == "run_manual_cio_diagnostic.py"
+    assert sessions == [os.name == "posix"]
 
 
 def test_watchdog_times_out_and_closes_claimed_request(monkeypatch, capsys) -> None:
