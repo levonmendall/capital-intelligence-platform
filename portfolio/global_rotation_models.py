@@ -7,9 +7,10 @@ asset classes instead of treating cash as the residual default.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from math import exp, isfinite, log1p
-from typing import Sequence
+from typing import Any, Sequence
 
 from cio.models import CandidateAssetClass
 from intelligence.global_leadership import assess_global_leadership_economics
@@ -107,18 +108,44 @@ class GlobalOpportunitySignal:
             raise ValueError("rank must be positive")
         object.__setattr__(self, "score", _clip(self.score))
         object.__setattr__(self, "leadership_score", _clip(self.leadership_score))
-        object.__setattr__(self, "mispriced_change_score", _clip(self.mispriced_change_score, -1.0, 1.0))
+        object.__setattr__(
+            self,
+            "mispriced_change_score",
+            _clip(self.mispriced_change_score, -1.0, 1.0),
+        )
         object.__setattr__(self, "evidence_score", _clip(self.evidence_score))
         object.__setattr__(
             self,
             "evidence_identifiers",
-            tuple(dict.fromkeys(str(item).strip() for item in self.evidence_identifiers if str(item).strip())),
+            tuple(
+                dict.fromkeys(
+                    str(item).strip()
+                    for item in self.evidence_identifiers
+                    if str(item).strip()
+                )
+            ),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidate_identifier": self.candidate_identifier,
+            "domain": self.domain.value,
+            "rank": self.rank,
+            "score": self.score,
+            "leadership_state": self.leadership_state,
+            "leadership_score": self.leadership_score,
+            "mispriced_change_state": self.mispriced_change_state,
+            "mispriced_change_score": self.mispriced_change_score,
+            "forward_impulse": self.forward_impulse,
+            "expected_return_edge": self.expected_return_edge,
+            "evidence_score": self.evidence_score,
+            "evidence_identifiers": list(self.evidence_identifiers),
+        }
 
 
 @dataclass(frozen=True, slots=True)
 class GlobalRotationContext:
-    as_of: object
+    as_of: datetime
     signals: tuple[GlobalOpportunitySignal, ...]
     cash_expected_return: float
     minimum_cash_weight: float
@@ -127,6 +154,37 @@ class GlobalRotationContext:
     cash_competition_state: CashCompetitionState
     policy_version: str = "global-opportunity-rotation-context.v1"
     authorizes_capital: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.as_of, datetime):
+            raise TypeError("as_of must be a datetime")
+        if self.as_of.tzinfo is None or self.as_of.utcoffset() is None:
+            raise ValueError("as_of must be timezone-aware")
+        if not isinstance(self.signals, tuple) or not all(
+            isinstance(item, GlobalOpportunitySignal) for item in self.signals
+        ):
+            raise TypeError("signals must contain GlobalOpportunitySignal values")
+        identifiers = tuple(item.candidate_identifier for item in self.signals)
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("global rotation signals must be unique by candidate")
+        ranks = tuple(item.rank for item in self.signals)
+        if ranks and ranks != tuple(range(1, len(ranks) + 1)):
+            raise ValueError("global rotation signal ranks must be contiguous and ordered")
+        object.__setattr__(self, "minimum_cash_weight", _clip(self.minimum_cash_weight))
+        object.__setattr__(self, "current_cash_weight", _clip(self.current_cash_weight))
+        object.__setattr__(self, "excess_cash_weight", _clip(self.excess_cash_weight))
+        expected_excess = round(
+            max(0.0, self.current_cash_weight - self.minimum_cash_weight),
+            8,
+        )
+        if abs(self.excess_cash_weight - expected_excess) > 1e-8:
+            raise ValueError("excess cash must equal current cash less the required reserve")
+        if not isinstance(self.cash_competition_state, CashCompetitionState):
+            raise TypeError("cash_competition_state must be CashCompetitionState")
+        if not isinstance(self.policy_version, str) or not self.policy_version.strip():
+            raise ValueError("policy_version cannot be empty")
+        if self.authorizes_capital:
+            raise ValueError("global rotation context cannot authorize capital")
 
     @property
     def by_candidate(self) -> dict[str, GlobalOpportunitySignal]:
@@ -145,6 +203,26 @@ class GlobalRotationContext:
                 return item
         return None
 
+    def to_dict(self) -> dict[str, Any]:
+        strongest = self.strongest
+        return {
+            "as_of": self.as_of.isoformat(),
+            "policy_version": self.policy_version,
+            "cash_expected_return": self.cash_expected_return,
+            "minimum_cash_weight": self.minimum_cash_weight,
+            "current_cash_weight": self.current_cash_weight,
+            "excess_cash_weight": self.excess_cash_weight,
+            "cash_competition_state": self.cash_competition_state.value,
+            "strongest_candidate_identifier": (
+                None if strongest is None else strongest.candidate_identifier
+            ),
+            "strongest_domain": None if strongest is None else strongest.domain.value,
+            "signals": [item.to_dict() for item in self.signals],
+            "investment_authority": False,
+            "construction_authority": False,
+            "execution_authority": False,
+        }
+
 
 def _forward_impulse(bundle: object | None) -> float:
     if bundle is None:
@@ -152,7 +230,9 @@ def _forward_impulse(bundle: object | None) -> float:
     value = sum(
         float(item.expected_return_impact) * float(item.confidence)
         for item in tuple(getattr(bundle, "signals", ()) or ())
-        if not str(getattr(item, "identifier", "")).startswith("signal:global-opportunity-radar:")
+        if not str(getattr(item, "identifier", "")).startswith(
+            "signal:global-opportunity-radar:"
+        )
     )
     return max(-0.10, min(0.10, value))
 
@@ -171,7 +251,12 @@ def _score(candidate: object, bundle: object | None) -> tuple[float, dict[str, o
         mispricing_state = leadership.mispriced_change_state
         mispricing_score = leadership.mispriced_change_score
         evidence_ids = tuple(
-            dict.fromkeys((*tuple(getattr(candidate, "evidence_identifiers", ()) or ()), *leadership.evidence_identifiers))
+            dict.fromkeys(
+                (
+                    *tuple(getattr(candidate, "evidence_identifiers", ()) or ()),
+                    *leadership.evidence_identifiers,
+                )
+            )
         )
     impulse = _forward_impulse(bundle)
     horizon_alt = _horizon_return(
@@ -179,7 +264,9 @@ def _score(candidate: object, bundle: object | None) -> tuple[float, dict[str, o
         int(getattr(candidate, "decision_horizon_days", 365)),
     )
     edge = float(getattr(candidate, "net_expected_return", 0.0)) - horizon_alt
-    evidence = float(getattr(getattr(candidate, "evidence_quality", None), "score", 0.0))
+    evidence = float(
+        getattr(getattr(candidate, "evidence_quality", None), "score", 0.0)
+    )
     leadership_component = leadership_score
     mispricing_component = _clip(0.5 + 0.5 * mispricing_score)
     forward_component = _clip(0.5 + impulse / 0.10)
@@ -251,7 +338,11 @@ def build_global_rotation_context(
     current_cash = _clip(float(getattr(portfolio, "cash_weight", 0.0)))
     excess = round(max(0.0, current_cash - minimum_cash), 8)
     deployable_signal = next(
-        (item for item in signals if item.expected_return_edge > 0.0 and item.score >= 0.40),
+        (
+            item
+            for item in signals
+            if item.expected_return_edge > 0.0 and item.score >= 0.40
+        ),
         None,
     )
     if excess <= 1e-9:
@@ -260,8 +351,11 @@ def build_global_rotation_context(
         cash_state = CashCompetitionState.DEPLOYMENT_OPPORTUNITY
     else:
         cash_state = CashCompetitionState.CASH_LEADING_ESTIMATE
+    as_of = getattr(portfolio, "as_of", None)
+    if not isinstance(as_of, datetime):
+        raise TypeError("portfolio as_of must be a datetime")
     return GlobalRotationContext(
-        as_of=getattr(portfolio, "as_of", None),
+        as_of=as_of,
         signals=signals,
         cash_expected_return=float(getattr(portfolio, "cash_expected_return", 0.0)),
         minimum_cash_weight=minimum_cash,
