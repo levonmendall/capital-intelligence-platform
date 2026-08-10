@@ -108,13 +108,26 @@ def _wait_for_diagnostic_memory_lane(
     return True
 
 
-def validate_once() -> tuple["ProviderValidationReport", Path]:
-    """Run one validation pass; heavy provider modules load only at this boundary."""
+def validate_live_providers():
+    """Lazy compatibility seam; do not load the heavy provider stack while deferred."""
+
+    from operations.provider_validation import validate_live_providers as implementation
+
+    return implementation()
+
+
+def write_provider_validation_report(report):
+    """Lazy compatibility seam for persisted governed provider-validation evidence."""
 
     from operations.provider_validation import (
-        validate_live_providers,
-        write_provider_validation_report,
+        write_provider_validation_report as implementation,
     )
+
+    return implementation(report)
+
+
+def validate_once() -> tuple["ProviderValidationReport", Path]:
+    """Run one validation pass; heavy provider modules load only at this boundary."""
 
     report = validate_live_providers()
     report_path = write_provider_validation_report(report)
