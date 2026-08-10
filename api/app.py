@@ -110,7 +110,8 @@ def create_app(
             "analytical engines, evidence governance, CIO decisions, replays, "
             "authorized portfolios, and selective material-change delivery. "
             "The investment process uses one objective: maximize long-term "
-            "compounded portfolio dollar value after costs."
+            "compounded portfolio returns after costs, thereby maximizing sustainable "
+            "terminal portfolio dollar value."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
