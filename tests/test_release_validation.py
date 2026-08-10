@@ -47,12 +47,19 @@ def test_release_plan_is_one_ordered_bounded_command_surface() -> None:
         "golden_end_to_end_and_chaos",
         "certified_event_quality_benchmark",
         "run_intelligence",
+        "audit_decision_information_gaps",
         "validate_provider_bundle_implementation",
         "validate_all_markets_internal_readiness",
         "validate_universal_paper_asset_classes",
         "rehearse_all_markets_paper_execution",
         "full_test_suite",
     )
+    information_audit = next(
+        item for item in host
+        if item.name == "audit_decision_information_gaps"
+    )
+    assert "run_information_gap_audit.py" in information_audit.command
+    assert "reports/information-gap-audit.json" in information_audit.command
     universal = next(
         item for item in host
         if item.name == "validate_universal_paper_asset_classes"
