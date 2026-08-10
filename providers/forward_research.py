@@ -1,9 +1,10 @@
-"""Configured provider adapter for certified forward-research evidence.
+"""Configured and public adapters for certified forward-research evidence.
 
-The adapter activates only dataset types explicitly bound in a configured provider
-file. Missing bindings remain unavailable and do not become synthetic evidence.
-A configured binding that is present but fails retrieval/validation raises, so a
-claimed certified feed cannot silently degrade into the market proxy.
+Explicit configured dataset bindings remain preferred.  When none is configured, the
+provider may expose a conservative matched subset of already-certified public
+positioning observations (currently CFTC managed-money evidence).  Missing bindings
+or unmatched public evidence remain unavailable and do not become synthetic neutral
+signals.  Neither path has investment authority.
 """
 from __future__ import annotations
 
@@ -25,6 +26,10 @@ from intelligence.forward_research import (
     positioning_observations_from_snapshot,
 )
 from providers.configured_dataset import ConfiguredDatasetProvider
+from providers.public_forward_research import (
+    PublicForwardResearchProvider,
+    build_public_forward_research_provider,
+)
 
 
 _FORWARD_TYPES = frozenset({
@@ -193,16 +198,18 @@ class ConfiguredForwardResearchProvider:
 
 def build_configured_forward_research_provider(
     path: str | Path | None = None,
-) -> ConfiguredForwardResearchProvider | None:
+) -> ConfiguredForwardResearchProvider | PublicForwardResearchProvider | None:
+    """Prefer an explicit licensed/configured binding, else strict public research."""
+
     configured_path = str(
         path
         or os.getenv("CAPITAL_INTELLIGENCE_FORWARD_RESEARCH_DATASET_BINDING", "")
     ).strip()
-    if not configured_path:
-        return None
-    return ConfiguredForwardResearchProvider(
-        ConfiguredDatasetProvider.from_path(configured_path)
-    )
+    if configured_path:
+        return ConfiguredForwardResearchProvider(
+            ConfiguredDatasetProvider.from_path(configured_path)
+        )
+    return build_public_forward_research_provider()
 
 
 __all__ = [
