@@ -8,6 +8,8 @@ CIO qualification, size a position, construct a portfolio, or authorize executio
 from __future__ import annotations
 
 import os
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,7 +66,7 @@ def unavailable_comparison(detail: str = "Benchmark evidence is not available ye
 def load_benchmark_portfolio_comparison(
     database: str | Path | None = None,
 ) -> BenchmarkPortfolioComparison:
-    """Load a truthful same-window comparison from immutable paper evidence."""
+    """Synchronously load a truthful same-window comparison from immutable evidence."""
     data_dir = Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")).expanduser()
     path = Path(database).expanduser() if database is not None else data_dir / "paper_operation_evidence.db"
     if not path.exists():
@@ -83,8 +85,6 @@ def load_benchmark_portfolio_comparison(
                 return unavailable_comparison(
                     "The paper-operation evidence store exists but contains no benchmark observations yet."
                 )
-            # Evaluate only the already-recorded point-in-time observations. This does
-            # not append a report or modify any governed state.
             report = PaperOperationEvidenceEvaluator().evaluate(
                 observations,
                 evaluated_at=datetime.now(timezone.utc),
@@ -151,11 +151,65 @@ def load_benchmark_portfolio_comparison(
     )
 
 
+_CACHE_LOCK = threading.Lock()
+_CACHE_VALUE: BenchmarkPortfolioComparison | None = None
+_CACHE_UPDATED_AT = 0.0
+_CACHE_REFRESHING = False
+_CACHE_TTL_SECONDS = 30.0
+
+
+def _refresh_default_comparison() -> None:
+    global _CACHE_VALUE, _CACHE_UPDATED_AT, _CACHE_REFRESHING
+    try:
+        value = load_benchmark_portfolio_comparison()
+        with _CACHE_LOCK:
+            _CACHE_VALUE = value
+            _CACHE_UPDATED_AT = time.monotonic()
+    finally:
+        with _CACHE_LOCK:
+            _CACHE_REFRESHING = False
+
+
+def load_benchmark_portfolio_comparison_nonblocking() -> BenchmarkPortfolioComparison:
+    """Return cached evidence immediately while SQLite verification refreshes off-thread."""
+    global _CACHE_REFRESHING
+    now = time.monotonic()
+    with _CACHE_LOCK:
+        if _CACHE_VALUE is not None and now - _CACHE_UPDATED_AT <= _CACHE_TTL_SECONDS:
+            return _CACHE_VALUE
+        stale = _CACHE_VALUE
+        if not _CACHE_REFRESHING:
+            _CACHE_REFRESHING = True
+            thread = threading.Thread(
+                target=_refresh_default_comparison,
+                name="render-benchmark-comparison-refresh",
+                daemon=True,
+            )
+            thread.start()
+        if stale is not None:
+            return stale
+    return unavailable_comparison(
+        "Benchmark comparison evidence is refreshing in the background. "
+        "No reference return is shown until the governed evidence read completes."
+    )
+
+
+def reset_benchmark_portfolio_comparison_cache() -> None:
+    """Reset display cache for deterministic tests."""
+    global _CACHE_VALUE, _CACHE_UPDATED_AT, _CACHE_REFRESHING
+    with _CACHE_LOCK:
+        _CACHE_VALUE = None
+        _CACHE_UPDATED_AT = 0.0
+        _CACHE_REFRESHING = False
+
+
 __all__ = [
     "BenchmarkPortfolioComparison",
     "BenchmarkPortfolioRow",
     "CANONICAL_BENCHMARK_DETAIL",
     "CANONICAL_BENCHMARK_LABEL",
     "load_benchmark_portfolio_comparison",
+    "load_benchmark_portfolio_comparison_nonblocking",
+    "reset_benchmark_portfolio_comparison_cache",
     "unavailable_comparison",
 ]
