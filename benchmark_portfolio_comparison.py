@@ -115,8 +115,16 @@ def load_benchmark_portfolio_comparison(
     database: str | Path | None = None,
     *,
     market_client: AlpacaPaperClient | None = None,
+    _background: bool = False,
 ) -> BenchmarkPortfolioComparison:
-    """Load a truthful same-window system-versus-market comparison."""
+    """Load a truthful same-window system-versus-market comparison.
+
+    The no-argument presentation call is nonblocking. Explicit database/client
+    calls remain synchronous for deterministic evaluation and tests.
+    """
+    if database is None and market_client is None and not _background:
+        return load_benchmark_portfolio_comparison_nonblocking()
+
     data_dir = Path(os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")).expanduser()
     path = Path(database).expanduser() if database is not None else data_dir / "paper_operation_evidence.db"
     if not path.exists():
@@ -230,7 +238,7 @@ _CACHE_TTL_SECONDS = 30.0
 def _refresh_default_comparison() -> None:
     global _CACHE_VALUE, _CACHE_UPDATED_AT, _CACHE_REFRESHING
     try:
-        value = load_benchmark_portfolio_comparison()
+        value = load_benchmark_portfolio_comparison(_background=True)
         with _CACHE_LOCK:
             _CACHE_VALUE = value
             _CACHE_UPDATED_AT = time.monotonic()
