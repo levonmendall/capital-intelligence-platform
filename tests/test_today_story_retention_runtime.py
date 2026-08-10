@@ -188,7 +188,7 @@ def test_empty_refresh_reuses_persistent_story_cache(monkeypatch, tmp_path) -> N
     assert payload["records"][0]["identifier"] == "cached"
 
 
-def test_install_rebinds_after_streamlit_restores_base_adapters() -> None:
+def test_install_rebinds_adapters_without_owning_today_renderer() -> None:
     app = ModuleType("app_impl")
     events = ModuleType("event_ui")
     operating = ModuleType("operating_ui")
@@ -204,14 +204,20 @@ def test_install_rebinds_after_streamlit_restores_base_adapters() -> None:
     def operating_loader():
         return object()
 
+    def renderer(active_app, dependencies):
+        del active_app, dependencies
+
     events.build_today_items = builder
     operating.build_today_items = builder
     events.load_public_event_snapshot = event_loader
     operating.load_public_event_snapshot = operating_loader
+    story._render_today = renderer
 
     retention.install(app, events, operating, story)
     first_builder = events.build_today_items
     first_event_loader = events.load_public_event_snapshot
+
+    assert story._render_today is renderer
 
     # Simulate the assignments performed earlier in the next Streamlit run.
     events.build_today_items = builder
@@ -228,21 +234,23 @@ def test_install_rebinds_after_streamlit_restores_base_adapters() -> None:
     assert retention._base_callable(events.build_today_items) is builder
     assert retention._base_callable(events.load_public_event_snapshot) is event_loader
     assert retention._base_callable(operating.load_public_event_snapshot) is operating_loader
+    assert story._render_today is renderer
 
 
-def test_entrypoints_install_retention_after_final_today_renderer() -> None:
+def test_entrypoints_install_retention_before_canonical_today_renderer() -> None:
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
         assert "import today_story_retention_runtime" in source
-        final_renderer = source.index("environment_story_placement_refinement.install(app_impl)")
         retention_install = source.index("today_story_retention_runtime.install(")
-        assert final_renderer < retention_install
+        trust_install = source.index("today_trust_ui_runtime.install(")
+        assert retention_install < trust_install
 
 
-def test_retained_today_copy_is_truthful_about_story_age() -> None:
+def test_retention_runtime_contains_no_streamlit_presentation() -> None:
     source = Path("today_story_retention_runtime.py").read_text(encoding="utf-8")
 
-    assert "Today // latest verified developments" in source
-    assert "No new source-qualified development cleared the current 24-hour controls" in source
-    assert "original publication timestamps" in source
-    assert "No new qualifying stories" in source
+    assert "import streamlit" not in source
+    assert "st.markdown" not in source
+    assert "_retained_today_renderer" not in source
+    assert "story_ui._render_today =" not in source
+    assert "original publication times are preserved" in source
