@@ -1,16 +1,9 @@
 """Refresh live-provider readiness without blocking Render web startup.
 
-The report produced here remains an operational prerequisite for governed CIO analysis
-and paper implementation. This worker is deliberately noncritical to web availability:
-provider outages or slow responses are recorded in the readiness report while the
-authenticated console and health endpoint remain online.
-
-Release-triggered CIO diagnostics are owned exclusively by the Render bootstrap. Keeping
-this worker limited to provider validation prevents two independent processes from
-claiming or closing the same durable diagnostic request. Provider validation also yields
-its heavy provider-read window while any manual CIO diagnostic is pending or in progress,
-so comprehensive discovery receives an exclusive memory lane on constrained Render
-instances without reducing market coverage.
+The loop intentionally stays lightweight while a manual CIO diagnostic owns the constrained
+Render memory lane. Heavy provider-validation imports are delayed until the memory lane is
+open so a sleeping validation worker cannot consume avoidable resident memory during the
+comprehensive all-market diagnostic.
 """
 
 from __future__ import annotations
@@ -23,14 +16,12 @@ import time
 from pathlib import Path
 from threading import Event
 from types import FrameType
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
-from operations.provider_validation import (
-    ProviderValidationReport,
-    validate_live_providers,
-    write_provider_validation_report,
-)
+
+if TYPE_CHECKING:
+    from operations.provider_validation import ProviderValidationReport
 
 _DEFAULT_INTERVAL_SECONDS = 3600.0
 _DEFAULT_INITIAL_DELAY_SECONDS = 5.0
@@ -88,11 +79,7 @@ def _wait_for_diagnostic_memory_lane(
     *,
     poll_seconds: float | None = None,
 ) -> bool:
-    """Wait until no governed diagnostic owns the heavy-memory lane.
-
-    Returns False when shutdown was requested while waiting. The coordination file is
-    operational state only and has no investment or execution authority.
-    """
+    """Wait until no governed diagnostic owns the heavy-memory lane."""
 
     poll = (
         _seconds(
@@ -110,6 +97,7 @@ def _wait_for_diagnostic_memory_lane(
             _log(
                 "provider_validation_deferred_for_cio_diagnostic",
                 complete_market_coverage_preserved=True,
+                heavy_provider_modules_loaded=False,
                 paper_only=True,
             )
             deferred_logged = True
@@ -120,8 +108,13 @@ def _wait_for_diagnostic_memory_lane(
     return True
 
 
-def validate_once() -> tuple[ProviderValidationReport, Path]:
-    """Run one credential-safe validation pass and persist its governed report."""
+def validate_once() -> tuple["ProviderValidationReport", Path]:
+    """Run one validation pass; heavy provider modules load only at this boundary."""
+
+    from operations.provider_validation import (
+        validate_live_providers,
+        write_provider_validation_report,
+    )
 
     report = validate_live_providers()
     report_path = write_provider_validation_report(report)
@@ -183,6 +176,7 @@ def run_loop(
             "provider_validation_worker_started",
             initial_delay_seconds=initial_delay,
             interval_seconds=interval,
+            heavy_provider_modules_loaded=False,
         )
         if stopping.wait(initial_delay):
             return 0
