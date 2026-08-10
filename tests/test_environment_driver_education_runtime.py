@@ -130,13 +130,19 @@ def test_install_replaces_the_environment_story_renderer_idempotently() -> None:
     assert module._render_environment is installed
 
 
-def test_active_entrypoints_install_education_before_surface_ownership() -> None:
+def test_driver_helpers_are_consumed_by_canonical_environment_owner() -> None:
+    clarity_source = Path("environment_mobile_clarity_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "import environment_driver_education_runtime as driver_runtime" in clarity_source
+    assert "driver_runtime._driver_rows" in clarity_source
+    assert "driver_runtime._cross_asset_rows" in clarity_source
+
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
-        assert "import environment_driver_education_runtime" in source
-        education_index = source.index("environment_driver_education_runtime.install")
-        surface_index = source.index("environment_story_placement_refinement.install")
-        assert education_index < surface_index
+        assert "import environment_mobile_clarity_runtime" in source
+        assert "environment_mobile_clarity_runtime.install(" in source
+        assert "environment_driver_education_runtime.install(" not in source
 
 
 def test_renderer_language_visibly_connects_cards_and_cross_asset_map() -> None:
