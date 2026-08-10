@@ -65,6 +65,16 @@ def _steps(*, include_container: bool) -> tuple[ReleaseValidationStep, ...]:
             300,
         ),
         ReleaseValidationStep(
+            "audit_decision_information_gaps",
+            (
+                python,
+                "run_information_gap_audit.py",
+                "--output",
+                "reports/information-gap-audit.json",
+            ),
+            120,
+        ),
+        ReleaseValidationStep(
             "validate_provider_bundle_implementation",
             (
                 python,
