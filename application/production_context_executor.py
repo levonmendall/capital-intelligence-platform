@@ -13,6 +13,9 @@ from __future__ import annotations
 from datetime import datetime
 
 from application import production_context_executor_impl as _implementation
+from application.marginal_targeting_runtime import (
+    install_construction_backed_marginal_targeting,
+)
 
 _ORIGINAL_CANDIDATE_AUTHORITY_UNIVERSE = (
     _implementation._candidate_authority_universe
@@ -27,6 +30,13 @@ for _name, _value in vars(_implementation).items():
     if _name.startswith("__") or _name in _WRAPPED_NAMES:
         continue
     globals()[_name] = _value
+
+
+# Production ranking and portfolio-specialist previews use the same canonical
+# construction engine instead of a maximum-position proxy. The binding is idempotent
+# and leaves direct imports of the historical cycle untouched until the production
+# executor is composed.
+install_construction_backed_marginal_targeting()
 
 
 def _synchronize_runtime_bindings() -> None:
