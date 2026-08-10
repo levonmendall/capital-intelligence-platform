@@ -5,8 +5,7 @@ from __future__ import annotations
 import app_impl
 import decision_pulse_ui_refinement
 import educational_market_briefing_ui
-import environment_actionable_learning_refinement
-import environment_driver_education_runtime
+import environment_mobile_clarity_runtime
 import environment_story_placement_refinement
 import operating_intelligence_ui
 import opportunity_funnel_ui_refinement
@@ -16,7 +15,6 @@ import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
 import surface_route_isolation_runtime
-import today_development_card_format_runtime
 import today_event_alignment_runtime
 import today_story_retention_runtime
 import today_trust_ui_runtime
@@ -28,13 +26,6 @@ from secure_app import create_streamlit_application
 def main() -> None:
     public_event_recency_runtime.install()
     today_event_alignment_runtime.install()
-    today_development_card_format_runtime.install()
-    environment_driver_education_runtime.install(
-        environment_story_placement_refinement
-    )
-    environment_actionable_learning_refinement.install(
-        environment_story_placement_refinement
-    )
     opportunity_scan_resilience.install()
     ui_refinement.install(app_impl, secure_app)
     ui_experience_refinement.install(app_impl)
@@ -42,6 +33,7 @@ def main() -> None:
     opportunity_funnel_ui_refinement.install(app_impl)
     surface_content_refinement.install(app_impl)
     environment_story_placement_refinement.install(app_impl)
+    environment_mobile_clarity_runtime.install(environment_story_placement_refinement)
     today_story_retention_runtime.install(
         app_impl,
         educational_market_briefing_ui,
