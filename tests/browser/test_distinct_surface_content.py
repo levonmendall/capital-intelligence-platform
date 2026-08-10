@@ -17,7 +17,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _assert_hidden_or_absent(locator) -> None:
-    """Allow Streamlit to retain stale Environment fragment DOM only if hidden."""
+    """Allow Streamlit to retain stale surface fragment DOM only if hidden."""
 
     assert locator.count() <= 1
     if locator.count() == 1:
@@ -102,6 +102,8 @@ def test_primary_surfaces_have_distinct_information_ownership(
         _assert_hidden_or_absent(
             page.get_by_text("How this backdrop reaches markets", exact=True)
         )
-        assert page.get_by_text("Current holdings", exact=True).count() == 0
+        _assert_hidden_or_absent(
+            page.get_by_text("Current holdings", exact=True)
+        )
         assert page.get_by_text("Performance vs benchmarks", exact=True).count() == 0
         browser.close()
