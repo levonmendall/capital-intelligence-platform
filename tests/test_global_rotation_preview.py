@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from application.global_rotation_preview import build_global_rotation_preview
@@ -9,6 +10,8 @@ from portfolio.global_rotation import (
     GlobalOpportunitySignal,
     GlobalRotationContext,
 )
+
+NOW = datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc)
 
 
 def _candidate(identifier: str, symbol: str, maximum: float = 0.10):
@@ -50,7 +53,7 @@ def test_global_preview_requests_larger_targets_for_stronger_opportunities():
     strong = _candidate("candidate:strong", "AAA")
     developing = _candidate("candidate:developing", "BBB")
     context = GlobalRotationContext(
-        as_of=None,
+        as_of=NOW,
         signals=(
             _signal(strong.identifier, 1, 0.82),
             _signal(developing.identifier, 2, 0.60),
@@ -115,7 +118,7 @@ def test_global_preview_requests_larger_targets_for_stronger_opportunities():
 def test_zero_global_score_does_not_create_a_preview_buy():
     weak = _candidate("candidate:weak", "CCC")
     context = GlobalRotationContext(
-        as_of=None,
+        as_of=NOW,
         signals=(_signal(weak.identifier, 1, 0.20),),
         cash_expected_return=0.03,
         minimum_cash_weight=0.05,
@@ -126,12 +129,18 @@ def test_zero_global_score_does_not_create_a_preview_buy():
 
     class Portfolio:
         cash_weight = 1.0
-        def current_weight(self, _symbol): return 0.0
-        def profile(self, _identifier): raise AssertionError("no intent should require a profile")
+
+        def current_weight(self, _symbol):
+            return 0.0
+
+        def profile(self, _identifier):
+            raise AssertionError("no intent should require a profile")
 
     class Engine:
         policy = SimpleNamespace(version="construction.test")
-        def construct(self, _request): raise AssertionError("construction should not run")
+
+        def construct(self, _request):
+            raise AssertionError("construction should not run")
 
     preview = build_global_rotation_preview(
         cycle_identifier="cycle:weak",
