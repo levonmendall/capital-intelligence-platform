@@ -31,3 +31,9 @@ ready point-in-time data
 ```
 
 Absence of any term blocks the append. No downstream component may manufacture a missing upstream authorization.
+
+## Committee and CIO evolution status
+
+The committee and CIO architecture are **not frozen**. Evidence-backed improvements to specialist roles, analytical methods, inputs, reconciliation, CIO reasoning, portfolio context, and decision controls may be proposed, tested, and promoted through normal governed review.
+
+Unfreezing does not itself change authority. The current six-specialist structure remains canonical until a separately justified and validated change is adopted; the CIO remains the sole investment-action authority; construction remains the independent final portfolio-sizing authority; and advisory components such as the Red Team do not acquire a vote, veto, threshold, sizing, or execution power by implication. Changes must preserve point-in-time evidence, explicit accountability, fail-closed readiness, append-only lineage, and paper-only execution boundaries.

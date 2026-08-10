@@ -41,7 +41,7 @@ from cio.models import (
 
 _LAZY_EXPORTS = {
     "CIOSynthesisPolicy": ("cio.service", "CIOSynthesisPolicy"),
-    "ChiefInvestmentOfficer": ("cio.committee_advisory_cio", "ChiefInvestmentOfficer"),
+    "ChiefInvestmentOfficer": ("cio.intelligence_refinement", "ChiefInvestmentOfficer"),
     "RecommendationUniversePolicy": (
         "cio.universe",
         "RecommendationUniversePolicy",
