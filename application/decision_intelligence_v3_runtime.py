@@ -5,6 +5,8 @@ cycle. Failure to write an explanation/measurement packet is logged by the calle
 can never alter the already-computed CIO decision or canonical portfolio state.
 Expectation forecasts are registered from the same packet the CIO produced so later
 resolution measures the exact point-in-time expectation rather than a reconstruction.
+A whole-portfolio factor/stress synthesis is also persisted downstream; it is read-only
+and may influence construction only after separate analytical-promotion certification.
 """
 from __future__ import annotations
 
@@ -17,11 +19,13 @@ from evaluation.expectations_resolution import (
     ExpectationsForecastRecord,
     SQLiteExpectationsResolutionStore,
 )
+from evaluation.portfolio_risk_synthesis import SQLitePortfolioRiskSynthesisStore
 from intelligence.decision_intelligence_v3 import (
     build_candidate_decision_intelligence_packet,
 )
+from intelligence.portfolio_risk_synthesis import build_portfolio_risk_synthesis
 
-_LOGGER = logging.getLogger("capital_intelligence.expectations_resolution")
+_LOGGER = logging.getLogger("capital_intelligence.decision_intelligence_learning")
 
 
 def _by_candidate(values: object) -> dict[str, object]:
@@ -74,13 +78,22 @@ def _expectations_database_path() -> Path:
     ).expanduser()
 
 
+def _risk_database_path() -> Path:
+    return Path(
+        os.getenv(
+            "CAPITAL_INTELLIGENCE_PORTFOLIO_RISK_SYNTHESIS_DB",
+            "database/portfolio-risk-synthesis.db",
+        )
+    ).expanduser()
+
+
 def append_post_cycle_decision_intelligence(
     *,
     result: object,
     context: object,
     path: str | Path | None = None,
 ) -> tuple[str, ...]:
-    """Persist one read-only packet for every candidate that reached the CIO."""
+    """Persist read-only decision, expectations, and portfolio-risk evidence."""
 
     if result is None or context is None:
         return ()
@@ -142,6 +155,24 @@ def append_post_cycle_decision_intelligence(
                     "expectations forecast registration failed for %s",
                     packet.identifier,
                 )
+
+    try:
+        risk_synthesis = build_portfolio_risk_synthesis(
+            portfolio=portfolio,
+            construction=construction,
+            candidates=tuple(candidates.values()),
+        )
+        SQLitePortfolioRiskSynthesisStore(_risk_database_path()).append(
+            risk_synthesis
+        )
+    except Exception:
+        # Same governance boundary as expectations resolution: this is downstream
+        # empirical/diagnostic state and cannot invalidate the authoritative CIO or
+        # construction result. Missing dynamic histories remain explicitly unavailable.
+        _LOGGER.exception(
+            "portfolio risk synthesis persistence failed for %s",
+            cycle_identifier,
+        )
     return tuple(hashes)
 
 
