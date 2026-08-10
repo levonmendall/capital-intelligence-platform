@@ -1,14 +1,14 @@
 """Fail-closed candidate decision-readiness policy.
 
 The underwriting completeness matrix is broader than the minimum information that
-must block capital.  This module identifies the asset-specific dimensions that are
+must block capital. This module identifies the asset-specific dimensions that are
 material enough to prohibit a candidate from entering the governed opportunity
-funnel when they are unavailable.  It cannot authorize capital, relax a CIO hurdle,
+funnel when they are unavailable. It cannot authorize capital, relax a CIO hurdle,
 or turn partial/shadow information into decision evidence.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from cio.models import CandidateAssetClass
 from intelligence.asset_underwriting import UnderwritingCoverage, UnderwritingDimension
@@ -149,22 +149,18 @@ class CandidateDecisionReadinessPolicy:
         required = self.blocking_dimensions(asset_class)
         missing_set = set(completeness.coverage.missing)
         blocking_missing = tuple(item for item in required if item in missing_set)
-        reasons = tuple(
-            dict.fromkeys(
-                (
-                    *completeness.available_reasons,
-                    *(
-                        (
-                            "All asset-specific critical decision-information dimensions are available.",
-                        )
-                        if not blocking_missing
-                        else tuple(
-                            f"Missing critical {item.value} evidence."
-                            for item in blocking_missing
-                        )
-                    ),
-                )
+        readiness_reasons = (
+            (
+                "All asset-specific critical decision-information dimensions are available.",
             )
+            if not blocking_missing
+            else tuple(
+                f"Missing critical {item.value} evidence."
+                for item in blocking_missing
+            )
+        )
+        reasons = tuple(
+            dict.fromkeys((*completeness.available_reasons, *readiness_reasons))
         )
         return CandidateDecisionReadiness(
             candidate_identifier=completeness.candidate_identifier,
@@ -175,6 +171,56 @@ class CandidateDecisionReadinessPolicy:
             decision_ready=not blocking_missing,
             reasons=reasons,
             information_completeness=completeness,
+        )
+
+    def filter_paper_evidence_result(self, result: object):
+        """Remove non-ready candidates before screening while preserving holdings.
+
+        The paper-evidence result is intentionally treated as a structural protocol so
+        this governance module does not import the production facade and create a
+        circular dependency. Missing candidate evidence fails closed as an exclusion.
+        """
+        candidates = tuple(getattr(result, "candidates"))
+        candidate_evidence = tuple(getattr(result, "candidate_evidence"))
+        by_identifier = {
+            item.candidate_identifier: item for item in candidate_evidence
+        }
+        if len(by_identifier) != len(candidate_evidence):
+            raise ValueError("candidate evidence must be unique by candidate identifier")
+
+        retained_candidates: list[object] = []
+        retained_evidence: list[object] = []
+        exclusions = list(tuple(getattr(result, "exclusions")))
+        excluded_instruments = {str(item[0]) for item in exclusions}
+
+        for candidate in candidates:
+            evidence = by_identifier.get(candidate.identifier)
+            if evidence is None:
+                reasons = (
+                    "Decision-readiness gate: governed candidate evidence is missing.",
+                )
+                instrument_identifier = candidate.instrument.instrument_id
+                if instrument_identifier not in excluded_instruments:
+                    exclusions.append((instrument_identifier, reasons))
+                    excluded_instruments.add(instrument_identifier)
+                continue
+            readiness = self.assess(candidate, evidence)
+            if readiness.decision_ready:
+                retained_candidates.append(candidate)
+                retained_evidence.append(evidence)
+                continue
+            instrument_identifier = candidate.instrument.instrument_id
+            if instrument_identifier not in excluded_instruments:
+                exclusions.append(
+                    (instrument_identifier, readiness.exclusion_reasons)
+                )
+                excluded_instruments.add(instrument_identifier)
+
+        return replace(
+            result,
+            candidates=tuple(retained_candidates),
+            candidate_evidence=tuple(retained_evidence),
+            exclusions=tuple(exclusions),
         )
 
 
