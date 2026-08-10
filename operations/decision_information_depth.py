@@ -1,14 +1,11 @@
 """Portfolio-value-ranked decision-information depth program.
 
-The platform already knows which underwriting dimensions are missing and already has a
-capability registry describing monitored versus decision-certified information. This
-module joins those two views and ranks research/data work by the amount of portfolio
-dollar-value opportunity that is currently blocked or weakened.
-
-It does not make an investment decision, lower an evidence threshold, or treat a
-provider's mere existence as certified evidence. Its sole purpose is to answer:
-"Which missing information should we resolve first if the objective is to maximize
-long-term compounded portfolio dollar value after costs?"
+Rank missing decision information by its potential contribution to sustainable
+long-term compounded portfolio dollar value. The program combines the existing
+candidate decision-readiness policy, Value of Information, and canonical information
+capability audit. It is diagnostic only: provider presence is never treated as
+certification, and this module cannot create a candidate, lower a hurdle, authorize
+capital, size a position, or execute.
 """
 from __future__ import annotations
 
@@ -20,17 +17,12 @@ from typing import Any, Iterable, Mapping
 
 from governance.decision_readiness import CandidateDecisionReadinessPolicy
 from intelligence.asset_underwriting import UnderwritingDimension
-from intelligence.value_of_information import (
-    MissingInformationInput,
-    ValueOfInformationEngine,
-)
+from intelligence.value_of_information import MissingInformationInput, ValueOfInformationEngine
 from operations.information_gap_audit import build_information_gap_audit
 
 
-# Only canonical domains that actually exist in maximum_decision_information_scope are
-# mapped here. Vehicle mechanics such as security identity, pricing, generic liquidity,
-# and execution are governed by the separate security-master/market/execution
-# capability stack and must not be mislabeled as a missing news/research provider.
+# Research/data domains come only from maximum_decision_information_scope.json.
+# Vehicle mechanics remain in the separate security-master/market/execution stack.
 _DIMENSION_DOMAINS: dict[UnderwritingDimension, tuple[str, ...]] = {
     UnderwritingDimension.IDENTITY: (),
     UnderwritingDimension.MARKET_DATA: (),
@@ -88,6 +80,9 @@ class InformationDepthResolutionState(str, Enum):
     EXISTING_DECISION_CERTIFIED = "existing_decision_certified"
     EXISTING_MONITORED_NEEDS_CERTIFICATION = "existing_monitored_needs_certification"
     EXISTING_NEEDS_POINT_IN_TIME_HISTORY = "existing_needs_point_in_time_history"
+    PARTIAL_EXISTING_COVERAGE_NEW_SOURCE_REQUIRED = (
+        "partial_existing_coverage_new_source_required"
+    )
     NEW_OR_PREMIUM_SOURCE_REQUIRED = "new_or_premium_source_required"
     CORE_CAPABILITY_STACK_REQUIRED = "core_capability_stack_required"
 
@@ -108,7 +103,7 @@ class CandidateInformationDepthDemand:
     resolution_state: InformationDepthResolutionState
     rationale: tuple[str, ...]
     investment_authority: bool = False
-    schema_version: str = "candidate-information-depth-demand.v1"
+    schema_version: str = "candidate-information-depth-demand.v2"
 
     def __post_init__(self) -> None:
         if not self.candidate_identifier.strip():
@@ -167,7 +162,7 @@ class DecisionInformationDepthProgram:
     domain_rollup: tuple[dict[str, Any], ...]
     investment_authority: bool = False
     execution_authority: bool = False
-    schema_version: str = "decision-information-depth-program.v1"
+    schema_version: str = "decision-information-depth-program.v2"
 
     def __post_init__(self) -> None:
         if self.portfolio_value <= 0.0:
@@ -192,38 +187,72 @@ class DecisionInformationDepthProgram:
 
 
 def _domain_rows(audit: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
-    result: dict[str, Mapping[str, Any]] = {}
-    for row in audit.get("domain_status", ()):
-        if isinstance(row, Mapping) and str(row.get("domain", "")).strip():
-            result[str(row["domain"])] = row
-    return result
+    return {
+        str(row["domain"]): row
+        for row in audit.get("domain_status", ())
+        if isinstance(row, Mapping) and str(row.get("domain", "")).strip()
+    }
 
 
 def _resolution_state(
     domains: tuple[str, ...],
     rows: Mapping[str, Mapping[str, Any]],
 ) -> tuple[InformationDepthResolutionState, tuple[str, ...]]:
+    """Resolve the *complete* mapped dimension, never just one favorable subdomain."""
+
     if not domains:
         return InformationDepthResolutionState.CORE_CAPABILITY_STACK_REQUIRED, ()
-    relevant = tuple(rows[domain] for domain in domains if domain in rows)
+
+    relevant = {domain: rows.get(domain) for domain in domains}
     capabilities = tuple(
         dict.fromkeys(
             str(identifier)
-            for row in relevant
+            for row in relevant.values()
+            if isinstance(row, Mapping)
             for identifier in row.get("capability_identifiers", ())
             if str(identifier).strip()
         )
     )
-    if any(bool(row.get("decision_certified_and_healthy", False)) for row in relevant):
+    present_rows = tuple(row for row in relevant.values() if isinstance(row, Mapping))
+    certified_domains = {
+        domain
+        for domain, row in relevant.items()
+        if isinstance(row, Mapping)
+        and bool(row.get("decision_certified_and_healthy", False))
+    }
+    monitored_domains = {
+        domain
+        for domain, row in relevant.items()
+        if isinstance(row, Mapping) and bool(row.get("monitored", False))
+    }
+    historical_domains = {
+        domain
+        for domain, row in relevant.items()
+        if isinstance(row, Mapping)
+        and bool(row.get("historical_capability_present", False))
+    }
+    required = set(domains)
+
+    if certified_domains == required:
         return InformationDepthResolutionState.EXISTING_DECISION_CERTIFIED, capabilities
-    if any(bool(row.get("monitored", False)) for row in relevant):
-        if any(bool(row.get("historical_capability_present", False)) for row in relevant):
+
+    covered = certified_domains | monitored_domains
+    if covered == required:
+        # Every required subdomain exists. Distinguish a certification problem from
+        # a missing PIT-history problem; neither is described as fully certified.
+        if historical_domains == required:
             return (
                 InformationDepthResolutionState.EXISTING_MONITORED_NEEDS_CERTIFICATION,
                 capabilities,
             )
         return (
             InformationDepthResolutionState.EXISTING_NEEDS_POINT_IN_TIME_HISTORY,
+            capabilities,
+        )
+
+    if covered:
+        return (
+            InformationDepthResolutionState.PARTIAL_EXISTING_COVERAGE_NEW_SOURCE_REQUIRED,
             capabilities,
         )
     return InformationDepthResolutionState.NEW_OR_PREMIUM_SOURCE_REQUIRED, capabilities
@@ -237,19 +266,26 @@ def _compounding_value_score(
     blocking: bool,
     deep_gap: bool,
 ) -> float:
-    # A 2% portfolio-value opportunity is enough to saturate the dollar-importance
-    # term. This keeps a very large but low-information-quality idea from overwhelming
-    # a genuinely blocking evidence gap while still ranking research by wealth impact.
+    # A 2% portfolio-value opportunity saturates the wealth-importance term. This
+    # prevents a large speculative idea from swamping a genuinely blocking evidence
+    # gap while still making research priority sensitive to terminal-dollar impact.
     dollar_importance = min(
         1.0,
         abs(float(expected_dollar_opportunity_at_stake))
         / max(1.0, float(portfolio_value) * 0.02),
     )
     governance_multiplier = 1.0 if blocking else (0.92 if deep_gap else 0.82)
-    score = governance_multiplier * (
-        0.62 * float(voi_score) + 0.38 * dollar_importance
+    return round(
+        max(
+            0.0,
+            min(
+                1.0,
+                governance_multiplier
+                * (0.62 * float(voi_score) + 0.38 * dollar_importance),
+            ),
+        ),
+        8,
     )
-    return round(max(0.0, min(1.0, score)), 8)
 
 
 def build_decision_information_depth_program(
@@ -300,13 +336,6 @@ def build_decision_information_depth_program(
             state, capability_ids = _resolution_state(domains, rows)
             dollar_at_stake = expected.get(readiness.candidate_identifier, 0.0)
             deep_gap = priority.dimension in deep_missing
-            score = _compounding_value_score(
-                voi_score=priority.priority_score,
-                expected_dollar_opportunity_at_stake=dollar_at_stake,
-                portfolio_value=float(portfolio_value),
-                blocking=priority.blocking,
-                deep_gap=deep_gap,
-            )
             demands.append(
                 CandidateInformationDepthDemand(
                     candidate_identifier=readiness.candidate_identifier,
@@ -320,7 +349,13 @@ def build_decision_information_depth_program(
                     value_of_information_score=priority.priority_score,
                     expected_dollar_opportunity_at_stake=dollar_at_stake,
                     portfolio_value=float(portfolio_value),
-                    compounding_value_score=score,
+                    compounding_value_score=_compounding_value_score(
+                        voi_score=priority.priority_score,
+                        expected_dollar_opportunity_at_stake=dollar_at_stake,
+                        portfolio_value=float(portfolio_value),
+                        blocking=priority.blocking,
+                        deep_gap=deep_gap,
+                    ),
                     mapped_domains=domains,
                     existing_capability_identifiers=capability_ids,
                     resolution_state=state,
@@ -350,14 +385,13 @@ def build_decision_information_depth_program(
             reverse=True,
         )
     )
-    domain_accumulator: dict[str, dict[str, Any]] = {}
+    rollup_map: dict[str, dict[str, Any]] = {}
     for item in ordered:
         for domain in item.mapped_domains or ("core_capability_stack",):
-            row = domain_accumulator.setdefault(
+            row = rollup_map.setdefault(
                 domain,
                 {
                     "domain": domain,
-                    "candidate_count": 0,
                     "demand_count": 0,
                     "capital_blocking_demand_count": 0,
                     "expected_dollar_opportunity_at_stake": 0.0,
@@ -377,8 +411,9 @@ def build_decision_information_depth_program(
             )
             row["resolution_states"].add(item.resolution_state.value)
             row["candidate_identifiers"].add(item.candidate_identifier)
-    rollup = []
-    for row in domain_accumulator.values():
+
+    rollup: list[dict[str, Any]] = []
+    for row in rollup_map.values():
         row["candidate_count"] = len(row["candidate_identifiers"])
         row["candidate_identifiers"] = sorted(row["candidate_identifiers"])
         row["resolution_states"] = sorted(row["resolution_states"])
@@ -398,6 +433,7 @@ def build_decision_information_depth_program(
         ),
         reverse=True,
     )
+
     return DecisionInformationDepthProgram(
         portfolio_value=float(portfolio_value),
         candidate_count=len(candidate_ids),
