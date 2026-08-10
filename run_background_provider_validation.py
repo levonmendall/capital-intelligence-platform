@@ -1,9 +1,11 @@
 """Refresh live-provider readiness without blocking Render web startup.
 
-The loop intentionally stays lightweight while a manual CIO diagnostic owns the constrained
-Render memory lane. Heavy provider-validation imports are delayed until the memory lane is
-open so a sleeping validation worker cannot consume avoidable resident memory during the
-comprehensive all-market diagnostic.
+The long-lived coordinator stays lightweight. Each heavyweight provider-validation pass
+runs in a short-lived child process so imported provider/data modules and allocator arenas
+are returned to the OS when the pass finishes. A quiet memory window is required after any
+manual CIO diagnostic before provider validation may start, preventing the diagnostic,
+normal supervisor startup, and provider stack from racing for the same constrained Render
+memory budget.
 """
 
 from __future__ import annotations
@@ -12,11 +14,13 @@ import argparse
 import json
 import os
 import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 from threading import Event
 from types import FrameType
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
 
@@ -26,6 +30,8 @@ if TYPE_CHECKING:
 _DEFAULT_INTERVAL_SECONDS = 3600.0
 _DEFAULT_INITIAL_DELAY_SECONDS = 5.0
 _DEFAULT_DIAGNOSTIC_POLL_SECONDS = 5.0
+_DEFAULT_POST_LANE_QUIET_SECONDS = 60.0
+_DEFAULT_VALIDATION_TIMEOUT_SECONDS = 900.0
 _ACTIVE_DIAGNOSTIC_STATES = frozenset({"pending", "in_progress"})
 
 
@@ -108,8 +114,54 @@ def _wait_for_diagnostic_memory_lane(
     return True
 
 
+def _wait_for_quiet_memory_lane(
+    stopping: Event,
+    *,
+    quiet_seconds: float | None = None,
+    poll_seconds: float | None = None,
+) -> bool:
+    """Require a diagnostic-free settling window before heavy validation starts.
+
+    The release supervisor starts its deferred CIO/operator/collector processes as soon as
+    the release diagnostic completes. Without this quiet period provider validation would
+    start at the same instant, recreating the transient import/RSS spike that can kill a
+    2 GB Render instance. If another diagnostic appears during the quiet period, restart
+    the wait rather than allowing overlap.
+    """
+
+    quiet = (
+        _seconds(
+            "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_POST_LANE_QUIET_SECONDS",
+            _DEFAULT_POST_LANE_QUIET_SECONDS,
+        )
+        if quiet_seconds is None
+        else float(quiet_seconds)
+    )
+    if quiet < 0:
+        raise ValueError("quiet_seconds cannot be negative")
+
+    while not stopping.is_set():
+        if not _wait_for_diagnostic_memory_lane(stopping, poll_seconds=poll_seconds):
+            return False
+        if quiet > 0:
+            _log(
+                "provider_validation_memory_quiet_period_started",
+                quiet_seconds=quiet,
+                heavy_provider_modules_loaded=False,
+            )
+            if stopping.wait(quiet):
+                return False
+        if not _diagnostic_active():
+            return True
+        _log(
+            "provider_validation_quiet_period_interrupted",
+            provider_validation_deferred=True,
+        )
+    return False
+
+
 def validate_live_providers():
-    """Lazy compatibility seam; do not load the heavy provider stack while deferred."""
+    """Lazy compatibility seam used only by the short-lived ``--once`` child."""
 
     from operations.provider_validation import validate_live_providers as implementation
 
@@ -127,7 +179,11 @@ def write_provider_validation_report(report):
 
 
 def validate_once() -> tuple["ProviderValidationReport", Path]:
-    """Run one validation pass; heavy provider modules load only at this boundary."""
+    """Run one validation pass in the current process.
+
+    The long-lived loop never calls this function directly; it is reserved for the
+    short-lived ``--once`` child so heavy imports are released when that child exits.
+    """
 
     report = validate_live_providers()
     report_path = write_provider_validation_report(report)
@@ -141,13 +197,94 @@ def validate_once() -> tuple["ProviderValidationReport", Path]:
     return report, report_path
 
 
+def _run_isolated_validation(
+    *,
+    values: Mapping[str, str] | None = None,
+    timeout_seconds: float | None = None,
+) -> int:
+    """Run one provider pass in a bounded child so RSS cannot remain resident.
+
+    Reuses the diagnostic watchdog's container-memory accounting and process-group
+    termination. Provider validation is operational evidence only, so a memory-bound pass
+    fails closed and waits for the next interval instead of risking service availability.
+    """
+
+    resolved = dict(os.environ if values is None else values)
+    timeout = (
+        _seconds(
+            "CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_TIMEOUT_SECONDS",
+            _DEFAULT_VALIDATION_TIMEOUT_SECONDS,
+        )
+        if timeout_seconds is None
+        else float(timeout_seconds)
+    )
+    if timeout <= 0:
+        raise ValueError("provider validation timeout must be positive")
+
+    # Import only the lightweight watchdog utilities in the coordinator. The heavy
+    # provider stack remains confined to the --once child process.
+    import run_bounded_manual_cio_diagnostic as memory_watchdog
+
+    script = Path(__file__).resolve()
+    process = subprocess.Popen(
+        (sys.executable, str(script), "--once"),
+        env=resolved,
+        cwd=str(script.parent),
+        start_new_session=(os.name == "posix"),
+    )
+    _log(
+        "provider_validation_isolated_child_started",
+        pid=process.pid,
+        heavy_provider_modules_loaded_in_coordinator=False,
+    )
+
+    return_code, timed_out, memory_limited, process_peak_kib, container_peak_kib = (
+        memory_watchdog._wait_with_resource_bounds(
+            process,
+            timeout_seconds=timeout,
+            memory_high_water_fraction=memory_watchdog._memory_high_water_fraction(resolved),
+            values=resolved,
+            memory_reserve_kib=memory_watchdog._memory_reserve_kib(resolved),
+            poll_seconds=memory_watchdog._memory_poll_seconds(resolved),
+        )
+    )
+    if timed_out:
+        return_code = memory_watchdog._terminate(process)
+        _log(
+            "provider_validation_isolated_child_timed_out",
+            return_code=return_code,
+            process_peak_rss_kib=process_peak_kib,
+            container_peak_memory_kib=container_peak_kib,
+        )
+        return 124
+    if memory_limited:
+        return_code = memory_watchdog._terminate(process)
+        _log(
+            "provider_validation_isolated_child_memory_limited",
+            return_code=return_code,
+            process_peak_rss_kib=process_peak_kib,
+            container_peak_memory_kib=container_peak_kib,
+            service_oom_prevented=True,
+        )
+        return 125
+
+    _log(
+        "provider_validation_isolated_child_finished",
+        return_code=return_code,
+        process_peak_rss_kib=process_peak_kib,
+        container_peak_memory_kib=container_peak_kib,
+        heavy_provider_modules_retained_in_coordinator=False,
+    )
+    return int(return_code or 0)
+
+
 def run_loop(
     *,
     interval_seconds: float | None = None,
     initial_delay_seconds: float | None = None,
     stop_event: Event | None = None,
 ) -> int:
-    """Continuously refresh validation evidence without terminating the web service."""
+    """Continuously refresh validation evidence without retaining its heavy stack."""
 
     interval = (
         _seconds(
@@ -190,20 +327,28 @@ def run_loop(
             initial_delay_seconds=initial_delay,
             interval_seconds=interval,
             heavy_provider_modules_loaded=False,
+            isolated_validation_children=True,
         )
         if stopping.wait(initial_delay):
             return 0
 
         while not stopping.is_set():
-            if not _wait_for_diagnostic_memory_lane(stopping):
+            if not _wait_for_quiet_memory_lane(stopping):
                 break
             try:
-                validate_once()
-            except Exception as error:  # Worker boundary: never expose provider details.
+                return_code = _run_isolated_validation()
+            except Exception as error:  # Coordinator boundary: never expose provider details.
                 _log(
                     "provider_validation_iteration_failed",
                     error_type=type(error).__name__,
                 )
+            else:
+                if return_code != 0:
+                    _log(
+                        "provider_validation_iteration_failed",
+                        return_code=return_code,
+                        memory_safe_retry_deferred=True,
+                    )
             if stopping.wait(interval):
                 break
         return 0

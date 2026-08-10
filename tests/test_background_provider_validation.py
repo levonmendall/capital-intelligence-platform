@@ -63,12 +63,25 @@ def test_loop_only_validates_providers_and_does_not_launch_diagnostic(monkeypatc
     events = []
     stopping = Event()
 
-    def validate():
+    monkeypatch.setattr(
+        worker,
+        "_wait_for_quiet_memory_lane",
+        lambda _stopping: True,
+    )
+
+    def validate_isolated():
         events.append("validation")
         stopping.set()
-        return SimpleNamespace(), Path("report.json")
+        return 0
 
-    monkeypatch.setattr(worker, "validate_once", validate)
+    monkeypatch.setattr(worker, "_run_isolated_validation", validate_isolated)
+    monkeypatch.setattr(
+        worker,
+        "validate_once",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("long-lived loop must not run provider validation in-process")
+        ),
+    )
 
     assert worker.run_loop(
         interval_seconds=60,
