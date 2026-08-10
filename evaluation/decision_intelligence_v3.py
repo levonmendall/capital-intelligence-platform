@@ -344,9 +344,21 @@ def build_cio_wealth_validation_report(
         expected_return_errors.append(
             abs(realized_candidate - float(opportunity["candidate_expected_return"]))
         )
-        realized_improvement = realized_portfolio - realized_alt
+        # Match the expected candidate attribution used at decision time: allocation
+        # change multiplied by the candidate's realized edge over the same alternative.
+        # This handles both additions and avoided losses from reductions without
+        # confusing candidate attribution with whole-portfolio realized return.
+        weight_change = float(opportunity["proposed_target_weight"]) - float(
+            opportunity["current_weight"]
+        )
+        realized_candidate_improvement = weight_change * (
+            realized_candidate - realized_alt
+        )
         expected_improvement_errors.append(
-            abs(realized_improvement - float(opportunity["marginal_portfolio_improvement"]))
+            abs(
+                realized_candidate_improvement
+                - float(opportunity["marginal_portfolio_improvement"])
+            )
         )
         dollar_vs_cash.append(portfolio_value * (realized_portfolio - realized_cash))
         dollar_vs_alt.append(portfolio_value * (realized_portfolio - realized_alt))
