@@ -47,12 +47,19 @@ def test_release_plan_is_one_ordered_bounded_command_surface() -> None:
         "golden_end_to_end_and_chaos",
         "certified_event_quality_benchmark",
         "run_intelligence",
+        "audit_decision_information_gaps",
         "validate_provider_bundle_implementation",
         "validate_all_markets_internal_readiness",
         "validate_universal_paper_asset_classes",
         "rehearse_all_markets_paper_execution",
         "full_test_suite",
     )
+    information_audit = next(
+        item for item in host
+        if item.name == "audit_decision_information_gaps"
+    )
+    assert "run_information_gap_audit.py" in information_audit.command
+    assert "reports/information-gap-audit.json" in information_audit.command
     universal = next(
         item for item in host
         if item.name == "validate_universal_paper_asset_classes"
@@ -161,21 +168,22 @@ def test_release_runner_classifies_timeout_and_does_not_continue(
 
     report = ReleaseValidationRunner(
         steps=(
-            ReleaseValidationStep("timeout", ("python", "slow.py"), 1),
-            ReleaseValidationStep("later", ("python", "later.py"), 1),
+            ReleaseValidationStep("timeout", ("python", "hang.py"), 1),
+            ReleaseValidationStep("must_not_run", ("python", "later.py"), 10),
         ),
         report_path=tmp_path / "release.json",
         working_directory=tmp_path,
         environment={},
+        maximum_diagnostic_characters=200,
         run_command=run,
         clock=Clock(),
         monotonic=Monotonic(),
     ).run()
 
-    assert calls == 1
     assert report["status"] == "failed"
-    assert report["timed_out_steps"] == 1
-    assert report["steps"][0]["status"] == "timed_out"
-    assert report["steps"][0]["return_code"] is None
-    assert report["steps"][0]["stdout"] == "partial stdout"
-    assert report["steps"][0]["stderr"] == "timeout detail"
+    assert calls == 1
+    result = report["steps"][0]
+    assert result["return_code"] is None
+    assert result["failure_reason"] == "timeout"
+    assert "partial stdout" in result["stdout"]
+    assert "timeout detail" in result["stderr"]
