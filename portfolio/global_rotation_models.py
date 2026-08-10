@@ -14,6 +14,7 @@ from typing import Any, Sequence
 
 from cio.models import CandidateAssetClass
 from intelligence.global_leadership import assess_global_leadership_economics
+from intelligence.theme_successor import theme_successor_score
 
 
 class GlobalOpportunityDomain(str, Enum):
@@ -98,6 +99,8 @@ class GlobalOpportunitySignal:
     expected_return_edge: float
     evidence_score: float
     evidence_identifiers: tuple[str, ...]
+    theme_successor_score: float = 0.0
+    theme_successor_sources: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.candidate_identifier.strip():
@@ -114,6 +117,7 @@ class GlobalOpportunitySignal:
             _clip(self.mispriced_change_score, -1.0, 1.0),
         )
         object.__setattr__(self, "evidence_score", _clip(self.evidence_score))
+        object.__setattr__(self, "theme_successor_score", _clip(self.theme_successor_score))
         object.__setattr__(
             self,
             "evidence_identifiers",
@@ -121,6 +125,17 @@ class GlobalOpportunitySignal:
                 dict.fromkeys(
                     str(item).strip()
                     for item in self.evidence_identifiers
+                    if str(item).strip()
+                )
+            ),
+        )
+        object.__setattr__(
+            self,
+            "theme_successor_sources",
+            tuple(
+                dict.fromkeys(
+                    str(item).strip()
+                    for item in self.theme_successor_sources
                     if str(item).strip()
                 )
             ),
@@ -139,6 +154,8 @@ class GlobalOpportunitySignal:
             "forward_impulse": self.forward_impulse,
             "expected_return_edge": self.expected_return_edge,
             "evidence_score": self.evidence_score,
+            "theme_successor_score": self.theme_successor_score,
+            "theme_successor_sources": list(self.theme_successor_sources),
             "evidence_identifiers": list(self.evidence_identifiers),
         }
 
@@ -233,11 +250,24 @@ def _forward_impulse(bundle: object | None) -> float:
         if not str(getattr(item, "identifier", "")).startswith(
             "signal:global-opportunity-radar:"
         )
+        and not str(getattr(item, "identifier", "")).startswith(
+            "signal:theme-successor:"
+        )
     )
     return max(-0.10, min(0.10, value))
 
 
 def _score(candidate: object, bundle: object | None) -> tuple[float, dict[str, object]]:
+    successor_score, successor_evidence = theme_successor_score(bundle)
+    successor_sources: tuple[str, ...] = ()
+    if bundle is not None:
+        successor_sources = tuple(
+            dict.fromkeys(
+                diagnostic.split(" <- ", 1)[1].split(";", 1)[0].strip()
+                for diagnostic in tuple(getattr(bundle, "diagnostics", ()) or ())
+                if diagnostic.startswith("Theme successor rotation:") and " <- " in diagnostic
+            )
+        )
     if bundle is None:
         leadership_state = "unavailable"
         leadership_score = 0.0
@@ -255,6 +285,7 @@ def _score(candidate: object, bundle: object | None) -> tuple[float, dict[str, o
                 (
                     *tuple(getattr(candidate, "evidence_identifiers", ()) or ()),
                     *leadership.evidence_identifiers,
+                    *successor_evidence,
                 )
             )
         )
@@ -271,13 +302,16 @@ def _score(candidate: object, bundle: object | None) -> tuple[float, dict[str, o
     mispricing_component = _clip(0.5 + 0.5 * mispricing_score)
     forward_component = _clip(0.5 + impulse / 0.10)
     edge_component = _clip(0.5 + edge / 0.10)
-    total = _clip(
+    base = (
         0.28 * leadership_component
         + 0.24 * mispricing_component
         + 0.20 * forward_component
         + 0.18 * edge_component
         + 0.10 * evidence
     )
+    # Structural-theme successor evidence raises attention/rank by at most ten
+    # percentage points. It never changes expected return or the robust-edge test.
+    total = _clip(base + 0.10 * successor_score)
     if leadership_state == "deteriorating":
         total = _clip(total - 0.22)
     return total, {
@@ -289,6 +323,8 @@ def _score(candidate: object, bundle: object | None) -> tuple[float, dict[str, o
         "edge": edge,
         "evidence": evidence,
         "evidence_ids": evidence_ids,
+        "theme_successor_score": successor_score,
+        "theme_successor_sources": successor_sources,
     }
 
 
@@ -331,6 +367,8 @@ def build_global_rotation_context(
             expected_return_edge=float(details["edge"]),
             evidence_score=float(details["evidence"]),
             evidence_identifiers=tuple(details["evidence_ids"]),
+            theme_successor_score=float(details["theme_successor_score"]),
+            theme_successor_sources=tuple(details["theme_successor_sources"]),
         )
         for rank, (candidate, score, details) in enumerate(ranked, start=1)
     )
