@@ -36,20 +36,41 @@ Raw Global Bull Market Radar output remains research-only and keeps `expected_re
 
 Momentum without forward-economic confirmation remains unconfirmed. Crowded or mature leadership receives no automatic positive adjustment. Leadership plus deteriorating forward economics can produce a negative interaction.
 
+## Reviewed-candidate boundary
+
+Global capital competition starts only after the canonical opportunity engine has applied the same point-in-time qualification rules used by the normal CIO cycle. The rotation cycle freezes that authoritative queue and then ranks only `queue.ranked` candidates.
+
+This is important: a raw instrument with attractive price momentum, theme exposure, or expected return cannot be described as a deployable global opportunity if capability authority, evidence integrity, liquidity, downside, implementation cost, or another canonical hard qualification condition rejected it upstream. The reviewed rotation candidate also uses the queue's `effective_opportunity_cost`, not a stale candidate-local approximation.
+
+The same frozen queue is supplied to the downstream six-specialist/CIO cycle, so global rotation cannot create a parallel admission path.
+
 ## Global opportunity hierarchy
 
-Every governed candidate receives a common marginal-capital context containing:
+Every governed reviewed candidate receives a common marginal-capital context containing:
 
 - economic opportunity domain;
 - global opportunity rank;
 - leadership state and score;
 - mispriced-change state and score;
 - governed forward impulse;
-- horizon-consistent pre-specialist edge versus the recorded capital alternative;
+- horizon-consistent pre-specialist edge versus the effective capital alternative;
 - evidence quality;
+- structural-theme successor attention, when explicitly modeled;
 - cash reserve, current cash, and excess cash state.
 
 The context ranks opportunities across domains rather than evaluating U.S. equities as the implicit center of the portfolio.
+
+## Forward structural-theme succession
+
+The existing `StructuralThemeEngine` already computes multi-hop demand transmission, bottlenecks, transmission lags, reachable downstream nodes, and `next_beneficiaries`. `theme-successor-rotation.v1` operationalizes that existing output for capital-rotation research.
+
+If an already-governed source theme explicitly names another symbol as a next beneficiary, and that symbol already exists as a governed candidate in the same point-in-time opportunity set, the target receives a zero-return-impact successor signal carrying the source theme's evidence lineage. For example, an explicitly modeled chain can represent:
+
+`AI demand -> compute -> semiconductors -> memory/HBM -> networking -> power/cooling -> grid equipment -> commodities`
+
+The successor signal can increase global research/ranking attention by at most ten percentage points, but it does **not** change expected return, robust edge, evidence quality, or investment authority. Candidate-specific fundamentals, expectations, valuation, leadership, risk, six-specialist analysis, and CIO qualification must still establish the actual investment case.
+
+Unknown beneficiary symbols are ignored rather than invented. Relationships therefore remain explicit and point-in-time instead of being guessed from names, text similarity, or price action.
 
 ## Currency is first-class
 
@@ -78,24 +99,32 @@ This creates the intended loop:
 
 `leadership emerges -> candidate economics corroborate -> CIO participates -> conviction grows/shrinks -> leadership/economics deteriorate -> exposure derisks -> strongest cross-asset replacement competes for marginal capital`
 
-## Cash competition
+## Cash competition and accountability
 
 The global context records:
 
 - minimum required cash;
 - current cash;
 - excess cash;
-- whether at least one positive globally ranked opportunity exists before specialist/CIO confirmation.
+- whether at least one positive reviewed globally ranked opportunity exists before specialist/CIO confirmation.
 
 A final positive allocation still requires the six specialists, CIO, funding, risk controls, and final construction. The context does not force investment. Its purpose is to distinguish deliberate cash from cash that remains only because ordinary uncertainty was converted into binary abstention.
 
-## Causal and structural rotation
+After each completed cycle, `SQLiteGlobalRotationStore` persists an independent append-only hash-chained record with the rotation context and one residual-cash classification:
 
-The existing exposure graph and forward engines remain responsible for relationships such as:
+- `required_reserve`;
+- `economic_win_estimate`;
+- `deployed_with_residual`;
+- `hard_constraint_forced`;
+- `unexplained_residual`.
 
-`AI demand -> compute -> semiconductors -> memory/HBM -> networking -> power/cooling -> grid equipment -> commodities`
+`unexplained_residual` is reserved for the case in which a reviewed deployment opportunity existed, excess cash remained, no final construction block explains it, and the CIO took no positive action. That state is an explicit process diagnostic rather than a valid default-cash conclusion.
 
-The rotation layer does not guess those relationships. Explicit reviewed relationships and point-in-time evidence continue to be required. What changes is that corroborated emerging leadership and improving economics can now affect marginal-capital conviction instead of remaining detached research information.
+## Joint portfolio competition
+
+Before individual CIO synthesis, the rotation cycle creates one non-authoritative simultaneous construction preview using the globally ranked reviewed candidate set. Developing opportunities are previewed at bounded exploratory/provisional targets and stronger opportunities at larger targets within their candidate caps.
+
+The preview can show that a basket of individually modest opportunities is jointly feasible. It cannot create a CIO action, and a zero preview target cannot become a hidden veto. Final construction still runs after CIO decisions and remains the independent sizing authority.
 
 ## Certification
 
