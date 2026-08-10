@@ -8,7 +8,9 @@ manufactures unavailable evidence. Decision gating is owned separately by
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
+from cio.models import CandidateAssetClass
 from intelligence.asset_underwriting import (
     AssetUnderwritingPolicy,
     UnderwritingCoverage,
@@ -126,6 +128,25 @@ class CandidateInformationCompletenessEngine:
         if getattr(evidence, "asset_valuation", None) is not None:
             available.add(UnderwritingDimension.VALUATION)
             reasons.append("asset-specific valuation packet is present")
+
+        # The canonical cash hurdle is itself a governed point-in-time return input.
+        # A short U.S.-Treasury cash-equivalent candidate explicitly sets its base
+        # return from that hurdle and carries Treasury identity/duration metadata.
+        # Treat that combination as carry evidence rather than forcing the same
+        # curve/credit packet required of longer-duration fixed income.
+        opportunity_cost = getattr(candidate, "opportunity_cost_return", None)
+        if (
+            asset_class is CandidateAssetClass.CASH_EQUIVALENT
+            and bool(getattr(instrument, "is_us_treasury", False))
+            and UnderwritingDimension.MACRO in available
+            and isinstance(opportunity_cost, (int, float))
+            and not isinstance(opportunity_cost, bool)
+            and isfinite(float(opportunity_cost))
+        ):
+            available.add(UnderwritingDimension.CARRY)
+            reasons.append(
+                "governed cash-hurdle return and Treasury identity provide short-duration carry evidence"
+            )
 
         forward_dimensions = set(_available_forward_dimensions(evidence))
         forward_mapping = {
