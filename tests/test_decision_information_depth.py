@@ -217,7 +217,7 @@ def test_core_vehicle_gap_is_not_mislabeled_as_research_provider_gap(monkeypatch
     )
 
 
-def test_decision_certified_positioning_source_is_recognized_but_other_positioning_gaps_remain(monkeypatch):
+def test_partial_positioning_coverage_never_claims_full_certification(monkeypatch):
     readiness = _readiness(
         "candidate:commodity",
         asset_class=CandidateAssetClass.COMMODITY,
@@ -241,7 +241,8 @@ def test_decision_certified_positioning_source_is_recognized_but_other_positioni
     )
     assert (
         positioning.resolution_state
-        is InformationDepthResolutionState.EXISTING_DECISION_CERTIFIED
+        is InformationDepthResolutionState.PARTIAL_EXISTING_COVERAGE_NEW_SOURCE_REQUIRED
     )
     assert "public:cftc" in positioning.existing_capability_identifiers
+    assert "public:sec" in positioning.existing_capability_identifiers
     assert positioning.investment_authority is False
