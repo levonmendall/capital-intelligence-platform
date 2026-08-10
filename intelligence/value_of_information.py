@@ -4,6 +4,11 @@ The purpose is to decide what research to resolve next, not to increase convicti
 manufacture a trade. Missing information is ranked by its potential to change a
 portfolio decision, its current uncertainty, and whether it is realistically
 resolvable before the candidate's decision horizon.
+
+Both execution-vehicle completeness and underlying economic-exposure gaps are included.
+That keeps wrappers from becoming an informational blind spot: a listed crypto,
+commodity, credit, or volatility vehicle may be operationally usable while deeper
+underlying intelligence remains the highest-value research task.
 """
 from __future__ import annotations
 
@@ -70,11 +75,11 @@ class InformationAcquisitionPriority:
     blocking: bool
     rationale: tuple[str, ...]
     authorizes_capital: bool = False
-    schema_version: str = "information-acquisition-priority.v1"
+    schema_version: str = "information-acquisition-priority.v2"
 
 
 class ValueOfInformationEngine:
-    version = "value-of-information.v1"
+    version = "value-of-information.v2-two-axis"
 
     def prioritize(
         self,
@@ -84,7 +89,9 @@ class ValueOfInformationEngine:
     ) -> tuple[InformationAcquisitionPriority, ...]:
         if not isinstance(readiness, CandidateDecisionReadiness):
             raise TypeError("readiness must be CandidateDecisionReadiness")
-        missing = tuple(readiness.coverage.missing)
+        vehicle_missing = tuple(readiness.coverage.missing)
+        deep_missing = tuple(getattr(readiness, "deep_missing", ()) or ())
+        missing = tuple(dict.fromkeys((*vehicle_missing, *deep_missing)))
         supplied = {item.dimension: item for item in inputs}
         if len(supplied) != len(inputs):
             raise ValueError("missing-information inputs must be unique by dimension")
@@ -92,6 +99,7 @@ class ValueOfInformationEngine:
         if unknown:
             raise ValueError("value-of-information inputs must refer to missing dimensions")
         blocking = set(readiness.blocking_missing)
+        deep = set(deep_missing)
         priorities: list[InformationAcquisitionPriority] = []
         for dimension in missing:
             item = supplied.get(
@@ -106,6 +114,7 @@ class ValueOfInformationEngine:
             )
             impact = _BASE_DECISION_IMPACT[dimension]
             blocking_multiplier = 1.25 if dimension in blocking else 1.0
+            deep_multiplier = 1.10 if dimension in deep else 1.0
             information_value = (
                 impact
                 * float(item.uncertainty)
@@ -113,10 +122,20 @@ class ValueOfInformationEngine:
                 * float(item.time_relevance)
                 * (0.75 + 0.25 * float(item.independent_source_gain))
                 * blocking_multiplier
+                * deep_multiplier
             )
             score = max(
                 0.0,
                 min(1.0, information_value - 0.20 * float(item.estimated_acquisition_cost)),
+            )
+            classification = (
+                "critical decision-readiness blocker"
+                if dimension in blocking
+                else (
+                    "underlying economic-exposure intelligence gap"
+                    if dimension in deep
+                    else "completeness enhancement"
+                )
             )
             priorities.append(
                 InformationAcquisitionPriority(
@@ -129,7 +148,7 @@ class ValueOfInformationEngine:
                         f"uncertainty={float(item.uncertainty):.0%}",
                         f"resolvable probability={float(item.probability_resolvable):.0%}",
                         f"time relevance={float(item.time_relevance):.0%}",
-                        "critical decision-readiness blocker" if dimension in blocking else "completeness enhancement",
+                        classification,
                     ),
                 )
             )
