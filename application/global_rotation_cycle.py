@@ -1,9 +1,9 @@
 """Production canonical cycle for global opportunity rotation.
 
 The cycle enriches already-governed candidates with mispriced-change and corroborated
-global-leadership economics, freezes the authoritative opportunity queue before global
-capital competition, builds one cross-asset marginal-capital context from candidates
-that actually reached governed review, and supplies it to the existing CIO. Final
+global-leadership economics, propagates explicitly modeled structural-theme successor
+attention, freezes the authoritative opportunity queue before global capital
+competition, and supplies that cross-asset context to the existing CIO. Final
 construction and paper execution are unchanged.
 """
 from __future__ import annotations
@@ -20,6 +20,7 @@ from cio.global_rotation_authority import GlobalRotationChiefInvestmentOfficer
 from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from intelligence.global_leadership import enrich_bundle_with_global_leadership_economics
 from intelligence.mispriced_change import enrich_bundle_with_mispriced_change
+from intelligence.theme_successor import propagate_theme_successors
 from portfolio.global_rotation import GlobalRotationContext, build_global_rotation_context
 from portfolio.global_rotation_persistence import (
     GlobalCashAccountability,
@@ -30,20 +31,46 @@ from portfolio.global_rotation_persistence import (
 _LOGGER = logging.getLogger("capital_intelligence.global_rotation")
 
 
-def enrich_global_rotation_contexts(contexts: tuple[object, ...]) -> tuple[object, ...]:
-    """Attach one idempotent forward/mispricing/leadership synthesis per candidate."""
+def enrich_global_rotation_contexts(
+    contexts: tuple[object, ...],
+    candidates: tuple[object, ...],
+) -> tuple[object, ...]:
+    """Build mispricing, theme-successor, then leadership context without guessing."""
 
     if not isinstance(contexts, tuple):
         raise TypeError("specialist_contexts must be supplied as a tuple")
-    result: list[object] = []
+    if not isinstance(candidates, tuple):
+        raise TypeError("candidates must be supplied as a tuple")
+    mispriced: list[object] = []
     for context in contexts:
+        bundle = getattr(context, "forward_intelligence", None)
+        if bundle is None:
+            mispriced.append(context)
+            continue
+        mispriced.append(
+            replace(
+                context,
+                forward_intelligence=enrich_bundle_with_mispriced_change(bundle),
+            )
+        )
+    propagated = propagate_theme_successors(
+        contexts=tuple(mispriced),
+        candidates=candidates,
+    )
+    result: list[object] = []
+    for context in propagated:
         bundle = getattr(context, "forward_intelligence", None)
         if bundle is None:
             result.append(context)
             continue
-        enriched = enrich_bundle_with_mispriced_change(bundle)
-        enriched = enrich_bundle_with_global_leadership_economics(enriched)
-        result.append(replace(context, forward_intelligence=enriched))
+        result.append(
+            replace(
+                context,
+                forward_intelligence=enrich_bundle_with_global_leadership_economics(
+                    bundle
+                ),
+            )
+        )
     return tuple(result)
 
 
@@ -184,7 +211,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         if portfolio is None:
             raise TypeError("portfolio must be supplied")
 
-        enriched_contexts = enrich_global_rotation_contexts(contexts)
+        enriched_contexts = enrich_global_rotation_contexts(contexts, candidates)
         prepared_kwargs, authoritative_queue = self._freeze_authoritative_queue(
             kwargs=kwargs,
             candidates=candidates,
