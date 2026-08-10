@@ -12,44 +12,75 @@ long-term compounded portfolio dollar value after costs?"
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from governance.decision_readiness import (
-    CandidateDecisionReadiness,
-    CandidateDecisionReadinessPolicy,
-)
+from governance.decision_readiness import CandidateDecisionReadinessPolicy
 from intelligence.asset_underwriting import UnderwritingDimension
 from intelligence.value_of_information import (
-    InformationAcquisitionPriority,
     MissingInformationInput,
     ValueOfInformationEngine,
 )
 from operations.information_gap_audit import build_information_gap_audit
 
 
+# Only canonical domains that actually exist in maximum_decision_information_scope are
+# mapped here. Vehicle mechanics such as security identity, pricing, generic liquidity,
+# and execution are governed by the separate security-master/market/execution
+# capability stack and must not be mislabeled as a missing news/research provider.
 _DIMENSION_DOMAINS: dict[UnderwritingDimension, tuple[str, ...]] = {
-    UnderwritingDimension.IDENTITY: ("security_master_reference_data",),
-    UnderwritingDimension.MARKET_DATA: ("prices_returns_market_data", "market_microstructure"),
-    UnderwritingDimension.LIQUIDITY: ("liquidity_transaction_costs", "market_microstructure"),
-    UnderwritingDimension.MACRO: ("macro_growth_inflation_labor", "monetary_policy_rates_liquidity"),
-    UnderwritingDimension.FUNDAMENTALS: ("company_fundamentals_filings", "analyst_consensus_estimates_revisions"),
-    UnderwritingDimension.VALUATION: ("valuation_expected_returns", "analyst_consensus_estimates_revisions"),
-    UnderwritingDimension.CARRY: ("rates_curves_carry", "cross_asset_forward_returns"),
-    UnderwritingDimension.CURVE: ("rates_curves_carry", "commodity_physical_curves"),
-    UnderwritingDimension.CREDIT: ("credit_default_recovery_covenants", "credit_spreads_curves"),
-    UnderwritingDimension.CURRENCY: ("fx_rates_flows_positioning", "monetary_policy_rates_liquidity"),
-    UnderwritingDimension.PHYSICAL_BALANCE: ("commodity_physical_curves", "physical_economy_supply_chain"),
-    UnderwritingDimension.POSITIONING: ("flows_positioning_ownership_short_interest", "derivatives_options_volatility"),
-    UnderwritingDimension.ONCHAIN: ("crypto_onchain_network", "crypto_derivatives_market_structure"),
-    UnderwritingDimension.DERIVATIVES: ("derivatives_options_volatility", "crypto_derivatives_market_structure"),
-    UnderwritingDimension.CASH_FLOW: ("company_fundamentals_filings",),
-    UnderwritingDimension.CORPORATE_ACTIONS: ("corporate_actions_capital_allocation",),
-    UnderwritingDimension.HISTORY: ("point_in_time_history",),
-    UnderwritingDimension.EXECUTION: ("execution_custody_settlement",),
+    UnderwritingDimension.IDENTITY: (),
+    UnderwritingDimension.MARKET_DATA: (),
+    UnderwritingDimension.LIQUIDITY: (),
+    UnderwritingDimension.MACRO: (
+        "central_bank_communications",
+        "government_policy_regulation",
+        "labor_web_activity",
+    ),
+    UnderwritingDimension.FUNDAMENTALS: (
+        "filings_corporate_disclosures",
+        "management_guidance",
+        "analyst_estimates_revisions",
+    ),
+    UnderwritingDimension.VALUATION: ("analyst_estimates_revisions",),
+    UnderwritingDimension.CARRY: (),
+    UnderwritingDimension.CURVE: (),
+    UnderwritingDimension.CREDIT: ("credit_ratings_defaults",),
+    UnderwritingDimension.CURRENCY: (
+        "central_bank_communications",
+        "fund_flows_positioning",
+    ),
+    UnderwritingDimension.PHYSICAL_BALANCE: (
+        "commodity_physical_balances",
+        "supply_chain_shipping_inventories",
+        "weather_climate_disasters",
+        "energy_grid_power",
+    ),
+    UnderwritingDimension.POSITIONING: (
+        "futures_positioning",
+        "fund_flows_positioning",
+        "short_interest_securities_lending",
+        "insider_institutional_ownership",
+    ),
+    UnderwritingDimension.ONCHAIN: ("onchain_crypto_network",),
+    UnderwritingDimension.DERIVATIVES: (
+        "options_implied_expectations",
+        "futures_positioning",
+    ),
+    UnderwritingDimension.CASH_FLOW: (
+        "filings_corporate_disclosures",
+        "management_guidance",
+    ),
+    UnderwritingDimension.CORPORATE_ACTIONS: (
+        "filings_corporate_disclosures",
+        "management_guidance",
+        "insider_institutional_ownership",
+    ),
+    UnderwritingDimension.HISTORY: (),
+    UnderwritingDimension.EXECUTION: (),
 }
 
 
@@ -58,6 +89,7 @@ class InformationDepthResolutionState(str, Enum):
     EXISTING_MONITORED_NEEDS_CERTIFICATION = "existing_monitored_needs_certification"
     EXISTING_NEEDS_POINT_IN_TIME_HISTORY = "existing_needs_point_in_time_history"
     NEW_OR_PREMIUM_SOURCE_REQUIRED = "new_or_premium_source_required"
+    CORE_CAPABILITY_STACK_REQUIRED = "core_capability_stack_required"
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,11 +141,15 @@ class CandidateInformationDepthDemand:
             "capital_blocking": self.capital_blocking,
             "deep_economic_gap": self.deep_economic_gap,
             "value_of_information_score": round(self.value_of_information_score, 8),
-            "expected_dollar_opportunity_at_stake": round(self.expected_dollar_opportunity_at_stake, 2),
+            "expected_dollar_opportunity_at_stake": round(
+                self.expected_dollar_opportunity_at_stake, 2
+            ),
             "portfolio_value": round(self.portfolio_value, 2),
             "compounding_value_score": round(self.compounding_value_score, 8),
             "mapped_domains": list(self.mapped_domains),
-            "existing_capability_identifiers": list(self.existing_capability_identifiers),
+            "existing_capability_identifiers": list(
+                self.existing_capability_identifiers
+            ),
             "resolution_state": self.resolution_state.value,
             "rationale": list(self.rationale),
             "investment_authority": False,
@@ -144,7 +180,9 @@ class DecisionInformationDepthProgram:
             "portfolio_value": round(self.portfolio_value, 2),
             "candidate_count": self.candidate_count,
             "demand_count": self.demand_count,
-            "total_expected_dollar_opportunity_at_stake": round(self.total_expected_dollar_opportunity_at_stake, 2),
+            "total_expected_dollar_opportunity_at_stake": round(
+                self.total_expected_dollar_opportunity_at_stake, 2
+            ),
             "demands": [item.to_dict() for item in self.demands],
             "domain_rollup": list(self.domain_rollup),
             "investment_authority": False,
@@ -165,6 +203,8 @@ def _resolution_state(
     domains: tuple[str, ...],
     rows: Mapping[str, Mapping[str, Any]],
 ) -> tuple[InformationDepthResolutionState, tuple[str, ...]]:
+    if not domains:
+        return InformationDepthResolutionState.CORE_CAPABILITY_STACK_REQUIRED, ()
     relevant = tuple(rows[domain] for domain in domains if domain in rows)
     capabilities = tuple(
         dict.fromkeys(
@@ -206,7 +246,9 @@ def _compounding_value_score(
         / max(1.0, float(portfolio_value) * 0.02),
     )
     governance_multiplier = 1.0 if blocking else (0.92 if deep_gap else 0.82)
-    score = governance_multiplier * (0.62 * float(voi_score) + 0.38 * dollar_importance)
+    score = governance_multiplier * (
+        0.62 * float(voi_score) + 0.38 * dollar_importance
+    )
     return round(max(0.0, min(1.0, score)), 8)
 
 
@@ -228,7 +270,9 @@ def build_decision_information_depth_program(
     pairs = tuple(candidate_evidence_pairs)
     expected = {
         str(key): float(value)
-        for key, value in dict(expected_dollar_opportunity_by_candidate or {}).items()
+        for key, value in dict(
+            expected_dollar_opportunity_by_candidate or {}
+        ).items()
     }
     supplied_inputs = dict(missing_information_inputs or {})
     audit = dict(
@@ -246,7 +290,9 @@ def build_decision_information_depth_program(
         candidate_ids.add(readiness.candidate_identifier)
         priorities = voi_engine.prioritize(
             readiness=readiness,
-            inputs=tuple(supplied_inputs.get(readiness.candidate_identifier, ())),
+            inputs=tuple(
+                supplied_inputs.get(readiness.candidate_identifier, ())
+            ),
         )
         deep_missing = set(readiness.deep_missing)
         for priority in priorities:
@@ -266,7 +312,8 @@ def build_decision_information_depth_program(
                     candidate_identifier=readiness.candidate_identifier,
                     dimension=priority.dimension,
                     economic_exposure_class=(
-                        readiness.economic_exposure_class or readiness.asset_class
+                        readiness.economic_exposure_class
+                        or readiness.asset_class
                     ).value,
                     capital_blocking=priority.blocking,
                     deep_economic_gap=deep_gap,
@@ -305,7 +352,7 @@ def build_decision_information_depth_program(
     )
     domain_accumulator: dict[str, dict[str, Any]] = {}
     for item in ordered:
-        for domain in item.mapped_domains or ("unmapped",):
+        for domain in item.mapped_domains or ("core_capability_stack",):
             row = domain_accumulator.setdefault(
                 domain,
                 {
@@ -325,12 +372,13 @@ def build_decision_information_depth_program(
                 item.expected_dollar_opportunity_at_stake
             )
             row["highest_compounding_value_score"] = max(
-                row["highest_compounding_value_score"], item.compounding_value_score
+                row["highest_compounding_value_score"],
+                item.compounding_value_score,
             )
             row["resolution_states"].add(item.resolution_state.value)
             row["candidate_identifiers"].add(item.candidate_identifier)
     rollup = []
-    for domain, row in domain_accumulator.items():
+    for row in domain_accumulator.values():
         row["candidate_count"] = len(row["candidate_identifiers"])
         row["candidate_identifiers"] = sorted(row["candidate_identifiers"])
         row["resolution_states"] = sorted(row["resolution_states"])
