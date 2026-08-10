@@ -16,6 +16,10 @@ def test_successful_diagnostic_preserves_persisted_context_cycle_key(
         "RENDER_GIT_COMMIT": "release-context-lineage",
         "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_ON_RELEASE": "true",
     }
+    # The production diagnostic intentionally defers application imports until the
+    # governed phase that needs them. Load only the coordination/configuration boundary
+    # before replacing those dependencies with deterministic test doubles.
+    diagnostic._load_coordination_dependencies()
     settings = SimpleNamespace(
         portfolio_database=tmp_path / "portfolio.db",
         journal_database=tmp_path / "journal.db",
