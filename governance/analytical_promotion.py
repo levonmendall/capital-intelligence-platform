@@ -2,8 +2,9 @@
 
 Promotion is deliberately one-way conservative: a certified calibration artifact may
 cap confidence, a certified macro overlay may add adverse evidence or reduce expected
-return, and a certified risk overlay may tighten risk.  No promoted artifact may
-raise expected return, confidence, position size, or execution authority.
+return, and a certified risk overlay may tighten construction risk. No promoted
+artifact may raise expected return, confidence, position size, turnover, or execution
+authority.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from committee.specialists import (
     CrossAssetForecastSpecialistContext,
     MacroSpecialistContext,
 )
+from portfolio.construction_api import PortfolioConstructionPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +126,44 @@ class ConservativeMacroOverlay:
             raise ValueError("macro overlay requires evidence lineage")
 
 
+@dataclass(frozen=True, slots=True)
+class ConservativeRiskOverlay:
+    """Decision-certified risk limits derived from validated dynamic/stress analytics."""
+
+    identifier: str
+    as_of: datetime
+    maximum_expected_shortfall: float
+    maximum_stressed_drawdown: float
+    maximum_liquidity_adjusted_loss: float
+    maximum_position_weight_ceiling: float
+    maximum_turnover_ceiling: float
+    evidence_identifiers: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.identifier.strip():
+            raise ValueError("risk overlay identifier cannot be empty")
+        if self.as_of.tzinfo is None or self.as_of.utcoffset() is None:
+            raise ValueError("risk overlay as_of must be timezone-aware")
+        for name in (
+            "maximum_expected_shortfall",
+            "maximum_stressed_drawdown",
+            "maximum_liquidity_adjusted_loss",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{name} must be numeric")
+            if not isfinite(float(value)) or not -1.0 <= float(value) < 0.0:
+                raise ValueError(f"{name} must be negative and at least -1")
+        for name in ("maximum_position_weight_ceiling", "maximum_turnover_ceiling"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{name} must be numeric")
+            if not isfinite(float(value)) or not 0.0 < float(value) <= 1.0:
+                raise ValueError(f"{name} must be between zero and one")
+        if not self.evidence_identifiers:
+            raise ValueError("risk overlay requires evidence lineage")
+
+
 class ConservativeAnalyticalPromotion:
     version = "conservative-analytical-promotion.v1"
 
@@ -201,10 +241,49 @@ class ConservativeAnalyticalPromotion:
             ),
         )
 
+    @staticmethod
+    def apply_construction_risk_overlay(
+        policy: PortfolioConstructionPolicy,
+        overlay: ConservativeRiskOverlay,
+        certification: AnalyticalPromotionCertification,
+    ) -> PortfolioConstructionPolicy:
+        """Tighten canonical construction policy; never relax an existing limit."""
+        if not isinstance(policy, PortfolioConstructionPolicy):
+            raise TypeError("policy must be PortfolioConstructionPolicy")
+        certification.require_usable(
+            as_of=overlay.as_of,
+            artifact_identifier=overlay.identifier,
+        )
+        return replace(
+            policy,
+            version=f"{policy.version}|{ConservativeAnalyticalPromotion.version}",
+            maximum_expected_shortfall=max(
+                policy.maximum_expected_shortfall,
+                float(overlay.maximum_expected_shortfall),
+            ),
+            maximum_stressed_drawdown=max(
+                policy.maximum_stressed_drawdown,
+                float(overlay.maximum_stressed_drawdown),
+            ),
+            maximum_liquidity_adjusted_loss=max(
+                policy.maximum_liquidity_adjusted_loss,
+                float(overlay.maximum_liquidity_adjusted_loss),
+            ),
+            maximum_position_weight=min(
+                policy.maximum_position_weight,
+                float(overlay.maximum_position_weight_ceiling),
+            ),
+            maximum_turnover=min(
+                policy.maximum_turnover,
+                float(overlay.maximum_turnover_ceiling),
+            ),
+        )
+
 
 __all__ = [
     "AnalyticalPromotionCertification",
     "ConservativeAnalyticalPromotion",
     "ConservativeMacroOverlay",
+    "ConservativeRiskOverlay",
     "ForecastConfidenceCeiling",
 ]
