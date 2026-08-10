@@ -31,15 +31,15 @@ def test_rotation_context_cannot_turn_rejected_raw_candidate_into_deployment_opp
 
 
 def test_rotation_candidates_use_authoritative_effective_opportunity_cost():
-    candidate = SimpleNamespace(identifier="candidate:qualified")
-    # replace() requires a dataclass in production; this structural assertion guards the
-    # exact canonical helper used to produce the reviewed set without duplicating models.
+    # A separate behavioral test exercises a dataclass candidate through this helper.
+    # This source guard exists only to prevent a future edit from admitting rejected
+    # candidates or reverting to a stale candidate-local opportunity-cost estimate.
     import inspect
 
     source = inspect.getsource(
         GlobalOpportunityRotationCanonicalCIOCycle._rotation_candidates
     )
-    assert "queue.ranked" in source
+    assert 'getattr(queue, "ranked"' in source
     assert "item.qualification.effective_opportunity_cost" in source
     assert "queue.rejected" not in source
     freeze_source = inspect.getsource(
