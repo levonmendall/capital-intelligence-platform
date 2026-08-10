@@ -35,13 +35,81 @@ def test_provider_validation_fails_memory_safe_when_coordination_is_unreadable(m
 
 def test_provider_worker_keeps_heavy_validation_imports_lazy() -> None:
     # Preserve the public monkeypatch seam without importing the provider stack until a
-    # validation pass actually begins after the diagnostic memory lane is released.
+    # short-lived validation pass actually begins after the diagnostic memory lane is released.
     validate_source = inspect.getsource(provider_worker.validate_live_providers)
     write_source = inspect.getsource(provider_worker.write_provider_validation_report)
     once_source = inspect.getsource(provider_worker.validate_once)
+    loop_source = inspect.getsource(provider_worker.run_loop)
     assert "from operations.provider_validation import" in validate_source
     assert "from operations.provider_validation import" in write_source
     assert "from operations.provider_validation import" not in once_source
+    assert "validate_once()" not in loop_source
+    assert "_run_isolated_validation()" in loop_source
+
+
+def test_provider_validation_requires_quiet_window_before_heavy_child(monkeypatch) -> None:
+    class RecordingEvent(Event):
+        def __init__(self) -> None:
+            super().__init__()
+            self.waits: list[float | None] = []
+
+        def wait(self, timeout=None):
+            self.waits.append(timeout)
+            return False
+
+    stopping = RecordingEvent()
+    monkeypatch.setattr(
+        provider_worker,
+        "_wait_for_diagnostic_memory_lane",
+        lambda _stopping, poll_seconds=None: True,
+    )
+    monkeypatch.setattr(provider_worker, "_diagnostic_active", lambda: False)
+
+    assert provider_worker._wait_for_quiet_memory_lane(
+        stopping,
+        quiet_seconds=1.25,
+        poll_seconds=0.01,
+    ) is True
+    assert stopping.waits == [1.25]
+
+
+def test_provider_loop_runs_validation_in_isolated_child(monkeypatch) -> None:
+    stopping = Event()
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        provider_worker,
+        "_wait_for_quiet_memory_lane",
+        lambda _stopping: True,
+    )
+
+    def isolated():
+        calls.append("isolated")
+        stopping.set()
+        return 0
+
+    monkeypatch.setattr(provider_worker, "_run_isolated_validation", isolated)
+    monkeypatch.setattr(
+        provider_worker,
+        "validate_once",
+        lambda: (_ for _ in ()).throw(AssertionError("loop must not retain provider imports")),
+    )
+
+    assert provider_worker.run_loop(
+        interval_seconds=0.001,
+        initial_delay_seconds=0.0,
+        stop_event=stopping,
+    ) == 0
+    assert calls == ["isolated"]
+
+
+def test_provider_isolated_child_reuses_hard_memory_watchdog() -> None:
+    source = inspect.getsource(provider_worker._run_isolated_validation)
+    assert "subprocess.Popen" in source
+    assert '"--once"' in source
+    assert "_wait_with_resource_bounds" in source
+    assert 'start_new_session=(os.name == "posix")' in source
+    assert "service_oom_prevented=True" in source
 
 
 def test_diagnostic_container_high_water_stops_before_kernel_oom(monkeypatch) -> None:
