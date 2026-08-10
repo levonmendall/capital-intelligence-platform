@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -29,6 +30,9 @@ _FORBIDDEN_KEYS = frozenset(
         "secret",
     }
 )
+_SAFE_PROGRESS_TOKEN = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+_PROGRESS_HEARTBEAT_SECONDS = 30.0
+_STALE_PROGRESS_WARNING_SECONDS = 300.0
 
 
 class RenderAuditVerificationError(RuntimeError):
@@ -70,6 +74,72 @@ def _walk_keys(value: object) -> tuple[str, ...]:
         for item in value:
             keys.extend(_walk_keys(item))
     return tuple(keys)
+
+
+def _safe_progress_token(value: object, *, fallback: str) -> str:
+    candidate = str(value or "").strip()
+    return candidate if _SAFE_PROGRESS_TOKEN.fullmatch(candidate) else fallback
+
+
+def _progress_stage(payload: Mapping[str, Any]) -> str:
+    raw = str(payload.get("detail") or "").strip()
+    prefix = "governed_progress="
+    if not raw.startswith(prefix):
+        return "awaiting_progress"
+    stage = raw[len(prefix) :].split(";", 1)[0].strip()
+    return _safe_progress_token(stage, fallback="awaiting_progress")
+
+
+def _progress_fields(
+    payload: Mapping[str, Any],
+    *,
+    expected_release: str,
+) -> tuple[str, str, str]:
+    state = _safe_progress_token(payload.get("state"), fallback="unknown")
+    stage = _progress_stage(payload)
+    active_release = str(payload.get("active_release") or "")
+    if active_release:
+        release_match = (
+            "yes"
+            if active_release == expected_release and payload.get("release_matches") is True
+            else "no"
+        )
+    else:
+        release_match = "unknown"
+    return stage, state, release_match
+
+
+def _emit_progress(
+    *,
+    writer: Callable[[str], None],
+    attempt: int,
+    elapsed_seconds: float,
+    stage: str,
+    state: str,
+    release_match: str,
+    stale_seconds: float | None = None,
+) -> None:
+    event = {
+        "event": "render_cio_diagnostic_progress",
+        "attempt": attempt,
+        "verification_elapsed_seconds": int(max(0.0, elapsed_seconds)),
+        "stage": stage,
+        "state": state,
+        "release_match": release_match,
+    }
+    writer(json.dumps(event, sort_keys=True))
+    writer(
+        "::notice title=Render CIO diagnostic progress::"
+        f"stage={stage} state={state} elapsed={event['verification_elapsed_seconds']}s "
+        f"release_match={release_match} attempt={attempt}"
+    )
+    if stale_seconds is not None:
+        stale = int(max(0.0, stale_seconds))
+        writer(
+            "::warning title=Render CIO diagnostic phase unchanged::"
+            f"stage={stage} state={state} unchanged_for={stale}s "
+            f"release_match={release_match}"
+        )
 
 
 def audit_is_current_and_final(
@@ -117,6 +187,8 @@ def poll_render_audit(
     interval_seconds: float = 15.0,
     fetcher: Callable[[str], Mapping[str, Any]] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+    progress_writer: Callable[[str], None] | None = print,
 ) -> Mapping[str, Any]:
     if not url.strip():
         raise ValueError("url cannot be empty")
@@ -128,6 +200,12 @@ def poll_render_audit(
         raise ValueError("interval_seconds cannot be negative")
     active_fetcher = fetcher or (lambda target: _fetch_json(target))
     last_detail = "the audit endpoint did not return a current release record"
+    started_at = clock()
+    last_progress_key: tuple[str, str, str] | None = None
+    last_progress_change_at = started_at
+    last_heartbeat_at: float | None = None
+    last_stale_warning_at: float | None = None
+
     for attempt in range(1, maximum_attempts + 1):
         try:
             payload = active_fetcher(url)
@@ -140,7 +218,62 @@ def poll_render_audit(
             RenderAuditVerificationError,
         ) as error:
             last_detail = f"{type(error).__name__}: {error}"
+            now = clock()
+            if progress_writer is not None and (
+                last_heartbeat_at is None
+                or now - last_heartbeat_at >= _PROGRESS_HEARTBEAT_SECONDS
+            ):
+                _emit_progress(
+                    writer=progress_writer,
+                    attempt=attempt,
+                    elapsed_seconds=now - started_at,
+                    stage="audit_unavailable",
+                    state="unavailable",
+                    release_match="unknown",
+                )
+                last_heartbeat_at = now
         else:
+            now = clock()
+            progress_key = _progress_fields(payload, expected_release=expected_release)
+            progress_changed = progress_key != last_progress_key
+            if progress_changed:
+                last_progress_key = progress_key
+                last_progress_change_at = now
+                last_stale_warning_at = None
+
+            stale_for = now - last_progress_change_at
+            stale_warning_due = bool(
+                not progress_changed
+                and stale_for >= _STALE_PROGRESS_WARNING_SECONDS
+                and (
+                    last_stale_warning_at is None
+                    or now - last_stale_warning_at >= _STALE_PROGRESS_WARNING_SECONDS
+                )
+            )
+            heartbeat_due = bool(
+                progress_writer is not None
+                and (
+                    progress_changed
+                    or last_heartbeat_at is None
+                    or now - last_heartbeat_at >= _PROGRESS_HEARTBEAT_SECONDS
+                    or stale_warning_due
+                )
+            )
+            if heartbeat_due and progress_writer is not None:
+                stage, state, release_match = progress_key
+                _emit_progress(
+                    writer=progress_writer,
+                    attempt=attempt,
+                    elapsed_seconds=now - started_at,
+                    stage=stage,
+                    state=state,
+                    release_match=release_match,
+                    stale_seconds=stale_for if stale_warning_due else None,
+                )
+                last_heartbeat_at = now
+                if stale_warning_due:
+                    last_stale_warning_at = now
+
             if audit_is_current_success(
                 payload,
                 expected_release=expected_release,
