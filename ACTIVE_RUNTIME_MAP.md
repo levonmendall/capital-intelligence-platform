@@ -54,6 +54,20 @@ The superseded `today_development_card_format_runtime.py` presentation layer has
 removed. Retention, recency, educational helpers, and route guards remain separate
 from final surface presentation so each concern has one runtime owner.
 
+### Non-authoritative compounding aspiration
+
+`compounding_aspiration.py` defines a 5% monthly stretch-compounding reference for
+performance review and investor education. `portfolio_ui_refinement.py` consumes that
+reference only for Portfolio presentation. The governed objective remains maximizing
+long-term compounded returns after costs.
+
+The aspiration is not an input to opportunity qualification, CIO ranking, sizing,
+portfolio construction, or execution. Falling behind the reference triggers process
+review only: opportunity capture, evidence quality, construction efficiency, and
+possible false conservatism may be examined, but the reference cannot force a trade,
+override cash, relax risk or evidence standards, lower thresholds, or authorize
+catch-up risk-taking.
+
 ## Active FastAPI composition
 
 ```text
