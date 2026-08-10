@@ -61,8 +61,8 @@ class GlobalConvictionPolicy:
     high_conviction_minimum_probability: float = 0.60
     exploratory_maximum_probability_of_loss: float = 0.60
     provisional_maximum_probability_of_loss: float = 0.55
-    exploratory_minimum_stressed_edge: float = -0.01
-    provisional_minimum_stressed_edge: float = -0.005
+    exploratory_minimum_stressed_edge: float = 0.0
+    provisional_minimum_stressed_edge: float = 0.0
 
     def _hard_blockers(
         self,
@@ -142,7 +142,9 @@ class GlobalConvictionPolicy:
                 ("hard readiness, implementation, or risk controls prohibit positive capital",),
             )
 
-        horizon_alternative = float(getattr(reconciliation, "horizon_alternative_return", 0.0))
+        horizon_alternative = float(
+            getattr(reconciliation, "horizon_alternative_return", 0.0)
+        )
         expected = float(getattr(reconciliation, "expected_return", -1.0))
         robust_edge = float(getattr(robustness, "robust_edge", -1.0))
         if expected <= horizon_alternative or robust_edge <= 0.0:
@@ -155,7 +157,9 @@ class GlobalConvictionPolicy:
             )
 
         score = 0.0 if signal is None else signal.score
-        success = float(getattr(robustness, "effective_probability_of_success", 0.0))
+        success = float(
+            getattr(robustness, "effective_probability_of_success", 0.0)
+        )
         stressed = float(getattr(robustness, "stressed_edge", -1.0))
         probability_loss = float(getattr(robustness, "probability_of_loss", 1.0))
         soft: list[str] = []
@@ -175,8 +179,12 @@ class GlobalConvictionPolicy:
         if callable(counter):
             opposition = int(counter(float(material_opposition_threshold)))
         if opposition:
-            soft.append(f"{opposition} independent high-confidence specialist objection(s) remain")
-        ensemble_stage = str(getattr(getattr(ensemble, "stage", None), "value", "observe"))
+            soft.append(
+                f"{opposition} independent high-confidence specialist objection(s) remain"
+            )
+        ensemble_stage = str(
+            getattr(getattr(ensemble, "stage", None), "value", "observe")
+        )
         if ensemble_stage == "observe":
             soft.append("growth ensemble remains at observe")
         if directive is not None:
@@ -192,7 +200,11 @@ class GlobalConvictionPolicy:
             and robust_edge >= float(getattr(profile, "minimum_opportunity_edge", 1.0))
             and stressed > 0.0
         )
-        if full and score >= self.high_conviction_minimum_score and success >= self.high_conviction_minimum_probability:
+        if (
+            full
+            and score >= self.high_conviction_minimum_score
+            and success >= self.high_conviction_minimum_probability
+        ):
             stage = ConvictionStage.HIGH_CONVICTION
         elif full:
             stage = ConvictionStage.QUALIFIED
@@ -216,16 +228,30 @@ class GlobalConvictionPolicy:
                 None,
                 (),
                 tuple(dict.fromkeys(soft)),
-                ("positive economics survive, but uncertainty is too high for even the exploratory risk budget",),
+                (
+                    "positive economics survive, but uncertainty is too high for even "
+                    "the exploratory risk budget"
+                ),
             )
 
         # Multiple independent objections, an observe ensemble, or a discouraged
         # posture reduce size; they do not become hidden zero-target vetoes.
-        if opposition >= 2 or ensemble_stage == "observe" or bool(getattr(directive, "discouraged", False)):
+        if (
+            opposition >= 2
+            or ensemble_stage == "observe"
+            or bool(getattr(directive, "discouraged", False))
+        ):
             stage = ConvictionStage.EXPLORATORY
-        elif opposition >= 1 and stage in {ConvictionStage.HIGH_CONVICTION, ConvictionStage.QUALIFIED}:
+        elif opposition >= 1 and stage in {
+            ConvictionStage.HIGH_CONVICTION,
+            ConvictionStage.QUALIFIED,
+        }:
             stage = ConvictionStage.PROVISIONAL
-        elif directive is not None and not bool(getattr(directive, "preferred", False)) and stage is ConvictionStage.HIGH_CONVICTION:
+        elif (
+            directive is not None
+            and not bool(getattr(directive, "preferred", False))
+            and stage is ConvictionStage.HIGH_CONVICTION
+        ):
             stage = ConvictionStage.QUALIFIED
 
         portfolio = getattr(specialists, "portfolio_recommendation")
@@ -235,7 +261,11 @@ class GlobalConvictionPolicy:
             float(getattr(portfolio, "recommended_position_weight", 0.0)),
         )
         multiplier = float(
-            getattr(getattr(specialists, "historical_learning", None), "effective_position_multiplier", 1.0)
+            getattr(
+                getattr(specialists, "historical_learning", None),
+                "effective_position_multiplier",
+                1.0,
+            )
         )
         maximum *= max(0.0, min(1.0, multiplier))
         if opposition >= 3:
@@ -247,8 +277,18 @@ class GlobalConvictionPolicy:
             )
             target = min(maximum, self.exploratory_maximum_weight, desired)
         elif stage is ConvictionStage.PROVISIONAL:
-            normalized = max(0.0, min(1.0, (score - self.provisional_minimum_score) / 0.23))
-            target = min(maximum, self.provisional_maximum_weight, 0.01 + 0.02 * normalized)
+            normalized = max(
+                0.0,
+                min(
+                    1.0,
+                    (score - self.provisional_minimum_score) / 0.23,
+                ),
+            )
+            target = min(
+                maximum,
+                self.provisional_maximum_weight,
+                0.01 + 0.02 * normalized,
+            )
         elif stage is ConvictionStage.QUALIFIED:
             target = min(maximum, self.qualified_reference_weight)
         else:
@@ -266,7 +306,10 @@ class GlobalConvictionPolicy:
             round(target, 8),
             (),
             tuple(dict.fromkeys(soft)),
-            (f"{stage.value} participation expresses surviving opportunity through bounded position size",),
+            (
+                f"{stage.value} participation expresses surviving opportunity through "
+                "bounded position size"
+            ),
         )
 
 
