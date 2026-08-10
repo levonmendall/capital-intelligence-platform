@@ -1,0 +1,97 @@
+name: Capture Render Production Telemetry
+
+on:
+  deployment_status:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      expected_release:
+        description: Optional deployed commit SHA to observe; defaults to current main
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-production-telemetry-${{ github.event.deployment.sha || github.event.inputs.expected_release || github.sha }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'deployment_status' }}
+
+jobs:
+  capture:
+    if: >-
+      github.event_name != 'deployment_status' ||
+      (
+        github.event.deployment_status.state == 'success' &&
+        github.event.deployment.environment == 'main - capital-intelligence-platform' &&
+        github.event.deployment.production_environment == true &&
+        github.event.deployment.ref == 'main'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TELEMETRY_URL: https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json
+      EXPECTED_RELEASE: ${{ github.event.deployment.sha || github.event.inputs.expected_release || github.sha }}
+      TELEMETRY_OUTPUT: /tmp/render-production-telemetry.json
+      TELEMETRY_TIMELINE: /tmp/render-production-telemetry-timeline.json
+
+    steps:
+      - name: Check out exact release to observe
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_RELEASE }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Capture deployment progress
+        if: github.event_name == 'deployment_status'
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/capture_render_production_telemetry.py \
+            --url "$TELEMETRY_URL" \
+            --expected-release "$EXPECTED_RELEASE" \
+            --output "$TELEMETRY_OUTPUT" \
+            --timeline-output "$TELEMETRY_TIMELINE" \
+            --watch-seconds 2100 \
+            --interval-seconds 30
+
+      - name: Capture current production snapshot
+        if: github.event_name != 'deployment_status'
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/capture_render_production_telemetry.py \
+            --url "$TELEMETRY_URL" \
+            --expected-release "$EXPECTED_RELEASE" \
+            --output "$TELEMETRY_OUTPUT" \
+            --timeline-output "$TELEMETRY_TIMELINE"
+
+      - name: Publish safe telemetry summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$TELEMETRY_OUTPUT" ]]; then
+            echo '### Render production telemetry' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "$TELEMETRY_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '### Render production telemetry unavailable' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload credential-safe production telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-production-telemetry-${{ env.EXPECTED_RELEASE }}-${{ github.run_id }}
+          path: |
+            /tmp/render-production-telemetry.json
+            /tmp/render-production-telemetry-timeline.json
+          if-no-files-found: warn
+          retention-days: 14
