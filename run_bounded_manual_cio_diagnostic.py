@@ -17,6 +17,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event, Thread
 from typing import Mapping, Sequence
 
 from operations.manual_cio_diagnostic import (
@@ -204,35 +205,59 @@ def _wait_with_resource_bounds(
     timeout_seconds: float,
     memory_high_water_fraction: float,
 ) -> tuple[int | None, bool, bool, int, int]:
-    """Observe a diagnostic until exit, timeout, or memory protection triggers.
+    """Wait normally while a sidecar sampler protects the container memory ceiling."""
 
-    Returns ``(return_code, timed_out, memory_limited, process_peak_kib,
-    cgroup_peak_kib)``. The cgroup guard accounts for the web/API processes as well as
-    the diagnostic, protecting service availability rather than merely measuring one
-    child process.
-    """
+    sampler_stop = Event()
+    memory_limited = Event()
+    peaks = {"process": 0, "cgroup": 0}
 
-    deadline = time.monotonic() + timeout_seconds
-    process_peak_kib = 0
-    cgroup_peak_kib = 0
-    while True:
-        return_code = process.poll()
-        rss_kib, hwm_kib = _process_memory_kib(process.pid)
-        process_peak_kib = max(process_peak_kib, rss_kib or 0, hwm_kib or 0)
-        cgroup_current_kib, cgroup_limit_kib = _cgroup_memory_kib()
-        cgroup_peak_kib = max(cgroup_peak_kib, cgroup_current_kib or 0)
-        if return_code is not None:
-            return return_code, False, False, process_peak_kib, cgroup_peak_kib
-        if (
-            cgroup_current_kib is not None
-            and cgroup_limit_kib is not None
-            and cgroup_limit_kib > 0
-            and cgroup_current_kib >= int(cgroup_limit_kib * memory_high_water_fraction)
-        ):
-            return None, False, True, process_peak_kib, cgroup_peak_kib
-        if time.monotonic() >= deadline:
-            return None, True, False, process_peak_kib, cgroup_peak_kib
-        time.sleep(min(_MEMORY_POLL_SECONDS, max(0.0, deadline - time.monotonic())))
+    def sample_memory() -> None:
+        pid = getattr(process, "pid", None)
+        while not sampler_stop.is_set():
+            if isinstance(pid, int) and pid > 0:
+                rss_kib, hwm_kib = _process_memory_kib(pid)
+                peaks["process"] = max(peaks["process"], rss_kib or 0, hwm_kib or 0)
+            cgroup_current_kib, cgroup_limit_kib = _cgroup_memory_kib()
+            peaks["cgroup"] = max(peaks["cgroup"], cgroup_current_kib or 0)
+            if (
+                cgroup_current_kib is not None
+                and cgroup_limit_kib is not None
+                and cgroup_limit_kib > 0
+                and cgroup_current_kib >= int(cgroup_limit_kib * memory_high_water_fraction)
+            ):
+                memory_limited.set()
+                try:
+                    process.terminate()
+                except (AttributeError, OSError):
+                    pass
+                return
+            sampler_stop.wait(_MEMORY_POLL_SECONDS)
+
+    sampler = Thread(
+        target=sample_memory,
+        name="manual-cio-diagnostic-memory-sampler",
+        daemon=True,
+    )
+    sampler.start()
+    try:
+        try:
+            return_code = process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            return_code = None
+            timed_out = True
+        else:
+            timed_out = False
+    finally:
+        sampler_stop.set()
+        sampler.join(timeout=1.0)
+
+    return (
+        return_code,
+        timed_out,
+        memory_limited.is_set(),
+        peaks["process"],
+        peaks["cgroup"],
+    )
 
 
 def run_bounded_diagnostic(
