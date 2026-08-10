@@ -69,7 +69,7 @@ def test_primary_surfaces_have_distinct_information_ownership(
         page.get_by_text("CIO / research funnel", exact=True).wait_for()
         assert page.get_by_text("How this backdrop reaches markets", exact=True).count() == 0
         assert page.get_by_text("Current holdings", exact=True).count() == 0
-        assert page.get_by_text("CIO decision", exact=True).count() == 0
+        assert page.get_by_text("Performance vs benchmarks", exact=True).count() == 0
         assert page.get_by_text("Detailed decision trail", exact=True).count() == 0
 
         navigation.get_by_role("radio", name="Environment", exact=True).click()
@@ -79,14 +79,17 @@ def test_primary_surfaces_have_distinct_information_ownership(
         assert page.get_by_text("Market state", exact=True).count() == 0
         assert page.get_by_text("CIO / research funnel", exact=True).count() == 0
         assert page.get_by_text("Current holdings", exact=True).count() == 0
-        assert page.get_by_text("CIO decision", exact=True).count() == 0
+        assert page.get_by_text("Performance vs benchmarks", exact=True).count() == 0
         assert page.get_by_text("Detailed decision trail", exact=True).count() == 0
 
         navigation.get_by_role("radio", name="Portfolio", exact=True).click()
+        page.get_by_text("LATEST CIO POSITIONING", exact=True).first.wait_for()
+        page.get_by_text("Performance vs benchmarks", exact=True).first.wait_for()
+        page.get_by_text("Current → target allocation", exact=True).first.wait_for()
         page.get_by_text("Current holdings", exact=True).first.wait_for()
-        page.get_by_text("CIO decision", exact=True).first.wait_for()
-        page.get_by_text("Capital deployment", exact=True).first.wait_for()
-        page.get_by_text("Outstanding portfolio actions", exact=True).first.wait_for()
+        page.get_by_text("Performance attribution", exact=True).first.wait_for()
+        page.get_by_text("Risk & exposure", exact=True).first.wait_for()
+        page.get_by_text("Pending implementation", exact=True).first.wait_for()
         assert page.get_by_text("Market state", exact=True).count() == 0
         _assert_hidden_or_absent(
             page.get_by_text("How this backdrop reaches markets", exact=True)
@@ -100,5 +103,5 @@ def test_primary_surfaces_have_distinct_information_ownership(
             page.get_by_text("How this backdrop reaches markets", exact=True)
         )
         assert page.get_by_text("Current holdings", exact=True).count() == 0
-        assert page.get_by_text("CIO decision", exact=True).count() == 0
+        assert page.get_by_text("Performance vs benchmarks", exact=True).count() == 0
         browser.close()

@@ -132,7 +132,7 @@ def test_integrity_failure_withholds_comparison(monkeypatch, tmp_path: Path) -> 
 
 def test_portfolio_surface_exposes_comparison_without_authority() -> None:
     source = Path("portfolio_ui_refinement.py").read_text(encoding="utf-8")
-    assert '"Benchmark comparison"' in source
+    assert '"Performance vs benchmarks"' in source
     assert "80% VTI / 20% SGOV" not in source
-    assert "Benchmark results cannot authorize a portfolio change." in source
+    assert "Benchmark results are evaluation-only." in source
     assert "load_benchmark_portfolio_comparison" in source
