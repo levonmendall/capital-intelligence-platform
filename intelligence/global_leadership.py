@@ -15,6 +15,7 @@ from intelligence.mispriced_change import MispricedChangeState, assess_mispriced
 
 _RADAR_PREFIX = "signal:global-opportunity-radar:"
 _ECONOMIC_PREFIX = "signal:global-leadership-economics:"
+_SUCCESSOR_PREFIX = "signal:theme-successor:"
 _POLICY_VERSION = "global-leadership-economics.v1"
 
 
@@ -103,6 +104,7 @@ def _forward_confirmation(bundle: ForwardIntelligenceBundle) -> float:
         for item in bundle.signals
         if not item.identifier.startswith(_RADAR_PREFIX)
         and not item.identifier.startswith(_ECONOMIC_PREFIX)
+        and not item.identifier.startswith(_SUCCESSOR_PREFIX)
         and not item.identifier.startswith("signal:mispriced-change:")
     )
     if not impacts:
