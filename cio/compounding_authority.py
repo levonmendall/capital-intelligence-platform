@@ -10,7 +10,7 @@ one bounded independent disagreement.
 
 from __future__ import annotations
 
-from cio.decision_integrity import ChiefInvestmentOfficer
+from cio.committee_advisory_cio import ChiefInvestmentOfficer
 from cio.models import CIOAction
 from portfolio.compounding_allocation import (
     CandidateAllocationDirective,
