@@ -7,7 +7,6 @@ import educational_market_briefing_ui as event_ui
 import environment_story_placement_refinement as story
 import operating_intelligence_ui as operating_ui
 import public_event_recency_runtime
-import today_development_card_format_runtime as card_format
 import today_event_alignment_runtime as alignment
 
 
@@ -54,7 +53,6 @@ def _record(
 def _install() -> None:
     public_event_recency_runtime.install(event_ui)
     alignment.install(event_ui, operating_ui, story)
-    card_format.install(story)
 
 
 def test_routine_meeting_notice_is_not_presented_as_a_market_event() -> None:
@@ -128,41 +126,15 @@ def test_federal_register_events_receive_specific_explanations() -> None:
     assert "market_structure" in cboe_item.impact_channels
 
 
-def test_repeated_all_asset_block_and_repeated_lesson_are_removed() -> None:
-    now = datetime(2026, 8, 2, 22, 0, tzinfo=timezone.utc)
-    cboe = _record(
-        identifier="cboe-trust-shares",
-        title=(
-            "Self-Regulatory Organizations; Cboe BZX Exchange, Inc.; Notice of Filing, "
-            "and Order Granting Accelerated Approval of a Proposed Rule Change To Amend "
-            "Rule 14.11(e)(4) (Commodity-Based Trust Shares)"
-        ),
-        summary=(
-            "Self-Regulatory Organizations; Cboe BZX Exchange, Inc.; Notice of Filing, "
-            "and Order Granting Accelerated Approval of a Proposed Rule Change To Amend "
-            "Rule 14.11(e)(4) (Commodity-Based Trust Shares)"
-        ),
-        published_at=now - timedelta(minutes=26),
-    )
-    _install()
-    item = alignment.build_today_items((cboe,), now=now)[0]
-
-    primary = story._primary(item)
-    secondary = story._secondary(item, 2)
-    tags = story._tags(item)
-    combined = primary + secondary + tags
-
-    assert "cash and short-duration bonds" not in combined
-    assert "consumer sectors" not in combined
-    assert "volatility strategies" not in combined
-    assert "Most directly exposed:" in primary
-    assert "Investor lesson" not in secondary
-    assert '<div class="ci-label">Why it matters</div>' in secondary
-    assert '<div class="ci-label">How markets may react</div>' in secondary
-
-
-def test_active_entrypoints_install_event_alignment() -> None:
+def test_active_entrypoints_keep_alignment_separate_from_final_today_presentation() -> None:
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
         assert "import today_event_alignment_runtime" in source
         assert "today_event_alignment_runtime.install" in source
+        assert "import today_trust_ui_runtime" in source
+        assert "today_trust_ui_runtime.install" in source
+        assert "today_development_card_format_runtime" not in source
+
+        alignment_install = source.index("today_event_alignment_runtime.install")
+        trust_install = source.index("today_trust_ui_runtime.install")
+        assert alignment_install < trust_install

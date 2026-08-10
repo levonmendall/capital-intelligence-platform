@@ -29,6 +29,8 @@ def test_render_entrypoint_preserves_portfolio_refinement_contract() -> None:
 
     source = (ROOT / "render_app.py").read_text(encoding="utf-8")
     assert "import portfolio_ui_refinement" in source
+    assert "portfolio_first_ui_refinement" not in source
+    assert "_portfolio_first_sync_renderer" not in source
 
     main_source = source[source.index("def main() -> None:") :]
     install_call = "portfolio_ui_refinement.install(app_impl)"
@@ -42,8 +44,8 @@ def test_render_entrypoint_preserves_portfolio_refinement_contract() -> None:
         source.index("def prepare_render_surface_runtime() -> None:") :
         source.index("def deployment_context_from_environment()")
     ]
-    assert 'getattr(renderer, "__module__", "") != "portfolio_ui_refinement"' in runtime_source
-    assert "_portfolio_first_sync_renderer(renderer)" in runtime_source
+    assert "portfolio_first_ui_refinement" not in runtime_source
+    assert "_portfolio_first_sync_renderer" not in runtime_source
 
 
 @pytest.mark.parametrize("viewport_name", ("desktop", "iphone"))

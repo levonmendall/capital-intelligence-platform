@@ -38,6 +38,22 @@ another Python source file. `render_app.py`, `secure_app.py`, and `app_impl.py` 
 ordinary imported modules. The removed `streamlit_paper_execution_worker.py` is not an
 execution path; paper implementation is owned by the headless operator.
 
+### Canonical presentation ownership
+
+| Surface / concern | Active owner | Supporting runtime boundary |
+| --- | --- | --- |
+| Today presentation | `today_trust_ui_runtime.py` | `today_story_retention_runtime.py` owns retained-story data lifecycle only; `today_event_alignment_runtime.py` and public-event recency supply aligned source context. |
+| Environment presentation | `environment_mobile_clarity_runtime.py` | `environment_story_placement_refinement.py` provides the base story API. `environment_driver_education_runtime.py` and `environment_actionable_learning_refinement.py` remain helper providers and do not install presentation from the entrypoints. |
+| Portfolio presentation | `portfolio_ui_refinement.py` | No `portfolio_first_ui_refinement.py` runtime fallback remains in the canonical entrypoints. |
+| History presentation | `history_ui_refinement.py` / historical navigation runtime | Historical reads remain presentation-only and do not authorize portfolio changes. |
+| Primary-surface route isolation | `surface_route_isolation_runtime.py` | Owns navigation tracking, stale-fragment suppression, and synchronous Render targets only. It does not install Today or Environment presentation. |
+
+Both `app.py` and `render_app.py` explicitly install the final Environment renderer,
+then Today retention adapters, then the final Today renderer, before route isolation.
+The superseded `today_development_card_format_runtime.py` presentation layer has been
+removed. Retention, recency, educational helpers, and route guards remain separate
+from final surface presentation so each concern has one runtime owner.
+
 ## Active FastAPI composition
 
 ```text

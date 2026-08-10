@@ -1,12 +1,12 @@
 """Retain the last qualified Today stories when no new story is available.
 
-The current 24-hour selection remains authoritative. This presentation-only
-runtime stores the most recent source-qualified record set on the persistent
-application disk and reuses it only when the current selection is empty. Prior
-stories remain available for a bounded 72-hour continuity window, keep their
-original publication timestamps, and are explicitly labeled as retained history;
-they are never renewed, treated as current evidence, or allowed to authorize a
-portfolio action.
+The current 24-hour selection remains authoritative. This retention-only runtime
+stores the most recent source-qualified record set on the persistent application
+disk and reuses it only when the current selection is empty. Prior stories remain
+available for a bounded 72-hour continuity window, keep their original publication
+timestamps, and are explicitly labeled as retained history by the canonical Today
+renderer; they are never renewed, treated as current evidence, or allowed to
+authorize a portfolio action.
 """
 
 from __future__ import annotations
@@ -14,12 +14,9 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from html import escape
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Iterable, Mapping, Sequence
-
-import streamlit as st
 
 
 _INSTALLED_STATE_KEY = "_capital_intelligence_today_story_retention_installed"
@@ -99,9 +96,7 @@ def _build_retained_items(
 
     evaluated_at = _utc_now(now)
     candidates = _records(records)
-    current = tuple(
-        original_builder(candidates, now=evaluated_at, limit=limit)
-    )
+    current = tuple(original_builder(candidates, now=evaluated_at, limit=limit))
     if current:
         return current
     latest = _latest_record_time(event_ui, candidates, now=evaluated_at)
@@ -110,9 +105,7 @@ def _build_retained_items(
     # Reuse the governed ranking, quality, channel, clustering, and provider
     # diversity controls by anchoring selection to the last recorded event.
     historical_anchor = latest + timedelta(microseconds=1)
-    return tuple(
-        original_builder(candidates, now=historical_anchor, limit=limit)
-    )
+    return tuple(original_builder(candidates, now=historical_anchor, limit=limit))
 
 
 def _record_key(event_ui: ModuleType, record: Mapping[str, Any]) -> str:
@@ -294,173 +287,18 @@ def _retaining_loader(
     return _mark_wrapper(load_snapshot, base_loader)
 
 
-def _retained_today_renderer(
-    app: ModuleType,
-    event_ui: ModuleType,
-    operating_ui: ModuleType,
-    story_ui: ModuleType,
-    original_builder: Callable[..., tuple[object, ...]],
-) -> Callable[[ModuleType, object], None]:
-    def render_today(active_app: ModuleType, dependencies: object) -> None:
-        del dependencies
-        story_ui._styles()
-        briefing = active_app._latest("daily_cio_briefing")
-        market = active_app.load_live_market_console()
-        snapshot = operating_ui.load_public_event_snapshot()
-        records = _records(getattr(snapshot, "records", ()))
-        now = datetime.now(timezone.utc)
-        current_items = tuple(original_builder(records, now=now, limit=3))
-        items = tuple(operating_ui.build_today_items(records, now=now, limit=3))
-        retained = not current_items and bool(items)
-        empty = not items
-
-        active_app.page_header(
-            "Investment world today",
-            "What happened, why investors care, how markets may react, and what evidence matters next.",
-            "NOW",
-        )
-        active_app.render_information_freshness(
-            briefing=briefing,
-            surface="today",
-        )
-        if retained:
-            kicker = "Today // latest verified developments"
-            deck = (
-                "No new source-qualified development cleared the current 24-hour controls. "
-                "The most recent verified stories remain visible with their original publication "
-                "age while independent feeds refresh."
-            )
-        elif empty:
-            kicker = "Today // live market pulse"
-            deck = (
-                "Independent headline feeds are refreshing. Live market-session and governed-quote "
-                "context remains visible so the Today section never disappears or implies that "
-                "nothing is happening."
-            )
-        else:
-            kicker = "Today // current developments"
-            deck = (
-                "Only source-qualified developments from the last 24 hours appear as current. "
-                "Each story separates the fact, the investment mechanism, and the possible market "
-                "reaction so headlines are not mistaken for trading signals."
-            )
-        hero = (
-            '<section class="ci-today"><div class="ci-head"><div>'
-            f'<div class="ci-kicker">{escape(kicker)}</div>'
-            '<h2>What is moving the investment conversation</h2>'
-            f'<div class="ci-deck">{escape(deck)}</div></div><div class="ci-chips">'
-            f'<span class="ci-chip">Market {story_ui._session(market).lower()}</span>'
-            f'<span class="ci-chip">{escape(story_ui._coverage(market))} governed quotes</span>'
-            f'<span class="ci-chip">{escape(story_ui._age_label(getattr(snapshot, "evaluated_at", None)))}</span>'
-            + ('<span class="ci-chip">No new qualifying stories</span>' if retained else "")
-            + ('<span class="ci-chip">Headline feeds refreshing</span>' if empty else "")
-            + (
-                '<span class="ci-chip">Coverage incomplete</span>'
-                if str(getattr(snapshot, "state", "available")) != "available"
-                else ""
-            )
-            + "</div></div>"
-        )
-        if items:
-            hero += story_ui._primary(items[0])
-        else:
-            detail = story_ui._clean(getattr(snapshot, "detail", "")) or (
-                "The current public-news collection did not return a usable story."
-            )
-            session = story_ui._session(market)
-            coverage = story_ui._coverage(market)
-            hero += (
-                '<div class="ci-primary"><div class="ci-meta"><span class="ci-rank">'
-                "Live market pulse</span></div>"
-                '<div class="ci-title">Headline providers are refreshing; market context remains live.</div>'
-                '<div class="ci-three"><div class="ci-box"><div class="ci-label">What is live</div>'
-                f'<p>The market session is {escape(session.lower())}, with {escape(coverage)} governed '
-                "quotes currently represented.</p></div>"
-                '<div class="ci-box"><div class="ci-label">Coverage status</div>'
-                f'<p>{escape(detail)} The application retains verified stories and never interprets '
-                "an empty feed as proof that the news cycle is quiet.</p></div>"
-                '<div class="ci-box"><div class="ci-label">What to watch</div>'
-                '<p>New independent-source headlines, meaningful cross-asset price moves, official '
-                "confirmations, and any change to the CIO assessment.</p></div></div></div>"
-            )
-        st.markdown(hero + "</section>", unsafe_allow_html=True)
-
-        if len(items) > 1:
-            st.markdown(
-                '<section class="ci-story-grid">'
-                + "".join(
-                    story_ui._secondary(item, rank)
-                    for rank, item in enumerate(items[1:], start=2)
-                )
-                + "</section>",
-                unsafe_allow_html=True,
-            )
-        if items:
-            concept, explanation = story_ui._lesson(items[0])
-            watch_markup = "".join(
-                '<div class="ci-watch">'
-                f'<span class="ci-num">{index:02d}</span><span>{escape(value)}</span></div>'
-                for index, value in enumerate(story_ui._watch(items), start=1)
-            )
-            st.markdown(
-                '<section class="ci-pair"><div class="ci-panel"><div class="ci-meta">'
-                '<span class="ci-rank">What to watch next</span></div>'
-                '<h3>Evidence that can confirm or reverse the story</h3>'
-                f'{watch_markup}</div><div class="ci-panel"><div class="ci-meta">'
-                '<span class="ci-rank">Investor lesson</span></div>'
-                f'<h3>{escape(concept)}</h3><div class="ci-lesson">Learn the mechanism</div>'
-                f'<div class="ci-copy">{escape(explanation)}</div></div></section>',
-                unsafe_allow_html=True,
-            )
-        with st.expander("Original source context", expanded=False):
-            if not items:
-                st.write(
-                    story_ui._clean(getattr(snapshot, "detail", ""))
-                    or "No source-qualified event is available."
-                )
-            for index, item in enumerate(items, start=1):
-                st.markdown(
-                    f"**{index}. {story_ui._clean(getattr(item, 'title', 'Market development'))}**"
-                )
-                st.write(story_ui._clean(getattr(item, "summary", "")))
-                st.caption(
-                    f"{story_ui._clean(getattr(item, 'source_type', 'Public'))} source: "
-                    f"{story_ui._clean(getattr(item, 'source', 'Public source'))} · published "
-                    f"{story_ui._format_time(getattr(item, 'published_at', None))}"
-                )
-        story_ui._research_radar()
-        with st.expander("Live market operating detail", expanded=False):
-            active_app.render_live_market_status()
-        retained_caption = (
-            " No new qualifying event was available, so the latest verified stories remain visible "
-            "with their original publication timestamps."
-            if retained
-            else ""
-        )
-        pulse_caption = (
-            " Headline providers are refreshing, so the live market pulse is shown instead of an "
-            "empty section."
-            if empty
-            else ""
-        )
-        st.caption(
-            event_ui._daily_caption(snapshot)
-            + retained_caption
-            + pulse_caption
-            + " Educational interpretation only. Today explains external developments; holdings "
-            "and CIO-authorized actions remain in Portfolio."
-        )
-
-    return render_today
-
-
 def install(
     app_impl: ModuleType,
     event_ui: ModuleType,
     operating_ui: ModuleType,
     story_ui: ModuleType,
 ) -> None:
-    """Reattach retention after each Streamlit rerun without nesting wrappers."""
+    """Reattach retention adapters after each Streamlit rerun.
+
+    This runtime owns story selection continuity only. It deliberately leaves
+    ``story_ui._render_today`` unchanged so the canonical Today presentation can
+    be installed independently by ``today_trust_ui_runtime``.
+    """
 
     # Render and local Streamlit entrypoints run from top to bottom after every
     # navigation interaction. Earlier setup steps intentionally restore the
@@ -468,9 +306,7 @@ def install(
     # every run so those assignments cannot silently remove the fallback.
     original_builder = _base_callable(event_ui.build_today_items)
     original_event_loader = _base_callable(event_ui.load_public_event_snapshot)
-    original_operating_loader = _base_callable(
-        operating_ui.load_public_event_snapshot
-    )
+    original_operating_loader = _base_callable(operating_ui.load_public_event_snapshot)
 
     def build_today_items(
         records: Iterable[Mapping[str, Any]],
@@ -498,13 +334,6 @@ def install(
         original_operating_loader,
         original_builder,
         event_ui,
-    )
-    story_ui._render_today = _retained_today_renderer(
-        app_impl,
-        event_ui,
-        operating_ui,
-        story_ui,
-        original_builder,
     )
     setattr(app_impl, _INSTALLED_STATE_KEY, True)
 

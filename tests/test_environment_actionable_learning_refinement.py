@@ -114,12 +114,17 @@ def test_streamlit_proxy_replaces_only_the_dense_lower_section() -> None:
     assert fake.caption_calls == []
 
 
-def test_local_and_render_entrypoints_install_after_driver_runtime() -> None:
+def test_entrypoints_delegate_environment_presentation_to_final_clarity_runtime() -> None:
+    clarity_source = Path("environment_mobile_clarity_runtime.py").read_text(encoding="utf-8")
+    assert "import environment_actionable_learning_refinement as learning" in clarity_source
+    assert "import environment_driver_education_runtime as driver_runtime" in clarity_source
+
     for relative in ("app.py", "render_app.py"):
         source = Path(relative).read_text(encoding="utf-8")
-        driver = source.index("environment_driver_education_runtime.install(")
-        actionable = source.index("environment_actionable_learning_refinement.install(")
-        final_owner = source.index("environment_story_placement_refinement.install(app_impl)")
+        clarity = source.index("environment_mobile_clarity_runtime.install(")
+        route_boundary = source.index("surface_route_isolation_runtime.install(")
 
-        assert "import environment_actionable_learning_refinement" in source
-        assert driver < actionable < final_owner
+        assert "import environment_mobile_clarity_runtime" in source
+        assert clarity < route_boundary
+        assert "environment_driver_education_runtime.install(" not in source
+        assert "environment_actionable_learning_refinement.install(" not in source

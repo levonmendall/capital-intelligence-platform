@@ -129,11 +129,16 @@ def test_environment_runtime_is_presentation_only_and_renders_html_explicitly() 
     assert "authorize real money" in source
 
 
-def test_final_route_boundary_installs_environment_clarity_before_surface_guard() -> None:
-    source = Path("surface_route_isolation_runtime.py").read_text(encoding="utf-8")
+def test_entrypoints_install_environment_clarity_before_surface_guard() -> None:
+    route_source = Path("surface_route_isolation_runtime.py").read_text(encoding="utf-8")
+    assert "import environment_mobile_clarity_runtime" not in route_source
+    assert "environment_mobile_clarity_runtime.install(" not in route_source
 
-    install = source.index("environment_mobile_clarity_runtime.install(story_ui)")
-    guard = source.index('_guard_story_renderer(story_ui, "_render_environment", "Environment")')
-
-    assert "import environment_mobile_clarity_runtime" in source
-    assert install < guard
+    for path in (Path("app.py"), Path("render_app.py")):
+        source = path.read_text(encoding="utf-8")
+        install = source.index(
+            "environment_mobile_clarity_runtime.install(environment_story_placement_refinement)"
+        )
+        guard = source.index("surface_route_isolation_runtime.install(")
+        assert "import environment_mobile_clarity_runtime" in source
+        assert install < guard

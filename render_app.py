@@ -16,8 +16,7 @@ import streamlit as st
 
 import app_impl
 import educational_market_briefing_ui
-import environment_actionable_learning_refinement
-import environment_driver_education_runtime
+import environment_mobile_clarity_runtime
 import environment_story_placement_refinement
 import history_ui_refinement
 import live_operating_console
@@ -25,13 +24,11 @@ import operating_intelligence_ui
 import operating_status
 import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
-import portfolio_first_ui_refinement
 import portfolio_ui_refinement
 import public_event_recency_runtime
 import secure_app
 import surface_content_refinement
 import surface_route_isolation_runtime
-import today_development_card_format_runtime
 import today_event_alignment_runtime
 import today_story_retention_runtime
 import today_trust_ui_runtime
@@ -71,34 +68,6 @@ def _synchronous_renderer(renderer: Callable[..., Any]) -> Callable[..., Any]:
     if callable(explicit_target):
         return explicit_target
     return getattr(renderer, "__wrapped__", renderer)
-
-
-def _portfolio_first_sync_renderer(renderer: Callable[..., Any]) -> Callable[..., Any]:
-    original = getattr(renderer, "__wrapped__", renderer)
-
-    def render_portfolio(dependencies: object, *, principal: object | None) -> None:
-        construction = app_impl._latest("portfolio_construction")
-        briefing = app_impl._latest("daily_cio_briefing")
-        mandate = dependencies.get_mandate_details(app_impl.CANONICAL_PORTFOLIO_CODE)
-        if mandate is None:
-            st.warning("The canonical paper portfolio is unavailable.")
-            return
-        st.markdown(portfolio_first_ui_refinement._CSS, unsafe_allow_html=True)
-        _nav, _cash, deployed = portfolio_first_ui_refinement._capital_structure(
-            app_impl, mandate=mandate
-        )
-        portfolio_first_ui_refinement._render_cio_report(
-            app_impl,
-            briefing=briefing,
-            construction=construction,
-            mandate=mandate,
-            deployed=deployed,
-        )
-        portfolio_first_ui_refinement._render_remaining_portfolio(
-            app_impl, original, dependencies, principal=principal
-        )
-
-    return render_portfolio
 
 
 def _log_slow_surface(surface_name: str, render_thread_id: int) -> None:
@@ -190,15 +159,6 @@ def prepare_render_surface_runtime() -> None:
         renderer = getattr(app_impl, attribute_name)
         if getattr(renderer, "_capital_intelligence_guarded_surface", False):
             continue
-        if (
-            attribute_name == "_render_portfolio"
-            and getattr(renderer, "__module__", "") != "portfolio_ui_refinement"
-        ):
-            setattr(
-                renderer,
-                _RENDER_SYNC_TARGET_ATTRIBUTE,
-                _portfolio_first_sync_renderer(renderer),
-            )
         guarded = _guarded_renderer(attribute_name.removeprefix("_render_"), renderer)
         if not getattr(guarded, "_capital_intelligence_fragment_removed", False):
             _LOGGER.warning(
@@ -230,17 +190,13 @@ def main() -> None:
         operating_intelligence_ui,
         environment_story_placement_refinement,
     )
-    today_development_card_format_runtime.install(environment_story_placement_refinement)
-    environment_driver_education_runtime.install(environment_story_placement_refinement)
-    environment_actionable_learning_refinement.install(
-        environment_story_placement_refinement
-    )
     opportunity_scan_resilience.install()
     ui_refinement.install(app_impl, secure_app)
     ui_experience_refinement.install(app_impl)
     opportunity_funnel_ui_refinement.install(app_impl)
     surface_content_refinement.install(app_impl)
     environment_story_placement_refinement.install(app_impl)
+    environment_mobile_clarity_runtime.install(environment_story_placement_refinement)
     today_story_retention_runtime.install(
         app_impl,
         educational_market_briefing_ui,
