@@ -10,7 +10,7 @@ import logging
 from dataclasses import replace
 
 from application.compounding_cycle import CompoundingCanonicalCIOCycle
-from application.joint_portfolio_preview import build_joint_portfolio_preview
+from application.global_rotation_preview import build_global_rotation_preview
 from cio.global_rotation_authority import GlobalRotationChiefInvestmentOfficer
 from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from intelligence.global_leadership import enrich_bundle_with_global_leadership_economics
@@ -88,18 +88,19 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
 
         preview = None
         try:
-            preview = build_joint_portfolio_preview(
+            preview = build_global_rotation_preview(
                 cycle_identifier=str(kwargs.get("identifier", "unknown")),
                 candidates=candidates,
                 portfolio=portfolio,
                 construction_engine=self.construction_engine,
+                rotation_context=rotation_context,
                 authoritative_queue=kwargs.get("authoritative_opportunity_queue"),
             )
         except Exception:
             # Additional portfolio context must never become a hidden veto. The final
             # constructor still fails closed after the CIO makes any positive decision.
             _LOGGER.exception(
-                "joint portfolio preview unavailable for %s; continuing without pre-CIO cap",
+                "global joint portfolio preview unavailable for %s; continuing without pre-CIO cap",
                 kwargs.get("identifier", "unknown"),
             )
         preview_setter = getattr(self.cio, "set_joint_preview_context", None)
