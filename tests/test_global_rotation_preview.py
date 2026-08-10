@@ -115,6 +115,78 @@ def test_global_preview_requests_larger_targets_for_stronger_opportunities():
     assert engine.intents[1].priority_rank == 2
 
 
+def test_specialist_conviction_targets_override_raw_global_score_bands():
+    strong = _candidate("candidate:strong", "AAA")
+    developing = _candidate("candidate:developing", "BBB")
+    context = GlobalRotationContext(
+        as_of=NOW,
+        signals=(
+            _signal(strong.identifier, 1, 0.90),
+            _signal(developing.identifier, 2, 0.70),
+        ),
+        cash_expected_return=0.03,
+        minimum_cash_weight=0.05,
+        current_cash_weight=1.0,
+        excess_cash_weight=0.95,
+        cash_competition_state=CashCompetitionState.DEPLOYMENT_OPPORTUNITY,
+    )
+
+    class Portfolio:
+        cash_weight = 1.0
+
+        def current_weight(self, _symbol):
+            return 0.0
+
+        def profile(self, _identifier):
+            return SimpleNamespace(
+                sector="test",
+                factor_loadings=(),
+                correlation_bucket="test",
+                derivative_lifecycle=None,
+            )
+
+        def request(self, *, identifier, intents):
+            return SimpleNamespace(identifier=identifier, intents=intents)
+
+    class Engine:
+        policy = SimpleNamespace(version="construction.test")
+
+        def __init__(self):
+            self.intents = ()
+
+        def construct(self, request):
+            self.intents = request.intents
+            return SimpleNamespace(
+                request_identifier=request.identifier,
+                status=SimpleNamespace(value="accepted"),
+                policy_version="construction.test",
+                target_weights=(("AAA", 0.01), ("BBB", 0.025)),
+                target_cash_weight=0.965,
+                expected_return_improvement=0.004,
+                blocks=(),
+            )
+
+    engine = Engine()
+    preview = build_global_rotation_preview(
+        cycle_identifier="cycle:specialist-informed",
+        candidates=(strong, developing),
+        portfolio=Portfolio(),
+        construction_engine=engine,
+        rotation_context=context,
+        conviction_targets={
+            strong.identifier: 0.01,
+            developing.identifier: 0.025,
+        },
+    )
+    requested = dict(preview.requested_targets)
+    assert requested[strong.identifier] == 0.01
+    assert requested[developing.identifier] == 0.025
+    assert tuple(item.requested_target_weight for item in engine.intents) == (
+        0.01,
+        0.025,
+    )
+
+
 def test_zero_global_score_does_not_create_a_preview_buy():
     weak = _candidate("candidate:weak", "CCC")
     context = GlobalRotationContext(
