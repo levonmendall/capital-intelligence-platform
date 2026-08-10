@@ -43,7 +43,10 @@ def test_certified_dynamic_risk_can_only_tighten_construction_policy() -> None:
     )
 
     promoted = ConservativeAnalyticalPromotion.apply_construction_risk_overlay(
-        policy, overlay, certification
+        policy,
+        overlay,
+        certification,
+        as_of=AS_OF,
     )
 
     assert promoted.maximum_expected_shortfall == -0.09
@@ -90,7 +93,10 @@ def test_risk_promotion_never_relaxes_stricter_existing_policy() -> None:
     )
 
     promoted = ConservativeAnalyticalPromotion.apply_construction_risk_overlay(
-        policy, overlay, certification
+        policy,
+        overlay,
+        certification,
+        as_of=AS_OF,
     )
 
     assert promoted.maximum_expected_shortfall == policy.maximum_expected_shortfall
