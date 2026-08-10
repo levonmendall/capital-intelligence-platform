@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 
@@ -34,9 +35,20 @@ def test_diagnostic_cgroup_high_water_stops_before_kernel_oom(monkeypatch) -> No
     class Process:
         pid = 123
 
-        @staticmethod
-        def poll():
-            return None
+        def __init__(self) -> None:
+            self.terminated = Event()
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.returncode = -15
+            self.terminated.set()
+
+        def wait(self, timeout=None):
+            assert self.terminated.wait(timeout)
+            return self.returncode
 
     monkeypatch.setattr(
         diagnostic_watchdog,
@@ -57,7 +69,7 @@ def test_diagnostic_cgroup_high_water_stops_before_kernel_oom(monkeypatch) -> No
         )
     )
 
-    assert return_code is None
+    assert return_code == -15
     assert timed_out is False
     assert memory_limited is True
     assert process_peak == 710_000
@@ -65,7 +77,7 @@ def test_diagnostic_cgroup_high_water_stops_before_kernel_oom(monkeypatch) -> No
 
 
 def test_diagnostic_memory_guard_does_not_change_market_scope() -> None:
-    source = open("run_render_service_nonblocking.py", encoding="utf-8").read()
+    source = Path("run_render_service_nonblocking.py").read_text(encoding="utf-8")
     assert '"CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY": "true"' in source
     assert '"CAPITAL_INTELLIGENCE_DISCOVERY_REQUIRE_COMPLETE_MARKET_COVERAGE": "true"' in source
     assert "complete_all_market_coverage_required=True" in source
