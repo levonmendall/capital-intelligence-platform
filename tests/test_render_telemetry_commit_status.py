@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import json
+
 from scripts import render_telemetry_commit_status as status
 
 
@@ -104,3 +107,15 @@ def test_invalid_safety_contract_is_rejected() -> None:
         pass
     else:
         raise AssertionError("unsafe telemetry snapshot should be rejected")
+
+
+def test_cli_emits_two_shell_safe_lines(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(status.sys, "stdin", io.StringIO(json.dumps(_snapshot())))
+
+    result = status.main()
+
+    assert result == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "pending",
+        "stage=deep_evidence state=in_progress elapsed=612s release_match=yes",
+    ]
