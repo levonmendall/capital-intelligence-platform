@@ -9,11 +9,22 @@ and persistence to ``capture_render_production_telemetry``.
 from __future__ import annotations
 
 import json
+import sys
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
+
+# GitHub Actions executes this file directly as
+# ``python scripts/capture_render_production_telemetry_canonical.py``. In that mode,
+# Python puts ``scripts/`` rather than the repository root on sys.path, so the package
+# import below would otherwise fail before telemetry can contact Render.
+if __package__ in {None, ""}:
+    repository_root = str(Path(__file__).resolve().parents[1])
+    if repository_root not in sys.path:
+        sys.path.insert(0, repository_root)
 
 from scripts import capture_render_production_telemetry as telemetry
 
