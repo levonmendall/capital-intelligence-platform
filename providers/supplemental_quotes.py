@@ -1,6 +1,6 @@
-"""Governed supplemental quote cross-checks for Alpha Vantage and Twelve Data.
+"""Governed supplemental quote cross-checks across independent U.S. market sources.
 
-These sources corroborate broad market observations.  They never provide canonical
+These sources corroborate broad market observations. They never provide canonical
 execution quotes, paper-order authority, or real-money authority.
 """
 
@@ -14,6 +14,8 @@ from math import isfinite
 from typing import Any
 
 import requests
+
+from provider_environment import provider_environment_value
 
 
 class SupplementalQuoteError(RuntimeError):
@@ -128,19 +130,25 @@ class SupplementalQuoteProvider:
         *,
         alpha_vantage_key: str | None = None,
         twelve_data_key: str | None = None,
+        tradier_key: str | None = None,
         timeout: int = 20,
         clock: Callable[[], datetime] | None = None,
         http_get: Callable[..., Any] | None = None,
     ) -> None:
         self.alpha_vantage_key = (
             alpha_vantage_key
-            or os.getenv("ALPHAVANTAGE_API_KEY")
-            or os.getenv("ALPHA_VANTAGE_API_KEY")
+            or provider_environment_value("ALPHA_VANTAGE_API_KEY")
+            or provider_environment_value("ALPHAVANTAGE_API_KEY")
         )
         self.twelve_data_key = (
             twelve_data_key
-            or os.getenv("TWELVE_API_KEY")
-            or os.getenv("TWELVE_DATA_API_KEY")
+            or provider_environment_value("TWELVE_DATA_API_KEY")
+            or provider_environment_value("TWELVE_API_KEY")
+        )
+        self.tradier_key = (
+            tradier_key
+            or provider_environment_value("TRADIER_API_KEY")
+            or provider_environment_value("TRADIER_API_TOKEN")
         )
         self.timeout = timeout
         self._clock = clock or (lambda: datetime.now(timezone.utc))
@@ -166,6 +174,13 @@ class SupplementalQuoteProvider:
                 errors.append(f"twelve_data:{error}")
         else:
             errors.append("twelve_data:credential_missing")
+        if self.tradier_key:
+            try:
+                quotes.append(self._tradier(normalized))
+            except SupplementalQuoteError as error:
+                errors.append(f"tradier:{error}")
+        else:
+            errors.append("tradier:credential_missing")
         if not quotes:
             raise SupplementalQuoteError("; ".join(errors))
         return SupplementalQuoteCrossCheck(
@@ -246,9 +261,79 @@ class SupplementalQuoteProvider:
             source_field=source_field,
         )
 
-    def _get(self, url: str, *, params: dict[str, object], provider: str) -> Any:
+    def _tradier(self, symbol: str) -> SupplementalQuote:
+        retrieved_at = self._now()
+        response = self._get(
+            "https://api.tradier.com/v1/markets/quotes",
+            params={"symbols": symbol, "greeks": "false"},
+            provider="Tradier",
+            headers={
+                "Authorization": f"Bearer {self.tradier_key}",
+                "Accept": "application/json",
+            },
+        )
+        if not isinstance(response, dict):
+            raise SupplementalQuoteError("Tradier response must be an object")
+        quotes_payload = response.get("quotes")
+        if not isinstance(quotes_payload, dict):
+            raise SupplementalQuoteError("Tradier quote container is missing")
+        quote = quotes_payload.get("quote")
+        if isinstance(quote, list):
+            quote = next(
+                (
+                    item
+                    for item in quote
+                    if isinstance(item, dict)
+                    and str(item.get("symbol") or "").upper() == symbol
+                ),
+                None,
+            )
+        if not isinstance(quote, dict):
+            raise SupplementalQuoteError("Tradier quote is missing")
+        returned_symbol = str(quote.get("symbol") or "").upper()
+        if returned_symbol != symbol:
+            raise SupplementalQuoteError("Tradier symbol mismatch")
+        observed_at = retrieved_at
+        trade_date = quote.get("trade_date")
+        if isinstance(trade_date, (int, float)) and not isinstance(trade_date, bool):
+            value = float(trade_date)
+            # Tradier publishes market timestamps in epoch milliseconds.
+            if value > 10_000_000_000:
+                value /= 1000.0
+            try:
+                observed_at = datetime.fromtimestamp(value, tz=timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                observed_at = retrieved_at
+        source_field = next(
+            (field for field in ("last", "close", "prevclose") if quote.get(field) not in (None, "")),
+            None,
+        )
+        if source_field is None:
+            raise SupplementalQuoteError("Tradier quote has no usable price")
+        return SupplementalQuote(
+            provider="TRADIER",
+            symbol=symbol,
+            price=_price(quote.get(source_field), field_name="Tradier price"),
+            observed_at=min(observed_at, retrieved_at),
+            retrieved_at=retrieved_at,
+            source_field=source_field,
+        )
+
+    def _get(
+        self,
+        url: str,
+        *,
+        params: dict[str, object],
+        provider: str,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
         try:
-            response = self._http_get(url, params=params, timeout=self.timeout)
+            response = self._http_get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=self.timeout,
+            )
         except requests.RequestException as error:
             raise SupplementalQuoteError(f"{provider} request failed") from error
         status_code = int(getattr(response, "status_code", 0))

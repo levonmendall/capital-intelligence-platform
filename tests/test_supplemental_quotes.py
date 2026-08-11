@@ -28,17 +28,43 @@ def test_crosscheck_agrees_without_execution_authority() -> None:
             }
         },
         {"symbol": "AAPL", "close": "210.10", "timestamp": int(NOW.timestamp())},
+        {
+            "quotes": {
+                "quote": {
+                    "symbol": "AAPL",
+                    "last": 210.05,
+                    "trade_date": int(NOW.timestamp() * 1000),
+                }
+            }
+        },
     ]
+    calls: list[dict[str, object]] = []
+
+    def fake_get(url, **kwargs):
+        calls.append({"url": url, **kwargs})
+        return FakeResponse(payloads.pop(0))
 
     provider = SupplementalQuoteProvider(
         alpha_vantage_key="alpha-secret",
         twelve_data_key="twelve-secret",
+        tradier_key="tradier-secret",
         clock=lambda: NOW,
-        http_get=lambda *_args, **_kwargs: FakeResponse(payloads.pop(0)),
+        http_get=fake_get,
     )
     result = provider.cross_check("AAPL", maximum_divergence_bps=10).to_dict()
+
     assert result["state"] == "agree"
     assert result["divergence_bps"] < 10
+    assert [item["provider"] for item in result["quotes"]] == [
+        "ALPHA_VANTAGE",
+        "TWELVE_DATA",
+        "TRADIER",
+    ]
+    tradier_call = calls[-1]
+    assert tradier_call["url"] == "https://api.tradier.com/v1/markets/quotes"
+    assert tradier_call["headers"]["Authorization"] == "Bearer tradier-secret"
     assert result["canonical_execution_authority"] is False
-    assert "alpha-secret" not in str(result)
-    assert "twelve-secret" not in str(result)
+    serialized = str(result)
+    assert "alpha-secret" not in serialized
+    assert "twelve-secret" not in serialized
+    assert "tradier-secret" not in serialized
