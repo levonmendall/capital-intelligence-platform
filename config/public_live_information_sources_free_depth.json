@@ -3,7 +3,7 @@
   "sources": [
     {
       "identifier": "xbrl-global-filings-live",
-      "source_name": "XBRL International filings.xbrl.org structured filing index",
+      "source_name": "XBRL International filings.xbrl.org structured filings",
       "parser": "xbrl_filings",
       "endpoint": "https://filings.xbrl.org/api/filings",
       "source_type": "research",
@@ -21,8 +21,7 @@
       },
       "maximum_records": 200,
       "domains": [
-        "filings_corporate_disclosures",
-        "management_guidance"
+        "filings_corporate_disclosures"
       ],
       "impact_channels": [
         "earnings",
@@ -38,9 +37,9 @@
       "license_identifier": "XBRL-International-filings-index-public-data",
       "usage_rights_identifier": "filings.xbrl.org.currently-unrestricted-use.internal-analysis",
       "limitations": [
-        "Keyless and free, but the index is not a complete global filing universe and currently omits some ESEF jurisdictions.",
-        "The processed timestamp is treated as a conservative availability proxy; original regulator publication timing must be certified before historical decision reliance.",
-        "Structured filing discovery supports fundamentals and issuer evidence but never independently authorizes capital."
+        "Keyless and free, but the repository is not a complete global filing universe and currently covers ESEF, UKSEF, and Ukraine filing systems rather than every jurisdiction.",
+        "Collection follows only a bounded number of recent xBRL-JSON filing links and extracts high-value accounting concepts; full historical fundamental backfill remains a separate governed workload.",
+        "Original regulator publication timing must be certified before historical decision reliance; repository availability metadata never creates capital authority."
       ]
     },
     {
@@ -60,8 +59,7 @@
       "maximum_records": 300,
       "domains": [
         "fund_flows_positioning",
-        "economic_data_releases",
-        "credit_ratings_defaults"
+        "economic_data_releases"
       ],
       "impact_channels": [
         "liquidity",
@@ -80,7 +78,7 @@
       "limitations": [
         "Monthly cross-border portfolio statistics are lagged and are not a real-time capital-flow tape.",
         "The current table does not expose a machine-readable row publication timestamp, so retrieval time is preserved as the conservative availability boundary.",
-        "Country holdings and transactions are macro/positioning evidence and require causal and market confirmation before candidate economics change."
+        "Country holdings and transactions are macro and positioning evidence and require causal and market confirmation before candidate economics change."
       ]
     },
     {
