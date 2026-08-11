@@ -19,10 +19,23 @@ import requests
 
 DATABENTO_OPRA_DATASET = "OPRA.PILLAR"
 DATABENTO_TIMESERIES_URL = "https://hist.databento.com/v0/timeseries.get_range"
+_DEFAULT_TIMEOUT_SECONDS = 15
+_DEFAULT_MAXIMUM_SESSION_ATTEMPTS = 4
 
 
 class DatabentoOptionsError(RuntimeError):
     """Raised when authenticated OPRA evidence cannot be certified."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = bool(retryable)
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -206,7 +219,8 @@ class DatabentoOptionsProvider:
         api_key: str | None = None,
         *,
         http_post: HttpPost = requests.post,
-        timeout_seconds: int = 90,
+        timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+        maximum_session_attempts: int = _DEFAULT_MAXIMUM_SESSION_ATTEMPTS,
     ) -> None:
         if api_key is None:
             resolved = (
@@ -220,9 +234,17 @@ class DatabentoOptionsProvider:
             raise TypeError("timeout_seconds must be an integer")
         if timeout_seconds < 1 or timeout_seconds > 180:
             raise ValueError("timeout_seconds must be between 1 and 180")
+        if (
+            isinstance(maximum_session_attempts, bool)
+            or not isinstance(maximum_session_attempts, int)
+        ):
+            raise TypeError("maximum_session_attempts must be an integer")
+        if maximum_session_attempts < 1 or maximum_session_attempts > 7:
+            raise ValueError("maximum_session_attempts must be between 1 and 7")
         self._api_key = resolved
         self._http_post = http_post
         self._timeout_seconds = timeout_seconds
+        self._maximum_session_attempts = maximum_session_attempts
 
     @property
     def configured(self) -> bool:
@@ -240,7 +262,8 @@ class DatabentoOptionsProvider:
             )
         except requests.RequestException as error:
             raise DatabentoOptionsError(
-                f"Databento OPRA request failed: {type(error).__name__}"
+                f"Databento OPRA request failed: {type(error).__name__}",
+                retryable=True,
             ) from error
         status = int(getattr(response, "status_code", 0))
         text = str(getattr(response, "text", ""))
@@ -255,7 +278,12 @@ class DatabentoOptionsProvider:
                     detail = str(candidate["detail"])[:300]
                     break
             suffix = f": {detail}" if detail else ""
-            raise DatabentoOptionsError(f"Databento OPRA HTTP {status}{suffix}")
+            retryable = status in {408, 425, 429} or 500 <= status <= 599
+            raise DatabentoOptionsError(
+                f"Databento OPRA HTTP {status}{suffix}",
+                status_code=status,
+                retryable=retryable,
+            )
         records: list[Mapping[str, Any]] = []
         for line in text.splitlines():
             try:
@@ -280,7 +308,10 @@ class DatabentoOptionsProvider:
         if maximum_records < 1 or maximum_records > 50_000:
             raise ValueError("maximum_records must be between 1 and 50000")
         failures: list[str] = []
-        for session_date in _candidate_sessions(timestamp):
+        for session_date in _candidate_sessions(
+            timestamp,
+            maximum_attempts=self._maximum_session_attempts,
+        ):
             end_date = session_date + timedelta(days=1)
             try:
                 rows = self._records(
@@ -299,6 +330,8 @@ class DatabentoOptionsProvider:
                     }
                 )
             except DatabentoOptionsError as error:
+                if not error.retryable:
+                    raise
                 failures.append(str(error))
                 continue
             definitions: list[DatabentoOptionDefinition] = []
@@ -457,7 +490,10 @@ class DatabentoOptionsProvider:
 
         timestamp = _aware(as_of, field_name="as_of")
         failures: list[str] = []
-        for session_date in _candidate_sessions(timestamp):
+        for session_date in _candidate_sessions(
+            timestamp,
+            maximum_attempts=self._maximum_session_attempts,
+        ):
             try:
                 bars = self.daily_bars(
                     instruments,
@@ -466,6 +502,8 @@ class DatabentoOptionsProvider:
                     history_days=history_days,
                 )
             except DatabentoOptionsError as error:
+                if not error.retryable:
+                    raise
                 failures.append(str(error))
                 continue
             if bars:
