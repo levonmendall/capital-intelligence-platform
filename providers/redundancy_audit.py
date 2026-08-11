@@ -2,7 +2,7 @@
 
 Every provider capability is tracked through the same ordered state model:
 configured -> authenticated -> routed -> certified for the evidence role -> attempted
--> used -> failed-over.  The ledger is observational only and grants no CIO,
+-> used -> failed-over. The ledger is observational only and grants no CIO,
 construction, execution, or real-money authority.
 """
 
@@ -28,8 +28,16 @@ class ProviderCapabilityKey:
     dataset: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "provider", _text(self.provider, field_name="provider").lower())
-        object.__setattr__(self, "capability", _text(self.capability, field_name="capability").lower())
+        object.__setattr__(
+            self,
+            "provider",
+            _text(self.provider, field_name="provider").lower(),
+        )
+        object.__setattr__(
+            self,
+            "capability",
+            _text(self.capability, field_name="capability").lower(),
+        )
         object.__setattr__(self, "dataset", _text(self.dataset, field_name="dataset"))
 
     @property
@@ -102,13 +110,25 @@ class RedundancyAuditLedger:
             current = self._records.get(key, ProviderCapabilityAudit(key=key))
             self._records[key] = replace(current, attempted=True)
 
-    def failed(self, key: ProviderCapabilityKey, failure_class: str) -> None:
+    def authenticated(self, key: ProviderCapabilityKey) -> None:
+        """Record successful authentication/equivalent public access for this capability."""
+
         with self._lock:
             current = self._records.get(key, ProviderCapabilityAudit(key=key))
+            self._records[key] = replace(current, authenticated=True)
+
+    def failed(self, key: ProviderCapabilityKey, failure_class: str) -> None:
+        normalized = _text(failure_class, field_name="failure_class")
+        with self._lock:
+            current = self._records.get(key, ProviderCapabilityAudit(key=key))
+            authenticated = current.authenticated
+            if normalized == "authentication_or_entitlement":
+                authenticated = False
             self._records[key] = replace(
                 current,
+                authenticated=authenticated,
                 attempted=True,
-                failure_class=_text(failure_class, field_name="failure_class"),
+                failure_class=normalized,
             )
 
     def used(
@@ -119,15 +139,19 @@ class RedundancyAuditLedger:
         failed_over: bool = False,
     ) -> None:
         clean_sources = tuple(
-            dict.fromkeys(str(item).strip() for item in source_identifiers if str(item).strip())
+            dict.fromkeys(
+                str(item).strip() for item in source_identifiers if str(item).strip()
+            )
         )
         with self._lock:
             current = self._records.get(key, ProviderCapabilityAudit(key=key))
             self._records[key] = replace(
                 current,
+                authenticated=True,
                 attempted=True,
                 used=True,
                 failed_over=bool(failed_over),
+                failure_class=None,
                 source_identifiers=clean_sources,
             )
 
@@ -149,7 +173,10 @@ _LOCK = RLock()
 _CURRENT: RedundancyAuditLedger | None = None
 
 
-def begin_redundancy_cycle(cycle_identifier: str, as_of: datetime) -> RedundancyAuditLedger:
+def begin_redundancy_cycle(
+    cycle_identifier: str,
+    as_of: datetime,
+) -> RedundancyAuditLedger:
     global _CURRENT
     ledger = RedundancyAuditLedger(cycle_identifier=cycle_identifier, as_of=as_of)
     with _LOCK:
