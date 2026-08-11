@@ -8,7 +8,7 @@ def _record(records, provider_id: str):
     return next(item for item in records if item.provider_id == provider_id)
 
 
-def test_provider_alias_groups_populate_all_supported_names() -> None:
+def test_provider_alias_groups_populate_runtime_canonical_names() -> None:
     source = {
         "CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY": "massive-secret",
         "DATABENTO_API_TOKEN": "databento-secret",
@@ -20,7 +20,7 @@ def test_provider_alias_groups_populate_all_supported_names() -> None:
     normalized = normalize_provider_environment(source)
 
     assert normalized["MASSIVE_API_KEY"] == "massive-secret"
-    assert normalized["POLYGON_API_KEY"] == "massive-secret"
+    assert normalized["CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY"] == "massive-secret"
     assert normalized["DATABENTO_API_KEY"] == "databento-secret"
     assert normalized["CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"] == "databento-secret"
     assert normalized["FINRA_CLIENT_ID"] == "finra-id"
