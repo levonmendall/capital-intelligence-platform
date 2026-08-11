@@ -1,0 +1,79 @@
+name: One Shot Merge Current Main
+
+on:
+  push:
+    branches:
+      - agent/all-asset-provider-redundancy-v2
+    paths:
+      - ".github/workflows/one-shot-merge-current-main.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  merge-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/all-asset-provider-redundancy-v2
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Merge current main preserving tested combined option router
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          if ! git merge --no-ff --no-commit origin/main; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            unexpected="$(printf '%s\n' "$conflicts" | grep -v -E '^(providers/redundant_options.py|providers/single_pass_massive_options.py|tests/test_single_pass_massive_options.py)$' || true)"
+            if [ -n "$unexpected" ]; then
+              echo "Unexpected merge conflicts:" >&2
+              echo "$unexpected" >&2
+              exit 1
+            fi
+            for path in $conflicts; do
+              git checkout --ours -- "$path"
+              git add "$path"
+            done
+          fi
+          git status --short
+          git commit -m "Merge current main into all-asset redundancy v2"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --require-hashes -r requirements.lock
+          pip install pytest
+
+      - name: Validate reconciled option and redundancy integration
+        run: |
+          python -m py_compile \
+            providers/redundant_options.py \
+            providers/single_pass_massive_options.py \
+            providers/redundant_market_history.py \
+            operations/redundant_market_probe.py
+          pytest -q \
+            tests/test_redundant_options_provider.py \
+            tests/test_single_pass_massive_options.py \
+            tests/test_all_asset_redundancy_v2.py \
+            tests/test_all_asset_redundancy_integration.py
+
+      - name: Remove one-shot workflow and push
+        if: success()
+        shell: bash
+        run: |
+          rm .github/workflows/one-shot-merge-current-main.yml
+          git add -A
+          git commit -m "Remove one-shot main reconciliation workflow"
+          git push origin HEAD:agent/all-asset-provider-redundancy-v2
