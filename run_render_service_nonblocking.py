@@ -30,6 +30,7 @@ _DEFAULT_RELEASE_DIAGNOSTIC_MAX_ATTEMPTS = 4
 _MAX_RELEASE_DIAGNOSTIC_ATTEMPTS = 12
 _DEFAULT_RELEASE_DIAGNOSTIC_RETRY_SECONDS = 75.0
 _MAX_RELEASE_DIAGNOSTIC_RETRY_SECONDS = 600.0
+_DEFAULT_RELEASE_DIAGNOSTIC_AUDIT_REFRESH_SECONDS = 15.0
 _RESOURCE_LIMIT_RETURN_CODES = frozenset({125})
 
 
@@ -171,6 +172,22 @@ def _publish_release_diagnostic_audit(
     return completed.returncode
 
 
+def _run_release_diagnostic_with_live_audit(
+    command: Sequence[str],
+    *,
+    diagnostic_values: MutableMapping[str, str],
+    refresh_seconds: float = _DEFAULT_RELEASE_DIAGNOSTIC_AUDIT_REFRESH_SECONDS,
+) -> int:
+    """Run the bounded diagnostic while republishing its durable redacted state."""
+
+    process = subprocess.Popen(tuple(command), env=dict(diagnostic_values))
+    while True:
+        try:
+            return process.wait(timeout=refresh_seconds)
+        except subprocess.TimeoutExpired:
+            _publish_release_diagnostic_audit(diagnostic_values)
+
+
 def _release_components_ready(
     values: MutableMapping[str, str],
     *,
@@ -274,10 +291,9 @@ def _run_release_diagnostic_after_readiness(
             paper_only=True,
         )
         try:
-            completed = subprocess.run(
+            return_code = _run_release_diagnostic_with_live_audit(
                 command,
-                env=diagnostic_values,
-                check=False,
+                diagnostic_values=diagnostic_values,
             )
         except OSError as error:
             _log(
@@ -293,19 +309,19 @@ def _run_release_diagnostic_after_readiness(
         _publish_release_diagnostic_audit(diagnostic_values)
         _log(
             "manual_cio_release_diagnostic_finished",
-            return_code=completed.returncode,
+            return_code=return_code,
             release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
             attempt=attempt,
             max_attempts=max_attempts,
             complete_all_market_coverage_required=True,
             paper_only=True,
         )
-        if completed.returncode == 0:
+        if return_code == 0:
             return
-        if not _release_diagnostic_retryable(completed.returncode):
+        if not _release_diagnostic_retryable(return_code):
             _log(
                 "manual_cio_release_diagnostic_resource_limit_terminal",
-                return_code=completed.returncode,
+                return_code=return_code,
                 release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
                 attempt=attempt,
                 retries_suppressed=True,
@@ -317,7 +333,7 @@ def _run_release_diagnostic_after_readiness(
         if attempt >= max_attempts:
             _log(
                 "manual_cio_release_diagnostic_attempts_exhausted",
-                return_code=completed.returncode,
+                return_code=return_code,
                 release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
                 attempts=max_attempts,
                 complete_all_market_coverage_required=True,
