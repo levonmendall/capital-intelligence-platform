@@ -61,7 +61,7 @@ _FUNDAMENTAL_CONCEPTS = {
 def _first(mapping: Mapping[str, Any], *names: str) -> object | None:
     for name in names:
         value = mapping.get(name)
-        if value not in {None, ""}:
+        if value is not None and value != "":
             return value
     return None
 
@@ -311,7 +311,7 @@ class FreeDecisionDepthInformationProvider(ImpactfulPublicLiveInformationProvide
             normalized_concept = _local_concept(concept)
             category = _FUNDAMENTAL_CONCEPTS.get(normalized_concept)
             value = raw_fact.get("value")
-            if not category or value in {None, ""}:
+            if not category or value is None or value == "":
                 continue
             unit = str(dimensions.get("unit", "")).strip()
             period = str(dimensions.get("period", "")).strip()
@@ -400,6 +400,11 @@ class FreeDecisionDepthInformationProvider(ImpactfulPublicLiveInformationProvide
         if not periods:
             return []
         latest_period = periods[-1]
+        observation_date = (
+            f"{latest_period}-01"
+            if len(latest_period) == 7 and latest_period[4] == "-"
+            else latest_period
+        )
 
         output: list[DecisionInformationRecord] = []
         for item in rows:
@@ -427,7 +432,7 @@ class FreeDecisionDepthInformationProvider(ImpactfulPublicLiveInformationProvide
                         f"Treasuries {treasury or 'n.a.'}, corporate/other bonds "
                         f"{corporate_bonds or 'n.a.'}, and equities {equities or 'n.a.'} million."
                     ),
-                    event_at=latest_period,
+                    event_at=observation_date,
                     published_at=retrieved_at,
                     source_identifier=f"tic-slt1:{country_code}:{latest_period}",
                     entities=("U.S. Department of the Treasury",),
