@@ -8,109 +8,87 @@ The operating question is:
 
 > Where should the next marginal dollar of capital be allocated, given what is strongest now, what is improving next, and what is deteriorating?
 
-The system therefore continuously searches the complete governed investable set across equities, fixed income, credit, currencies, commodities, crypto, real estate, volatility, alternatives, and relative-value implementations. Cash is a competing use of capital, not the automatic residual when an ordinary forecast condition is imperfect.
+The system searches the complete governed investable set across equities, fixed income, credit, currencies, commodities, crypto, real estate, volatility, alternatives, and relative-value implementations. Cash is a competing use of capital, not the automatic residual when ordinary forecast uncertainty is present.
 
-## Existing foundation reused
+## Authority boundary
 
-This design deliberately reuses the platform's existing governed architecture:
+Exactly six specialist analyses remain canonical. The CIO remains the sole investment-action authority. The Red Team remains advisory. Final construction remains the independent sizing/implementation authority. Evidence remains point-in-time and fail-closed for hard readiness/integrity failures. Execution remains paper-only.
 
-- complete point-in-time global evidence collection and screening;
-- Global Bull Market Radar across one-, three-, six-, and twelve-month leadership;
-- explicit exposure graph relationships for asset class, country, currency, sector, industry, theme, issuer, product, supplier, customer, commodity, and underlying;
-- Forward Opportunity Discovery;
-- business/trend/theme/monetary/currency transmission intelligence;
-- expectations, revisions, nowcasts, positioning, derivatives, flows, catalysts, and value-of-waiting;
-- mispriced-change synthesis;
-- exactly six specialist analyses;
-- CIO-only investment-action authority;
-- independent construction, reconciliation, and paper implementation;
-- point-in-time historical learning and statistical certification.
+Global rotation cannot admit a raw instrument around the canonical opportunity engine. The rotation cycle freezes the already-qualified queue and ranks only reviewed candidates. A candidate rejected for capability authority, evidence integrity, liquidity, downside, implementation cost, scenario integrity, or another hard qualification condition cannot re-enter through leadership, theme, hierarchy, or optimizer logic.
 
-No seventh specialist or second CIO is introduced.
+## Global leadership economics
 
-## Leadership is no longer merely descriptive
+Raw Global Bull Market Radar output remains research-only and keeps `expected_return_impact=0.0`. Price leadership alone cannot manufacture economics.
 
-Raw Global Bull Market Radar output remains research-only and keeps `expected_return_impact=0.0`. Price leadership alone therefore cannot manufacture expected return.
+`global-leadership-economics.v1` requires emerging/confirmed leadership to agree with independently governed forward economics and mispriced-change evidence before a bounded interaction can enter the cross-asset forecast specialist. The interaction is capped at +/-1 percentage point and remains challengeable by the same six-specialist/CIO path as any other forecast input. Mature/crowded leadership receives no automatic positive adjustment; deteriorating leadership plus deteriorating forward economics can become negative.
 
-`global-leadership-economics.v1` asks whether that leadership is corroborated by independently governed forward economics and the existing mispriced-change synthesis. Only when emerging/confirmed leadership agrees with constructive forward evidence can a bounded interaction term enter the existing cross-asset forecast specialist. The term is capped at +/-1.0 percentage point and is challenged by the same specialist/CIO path as every other forecast input.
+## Hierarchical global opportunity map
 
-Momentum without forward-economic confirmation remains unconfirmed. Crowded or mature leadership receives no automatic positive adjustment. Leadership plus deteriorating forward economics can produce a negative interaction.
+`global-opportunity-hierarchy.v1` explicitly aggregates reviewed opportunities through:
 
-## Reviewed-candidate boundary
+`asset class -> country/currency -> sector/theme -> industry -> instrument`
 
-Global capital competition starts only after the canonical opportunity engine has applied the same point-in-time qualification rules used by the normal CIO cycle. The rotation cycle freezes that authoritative queue and then ranks only `queue.ranked` candidates.
+Each node receives a within-parent rank, breadth-aware score, candidate count, and strongest constituent. Candidate hierarchy strength weights the instrument most heavily so a strong country, theme, or sector cannot rescue a weak security. Classification uses explicit instrument, portfolio-profile, or governed exposure-graph metadata only; missing classifications remain `unclassified` rather than being guessed from names or price action.
 
-This is important: a raw instrument with attractive price momentum, theme exposure, or expected return cannot be described as a deployable global opportunity if capability authority, evidence integrity, liquidity, downside, implementation cost, or another canonical hard qualification condition rejected it upstream. The reviewed rotation candidate also uses the queue's `effective_opportunity_cost`, not a stale candidate-local approximation.
+The final global candidate score combines leadership, mispriced-change economics, forward impulse, horizon-consistent opportunity edge, evidence quality, causal-transition strength, and hierarchy strength. This lets USD, duration, gold, international equities, crypto, semiconductors, or another governed opportunity compete in the same marginal-capital context without treating U.S. equities as the portfolio center.
 
-The same frozen queue is supplied to the downstream six-specialist/CIO cycle, so global rotation cannot create a parallel admission path.
+## Dynamic causal leadership transition
 
-## Global opportunity hierarchy
+The structural-theme engine already computes multi-hop transmission, lags, bottlenecks, priced-in benefit, and explicitly named `next_beneficiaries`. `theme-successor-rotation.v1` carries those named relationships to candidates already present in the same point-in-time opportunity set, with zero direct return impact.
 
-Every governed reviewed candidate receives a common marginal-capital context containing:
+`causal-opportunity-rotation.v1` then evaluates whether an explicitly modeled successor is becoming economically important using:
 
-- economic opportunity domain;
-- global opportunity rank;
-- leadership state and score;
-- mispriced-change state and score;
-- governed forward impulse;
-- horizon-consistent pre-specialist edge versus the effective capital alternative;
-- evidence quality;
-- structural-theme successor attention, when explicitly modeled;
-- cash reserve, current cash, and excess cash state.
+- successor evidence and source lineage;
+- bottleneck intensity;
+- estimated priced-in benefit / remaining pricing gap;
+- trend acceleration;
+- theme acceleration or supply constraint;
+- corroborated global leadership;
+- forward-economic confirmation;
+- mispriced-change strength.
 
-The context ranks opportunities across domains rather than evaluating U.S. equities as the implicit center of the portfolio.
-
-## Forward structural-theme succession
-
-The existing `StructuralThemeEngine` already computes multi-hop demand transmission, bottlenecks, transmission lags, reachable downstream nodes, and `next_beneficiaries`. `theme-successor-rotation.v1` operationalizes that existing output for capital-rotation research.
-
-If an already-governed source theme explicitly names another symbol as a next beneficiary, and that symbol already exists as a governed candidate in the same point-in-time opportunity set, the target receives a zero-return-impact successor signal carrying the source theme's evidence lineage. For example, an explicitly modeled chain can represent:
+It classifies `source_leadership`, `early_successor`, `accelerating_successor`, `broadening_successor`, `priced_or_crowded`, or `decaying`. This is how an explicit chain such as
 
 `AI demand -> compute -> semiconductors -> memory/HBM -> networking -> power/cooling -> grid equipment -> commodities`
 
-The successor signal can increase global research/ranking attention by at most ten percentage points, but it does **not** change expected return or robust edge and cannot independently create investment authority. Candidate-specific fundamentals, expectations, valuation, leadership, risk, six-specialist analysis, and CIO qualification must still establish the actual investment case.
+can be evaluated for where leadership is migrating rather than treated as one static AI label. Unknown beneficiaries are ignored. Causal transition changes ranking/research context, not trade authority; candidate-specific economics, risk, six specialists, CIO qualification, and construction still control capital.
 
-Unknown beneficiary symbols are ignored rather than invented. Relationships therefore remain explicit and point-in-time instead of being guessed from names, text similarity, or price action.
+## First-class currency opportunities
 
-## Currency is first-class
+FX is the `currency` global opportunity domain, not economically collapsed into the legacy dollar-liquidity posture sleeve. Currency opportunities can therefore compete beside equities, rates, credit, commodities, crypto, volatility, and alternatives using certified policy divergence, nominal/real-rate differentials, relative growth, funding stress, capital flows, positioning, valuation, trend, and related evidence. The implementation instrument must still be capability-certified and paper-executable.
 
-FX is classified as the `currency` opportunity domain for global capital competition. It is not economically reduced to the legacy `dollar_liquidity` posture sleeve.
+## Graduated conviction
 
-The existing currency-transmission and forward-research architecture can therefore support opportunities driven by policy divergence, real-rate differentials, relative growth, funding stress, capital flows, positioning, trend, and other certified evidence. The actual instrument still must be capability-certified and pass the normal CIO and construction controls.
+Hard failures remain zero-capital boundaries: capability/readiness failure, unresolved evidence veto, evidence below the 70% aggregate / 50% minimum-dimension standards, implementation blocks, unacceptable downside/path risk, invalid scenario structure, no positive feasible weight, or no exact funding source.
 
-## Graduated conviction instead of binary abstention
+Ordinary uncertainty is expressed through size:
 
-Hard failures remain hard zero-capital boundaries. These include capability/readiness failure, evidence vetoes, evidence below the 70% aggregate / 50% minimum-dimension standards, implementation blocks, unacceptable downside/path risk, invalid scenario structure, no positive feasible portfolio weight, and no exact funding source.
+- `exploratory`: normally 0.25%-1%;
+- `provisional`: normally 1%-3%;
+- `qualified`: ordinary full-conviction sizing inside all caps;
+- `high_conviction`: larger eligible sizing inside all caps.
 
-Ordinary uncertainty is expressed through position size:
+Specialist disagreement, an `observe` ensemble, non-preferred posture, or a modest full-conviction shortfall can lower the stage instead of automatically producing cash. Positive rotation capital still requires positive reconciled economics versus the governed alternative, positive robust edge, and nonnegative stressed edge.
 
-- `exploratory`: normally 0.25% to 1%;
-- `provisional`: normally 1% to 3%;
-- `qualified`: ordinary full-conviction sizing within existing caps;
-- `high_conviction`: larger eligible sizing within existing construction caps.
+## Longitudinal leadership and rotation
 
-Ordinary specialist disagreement, an `observe` ensemble, non-preferred posture, marginal success probability, or a modest full-conviction return shortfall can reduce a position to exploratory/provisional rather than automatically creating cash. Positive rotation capital still requires positive reconciled economics versus the best governed alternative, positive robust edge, and a **nonnegative stressed edge**. Adverse probability stress that makes the edge negative therefore cannot be bypassed merely to reduce cash.
+The independent append-only global-rotation side store retains prior candidate snapshots. Each new cycle compares the current point-in-time score/rank/causal stage with the prior snapshot and classifies the candidate as `new`, `accelerating`, `rotating_in`, `stable`, `maturing`, `rotating_out`, or `deteriorating`.
 
-## Derisk and rotate
+Longitudinal state is corroborating information; it cannot independently force an exit. Faster derisking still requires both deteriorating market leadership and deteriorating forward/mispriced economics. When that condition is met, the CIO can reduce a holding and disclose the strongest cross-asset replacement, which must independently clear its own CIO and construction controls.
 
-Existing holding exit/reduce logic remains in force. Global rotation adds one forward-looking deterioration condition: if both market leadership and forward/mispriced economics are deteriorating, a holding that would otherwise remain unchanged may be reduced. The global context also discloses the strongest cross-asset replacement, but that replacement has no automatic authority and must clear its own CIO and construction controls.
+## Two-pass global portfolio competition
 
-This creates the intended loop:
+The production cycle performs one preliminary all-candidate six-specialist pass before final CIO synthesis. Candidate-risk and O(N^2) joint-candidate analysis are memoized for that cycle, and the exact immutable specialist packets are reused in the final canonical pass. This prevents the two-pass architecture from doubling all-market analysis/memory while preserving one final authoritative CIO/construction path.
 
-`leadership emerges -> candidate economics corroborate -> CIO participates -> conviction grows/shrinks -> leadership/economics deteriorate -> exposure derisks -> strongest cross-asset replacement competes for marginal capital`
+`global-compound-optimizer.v1` takes only positive specialist-bounded conviction caps and allocates deployable marginal cash in small increments using a deterministic expected-log-growth proxy with after-cost opportunity edge, downside, hierarchy/causal strength, factor overlap, sector/correlation concentration, and diminishing marginal utility. It cannot raise a specialist conviction cap and has no action authority.
 
-## Cash competition and accountability
+Its proposed basket is then passed through the canonical construction engine simultaneously. The preview can establish that a combination of individually modest opportunities is jointly feasible, but cannot create a CIO action and cannot make a zero preview target a hidden veto. Final construction remains authoritative.
 
-The global context records:
+## Cash must be explained
 
-- minimum required cash;
-- current cash;
-- excess cash;
-- whether at least one positive reviewed globally ranked opportunity exists before specialist/CIO confirmation.
+The side store records required cash, current/excess cash, conviction-stage counts, hard/soft blockers, specialist-indicated weight, optimizer-deployable weight, actual positive deployed weight, unfilled optimized weight, construction blocks, and construction expected-return improvement.
 
-A final positive allocation still requires the six specialists, CIO, funding, risk controls, and final construction. The context does not force investment. Its purpose is to distinguish deliberate cash from cash that remains only because ordinary uncertainty was converted into binary abstention.
-
-After each completed cycle, `SQLiteGlobalRotationStore` persists an independent append-only hash-chained record with the rotation context and one residual-cash classification:
+Residual cash is classified as:
 
 - `required_reserve`;
 - `economic_win_estimate`;
@@ -118,37 +96,33 @@ After each completed cycle, `SQLiteGlobalRotationStore` persists an independent 
 - `hard_constraint_forced`;
 - `unexplained_residual`.
 
-The accountability record also persists conviction-stage counts, candidate-level hard-block counts, soft-constraint counts, indicated conviction weight, construction blocks, and the final construction expected-return improvement when available. An empty queue caused by evidence/capability/operational failure and a reviewed set later blocked entirely by hard CIO controls are explicitly classified as forced cash rather than an economic cash win.
+A small positive trade no longer hides a larger missed opportunity. If the specialist-bounded optimizer identifies material deployable marginal capital, excess cash remains, final positive deployment leaves at least one 0.25% allocation increment materially unfilled, and neither construction nor complete hard blockers explain it, the residual is `unexplained_residual`. That is a decision-process defect, not a valid cash conclusion.
 
-`unexplained_residual` is reserved for the case in which a reviewed deployment opportunity existed, excess cash remained, no final construction block or complete hard-block explanation exists, and the CIO took no positive action. That state is an explicit process diagnostic rather than a valid default-cash conclusion.
+## External-data coverage is measured, not assumed
+
+`evaluation/global_market_coverage.py` audits which domains actually reached the reviewed point-in-time decision set with governed evidence, liquidity, and forward-intelligence coverage. The default required set is equity, fixed income, credit, currency, commodity, and crypto.
+
+This report cannot create a missing provider subscription, exchange entitlement, history, or certified dataset. A passed observed decision-set report therefore does not claim that every security or provider in the world is available. Full production readiness still requires successful complete all-market discovery/screening plus the underlying provider entitlements.
+
+The all-market terminal-screening path is designed to stream the provider-factor publication through bounded SQLite/chunked processing rather than retain the complete global publication in memory, preserving full market scope and the existing fail-closed memory boundary.
+
+## Performance and walk-forward certification
+
+The existing PIT CIO statistical certification remains authoritative for broad CIO process evaluation. Global rotation adds two complementary evaluation layers:
+
+- `evaluation/global_rotation_certification.py`: leadership participation, derisk response, unexplained cash, equity-down portfolio behavior, selected-versus-strongest leadership diagnostics;
+- `evaluation/global_rotation_performance.py`: terminal wealth multiple, annualized after-cost compounding, maximum drawdown, empirical expected shortfall, turnover/cost, mean cash, equity-contraction returns, false-rotation rate, leadership capture ratio, leadership lead time, causal-transition hit rate, and performance segmented by regime/domain.
+
+The comprehensive decision-intelligence certification now exposes separate gates for global market coverage and global rotation performance. These are evidence gates only: they cannot promote policy automatically, authorize public performance claims by themselves, or create investment/live-money authority.
+
+Historical certification must use true point-in-time observations across multiple regimes rather than a synthetic success claim. Software completion is therefore distinct from empirical proof: the platform can contain the full measurement path while certification remains pending until enough real historical/replayed outcomes exist.
 
 ## Persistence boundary
 
-Canonical CIO persistence is not extended or rewritten by global rotation. `cio/persistence.py` remains the existing append-only CIO journal contract for candidates, queues, specialist packets, CIO decisions, theses, construction lineage, daily briefings, and historical learning reconstruction.
+Canonical `cio/persistence.py` is not rewritten by global rotation. The separate `SQLiteGlobalRotationStore` uses its own append-only table and independent hash chain, may share the same SQLite database file, and cannot update/delete canonical CIO journal rows. It also provides the prior immutable rotation snapshot used for longitudinal state. Regression tests preserve canonical CIO journal append/read/integrity behavior.
 
-Global rotation uses the separate `SQLiteGlobalRotationStore` table and independent hash chain in `portfolio/global_rotation_persistence.py`. It may share the same SQLite database file, but it does not update or delete canonical CIO journal rows. Regression coverage verifies that canonical CIO journal append/read/integrity operations still work before and after the global-rotation store is initialized.
+## Resulting decision loop
 
-This boundary is intentional: future global-rotation diagnostics must be added to the side store or another governed extension rather than truncating or replacing canonical CIO persistence.
+`complete global evidence -> canonical qualification -> hierarchy/leadership/causal transition -> all-candidate six-specialist pass -> conviction caps -> marginal compound optimizer -> simultaneous construction preview -> final CIO -> final construction -> paper implementation -> append-only outcome learning -> rotation reassessment`
 
-## Joint portfolio competition
-
-Before individual CIO synthesis, the rotation cycle creates one non-authoritative simultaneous construction preview using the globally ranked reviewed candidate set. Developing opportunities are previewed at bounded exploratory/provisional targets and stronger opportunities at larger targets within their candidate caps.
-
-The preview can show that a basket of individually modest opportunities is jointly feasible. It cannot create a CIO action, and a zero preview target cannot become a hidden veto. Final construction still runs after CIO decisions and remains the independent sizing authority.
-
-## Certification
-
-`evaluation/global_rotation_certification.py` adds point-in-time behavioral evaluation for:
-
-- leadership participation rate;
-- derisk response rate;
-- unexplained excess-cash rate;
-- portfolio positive-return rate during equity-down observations;
-- mean portfolio return during equity-down observations;
-- selected-rotation versus strongest-leadership realized return diagnostics.
-
-Certification has no investment authority, cannot promote policy automatically, and cannot authorize performance claims.
-
-## Authority invariants
-
-The current six specialists remain canonical. The CIO remains the sole investment-action authority. The Red Team remains advisory. Final construction remains the independent sizing authority. Evidence remains point-in-time and fail-closed for hard readiness/integrity failures. Append-only lineage and historical evaluation remain intact. Execution remains paper-only and no real-money capability is introduced.
+The aim is not to force investment or chase the highest trailing return. The aim is to identify the strongest *prospective* after-cost opportunities across certified markets, participate in them in proportion to surviving conviction, and rotate capital when forward economics and leadership migrate.
