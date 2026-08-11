@@ -28,6 +28,9 @@ from providers.massive_options import (
 )
 
 
+_MASSIVE_BASIC_FALLBACK_MAX_EXPIRATIONS = 1
+
+
 class RedundantOptionsError(DatabentoOptionsError):
     """Raised when no configured certified option provider can satisfy the request."""
 
@@ -231,17 +234,23 @@ class RedundantOptionsProvider:
 
         if self.fallback.configured:
             try:
-                # Massive's basic REST path is request-limited. Keep the same
-                # expiration/right policy but inspect the nearest priced contract in
-                # each bucket so failover is bounded and does not lower any evidence,
-                # price, expiry, or portfolio threshold.
+                # Massive Options Basic is request-limited. Preserve the complete
+                # configured underlying universe, DTE window, moneyness rule, and
+                # call/put symmetry while bounding fallback I/O to one expiration.
+                # That reduces the normal fallback path from one definition plus four
+                # bar requests per underlying to one definition plus two bar requests.
+                # No price, evidence, qualification, CIO, or construction threshold is
+                # relaxed; missing authentic bars still fail closed.
                 selections = self.fallback.select_contracts(
                     underlying,
                     underlying_price=underlying_price,
                     as_of=timestamp,
                     minimum_days_to_expiry=minimum_days_to_expiry,
                     maximum_days_to_expiry=maximum_days_to_expiry,
-                    maximum_expirations=maximum_expirations,
+                    maximum_expirations=min(
+                        maximum_expirations,
+                        _MASSIVE_BASIC_FALLBACK_MAX_EXPIRATIONS,
+                    ),
                     candidates_per_bucket=1,
                 )
                 return tuple(_adapt_massive_selection(item) for item in selections)
