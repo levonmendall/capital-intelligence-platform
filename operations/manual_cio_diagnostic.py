@@ -47,6 +47,7 @@ _PROGRESS_STAGES = frozenset(
 _PROGRESS_LANE_STAGES = frozenset(
     {
         "terminal_screening",
+        "terminal_screening_chunk",
         "deep_market_evidence",
         "deep_market_evidence_complete",
         "terminal_accounting_complete",
@@ -81,6 +82,9 @@ _PROGRESS_METRICS = frozenset(
         "excluded",
         "selected",
         "scheduled_lanes",
+        "processed_records",
+        "total_records",
+        "chunk_records",
     }
 )
 
