@@ -110,6 +110,12 @@ from providers.supplemental_quotes import (
     SupplementalQuoteError,
     SupplementalQuoteProvider,
 )
+from providers.treasury_fiscal_data import (
+    TreasuryFiscalDataError,
+    TreasuryFiscalDataProvider,
+    TreasurySecurityReference,
+    build_treasury_fiscal_data_provider,
+)
 
 __all__ = [
     "CoinbaseExchangeProvider",
@@ -170,6 +176,9 @@ __all__ = [
     "SupplementalQuoteError",
     "SupplementalQuoteProvider",
     "TransportResponse",
+    "TreasuryFiscalDataError",
+    "TreasuryFiscalDataProvider",
+    "TreasurySecurityReference",
     "build_coinbase_exchange_provider",
     "build_configured_candidate_screening_provider",
     "build_configured_dataset_provider",
@@ -178,6 +187,7 @@ __all__ = [
     "build_configured_universe_metrics_provider",
     "build_databento_provider",
     "build_kraken_spot_provider",
+    "build_treasury_fiscal_data_provider",
     "fred_cache_key",
     "install_provider_environment_aliases",
     "load_crypto_venue_bindings",
