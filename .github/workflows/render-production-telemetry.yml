@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      TELEMETRY_URL: https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json
+      TELEMETRY_URL: https://capital-intelligence-platform.onrender.com/v1/operations/cio-diagnostic/telemetry
       EXPECTED_RELEASE: ${{ github.event.deployment.sha || github.event.inputs.expected_release || github.sha }}
       TELEMETRY_OUTPUT: /tmp/render-production-telemetry.json
       TELEMETRY_TIMELINE: /tmp/render-production-telemetry-timeline.json

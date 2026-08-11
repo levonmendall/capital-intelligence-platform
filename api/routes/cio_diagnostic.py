@@ -88,7 +88,9 @@ def _market_lanes(
             {
                 "asset_class": str(asset_class),
                 "scheduled": scheduled,
-                "schedule_reason": None if raw.get("schedule_reason") in (None, "") else str(raw.get("schedule_reason"))[:200],
+                "schedule_reason": None
+                if raw.get("schedule_reason") in (None, "")
+                else str(raw.get("schedule_reason"))[:200],
                 "catalog_count": catalog,
                 "deep_analyzed_count": deep,
                 "selected_count": selected,
@@ -173,7 +175,9 @@ def build_cio_diagnostic_audit(
         and attempt_started is not None
         and attempt_started >= diagnostic.started_at.astimezone(timezone.utc)
     )
-    attempt_cycle = str(attempt.get("cycle_key") or "").strip() if current_attempt else ""
+    attempt_cycle = (
+        str(attempt.get("cycle_key") or "").strip() if current_attempt else ""
+    )
 
     return {
         "ready": all_market_evaluation_complete,
@@ -184,16 +188,26 @@ def build_cio_diagnostic_audit(
         "request_id": diagnostic.request_id,
         "diagnostic_id": diagnostic.request_id,
         "requested_at": diagnostic.requested_at.isoformat(),
-        "started_at": None if diagnostic.started_at is None else diagnostic.started_at.isoformat(),
-        "completed_at": None if diagnostic.completed_at is None else diagnostic.completed_at.isoformat(),
+        "started_at": None
+        if diagnostic.started_at is None
+        else diagnostic.started_at.isoformat(),
+        "completed_at": None
+        if diagnostic.completed_at is None
+        else diagnostic.completed_at.isoformat(),
         "diagnostic_age_seconds": _age_seconds(diagnostic.requested_at, now=now),
         "terminal_age_seconds": _age_seconds(diagnostic.completed_at, now=now),
         "stage": diagnostic.progress_stage,
         "cycle_key": diagnostic.cycle_key,
         "snapshot_identifier": diagnostic.snapshot_identifier,
         "context_cycle_matches": cycle_matches,
-        "context_attempt_state": str(attempt.get("state") or "unknown") if current_attempt else "not_current",
-        "context_attempt_cycle_matches": bool(attempt_cycle and diagnostic.cycle_key and attempt_cycle == diagnostic.cycle_key),
+        "context_attempt_state": (
+            str(attempt.get("state") or "unknown") if current_attempt else "not_current"
+        ),
+        "context_attempt_cycle_matches": bool(
+            attempt_cycle
+            and diagnostic.cycle_key
+            and attempt_cycle == diagnostic.cycle_key
+        ),
         "comprehensive_discovery_required": scope_required,
         "comprehensive_discovery_scope_state": scope_state,
         "comprehensive_discovery_complete": scope_complete,
@@ -226,4 +240,20 @@ def cio_diagnostic_status(request: Request, response: Response) -> dict[str, obj
     return payload
 
 
-__all__ = ["build_cio_diagnostic_audit", "cio_diagnostic_status", "router"]
+@router.get(
+    "/v1/operations/cio-diagnostic/telemetry",
+    summary="Read live credential-safe CIO diagnostic telemetry",
+)
+def cio_diagnostic_telemetry(request: Request) -> dict[str, object]:
+    """Expose live progress without using readiness HTTP status as transport state."""
+
+    payload = build_cio_diagnostic_audit(settings=request.app.state.settings)
+    return {**payload, "credential_safe": True}
+
+
+__all__ = [
+    "build_cio_diagnostic_audit",
+    "cio_diagnostic_status",
+    "cio_diagnostic_telemetry",
+    "router",
+]
