@@ -120,7 +120,6 @@ def build_cio_diagnostic_audit(
             "state": "not_recorded",
             "detail": "no release-triggered CIO diagnostic has been recorded",
             "active_release": release,
-            "credential_safe": True,
             "paper_only": True,
             "real_money_authorized": False,
             "all_market_evaluation_complete": False,
@@ -225,7 +224,6 @@ def build_cio_diagnostic_audit(
         "scheduled_market_coverage_complete": scheduled_market_coverage_complete,
         "all_market_evaluation_complete": all_market_evaluation_complete,
         "market_lanes": list(lanes),
-        "credential_safe": True,
         "paper_only": True,
         "real_money_authorized": False,
     }
@@ -247,9 +245,10 @@ def cio_diagnostic_status(request: Request, response: Response) -> dict[str, obj
     summary="Read live credential-safe CIO diagnostic telemetry",
 )
 def cio_diagnostic_telemetry(request: Request) -> dict[str, object]:
-    """Expose live diagnostic progress without using readiness HTTP status as transport state."""
+    """Expose live progress without using readiness HTTP status as transport state."""
 
-    return build_cio_diagnostic_audit(settings=request.app.state.settings)
+    payload = build_cio_diagnostic_audit(settings=request.app.state.settings)
+    return {**payload, "credential_safe": True}
 
 
 __all__ = [
