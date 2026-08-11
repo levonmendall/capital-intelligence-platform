@@ -7,6 +7,8 @@ from enum import Enum
 from typing import Any, Mapping
 
 from evaluation.cio_statistical_certification import CIOStatisticalCertificationReport
+from evaluation.global_market_coverage import GlobalMarketCoverageReport
+from evaluation.global_rotation_performance import GlobalRotationPerformanceReport
 
 
 class CertificationState(str, Enum):
@@ -37,11 +39,13 @@ class ComprehensiveDecisionIntelligenceCertification:
     blocking_failures: tuple[str, ...]
     empirical_pending: tuple[str, ...]
     statistically_certified: bool
-    public_performance_claim_authorized: bool
+    global_rotation_performance_certified: bool = False
+    global_market_coverage_certified: bool = False
+    public_performance_claim_authorized: bool = False
     automatic_policy_promotion_authorized: bool = False
     investment_authority: bool = False
     real_money_authorized: bool = False
-    schema_version: str = "comprehensive-decision-intelligence-certification.v1"
+    schema_version: str = "comprehensive-decision-intelligence-certification.v2"
 
     def __post_init__(self) -> None:
         if self.as_of.tzinfo is None or self.as_of.utcoffset() is None:
@@ -62,6 +66,8 @@ class ComprehensiveDecisionIntelligenceCertification:
             "blocking_failures": list(self.blocking_failures),
             "empirical_pending": list(self.empirical_pending),
             "statistically_certified": self.statistically_certified,
+            "global_rotation_performance_certified": self.global_rotation_performance_certified,
+            "global_market_coverage_certified": self.global_market_coverage_certified,
             "public_performance_claim_authorized": self.public_performance_claim_authorized,
             "automatic_policy_promotion_authorized": False,
             "investment_authority": False,
@@ -95,6 +101,8 @@ def build_comprehensive_decision_intelligence_certification(
     expectations_resolution_available: bool,
     portfolio_risk_synthesis_available: bool,
     atomic_relative_value_execution_certified: bool,
+    global_market_coverage: GlobalMarketCoverageReport | None = None,
+    global_rotation_performance: GlobalRotationPerformanceReport | None = None,
     human_performance_claim_approval: bool = False,
 ) -> ComprehensiveDecisionIntelligenceCertification:
     if as_of.tzinfo is None or as_of.utcoffset() is None:
@@ -102,6 +110,33 @@ def build_comprehensive_decision_intelligence_certification(
     unresolved = tuple(str(item) for item in information_gap_audit.get("unresolved_domains", ()) if str(item).strip())
     certified_domains = tuple(str(item) for item in information_gap_audit.get("decision_certified_domains", ()) if str(item).strip())
     statistical_certified = bool(statistical_report is not None and statistical_report.statistically_certified)
+    coverage_certified = bool(
+        global_market_coverage is not None
+        and global_market_coverage.globally_rotation_ready
+    )
+    rotation_performance_certified = bool(
+        global_rotation_performance is not None
+        and global_rotation_performance.performance_behavior_certified
+    )
+    coverage_evidence = (
+        ("global market coverage report not yet available",)
+        if global_market_coverage is None
+        else (
+            f"reviewed candidates={global_market_coverage.reviewed_candidate_count}",
+            f"required domains present={global_market_coverage.all_required_domains_present}",
+            f"forward-intelligence ratio={global_market_coverage.forward_intelligence_ratio:.1%}",
+        )
+    )
+    rotation_evidence = (
+        ("global rotation walk-forward outcomes not yet available",)
+        if global_rotation_performance is None
+        else (
+            f"rotation observations={global_rotation_performance.observation_count}",
+            f"terminal wealth multiple={global_rotation_performance.terminal_wealth_multiple:.4f}",
+            f"false-rotation rate={global_rotation_performance.false_rotation_rate:.1%}",
+            f"leadership capture={global_rotation_performance.leadership_capture_ratio}",
+        )
+    )
     gates = (
         _gate("all_market_runtime", all_market_runtime_certified, "capability-qualified all-market exact-release certification"),
         _gate("six_specialist_path", six_specialist_path_certified, "exactly six advisory specialists precede CIO"),
@@ -109,6 +144,8 @@ def build_comprehensive_decision_intelligence_certification(
         _gate("portfolio_construction", construction_certified, "canonical portfolio construction certified"),
         _gate("paper_execution_reconciliation", paper_execution_reconciliation_certified, "reconciled paper-only implementation certified"),
         _gate("decision_explanation", decision_explanation_certified, "Decision Intelligence evidence-to-decision explanation available"),
+        _gate("global_market_rotation_coverage", coverage_certified, *coverage_evidence, blocking=False),
+        _gate("global_rotation_performance", rotation_performance_certified, *rotation_evidence, blocking=False),
         _gate("causal_resolution", causal_resolution_available, "causal hypotheses persist and resolve PIT", blocking=False),
         _gate("expectations_resolution", expectations_resolution_available, "expectations persist and resolve PIT", blocking=False),
         _gate("portfolio_risk_synthesis", portfolio_risk_synthesis_available, "current-versus-proposed portfolio stress synthesis available", blocking=False),
@@ -117,7 +154,7 @@ def build_comprehensive_decision_intelligence_certification(
         _gate(
             "statistical_edge",
             statistical_certified,
-            *( (f"resolved decisions={statistical_report.resolved_decision_count}",) if statistical_report is not None else ("statistically qualifying resolved CIO sample not yet available",) ),
+            *((f"resolved decisions={statistical_report.resolved_decision_count}",) if statistical_report is not None else ("statistically qualifying resolved CIO sample not yet available",)),
             blocking=False,
         ),
     )
@@ -133,6 +170,7 @@ def build_comprehensive_decision_intelligence_certification(
     performance_claim = bool(
         state is CertificationState.CERTIFIED
         and statistical_certified
+        and rotation_performance_certified
         and human_performance_claim_approval
     )
     return ComprehensiveDecisionIntelligenceCertification(
@@ -142,6 +180,8 @@ def build_comprehensive_decision_intelligence_certification(
         blocking_failures=blocking_failures,
         empirical_pending=empirical_pending,
         statistically_certified=statistical_certified,
+        global_rotation_performance_certified=rotation_performance_certified,
+        global_market_coverage_certified=coverage_certified,
         public_performance_claim_authorized=performance_claim,
     )
 
