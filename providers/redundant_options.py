@@ -19,6 +19,11 @@ from providers.databento_options import (
     DatabentoOptionsError,
     DatabentoOptionsProvider,
 )
+from providers.redundancy_audit import (
+    ProviderCapabilityKey,
+    current_redundancy_ledger,
+)
+from providers.single_pass_massive_options import SinglePassMassiveOptionsProvider
 from providers.massive_options import (
     MASSIVE_OPRA_DATASET,
     MassiveOptionBar,
@@ -178,6 +183,32 @@ def _adapt_massive_bar(
     )
 
 
+def _option_audit_keys(capability: str):
+    ledger = current_redundancy_ledger()
+    primary_key = ProviderCapabilityKey(
+        "databento", capability, DATABENTO_OPRA_DATASET
+    )
+    fallback_key = ProviderCapabilityKey(
+        "massive", capability, MASSIVE_OPRA_DATASET
+    )
+    return ledger, primary_key, fallback_key
+
+
+def _selection_sources(selections: Sequence[RedundantOptionSelection]) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            source
+            for item in selections
+            for source in (
+                item.definition.source_identifier,
+                item.bar.source_identifier,
+            )
+            if source
+        )
+    )
+
+
+
 class RedundantOptionsProvider:
     """Databento-primary, Massive-fallback option evidence router."""
 
@@ -216,8 +247,26 @@ class RedundantOptionsProvider:
         candidates_per_bucket: int = 8,
     ) -> tuple[RedundantOptionSelection, ...]:
         timestamp = _aware(as_of, field_name="as_of")
+        ledger, primary_key, fallback_key = _option_audit_keys("option_contract_selection")
+        if ledger is not None:
+            ledger.declare(
+                primary_key,
+                configured=self.primary.configured,
+                authenticated=False,
+                routed=True,
+                certified_for_evidence_role=True,
+            )
+            ledger.declare(
+                fallback_key,
+                configured=self.fallback.configured,
+                authenticated=False,
+                routed=True,
+                certified_for_evidence_role=True,
+            )
         primary_error: BaseException | None = None
         if self.primary.configured:
+            if ledger is not None:
+                ledger.attempted(primary_key)
             try:
                 selections = self.primary.select_contracts(
                     underlying,
@@ -229,11 +278,24 @@ class RedundantOptionsProvider:
                     candidates_per_bucket=candidates_per_bucket,
                 )
                 if selections:
-                    return tuple(_adapt_databento_selection(item) for item in selections)
+                    adapted = tuple(_adapt_databento_selection(item) for item in selections)
+                    if ledger is not None:
+                        ledger.used(
+                            primary_key,
+                            source_identifiers=_selection_sources(adapted),
+                            failed_over=False,
+                        )
+                    return adapted
+                if ledger is not None:
+                    ledger.failed(primary_key, "insufficient_evidence")
             except DatabentoOptionsError as error:
                 primary_error = error
+                if ledger is not None:
+                    ledger.failed(primary_key, _failure_class(error))
 
         if self.fallback.configured:
+            if ledger is not None:
+                ledger.attempted(fallback_key)
             try:
                 # Massive Options Basic is request-limited. Preserve the complete
                 # configured underlying universe, DTE window, moneyness rule, and
@@ -254,8 +316,21 @@ class RedundantOptionsProvider:
                     ),
                     candidates_per_bucket=1,
                 )
-                return tuple(_adapt_massive_selection(item) for item in selections)
+                adapted = tuple(_adapt_massive_selection(item) for item in selections)
+                if adapted:
+                    if ledger is not None:
+                        ledger.used(
+                            fallback_key,
+                            source_identifiers=_selection_sources(adapted),
+                            failed_over=bool(self.primary.configured),
+                        )
+                    return adapted
+                if ledger is not None:
+                    ledger.failed(fallback_key, "insufficient_evidence")
+                return adapted
             except MassiveOptionsError as fallback_error:
+                if ledger is not None:
+                    ledger.failed(fallback_key, _failure_class(fallback_error))
                 raise RedundantOptionsError(
                     "Certified option providers are unavailable; "
                     f"primary={_failure_class(primary_error)}; "
@@ -281,6 +356,22 @@ class RedundantOptionsProvider:
         history_days: int = 45,
     ) -> tuple[date, Mapping[str, tuple[RedundantOptionBar, ...]]]:
         timestamp = _aware(as_of, field_name="as_of")
+        ledger, primary_key, fallback_key = _option_audit_keys("option_daily_history")
+        if ledger is not None:
+            ledger.declare(
+                primary_key,
+                configured=self.primary.configured,
+                authenticated=False,
+                routed=True,
+                certified_for_evidence_role=True,
+            )
+            ledger.declare(
+                fallback_key,
+                configured=self.fallback.configured,
+                authenticated=False,
+                routed=True,
+                certified_for_evidence_role=True,
+            )
         normalized = tuple(
             (instrument_id, str(raw_symbol).strip().upper())
             for instrument_id, raw_symbol in instruments
@@ -299,18 +390,29 @@ class RedundantOptionsProvider:
             and instrument_id > 0
         )
         if self.primary.configured and primary_instruments:
+            if ledger is not None:
+                ledger.attempted(primary_key)
             try:
                 _session, primary_bars = self.primary.latest_daily_bars(
                     primary_instruments,
                     as_of=timestamp,
                     history_days=history_days,
                 )
+                primary_sources: list[str] = []
                 for raw_symbol, bars in primary_bars.items():
-                    result[str(raw_symbol).strip().upper()] = tuple(
-                        _adapt_databento_bar(item) for item in bars
+                    adapted_bars = tuple(_adapt_databento_bar(item) for item in bars)
+                    result[str(raw_symbol).strip().upper()] = adapted_bars
+                    primary_sources.extend(item.source_identifier for item in adapted_bars)
+                if primary_sources and ledger is not None:
+                    ledger.used(
+                        primary_key,
+                        source_identifiers=tuple(dict.fromkeys(primary_sources)),
+                        failed_over=False,
                     )
             except DatabentoOptionsError as error:
                 primary_error = error
+                if ledger is not None:
+                    ledger.failed(primary_key, _failure_class(error))
 
         missing = tuple(
             raw_symbol for _instrument_id, raw_symbol in normalized if raw_symbol not in result
@@ -318,21 +420,34 @@ class RedundantOptionsProvider:
         fallback_error: BaseException | None = None
         if missing and self.fallback.configured:
             aliases = {_massive_ticker(raw_symbol): raw_symbol for raw_symbol in missing}
+            if ledger is not None:
+                ledger.attempted(fallback_key)
             try:
                 _session, fallback_bars = self.fallback.latest_daily_bars(
                     tuple((None, ticker) for ticker in aliases),
                     as_of=timestamp,
                     history_days=history_days,
                 )
+                fallback_sources: list[str] = []
                 for massive_symbol, bars in fallback_bars.items():
                     normalized_massive = str(massive_symbol).strip().upper()
                     original_symbol = aliases.get(normalized_massive, normalized_massive)
-                    result[original_symbol] = tuple(
+                    adapted_bars = tuple(
                         _adapt_massive_bar(item, raw_symbol=original_symbol)
                         for item in bars
                     )
+                    result[original_symbol] = adapted_bars
+                    fallback_sources.extend(item.source_identifier for item in adapted_bars)
+                if fallback_sources and ledger is not None:
+                    ledger.used(
+                        fallback_key,
+                        source_identifiers=tuple(dict.fromkeys(fallback_sources)),
+                        failed_over=True,
+                    )
             except MassiveOptionsError as error:
                 fallback_error = error
+                if ledger is not None:
+                    ledger.failed(fallback_key, _failure_class(error))
 
         if not result and (primary_error is not None or fallback_error is not None):
             active_error = fallback_error or primary_error

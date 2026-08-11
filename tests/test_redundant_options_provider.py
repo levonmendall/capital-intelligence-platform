@@ -16,6 +16,7 @@ from providers.massive_options import (
     MassiveOptionSelection,
     MassiveOptionsError,
 )
+from providers.redundancy_audit import begin_redundancy_cycle
 from providers.redundant_options import RedundantOptionsError, RedundantOptionsProvider
 
 
@@ -218,3 +219,53 @@ def test_both_providers_unavailable_remains_fail_closed() -> None:
     message = str(captured.value)
     assert "primary=access_or_credit_cap" in message
     assert "fallback=rate_limit" in message
+
+
+def test_option_failover_publishes_actual_attempt_sequence() -> None:
+    ledger = begin_redundancy_cycle("option-failover", AS_OF)
+    provider = RedundantOptionsProvider(
+        primary=_CappedPrimary(),
+        fallback=_HealthyFallback(),
+    )
+
+    selections = _select(provider)
+
+    assert selections[0].definition.provider_kind == "massive"
+    records = {
+        (item["provider"], item["capability"]): item
+        for item in ledger.to_dict()["records"]
+    }
+    primary = records[("databento", "option_contract_selection")]
+    fallback = records[("massive", "option_contract_selection")]
+    assert primary["configured"] is True
+    assert primary["attempted"] is True
+    assert primary["used"] is False
+    assert primary["failure_class"] == "access_or_credit_cap"
+    assert fallback["configured"] is True
+    assert fallback["attempted"] is True
+    assert fallback["authenticated"] is True
+    assert fallback["used"] is True
+    assert fallback["failed_over"] is True
+
+
+def test_healthy_option_primary_keeps_fallback_visible_but_unattempted() -> None:
+    ledger = begin_redundancy_cycle("option-primary", AS_OF)
+    provider = RedundantOptionsProvider(
+        primary=_HealthyPrimary(),
+        fallback=_HealthyFallback(),
+    )
+
+    _select(provider)
+
+    records = {
+        (item["provider"], item["capability"]): item
+        for item in ledger.to_dict()["records"]
+    }
+    primary = records[("databento", "option_contract_selection")]
+    fallback = records[("massive", "option_contract_selection")]
+    assert primary["used"] is True
+    assert primary["authenticated"] is True
+    assert fallback["configured"] is True
+    assert fallback["authenticated"] is False
+    assert fallback["attempted"] is False
+    assert fallback["used"] is False

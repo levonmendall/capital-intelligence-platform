@@ -13,6 +13,11 @@ from typing import Any, Callable, Mapping
 
 import requests
 
+from providers.redundancy_audit import (
+    ProviderCapabilityKey,
+    current_redundancy_ledger,
+)
+
 
 TREASURY_AUCTIONS_ENDPOINT = (
     "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
@@ -128,6 +133,21 @@ class TreasuryFiscalDataProvider:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("as_of must be timezone-aware")
         as_of_date = as_of.astimezone(timezone.utc).date()
+        audit_key = ProviderCapabilityKey(
+            "treasury_fiscal_data",
+            "treasury_security_reference",
+            "auctions_query",
+        )
+        ledger = current_redundancy_ledger()
+        if ledger is not None:
+            ledger.declare(
+                audit_key,
+                configured=True,
+                authenticated=True,
+                routed=True,
+                certified_for_evidence_role=True,
+            )
+            ledger.attempted(audit_key)
         fields = ",".join(
             (
                 "record_date",
@@ -231,12 +251,21 @@ class TreasuryFiscalDataProvider:
             raise TreasuryFiscalDataError(
                 "Treasury Fiscal Data returned no active point-in-time securities"
             )
-        return tuple(
+        result = tuple(
             sorted(
                 latest_by_cusip.values(),
                 key=lambda item: (item.maturity_date, item.cusip),
             )
         )
+        if ledger is not None:
+            ledger.used(
+                audit_key,
+                source_identifiers=tuple(
+                    item.evidence_identifier for item in result[:25]
+                ),
+                failed_over=False,
+            )
+        return result
 
 
 def build_treasury_fiscal_data_provider() -> TreasuryFiscalDataProvider:

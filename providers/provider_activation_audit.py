@@ -64,8 +64,16 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ),
     ProviderActivationSpec(
         "massive",
-        ("option_reference", "option_history"),
-        "governed options fallback provider",
+        (
+            "option_reference",
+            "option_history",
+            "us_equity_history",
+            "fx_history",
+            "crypto_history",
+            "us_futures_reference",
+            "us_futures_history",
+        ),
+        "governed options fallback and capability-scoped all-asset market-history redundancy",
         ("MASSIVE_API_KEY",),
     ),
     ProviderActivationSpec(
@@ -88,8 +96,14 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ),
     ProviderActivationSpec(
         "tradier",
-        ("supplemental_quote", "us_equity_market_data", "us_option_market_data"),
-        "supplemental quote cross-check",
+        (
+            "supplemental_quote",
+            "us_equity_market_data",
+            "us_equity_history",
+            "us_option_market_data",
+            "active_option_chain_corroboration",
+        ),
+        "supplemental quote, equity-history failover, and active option-chain corroboration",
         ("TRADIER_API_KEY",),
         note=(
             "Tradier is corroborating U.S. equity/options market data only; it has no "
@@ -105,14 +119,14 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ),
     ProviderActivationSpec(
         "coinbase",
-        ("crypto_quote_validation",),
-        "crypto venue evidence adapter",
+        ("crypto_quote_validation", "crypto_history"),
+        "crypto venue quote validation and native history evidence adapter",
         keyless=True,
     ),
     ProviderActivationSpec(
         "kraken",
-        ("crypto_quote_validation",),
-        "crypto venue evidence adapter",
+        ("crypto_quote_validation", "crypto_history"),
+        "crypto venue quote validation and native history evidence adapter",
         keyless=True,
     ),
     ProviderActivationSpec(
@@ -171,13 +185,12 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ),
     ProviderActivationSpec(
         "finra",
-        ("fixed_income_market_structure", "trace"),
-        None,
+        ("fixed_income_market_structure", "trace", "specialist_environment_context"),
+        "governed public-live fixed-income specialist/environment context",
         ("FINRA_CLIENT_ID", "FINRA_CLIENT_SECRET"),
         note=(
-            "FINRA credentials and live fixed-income probing are wired, but FINRA market "
-            "context is intentionally reported unrouted until a governed CIO evidence "
-            "consumer is added; aggregate TRACE data is not substituted for bond prices."
+            "FINRA aggregate TRACE context is routed to specialist/environment evidence only; "
+            "it cannot satisfy individual-bond identity, price, history, valuation, or execution."
         ),
     ),
 )

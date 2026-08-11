@@ -21,6 +21,11 @@ from urllib.parse import urlparse
 
 import requests
 
+from providers.finra_context import (
+    FinraContextError,
+    collect_finra_fixed_income_context,
+)
+
 from data.decision_information import (
     DecisionInformationRecord,
     InformationProvenance,
@@ -344,6 +349,42 @@ class PublicLiveInformationProvider:
                     limitations=source.limitations,
                 )
             )
+        try:
+            finra_record = collect_finra_fixed_income_context(as_of=evaluated_at)
+        except FinraContextError as error:
+            results.append(
+                PublicLiveSourceResult(
+                    source_identifier="finra-fixed-income-context",
+                    source_name="FINRA Fixed Income Market Context",
+                    retrieved_at=evaluated_at,
+                    configured=True,
+                    succeeded=False,
+                    record_count=0,
+                    content_hash=None,
+                    error=str(error),
+                    limitations=(
+                        "Aggregate TRACE context only; never individual-security pricing.",
+                    ),
+                )
+            )
+        else:
+            if finra_record is not None:
+                records.append(finra_record)
+                results.append(
+                    PublicLiveSourceResult(
+                        source_identifier="finra-fixed-income-context",
+                        source_name="FINRA Fixed Income Market Context",
+                        retrieved_at=evaluated_at,
+                        configured=True,
+                        succeeded=True,
+                        record_count=1,
+                        content_hash=finra_record.content_hash,
+                        error=None,
+                        limitations=(
+                            "Aggregate TRACE context only; never individual-security pricing.",
+                        ),
+                    )
+                )
         deduplicated = {item.content_hash: item for item in records}
         return PublicLiveCoverageReport(
             catalog_identifier=self.catalog.identifier,

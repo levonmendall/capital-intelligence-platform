@@ -114,7 +114,7 @@ def test_activation_audit_distinguishes_routed_and_unrouted_sources(tmp_path) ->
     assert _record(records, "nasa-firms").state == "active"
     assert _record(records, "census").state == "active"
     assert _record(records, "treasury-fiscal-data").state == "keyless_active"
-    assert _record(records, "finra").state == "configured_but_unrouted"
+    assert _record(records, "finra").state == "active"
     assert _record(records, "lseg-global-market-data").state == "configured_but_unrouted"
     assert not any(item.provider_id == "databento-execution-data" for item in records)
 
@@ -134,7 +134,7 @@ def test_lone_finra_api_key_is_not_misrepresented_as_complete_oauth_pair(tmp_pat
 
     finra = _record(records, "finra")
     assert finra.credential_configured is False
-    assert finra.state == "unrouted"
+    assert finra.state == "missing_credential"
 
 
 def test_activation_summary_is_credential_safe(tmp_path) -> None:
