@@ -58,6 +58,7 @@ _DIAGNOSTIC_BOOLEAN_KEYS = (
     "paper_only",
     "real_money_authorized",
     "context_cycle_matches",
+    "context_attempt_cycle_matches",
     "comprehensive_discovery_required",
     "comprehensive_discovery_complete",
     "scheduled_market_coverage_complete",
@@ -120,7 +121,21 @@ def _assert_credential_safe_source(payload: Mapping[str, Any]) -> None:
     if payload.get("paper_only") is not True:
         raise UnsafeTelemetryPayload("public audit is not marked paper-only")
     if payload.get("real_money_authorized") is not False:
-        raise UnsafeTelemetryPayload("public audit does not explicitly deny real-money authority")
+        raise UnsafeTelemetryPayload(
+            "public audit does not explicitly deny real-money authority"
+        )
+
+
+def _safe_stage(value: object) -> str | None:
+    stage = str(value or "").strip().lower()
+    if not stage or len(stage) > 100:
+        return None
+    if not all(
+        character.isalnum() or character in {"_", "-", ":"}
+        for character in stage
+    ):
+        return None
+    return stage
 
 
 def _parse_progress_stage(detail: object) -> str | None:
@@ -128,12 +143,28 @@ def _parse_progress_stage(detail: object) -> str | None:
     prefix = "governed_progress="
     if not raw.startswith(prefix):
         return None
-    stage = raw[len(prefix) :].split(";", 1)[0].strip()
-    if not stage or len(stage) > 80:
+    return _safe_stage(raw[len(prefix) :].split(";", 1)[0])
+
+
+def _safe_identifier(value: object) -> str | None:
+    identifier = str(value or "").strip()
+    if not identifier or len(identifier) > 128:
         return None
-    if not all(character.isalnum() or character in {"_", "-"} for character in stage):
+    if not all(character.isalnum() or character in {"_", "-", ":"} for character in identifier):
         return None
-    return stage
+    return identifier
+
+
+def _safe_nonnegative_number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0 or parsed != parsed or parsed == float("inf"):
+        return None
+    return round(parsed, 3)
 
 
 def _safe_market_lanes(value: object) -> list[dict[str, object]]:
@@ -153,9 +184,7 @@ def _safe_market_lanes(value: object) -> list[dict[str, object]]:
 
 
 def _elapsed_seconds(
-    payload: Mapping[str, Any],
-    *,
-    captured_at: datetime,
+    payload: Mapping[str, Any], *, captured_at: datetime
 ) -> float | None:
     requested_at = _parse_datetime(payload.get("requested_at"))
     if requested_at is None:
@@ -175,21 +204,31 @@ def build_snapshot(
     latency_ms: float | None = None,
 ) -> dict[str, object]:
     """Build an allowlisted production snapshot from the public diagnostic audit."""
-
     _assert_credential_safe_source(payload)
     now = (captured_at or _utc_now()).astimezone(timezone.utc)
     active_release = str(payload.get("active_release") or "")
     release_matches_expected = bool(
         active_release == expected_release and payload.get("release_matches") is True
     )
+    direct_stage = _safe_stage(payload.get("stage"))
     diagnostic: dict[str, object] = {
+        "diagnostic_id": _safe_identifier(
+            payload.get("diagnostic_id") or payload.get("request_id")
+        ),
         "state": str(payload.get("state") or "unknown"),
         "active_release": active_release,
         "release_matches_expected": release_matches_expected,
         "requested_at": str(payload.get("requested_at") or "") or None,
         "completed_at": str(payload.get("completed_at") or "") or None,
         "elapsed_seconds": _elapsed_seconds(payload, captured_at=now),
-        "stage": _parse_progress_stage(payload.get("detail")),
+        "diagnostic_age_seconds": _safe_nonnegative_number(
+            payload.get("diagnostic_age_seconds")
+        ),
+        "terminal_age_seconds": _safe_nonnegative_number(
+            payload.get("terminal_age_seconds")
+        ),
+        "stage": direct_stage or _parse_progress_stage(payload.get("detail")),
+        "context_attempt_state": _safe_identifier(payload.get("context_attempt_state")),
         "limitation_count": (
             len(payload.get("comprehensive_discovery_limitations"))
             if isinstance(payload.get("comprehensive_discovery_limitations"), list)
@@ -206,7 +245,6 @@ def build_snapshot(
         http["status"] = int(http_status)
     if latency_ms is not None:
         http["latency_ms"] = round(max(0.0, float(latency_ms)), 3)
-
     return {
         "schema_version": _SCHEMA_VERSION,
         "captured_at": _iso_z(now),
@@ -245,9 +283,7 @@ def unavailable_snapshot(
 
 
 def unsafe_snapshot(
-    *,
-    expected_release: str,
-    captured_at: datetime | None = None,
+    *, expected_release: str, captured_at: datetime | None = None
 ) -> dict[str, object]:
     now = (captured_at or _utc_now()).astimezone(timezone.utc)
     return {
@@ -262,12 +298,9 @@ def unsafe_snapshot(
 
 
 def fetch_public_audit(
-    url: str,
-    *,
-    timeout_seconds: float = 10.0,
+    url: str, *, timeout_seconds: float = 10.0
 ) -> tuple[Mapping[str, Any], int, float]:
     """GET the public audit without credentials, cookies, or mutation-capable methods."""
-
     request = urllib.request.Request(
         url,
         method="GET",
@@ -305,10 +338,15 @@ def capture_once(
         )
     except UnsafeTelemetryPayload:
         return unsafe_snapshot(
-            expected_release=expected_release,
-            captured_at=captured_at,
+            expected_release=expected_release, captured_at=captured_at
         ), True
-    except (OSError, TypeError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+        urllib.error.URLError,
+    ) as error:
         status = int(error.code) if isinstance(error, urllib.error.HTTPError) else None
         return unavailable_snapshot(
             expected_release=expected_release,
@@ -367,7 +405,9 @@ def _terminal_failure(snapshot: Mapping[str, object]) -> bool:
     )
 
 
-def _failure_class(snapshot: Mapping[str, object], *, timed_out: bool = False) -> str:
+def _failure_class(
+    snapshot: Mapping[str, object], *, timed_out: bool = False
+) -> str:
     diagnostic = _diagnostic(snapshot)
     if (
         snapshot.get("capture_state") == "ok"
@@ -424,7 +464,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.url.strip() or not args.expected_release.strip():
         raise SystemExit("url and expected-release are required")
     if args.watch_seconds < 0 or args.interval_seconds <= 0:
-        raise SystemExit("watch-seconds cannot be negative and interval-seconds must be positive")
+        raise SystemExit(
+            "watch-seconds cannot be negative and interval-seconds must be positive"
+        )
 
     started = time.monotonic()
     deadline = started + args.watch_seconds
@@ -433,8 +475,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     final_snapshot: dict[str, object] | None = None
     while True:
         snapshot, unsafe = capture_once(
-            url=args.url,
-            expected_release=args.expected_release,
+            url=args.url, expected_release=args.expected_release
         )
         now = time.monotonic()
         terminal_failure = _terminal_failure(snapshot)
