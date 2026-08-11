@@ -33,7 +33,7 @@ def test_actual_repository_secret_aliases_reach_runtime_canonicals() -> None:
         "NASA_API_KEY": "nasa-secret",
         "US_CENSUS_API_KEY": "census-secret",
         "TRADIER_API_KEY": "tradier-secret",
-        "FINRA_API_CLIENT_ID": "finra-id",
+        "FINRA_API_KEY": "finra-id",
         "FINRA_API_CLIENT_SECRET": "finra-secret",
         "OPEN_FIGI_API_KEY": "figi-secret",
         "TWELVE_API_KEY": "twelve-secret",
@@ -100,8 +100,8 @@ def test_activation_audit_distinguishes_routed_and_unrouted_sources(tmp_path) ->
         "CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY": "massive-secret",
         "DATABENTO_API_KEY": "databento-secret",
         "LSEG_MARKET_DATA_API_KEY": "lseg-secret",
-        "FINRA_CLIENT_ID": "finra-id",
-        "FINRA_CLIENT_SECRET": "finra-secret",
+        "FINRA_API_KEY": "finra-id",
+        "FINRA_API_CLIENT_SECRET": "finra-secret",
         "TRADIER_API_KEY": "tradier-secret",
         "NASA_API_KEY": "nasa-secret",
         "US_CENSUS_API_KEY": "census-secret",
@@ -119,7 +119,7 @@ def test_activation_audit_distinguishes_routed_and_unrouted_sources(tmp_path) ->
     assert not any(item.provider_id == "databento-execution-data" for item in records)
 
 
-def test_generic_finra_api_key_is_not_misrepresented_as_oauth_pair(tmp_path) -> None:
+def test_lone_finra_api_key_is_not_misrepresented_as_complete_oauth_pair(tmp_path) -> None:
     config = tmp_path / "config"
     config.mkdir()
     (config / "all_market_provider_bundle.json").write_text(
@@ -146,8 +146,8 @@ def test_activation_summary_is_credential_safe(tmp_path) -> None:
     )
     environment = {
         "MASSIVE_API_KEY": "do-not-leak-massive",
-        "FINRA_CLIENT_ID": "do-not-leak-id",
-        "FINRA_CLIENT_SECRET": "do-not-leak-secret",
+        "FINRA_API_KEY": "do-not-leak-id",
+        "FINRA_API_CLIENT_SECRET": "do-not-leak-secret",
         "TRADIER_API_KEY": "do-not-leak-tradier",
     }
 
@@ -158,3 +158,4 @@ def test_activation_summary_is_credential_safe(tmp_path) -> None:
     assert "do-not-leak" not in serialized
     assert "MASSIVE_API_KEY" in serialized
     assert "TRADIER_API_KEY" in serialized
+    assert "FINRA_API_KEY" in serialized
