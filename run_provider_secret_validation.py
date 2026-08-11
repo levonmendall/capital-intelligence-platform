@@ -16,14 +16,8 @@ from typing import Any
 
 import requests
 
-from providers.alpaca_paper import (
-    AlpacaPaperProviderError,
-    create_alpaca_paper_client,
-)
-from providers.finra_fixed_income import (
-    FinraFixedIncomeError,
-    FinraFixedIncomeProvider,
-)
+from providers.alpaca_paper import AlpacaPaperProviderError, create_alpaca_paper_client
+from providers.finra_fixed_income import FinraFixedIncomeError, FinraFixedIncomeProvider
 from providers.fred import FREDProvider
 from providers.openfigi import OpenFigiMappingJob, OpenFigiProvider
 from providers.provider_credentials import (
@@ -35,11 +29,7 @@ from providers.provider_credentials import (
 )
 
 
-ALPACA_KEY_NAMES = (
-    "APCA_API_KEY_ID",
-    "ALPACA_API_KEY_ID",
-    "ALPACA_API_KEY",
-)
+ALPACA_KEY_NAMES = ("APCA_API_KEY_ID", "ALPACA_API_KEY_ID", "ALPACA_API_KEY")
 ALPACA_SECRET_NAMES = (
     "APCA_API_SECRET_KEY",
     "ALPACA_API_SECRET_KEY",
@@ -48,10 +38,7 @@ ALPACA_SECRET_NAMES = (
 )
 FRED_NAMES = ("FRED_API_KEY",)
 EODHD_NAMES = EODHDCredentialProbe.environment_names
-OPENFIGI_NAMES = (
-    "OPEN_FIGI_API_KEY",
-    "OPENFIGI_API_KEY",
-)
+OPENFIGI_NAMES = ("OPEN_FIGI_API_KEY", "OPENFIGI_API_KEY")
 TRADIER_NAMES = (
     "TRADIER_API_KEY",
     "TRADIER_API_TOKEN",
@@ -65,6 +52,7 @@ FINRA_CLIENT_ID_NAMES = (
     "CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID",
     "FINRA_API_CLIENT_ID",
     "FINRA_API_KEY_ID",
+    "FINRA_API_KEY",
 )
 FINRA_CLIENT_SECRET_NAMES = (
     "FINRA_CLIENT_SECRET",
@@ -73,7 +61,6 @@ FINRA_CLIENT_SECRET_NAMES = (
     "FINRA_API_SECRET",
     "FINRA_API_SECRET_KEY",
 )
-FINRA_GENERIC_NAMES = ("FINRA_API_KEY",)
 ALL_SECRET_NAMES = tuple(
     dict.fromkeys(
         ALPACA_KEY_NAMES
@@ -84,7 +71,6 @@ ALL_SECRET_NAMES = tuple(
         + TRADIER_NAMES
         + FINRA_CLIENT_ID_NAMES
         + FINRA_CLIENT_SECRET_NAMES
-        + FINRA_GENERIC_NAMES
         + AlphaVantageCredentialProbe.environment_names
         + DatabentoCredentialProbe.environment_names
         + TwelveDataCredentialProbe.environment_names
@@ -113,10 +99,7 @@ def _safe_error(error: Exception) -> str:
     return message
 
 
-def _base_result(
-    provider: str,
-    credential_names: tuple[str, ...],
-) -> dict[str, Any]:
+def _base_result(provider: str, credential_names: tuple[str, ...]) -> dict[str, Any]:
     return {
         "provider": provider,
         "configured": bool(credential_names),
@@ -144,16 +127,10 @@ def _try_single_credentials(
     for name, value in candidates:
         try:
             evidence = probe(value)
-        except Exception as error:  # live provider boundary
+        except Exception as error:
             errors.append(f"{name}: {_safe_error(error)}")
             continue
-        result.update(
-            {
-                "passed": True,
-                "selected_credential": name,
-                "evidence": evidence,
-            }
-        )
+        result.update({"passed": True, "selected_credential": name, "evidence": evidence})
         return result
     result["error"] = "; ".join(errors) or "no configured credential authenticated"
     return result
@@ -161,9 +138,7 @@ def _try_single_credentials(
 
 def _alpaca() -> dict[str, Any]:
     key_names = tuple(name for name, _value in _configured_values(ALPACA_KEY_NAMES))
-    secret_names = tuple(
-        name for name, _value in _configured_values(ALPACA_SECRET_NAMES)
-    )
+    secret_names = tuple(name for name, _value in _configured_values(ALPACA_SECRET_NAMES))
     result = _base_result("alpaca-paper", key_names + secret_names)
     result["configured"] = bool(key_names and secret_names)
     if not result["configured"]:
@@ -207,28 +182,17 @@ def _fred() -> dict[str, Any]:
 
 
 def _eodhd() -> dict[str, Any]:
-    return _try_single_credentials(
-        "eodhd",
-        EODHD_NAMES,
-        lambda value: EODHDCredentialProbe(value).probe(),
-    )
+    return _try_single_credentials("eodhd", EODHD_NAMES, lambda value: EODHDCredentialProbe(value).probe())
 
 
 def _openfigi() -> dict[str, Any]:
     def probe(value: str) -> dict[str, Any]:
         results = OpenFigiProvider(api_key=value).map_identifiers(
-            (
-                OpenFigiMappingJob(
-                    id_type="ID_BB_GLOBAL",
-                    id_value="BBG000B9XRY4",
-                ),
-            )
+            (OpenFigiMappingJob(id_type="ID_BB_GLOBAL", id_value="BBG000B9XRY4"),)
         )
         matches = results[0].matches
         if not matches:
-            raise ProviderCredentialProbeError(
-                "OpenFIGI returned no mapping matches"
-            )
+            raise ProviderCredentialProbeError("OpenFIGI returned no mapping matches")
         return {
             "probe": "v3-mapping",
             "requested_identifier": "BBG000B9XRY4",
@@ -269,26 +233,19 @@ def _tradier() -> dict[str, Any]:
             response = requests.get(
                 "https://api.tradier.com/v1/markets/quotes",
                 params={"symbols": "SPY", "greeks": "false"},
-                headers={
-                    "Authorization": f"Bearer {value}",
-                    "Accept": "application/json",
-                },
+                headers={"Authorization": f"Bearer {value}", "Accept": "application/json"},
                 timeout=20,
             )
         except requests.RequestException as error:
             raise ProviderCredentialProbeError("Tradier request failed") from error
         status = int(getattr(response, "status_code", 0))
         if status < 200 or status >= 300:
-            raise ProviderCredentialProbeError(
-                f"Tradier returned HTTP {status or 'unknown'}"
-            )
+            raise ProviderCredentialProbeError(f"Tradier returned HTTP {status or 'unknown'}")
         try:
             payload = response.json()
         except (TypeError, ValueError) as error:
             raise ProviderCredentialProbeError("Tradier returned invalid JSON") from error
-        if not isinstance(payload, dict):
-            raise ProviderCredentialProbeError("Tradier response must be an object")
-        quotes = payload.get("quotes")
+        quotes = payload.get("quotes") if isinstance(payload, dict) else None
         quote = quotes.get("quote") if isinstance(quotes, dict) else None
         if isinstance(quote, list):
             quote = quote[0] if quote else None
@@ -309,23 +266,14 @@ def _tradier() -> dict[str, Any]:
 def _finra() -> dict[str, Any]:
     client_ids = _configured_values(FINRA_CLIENT_ID_NAMES)
     client_secrets = _configured_values(FINRA_CLIENT_SECRET_NAMES)
-    generic = _configured_values(FINRA_GENERIC_NAMES)
-    credential_names = tuple(
-        name for name, _value in (*client_ids, *client_secrets, *generic)
-    )
+    credential_names = tuple(name for name, _value in (*client_ids, *client_secrets))
     result = _base_result("finra-fixed-income", credential_names)
-    result["configured"] = bool(client_ids or client_secrets or generic)
+    result["configured"] = bool(client_ids or client_secrets)
     if not result["configured"]:
         result["error"] = "FINRA client credentials are not configured"
         return result
-    if generic and not (client_ids and client_secrets):
-        result["error"] = (
-            "FINRA_API_KEY is visible, but FINRA API Platform production access requires "
-            "an OAuth client ID and client secret; configure both supported aliases"
-        )
-        return result
     if not client_ids or not client_secrets:
-        result["error"] = "FINRA requires both client ID and client secret"
+        result["error"] = "FINRA requires both API Client ID and API Client Secret"
         return result
     try:
         evidence = FinraFixedIncomeProvider(
@@ -352,8 +300,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-all",
         action="store_true",
         help=(
-            "Return nonzero unless every established required provider credential "
-            "passes. Optional providers also block when they are configured but invalid."
+            "Return nonzero unless every established required provider credential passes. "
+            "Optional providers also block when they are configured but invalid."
         ),
     )
     return parser
@@ -393,17 +341,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         ]
         for optional in (tradier, finra):
             if optional["configured"] and not optional["passed"]:
-                blockers.append(
-                    f"{optional['provider']}: {optional.get('error', 'probe did not pass')}"
-                )
+                blockers.append(f"{optional['provider']}: {optional.get('error', 'probe did not pass')}")
         payload = {
             "identifier": f"provider-secret-validation:{evaluated_at.isoformat()}",
             "evaluated_at": evaluated_at.isoformat(),
             "state": "passed" if not blockers else "blocked",
             "providers": providers,
-            "configured_provider_count": sum(
-                1 for item in providers if item["configured"]
-            ),
+            "configured_provider_count": sum(1 for item in providers if item["configured"]),
             "passed_provider_count": sum(1 for item in providers if item["passed"]),
             "blockers": blockers,
             "secret_values_disclosed": False,
@@ -414,7 +358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "schema_version": "provider-secret-validation.v1",
         }
         _write(args.output, payload)
-    except Exception as error:  # defensive command boundary
+    except Exception as error:
         _write(
             args.output,
             {
