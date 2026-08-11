@@ -172,6 +172,16 @@ def _publish_release_diagnostic_audit(
     return completed.returncode
 
 
+def _refresh_release_diagnostic_audit_until_stopped(
+    stop_event: threading.Event,
+    *,
+    diagnostic_values: MutableMapping[str, str],
+    refresh_seconds: float,
+) -> None:
+    while not stop_event.wait(refresh_seconds):
+        _publish_release_diagnostic_audit(diagnostic_values)
+
+
 def _run_release_diagnostic_with_live_audit(
     command: Sequence[str],
     *,
@@ -180,12 +190,28 @@ def _run_release_diagnostic_with_live_audit(
 ) -> int:
     """Run the bounded diagnostic while republishing its durable redacted state."""
 
-    process = subprocess.Popen(tuple(command), env=dict(diagnostic_values))
-    while True:
-        try:
-            return process.wait(timeout=refresh_seconds)
-        except subprocess.TimeoutExpired:
-            _publish_release_diagnostic_audit(diagnostic_values)
+    stop_event = threading.Event()
+    publisher = threading.Thread(
+        name="manual-cio-release-audit-publisher",
+        target=_refresh_release_diagnostic_audit_until_stopped,
+        kwargs={
+            "stop_event": stop_event,
+            "diagnostic_values": diagnostic_values,
+            "refresh_seconds": refresh_seconds,
+        },
+        daemon=True,
+    )
+    publisher.start()
+    try:
+        completed = subprocess.run(
+            tuple(command),
+            env=dict(diagnostic_values),
+            check=False,
+        )
+        return completed.returncode
+    finally:
+        stop_event.set()
+        publisher.join(timeout=refresh_seconds)
 
 
 def _release_components_ready(
