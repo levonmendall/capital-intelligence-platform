@@ -256,8 +256,8 @@ class RedundantOptionsProvider:
 
         if primary_error is not None:
             raise RedundantOptionsError(
-                "Databento option evidence is unavailable and no certified fallback "
-                f"is configured; primary={_failure_class(primary_error)}",
+                f"{primary_error}; no certified fallback is configured; "
+                f"primary={_failure_class(primary_error)}",
                 status_code=getattr(primary_error, "status_code", None),
                 retryable=bool(getattr(primary_error, "retryable", False)),
             ) from primary_error
@@ -325,15 +325,14 @@ class RedundantOptionsProvider:
                 fallback_error = error
 
         if not result and (primary_error is not None or fallback_error is not None):
+            active_error = fallback_error or primary_error
             raise RedundantOptionsError(
-                "Certified option daily bars are unavailable; "
+                f"{active_error}; certified option daily bars are unavailable; "
                 f"primary={_failure_class(primary_error)}; "
                 f"fallback={_failure_class(fallback_error)}",
-                status_code=getattr(fallback_error or primary_error, "status_code", None),
-                retryable=bool(
-                    getattr(fallback_error or primary_error, "retryable", False)
-                ),
-            ) from (fallback_error or primary_error)
+                status_code=getattr(active_error, "status_code", None),
+                retryable=bool(getattr(active_error, "retryable", False)),
+            ) from active_error
 
         session_date = max(
             (
