@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from providers.crypto_venue_history import CoinbaseHistoryProvider, KrakenHistoryProvider
 from providers.massive_multi_asset import MassiveMultiAssetProvider
@@ -20,14 +20,17 @@ class Response:
 
 
 def test_massive_stock_history_normalizes_daily_bars() -> None:
+    first = int((AS_OF - timedelta(days=2)).timestamp() * 1000)
+    second = int((AS_OF - timedelta(days=1)).timestamp() * 1000)
+
     def get(url, **kwargs):
         assert "/v2/aggs/ticker/SPY/range/1/day/" in url
         return Response(
             {
                 "status": "OK",
                 "results": [
-                    {"t": 1786396800000, "c": 640.0, "v": 1000},
-                    {"t": 1786483200000, "c": 641.0, "v": 1100},
+                    {"t": first, "c": 640.0, "v": 1000},
+                    {"t": second, "c": 641.0, "v": 1100},
                 ],
             }
         )
@@ -92,18 +95,23 @@ def test_tradier_history_and_active_chain_are_evidence_only() -> None:
 
 
 def test_coinbase_and_kraken_only_keep_completed_daily_buckets() -> None:
+    old = int((AS_OF - timedelta(days=3)).timestamp())
+    completed = int((AS_OF - timedelta(days=2)).timestamp())
+    current = int((AS_OF - timedelta(hours=4)).timestamp())
     coinbase_payload = [
-        [1786320000, 100, 110, 101, 108, 10],
-        [1786406400, 108, 112, 109, 111, 11],
+        [old, 100, 110, 101, 108, 10],
+        [completed, 108, 112, 109, 111, 11],
+        [current, 111, 113, 112, 112.5, 12],
     ]
     kraken_payload = {
         "error": [],
         "result": {
             "XXBTZUSD": [
-                [1786320000, "100", "110", "101", "108", "105", "10", 2],
-                [1786406400, "108", "112", "109", "111", "110", "11", 3],
+                [old, "100", "110", "101", "108", "105", "10", 2],
+                [completed, "108", "112", "109", "111", "110", "11", 3],
+                [current, "111", "113", "112", "112.5", "112", "12", 4],
             ],
-            "last": 1786406400,
+            "last": current,
         },
     }
 
@@ -112,5 +120,7 @@ def test_coinbase_and_kraken_only_keep_completed_daily_buckets() -> None:
 
     coinbase_rows = coinbase.daily_history("BTC-USD", as_of=AS_OF, history_days=10)
     kraken_rows = kraken.daily_history("XBT/USD", as_of=AS_OF, history_days=10)
-    assert all(row["t"] < AS_OF for row in coinbase_rows)
-    assert all(row["t"] < AS_OF for row in kraken_rows)
+    assert len(coinbase_rows) == 2
+    assert len(kraken_rows) == 2
+    assert all(row["t"] + timedelta(days=1) <= AS_OF for row in coinbase_rows)
+    assert all(row["t"] + timedelta(days=1) <= AS_OF for row in kraken_rows)
