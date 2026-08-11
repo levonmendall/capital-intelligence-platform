@@ -38,6 +38,11 @@ from providers.redundant_options import (
     build_redundant_options_provider,
 )
 from providers.eodhd import EODHDProvider, EODHDProviderError, build_eodhd_provider
+from providers.treasury_fiscal_data import (
+    TreasuryFiscalDataError,
+    build_treasury_fiscal_data_provider,
+    is_valid_cusip,
+)
 from providers.alpaca_paper import (
     AlpacaPaperClient,
     AlpacaPaperProviderError,
@@ -641,6 +646,14 @@ def _directory_text(item: Mapping[str, Any], *names: str) -> str | None:
     return None
 
 
+def _explicit_valid_cusip(item: Mapping[str, Any]) -> str | None:
+    value = _directory_text(item, "CUSIP", "cusip", "Cusip")
+    if value is None:
+        return None
+    normalized = value.strip().upper()
+    return normalized if is_valid_cusip(normalized) else None
+
+
 def _catalog_from_eodhd(
     *,
     as_of: datetime,
@@ -661,6 +674,18 @@ def _catalog_from_eodhd(
         item: [] for item in requested
     }
     suffix_map = config.yahoo_suffix_map
+    treasury_reference_by_cusip: dict[str, object] = {}
+    if CandidateAssetClass.FIXED_INCOME in requested:
+        try:
+            treasury_provider = build_treasury_fiscal_data_provider()
+            treasury_reference_by_cusip = {
+                item.cusip: item
+                for item in treasury_provider.fetch_active_securities(as_of=as_of)
+            }
+        except TreasuryFiscalDataError:
+            # Treasury Fiscal Data is an independent reference-enrichment source.
+            # Its outage must not erase otherwise valid EODHD bond discovery.
+            treasury_reference_by_cusip = {}
     exchange_lanes = {
         "CC": frozenset({CandidateAssetClass.CRYPTO}),
         "FOREX": frozenset({CandidateAssetClass.FX}),
@@ -783,6 +808,16 @@ def _catalog_from_eodhd(
                 if "-" not in compact:
                     continue
                 yahoo_symbol = compact
+            source_identifier = f"{snapshot.provider_record_id}:{code}"
+            instrument_identifier: str | None = None
+            if asset_class is CandidateAssetClass.FIXED_INCOME:
+                cusip = _explicit_valid_cusip(item)
+                treasury_reference = (
+                    None if cusip is None else treasury_reference_by_cusip.get(cusip)
+                )
+                if cusip is not None and treasury_reference is not None:
+                    instrument_identifier = f"cusip:{cusip}"
+                    source_identifier += f"|{treasury_reference.evidence_identifier}"
             result[asset_class].append(
                 DiscoveryCatalogRecord(
                     symbol=(
@@ -799,7 +834,8 @@ def _catalog_from_eodhd(
                     settlement_currency=currency,
                     instrument_type=instrument_type,
                     provider_kind=selected_provider_kind,
-                    source_identifier=f"{snapshot.provider_record_id}:{code}",
+                    source_identifier=source_identifier,
+                    instrument_identifier=instrument_identifier,
                     quote_spread_bps=(2.0 if asset_class is CandidateAssetClass.FX else 12.0 if asset_class is CandidateAssetClass.CRYPTO else 8.0),
                 )
             )
