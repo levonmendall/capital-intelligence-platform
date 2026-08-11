@@ -20,6 +20,11 @@ from typing import Any
 
 _SCHEMA_VERSION = "render-production-telemetry.v1"
 _FINAL_SUCCESS_STATE = "completed"
+_FINAL_FAILURE_STATE = "failed"
+_EXIT_UNSAFE = 4
+_EXIT_RELEASE_MISMATCH = 5
+_EXIT_DIAGNOSTIC_FAILED = 6
+_EXIT_TIMEOUT = 7
 _FORBIDDEN_KEYS = frozenset(
     {
         "holdings",
@@ -54,6 +59,12 @@ _DIAGNOSTIC_BOOLEAN_KEYS = (
     "real_money_authorized",
     "context_cycle_matches",
     "comprehensive_discovery_required",
+    "comprehensive_discovery_complete",
+    "scheduled_market_coverage_complete",
+    "terminal_screening_complete",
+    "all_market_evaluation_complete",
+)
+_PROGRESS_BOOLEAN_KEYS = (
     "comprehensive_discovery_complete",
     "scheduled_market_coverage_complete",
     "terminal_screening_complete",
@@ -318,15 +329,87 @@ def _write_json(path: Path, payload: object) -> None:
     temporary.replace(path)
 
 
-def _current_success(snapshot: Mapping[str, object]) -> bool:
+def _diagnostic(snapshot: Mapping[str, object]) -> Mapping[str, object] | None:
     diagnostic = snapshot.get("diagnostic")
+    return diagnostic if isinstance(diagnostic, Mapping) else None
+
+
+def _progress_started(snapshot: Mapping[str, object]) -> bool:
+    diagnostic = _diagnostic(snapshot)
+    if diagnostic is None:
+        return False
+    if diagnostic.get("stage") is not None:
+        return True
+    lanes = diagnostic.get("market_lanes")
+    if isinstance(lanes, list) and lanes:
+        return True
+    return any(diagnostic.get(key) is True for key in _PROGRESS_BOOLEAN_KEYS)
+
+
+def _current_success(snapshot: Mapping[str, object]) -> bool:
+    diagnostic = _diagnostic(snapshot)
     return bool(
         snapshot.get("capture_state") == "ok"
-        and isinstance(diagnostic, Mapping)
+        and diagnostic is not None
         and diagnostic.get("release_matches_expected") is True
         and diagnostic.get("state") == _FINAL_SUCCESS_STATE
         and diagnostic.get("all_market_evaluation_complete") is True
     )
+
+
+def _terminal_failure(snapshot: Mapping[str, object]) -> bool:
+    diagnostic = _diagnostic(snapshot)
+    return bool(
+        snapshot.get("capture_state") == "ok"
+        and diagnostic is not None
+        and diagnostic.get("release_matches_expected") is True
+        and diagnostic.get("state") == _FINAL_FAILURE_STATE
+    )
+
+
+def _failure_class(snapshot: Mapping[str, object], *, timed_out: bool = False) -> str:
+    diagnostic = _diagnostic(snapshot)
+    if (
+        snapshot.get("capture_state") == "ok"
+        and diagnostic is not None
+        and diagnostic.get("release_matches_expected") is not True
+    ):
+        return "release_mismatch"
+    if _terminal_failure(snapshot):
+        return "terminal_failure" if _progress_started(snapshot) else "startup_failure"
+    if timed_out:
+        return "timeout"
+    return "none"
+
+
+def _annotate_observation(
+    snapshot: Mapping[str, object],
+    *,
+    observation_count: int,
+    observed_duration_seconds: float,
+    timed_out: bool = False,
+) -> dict[str, object]:
+    annotated = dict(snapshot)
+    annotated["progress_started"] = _progress_started(snapshot)
+    annotated["failure_class"] = _failure_class(snapshot, timed_out=timed_out)
+    annotated["observation_count"] = max(1, int(observation_count))
+    annotated["observed_duration_seconds"] = round(
+        max(0.0, float(observed_duration_seconds)), 3
+    )
+    return annotated
+
+
+def _exit_code(snapshot: Mapping[str, object], *, unsafe: bool) -> int:
+    if unsafe:
+        return _EXIT_UNSAFE
+    if _current_success(snapshot):
+        return 0
+    failure_class = str(snapshot.get("failure_class") or "")
+    if failure_class == "release_mismatch":
+        return _EXIT_RELEASE_MISMATCH
+    if failure_class in {"startup_failure", "terminal_failure"}:
+        return _EXIT_DIAGNOSTIC_FAILED
+    return _EXIT_TIMEOUT
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -343,26 +426,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.watch_seconds < 0 or args.interval_seconds <= 0:
         raise SystemExit("watch-seconds cannot be negative and interval-seconds must be positive")
 
-    deadline = time.monotonic() + args.watch_seconds
+    started = time.monotonic()
+    deadline = started + args.watch_seconds
     timeline: list[dict[str, object]] = []
     unsafe = False
+    final_snapshot: dict[str, object] | None = None
     while True:
         snapshot, unsafe = capture_once(
             url=args.url,
             expected_release=args.expected_release,
         )
-        timeline.append(snapshot)
-        _write_json(args.output, snapshot)
+        now = time.monotonic()
+        terminal_failure = _terminal_failure(snapshot)
+        success = _current_success(snapshot)
+        timed_out = not (unsafe or terminal_failure or success) and now >= deadline
+        final_snapshot = _annotate_observation(
+            snapshot,
+            observation_count=len(timeline) + 1,
+            observed_duration_seconds=now - started,
+            timed_out=timed_out,
+        )
+        timeline.append(final_snapshot)
+        _write_json(args.output, final_snapshot)
         if args.timeline_output is not None:
             _write_json(args.timeline_output, timeline)
-        print(json.dumps(snapshot, sort_keys=True, allow_nan=False), flush=True)
-        if unsafe or _current_success(snapshot) or time.monotonic() >= deadline:
+        print(json.dumps(final_snapshot, sort_keys=True, allow_nan=False), flush=True)
+        if unsafe or terminal_failure or success or timed_out:
             break
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
         time.sleep(min(args.interval_seconds, remaining))
-    return 4 if unsafe else 0
+
+    if final_snapshot is None:
+        return _EXIT_TIMEOUT
+    return _exit_code(final_snapshot, unsafe=unsafe)
 
 
 if __name__ == "__main__":
