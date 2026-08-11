@@ -32,9 +32,7 @@ def _payload(
 
 
 def _annotated(
-    payload: dict[str, object],
-    *,
-    timed_out: bool = False,
+    payload: dict[str, object], *, timed_out: bool = False
 ) -> dict[str, object]:
     snapshot = telemetry.build_snapshot(
         payload,
@@ -51,7 +49,6 @@ def _annotated(
 
 def test_failed_exact_release_without_progress_fails_closed_as_startup_failure():
     snapshot = _annotated(_payload(state="failed"))
-
     assert snapshot["progress_started"] is False
     assert snapshot["failure_class"] == "startup_failure"
     assert telemetry._exit_code(snapshot, unsafe=False) != 0
@@ -64,27 +61,43 @@ def test_failed_exact_release_after_progress_is_terminal_failure():
             detail="governed_progress=terminal_screening; lanes=1",
         )
     )
-
     assert snapshot["progress_started"] is True
     assert snapshot["failure_class"] == "terminal_failure"
     assert telemetry._exit_code(snapshot, unsafe=False) != 0
 
 
+def test_direct_stage_survives_terminal_detail_and_marks_progress():
+    payload = _payload(state="failed", detail="bounded child terminated fail-closed")
+    payload.update(
+        {
+            "diagnostic_id": "abc123",
+            "stage": "deep_market_evidence:international_equity",
+            "diagnostic_age_seconds": 1500.0,
+            "terminal_age_seconds": 7200.0,
+            "context_attempt_state": "ready",
+        }
+    )
+    snapshot = _annotated(payload)
+    diagnostic = snapshot["diagnostic"]
+    assert isinstance(diagnostic, dict)
+    assert diagnostic["diagnostic_id"] == "abc123"
+    assert diagnostic["stage"] == "deep_market_evidence:international_equity"
+    assert diagnostic["terminal_age_seconds"] == 7200.0
+    assert diagnostic["context_attempt_state"] == "ready"
+    assert snapshot["progress_started"] is True
+    assert snapshot["failure_class"] == "terminal_failure"
+
+
 def test_pending_diagnostic_at_watch_exhaustion_is_timeout_and_fails_closed():
     snapshot = _annotated(_payload(state="pending"), timed_out=True)
-
     assert snapshot["failure_class"] == "timeout"
     assert telemetry._exit_code(snapshot, unsafe=False) != 0
 
 
 def test_exact_release_completed_all_market_diagnostic_succeeds():
     snapshot = _annotated(
-        _payload(
-            state="completed",
-            all_market_evaluation_complete=True,
-        )
+        _payload(state="completed", all_market_evaluation_complete=True)
     )
-
     assert snapshot["failure_class"] == "none"
     assert telemetry._exit_code(snapshot, unsafe=False) == 0
 
@@ -98,14 +111,12 @@ def test_release_mismatch_is_explicit_and_fails_closed():
             all_market_evaluation_complete=True,
         )
     )
-
     assert snapshot["failure_class"] == "release_mismatch"
     assert telemetry._exit_code(snapshot, unsafe=False) != 0
 
 
 def test_observation_metadata_is_bounded_and_safe():
     snapshot = _annotated(_payload(state="failed"))
-
     assert snapshot["observation_count"] == 3
     assert snapshot["observed_duration_seconds"] == 12.5
     assert snapshot["failure_class"] in {
@@ -122,7 +133,6 @@ def test_observation_metadata_is_bounded_and_safe():
 def test_forbidden_source_fields_remain_rejected():
     payload = _payload(state="failed")
     payload["holdings"] = ["sensitive"]
-
     with pytest.raises(telemetry.UnsafeTelemetryPayload):
         telemetry.build_snapshot(
             payload,
