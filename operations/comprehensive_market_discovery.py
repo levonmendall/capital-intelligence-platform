@@ -22,6 +22,9 @@ from operations.provider_preselection_publication_runtime import (
     ProviderPreselectionPublicationError,
     ensure_provider_preselection_publication,
 )
+from operations.provider_preselection_market_probe import (
+    default_provider_preselection_market_probe,
+)
 from operations.bounded_terminal_screening import (
     BoundedTerminalScreeningError,
     build_bounded_cutoff_observations,
@@ -235,6 +238,7 @@ def discover_comprehensive_markets(
                 catalogs,
                 as_of=timestamp,
                 policy=resolved,
+                market_probe=default_provider_preselection_market_probe,
             )
             record_manual_cio_diagnostic_progress(
                 "provider_preselection_publication_complete",
