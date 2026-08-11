@@ -1,8 +1,8 @@
 """Provider credential alias normalization shared by runtime and governance code.
 
 Provider integrations have accumulated different environment-variable spellings over
-time.  Each mapping entry names one runtime/config canonical variable and the aliases
-that may satisfy it.  Normalization only populates missing canonical names; it never
+time. Each mapping entry names one runtime/config canonical variable and the aliases
+that may satisfy it. Normalization only populates missing canonical names; it never
 rewrites source aliases, logs a credential value, or persists a secret.
 """
 
@@ -77,6 +77,24 @@ PROVIDER_ENVIRONMENT_ALIASES: dict[str, tuple[str, ...]] = {
         "POLYGON_API_KEY",
     ),
 
+    # Tradier personal/market-data Bearer token aliases. Tradier calls this an API
+    # token; accepting API_KEY reflects the repository secret name without changing
+    # the provider's actual Bearer-token authentication semantics.
+    "TRADIER_API_KEY": (
+        "TRADIER_API_TOKEN",
+        "TRADIER_ACCESS_TOKEN",
+        "TRADIER_TOKEN",
+        "CAPITAL_INTELLIGENCE_TRADIER_API_KEY",
+        "CAPITAL_INTELLIGENCE_TRADIER_API_TOKEN",
+    ),
+    "TRADIER_API_TOKEN": (
+        "TRADIER_API_KEY",
+        "TRADIER_ACCESS_TOKEN",
+        "TRADIER_TOKEN",
+        "CAPITAL_INTELLIGENCE_TRADIER_API_KEY",
+        "CAPITAL_INTELLIGENCE_TRADIER_API_TOKEN",
+    ),
+
     # Twelve Data.
     "TWELVE_DATA_API_KEY": (
         "TWELVE_API_KEY",
@@ -109,10 +127,16 @@ PROVIDER_ENVIRONMENT_ALIASES: dict[str, tuple[str, ...]] = {
     ),
     "OPENFIGI_API_KEY": ("OPEN_FIGI_API_KEY",),
 
-    # Public/economic providers.
+    # Public/economic providers. The US_CENSUS_* and NASA_API_* forms are the
+    # repository names visible in the current GitHub secret inventory.
     "FRED_API_KEY": ("CAPITAL_INTELLIGENCE_FRED_API_KEY", "FRED_KEY"),
     "BEA_API_KEY": ("CAPITAL_INTELLIGENCE_BEA_API_KEY", "BEA_KEY"),
-    "CENSUS_API_KEY": ("CAPITAL_INTELLIGENCE_CENSUS_API_KEY", "CENSUS_KEY"),
+    "CENSUS_API_KEY": (
+        "CAPITAL_INTELLIGENCE_CENSUS_API_KEY",
+        "US_CENSUS_API_KEY",
+        "US_CENSUS_KEY",
+        "CENSUS_KEY",
+    ),
     "EIA_API_KEY": ("CAPITAL_INTELLIGENCE_EIA_API_KEY", "EIA_KEY"),
     "USDA_NASS_API_KEY": (
         "CAPITAL_INTELLIGENCE_USDA_NASS_API_KEY",
@@ -122,13 +146,30 @@ PROVIDER_ENVIRONMENT_ALIASES: dict[str, tuple[str, ...]] = {
     "NASA_FIRMS_MAP_KEY": (
         "CAPITAL_INTELLIGENCE_NASA_FIRMS_MAP_KEY",
         "NASA_FIRMS_API_KEY",
+        "NASA_API_KEY",
+        "NASA_MAP_KEY",
         "FIRMS_MAP_KEY",
     ),
 
-    # FINRA authenticated API/Data Platform aliases.
-    "FINRA_CLIENT_ID": ("CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID",),
-    "FINRA_CLIENT_SECRET": ("CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET",),
-    "FINRA_API_TOKEN": ("CAPITAL_INTELLIGENCE_FINRA_API_TOKEN",),
+    # FINRA API Platform uses OAuth client credentials. Accept common repository
+    # spellings for the client-id/secret pair and explicit short-lived bearer tokens,
+    # but do not reinterpret a generic single API key as a durable OAuth pair.
+    "FINRA_CLIENT_ID": (
+        "CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID",
+        "FINRA_API_CLIENT_ID",
+        "FINRA_API_KEY_ID",
+    ),
+    "FINRA_CLIENT_SECRET": (
+        "CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET",
+        "FINRA_API_CLIENT_SECRET",
+        "FINRA_API_SECRET",
+        "FINRA_API_SECRET_KEY",
+    ),
+    "FINRA_API_TOKEN": (
+        "CAPITAL_INTELLIGENCE_FINRA_API_TOKEN",
+        "FINRA_ACCESS_TOKEN",
+        "FINRA_BEARER_TOKEN",
+    ),
 
     # Institutional configured-dataset provider aliases.
     "CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_API_KEY": ("LSEG_MARKET_DATA_API_KEY",),
