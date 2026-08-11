@@ -9,6 +9,7 @@ from providers.redundancy_audit import ProviderCapabilityKey, begin_redundancy_c
 from providers.redundant_market_history import ALL_ASSET_REDUNDANCY_POLICY
 
 
+# Integration contracts below guard the exact governance boundaries required by PR #576.
 AS_OF = datetime(2026, 8, 11, 22, 0, tzinfo=timezone.utc)
 
 
