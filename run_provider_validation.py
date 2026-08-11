@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from dataclasses import replace
+from datetime import timedelta
+from typing import Any, Callable, Mapping
+
+import requests
 
 from operations.provider_validation import (
+    ProviderValidationCheck,
     ProviderValidationReport,
     require_provider_validation,
     validate_live_providers,
     write_provider_validation_report,
+)
+from providers.redundant_options import (
+    RedundantOptionsError,
+    RedundantOptionsProvider,
+    build_redundant_options_provider,
 )
 
 
@@ -34,6 +45,217 @@ _DATABENTO_TRANSIENT_HTTP_MARKERS = (
     "HTTP 503",
     "HTTP 504",
 )
+_GOVERNED_OPRA_DEFINITIONS_CHECK = "governed_opra_definitions"
+_GOVERNED_OPRA_DAILY_BARS_CHECK = "governed_opra_daily_bars"
+
+HttpGet = Callable[..., Any]
+
+
+def _fingerprint(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _spy_reference_price(
+    *,
+    report: ProviderValidationReport,
+    http_get: HttpGet = requests.get,
+) -> float:
+    as_of = report.generated_at
+    start = int((as_of - timedelta(days=10)).timestamp())
+    end = int(as_of.timestamp())
+    response = http_get(
+        "https://query1.finance.yahoo.com/v8/finance/chart/SPY",
+        params={
+            "period1": start,
+            "period2": end,
+            "interval": "1d",
+            "events": "history",
+        },
+        headers={"User-Agent": "capital-intelligence-provider-validation/1.0"},
+        timeout=20,
+    )
+    status = int(getattr(response, "status_code", 0))
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"Yahoo SPY reference-price HTTP {status}")
+    payload = response.json()
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("Yahoo SPY reference-price payload is not an object")
+    try:
+        result = payload["chart"]["result"]
+        quote = result[0]["indicators"]["quote"][0]
+        closes = tuple(
+            float(item) for item in quote.get("close", ()) if item is not None
+        )
+    except (KeyError, IndexError, TypeError, ValueError) as error:
+        raise RuntimeError("Yahoo SPY reference-price observations are unavailable") from error
+    if not closes or closes[-1] <= 0.0:
+        raise RuntimeError("Yahoo SPY reference price is unavailable")
+    return closes[-1]
+
+
+def certify_redundant_option_provider(
+    report: ProviderValidationReport,
+    *,
+    options_provider: RedundantOptionsProvider | None = None,
+    http_get: HttpGet = requests.get,
+) -> ProviderValidationReport:
+    """Certify the governed OPRA lane through Databento or its Massive fallback.
+
+    The legacy provider-validation report predates the redundant options router and
+    therefore reports the Databento OPRA checks as release-blocking even when the
+    production lane can lawfully fail over to Massive. Preserve those provider-specific
+    failures as diagnostics, but add required provider-neutral proof only when the exact
+    production router returns authentic completed-session near-money option evidence.
+    """
+
+    legacy_checks = {
+        check.name: check
+        for check in report.checks
+        if check.name in _DATABENTO_OPRA_CHECKS
+    }
+    if _DATABENTO_OPRA_CHECKS.issubset(legacy_checks) and all(
+        legacy_checks[name].passed for name in _DATABENTO_OPRA_CHECKS
+    ):
+        return report
+    if not legacy_checks:
+        return report
+
+    provider = options_provider or build_redundant_options_provider()
+    if not provider.configured:
+        return report
+
+    try:
+        reference_price = _spy_reference_price(report=report, http_get=http_get)
+        selections = provider.select_contracts(
+            "SPY",
+            underlying_price=reference_price,
+            as_of=report.generated_at,
+            minimum_days_to_expiry=30,
+            maximum_days_to_expiry=365,
+            maximum_expirations=1,
+            candidates_per_bucket=1,
+        )
+    except (
+        RedundantOptionsError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        requests.RequestException,
+    ):
+        return report
+    if not selections:
+        return report
+
+    provider_kinds = tuple(
+        sorted(
+            {
+                str(item.definition.provider_kind).strip().lower()
+                for item in selections
+                if str(item.definition.provider_kind).strip()
+            }
+        )
+    )
+    if not provider_kinds:
+        return report
+    provider_label = (
+        provider_kinds[0].upper()
+        if len(provider_kinds) == 1
+        else "REDUNDANT_OPTIONS"
+    )
+    sample_symbols = tuple(item.definition.symbol for item in selections[:5])
+    definition_sources = tuple(
+        dict.fromkeys(
+            item.definition.source_identifier
+            for item in selections
+            if item.definition.source_identifier
+        )
+    )
+    bar_sources = tuple(
+        dict.fromkeys(
+            item.bar.source_identifier for item in selections if item.bar.source_identifier
+        )
+    )
+    session_date = max(item.bar.observed_at.date() for item in selections).isoformat()
+    datasets = tuple(
+        sorted(
+            {
+                str(item.definition.provider_dataset).strip()
+                for item in selections
+                if str(item.definition.provider_dataset).strip()
+            }
+        )
+    )
+    governed_checks = (
+        ProviderValidationCheck(
+            name=_GOVERNED_OPRA_DEFINITIONS_CHECK,
+            provider=provider_label,
+            required=True,
+            state="passed",
+            detail=(
+                "governed redundant OPRA contract selection succeeded with "
+                f"{len(selections)} priced near-money contracts via {provider_label}"
+            ),
+            observed_at=report.generated_at,
+            source_identifier=definition_sources[0] if definition_sources else None,
+            evidence_fingerprint=_fingerprint(
+                {
+                    "provider_kinds": provider_kinds,
+                    "datasets": datasets,
+                    "session_date": session_date,
+                    "sample_symbols": sample_symbols,
+                    "sources": definition_sources,
+                }
+            ),
+        ),
+        ProviderValidationCheck(
+            name=_GOVERNED_OPRA_DAILY_BARS_CHECK,
+            provider=provider_label,
+            required=True,
+            state="passed",
+            detail=(
+                "production-aligned completed-session OPRA pricing succeeded with "
+                f"{len(selections)} priced contracts via {provider_label}"
+            ),
+            observed_at=report.generated_at,
+            source_identifier=bar_sources[0] if bar_sources else None,
+            evidence_fingerprint=_fingerprint(
+                {
+                    "provider_kinds": provider_kinds,
+                    "session_date": session_date,
+                    "sample_symbols": sample_symbols,
+                    "sources": bar_sources,
+                }
+            ),
+        ),
+    )
+
+    checks: list[ProviderValidationCheck] = []
+    for check in report.checks:
+        if check.name in _DATABENTO_OPRA_CHECKS and not check.passed:
+            checks.append(
+                replace(
+                    check,
+                    required=False,
+                    detail=(
+                        f"{check.detail}; provider-specific Databento OPRA degradation is "
+                        f"diagnostic because the governed redundant options lane certified "
+                        f"authentic evidence via {provider_label}"
+                    ),
+                )
+            )
+        else:
+            checks.append(check)
+    checks.extend(governed_checks)
+    return replace(report, checks=tuple(checks))
 
 
 def _transient_databento_server_degradation(
@@ -142,7 +364,9 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     arguments = _parser().parse_args()
-    report = release_preflight_report(validate_live_providers())
+    report = validate_live_providers()
+    report = certify_redundant_option_provider(report)
+    report = release_preflight_report(report)
     path = write_provider_validation_report(report, arguments.report)
     payload = report.to_dict()
     payload["report_path"] = str(path)
