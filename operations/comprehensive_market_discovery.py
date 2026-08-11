@@ -28,6 +28,8 @@ from operations.bounded_terminal_screening import (
     build_bounded_terminal_preselection,
 )
 from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress
+from operations.redundant_market_probe import default_redundant_market_probe
+from providers.redundancy_audit import begin_redundancy_cycle
 
 
 _MANIFEST_ENCODER = json.JSONEncoder(
@@ -185,6 +187,11 @@ def discover_comprehensive_markets(
 
     timestamp = _base._legacy._aware(as_of, field_name="as_of")
     resolved = policy or ComprehensiveMarketDiscoveryPolicy()
+    if market_probe is None:
+        begin_redundancy_cycle(
+            f"comprehensive-discovery:{timestamp.isoformat()}",
+            timestamp,
+        )
     record_manual_cio_diagnostic_progress(
         "comprehensive_catalog_discovery",
     )
@@ -392,7 +399,7 @@ def discover_comprehensive_markets(
             f"deep_market_evidence:{asset_class.value}",
             metrics={"decision_eligible_records": len(deep_records)},
         )
-        features = (market_probe or _base._legacy.default_market_probe)(
+        features = (market_probe or default_redundant_market_probe)(
             deep_records, timestamp, resolved
         )
         record_manual_cio_diagnostic_progress(

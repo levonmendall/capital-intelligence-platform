@@ -14,6 +14,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
+from providers.redundancy_audit import redundancy_audit_snapshot
+
 
 _SCHEMA_VERSION = "cio-decision-export.v2"
 _RECORD_NAMES = (
@@ -460,6 +462,7 @@ def build_cio_decision_export(
             "references": references,
         },
         "records": records,
+        "provider_redundancy_audit": redundancy_audit_snapshot(),
         "authority": {
             "read_only_export": True,
             "candidate_authority": False,
