@@ -78,7 +78,8 @@ jobs:
             tests/test_redundant_options_provider.py
       - name: Install locked test dependencies
         run: |
-          python -m pip install --disable-pip-version-check -q -r requirements.lock pytest
+          python -m pip install --disable-pip-version-check -q -r requirements.lock
+          python -m pip install --disable-pip-version-check -q pytest
       - name: Run focused redundancy and option discovery regressions
         run: |
           PYTHONPATH=. python -m pytest -q \
