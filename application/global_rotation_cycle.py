@@ -1,10 +1,10 @@
 """Production canonical cycle for global opportunity rotation.
 
 The cycle enriches already-governed candidates with mispriced-change and corroborated
-global-leadership economics, propagates explicitly modeled structural-theme successor
-attention, freezes the authoritative opportunity queue, performs a non-authoritative
-all-candidate six-specialist preliminary pass for joint portfolio preview, and then
-reuses those immutable packets in the unchanged final CIO/construction authority path.
+leadership economics, builds causal and hierarchical global opportunity context,
+freezes the authoritative opportunity queue, performs one all-candidate six-specialist
+preliminary pass, optimizes specialist-bounded marginal capital jointly, and then
+reuses immutable packets/risk analyses in the unchanged final CIO/construction path.
 """
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from application.compounding_cycle import (
     CompoundingCanonicalCIOCycleResult,
 )
 from application.global_rotation_preliminary import (
+    MemoizedCandidateRiskIntelligenceEngine,
+    MemoizedJointCandidateIntelligenceEngine,
     PrecomputedSpecialistService,
     assess_preliminary_global_conviction,
 )
@@ -24,9 +26,17 @@ from cio import HistoricalLearningContext
 from cio.global_rotation_authority import GlobalRotationChiefInvestmentOfficer
 from cio.policy_authority import CanonicalDecisionPolicyAuthority
 from committee.specialists import CandidateSpecialistContext
+from evaluation.global_market_coverage import (
+    GlobalMarketCoverageReport,
+    build_global_market_coverage_report,
+)
 from intelligence.global_leadership import enrich_bundle_with_global_leadership_economics
 from intelligence.mispriced_change import enrich_bundle_with_mispriced_change
 from intelligence.theme_successor import propagate_theme_successors
+from portfolio.global_compound_optimizer import (
+    GlobalCompoundPortfolioProposal,
+    optimize_global_compound_targets,
+)
 from portfolio.global_rotation import GlobalRotationContext, build_global_rotation_context
 from portfolio.global_rotation_persistence import (
     GlobalCashAccountability,
@@ -72,18 +82,21 @@ def enrich_global_rotation_contexts(
         result.append(
             replace(
                 context,
-                forward_intelligence=enrich_bundle_with_global_leadership_economics(
-                    bundle
-                ),
+                forward_intelligence=enrich_bundle_with_global_leadership_economics(bundle),
             )
         )
     return tuple(result)
 
 
 class GlobalOpportunityRotationCanonicalCIOCycleResult(CompoundingCanonicalCIOCycleResult):
-    """Canonical compounding result plus global rotation/cash accountability."""
+    """Canonical compounding result plus global opportunity diagnostics."""
 
-    __slots__ = ("global_rotation_context", "global_cash_accountability")
+    __slots__ = (
+        "global_rotation_context",
+        "global_cash_accountability",
+        "global_compound_proposal",
+        "global_market_coverage",
+    )
 
     def __init__(
         self,
@@ -91,6 +104,8 @@ class GlobalOpportunityRotationCanonicalCIOCycleResult(CompoundingCanonicalCIOCy
         base_result: CompoundingCanonicalCIOCycleResult,
         global_rotation_context: GlobalRotationContext,
         global_cash_accountability: GlobalCashAccountability,
+        global_compound_proposal: GlobalCompoundPortfolioProposal | None = None,
+        global_market_coverage: GlobalMarketCoverageReport | None = None,
     ) -> None:
         if not isinstance(base_result, CompoundingCanonicalCIOCycleResult):
             raise TypeError("base_result must be CompoundingCanonicalCIOCycleResult")
@@ -98,6 +113,14 @@ class GlobalOpportunityRotationCanonicalCIOCycleResult(CompoundingCanonicalCIOCy
             raise TypeError("global_rotation_context must be GlobalRotationContext")
         if not isinstance(global_cash_accountability, GlobalCashAccountability):
             raise TypeError("global_cash_accountability must be GlobalCashAccountability")
+        if global_compound_proposal is not None and not isinstance(
+            global_compound_proposal, GlobalCompoundPortfolioProposal
+        ):
+            raise TypeError("global_compound_proposal has the wrong type")
+        if global_market_coverage is not None and not isinstance(
+            global_market_coverage, GlobalMarketCoverageReport
+        ):
+            raise TypeError("global_market_coverage has the wrong type")
         super().__init__(
             base_result=base_result,
             portfolio_posture=base_result.portfolio_posture,
@@ -109,11 +132,9 @@ class GlobalOpportunityRotationCanonicalCIOCycleResult(CompoundingCanonicalCIOCy
             advanced_intelligence_shadow=base_result.advanced_intelligence_shadow,
         )
         object.__setattr__(self, "global_rotation_context", global_rotation_context)
-        object.__setattr__(
-            self,
-            "global_cash_accountability",
-            global_cash_accountability,
-        )
+        object.__setattr__(self, "global_cash_accountability", global_cash_accountability)
+        object.__setattr__(self, "global_compound_proposal", global_compound_proposal)
+        object.__setattr__(self, "global_market_coverage", global_market_coverage)
 
 
 class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
@@ -134,25 +155,27 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
             or getattr(opportunity_engine, "policy_authority", None)
             or CanonicalDecisionPolicyAuthority()
         )
-        resolved_cio = cio or GlobalRotationChiefInvestmentOfficer(
-            policy_authority=authority
-        )
-        super().__init__(
-            cio=resolved_cio,
-            policy_authority=authority,
-            **kwargs,
-        )
+        resolved_cio = cio or GlobalRotationChiefInvestmentOfficer(policy_authority=authority)
+        super().__init__(cio=resolved_cio, policy_authority=authority, **kwargs)
         if not isinstance(self.specialist_service, PrecomputedSpecialistService):
-            self.specialist_service = PrecomputedSpecialistService(
-                self.specialist_service
+            self.specialist_service = PrecomputedSpecialistService(self.specialist_service)
+        if not isinstance(
+            self.risk_intelligence_engine, MemoizedCandidateRiskIntelligenceEngine
+        ):
+            self.risk_intelligence_engine = MemoizedCandidateRiskIntelligenceEngine(
+                self.risk_intelligence_engine
+            )
+        if not isinstance(
+            self.joint_candidate_engine, MemoizedJointCandidateIntelligenceEngine
+        ):
+            self.joint_candidate_engine = MemoizedJointCandidateIntelligenceEngine(
+                self.joint_candidate_engine
             )
         self.global_rotation_store = global_rotation_store
         if self.global_rotation_store is None and self.journal is not None:
             self.global_rotation_store = SQLiteGlobalRotationStore(self.journal.path)
 
     def _freeze_authoritative_queue(self, *, kwargs, candidates, portfolio):
-        """Use the same qualification inputs as the canonical cycle before rotation."""
-
         supplied_queue = kwargs.get("authoritative_opportunity_queue")
         if supplied_queue is not None:
             return dict(kwargs), supplied_queue
@@ -165,8 +188,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
             minimum_cash_weight=self.construction_engine.policy.minimum_cash_weight,
         )
         supplied_ranking = {
-            item.candidate_identifier: item
-            for item in opportunity_context.ranking_inputs
+            item.candidate_identifier: item for item in opportunity_context.ranking_inputs
         }
         supplied_ranking.update(
             {
@@ -191,8 +213,6 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
 
     @staticmethod
     def _rotation_candidates(candidates, queue):
-        """Return governed reviewed candidates with the true queue opportunity cost."""
-
         if queue is None:
             return candidates
         return tuple(
@@ -212,21 +232,21 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         portfolio,
         opportunity_context,
     ) -> dict[str, object]:
-        """Build every six-specialist packet before any final CIO synthesis.
-
-        This pass is non-persistent and non-authoritative. The exact immutable packets
-        are reused by the base cycle, which persists them once in its normal order. This
-        avoids doubling specialist work across a potentially large all-market set.
-        """
+        """Build every six-specialist packet before any final CIO synthesis."""
 
         if queue is None or not tuple(getattr(queue, "ranked", ()) or ()):
             return {}
-        context_map = {
-            item.candidate_identifier: item for item in specialist_contexts
-        }
+        context_map = {item.candidate_identifier: item for item in specialist_contexts}
         if len(context_map) != len(specialist_contexts):
             raise ValueError("specialist candidate contexts must be unique")
         ranked_values = tuple(queue.ranked)
+
+        def invalidation_clarity(ranked) -> float:
+            if opportunity_context is None:
+                return 0.50
+            ranking = opportunity_context.ranking_input(ranked.candidate.identifier)
+            return 0.50 if ranking is None else ranking.invalidation_clarity_score
+
         risk_assessments = tuple(
             self.risk_intelligence_engine.assess(
                 ranked.candidate,
@@ -244,14 +264,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                     ),
                 ),
                 alternative_return=ranked.qualification.effective_opportunity_cost,
-                invalidation_clarity=(
-                    0.50
-                    if opportunity_context.ranking_input(ranked.candidate.identifier)
-                    is None
-                    else opportunity_context.ranking_input(
-                        ranked.candidate.identifier
-                    ).invalidation_clarity_score
-                ),
+                invalidation_clarity=invalidation_clarity(ranked),
             )
             for ranked in ranked_values
         )
@@ -261,42 +274,30 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         joint_assessments = self.joint_candidate_engine.assess(
             tuple(item.candidate for item in ranked_values),
             risk_assessments,
-            tuple(
-                portfolio.profile(item.candidate.identifier)
-                for item in ranked_values
-            ),
+            tuple(portfolio.profile(item.candidate.identifier) for item in ranked_values),
         )
         joint_by_candidate: dict[str, list[object]] = {}
         for item in joint_assessments:
-            joint_by_candidate.setdefault(
-                item.first_candidate_identifier, []
-            ).append(item)
-            joint_by_candidate.setdefault(
-                item.second_candidate_identifier, []
-            ).append(item)
+            joint_by_candidate.setdefault(item.first_candidate_identifier, []).append(item)
+            joint_by_candidate.setdefault(item.second_candidate_identifier, []).append(item)
 
         packets: dict[str, object] = {}
         for ranked in ranked_values:
             candidate = ranked.candidate
             base_context = context_map.get(candidate.identifier)
             if base_context is None:
-                raise KeyError(
-                    f"missing specialist context for {candidate.identifier}"
-                )
+                raise KeyError(f"missing specialist context for {candidate.identifier}")
             portfolio_context = self._preview_portfolio(
                 candidate=candidate,
                 rank=ranked.rank,
                 portfolio=portfolio,
-                effective_opportunity_cost=(
-                    ranked.qualification.effective_opportunity_cost
-                ),
+                effective_opportunity_cost=ranked.qualification.effective_opportunity_cost,
             )
             candidate_risk = risk_by_candidate[candidate.identifier]
             pair_evidence = tuple(
                 (
                     f"Joint candidate relation={item.relation.value}; "
-                    f"tail dependence={item.tail_dependence:.0%}; "
-                    f"{item.explanation}"
+                    f"tail dependence={item.tail_dependence:.0%}; {item.explanation}"
                 )
                 for item in joint_by_candidate.get(candidate.identifier, ())
             )
@@ -311,8 +312,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                 ),
                 implementation_blocks=tuple(
                     dict.fromkeys(
-                        portfolio_context.implementation_blocks
-                        + candidate_risk.hard_blocks
+                        portfolio_context.implementation_blocks + candidate_risk.hard_blocks
                     )
                 ),
                 review_conditions=tuple(
@@ -329,8 +329,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                     candidate_identifier=candidate.identifier,
                     as_of=base_context.analysis_completed_at,
                     reason=(
-                        "Historical replay cannot consume a manifest generated from its "
-                        "own future results."
+                        "Historical replay cannot consume a manifest generated from its own future results."
                     ),
                 )
             else:
@@ -353,17 +352,11 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                 historical_learning=historical_learning,
             )
             packets[candidate.identifier] = self.specialist_service.analyze(
-                candidate,
-                specialist_context,
+                candidate, specialist_context
             )
         return packets
 
-    def _preliminary_conviction_targets(
-        self,
-        *,
-        queue,
-        packets,
-    ) -> dict[str, float | None]:
+    def _preliminary_conviction_targets(self, *, queue, packets) -> dict[str, float | None]:
         if queue is None:
             return {}
         targets: dict[str, float | None] = {}
@@ -394,29 +387,45 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         if portfolio is None:
             raise TypeError("portfolio must be supplied")
 
+        # `exposure_graph` is rotation research context, not a canonical base-cycle
+        # argument. Remove it before delegating so the authority API remains unchanged.
+        base_kwargs = dict(kwargs)
+        exposure_graph = base_kwargs.pop("exposure_graph", None)
         enriched_contexts = enrich_global_rotation_contexts(contexts, candidates)
         prepared_kwargs, authoritative_queue = self._freeze_authoritative_queue(
-            kwargs=kwargs,
+            kwargs=base_kwargs,
             candidates=candidates,
             portfolio=portfolio,
         )
-        reviewed_candidates = self._rotation_candidates(
-            candidates,
-            authoritative_queue,
+        reviewed_candidates = self._rotation_candidates(candidates, authoritative_queue)
+        prior_signals = (
+            {}
+            if self.global_rotation_store is None
+            else self.global_rotation_store.latest_signal_snapshots()
         )
         rotation_context = build_global_rotation_context(
             candidates=reviewed_candidates,
             specialist_contexts=enriched_contexts,
             portfolio=portfolio,
             minimum_cash_weight=self.construction_engine.policy.minimum_cash_weight,
+            exposure_graph=exposure_graph,
+            prior_signals=prior_signals,
+        )
+        coverage_report = build_global_market_coverage_report(
+            candidates=reviewed_candidates,
+            specialist_contexts=enriched_contexts,
+            as_of=portfolio.as_of,
         )
         setter = getattr(self.cio, "set_global_rotation_context", None)
         clearer = getattr(self.cio, "clear_global_rotation_context", None)
         if callable(setter):
             setter(rotation_context)
 
+        risk_cache_token = self.risk_intelligence_engine.begin_cycle_cache()
+        joint_cache_token = self.joint_candidate_engine.begin_cycle_cache()
         preliminary_packets: dict[str, object] = {}
-        conviction_targets = None
+        conviction_targets: dict[str, float | None] | None = None
+        optimizer_proposal: GlobalCompoundPortfolioProposal | None = None
         try:
             preliminary_packets = self._preliminary_specialist_packets(
                 cycle_identifier=cycle_identifier,
@@ -429,18 +438,29 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                 queue=authoritative_queue,
                 packets=preliminary_packets,
             )
+            optimizer_proposal = optimize_global_compound_targets(
+                candidates=reviewed_candidates,
+                rotation_context=rotation_context,
+                conviction_targets=conviction_targets,
+                portfolio=portfolio,
+                minimum_cash_weight=self.construction_engine.policy.minimum_cash_weight,
+            )
         except Exception:
-            # The preview must never become a hidden action veto. The canonical final
-            # cycle below performs its own complete six-specialist analysis and fails
-            # closed there if a required authoritative input is actually invalid.
             preliminary_packets = {}
+            conviction_targets = None
+            optimizer_proposal = None
             _LOGGER.exception(
-                "specialist-informed global preview unavailable for %s; falling back to bounded leadership preview",
+                "specialist-informed global optimization unavailable for %s; falling back to bounded leadership preview",
                 cycle_identifier,
             )
 
         preview = None
         try:
+            preview_targets = (
+                None
+                if optimizer_proposal is None
+                else optimizer_proposal.target_by_candidate
+            )
             preview = build_global_rotation_preview(
                 cycle_identifier=cycle_identifier,
                 candidates=reviewed_candidates,
@@ -448,7 +468,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                 construction_engine=self.construction_engine,
                 rotation_context=rotation_context,
                 authoritative_queue=authoritative_queue,
-                conviction_targets=conviction_targets,
+                conviction_targets=preview_targets,
             )
         except Exception:
             _LOGGER.exception(
@@ -471,6 +491,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                 cycle_identifier=cycle_identifier,
                 context=rotation_context,
                 result=base_result,
+                optimizer_proposal=optimizer_proposal,
             )
             if self.global_rotation_store is not None:
                 self.global_rotation_store.append(
@@ -478,13 +499,19 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                     context=rotation_context,
                     accountability=accountability,
                     code_version=code_version,
+                    optimizer_proposal=optimizer_proposal,
+                    coverage_report=coverage_report,
                 )
             return GlobalOpportunityRotationCanonicalCIOCycleResult(
                 base_result=base_result,
                 global_rotation_context=rotation_context,
                 global_cash_accountability=accountability,
+                global_compound_proposal=optimizer_proposal,
+                global_market_coverage=coverage_report,
             )
         finally:
+            self.joint_candidate_engine.end_cycle_cache(joint_cache_token)
+            self.risk_intelligence_engine.end_cycle_cache(risk_cache_token)
             if callable(preview_clearer):
                 preview_clearer()
             if callable(clearer):
