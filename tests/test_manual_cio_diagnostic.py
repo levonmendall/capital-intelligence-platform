@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -17,36 +18,26 @@ NOW = datetime(2026, 8, 4, 21, 36, tzinfo=timezone.utc)
 
 
 def _values(tmp_path):
-    return {
-        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
-    }
+    return {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
 
 
 def test_request_claim_and_finish_are_durable(tmp_path) -> None:
     values = _values(tmp_path)
     request, created = request_manual_cio_diagnostic(
-        requested_by="render-release:abc123",
-        now=NOW,
-        values=values,
+        requested_by="render-release:abc123", now=NOW, values=values
     )
-
     assert created is True
     assert request.state == "pending"
     assert request.trigger_key.startswith("manual-diagnostic-")
     assert request.to_dict()["real_money_authorized"] is False
 
     duplicate, duplicate_created = request_manual_cio_diagnostic(
-        requested_by="another-admin",
-        now=NOW + timedelta(seconds=1),
-        values=values,
+        requested_by="another-admin", now=NOW + timedelta(seconds=1), values=values
     )
     assert duplicate_created is False
     assert duplicate.request_id == request.request_id
 
-    claimed = claim_manual_cio_diagnostic(
-        now=NOW + timedelta(seconds=2),
-        values=values,
-    )
+    claimed = claim_manual_cio_diagnostic(now=NOW + timedelta(seconds=2), values=values)
     assert claimed is not None
     assert claimed.state == "in_progress"
     assert claimed.started_at == NOW + timedelta(seconds=2)
@@ -63,17 +54,13 @@ def test_request_claim_and_finish_are_durable(tmp_path) -> None:
     )
     assert finished.state == "failed"
     assert finished.completed_at == NOW + timedelta(seconds=3)
-
-    reloaded = latest_manual_cio_diagnostic(values=values)
-    assert reloaded == finished
+    assert latest_manual_cio_diagnostic(values=values) == finished
 
 
 def test_final_request_allows_a_new_diagnostic(tmp_path) -> None:
     values = _values(tmp_path)
     first, _ = request_manual_cio_diagnostic(
-        requested_by="render-release:first",
-        now=NOW,
-        values=values,
+        requested_by="render-release:first", now=NOW, values=values
     )
     claimed = claim_manual_cio_diagnostic(now=NOW, values=values)
     assert claimed is not None
@@ -86,11 +73,8 @@ def test_final_request_allows_a_new_diagnostic(tmp_path) -> None:
         now=NOW,
         values=values,
     )
-
     second, created = request_manual_cio_diagnostic(
-        requested_by="render-release:second",
-        now=NOW + timedelta(minutes=1),
-        values=values,
+        requested_by="render-release:second", now=NOW + timedelta(minutes=1), values=values
     )
     assert created is True
     assert second.request_id != first.request_id
@@ -100,21 +84,13 @@ def test_final_request_allows_a_new_diagnostic(tmp_path) -> None:
 def test_progress_is_release_scoped_and_credential_safe(tmp_path) -> None:
     values = _values(tmp_path)
     request_manual_cio_diagnostic(
-        requested_by="render-release:progress",
-        now=NOW,
-        values=values,
+        requested_by="render-release:progress", now=NOW, values=values
     )
     claimed = claim_manual_cio_diagnostic(now=NOW, values=values)
     assert claimed is not None
-
-    assert (
-        record_manual_cio_diagnostic_progress(
-            "catalog_eodhd_directories",
-            metrics={"configured_exchanges": 19},
-            values=values,
-        )
-        is None
-    )
+    assert record_manual_cio_diagnostic_progress(
+        "catalog_eodhd_directories", metrics={"configured_exchanges": 19}, values=values
+    ) is None
     assert latest_manual_cio_diagnostic(values=values) == claimed
 
     enabled = {
@@ -126,36 +102,91 @@ def test_progress_is_release_scoped_and_credential_safe(tmp_path) -> None:
         metrics={"decision_eligible_records": 417, "catalog_records": 1200},
         values=enabled,
     )
-
     assert updated is not None
     assert updated.detail == (
         "governed_progress=deep_market_evidence:international_equity; "
         "catalog_records=1200; decision_eligible_records=417"
     )
+    assert updated.progress_stage == "deep_market_evidence:international_equity"
     assert updated.to_dict()["paper_only"] is True
     assert updated.to_dict()["real_money_authorized"] is False
     assert "symbol" not in updated.detail
     assert "provider" not in updated.detail
 
     with pytest.raises(ValueError, match="stage is invalid"):
-        record_manual_cio_diagnostic_progress(
-            "provider key leaked",
-            values=enabled,
-        )
+        record_manual_cio_diagnostic_progress("provider key leaked", values=enabled)
     with pytest.raises(ValueError, match="stage is invalid"):
-        record_manual_cio_diagnostic_progress(
-            "deep_market_evidence:secret",
-            values=enabled,
-        )
+        record_manual_cio_diagnostic_progress("deep_market_evidence:secret", values=enabled)
     with pytest.raises(ValueError, match="metric name is invalid"):
         record_manual_cio_diagnostic_progress(
-            "catalog_eodhd_directories",
-            metrics={"api_key": 1},
-            values=enabled,
+            "catalog_eodhd_directories", metrics={"api_key": 1}, values=enabled
         )
     with pytest.raises(ValueError, match="nonnegative integers"):
         record_manual_cio_diagnostic_progress(
-            "catalog_eodhd_directories",
-            metrics={"catalog_records": True},
-            values=enabled,
+            "catalog_eodhd_directories", metrics={"catalog_records": True}, values=enabled
+        )
+
+
+def test_context_cycle_and_last_stage_survive_watchdog_style_finalization(tmp_path) -> None:
+    values = {
+        **_values(tmp_path),
+        "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED": "true",
+    }
+    request_manual_cio_diagnostic(
+        requested_by="render-release:lineage", now=NOW, values=values
+    )
+    claimed = claim_manual_cio_diagnostic(now=NOW, values=values)
+    assert claimed is not None
+
+    (tmp_path / "production-context-publication-state.json").write_text(
+        json.dumps({"cycle_key": "daily-cio:2026-08-04:context"}), encoding="utf-8"
+    )
+    progressed = record_manual_cio_diagnostic_progress(
+        "six_specialist_committee_cio_cycle", values=values
+    )
+    assert progressed is not None
+    assert progressed.cycle_key == "daily-cio:2026-08-04:context"
+    assert progressed.progress_stage == "six_specialist_committee_cio_cycle"
+
+    # The watchdog holds the original claimed object. Finalization must reload the latest
+    # durable state rather than erasing the cycle and stage with that stale object.
+    finished = finish_manual_cio_diagnostic(
+        claimed,
+        succeeded=False,
+        cycle_key=None,
+        snapshot_identifier=None,
+        detail="bounded child terminated fail-closed",
+        now=NOW + timedelta(minutes=20),
+        values=values,
+    )
+    assert finished.state == "failed"
+    assert finished.cycle_key == "daily-cio:2026-08-04:context"
+    assert finished.progress_stage == "six_specialist_committee_cio_cycle"
+    assert latest_manual_cio_diagnostic(values=values) == finished
+
+
+def test_finalization_rejects_context_cycle_rebinding(tmp_path) -> None:
+    values = {
+        **_values(tmp_path),
+        "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED": "true",
+    }
+    request_manual_cio_diagnostic(
+        requested_by="render-release:lineage", now=NOW, values=values
+    )
+    claimed = claim_manual_cio_diagnostic(now=NOW, values=values)
+    assert claimed is not None
+    (tmp_path / "production-context-publication-state.json").write_text(
+        json.dumps({"cycle_key": "context:one"}), encoding="utf-8"
+    )
+    record_manual_cio_diagnostic_progress(
+        "six_specialist_committee_cio_cycle", values=values
+    )
+    with pytest.raises(ValueError, match="cannot be rebound"):
+        finish_manual_cio_diagnostic(
+            claimed,
+            succeeded=False,
+            cycle_key="context:two",
+            snapshot_identifier=None,
+            detail="failed",
+            values=values,
         )
