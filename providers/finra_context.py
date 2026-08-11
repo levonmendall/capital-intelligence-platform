@@ -22,9 +22,14 @@ from data.decision_information import (
     InformationSourceType,
     PortfolioImpactChannel,
 )
+from providers.redundancy_audit import (
+    ProviderCapabilityKey,
+    current_redundancy_ledger,
+)
 from providers.finra_fixed_income import (
     FINRA_FIXED_INCOME_BASE_URL,
     FINRA_TREASURY_DAILY_AGGREGATES,
+    FinraFixedIncomeError,
     build_finra_fixed_income_provider,
 )
 
@@ -52,11 +57,53 @@ def collect_finra_fixed_income_context(
 
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("as_of must be timezone-aware")
-    provider = build_finra_fixed_income_provider()
+    key = ProviderCapabilityKey(
+        "finra",
+        "fixed_income_market_context",
+        FINRA_TREASURY_DAILY_AGGREGATES,
+    )
+    ledger = current_redundancy_ledger()
+    try:
+        provider = build_finra_fixed_income_provider()
+    except (FinraFixedIncomeError, TypeError, ValueError) as error:
+        if ledger is not None:
+            ledger.declare(
+                key,
+                configured=True,
+                authenticated=False,
+                routed=True,
+                certified_for_evidence_role=True,
+            )
+            ledger.failed(key, "authentication_or_entitlement")
+        raise FinraContextError("FINRA OAuth credentials are invalid") from error
     if provider is None:
+        if ledger is not None:
+            ledger.declare(
+                key,
+                configured=False,
+                authenticated=False,
+                routed=True,
+                certified_for_evidence_role=True,
+            )
         return None
     cutoff = as_of.astimezone(timezone.utc)
-    token, _token_type, _expires = provider._access_token()  # noqa: SLF001 -- same bounded OAuth adapter
+    if ledger is not None:
+        ledger.declare(
+            key,
+            configured=True,
+            authenticated=False,
+            routed=True,
+            certified_for_evidence_role=True,
+        )
+        ledger.attempted(key)
+    try:
+        token, _token_type, _expires = provider._access_token()  # noqa: SLF001 -- same bounded OAuth adapter
+    except FinraFixedIncomeError as error:
+        if ledger is not None:
+            ledger.failed(key, "authentication_or_entitlement")
+        raise FinraContextError("FINRA OAuth authentication failed") from error
+    if ledger is not None:
+        ledger.authenticated(key)
     getter = http_get or requests.get
     endpoint = f"{FINRA_FIXED_INCOME_BASE_URL}/{FINRA_TREASURY_DAILY_AGGREGATES}"
     try:
@@ -77,6 +124,11 @@ def collect_finra_fixed_income_context(
         raise FinraContextError("FINRA fixed-income context request failed") from error
     status = int(getattr(response, "status_code", 0))
     if not 200 <= status < 300:
+        if ledger is not None:
+            ledger.failed(
+                key,
+                "authentication_or_entitlement" if status in {401, 403} else "provider_evidence_unavailable",
+            )
         raise FinraContextError(
             f"FINRA fixed-income context returned HTTP {status or 'unknown'}"
         )
@@ -148,6 +200,15 @@ def collect_finra_fixed_income_context(
         f"buckets={len(rows)}. This is aggregate market-structure/liquidity context "
         "only and is not an individual Treasury or bond price."
     )
+    source_identifier = (
+        f"{FINRA_TREASURY_DAILY_AGGREGATES}:{latest_date.isoformat()}"
+    )
+    if ledger is not None:
+        ledger.used(
+            key,
+            source_identifiers=(source_identifier,),
+            failed_over=False,
+        )
     return DecisionInformationRecord(
         identifier=f"finra-context:treasury:{latest_date.isoformat()}:{digest[:16]}",
         topic="FINRA TRACE U.S. Treasury market activity",
@@ -159,7 +220,7 @@ def collect_finra_fixed_income_context(
         provenance=InformationProvenance(
             provider="FINRA",
             source_identifier=(
-                f"{FINRA_TREASURY_DAILY_AGGREGATES}:{latest_date.isoformat()}"
+                source_identifier
             ),
             source_type=InformationSourceType.REGULATORY,
             retrieved_at=cutoff,

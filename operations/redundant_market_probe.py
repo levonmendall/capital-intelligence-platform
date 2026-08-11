@@ -164,7 +164,7 @@ def _candidate_set(
     history_days = policy.history_days
     candidates: list[MarketHistoryCandidate] = []
 
-    def add(provider, capability, dataset, symbol, loader, *, configured=True, authenticated=True, fixed_income=False, exact=True):
+    def add(provider, capability, dataset, symbol, loader, *, configured=True, authenticated=False, fixed_income=False, exact=True):
         candidates.append(
             MarketHistoryCandidate(
                 provider=provider,
@@ -183,47 +183,47 @@ def _candidate_set(
 
     if record.asset_class in {CandidateAssetClass.US_EQUITY, CandidateAssetClass.US_ETF}:
         add("alpaca", "us_equity_history", "IEX", record.provider_symbol, lambda: _alpaca_loader(record, as_of=as_of, history_days=history_days))
-        add("tradier", "us_equity_history", "markets/history", record.symbol, lambda: tradier.daily_history(record.symbol, as_of=as_of, history_days=history_days), configured=tradier.configured, authenticated=tradier.configured)
-        add("massive", "us_equity_history", "stocks-aggs", record.symbol, lambda: massive.daily_history("stock", record.symbol, as_of=as_of, history_days=history_days), configured=massive.configured, authenticated=massive.configured)
-        add("twelve_data", "us_equity_history", "time_series", record.symbol, lambda: twelve.daily_history((record.symbol,), as_of=as_of, history_days=history_days)[1], configured=twelve.configured, authenticated=twelve.configured)
-        add("yahoo", "us_equity_history", "chart", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get))
+        add("tradier", "us_equity_history", "markets/history", record.symbol, lambda: tradier.daily_history(record.symbol, as_of=as_of, history_days=history_days), configured=tradier.configured, authenticated=False)
+        add("massive", "us_equity_history", "stocks-aggs", record.symbol, lambda: massive.daily_history("stock", record.symbol, as_of=as_of, history_days=history_days), configured=massive.configured, authenticated=False)
+        add("twelve_data", "us_equity_history", "time_series", record.symbol, lambda: twelve.daily_history((record.symbol,), as_of=as_of, history_days=history_days)[1], configured=twelve.configured, authenticated=False)
+        add("yahoo", "us_equity_history", "chart", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get), authenticated=True)
     elif record.asset_class is CandidateAssetClass.INTERNATIONAL_EQUITY:
-        add("eodhd", "international_equity_history", "eodhd-history", record.provider_symbol, lambda: _legacy._eodhd_rows(record, as_of=as_of, history_days=history_days, provider=eodhd_provider), configured=eodhd_provider.configured, authenticated=eodhd_provider.configured)
-        add("twelve_data", "international_equity_history", "time_series", record.provider_symbol, lambda: twelve.daily_history((record.provider_symbol, record.symbol), as_of=as_of, history_days=history_days)[1], configured=twelve.configured, authenticated=twelve.configured)
-        add("yahoo", "international_equity_history", "chart", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get))
+        add("eodhd", "international_equity_history", "eodhd-history", record.provider_symbol, lambda: _legacy._eodhd_rows(record, as_of=as_of, history_days=history_days, provider=eodhd_provider), configured=eodhd_provider.configured, authenticated=False)
+        add("twelve_data", "international_equity_history", "time_series", record.provider_symbol, lambda: twelve.daily_history((record.provider_symbol, record.symbol), as_of=as_of, history_days=history_days)[1], configured=twelve.configured, authenticated=False)
+        add("yahoo", "international_equity_history", "chart", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get), authenticated=True)
     elif record.asset_class is CandidateAssetClass.FX:
-        add("twelve_data", "fx_history", "time_series", record.provider_symbol, lambda: twelve.daily_history((record.provider_symbol, record.symbol), as_of=as_of, history_days=history_days)[1], configured=twelve.configured, authenticated=twelve.configured)
-        add("massive", "fx_history", "forex-aggs", record.symbol, lambda: massive.daily_history("fx", record.symbol, as_of=as_of, history_days=history_days), configured=massive.configured, authenticated=massive.configured)
-        add("eodhd", "fx_history", "eodhd-history", record.provider_symbol, lambda: _legacy._eodhd_rows(record, as_of=as_of, history_days=history_days, provider=eodhd_provider), configured=eodhd_provider.configured, authenticated=eodhd_provider.configured)
-        add("yahoo", "fx_history", "chart", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get))
+        add("twelve_data", "fx_history", "time_series", record.provider_symbol, lambda: twelve.daily_history((record.provider_symbol, record.symbol), as_of=as_of, history_days=history_days)[1], configured=twelve.configured, authenticated=False)
+        add("massive", "fx_history", "forex-aggs", record.symbol, lambda: massive.daily_history("fx", record.symbol, as_of=as_of, history_days=history_days), configured=massive.configured, authenticated=False)
+        add("eodhd", "fx_history", "eodhd-history", record.provider_symbol, lambda: _legacy._eodhd_rows(record, as_of=as_of, history_days=history_days, provider=eodhd_provider), configured=eodhd_provider.configured, authenticated=False)
+        add("yahoo", "fx_history", "chart", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get), authenticated=True)
     elif record.asset_class is CandidateAssetClass.CRYPTO:
         binding = _crypto_binding(record)
         if binding is not None:
             coinbase_symbol = str(binding.get("coinbase_product_id") or "")
             kraken_symbol = str(binding.get("kraken_symbol") or "")
             if coinbase_symbol:
-                add("coinbase", "crypto_history", "exchange-candles", coinbase_symbol, lambda: coinbase.daily_history(coinbase_symbol, as_of=as_of, history_days=history_days))
+                add("coinbase", "crypto_history", "exchange-candles", coinbase_symbol, lambda: coinbase.daily_history(coinbase_symbol, as_of=as_of, history_days=history_days), authenticated=True)
             if kraken_symbol:
-                add("kraken", "crypto_history", "spot-ohlc", kraken_symbol, lambda: kraken.daily_history(kraken_symbol, as_of=as_of, history_days=history_days))
-        add("massive", "crypto_history", "crypto-aggs", record.symbol, lambda: massive.daily_history("crypto", record.symbol, as_of=as_of, history_days=history_days), configured=massive.configured, authenticated=massive.configured)
-        add("twelve_data", "crypto_history", "time_series", record.provider_symbol, lambda: twelve.daily_history((record.provider_symbol, record.symbol), as_of=as_of, history_days=history_days)[1], configured=twelve.configured, authenticated=twelve.configured)
-        add("yahoo", "crypto_history", "chart", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get))
+                add("kraken", "crypto_history", "spot-ohlc", kraken_symbol, lambda: kraken.daily_history(kraken_symbol, as_of=as_of, history_days=history_days), authenticated=True)
+        add("massive", "crypto_history", "crypto-aggs", record.symbol, lambda: massive.daily_history("crypto", record.symbol, as_of=as_of, history_days=history_days), configured=massive.configured, authenticated=False)
+        add("twelve_data", "crypto_history", "time_series", record.provider_symbol, lambda: twelve.daily_history((record.provider_symbol, record.symbol), as_of=as_of, history_days=history_days)[1], configured=twelve.configured, authenticated=False)
+        add("yahoo", "crypto_history", "chart", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get), authenticated=True)
     elif record.asset_class is CandidateAssetClass.FUTURE:
         exact_symbol = record.symbol
         dataset = record.provider_dataset or "GLBX.MDP3"
-        add("databento", "futures_history", dataset, exact_symbol, lambda: databento_futures.daily_history(symbol=exact_symbol, venue=record.venue, currency=record.currency, as_of=as_of, history_days=history_days, dataset=dataset), configured=databento_futures.configured, authenticated=databento_futures.configured)
+        add("databento", "futures_history", dataset, exact_symbol, lambda: databento_futures.daily_history(symbol=exact_symbol, venue=record.venue, currency=record.currency, as_of=as_of, history_days=history_days, dataset=dataset), configured=databento_futures.configured, authenticated=False)
         massive_symbol = _massive_future_symbol(exact_symbol)
-        add("massive", "futures_history", "futures-aggs", massive_symbol, lambda: massive.daily_history("future", massive_symbol, as_of=as_of, history_days=history_days), configured=massive.configured, authenticated=massive.configured)
+        add("massive", "futures_history", "futures-aggs", massive_symbol, lambda: massive.daily_history("future", massive_symbol, as_of=as_of, history_days=history_days), configured=massive.configured, authenticated=False)
         # Yahoo is tertiary only when the configured record itself supplies an exact
         # Yahoo symbol; never manufacture a continuous contract for fallback.
         if record.provider_kind == "yahoo" and "=" not in record.provider_symbol:
-            add("yahoo", "futures_history", "chart-exact", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get))
+            add("yahoo", "futures_history", "chart-exact", record.provider_symbol, lambda: _legacy._yahoo_rows(record, as_of=as_of, history_days=history_days, http_get=http_get), authenticated=True)
     elif record.asset_class is CandidateAssetClass.FIXED_INCOME:
         # No generic provider substitution is permitted. A certified exact-security
         # record may use its own EODHD price history; FINRA/Treasury never enter here.
         exact = bool(record.instrument_identifier)
         if record.provider_kind == "eodhd" and exact:
-            add("eodhd", "fixed_income_exact_security_history", "eodhd-history", record.provider_symbol, lambda: _legacy._eodhd_rows(record, as_of=as_of, history_days=history_days, provider=eodhd_provider), configured=eodhd_provider.configured, authenticated=eodhd_provider.configured, fixed_income=True, exact=True)
+            add("eodhd", "fixed_income_exact_security_history", "eodhd-history", record.provider_symbol, lambda: _legacy._eodhd_rows(record, as_of=as_of, history_days=history_days, provider=eodhd_provider), configured=eodhd_provider.configured, authenticated=False, fixed_income=True, exact=True)
     return tuple(candidates)
 
 
@@ -238,7 +238,7 @@ def _corroborate_options(
     ledger = current_redundancy_ledger()
     key = ProviderCapabilityKey("tradier", "active_option_chain_corroboration", "options/chains")
     if ledger is not None:
-        ledger.declare(key, configured=tradier.configured, authenticated=tradier.configured, routed=True, certified_for_evidence_role=True)
+        ledger.declare(key, configured=tradier.configured, authenticated=False, routed=True, certified_for_evidence_role=True)
     grouped: dict[tuple[str, date], list[_legacy.DiscoveryCatalogRecord]] = {}
     for record in records:
         if record.asset_class is not CandidateAssetClass.OPTION or not record.underlying_symbol or record.expiration_at is None:
@@ -275,6 +275,76 @@ def _corroborate_options(
     return result
 
 
+
+def _mark_existing_result_usage(
+    records: Sequence[_legacy.DiscoveryCatalogRecord],
+    features: Mapping[str, _legacy.DiscoveryMarketFeatures],
+) -> None:
+    """Record provider-native first-pass successes in the cycle audit."""
+
+    ledger = current_redundancy_ledger()
+    if ledger is None:
+        return
+    for record in records:
+        feature = features.get(record.symbol)
+        if feature is None:
+            continue
+        sources = tuple(feature.evidence_identifiers)
+        if record.asset_class is CandidateAssetClass.OPTION:
+            providers = tuple(
+                provider
+                for provider in ("databento", "massive")
+                if any(provider in source.lower() for source in sources)
+            )
+            if not providers and record.provider_kind in {"databento", "massive"}:
+                providers = (record.provider_kind,)
+            for provider in providers:
+                dataset = "OPRA.PILLAR" if provider == "databento" else "OPRA"
+                key = ProviderCapabilityKey(provider, "option_evidence", dataset)
+                ledger.declare(
+                    key,
+                    configured=True,
+                    authenticated=True,
+                    routed=True,
+                    certified_for_evidence_role=True,
+                )
+                ledger.used(
+                    key,
+                    source_identifiers=tuple(
+                        source for source in sources if provider in source.lower()
+                    ),
+                    failed_over=provider == "massive",
+                )
+            continue
+        provider = record.provider_kind.strip().lower()
+        capability = {
+            CandidateAssetClass.US_EQUITY: "us_equity_history",
+            CandidateAssetClass.US_ETF: "us_equity_history",
+            CandidateAssetClass.INTERNATIONAL_EQUITY: "international_equity_history",
+            CandidateAssetClass.FX: "fx_history",
+            CandidateAssetClass.CRYPTO: "crypto_history",
+            CandidateAssetClass.FUTURE: "futures_history",
+            CandidateAssetClass.FIXED_INCOME: "fixed_income_exact_security_history",
+        }.get(record.asset_class)
+        if not provider or capability is None:
+            continue
+        dataset = record.provider_dataset or {
+            "alpaca": "IEX",
+            "eodhd": "eodhd-history",
+            "yahoo": "chart",
+            "databento": "GLBX.MDP3",
+            "massive": "market-aggs",
+        }.get(provider, "provider-native")
+        key = ProviderCapabilityKey(provider, capability, dataset)
+        ledger.declare(
+            key,
+            configured=True,
+            authenticated=True,
+            routed=True,
+            certified_for_evidence_role=True,
+        )
+        ledger.used(key, source_identifiers=sources, failed_over=False)
+
 def default_redundant_market_probe(
     records: Sequence[_legacy.DiscoveryCatalogRecord],
     as_of: datetime,
@@ -289,6 +359,7 @@ def default_redundant_market_probe(
     # Preserve current provider-native behavior first; redundancy only repairs missing
     # authentic evidence and cannot override a valid canonical first-pass result.
     result = dict(_legacy.default_market_probe(records, timestamp, policy, http_get=http_get))
+    _mark_existing_result_usage(records, result)
     missing = tuple(record for record in records if record.symbol not in result and record.asset_class is not CandidateAssetClass.OPTION)
     if missing:
         eodhd = _legacy.build_eodhd_provider()

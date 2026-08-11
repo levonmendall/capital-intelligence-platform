@@ -288,16 +288,17 @@ class RedundantMarketHistoryRouter:
         ledger = self.audit or current_redundancy_ledger()
         attempted: list[str] = []
         failures: list[tuple[str, str]] = []
-        for index, candidate in enumerate(candidates):
-            key = candidate.key
-            if ledger is not None:
+        if ledger is not None:
+            for candidate in candidates:
                 ledger.declare(
-                    key,
+                    candidate.key,
                     configured=candidate.configured,
                     authenticated=candidate.authenticated,
                     routed=True,
                     certified_for_evidence_role=candidate.certified_for_evidence_role,
                 )
+        for index, candidate in enumerate(candidates):
+            key = candidate.key
             if not candidate.configured:
                 failures.append((key.identifier, "not_configured"))
                 continue
