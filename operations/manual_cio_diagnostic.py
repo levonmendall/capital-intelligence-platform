@@ -22,6 +22,10 @@ _ACTIVE_STATES = frozenset({"pending", "in_progress"})
 _FINAL_STATES = frozenset({"completed", "failed"})
 _PROGRESS_ENABLED = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED"
 _CONTEXT_STATE_FILENAME = "production-context-publication-state.json"
+_PROGRESS_STAGE_ALIASES = {
+    "catalog_databento_options": "catalog_options",
+    "catalog_databento_options_complete": "catalog_options_complete",
+}
 _PROGRESS_STAGES = frozenset(
     {
         "canonical_portfolio_initialization",
@@ -32,8 +36,8 @@ _PROGRESS_STAGES = frozenset(
         "comprehensive_catalog_discovery",
         "catalog_eodhd_directories",
         "catalog_eodhd_directories_complete",
-        "catalog_databento_options",
-        "catalog_databento_options_complete",
+        "catalog_options",
+        "catalog_options_complete",
         "comprehensive_catalog_discovery_complete",
         "certified_catalog_merge_complete",
         "provider_preselection_publication",
@@ -239,6 +243,7 @@ def record_manual_cio_diagnostic_progress(
     if enabled not in {"1", "true", "yes", "on"}:
         return None
     normalized_stage = str(stage).strip().lower()
+    normalized_stage = _PROGRESS_STAGE_ALIASES.get(normalized_stage, normalized_stage)
     lane_stage = normalized_stage.split(":", 1)
     if normalized_stage not in _PROGRESS_STAGES and not (
         len(lane_stage) == 2 and lane_stage[0] in _PROGRESS_LANE_STAGES and lane_stage[1] in _PROGRESS_LANES
