@@ -135,7 +135,13 @@ def build_cio_diagnostic_audit(
     )
     context: Mapping[str, Any] = persisted_context if cycle_matches else {}
 
-    scope_required = context.get("comprehensive_discovery_required") is True
+    configured_scope_required = str(
+        resolved.get("CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY", "")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    scope_required = (
+        context.get("comprehensive_discovery_required") is True
+        or configured_scope_required
+    )
     scope_state = str(context.get("comprehensive_discovery_scope_state") or "missing")
     scope_complete = scope_state == "complete"
     instrument_count = _count(context, "instrument_count")
