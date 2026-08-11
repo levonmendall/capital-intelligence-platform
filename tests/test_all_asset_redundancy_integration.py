@@ -64,7 +64,7 @@ def test_cio_export_publishes_seven_stage_redundancy_audit() -> None:
     assert record["attempted"] is True
     assert record["used"] is True
     assert record["failed_over"] is True
-    assert audit["credential_values_included"] is False
+    assert audit["secret_values_included"] is False
     assert audit["decision_authority_granted"] is False
     assert audit["execution_authority_granted"] is False
 

@@ -142,6 +142,6 @@ def test_audit_records_all_required_state_transitions() -> None:
         "failed_over",
     ):
         assert massive[field] is True
-    assert payload["credential_values_included"] is False
+    assert payload["secret_values_included"] is False
     assert payload["decision_authority_granted"] is False
     assert payload["execution_authority_granted"] is False

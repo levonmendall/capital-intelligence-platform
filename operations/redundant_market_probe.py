@@ -356,34 +356,55 @@ def default_redundant_market_probe(
     if current_redundancy_ledger() is None:
         begin_redundancy_cycle(f"cio-market-evidence:{timestamp.isoformat()}", timestamp)
 
+    eodhd = _legacy.build_eodhd_provider()
+    tradier = TradierMarketDataProvider()
+    massive = MassiveMultiAssetProvider()
+    twelve = TwelveDataHistoryProvider()
+    coinbase = CoinbaseHistoryProvider()
+    kraken = KrakenHistoryProvider()
+    databento_futures = DatabentoFuturesHistoryProvider()
+    ledger = current_redundancy_ledger()
+    candidate_sets: dict[str, tuple[MarketHistoryCandidate, ...]] = {}
+    for record in records:
+        if record.asset_class is CandidateAssetClass.OPTION:
+            continue
+        candidates = _candidate_set(
+            record,
+            as_of=timestamp,
+            policy=policy,
+            http_get=http_get,
+            eodhd_provider=eodhd,
+            tradier=tradier,
+            massive=massive,
+            twelve=twelve,
+            coinbase=coinbase,
+            kraken=kraken,
+            databento_futures=databento_futures,
+        )
+        candidate_sets[record.symbol] = candidates
+        if ledger is not None:
+            for candidate in candidates:
+                ledger.declare(
+                    candidate.key,
+                    configured=candidate.configured,
+                    authenticated=candidate.authenticated,
+                    routed=True,
+                    certified_for_evidence_role=candidate.certified_for_evidence_role,
+                )
+
     # Preserve current provider-native behavior first; redundancy only repairs missing
     # authentic evidence and cannot override a valid canonical first-pass result.
     result = dict(_legacy.default_market_probe(records, timestamp, policy, http_get=http_get))
     _mark_existing_result_usage(records, result)
-    missing = tuple(record for record in records if record.symbol not in result and record.asset_class is not CandidateAssetClass.OPTION)
+    missing = tuple(
+        record
+        for record in records
+        if record.symbol not in result and record.asset_class is not CandidateAssetClass.OPTION
+    )
     if missing:
-        eodhd = _legacy.build_eodhd_provider()
-        tradier = TradierMarketDataProvider()
-        massive = MassiveMultiAssetProvider()
-        twelve = TwelveDataHistoryProvider()
-        coinbase = CoinbaseHistoryProvider()
-        kraken = KrakenHistoryProvider()
-        databento_futures = DatabentoFuturesHistoryProvider()
         router = RedundantMarketHistoryRouter()
         for record in missing:
-            candidates = _candidate_set(
-                record,
-                as_of=timestamp,
-                policy=policy,
-                http_get=http_get,
-                eodhd_provider=eodhd,
-                tradier=tradier,
-                massive=massive,
-                twelve=twelve,
-                coinbase=coinbase,
-                kraken=kraken,
-                databento_futures=databento_futures,
-            )
+            candidates = candidate_sets.get(record.symbol, ())
             if not candidates:
                 continue
             try:

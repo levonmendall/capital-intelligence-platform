@@ -162,7 +162,7 @@ class RedundancyAuditLedger:
             "schema_version": "provider-redundancy-audit.v2",
             "cycle_identifier": self.cycle_identifier,
             "as_of": self.as_of.isoformat(),
-            "credential_values_included": False,
+            "secret_values_included": False,
             "decision_authority_granted": False,
             "execution_authority_granted": False,
             "records": [item.to_dict() for item in records],
