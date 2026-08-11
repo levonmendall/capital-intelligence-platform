@@ -57,6 +57,11 @@ def _failure_class(error: BaseException | None) -> str:
     return "provider_evidence_unavailable"
 
 
+def _massive_ticker(raw_symbol: str) -> str:
+    compact = "".join(str(raw_symbol).strip().upper().split())
+    return compact if compact.startswith("O:") else f"O:{compact}"
+
+
 @dataclass(frozen=True, slots=True)
 class RedundantOptionDefinition:
     symbol: str
@@ -154,9 +159,13 @@ def _adapt_massive_selection(selection: MassiveOptionSelection) -> RedundantOpti
     )
 
 
-def _adapt_massive_bar(bar: MassiveOptionBar) -> RedundantOptionBar:
+def _adapt_massive_bar(
+    bar: MassiveOptionBar,
+    *,
+    raw_symbol: str | None = None,
+) -> RedundantOptionBar:
     return RedundantOptionBar(
-        raw_symbol=bar.raw_symbol,
+        raw_symbol=raw_symbol or bar.raw_symbol,
         observed_at=bar.observed_at,
         close=bar.close,
         volume=bar.volume,
@@ -222,7 +231,7 @@ class RedundantOptionsProvider:
 
         if self.fallback.configured:
             try:
-                # Massive's free/basic REST path is request-limited. Keep the same
+                # Massive's basic REST path is request-limited. Keep the same
                 # expiration/right policy but inspect the nearest priced contract in
                 # each bucket so failover is bounded and does not lower any evidence,
                 # price, expiry, or portfolio threshold.
@@ -298,15 +307,19 @@ class RedundantOptionsProvider:
         )
         fallback_error: BaseException | None = None
         if missing and self.fallback.configured:
+            aliases = {_massive_ticker(raw_symbol): raw_symbol for raw_symbol in missing}
             try:
                 _session, fallback_bars = self.fallback.latest_daily_bars(
-                    tuple((None, raw_symbol) for raw_symbol in missing),
+                    tuple((None, ticker) for ticker in aliases),
                     as_of=timestamp,
                     history_days=history_days,
                 )
-                for raw_symbol, bars in fallback_bars.items():
-                    result[str(raw_symbol).strip().upper()] = tuple(
-                        _adapt_massive_bar(item) for item in bars
+                for massive_symbol, bars in fallback_bars.items():
+                    normalized_massive = str(massive_symbol).strip().upper()
+                    original_symbol = aliases.get(normalized_massive, normalized_massive)
+                    result[original_symbol] = tuple(
+                        _adapt_massive_bar(item, raw_symbol=original_symbol)
+                        for item in bars
                     )
             except MassiveOptionsError as error:
                 fallback_error = error
