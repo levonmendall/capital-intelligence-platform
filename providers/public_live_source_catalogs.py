@@ -10,26 +10,36 @@ from providers.public_live_information import (
 )
 
 
+_SUPPLEMENTAL_SUFFIXES = (
+    "official_expansion",
+    "free_depth",
+)
+
+
 def load_operating_public_live_source_catalog(
     path: str | Path,
 ) -> PublicLiveSourceCatalog:
-    """Load the base catalog plus an adjacent official-source expansion, if present."""
+    """Load the base catalog plus adjacent governed supplemental catalogs."""
 
     catalog_path = Path(path)
-    base = load_public_live_source_catalog(catalog_path)
-    supplemental_path = catalog_path.with_name(
-        f"{catalog_path.stem}_official_expansion{catalog_path.suffix}"
-    )
-    if not supplemental_path.exists():
-        return base
+    catalogs = [load_public_live_source_catalog(catalog_path)]
+    for suffix in _SUPPLEMENTAL_SUFFIXES:
+        supplemental_path = catalog_path.with_name(
+            f"{catalog_path.stem}_{suffix}{catalog_path.suffix}"
+        )
+        if supplemental_path.exists():
+            catalogs.append(load_public_live_source_catalog(supplemental_path))
 
-    supplemental = load_public_live_source_catalog(supplemental_path)
-    sources = base.sources + supplemental.sources
+    sources = tuple(
+        source
+        for catalog in catalogs
+        for source in catalog.sources
+    )
     identifiers = tuple(item.identifier for item in sources)
     if len(identifiers) != len(set(identifiers)):
         raise ValueError("public live source identifiers cannot repeat across catalogs")
     return PublicLiveSourceCatalog(
-        identifier=f"{base.identifier}+{supplemental.identifier}",
+        identifier="+".join(catalog.identifier for catalog in catalogs),
         sources=sources,
     )
 
