@@ -23,6 +23,7 @@ from providers.redundancy_audit import (
     ProviderCapabilityKey,
     current_redundancy_ledger,
 )
+from providers.single_pass_massive_options import SinglePassMassiveOptionsProvider
 from providers.massive_options import (
     MASSIVE_OPRA_DATASET,
     MassiveOptionBar,
@@ -219,7 +220,7 @@ class RedundantOptionsProvider:
         fallback: MassiveOptionsProvider | None = None,
     ) -> None:
         self.primary = primary or DatabentoOptionsProvider()
-        self.fallback = fallback or MassiveOptionsProvider()
+        self.fallback = fallback or SinglePassMassiveOptionsProvider()
 
     @property
     def configured(self) -> bool:
