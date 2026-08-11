@@ -1,31 +1,52 @@
-import subprocess
+from types import SimpleNamespace
 
 import run_render_service_nonblocking as bootstrap
 
 
-def test_release_diagnostic_republishes_public_audit_while_running(monkeypatch):
-    command = ("python", "run_bounded_manual_cio_diagnostic.py")
+def test_live_audit_publisher_republishes_until_stopped(monkeypatch):
     diagnostic_values = {
         "CAPITAL_INTELLIGENCE_RELEASE": "release-live-static-audit",
         "CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/capital-intelligence-test",
     }
-    observed: dict[str, object] = {}
-    waits: list[float | None] = []
+    waits: list[float] = []
     publications: list[dict[str, str]] = []
 
-    class FakeProcess:
-        def wait(self, timeout=None):
+    class FakeStopEvent:
+        def wait(self, timeout):
             waits.append(timeout)
-            if len(waits) == 1:
-                raise subprocess.TimeoutExpired(cmd=command, timeout=timeout)
-            return 0
+            return len(waits) > 1
 
-    def fake_popen(received_command, *, env):
+    monkeypatch.setattr(
+        bootstrap,
+        "_publish_release_diagnostic_audit",
+        lambda values: publications.append(dict(values)) or 0,
+    )
+
+    bootstrap._refresh_release_diagnostic_audit_until_stopped(
+        FakeStopEvent(),
+        diagnostic_values=diagnostic_values,
+        refresh_seconds=15.0,
+    )
+
+    assert waits == [15.0, 15.0]
+    assert publications == [diagnostic_values]
+
+
+def test_release_diagnostic_preserves_subprocess_run_contract(monkeypatch):
+    command = ("python", "run_bounded_manual_cio_diagnostic.py")
+    diagnostic_values = {
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-run-contract",
+    }
+    observed: dict[str, object] = {}
+    publications: list[dict[str, str]] = []
+
+    def fake_run(received_command, *, env, check):
         observed["command"] = tuple(received_command)
         observed["env"] = dict(env)
-        return FakeProcess()
+        observed["check"] = check
+        return SimpleNamespace(returncode=6)
 
-    monkeypatch.setattr(bootstrap.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
     monkeypatch.setattr(
         bootstrap,
         "_publish_release_diagnostic_audit",
@@ -35,42 +56,13 @@ def test_release_diagnostic_republishes_public_audit_while_running(monkeypatch):
     return_code = bootstrap._run_release_diagnostic_with_live_audit(
         command,
         diagnostic_values=diagnostic_values,
-        refresh_seconds=0.01,
-    )
-
-    assert return_code == 0
-    assert observed["command"] == command
-    assert observed["env"] == diagnostic_values
-    assert waits == [0.01, 0.01]
-    assert publications == [diagnostic_values]
-
-
-def test_release_diagnostic_does_not_publish_extra_snapshot_when_it_finishes_immediately(
-    monkeypatch,
-):
-    publications: list[dict[str, str]] = []
-
-    class FakeProcess:
-        def wait(self, timeout=None):
-            assert timeout == 0.01
-            return 6
-
-    monkeypatch.setattr(
-        bootstrap.subprocess,
-        "Popen",
-        lambda _command, *, env: FakeProcess(),
-    )
-    monkeypatch.setattr(
-        bootstrap,
-        "_publish_release_diagnostic_audit",
-        lambda values: publications.append(dict(values)) or 0,
-    )
-
-    return_code = bootstrap._run_release_diagnostic_with_live_audit(
-        ("python", "run_bounded_manual_cio_diagnostic.py"),
-        diagnostic_values={"CAPITAL_INTELLIGENCE_RELEASE": "release-terminal"},
-        refresh_seconds=0.01,
+        refresh_seconds=15.0,
     )
 
     assert return_code == 6
+    assert observed == {
+        "command": command,
+        "env": diagnostic_values,
+        "check": False,
+    }
     assert publications == []
