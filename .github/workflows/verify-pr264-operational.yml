@@ -21,6 +21,8 @@ on:
       - providers/crypto_venues.py
       - providers/databento.py
       - providers/databento_options.py
+      - providers/massive_options.py
+      - providers/redundant_options.py
       - providers/eodhd.py
       - render.yaml
       - run_provider_validation.py
@@ -29,7 +31,9 @@ on:
       - tests/test_comprehensive_market_discovery_default_config.py
       - tests/test_databento_options.py
       - tests/test_provider_validation.py
+      - tests/test_redundant_options_provider.py
       - tests/test_run_provider_validation_policy.py
+      - tests/test_run_provider_validation_redundancy.py
   push:
     branches:
       - main
@@ -52,6 +56,8 @@ on:
       - providers/crypto_venues.py
       - providers/databento.py
       - providers/databento_options.py
+      - providers/massive_options.py
+      - providers/redundant_options.py
       - providers/eodhd.py
       - render.yaml
       - run_provider_validation.py
@@ -60,7 +66,9 @@ on:
       - tests/test_comprehensive_market_discovery_default_config.py
       - tests/test_databento_options.py
       - tests/test_provider_validation.py
+      - tests/test_redundant_options_provider.py
       - tests/test_run_provider_validation_policy.py
+      - tests/test_run_provider_validation_redundancy.py
   workflow_dispatch:
   schedule:
     - cron: "17 14 * * 1-5"
@@ -95,6 +103,8 @@ jobs:
           .venv/bin/python -m py_compile \
             providers/crypto_venues.py \
             providers/databento_options.py \
+            providers/massive_options.py \
+            providers/redundant_options.py \
             operations/certified_investable_catalog.py \
             operations/comprehensive_market_discovery.py \
             operations/comprehensive_market_discovery_legacy.py \
@@ -112,7 +122,9 @@ jobs:
             tests/test_manual_cio_diagnostic_restart_recovery.py \
             tests/test_provider_preselection_publication_runtime.py \
             tests/test_provider_validation.py \
-            tests/test_run_provider_validation_policy.py
+            tests/test_redundant_options_provider.py \
+            tests/test_run_provider_validation_policy.py \
+            tests/test_run_provider_validation_redundancy.py
       - name: Run PR264 deterministic regressions
         shell: bash
         run: |
@@ -126,7 +138,9 @@ jobs:
             tests/test_manual_cio_diagnostic_restart_recovery.py \
             tests/test_provider_preselection_publication_runtime.py \
             tests/test_provider_validation.py \
-            tests/test_run_provider_validation_policy.py
+            tests/test_redundant_options_provider.py \
+            tests/test_run_provider_validation_policy.py \
+            tests/test_run_provider_validation_redundancy.py
 
   live-provider-validation:
     if: github.event_name != 'pull_request'
@@ -136,6 +150,7 @@ jobs:
     env:
       CAPITAL_INTELLIGENCE_EODHD_API_TOKEN: ${{ secrets.CAPITAL_INTELLIGENCE_EODHD_API_TOKEN || secrets.EODHD_API_TOKEN || secrets.EODHD_API_KEY }}
       CAPITAL_INTELLIGENCE_DATABENTO_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_DATABENTO_API_KEY || secrets.DATABENTO_API_KEY }}
+      CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY || secrets.MASSIVE_API_KEY || secrets.POLYGON_API_KEY }}
       CAPITAL_INTELLIGENCE_RELEASE: ${{ github.sha }}
     steps:
       - name: Check out exact release source
