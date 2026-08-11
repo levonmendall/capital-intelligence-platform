@@ -18,6 +18,10 @@ from providers.alpaca_paper import (
     AlpacaPaperProviderError,
     create_alpaca_paper_client,
 )
+from providers.finra_fixed_income import (
+    FinraFixedIncomeError,
+    FinraFixedIncomeProvider,
+)
 from providers.fred import FREDProvider
 from providers.openfigi import OpenFigiMappingJob, OpenFigiProvider
 from providers.provider_credentials import (
@@ -46,6 +50,14 @@ OPENFIGI_NAMES = (
     "OPEN_FIGI_API_KEY",
     "OPENFIGI_API_KEY",
 )
+FINRA_CLIENT_ID_NAMES = (
+    "FINRA_CLIENT_ID",
+    "CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID",
+)
+FINRA_CLIENT_SECRET_NAMES = (
+    "FINRA_CLIENT_SECRET",
+    "CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET",
+)
 ALL_SECRET_NAMES = tuple(
     dict.fromkeys(
         ALPACA_KEY_NAMES
@@ -53,6 +65,8 @@ ALL_SECRET_NAMES = tuple(
         + FRED_NAMES
         + EODHD_NAMES
         + OPENFIGI_NAMES
+        + FINRA_CLIENT_ID_NAMES
+        + FINRA_CLIENT_SECRET_NAMES
         + AlphaVantageCredentialProbe.environment_names
         + DatabentoCredentialProbe.environment_names
         + TwelveDataCredentialProbe.environment_names
@@ -231,13 +245,50 @@ def _twelve_data() -> dict[str, Any]:
     )
 
 
+def _finra() -> dict[str, Any]:
+    client_ids = _configured_values(FINRA_CLIENT_ID_NAMES)
+    client_secrets = _configured_values(FINRA_CLIENT_SECRET_NAMES)
+    credential_names = tuple(
+        name for name, _value in (*client_ids, *client_secrets)
+    )
+    result = _base_result("finra-fixed-income", credential_names)
+    # Treat either half of the pair as configured so partial wiring is visible and
+    # fails rather than being silently mistaken for an absent optional provider.
+    result["configured"] = bool(client_ids or client_secrets)
+    if not result["configured"]:
+        result["error"] = "FINRA client credentials are not configured"
+        return result
+    if not client_ids or not client_secrets:
+        result["error"] = "FINRA requires both client ID and client secret"
+        return result
+    try:
+        evidence = FinraFixedIncomeProvider(
+            client_ids[0][1],
+            client_secrets[0][1],
+        ).probe_treasury_daily_aggregates().to_dict()
+    except (FinraFixedIncomeError, TypeError, ValueError) as error:
+        result["error"] = _safe_error(error)
+        return result
+    result.update(
+        {
+            "passed": True,
+            "selected_credential": "oauth-client-id-secret-pair",
+            "evidence": evidence,
+        }
+    )
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output")
     parser.add_argument(
         "--require-all",
         action="store_true",
-        help="Return nonzero unless every supported provider credential passes.",
+        help=(
+            "Return nonzero unless every established required provider credential "
+            "passes. Optional providers also block when they are configured but invalid."
+        ),
     )
     return parser
 
@@ -257,7 +308,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     evaluated_at = datetime.now(timezone.utc)
     try:
-        providers = [
+        established_required = [
             _alpaca(),
             _fred(),
             _eodhd(),
@@ -266,11 +317,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             _databento(),
             _twelve_data(),
         ]
+        finra = _finra()
+        providers = [*established_required, finra]
         blockers = [
             f"{item['provider']}: {item.get('error', 'probe did not pass')}"
-            for item in providers
+            for item in established_required
             if args.require_all and not item["passed"]
         ]
+        if finra["configured"] and not finra["passed"]:
+            blockers.append(
+                f"{finra['provider']}: {finra.get('error', 'probe did not pass')}"
+            )
         payload = {
             "identifier": f"provider-secret-validation:{evaluated_at.isoformat()}",
             "evaluated_at": evaluated_at.isoformat(),
