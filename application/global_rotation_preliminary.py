@@ -1,0 +1,156 @@
+"""Pre-final-CIO global conviction assessment for simultaneous portfolio preview.
+
+The global cycle computes all six-specialist packets before final CIO synthesis so the
+joint portfolio preview is specialist-informed. The same immutable packets are then
+reused by the canonical final pass through a context-local cache, avoiding a second
+specialist analysis across a potentially large all-market candidate set. Nothing here
+has action, construction, execution, or canonical persistence authority.
+"""
+from __future__ import annotations
+
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
+from typing import Iterator
+
+from portfolio.global_rotation import GlobalConvictionDecision
+
+
+class PrecomputedSpecialistService:
+    """Context-local packet reuse around an existing specialist service.
+
+    The delegate remains the only packet producer. A bound packet may be reused only
+    for the same candidate and the same historical-learning context. This keeps the
+    preliminary and final CIO passes identical without mutating the canonical journal
+    or creating a second specialist implementation.
+    """
+
+    def __init__(self, delegate) -> None:
+        self.delegate = delegate
+        self._active_packets: ContextVar[dict[str, object]] = ContextVar(
+            f"global_rotation_specialist_packets_{id(self)}",
+            default={},
+        )
+
+    def __getattr__(self, name: str):
+        return getattr(self.delegate, name)
+
+    @contextmanager
+    def bind_packets(self, packets: dict[str, object]) -> Iterator[None]:
+        if not isinstance(packets, dict):
+            raise TypeError("packets must be a dict")
+        token = self._active_packets.set(dict(packets))
+        try:
+            yield
+        finally:
+            self._active_packets.reset(token)
+
+    def analyze(self, candidate, context):
+        packet = self._active_packets.get().get(candidate.identifier)
+        if packet is None:
+            return self.delegate.analyze(candidate, context)
+        validate = getattr(packet, "validate_against", None)
+        if callable(validate):
+            validate(candidate)
+        packet_learning = getattr(packet, "historical_learning", None)
+        context_learning = getattr(context, "historical_learning", None)
+        if packet_learning != context_learning:
+            raise ValueError(
+                "precomputed specialist packet historical-learning context changed "
+                "between preliminary and final CIO passes"
+            )
+        return packet
+
+
+def assess_preliminary_global_conviction(
+    cio,
+    *,
+    candidate,
+    ranked,
+    specialists,
+    directive=None,
+) -> GlobalConvictionDecision | None:
+    """Return a non-authoritative stage/target using the final CIO's own economics."""
+
+    context = getattr(cio, "global_rotation_context", None)
+    policy = getattr(cio, "global_conviction_policy", None)
+    if context is None or policy is None:
+        return None
+
+    profile = cio.policy_authority.resolve(candidate)
+    effective_alternative = ranked.qualification.effective_opportunity_cost
+    reconciliation = cio.reconciler.reconcile(
+        candidate,
+        specialists,
+        alternative_return=effective_alternative,
+    )
+    robustness_candidate = cio._robustness_candidate(candidate, reconciliation)
+    portfolio_cap = specialists.portfolio_recommendation.recommended_position_weight
+    assessment_cap = (
+        min(
+            portfolio_cap,
+            candidate.maximum_position_weight,
+            profile.maximum_position_weight,
+        )
+        if portfolio_cap is not None and portfolio_cap > 0.0
+        else (
+            candidate.current_portfolio_weight
+            if candidate.current_portfolio_weight > 0.0
+            else min(candidate.maximum_position_weight, profile.maximum_position_weight)
+        )
+    )
+    assessment_cap = round(assessment_cap, 8)
+
+    binder = getattr(cio.robust_assessor, "bind_path_drawdowns", None)
+    path_context = (
+        binder(candidate.identifier, reconciliation.path_drawdown_by_scenario)
+        if callable(binder)
+        else nullcontext()
+    )
+    with path_context:
+        supported_weight = cio.robust_assessor.maximum_supported_weight(
+            robustness_candidate,
+            alternative_return=effective_alternative,
+            maximum_weight=assessment_cap,
+            policy_profile=profile,
+            allow_soft_failures=False,
+        )
+        assessment_weight = (
+            supported_weight
+            if supported_weight > 0.0
+            else min(
+                cio.robust_assessor.policy.minimum_reference_weight,
+                assessment_cap,
+            )
+        )
+        robustness = cio.robust_assessor.assess(
+            robustness_candidate,
+            alternative_return=effective_alternative,
+            position_weight=assessment_weight,
+            policy_profile=profile,
+        )
+
+    ensemble = cio.growth_ensemble.assess(
+        candidate,
+        specialists,
+        robustness,
+        profile,
+        analysis_lane=ranked.qualification.analysis_lane.value,
+    )
+    return policy.assess(
+        candidate=candidate,
+        signal=context.by_candidate.get(candidate.identifier),
+        universe=ranked.qualification.universe,
+        specialists=specialists,
+        robustness=robustness,
+        reconciliation=reconciliation,
+        profile=profile,
+        ensemble=ensemble,
+        directive=directive,
+        material_opposition_threshold=cio.policy.maximum_unresolved_dissent_confidence,
+    )
+
+
+__all__ = [
+    "PrecomputedSpecialistService",
+    "assess_preliminary_global_conviction",
+]
