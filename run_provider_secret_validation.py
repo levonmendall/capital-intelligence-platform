@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import requests
+
 from providers.alpaca_paper import (
     AlpacaPaperProviderError,
     create_alpaca_paper_client,
@@ -50,14 +52,28 @@ OPENFIGI_NAMES = (
     "OPEN_FIGI_API_KEY",
     "OPENFIGI_API_KEY",
 )
+TRADIER_NAMES = (
+    "TRADIER_API_KEY",
+    "TRADIER_API_TOKEN",
+    "TRADIER_ACCESS_TOKEN",
+    "TRADIER_TOKEN",
+    "CAPITAL_INTELLIGENCE_TRADIER_API_KEY",
+    "CAPITAL_INTELLIGENCE_TRADIER_API_TOKEN",
+)
 FINRA_CLIENT_ID_NAMES = (
     "FINRA_CLIENT_ID",
     "CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID",
+    "FINRA_API_CLIENT_ID",
+    "FINRA_API_KEY_ID",
 )
 FINRA_CLIENT_SECRET_NAMES = (
     "FINRA_CLIENT_SECRET",
     "CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET",
+    "FINRA_API_CLIENT_SECRET",
+    "FINRA_API_SECRET",
+    "FINRA_API_SECRET_KEY",
 )
+FINRA_GENERIC_NAMES = ("FINRA_API_KEY",)
 ALL_SECRET_NAMES = tuple(
     dict.fromkeys(
         ALPACA_KEY_NAMES
@@ -65,8 +81,10 @@ ALL_SECRET_NAMES = tuple(
         + FRED_NAMES
         + EODHD_NAMES
         + OPENFIGI_NAMES
+        + TRADIER_NAMES
         + FINRA_CLIENT_ID_NAMES
         + FINRA_CLIENT_SECRET_NAMES
+        + FINRA_GENERIC_NAMES
         + AlphaVantageCredentialProbe.environment_names
         + DatabentoCredentialProbe.environment_names
         + TwelveDataCredentialProbe.environment_names
@@ -245,18 +263,66 @@ def _twelve_data() -> dict[str, Any]:
     )
 
 
+def _tradier() -> dict[str, Any]:
+    def probe(value: str) -> dict[str, Any]:
+        try:
+            response = requests.get(
+                "https://api.tradier.com/v1/markets/quotes",
+                params={"symbols": "SPY", "greeks": "false"},
+                headers={
+                    "Authorization": f"Bearer {value}",
+                    "Accept": "application/json",
+                },
+                timeout=20,
+            )
+        except requests.RequestException as error:
+            raise ProviderCredentialProbeError("Tradier request failed") from error
+        status = int(getattr(response, "status_code", 0))
+        if status < 200 or status >= 300:
+            raise ProviderCredentialProbeError(
+                f"Tradier returned HTTP {status or 'unknown'}"
+            )
+        try:
+            payload = response.json()
+        except (TypeError, ValueError) as error:
+            raise ProviderCredentialProbeError("Tradier returned invalid JSON") from error
+        if not isinstance(payload, dict):
+            raise ProviderCredentialProbeError("Tradier response must be an object")
+        quotes = payload.get("quotes")
+        quote = quotes.get("quote") if isinstance(quotes, dict) else None
+        if isinstance(quote, list):
+            quote = quote[0] if quote else None
+        if not isinstance(quote, dict) or str(quote.get("symbol") or "").upper() != "SPY":
+            raise ProviderCredentialProbeError("Tradier SPY quote is unavailable")
+        if quote.get("last") in (None, "") and quote.get("close") in (None, ""):
+            raise ProviderCredentialProbeError("Tradier SPY quote has no usable price")
+        return {
+            "probe": "brokerage-market-quote",
+            "symbol": "SPY",
+            "market_data_available": True,
+            "order_submission_tested": False,
+        }
+
+    return _try_single_credentials("tradier", TRADIER_NAMES, probe)
+
+
 def _finra() -> dict[str, Any]:
     client_ids = _configured_values(FINRA_CLIENT_ID_NAMES)
     client_secrets = _configured_values(FINRA_CLIENT_SECRET_NAMES)
+    generic = _configured_values(FINRA_GENERIC_NAMES)
     credential_names = tuple(
-        name for name, _value in (*client_ids, *client_secrets)
+        name for name, _value in (*client_ids, *client_secrets, *generic)
     )
     result = _base_result("finra-fixed-income", credential_names)
-    # Treat either half of the pair as configured so partial wiring is visible and
-    # fails rather than being silently mistaken for an absent optional provider.
-    result["configured"] = bool(client_ids or client_secrets)
+    result["configured"] = bool(client_ids or client_secrets or generic)
     if not result["configured"]:
         result["error"] = "FINRA client credentials are not configured"
+        return result
+    if generic and not (client_ids and client_secrets):
+        result["error"] = (
+            "FINRA_API_KEY is visible, but FINRA API Platform production access requires "
+            "an OAuth client ID and client secret; configure both supported aliases"
+        )
         return result
     if not client_ids or not client_secrets:
         result["error"] = "FINRA requires both client ID and client secret"
@@ -317,17 +383,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             _databento(),
             _twelve_data(),
         ]
+        tradier = _tradier()
         finra = _finra()
-        providers = [*established_required, finra]
+        providers = [*established_required, tradier, finra]
         blockers = [
             f"{item['provider']}: {item.get('error', 'probe did not pass')}"
             for item in established_required
             if args.require_all and not item["passed"]
         ]
-        if finra["configured"] and not finra["passed"]:
-            blockers.append(
-                f"{finra['provider']}: {finra.get('error', 'probe did not pass')}"
-            )
+        for optional in (tradier, finra):
+            if optional["configured"] and not optional["passed"]:
+                blockers.append(
+                    f"{optional['provider']}: {optional.get('error', 'probe did not pass')}"
+                )
         payload = {
             "identifier": f"provider-secret-validation:{evaluated_at.isoformat()}",
             "evaluated_at": evaluated_at.isoformat(),
