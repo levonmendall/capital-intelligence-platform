@@ -1,0 +1,170 @@
+name: One-shot Provider Deployment Contract
+
+on:
+  push:
+    branches:
+      - agent/treasury-provider-activation-v2
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      FINRA_CLIENT_ID: ${{ secrets.FINRA_CLIENT_ID }}
+      CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID: ${{ secrets.CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID }}
+      FINRA_CLIENT_SECRET: ${{ secrets.FINRA_CLIENT_SECRET }}
+      CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET: ${{ secrets.CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET }}
+      MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+      CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY }}
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      DATABENTO_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
+      CAPITAL_INTELLIGENCE_DATABENTO_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_DATABENTO_API_KEY }}
+      EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+      CAPITAL_INTELLIGENCE_EODHD_API_TOKEN: ${{ secrets.CAPITAL_INTELLIGENCE_EODHD_API_TOKEN }}
+      TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+      TWELVE_API_KEY: ${{ secrets.TWELVE_API_KEY }}
+      ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+      ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+      OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
+      OPEN_FIGI_API_KEY: ${{ secrets.OPEN_FIGI_API_KEY }}
+      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      BEA_API_KEY: ${{ secrets.BEA_API_KEY }}
+      CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+      EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+      USDA_NASS_API_KEY: ${{ secrets.USDA_NASS_API_KEY }}
+      NASA_FIRMS_MAP_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
+      CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_API_KEY }}
+      CAPITAL_INTELLIGENCE_LSEG_REFERENCE_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_LSEG_REFERENCE_API_KEY }}
+      CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_LSEG_FUNDAMENTALS_API_KEY }}
+      CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_ICE_FIXED_INCOME_API_KEY }}
+      CAPITAL_INTELLIGENCE_ICE_MARGIN_API_KEY: ${{ secrets.CAPITAL_INTELLIGENCE_ICE_MARGIN_API_KEY }}
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/treasury-provider-activation-v2
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Install test runner
+        run: pip install pytest
+
+      - name: Wire all declared provider activation inputs into Render
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          bundle = json.loads(Path("config/all_market_provider_bundle.json").read_text(encoding="utf-8"))
+          render_path = Path("render.yaml")
+          text = render_path.read_text(encoding="utf-8")
+          existing = set(re.findall(r"^\s*- key:\s*([A-Z0-9_]+)\s*$", text, flags=re.MULTILINE))
+
+          required = {"FINRA_CLIENT_ID", "FINRA_CLIENT_SECRET"}
+          for member in bundle["members"]:
+              for field in (
+                  "credential_environment_variables",
+                  "binding_environment_variables",
+                  "contract_reference_environment_variables",
+                  "license_approval_environment_variables",
+                  "certification_environment_variables",
+              ):
+                  required.update(str(item) for item in member.get(field, ()))
+
+          missing = sorted(required - existing)
+          if missing:
+              if not text.endswith("\n"):
+                  text += "\n"
+              text += "      # External inputs required by the governed all-market provider bundle.\n"
+              text += "      # Values remain external to source control; bundle activation still\n"
+              text += "      # requires valid bindings, commercial approvals, certifications, and\n"
+              text += "      # append-only provider activation evidence.\n"
+              for key in missing:
+                  text += f"      - key: {key}\n        sync: false\n"
+              render_path.write_text(text, encoding="utf-8")
+              print("added provider activation slots:", ", ".join(missing))
+          else:
+              print("all provider activation slots already declared")
+          PY
+
+      - name: Compile provider plumbing
+        run: |
+          python -m py_compile \
+            provider_environment.py \
+            providers/finra_fixed_income.py \
+            providers/treasury_fiscal_data.py \
+            providers/provider_activation_audit.py \
+            operations/comprehensive_market_discovery_legacy.py \
+            run_provider_secret_validation.py
+
+      - name: Run focused provider regressions
+        run: |
+          pytest -q \
+            tests/test_treasury_fiscal_data.py \
+            tests/test_treasury_discovery_enrichment.py \
+            tests/test_provider_environment_activation.py \
+            tests/test_provider_environment_aliases.py \
+            tests/test_provider_credentials.py \
+            tests/test_finra_fixed_income.py \
+            tests/test_render_provider_environment_contract.py \
+            tests/test_options_fallback_operational_budget.py
+
+      - name: Publish credential-safe activation audit
+        shell: bash
+        run: |
+          mkdir -p reports
+          python -m providers.provider_activation_audit > reports/provider-activation-audit.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("reports/provider-activation-audit.json").read_text(encoding="utf-8"))
+          print("activation counts:", payload.get("counts", {}))
+          print("unrouted providers:", ", ".join(payload.get("unrouted_provider_ids", [])) or "none")
+          print("missing-credential providers:", ", ".join(payload.get("missing_credential_provider_ids", [])) or "none")
+          PY
+
+      - name: Probe FINRA when configured
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from providers.finra_fixed_income import build_finra_fixed_income_provider
+
+          provider = build_finra_fixed_income_provider()
+          if provider is None:
+              print(json.dumps({"provider": "finra-fixed-income", "configured": False, "passed": False}))
+          else:
+              evidence = provider.probe_treasury_daily_aggregates().to_dict()
+              print(json.dumps({"provider": "finra-fixed-income", "configured": True, "passed": True, "evidence": evidence}, sort_keys=True))
+          PY
+
+      - name: Commit validated deployment contract and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/one-shot-provider-deployment-contract.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add render.yaml .github/workflows/one-shot-provider-deployment-contract.yml
+          if git diff --cached --quiet; then
+            echo "No deployment-contract changes to commit"
+            exit 0
+          fi
+          git commit -m "Wire governed provider inputs into Render"
+          git push origin HEAD:agent/treasury-provider-activation-v2
