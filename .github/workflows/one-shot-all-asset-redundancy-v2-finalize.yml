@@ -23,7 +23,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply final audit integration
-        run: python scripts/finalize_all_asset_redundancy_v2.py
+        run: |
+          python scripts/finalize_all_asset_redundancy_v2.py
+          python scripts/fix_redundancy_audit_schema.py
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -68,9 +70,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f \
-            .github/workflows/one-shot-all-asset-provider-redundancy-v2-finalize.yml \
             .github/workflows/one-shot-all-asset-redundancy-v2-finalize.yml \
-            scripts/finalize_all_asset_redundancy_v2.py
+            scripts/finalize_all_asset_redundancy_v2.py \
+            scripts/fix_redundancy_audit_schema.py
           git add -A
           git commit -m "Complete per-cycle all-asset redundancy evidence"
           git push origin HEAD:agent/all-asset-provider-redundancy-v2
