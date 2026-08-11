@@ -1,6 +1,6 @@
 """Credential-safe audit of whether configured data sources are actually routed.
 
-This is intentionally separate from provider health checks.  A provider can be healthy
+This is intentionally separate from provider health checks. A provider can be healthy
 and still be unused if its credential/configuration never reaches a production consumer.
 The audit reports only booleans and environment-variable *names*; it never returns a
 credential value.
@@ -48,7 +48,7 @@ class ProviderActivationRecord:
 
 # ``production_route`` names a concrete consumer, not merely an adapter module.
 # Entries with no route are deliberately visible as unrouted until production code
-# consumes them.  This prevents a secret or config file from being mistaken for use.
+# consumes them. This prevents a secret or config file from being mistaken for use.
 CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ProviderActivationSpec(
         "alpaca-market-data",
@@ -172,6 +172,16 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
 )
 
 
+_BUNDLE_PROVIDER_FAMILIES_WITH_DIRECT_ROUTES = frozenset(
+    {
+        "databento-execution-data",
+        "eodhd-primary",
+        "coinbase-crypto-validation",
+        "kraken-crypto-validation",
+    }
+)
+
+
 def _group_names(canonical: str) -> tuple[str, ...]:
     return (canonical, *PROVIDER_ENVIRONMENT_ALIASES.get(canonical, ()))
 
@@ -191,7 +201,7 @@ def _credential_names(groups: Sequence[str]) -> tuple[str, ...]:
 
 
 def _configured_dataset_specs(root: Path) -> tuple[ProviderActivationSpec, ...]:
-    """Expose configured institutional bundle members that are easy to mistake as active."""
+    """Expose institutional bundle members that are easy to mistake as CIO-routed."""
 
     path = root / "config" / "all_market_provider_bundle.json"
     if not path.exists():
@@ -204,18 +214,17 @@ def _configured_dataset_specs(root: Path) -> tuple[ProviderActivationSpec, ...]:
     if not isinstance(members, list):
         return ()
     specs: list[ProviderActivationSpec] = []
-    already = {item.provider_id for item in CORE_PROVIDER_ACTIVATION_SPECS}
     for raw in members:
         if not isinstance(raw, Mapping):
             continue
-        provider_id = str(raw.get("provider_id", "")).strip()
-        if not provider_id or provider_id in already:
+        provider_id = str(raw.get("provider_identifier", "")).strip()
+        if not provider_id or provider_id in _BUNDLE_PROVIDER_FAMILIES_WITH_DIRECT_ROUTES:
             continue
         roles = raw.get("roles")
         evidence_roles = tuple(
             str(item).strip() for item in roles if str(item).strip()
         ) if isinstance(roles, list) else ()
-        credentials = raw.get("required_credentials")
+        credentials = raw.get("credential_environment_variables")
         groups = tuple(
             str(item).strip() for item in credentials if str(item).strip()
         ) if isinstance(credentials, list) else ()
@@ -225,9 +234,11 @@ def _configured_dataset_specs(root: Path) -> tuple[ProviderActivationSpec, ...]:
                 evidence_roles=evidence_roles,
                 production_route=None,
                 credential_groups=groups,
+                keyless=not groups,
                 note=(
-                    "Present in all_market_provider_bundle.json but no direct comprehensive-"
-                    "discovery consumer is declared by the activation registry."
+                    "Declared in all_market_provider_bundle.json, but no direct comprehensive-"
+                    "discovery consumer is declared by the activation registry. Bundle readiness "
+                    "must not be mistaken for CIO-path consumption."
                 ),
             )
         )
@@ -254,7 +265,9 @@ def audit_provider_activation(
             else all(_group_is_configured(env, group) for group in spec.credential_groups)
         )
         if spec.production_route is None:
-            state = "configured_but_unrouted" if credential_configured else "unrouted"
+            # Presence in the registry/bundle is itself configuration; it is still not
+            # production consumption and therefore stays visibly unrouted.
+            state = "configured_but_unrouted" if credential_configured or spec.keyless else "unrouted"
         elif credential_required and not credential_configured:
             state = "missing_credential"
         elif spec.keyless:
@@ -286,13 +299,14 @@ def activation_summary(
         environment,
         repository_root=repository_root,
     )
+    states = sorted({item.state for item in records})
     return {
         "schema_version": "provider-activation-audit.v1",
         "credential_values_included": False,
         "providers": [item.to_dict() for item in records],
         "counts": {
             state: sum(1 for item in records if item.state == state)
-            for state in sorted({item.state for item in records})
+            for state in states
         },
         "unrouted_provider_ids": [
             item.provider_id
