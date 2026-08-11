@@ -34,6 +34,9 @@ from providers.databento_options import (
     DatabentoOptionsError,
     DatabentoOptionsProvider,
 )
+from providers.redundant_options import (
+    build_redundant_options_provider,
+)
 from providers.eodhd import EODHDProvider, EODHDProviderError, build_eodhd_provider
 from providers.alpaca_paper import (
     AlpacaPaperClient,
@@ -865,10 +868,12 @@ def _option_catalog(
     databento_options_provider: DatabentoOptionsProvider | None = None,
     alpaca_client: AlpacaPaperClient | None = None,
 ) -> Sequence[DiscoveryCatalogRecord]:
-    provider = databento_options_provider or DatabentoOptionsProvider()
+    provider = build_redundant_options_provider(
+        primary=databento_options_provider,
+    )
     if not provider.configured:
         raise ComprehensiveMarketDiscoveryError(
-            "Databento OPRA credentials are required for defined-risk option discovery"
+            "At least one certified OPRA options provider is required for defined-risk option discovery"
         )
 
     def discover_underlying(
@@ -912,14 +917,13 @@ def _option_catalog(
                     currency="USD",
                     settlement_currency="USD",
                     instrument_type="option",
-                    provider_kind="databento",
-                    provider_dataset=DATABENTO_OPRA_DATASET,
-                    provider_stype_in="instrument_id",
-                    provider_instrument_id=definition.instrument_id,
+                    provider_kind=definition.provider_kind,
+                    provider_dataset=definition.provider_dataset,
+                    provider_stype_in=definition.provider_stype_in,
+                    provider_instrument_id=definition.provider_instrument_id,
                     source_identifier=(
-                        "databento-opra-definition:"
-                        f"{definition.session_date.isoformat()}:"
-                        f"{definition.symbol}:bar:{bar.observed_at.isoformat()}:"
+                        f"{definition.source_identifier}:"
+                        f"bar:{bar.source_identifier}:"
                         f"underlying:{quote_source_identifier}"
                     ),
                     contract_multiplier=definition.contract_multiplier,
@@ -1057,7 +1061,7 @@ def _option_catalog(
             f"; provider_failure_sample={failure_samples}" if failure_samples else ""
         )
         raise ComprehensiveMarketDiscoveryError(
-            "Databento OPRA option discovery produced no priced contracts across "
+            "Certified option provider discovery produced no priced contracts across "
             f"{len(config.option_underlyings)} configured underlyings; "
             f"underlying_quote_unavailable={len(underlying_quote_failures)}; "
             f"provider_errors={len(provider_failures)}; "
@@ -1214,7 +1218,9 @@ def default_market_probe(
         raise ValueError("maximum_workers must be a positive integer")
     ordered_records = tuple(records)
     provider = eodhd_provider or build_eodhd_provider()
-    options_provider = databento_options_provider or DatabentoOptionsProvider()
+    options_provider = build_redundant_options_provider(
+        primary=databento_options_provider,
+    )
     option_records = tuple(
         item
         for item in ordered_records
@@ -1262,12 +1268,7 @@ def default_market_probe(
             option_instruments = tuple(
                 (item.provider_instrument_id, item.provider_symbol)
                 for item in option_records
-                if item.provider_instrument_id is not None
             )
-            if len(option_instruments) != len(option_records):
-                raise DatabentoOptionsError(
-                    "option records are missing provider instrument IDs"
-                )
             _option_session, option_histories = options_provider.latest_daily_bars(
                 option_instruments,
                 as_of=timestamp,
@@ -1332,8 +1333,16 @@ def default_market_probe(
                     }
                     for item in option_rows
                 ]
+                option_sources = tuple(
+                    dict.fromkeys(
+                        str(getattr(item, "source_identifier", "")).strip()
+                        for item in option_rows
+                        if str(getattr(item, "source_identifier", "")).strip()
+                    )
+                )
                 option_evidence = (
-                    f"databento-opra-bars:{record.symbol}:{_hash(option_material)}",
+                    *option_sources,
+                    f"option-bars:{record.symbol}:{_hash(option_material)}",
                 )
         elif record.provider_kind == "alpaca":
             raw_rows = alpaca_histories.get(record.provider_symbol.upper(), ())
