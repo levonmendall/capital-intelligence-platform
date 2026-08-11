@@ -4,7 +4,8 @@ The cycle enriches already-governed candidates with mispriced-change and corrobo
 global-leadership economics, propagates explicitly modeled structural-theme successor
 attention, freezes the authoritative opportunity queue, performs a non-authoritative
 all-candidate six-specialist preliminary pass for joint portfolio preview, and then
-reuses those immutable packets in the unchanged final CIO/construction authority path.
+reuses those immutable packets and risk analyses in the unchanged final CIO/construction
+authority path.
 """
 from __future__ import annotations
 
@@ -16,6 +17,8 @@ from application.compounding_cycle import (
     CompoundingCanonicalCIOCycleResult,
 )
 from application.global_rotation_preliminary import (
+    MemoizedCandidateRiskIntelligenceEngine,
+    MemoizedJointCandidateIntelligenceEngine,
     PrecomputedSpecialistService,
     assess_preliminary_global_conviction,
 )
@@ -146,6 +149,20 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
             self.specialist_service = PrecomputedSpecialistService(
                 self.specialist_service
             )
+        if not isinstance(
+            self.risk_intelligence_engine,
+            MemoizedCandidateRiskIntelligenceEngine,
+        ):
+            self.risk_intelligence_engine = MemoizedCandidateRiskIntelligenceEngine(
+                self.risk_intelligence_engine
+            )
+        if not isinstance(
+            self.joint_candidate_engine,
+            MemoizedJointCandidateIntelligenceEngine,
+        ):
+            self.joint_candidate_engine = MemoizedJointCandidateIntelligenceEngine(
+                self.joint_candidate_engine
+            )
         self.global_rotation_store = global_rotation_store
         if self.global_rotation_store is None and self.journal is not None:
             self.global_rotation_store = SQLiteGlobalRotationStore(self.journal.path)
@@ -214,9 +231,10 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
     ) -> dict[str, object]:
         """Build every six-specialist packet before any final CIO synthesis.
 
-        This pass is non-persistent and non-authoritative. The exact immutable packets
-        are reused by the base cycle, which persists them once in its normal order. This
-        avoids doubling specialist work across a potentially large all-market set.
+        This pass is non-persistent and non-authoritative. The exact immutable packets,
+        candidate-risk assessments, and joint-candidate assessments are reused by the
+        base cycle, which persists only its normal canonical events. This avoids doubling
+        specialist work or the potentially O(N²) joint-analysis memory footprint.
         """
 
         if queue is None or not tuple(getattr(queue, "ranked", ()) or ()):
@@ -227,6 +245,13 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         if len(context_map) != len(specialist_contexts):
             raise ValueError("specialist candidate contexts must be unique")
         ranked_values = tuple(queue.ranked)
+
+        def invalidation_clarity(ranked) -> float:
+            if opportunity_context is None:
+                return 0.50
+            ranking = opportunity_context.ranking_input(ranked.candidate.identifier)
+            return 0.50 if ranking is None else ranking.invalidation_clarity_score
+
         risk_assessments = tuple(
             self.risk_intelligence_engine.assess(
                 ranked.candidate,
@@ -244,14 +269,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                     ),
                 ),
                 alternative_return=ranked.qualification.effective_opportunity_cost,
-                invalidation_clarity=(
-                    0.50
-                    if opportunity_context.ranking_input(ranked.candidate.identifier)
-                    is None
-                    else opportunity_context.ranking_input(
-                        ranked.candidate.identifier
-                    ).invalidation_clarity_score
-                ),
+                invalidation_clarity=invalidation_clarity(ranked),
             )
             for ranked in ranked_values
         )
@@ -415,6 +433,8 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         if callable(setter):
             setter(rotation_context)
 
+        risk_cache_token = self.risk_intelligence_engine.begin_cycle_cache()
+        joint_cache_token = self.joint_candidate_engine.begin_cycle_cache()
         preliminary_packets: dict[str, object] = {}
         conviction_targets = None
         try:
@@ -485,6 +505,8 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                 global_cash_accountability=accountability,
             )
         finally:
+            self.joint_candidate_engine.end_cycle_cache(joint_cache_token)
+            self.risk_intelligence_engine.end_cycle_cache(risk_cache_token)
             if callable(preview_clearer):
                 preview_clearer()
             if callable(clearer):
