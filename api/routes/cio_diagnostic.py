@@ -56,6 +56,15 @@ def _age_seconds(value: datetime | None, *, now: datetime) -> float | None:
     return round(max(0.0, (now - value.astimezone(timezone.utc)).total_seconds()), 3)
 
 
+def _latest_context_attempt(settings: Any) -> Mapping[str, Any]:
+    """Return optional attempt metadata without making audit safety depend on it."""
+
+    if getattr(settings, "portfolio_database", None) is None:
+        return {}
+    attempt = latest_attempt(settings)
+    return attempt if isinstance(attempt, Mapping) else {}
+
+
 def _market_lanes(
     payload: object,
     *,
@@ -157,7 +166,7 @@ def build_cio_diagnostic_audit(
         )
     )
 
-    attempt = latest_attempt(settings) or {}
+    attempt = _latest_context_attempt(settings)
     attempt_started = _parse_datetime(attempt.get("started_at"))
     current_attempt = bool(
         diagnostic.started_at is not None
