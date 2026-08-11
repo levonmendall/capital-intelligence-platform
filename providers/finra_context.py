@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import requests
@@ -25,13 +25,12 @@ from data.decision_information import (
 from providers.finra_fixed_income import (
     FINRA_FIXED_INCOME_BASE_URL,
     FINRA_TREASURY_DAILY_AGGREGATES,
-    FinraFixedIncomeError,
     build_finra_fixed_income_provider,
 )
 
 
 class FinraContextError(RuntimeError):
-    pass
+    """Raised when aggregate FINRA context cannot be collected safely."""
 
 
 def _number(value: object) -> float:
@@ -57,7 +56,7 @@ def collect_finra_fixed_income_context(
     if provider is None:
         return None
     cutoff = as_of.astimezone(timezone.utc)
-    token, _token_type, _expires = provider._access_token()  # noqa: SLF001 - same governed adapter contract
+    token, _token_type, _expires = provider._access_token()  # noqa: SLF001 -- same bounded OAuth adapter
     getter = http_get or requests.get
     endpoint = f"{FINRA_FIXED_INCOME_BASE_URL}/{FINRA_TREASURY_DAILY_AGGREGATES}"
     try:
@@ -78,7 +77,9 @@ def collect_finra_fixed_income_context(
         raise FinraContextError("FINRA fixed-income context request failed") from error
     status = int(getattr(response, "status_code", 0))
     if not 200 <= status < 300:
-        raise FinraContextError(f"FINRA fixed-income context returned HTTP {status or 'unknown'}")
+        raise FinraContextError(
+            f"FINRA fixed-income context returned HTTP {status or 'unknown'}"
+        )
     try:
         payload = response.json()
     except (TypeError, ValueError) as error:
@@ -98,7 +99,10 @@ def collect_finra_fixed_income_context(
         if trade_date <= cutoff.date():
             dated.append((trade_date, item))
     if not dated:
-        raise FinraContextError("FINRA returned no point-in-time Treasury aggregate context")
+        raise FinraContextError(
+            "FINRA returned no point-in-time Treasury aggregate context"
+        )
+
     latest_date = max(item[0] for item in dated)
     rows = tuple(item for trade_date, item in dated if trade_date == latest_date)
     dealer_volume = sum(_number(item.get("dealerCustomerVolume")) for item in rows)
@@ -124,27 +128,39 @@ def collect_finra_fixed_income_context(
         "product_categories": categories,
     }
     digest = hashlib.sha256(
-        json.dumps(material, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        json.dumps(
+            material,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
     ).hexdigest()
-    published = datetime.combine(latest_date, datetime.min.time(), tzinfo=timezone.utc) + __import__("datetime").timedelta(days=1)
-    available = min(cutoff, max(published, datetime.combine(latest_date, datetime.min.time(), tzinfo=timezone.utc)))
+    event_at = datetime.combine(latest_date, datetime.min.time(), tzinfo=timezone.utc)
+    expected_publication = event_at + timedelta(days=1)
+    # Never backdate availability. If queried intraday before the normal publication
+    # boundary, retrieval time is the only safe availability proxy.
+    available = cutoff if cutoff < expected_publication else expected_publication
     summary = (
         f"FINRA TRACE Treasury aggregate activity for {latest_date.isoformat()}: "
-        f"dealer-customer volume metric={dealer_volume:.4f}, ATS interdealer volume metric={ats_volume:.4f}, "
-        f"dealer-customer count={dealer_count}, ATS interdealer count={ats_count}, buckets={len(rows)}. "
-        "This is aggregate market-structure/liquidity context only and is not an individual Treasury or bond price."
+        f"dealer-customer volume metric={dealer_volume:.4f}, "
+        f"ATS interdealer volume metric={ats_volume:.4f}, "
+        f"dealer-customer count={dealer_count}, ATS interdealer count={ats_count}, "
+        f"buckets={len(rows)}. This is aggregate market-structure/liquidity context "
+        "only and is not an individual Treasury or bond price."
     )
     return DecisionInformationRecord(
         identifier=f"finra-context:treasury:{latest_date.isoformat()}:{digest[:16]}",
         topic="FINRA TRACE U.S. Treasury market activity",
         summary=summary,
-        event_at=datetime.combine(latest_date, datetime.min.time(), tzinfo=timezone.utc),
+        event_at=event_at,
         published_at=available,
         available_at=available,
         knowledge_cutoff=available,
         provenance=InformationProvenance(
             provider="FINRA",
-            source_identifier=f"{FINRA_TREASURY_DAILY_AGGREGATES}:{latest_date.isoformat()}",
+            source_identifier=(
+                f"{FINRA_TREASURY_DAILY_AGGREGATES}:{latest_date.isoformat()}"
+            ),
             source_type=InformationSourceType.REGULATORY,
             retrieved_at=cutoff,
             license_identifier="finra-fixed-income-data",
@@ -156,13 +172,24 @@ def collect_finra_fixed_income_context(
                 "Cannot satisfy bond identity, valuation, market-history, liquidity-quote, or execution evidence.",
             ),
         ),
-        canonical_event_identifier=f"event:finra:treasury-activity:{latest_date.isoformat()}",
+        canonical_event_identifier=(
+            f"event:finra:treasury-activity:{latest_date.isoformat()}"
+        ),
         entities=("FINRA", "U.S. Treasury market"),
         instruments=(),
         geographies=("United States",),
         sectors=("Fixed Income",),
-        tags=("fixed-income", "treasury", "trace", "market-structure", "aggregate-context-only"),
-        impact_channels=(PortfolioImpactChannel.LIQUIDITY, PortfolioImpactChannel.DISCOUNT_RATE),
+        tags=(
+            "fixed-income",
+            "treasury",
+            "trace",
+            "market-structure",
+            "aggregate-context-only",
+        ),
+        impact_channels=(
+            PortfolioImpactChannel.LIQUIDITY,
+            PortfolioImpactChannel.DISCOUNT_RATE,
+        ),
         reliability=0.95,
         relevance=0.85,
         materiality=0.65,
