@@ -31,6 +31,7 @@ from providers.massive_options import (
     MassiveOptionsError,
     MassiveOptionsProvider,
 )
+from providers.single_pass_massive_options import SinglePassMassiveOptionsProvider
 
 
 _MASSIVE_BASIC_FALLBACK_MAX_EXPIRATIONS = 1
