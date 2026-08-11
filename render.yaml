@@ -179,6 +179,8 @@ services:
         sync: false
       - key: CAPITAL_INTELLIGENCE_DATABENTO_API_KEY
         sync: false
+      - key: CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY
+        sync: false
       - key: OPENFIGI_API_KEY
         sync: false
       - key: ALPHA_VANTAGE_API_KEY
