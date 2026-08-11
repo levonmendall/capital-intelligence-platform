@@ -22,6 +22,11 @@ from operations.provider_preselection_publication_runtime import (
     ProviderPreselectionPublicationError,
     ensure_provider_preselection_publication,
 )
+from operations.bounded_terminal_screening import (
+    BoundedTerminalScreeningError,
+    build_bounded_cutoff_observations,
+    build_bounded_terminal_preselection,
+)
 from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress
 
 
@@ -320,48 +325,68 @@ def discover_comprehensive_markets(
                 "continuity_records": len(continuity),
             },
         )
-        signals = active_preselection_probe(ordinary, timestamp, resolved)
-        if not isinstance(signals, Mapping):
-            raise _base._legacy.ComprehensiveMarketDiscoveryError(
-                f"{asset_class.value} preselection probe must return a mapping"
+        bounded_screening = None
+        signals = None
+        if canonical_publication_required:
+            try:
+                bounded_screening = build_bounded_terminal_preselection(
+                    ordinary,
+                    as_of=timestamp,
+                    policy=resolved,
+                    progress_label=asset_class.value,
+                )
+            except BoundedTerminalScreeningError as error:
+                raise _base._legacy.ComprehensiveMarketDiscoveryError(
+                    str(error)
+                ) from error
+            plan = bounded_screening.plan
+            nominated = bounded_screening.nominated
+            provider_factor_authority_established = (
+                bounded_screening.provider_factor_authority_established
             )
-        provider_factor_authority_established = False
-        if require_provider_factor_lineage:
-            signals = _base.validate_provider_enriched_signals(
+        else:
+            signals = active_preselection_probe(ordinary, timestamp, resolved)
+            if not isinstance(signals, Mapping):
+                raise _base._legacy.ComprehensiveMarketDiscoveryError(
+                    f"{asset_class.value} preselection probe must return a mapping"
+                )
+            provider_factor_authority_established = False
+            if require_provider_factor_lineage:
+                signals = _base.validate_provider_enriched_signals(
+                    ordinary,
+                    signals,
+                    required_factors=resolved.required_provider_preselection_factors,
+                )
+                provider_factor_authority_established = (
+                    not ordinary or _has_substantive_provider_factor_authority(signals)
+                )
+                if not provider_factor_authority_established:
+                    publication_failures = _provider_publication_failure_reasons(signals)
+                    detail = (
+                        "; " + ", ".join(publication_failures)
+                        if publication_failures
+                        else ""
+                    )
+                    raise _base._legacy.ComprehensiveMarketDiscoveryError(
+                        f"{asset_class.value} provider factor authority is unavailable "
+                        f"for the complete certified catalog{detail}"
+                    )
+
+            plan = _base.build_preselection_plan(
                 ordinary,
                 signals,
-                required_factors=resolved.required_provider_preselection_factors,
+                as_of=timestamp,
+                capacity=max(1, len(ordinary)),
+                shadow_limit=resolved.preselection_shadow_candidates_per_lane,
+                freshness_days=resolved.preselection_freshness_days,
+                minimum_liquidity_score=resolved.preselection_minimum_liquidity_score,
             )
-            provider_factor_authority_established = (
-                not ordinary or _has_substantive_provider_factor_authority(signals)
+            ordinary_by_symbol = {item.symbol: item for item in ordinary}
+            nominated = tuple(
+                ordinary_by_symbol[symbol]
+                for symbol in plan.selected_symbols
+                if symbol in ordinary_by_symbol
             )
-            if not provider_factor_authority_established:
-                publication_failures = _provider_publication_failure_reasons(signals)
-                detail = (
-                    "; " + ", ".join(publication_failures)
-                    if publication_failures
-                    else ""
-                )
-                raise _base._legacy.ComprehensiveMarketDiscoveryError(
-                    f"{asset_class.value} provider factor authority is unavailable "
-                    f"for the complete certified catalog{detail}"
-                )
-
-        plan = _base.build_preselection_plan(
-            ordinary,
-            signals,
-            as_of=timestamp,
-            capacity=max(1, len(ordinary)),
-            shadow_limit=resolved.preselection_shadow_candidates_per_lane,
-            freshness_days=resolved.preselection_freshness_days,
-            minimum_liquidity_score=resolved.preselection_minimum_liquidity_score,
-        )
-        ordinary_by_symbol = {item.symbol: item for item in ordinary}
-        nominated = tuple(
-            ordinary_by_symbol[symbol]
-            for symbol in plan.selected_symbols
-            if symbol in ordinary_by_symbol
-        )
         deep_records = tuple(dict.fromkeys((*continuity, *nominated)))
         record_manual_cio_diagnostic_progress(
             f"deep_market_evidence:{asset_class.value}",
@@ -415,31 +440,42 @@ def discover_comprehensive_markets(
         current_prices = {
             symbol: item_features.price for symbol, item_features in features.items()
         }
-        for symbol, signal in signals.items():
-            if signal.indicative_price is not None:
-                current_prices.setdefault(symbol, signal.indicative_price)
-        observations = _base.build_cutoff_observations(
-            plan,
-            asset_class=asset_class.value,
-            signals=signals,
-            selected_prices=current_prices,
-        )
+        if bounded_screening is not None:
+            for symbol, price in bounded_screening.signal_prices.items():
+                current_prices.setdefault(symbol, price)
+            observations = build_bounded_cutoff_observations(
+                bounded_screening,
+                asset_class=asset_class.value,
+                selected_prices=current_prices,
+            )
+            preselection_evidence = bounded_screening.preselection_evidence
+        else:
+            assert signals is not None
+            for symbol, signal in signals.items():
+                if signal.indicative_price is not None:
+                    current_prices.setdefault(symbol, signal.indicative_price)
+            observations = _base.build_cutoff_observations(
+                plan,
+                asset_class=asset_class.value,
+                signals=signals,
+                selected_prices=current_prices,
+            )
+            measured_symbols = tuple(
+                dict.fromkeys((*plan.selected_symbols, *plan.shadow_symbols))
+            )
+            preselection_evidence = tuple(
+                (
+                    symbol,
+                    tuple(signals[symbol].evidence_identifiers),
+                )
+                for symbol in measured_symbols
+                if symbol in signals
+            )
         outcomes = _base.evaluate_cutoff_outcomes(
             prior_cutoff_observations,
             asset_class=asset_class.value,
             current_prices=current_prices,
             as_of=timestamp,
-        )
-        measured_symbols = tuple(
-            dict.fromkeys((*plan.selected_symbols, *plan.shadow_symbols))
-        )
-        preselection_evidence = tuple(
-            (
-                symbol,
-                tuple(signals[symbol].evidence_identifiers),
-            )
-            for symbol in measured_symbols
-            if symbol in signals
         )
         source_identifiers = tuple(
             dict.fromkeys(item.source_identifier for item in catalog_records)
