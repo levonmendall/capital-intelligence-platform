@@ -102,9 +102,18 @@ class GlobalRotationChiefInvestmentOfficer(CompoundingChiefInvestmentOfficer):
         signal = context.by_candidate.get(candidate.identifier)
         if signal is None:
             return action, position_weight, reason
+        # Longitudinal decay is corroborating evidence, not an independent exit gate.
+        # A holding must still have deteriorating leadership and deteriorating/failed
+        # forward economics before this layer can accelerate a reduction.
         confirmed = (
             signal.leadership_state == "deteriorating"
             and signal.mispriced_change_state in {"deteriorating", "value_trap_risk"}
+            and signal.longitudinal_state in {
+                "deteriorating",
+                "rotating_out",
+                "stable",  # first observed deterioration may lack a prior snapshot
+                "new",
+            }
         )
         if not confirmed:
             return action, position_weight, reason
@@ -123,7 +132,8 @@ class GlobalRotationChiefInvestmentOfficer(CompoundingChiefInvestmentOfficer):
             if replacement is None
             else (
                 f" Strongest cross-asset replacement is {replacement.candidate_identifier} "
-                f"({replacement.domain.value}, global rank {replacement.rank}); it must independently clear CIO and construction controls."
+                f"({replacement.domain.value}, global rank {replacement.rank}, "
+                f"rotation state {replacement.longitudinal_state}); it must independently clear CIO and construction controls."
             )
         )
         return (
@@ -300,6 +310,14 @@ class GlobalRotationChiefInvestmentOfficer(CompoundingChiefInvestmentOfficer):
                     "mispriced_change_score": signal.mispriced_change_score,
                     "forward_impulse": signal.forward_impulse,
                     "pre_specialist_expected_return_edge": signal.expected_return_edge,
+                    "causal_stage": signal.causal_stage,
+                    "causal_score": signal.causal_score,
+                    "transition_probability": signal.transition_probability,
+                    "hierarchy_strength": signal.hierarchy_strength,
+                    "hierarchy_path": list(signal.hierarchy_path),
+                    "longitudinal_state": signal.longitudinal_state,
+                    "global_score_change": signal.score_change,
+                    "global_rank_change": signal.rank_change,
                 }
             )
         monitoring.append(
