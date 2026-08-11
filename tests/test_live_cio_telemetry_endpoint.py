@@ -24,7 +24,6 @@ def _in_progress_payload() -> dict[str, object]:
         "stage": "public_information_collection",
         "active_release": EXPECTED_RELEASE,
         "release_matches": True,
-        "credential_safe": True,
         "paper_only": True,
         "real_money_authorized": False,
         "all_market_evaluation_complete": False,
@@ -32,7 +31,7 @@ def _in_progress_payload() -> dict[str, object]:
     }
 
 
-def test_audit_payload_is_explicitly_credential_safe_when_not_recorded(monkeypatch):
+def test_canonical_audit_contract_remains_unchanged_when_not_recorded(monkeypatch):
     monkeypatch.setattr(
         cio_diagnostic,
         "latest_manual_cio_diagnostic",
@@ -45,7 +44,7 @@ def test_audit_payload_is_explicitly_credential_safe_when_not_recorded(monkeypat
     )
 
     assert payload["state"] == "not_recorded"
-    assert payload["credential_safe"] is True
+    assert "credential_safe" not in payload
     assert payload["paper_only"] is True
     assert payload["real_money_authorized"] is False
 
@@ -66,7 +65,7 @@ def test_readiness_endpoint_remains_fail_closed_but_telemetry_transport_stays_li
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert readiness_payload == payload
-    assert telemetry_payload == payload
+    assert telemetry_payload == {**payload, "credential_safe": True}
 
     snapshot = telemetry.build_snapshot(
         telemetry_payload,
@@ -78,7 +77,9 @@ def test_readiness_endpoint_remains_fail_closed_but_telemetry_transport_stays_li
 
 
 def test_live_telemetry_route_is_registered_as_get():
-    routes = {getattr(route, "path", ""): route for route in cio_diagnostic.router.routes}
+    routes = {
+        getattr(route, "path", ""): route for route in cio_diagnostic.router.routes
+    }
     route = routes["/v1/operations/cio-diagnostic/telemetry"]
     assert "GET" in route.methods
 
