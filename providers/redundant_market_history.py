@@ -1,8 +1,8 @@
 """Governed point-in-time market-history redundancy for investable assets.
 
 Failover is scoped to provider + capability + dataset, so an OPRA entitlement failure
-cannot disable the same vendor's futures, stock, FX, or crypto capability.  Candidates
-must represent the exact same economic instrument.  Fixed-income candidates additionally
+cannot disable the same vendor's futures, stock, FX, or crypto capability. Candidates
+must represent the exact same economic instrument. Fixed-income candidates additionally
 require explicit exact-security identity; aggregate TRACE, benchmark yields, auction
 prices, and proxy securities can never satisfy individual-bond price evidence.
 """
@@ -56,7 +56,10 @@ class MarketHistoryCandidate:
     instrument_identity: str
     loader: Callable[[], Sequence[Mapping[str, object]]]
     configured: bool = True
-    authenticated: bool = True
+    # ``authenticated`` is prior proof only. False means authentication has not yet
+    # been proven for this capability in the current cycle; it is not a reason to skip
+    # an otherwise configured candidate. A successful request promotes the audit state.
+    authenticated: bool = False
     certified_for_evidence_role: bool = True
     fixed_income: bool = False
     exact_security_identity: bool = True
@@ -72,7 +75,13 @@ class MarketHistoryCandidate:
             value = str(getattr(self, field_name) or "").strip()
             if not value:
                 raise ValueError(f"{field_name} cannot be empty")
-            object.__setattr__(self, field_name, value.lower() if field_name in {"provider", "capability"} else value)
+            object.__setattr__(
+                self,
+                field_name,
+                value.lower()
+                if field_name in {"provider", "capability"}
+                else value,
+            )
         if not callable(self.loader):
             raise TypeError("loader must be callable")
         if self.fixed_income and not self.exact_security_identity:
@@ -101,12 +110,40 @@ class RoutedMarketHistory:
 
 ALL_ASSET_REDUNDANCY_POLICY: dict[str, dict[str, tuple[str, ...]]] = {
     "us_equity": {
-        "history": ("alpaca", "tradier", "massive", "twelve_data", "yahoo", "eodhd"),
-        "quote": ("alpaca", "tradier", "massive", "twelve_data", "alpha_vantage", "yahoo"),
+        "history": (
+            "alpaca",
+            "tradier",
+            "massive",
+            "twelve_data",
+            "yahoo",
+            "eodhd",
+        ),
+        "quote": (
+            "alpaca",
+            "tradier",
+            "massive",
+            "twelve_data",
+            "alpha_vantage",
+            "yahoo",
+        ),
     },
     "us_etf": {
-        "history": ("alpaca", "tradier", "massive", "twelve_data", "yahoo", "eodhd"),
-        "quote": ("alpaca", "tradier", "massive", "twelve_data", "alpha_vantage", "yahoo"),
+        "history": (
+            "alpaca",
+            "tradier",
+            "massive",
+            "twelve_data",
+            "yahoo",
+            "eodhd",
+        ),
+        "quote": (
+            "alpaca",
+            "tradier",
+            "massive",
+            "twelve_data",
+            "alpha_vantage",
+            "yahoo",
+        ),
     },
     "international_equity": {
         "reference": ("eodhd", "twelve_data", "openfigi"),
@@ -158,18 +195,35 @@ def classify_provider_failure(error: BaseException) -> ProviderFailureClass:
     if bool(getattr(error, "retryable", False)):
         return ProviderFailureClass.TRANSIENT_PROVIDER_FAILURE
     text = str(error).lower()
-    if any(marker in text for marker in ("invalid symbol", "symbol mismatch", "unsupported", "request contract", "identity mismatch")):
+    if any(
+        marker in text
+        for marker in (
+            "invalid symbol",
+            "symbol mismatch",
+            "unsupported",
+            "request contract",
+            "identity mismatch",
+        )
+    ):
         return ProviderFailureClass.REQUEST_CONTRACT
     return ProviderFailureClass.PROVIDER_EVIDENCE_UNAVAILABLE
 
 
 def _aware(value: object) -> datetime | None:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         return None
     return value.astimezone(timezone.utc)
 
 
-def _normalize_rows(rows: Sequence[Mapping[str, object]], *, as_of: datetime) -> tuple[dict[str, object], ...]:
+def _normalize_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    as_of: datetime,
+) -> tuple[dict[str, object], ...]:
     by_timestamp: dict[datetime, dict[str, object]] = {}
     for raw in rows:
         if not isinstance(raw, Mapping):
@@ -194,7 +248,9 @@ class RedundantMarketHistoryRouter:
         self.audit = audit
 
     @property
-    def blocked_capabilities(self) -> Mapping[ProviderCapabilityKey, ProviderFailureClass]:
+    def blocked_capabilities(
+        self,
+    ) -> Mapping[ProviderCapabilityKey, ProviderFailureClass]:
         return dict(self._blocked)
 
     def fetch(
@@ -206,19 +262,29 @@ class RedundantMarketHistoryRouter:
     ) -> RoutedMarketHistory:
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("as_of must be timezone-aware")
-        if isinstance(minimum_rows, bool) or not isinstance(minimum_rows, int) or minimum_rows < 1:
+        if (
+            isinstance(minimum_rows, bool)
+            or not isinstance(minimum_rows, int)
+            or minimum_rows < 1
+        ):
             raise ValueError("minimum_rows must be a positive integer")
         if not candidates:
-            raise RedundantMarketHistoryError("no certified market-history candidates were supplied")
+            raise RedundantMarketHistoryError(
+                "no certified market-history candidates were supplied"
+            )
         identities = {item.instrument_identity for item in candidates}
         if len(identities) != 1:
             raise RedundantMarketHistoryError(
                 "provider failover cannot cross economic-instrument identities"
             )
-        if any(item.fixed_income and not item.exact_security_identity for item in candidates):
+        if any(
+            item.fixed_income and not item.exact_security_identity
+            for item in candidates
+        ):
             raise RedundantMarketHistoryError(
                 "fixed-income failover requires exact-security identity"
             )
+
         ledger = self.audit or current_redundancy_ledger()
         attempted: list[str] = []
         failures: list[tuple[str, str]] = []
@@ -235,22 +301,24 @@ class RedundantMarketHistoryRouter:
             if not candidate.configured:
                 failures.append((key.identifier, "not_configured"))
                 continue
-            if not candidate.authenticated:
-                failures.append((key.identifier, ProviderFailureClass.AUTHENTICATION_OR_ENTITLEMENT.value))
-                continue
             if not candidate.certified_for_evidence_role:
                 failures.append((key.identifier, "not_certified_for_evidence_role"))
                 continue
             blocked = self._blocked.get(key)
             if blocked is not None:
-                failures.append((key.identifier, f"cycle_blocked:{blocked.value}"))
+                failures.append(
+                    (key.identifier, f"cycle_blocked:{blocked.value}")
+                )
                 continue
             attempted.append(key.identifier)
             if ledger is not None:
                 ledger.attempted(key)
             try:
                 raw_rows = candidate.loader()
-                rows = _normalize_rows(raw_rows, as_of=as_of.astimezone(timezone.utc))
+                rows = _normalize_rows(
+                    raw_rows,
+                    as_of=as_of.astimezone(timezone.utc),
+                )
             except Exception as error:
                 failure_class = classify_provider_failure(error)
                 failures.append((key.identifier, failure_class.value))
@@ -273,7 +341,11 @@ class RedundantMarketHistoryRouter:
             )
             failed_over = index > 0 or bool(failures)
             if ledger is not None:
-                ledger.used(key, source_identifiers=(source,), failed_over=failed_over)
+                ledger.used(
+                    key,
+                    source_identifiers=(source,),
+                    failed_over=failed_over,
+                )
             return RoutedMarketHistory(
                 provider=candidate.provider,
                 capability=candidate.capability,
@@ -286,7 +358,12 @@ class RedundantMarketHistoryRouter:
                 failed_capabilities=tuple(failures),
                 failed_over=failed_over,
             )
-        detail = ",".join(f"{provider}={reason}" for provider, reason in failures) or "no_candidates"
+        detail = (
+            ",".join(
+                f"{provider}={reason}" for provider, reason in failures
+            )
+            or "no_candidates"
+        )
         raise RedundantMarketHistoryError(
             "certified market-history providers could not satisfy the existing evidence contract; "
             + detail
