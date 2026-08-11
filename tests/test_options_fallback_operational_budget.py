@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from operations.manual_cio_diagnostic import (
     claim_manual_cio_diagnostic,
     record_manual_cio_diagnostic_progress,
@@ -14,7 +16,7 @@ from providers.massive_options import (
     MassiveOptionDefinition,
     MassiveOptionSelection,
 )
-from providers.redundant_options import RedundantOptionsProvider
+from providers.redundant_options import RedundantOptionsError, RedundantOptionsProvider
 
 
 AS_OF = datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc)
@@ -29,6 +31,10 @@ class _CappedPrimary:
             status_code=402,
             retryable=False,
         )
+
+
+class _UnavailableSecondary:
+    configured = False
 
 
 class _BudgetAwareFallback:
@@ -66,9 +72,35 @@ class _BudgetAwareFallback:
         return (MassiveOptionSelection(definition=definition, bar=bar),)
 
 
-def test_massive_fallback_bounds_free_tier_expiration_requests() -> None:
+def test_massive_fallback_never_silently_truncates_multi_expiration_discovery() -> None:
     fallback = _BudgetAwareFallback()
-    provider = RedundantOptionsProvider(primary=_CappedPrimary(), fallback=fallback)
+    provider = RedundantOptionsProvider(
+        primary=_CappedPrimary(),
+        secondary=_UnavailableSecondary(),
+        fallback=fallback,
+    )
+
+    with pytest.raises(RedundantOptionsError, match="opportunity-complete"):
+        provider.select_contracts(
+            "SPY",
+            underlying_price=640.0,
+            as_of=AS_OF,
+            minimum_days_to_expiry=30,
+            maximum_days_to_expiry=365,
+            maximum_expirations=3,
+            candidates_per_bucket=8,
+        )
+
+    assert fallback.kwargs is None
+
+
+def test_massive_fallback_remains_available_for_explicit_single_expiration_probe() -> None:
+    fallback = _BudgetAwareFallback()
+    provider = RedundantOptionsProvider(
+        primary=_CappedPrimary(),
+        secondary=_UnavailableSecondary(),
+        fallback=fallback,
+    )
 
     selections = provider.select_contracts(
         "SPY",
@@ -76,7 +108,7 @@ def test_massive_fallback_bounds_free_tier_expiration_requests() -> None:
         as_of=AS_OF,
         minimum_days_to_expiry=30,
         maximum_days_to_expiry=365,
-        maximum_expirations=3,
+        maximum_expirations=1,
         candidates_per_bucket=8,
     )
 
