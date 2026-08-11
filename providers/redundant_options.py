@@ -26,6 +26,7 @@ from providers.massive_options import (
     MassiveOptionsError,
     MassiveOptionsProvider,
 )
+from providers.single_pass_massive_options import SinglePassMassiveOptionsProvider
 
 
 _MASSIVE_BASIC_FALLBACK_MAX_EXPIRATIONS = 1
@@ -189,7 +190,7 @@ class RedundantOptionsProvider:
         fallback: MassiveOptionsProvider | None = None,
     ) -> None:
         self.primary = primary or DatabentoOptionsProvider()
-        self.fallback = fallback or MassiveOptionsProvider()
+        self.fallback = fallback or SinglePassMassiveOptionsProvider()
 
     @property
     def configured(self) -> bool:
