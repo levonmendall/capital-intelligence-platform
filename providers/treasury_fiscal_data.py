@@ -1,7 +1,7 @@
 """Keyless U.S. Treasury Fiscal Data reference evidence.
 
 This adapter supplies point-in-time identity and terms for marketable U.S. Treasury
-securities from the Bureau of the Fiscal Service.  It is reference evidence only: it
+securities from the Bureau of the Fiscal Service. It is reference evidence only: it
 does not provide evaluated prices, authorize trades, or synthesize missing securities.
 """
 
@@ -22,6 +22,35 @@ TREASURY_AUCTIONS_ENDPOINT = (
 
 class TreasuryFiscalDataError(RuntimeError):
     """Raised when Treasury reference evidence cannot be retrieved or validated."""
+
+
+def is_valid_cusip(value: object) -> bool:
+    """Return whether ``value`` satisfies the CUSIP 8-character body + check digit."""
+
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip().upper()
+    if len(normalized) != 9 or not normalized[-1].isdigit():
+        return False
+    total = 0
+    for index, character in enumerate(normalized[:8], start=1):
+        if character.isdigit():
+            number = int(character)
+        elif "A" <= character <= "Z":
+            number = ord(character) - ord("A") + 10
+        elif character == "*":
+            number = 36
+        elif character == "@":
+            number = 37
+        elif character == "#":
+            number = 38
+        else:
+            return False
+        if index % 2 == 0:
+            number *= 2
+        total += number // 10 + number % 10
+    check_digit = (10 - total % 10) % 10
+    return int(normalized[-1]) == check_digit
 
 
 def _date(value: object, *, field: str) -> date:
@@ -56,6 +85,12 @@ class TreasurySecurityReference:
     investment_rate: float | None = None
     price_per_100: float | None = None
     bid_to_cover_ratio: float | None = None
+
+    def __post_init__(self) -> None:
+        normalized = self.cusip.strip().upper()
+        if not is_valid_cusip(normalized):
+            raise ValueError("TreasurySecurityReference requires a valid CUSIP")
+        object.__setattr__(self, "cusip", normalized)
 
     @property
     def evidence_identifier(self) -> str:
@@ -109,8 +144,6 @@ class TreasuryFiscalDataProvider:
                 "bid_to_cover_ratio",
             )
         )
-        # Only use records that were published and securities that were issued by the
-        # point-in-time cutoff; exclude already-matured instruments.
         filters = ",".join(
             (
                 f"record_date:lte:{as_of_date.isoformat()}",
@@ -160,7 +193,7 @@ class TreasuryFiscalDataProvider:
                 cusip = str(raw.get("cusip", "")).strip().upper()
                 security_type = str(raw.get("security_type", "")).strip()
                 security_term = str(raw.get("security_term", "")).strip()
-                if len(cusip) != 9 or not security_type or not security_term:
+                if not is_valid_cusip(cusip) or not security_type or not security_term:
                     continue
                 reference = TreasurySecurityReference(
                     cusip=cusip,
@@ -218,4 +251,5 @@ __all__ = [
     "TreasuryFiscalDataProvider",
     "TreasurySecurityReference",
     "build_treasury_fiscal_data_provider",
+    "is_valid_cusip",
 ]
