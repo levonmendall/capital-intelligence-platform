@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from application.global_rotation_preliminary import (
+    MemoizedCandidateRiskIntelligenceEngine,
+    MemoizedJointCandidateIntelligenceEngine,
     PrecomputedSpecialistService,
     assess_preliminary_global_conviction,
 )
@@ -77,6 +79,106 @@ def test_precomputed_specialist_service_reuses_packet_only_inside_bound_context(
     with service.bind_packets({candidate.identifier: packet}):
         assert service.analyze(candidate, context) is packet
     assert service.analyze(candidate, context) == "delegated"
+    assert delegate.calls == 2
+
+
+def test_candidate_risk_memoization_is_cycle_local_and_exact_input_keyed():
+    candidate = SimpleNamespace(identifier="candidate:AAA")
+
+    class Delegate:
+        def __init__(self):
+            self.calls = 0
+
+        def assess(self, _candidate, **kwargs):
+            self.calls += 1
+            return SimpleNamespace(call=self.calls, **kwargs)
+
+    delegate = Delegate()
+    engine = MemoizedCandidateRiskIntelligenceEngine(delegate)
+    token = engine.begin_cycle_cache()
+    try:
+        first = engine.assess(
+            candidate,
+            portfolio_value=250_000.0,
+            proposed_weight=0.03,
+            alternative_return=0.04,
+            invalidation_clarity=0.70,
+        )
+        second = engine.assess(
+            candidate,
+            portfolio_value=250_000.0,
+            proposed_weight=0.03,
+            alternative_return=0.04,
+            invalidation_clarity=0.70,
+        )
+        changed = engine.assess(
+            candidate,
+            portfolio_value=250_000.0,
+            proposed_weight=0.04,
+            alternative_return=0.04,
+            invalidation_clarity=0.70,
+        )
+        assert first is second
+        assert changed is not first
+        assert delegate.calls == 2
+    finally:
+        engine.end_cycle_cache(token)
+    engine.assess(
+        candidate,
+        portfolio_value=250_000.0,
+        proposed_weight=0.03,
+        alternative_return=0.04,
+        invalidation_clarity=0.70,
+    )
+    assert delegate.calls == 3
+
+
+def test_joint_candidate_memoization_avoids_duplicate_quadratic_pass():
+    candidates = (SimpleNamespace(identifier="A"), SimpleNamespace(identifier="B"))
+    risks = (
+        SimpleNamespace(
+            candidate_identifier="A",
+            proposed_weight=0.03,
+            probability_of_loss=0.3,
+            expected_shortfall=-0.1,
+            stressed_execution_cost_return=0.002,
+            fragility_score=0.2,
+            hard_blocks=(),
+        ),
+        SimpleNamespace(
+            candidate_identifier="B",
+            proposed_weight=0.02,
+            probability_of_loss=0.4,
+            expected_shortfall=-0.12,
+            stressed_execution_cost_return=0.002,
+            fragility_score=0.25,
+            hard_blocks=(),
+        ),
+    )
+    profiles = (
+        SimpleNamespace(candidate_identifier="A", factor_loadings=(("growth", 0.8),), correlation_bucket="growth"),
+        SimpleNamespace(candidate_identifier="B", factor_loadings=(("inflation", 0.8),), correlation_bucket="real_assets"),
+    )
+
+    class Delegate:
+        def __init__(self):
+            self.calls = 0
+
+        def assess(self, _candidates, _risks, _profiles):
+            self.calls += 1
+            return (f"result:{self.calls}",)
+
+    delegate = Delegate()
+    engine = MemoizedJointCandidateIntelligenceEngine(delegate)
+    token = engine.begin_cycle_cache()
+    try:
+        first = engine.assess(candidates, risks, profiles)
+        second = engine.assess(candidates, risks, profiles)
+        assert first is second
+        assert delegate.calls == 1
+    finally:
+        engine.end_cycle_cache(token)
+    engine.assess(candidates, risks, profiles)
     assert delegate.calls == 2
 
 

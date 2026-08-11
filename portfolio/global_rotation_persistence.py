@@ -1,8 +1,9 @@
 """Append-only global rotation context and cash-accountability persistence.
 
 The store is separate from canonical CIO decision authority. It records why excess cash
-remained after each completed paper cycle, including cycles with no candidate-level CIO
-decision, so persistent abstention cannot disappear from the audit trail.
+remained after each completed paper cycle and provides the prior immutable rotation
+snapshot needed to measure leadership migration. It never mutates canonical CIO
+persistence or authorizes investment.
 """
 from __future__ import annotations
 
@@ -13,13 +14,10 @@ from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from cio.models import CIOAction
-from portfolio.global_rotation_models import (
-    CashCompetitionState,
-    GlobalRotationContext,
-)
+from portfolio.global_rotation_models import CashCompetitionState, GlobalRotationContext
 
 _GLOBAL_CONTEXT_PREFIX = "global-rotation-context.v1:"
 
@@ -54,6 +52,18 @@ def _decision_rotation_payload(decision: object) -> dict[str, Any]:
     return {}
 
 
+def _to_dict_or_none(value: object | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    method = getattr(value, "to_dict", None)
+    if not callable(method):
+        raise TypeError("persisted global rotation extension must expose to_dict()")
+    payload = method()
+    if not isinstance(payload, dict):
+        raise TypeError("global rotation extension to_dict() must return a dict")
+    return payload
+
+
 @dataclass(frozen=True, slots=True)
 class GlobalCashAccountability:
     cycle_identifier: str
@@ -69,6 +79,9 @@ class GlobalCashAccountability:
     soft_constraint_count: int
     conviction_stage_counts: tuple[tuple[str, int], ...]
     indicated_conviction_weight: float
+    positive_deployed_weight: float
+    optimized_deployable_weight: float
+    unfilled_optimized_weight: float
     construction_expected_return_improvement: float | None
     pre_cio_cash_state: CashCompetitionState
     classification: ResidualCashClassification
@@ -78,7 +91,7 @@ class GlobalCashAccountability:
     strongest_expected_return_edge: float | None
     cycle_disposition_classification: str | None
     explanation: str
-    policy_version: str = "global-cash-accountability.v3"
+    policy_version: str = "global-cash-accountability.v4"
     investment_authority: bool = False
 
     def __post_init__(self) -> None:
@@ -90,6 +103,9 @@ class GlobalCashAccountability:
             "final_cash_weight",
             "residual_excess_cash_weight",
             "indicated_conviction_weight",
+            "positive_deployed_weight",
+            "optimized_deployable_weight",
+            "unfilled_optimized_weight",
         ):
             value = _finite(getattr(self, name), field_name=name)
             if not 0.0 <= value <= 1.0:
@@ -126,19 +142,19 @@ class GlobalCashAccountability:
             for item in self.conviction_stage_counts
         ):
             raise ValueError("conviction_stage_counts must contain (stage, count) pairs")
-        stages = tuple(item[0] for item in self.conviction_stage_counts)
-        if len(stages) != len(set(stages)):
+        if len(tuple(item[0] for item in self.conviction_stage_counts)) != len(
+            set(item[0] for item in self.conviction_stage_counts)
+        ):
             raise ValueError("conviction stages must be unique")
         if not isinstance(self.pre_cio_cash_state, CashCompetitionState):
             raise TypeError("pre_cio_cash_state must be CashCompetitionState")
         if not isinstance(self.classification, ResidualCashClassification):
             raise TypeError("classification must be ResidualCashClassification")
-        if self.cycle_disposition_classification is not None:
-            if (
-                not isinstance(self.cycle_disposition_classification, str)
-                or not self.cycle_disposition_classification.strip()
-            ):
-                raise ValueError("cycle_disposition_classification must be text or None")
+        if self.cycle_disposition_classification is not None and (
+            not isinstance(self.cycle_disposition_classification, str)
+            or not self.cycle_disposition_classification.strip()
+        ):
+            raise ValueError("cycle_disposition_classification must be text or None")
         if not isinstance(self.explanation, str) or not self.explanation.strip():
             raise ValueError("explanation cannot be empty")
         if self.investment_authority:
@@ -159,6 +175,9 @@ class GlobalCashAccountability:
             "soft_constraint_count": self.soft_constraint_count,
             "conviction_stage_counts": [list(item) for item in self.conviction_stage_counts],
             "indicated_conviction_weight": self.indicated_conviction_weight,
+            "positive_deployed_weight": self.positive_deployed_weight,
+            "optimized_deployable_weight": self.optimized_deployable_weight,
+            "unfilled_optimized_weight": self.unfilled_optimized_weight,
             "construction_expected_return_improvement": self.construction_expected_return_improvement,
             "pre_cio_cash_state": self.pre_cio_cash_state.value,
             "classification": self.classification.value,
@@ -174,23 +193,30 @@ class GlobalCashAccountability:
         }
 
 
+def _positive_deployed_weight(construction: object | None) -> float:
+    if construction is None:
+        return 0.0
+    total = 0.0
+    for trade in tuple(getattr(construction, "trades", ()) or ()):
+        before = getattr(trade, "from_weight", None)
+        after = getattr(trade, "to_weight", None)
+        if isinstance(before, (int, float)) and not isinstance(before, bool) and isinstance(after, (int, float)) and not isinstance(after, bool):
+            total += max(0.0, float(after) - float(before))
+    return min(1.0, total)
+
+
 def build_global_cash_accountability(
     *,
     cycle_identifier: str,
     context: GlobalRotationContext,
     result: object,
+    optimizer_proposal: object | None = None,
 ) -> GlobalCashAccountability:
     construction = getattr(result, "construction", None)
     final_cash = (
         context.current_cash_weight
         if construction is None
-        else float(
-            getattr(
-                construction,
-                "target_cash_weight",
-                context.current_cash_weight,
-            )
-        )
+        else float(getattr(construction, "target_cash_weight", context.current_cash_weight))
     )
     final_cash = max(0.0, min(1.0, final_cash))
     residual = max(0.0, final_cash - context.minimum_cash_weight)
@@ -199,11 +225,7 @@ def build_global_cash_accountability(
         getattr(item, "action", None) in {CIOAction.BUY, CIOAction.INCREASE}
         for item in decisions
     )
-    blocks = (
-        tuple(getattr(construction, "blocks", ()) or ())
-        if construction is not None
-        else ()
-    )
+    blocks = tuple(getattr(construction, "blocks", ()) or ()) if construction is not None else ()
     strongest = context.strongest
     disposition = getattr(result, "cycle_disposition", None)
     disposition_classification = getattr(disposition, "classification", None)
@@ -211,9 +233,7 @@ def build_global_cash_accountability(
         disposition_classification = str(disposition_classification).strip() or None
 
     rotation_payloads = tuple(
-        payload
-        for payload in (_decision_rotation_payload(item) for item in decisions)
-        if payload
+        payload for payload in (_decision_rotation_payload(item) for item in decisions) if payload
     )
     stage_counts: dict[str, int] = {}
     hard_blocked_candidate_count = 0
@@ -234,61 +254,63 @@ def build_global_cash_accountability(
             indicated_conviction_weight += max(0.0, float(target))
     indicated_conviction_weight = min(1.0, indicated_conviction_weight)
     construction_improvement = (
-        None
-        if construction is None
-        else getattr(construction, "expected_return_improvement", None)
+        None if construction is None else getattr(construction, "expected_return_improvement", None)
     )
+    deployed_weight = _positive_deployed_weight(construction)
+    optimized_weight = 0.0
+    if optimizer_proposal is not None:
+        value = getattr(optimizer_proposal, "deployable_cash_used", 0.0)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            optimized_weight = max(0.0, min(1.0, float(value)))
+    unfilled = max(0.0, optimized_weight - deployed_weight)
 
     all_reviewed_hard_blocked = bool(context.signals) and (
         hard_blocked_candidate_count >= len(context.signals)
     )
+    unexplained_partial = (
+        residual > 1e-8
+        and optimized_weight > 0.0
+        and unfilled >= 0.0025 - 1e-8
+        and not blocks
+        and not all_reviewed_hard_blocked
+    )
     if residual <= 1e-8:
         classification = ResidualCashClassification.REQUIRED_RESERVE
-        explanation = (
-            "No cash remains beyond the governed minimum reserve after final construction."
-        )
+        explanation = "No cash remains beyond the governed minimum reserve after final construction."
     elif disposition_classification == "evidence_or_authority_block":
         classification = ResidualCashClassification.HARD_CONSTRAINT_FORCED
         explanation = (
-            "Excess cash remained because the governed empty-queue disposition found "
-            "an evidence, capability-authority, operational, or unmapped qualification "
-            "block. Cash did not win an economic comparison; deployment was unavailable."
+            "Excess cash remained because the governed empty-queue disposition found an evidence, capability-authority, operational, or unmapped qualification block. Cash did not win an economic comparison; deployment was unavailable."
         )
     elif blocks:
         classification = ResidualCashClassification.HARD_CONSTRAINT_FORCED
         explanation = (
-            "Final construction retained excess cash because one or more explicit "
-            "portfolio construction constraints blocked additional deployment."
-        )
-    elif positive_count > 0:
-        classification = ResidualCashClassification.DEPLOYED_WITH_RESIDUAL
-        explanation = (
-            "The CIO deployed capital into positive opportunities, but approved "
-            "conviction/risk sizing left residual cash above the minimum reserve; that "
-            "residual remains subject to future global competition."
+            "Final construction retained excess cash because one or more explicit portfolio construction constraints blocked additional deployment."
         )
     elif all_reviewed_hard_blocked:
         classification = ResidualCashClassification.HARD_CONSTRAINT_FORCED
         explanation = (
-            "Every candidate that reached global CIO review was subsequently blocked by "
-            "one or more hard evidence, implementation, funding, or downside controls. "
-            "Cash therefore remained because deployment was prohibited, not because soft "
-            "uncertainty was treated as a default veto."
+            "Every candidate that reached global CIO review was subsequently blocked by one or more hard evidence, implementation, funding, or downside controls."
+        )
+    elif unexplained_partial:
+        classification = ResidualCashClassification.UNEXPLAINED_RESIDUAL
+        explanation = (
+            f"The specialist-bounded optimizer identified {optimized_weight:.2%} of deployable marginal capital, but final positive deployment used only {deployed_weight:.2%}; {unfilled:.2%} remained unfilled while excess cash persisted without a construction or complete hard-control explanation."
+        )
+    elif positive_count > 0:
+        classification = ResidualCashClassification.DEPLOYED_WITH_RESIDUAL
+        explanation = (
+            "The CIO deployed capital into positive opportunities and no material specialist-bounded optimizer allocation remained unexplained; residual cash reflects approved conviction/risk sizing."
         )
     elif context.cash_competition_state is CashCompetitionState.CASH_LEADING_ESTIMATE:
         classification = ResidualCashClassification.ECONOMIC_WIN_ESTIMATE
         explanation = (
-            "Among candidates that survived governed qualification, none cleared the "
-            "positive-edge and minimum global-opportunity score required to challenge "
-            "marginal cash. This is an economic estimate, not a default-cash rule."
+            "Among candidates that survived governed qualification, none cleared the positive-edge and minimum global-opportunity score required to challenge marginal cash."
         )
     else:
         classification = ResidualCashClassification.UNEXPLAINED_RESIDUAL
         explanation = (
-            "A pre-CIO deployment opportunity existed, no final construction block or "
-            "complete set of hard CIO blockers explains the residual, and no positive "
-            "CIO action deployed capital. This is an explicit abstention diagnostic "
-            "requiring review rather than a valid default-cash conclusion."
+            "A pre-CIO deployment opportunity existed, no final construction block or complete set of hard CIO blockers explains the residual, and no positive CIO action deployed capital."
         )
 
     return GlobalCashAccountability(
@@ -305,21 +327,18 @@ def build_global_cash_accountability(
         soft_constraint_count=soft_constraint_count,
         conviction_stage_counts=tuple(sorted(stage_counts.items())),
         indicated_conviction_weight=round(indicated_conviction_weight, 8),
+        positive_deployed_weight=round(deployed_weight, 8),
+        optimized_deployable_weight=round(optimized_weight, 8),
+        unfilled_optimized_weight=round(unfilled, 8),
         construction_expected_return_improvement=(
-            None
-            if construction_improvement is None
-            else float(construction_improvement)
+            None if construction_improvement is None else float(construction_improvement)
         ),
         pre_cio_cash_state=context.cash_competition_state,
         classification=classification,
-        strongest_candidate_identifier=(
-            None if strongest is None else strongest.candidate_identifier
-        ),
+        strongest_candidate_identifier=None if strongest is None else strongest.candidate_identifier,
         strongest_domain=None if strongest is None else strongest.domain.value,
         strongest_score=None if strongest is None else strongest.score,
-        strongest_expected_return_edge=(
-            None if strongest is None else strongest.expected_return_edge
-        ),
+        strongest_expected_return_edge=None if strongest is None else strongest.expected_return_edge,
         cycle_disposition_classification=disposition_classification,
         explanation=explanation,
     )
@@ -366,6 +385,39 @@ class SQLiteGlobalRotationStore:
                 """
             )
 
+    def latest_payload(self) -> dict[str, Any] | None:
+        """Return the last immutable side-store payload without changing authority."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM global_rotation_events ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(str(row["payload_json"]))
+        return payload if isinstance(payload, dict) else None
+
+    def latest_signal_snapshots(self) -> dict[str, Mapping[str, Any]]:
+        """Return prior candidate snapshots used only for longitudinal comparison."""
+
+        payload = self.latest_payload()
+        if payload is None:
+            return {}
+        context = payload.get("global_rotation_context")
+        if not isinstance(context, dict):
+            return {}
+        values = context.get("signals", ())
+        if not isinstance(values, list):
+            return {}
+        result: dict[str, Mapping[str, Any]] = {}
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            identifier = str(item.get("candidate_identifier", "")).strip()
+            if identifier:
+                result[identifier] = item
+        return result
+
     def append(
         self,
         *,
@@ -373,47 +425,38 @@ class SQLiteGlobalRotationStore:
         context: GlobalRotationContext,
         accountability: GlobalCashAccountability,
         code_version: str,
+        optimizer_proposal: object | None = None,
+        coverage_report: object | None = None,
     ) -> str:
         payload = {
-            "schema_version": "global-rotation-event.v1",
+            "schema_version": "global-rotation-event.v2",
             "cycle_identifier": str(cycle_identifier),
             "code_version": str(code_version or "unknown"),
             "global_rotation_context": context.to_dict(),
             "cash_accountability": accountability.to_dict(),
+            "compound_optimizer": _to_dict_or_none(optimizer_proposal),
+            "market_coverage": _to_dict_or_none(coverage_report),
             "paper_only": True,
             "real_money_authorized": False,
         }
-        payload_json = json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
         event_identifier = f"global-rotation:{cycle_identifier}"
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                "SELECT payload_json, content_hash FROM global_rotation_events "
-                "WHERE event_identifier = ?",
+                "SELECT payload_json, content_hash FROM global_rotation_events WHERE event_identifier = ?",
                 (event_identifier,),
             ).fetchone()
             if existing is not None:
                 if str(existing["payload_json"]) != payload_json:
-                    raise ValueError(
-                        "global rotation event already exists with different content"
-                    )
+                    raise ValueError("global rotation event already exists with different content")
                 connection.rollback()
                 return str(existing["content_hash"])
             previous = connection.execute(
-                "SELECT sequence, content_hash FROM global_rotation_events "
-                "ORDER BY sequence DESC LIMIT 1"
+                "SELECT sequence, content_hash FROM global_rotation_events ORDER BY sequence DESC LIMIT 1"
             ).fetchone()
             sequence = int(previous["sequence"]) + 1 if previous is not None else 1
-            previous_hash = (
-                str(previous["content_hash"])
-                if previous is not None
-                else self._GENESIS
-            )
+            previous_hash = str(previous["content_hash"]) if previous is not None else self._GENESIS
             content_hash = hashlib.sha256(
                 json.dumps(
                     {
@@ -452,13 +495,9 @@ class SQLiteGlobalRotationStore:
         previous = self._GENESIS
         expected_sequence = 1
         with self._connect() as connection:
-            cursor = connection.execute(
-                "SELECT * FROM global_rotation_events ORDER BY sequence"
-            )
+            cursor = connection.execute("SELECT * FROM global_rotation_events ORDER BY sequence")
             for row in cursor:
-                if int(row["sequence"]) != expected_sequence:
-                    return False
-                if str(row["previous_hash"]) != previous:
+                if int(row["sequence"]) != expected_sequence or str(row["previous_hash"]) != previous:
                     return False
                 expected = hashlib.sha256(
                     json.dumps(
