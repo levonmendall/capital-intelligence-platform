@@ -1,5 +1,7 @@
 import io
 import json
+import subprocess
+import sys
 import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
@@ -119,6 +121,26 @@ def test_canonical_transport_rejects_noncanonical_endpoint():
         assert "canonical CIO diagnostic endpoint" in str(error)
     else:
         raise AssertionError("noncanonical telemetry endpoint was accepted")
+
+
+def test_canonical_telemetry_starts_when_executed_like_github_actions():
+    repository_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/capture_render_production_telemetry_canonical.py",
+            "--help",
+        ],
+        cwd=repository_root,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--expected-release" in result.stdout
+    assert "ModuleNotFoundError" not in result.stderr
 
 
 def test_live_telemetry_route_is_registered_as_get():
