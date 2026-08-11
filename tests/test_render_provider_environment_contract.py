@@ -47,9 +47,42 @@ def test_render_declares_direct_redundancy_provider_credentials() -> None:
     assert missing == [], f"Render is missing direct provider credentials: {missing}"
 
 
+def test_render_declares_current_repository_provider_secret_aliases() -> None:
+    # These are the provider-native secret families currently used in the repository.
+    # Render must expose them as external slots so runtime normalization can see them.
+    required = {
+        "ALPHA_VANTAGE_API_KEY",
+        "APCA_API_KEY_ID",
+        "APCA_API_SECRET_KEY",
+        "BEA_API_KEY",
+        "DATABENTO_API_KEY",
+        "EIA_API_KEY",
+        "EODHD_API_KEY",
+        "FINRA_API_KEY",
+        "FRED_API_KEY",
+        "MASSIVE_API_KEY",
+        "NASA_API_KEY",
+        "OPEN_FIGI_API_KEY",
+        "TRADIER_API_KEY",
+        "TWELVE_API_KEY",
+        "USDA_NASS_API_KEY",
+        "US_CENSUS_API_KEY",
+    }
+    missing = sorted(required - _render_keys())
+    assert missing == [], f"Render is missing repository provider secret aliases: {missing}"
+
+
 def test_render_does_not_embed_provider_secret_values() -> None:
     text = (ROOT / "render.yaml").read_text(encoding="utf-8")
-    for key in _bundle_external_inputs() | {"FINRA_CLIENT_ID", "FINRA_CLIENT_SECRET"}:
+    protected = _bundle_external_inputs() | {
+        "FINRA_CLIENT_ID",
+        "FINRA_CLIENT_SECRET",
+        "FINRA_API_KEY",
+        "TRADIER_API_KEY",
+        "NASA_API_KEY",
+        "US_CENSUS_API_KEY",
+    }
+    for key in protected:
         match = re.search(
             rf"^\s*- key:\s*{re.escape(key)}\s*$\n(?P<body>(?:\s{{8,}}.*\n)*)",
             text,
