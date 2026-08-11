@@ -1,0 +1,206 @@
+name: One Shot All Asset Redundancy V2
+
+on:
+  push:
+    branches:
+      - agent/all-asset-provider-redundancy-v2
+    paths:
+      - ".github/workflows/one-shot-all-asset-redundancy-v2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/all-asset-provider-redundancy-v2
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Apply production integration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def patch(path: str, old: str, new: str) -> None:
+              source = Path(path)
+              text = source.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"required patch anchor missing in {path}: {old[:120]!r}")
+              source.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          # Canonical comprehensive discovery: every uninjected CIO discovery run gets
+          # a fresh audit ledger and the redundant evidence probe. Injected fixtures
+          # retain their explicit probes for deterministic tests.
+          patch(
+              "operations/comprehensive_market_discovery.py",
+              "from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress\n",
+              "from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress\n"
+              "from operations.redundant_market_probe import default_redundant_market_probe\n"
+              "from providers.redundancy_audit import begin_redundancy_cycle\n",
+          )
+          patch(
+              "operations/comprehensive_market_discovery.py",
+              "    resolved = policy or ComprehensiveMarketDiscoveryPolicy()\n    record_manual_cio_diagnostic_progress(\n",
+              "    resolved = policy or ComprehensiveMarketDiscoveryPolicy()\n"
+              "    if market_probe is None:\n"
+              "        begin_redundancy_cycle(\n"
+              "            f\"comprehensive-discovery:{timestamp.isoformat()}\",\n"
+              "            timestamp,\n"
+              "        )\n"
+              "    record_manual_cio_diagnostic_progress(\n",
+          )
+          patch(
+              "operations/comprehensive_market_discovery.py",
+              "        features = (market_probe or _base._legacy.default_market_probe)(\n",
+              "        features = (market_probe or default_redundant_market_probe)(\n",
+          )
+
+          # Add FINRA aggregate fixed-income context to the public/environment evidence
+          # stream. It remains optional context and never enters the bond-price path.
+          patch(
+              "providers/public_live_information.py",
+              "from data.decision_information import (\n",
+              "from providers.finra_context import (\n"
+              "    FinraContextError,\n"
+              "    collect_finra_fixed_income_context,\n"
+              ")\n\n"
+              "from data.decision_information import (\n",
+          )
+          patch(
+              "providers/public_live_information.py",
+              "        deduplicated = {item.content_hash: item for item in records}\n",
+              "        try:\n"
+              "            finra_record = collect_finra_fixed_income_context(as_of=evaluated_at)\n"
+              "        except FinraContextError as error:\n"
+              "            results.append(\n"
+              "                PublicLiveSourceResult(\n"
+              "                    source_identifier=\"finra-fixed-income-context\",\n"
+              "                    source_name=\"FINRA Fixed Income Market Context\",\n"
+              "                    retrieved_at=evaluated_at,\n"
+              "                    configured=True,\n"
+              "                    succeeded=False,\n"
+              "                    record_count=0,\n"
+              "                    content_hash=None,\n"
+              "                    error=str(error),\n"
+              "                    limitations=(\n"
+              "                        \"Aggregate TRACE context only; never individual-security pricing.\",\n"
+              "                    ),\n"
+              "                )\n"
+              "            )\n"
+              "        else:\n"
+              "            if finra_record is not None:\n"
+              "                records.append(finra_record)\n"
+              "                results.append(\n"
+              "                    PublicLiveSourceResult(\n"
+              "                        source_identifier=\"finra-fixed-income-context\",\n"
+              "                        source_name=\"FINRA Fixed Income Market Context\",\n"
+              "                        retrieved_at=evaluated_at,\n"
+              "                        configured=True,\n"
+              "                        succeeded=True,\n"
+              "                        record_count=1,\n"
+              "                        content_hash=finra_record.content_hash,\n"
+              "                        error=None,\n"
+              "                        limitations=(\n"
+              "                            \"Aggregate TRACE context only; never individual-security pricing.\",\n"
+              "                        ),\n"
+              "                    )\n"
+              "                )\n"
+              "        deduplicated = {item.content_hash: item for item in records}\n",
+          )
+
+          # Publish the exact cycle provider redundancy evidence in every CIO export.
+          patch(
+              "cio_decision_export.py",
+              "from typing import Any, Iterable, Mapping\n",
+              "from typing import Any, Iterable, Mapping\n\n"
+              "from providers.redundancy_audit import redundancy_audit_snapshot\n",
+          )
+          patch(
+              "cio_decision_export.py",
+              "        \"records\": records,\n        \"authority\": {\n",
+              "        \"records\": records,\n"
+              "        \"provider_redundancy_audit\": redundancy_audit_snapshot(),\n"
+              "        \"authority\": {\n",
+          )
+
+          # Provider activation audit: the new adapters are now real production routes.
+          audit = Path("providers/provider_activation_audit.py")
+          text = audit.read_text(encoding="utf-8")
+          replacements = {
+              '("option_reference", "option_history"),\n        "governed options fallback provider",':
+                  '(\n            "option_reference",\n            "option_history",\n            "us_equity_history",\n            "fx_history",\n            "crypto_history",\n            "us_futures_reference",\n            "us_futures_history",\n        ),\n        "governed options fallback and capability-scoped all-asset market-history redundancy",',
+              '("supplemental_quote", "us_equity_market_data", "us_option_market_data"),\n        "supplemental quote cross-check",':
+                  '(\n            "supplemental_quote",\n            "us_equity_market_data",\n            "us_equity_history",\n            "us_option_market_data",\n            "active_option_chain_corroboration",\n        ),\n        "supplemental quote, equity-history failover, and active option-chain corroboration",',
+              '("crypto_quote_validation",),\n        "crypto venue evidence adapter",\n        keyless=True,':
+                  '("crypto_quote_validation", "crypto_history"),\n        "crypto venue quote validation and native history evidence adapter",\n        keyless=True,',
+          }
+          for old, new in replacements.items():
+              count = text.count(old)
+              expected = 2 if old.startswith('(\"crypto_quote_validation\"') else 1
+              if count != expected:
+                  raise SystemExit(f"activation audit patch count mismatch: expected {expected}, got {count}: {old[:80]!r}")
+              text = text.replace(old, new)
+          old_finra = '''    ProviderActivationSpec(\n        "finra",\n        ("fixed_income_market_structure", "trace"),\n        None,\n        ("FINRA_CLIENT_ID", "FINRA_CLIENT_SECRET"),\n        note=(\n            "FINRA credentials and live fixed-income probing are wired, but FINRA market "\n            "context is intentionally reported unrouted until a governed CIO evidence "\n            "consumer is added; aggregate TRACE data is not substituted for bond prices."\n        ),\n    ),\n'''
+          new_finra = '''    ProviderActivationSpec(\n        "finra",\n        ("fixed_income_market_structure", "trace", "specialist_environment_context"),\n        "governed public-live fixed-income specialist/environment context",\n        ("FINRA_CLIENT_ID", "FINRA_CLIENT_SECRET"),\n        note=(\n            "FINRA aggregate TRACE context is routed to specialist/environment evidence only; "\n            "it cannot satisfy individual-bond identity, price, history, valuation, or execution."\n        ),\n    ),\n'''
+          if old_finra not in text:
+              raise SystemExit("FINRA activation audit anchor missing")
+          audit.write_text(text.replace(old_finra, new_finra, 1), encoding="utf-8")
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Compile changed Python
+        run: |
+          python -m py_compile \
+            providers/redundancy_audit.py \
+            providers/redundant_market_history.py \
+            providers/massive_multi_asset.py \
+            providers/tradier_market_data.py \
+            providers/crypto_venue_history.py \
+            providers/twelve_data_history.py \
+            providers/databento_futures_history.py \
+            providers/finra_context.py \
+            operations/redundant_market_probe.py \
+            operations/comprehensive_market_discovery.py \
+            providers/public_live_information.py \
+            cio_decision_export.py \
+            providers/provider_activation_audit.py
+
+      - name: Install locked dependencies and pytest
+        run: |
+          pip install --require-hashes -r requirements.lock
+          pip install pytest
+
+      - name: Run focused redundancy tests
+        run: |
+          pytest -q \
+            tests/test_all_asset_redundancy_v2.py \
+            tests/test_new_redundancy_adapters.py \
+            tests/test_redundant_options_provider.py \
+            tests/test_treasury_discovery_enrichment.py \
+            tests/test_treasury_fiscal_data.py \
+            tests/test_finra_fixed_income.py \
+            tests/test_provider_environment_activation.py \
+            tests/test_supplemental_quotes.py
+
+      - name: Commit integration and remove one-shot workflow
+        if: success()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm .github/workflows/one-shot-all-asset-redundancy-v2.yml
+          git add -A
+          git commit -m "Integrate governed all-asset provider redundancy"
+          git push origin HEAD:agent/all-asset-provider-redundancy-v2
