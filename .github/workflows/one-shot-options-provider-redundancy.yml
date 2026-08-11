@@ -6,6 +6,7 @@ on:
       - agent/options-provider-redundancy
     paths:
       - .github/workflows/one-shot-options-provider-redundancy.yml
+      - providers/redundant_options.py
 
 permissions:
   contents: write
