@@ -1,0 +1,76 @@
+name: One Shot All Asset Redundancy V2 Finalize
+
+on:
+  push:
+    branches:
+      - agent/all-asset-provider-redundancy-v2
+    paths:
+      - ".github/workflows/one-shot-all-asset-redundancy-v2-finalize.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/all-asset-provider-redundancy-v2
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Apply final audit integration
+        run: python scripts/finalize_all_asset_redundancy_v2.py
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Compile final integration
+        run: |
+          python -m py_compile \
+            providers/redundancy_audit.py \
+            providers/redundant_market_history.py \
+            providers/redundant_options.py \
+            operations/redundant_market_probe.py \
+            providers/finra_context.py \
+            providers/treasury_fiscal_data.py \
+            operations/comprehensive_market_discovery.py \
+            providers/public_live_information.py \
+            cio_decision_export.py
+
+      - name: Install locked dependencies and pytest
+        run: |
+          pip install --require-hashes -r requirements.lock
+          pip install pytest
+
+      - name: Run final focused integration suite
+        run: |
+          pytest -q \
+            tests/test_all_asset_redundancy_v2.py \
+            tests/test_all_asset_redundancy_integration.py \
+            tests/test_new_redundancy_adapters.py \
+            tests/test_redundant_options_provider.py \
+            tests/test_provider_environment_activation.py \
+            tests/test_treasury_fiscal_data.py \
+            tests/test_treasury_discovery_enrichment.py \
+            tests/test_finra_fixed_income.py \
+            tests/test_supplemental_quotes.py
+
+      - name: Commit final integration and remove temporary files
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f \
+            .github/workflows/one-shot-all-asset-provider-redundancy-v2-finalize.yml \
+            .github/workflows/one-shot-all-asset-redundancy-v2-finalize.yml \
+            scripts/finalize_all_asset_redundancy_v2.py
+          git add -A
+          git commit -m "Complete per-cycle all-asset redundancy evidence"
+          git push origin HEAD:agent/all-asset-provider-redundancy-v2
