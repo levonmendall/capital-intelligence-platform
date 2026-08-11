@@ -119,10 +119,96 @@ def test_xbrl_global_filing_index_preserves_conservative_availability() -> None:
     record = report.records[0]
     assert record.topic == "Structured company filing: Example plc"
     assert record.geographies == ("GB",)
-    assert "global-fundamentals" in record.tags
+    assert "global-fundamental-disclosure" in record.tags
     assert record.event_at == datetime(2025, 12, 31, tzinfo=timezone.utc)
     assert record.published_at == datetime(2026, 3, 15, 11, 30, tzinfo=timezone.utc)
     assert record.available_at == NOW
+
+
+def test_xbrl_follows_bounded_json_link_and_extracts_real_fundamental_facts() -> None:
+    source = _source("xbrl_filings")
+    index_payload = {
+        "data": [
+            {
+                "type": "filing",
+                "id": "filing-456",
+                "attributes": {
+                    "country": "FR",
+                    "period_end": "2025-12-31",
+                    "publication_date": "2026-03-20T07:00:00Z",
+                    "processed": "2026-03-20T08:00:00Z",
+                    "filing_system": "ESEF",
+                    "language": "en",
+                    "json_url": "https://example.test/filing-456.json",
+                },
+                "relationships": {
+                    "entity": {"data": {"type": "entity", "id": "LEI456"}}
+                },
+            }
+        ],
+        "included": [
+            {
+                "type": "entity",
+                "id": "LEI456",
+                "attributes": {"name": "Global Example SA", "identifier": "LEI456"},
+            }
+        ],
+    }
+    fact_payload = {
+        "facts": {
+            "f1": {
+                "value": 1250000000,
+                "dimensions": {
+                    "concept": "ifrs-full:Revenue",
+                    "entity": "LEI456",
+                    "period": "2025-01-01T00:00:00/2026-01-01T00:00:00",
+                    "unit": "iso4217:EUR",
+                },
+            },
+            "f2": {
+                "value": 210000000,
+                "dimensions": {
+                    "concept": "ifrs-full:ProfitLoss",
+                    "entity": "LEI456",
+                    "period": "2025-01-01T00:00:00/2026-01-01T00:00:00",
+                    "unit": "iso4217:EUR",
+                },
+            },
+            "ignored": {
+                "value": "Example text",
+                "dimensions": {
+                    "concept": "ifrs-full:NameOfReportingEntityOrOtherMeansOfIdentification",
+                    "entity": "LEI456",
+                    "period": "2025-12-31T00:00:00",
+                },
+            },
+        }
+    }
+
+    def http_get(url: str, **_kwargs: object) -> FakeResponse:
+        if url == source.endpoint:
+            return FakeResponse(index_payload)
+        assert url == "https://example.test/filing-456.json"
+        return FakeResponse(fact_payload)
+
+    provider = FreeDecisionDepthInformationProvider(
+        PublicLiveSourceCatalog("catalog:xbrl-facts", (source,)),
+        http_get=http_get,
+        clock=lambda: NOW,
+        sleeper=lambda _: None,
+    )
+    report = provider.collect()
+
+    fundamental_records = [
+        record for record in report.records if "structured-global-fundamentals" in record.tags
+    ]
+    assert {record.topic for record in fundamental_records} == {
+        "Global Example SA revenue",
+        "Global Example SA net-income",
+    }
+    assert all(record.published_at == datetime(2026, 3, 20, 7, 0, tzinfo=timezone.utc) for record in fundamental_records)
+    assert all(record.available_at == NOW for record in fundamental_records)
+    assert all("LEI456" in record.entities for record in fundamental_records)
 
 
 def test_treasury_tic_emits_latest_country_cross_border_capital_rows() -> None:
