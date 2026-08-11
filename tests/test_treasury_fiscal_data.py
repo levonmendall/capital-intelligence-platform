@@ -7,6 +7,7 @@ import pytest
 from providers.treasury_fiscal_data import (
     TreasuryFiscalDataError,
     TreasuryFiscalDataProvider,
+    is_valid_cusip,
 )
 
 
@@ -19,6 +20,13 @@ class _Response:
         return self._payload
 
 
+def test_cusip_check_digit_validation() -> None:
+    assert is_valid_cusip("91282CFU0") is True
+    assert is_valid_cusip("91282CJL6") is True
+    assert is_valid_cusip("91282CZZ9") is False
+    assert is_valid_cusip("not-a-cusip") is False
+
+
 def test_treasury_provider_returns_latest_active_point_in_time_cusips() -> None:
     calls = []
 
@@ -29,7 +37,7 @@ def test_treasury_provider_returns_latest_active_point_in_time_cusips() -> None:
                 "data": [
                     {
                         "record_date": "2026-08-10",
-                        "cusip": "912797AB1",
+                        "cusip": "91282CFU0",
                         "security_type": "Bill",
                         "security_term": "13-Week",
                         "auction_date": "2026-08-06",
@@ -42,7 +50,7 @@ def test_treasury_provider_returns_latest_active_point_in_time_cusips() -> None:
                     },
                     {
                         "record_date": "2026-08-09",
-                        "cusip": "912797AB1",
+                        "cusip": "91282CFU0",
                         "security_type": "Bill",
                         "security_term": "13-Week",
                         "auction_date": "2026-08-06",
@@ -52,7 +60,7 @@ def test_treasury_provider_returns_latest_active_point_in_time_cusips() -> None:
                     },
                     {
                         "record_date": "2026-08-10",
-                        "cusip": "91282CZZ9",
+                        "cusip": "91282CJL6",
                         "security_type": "Note",
                         "security_term": "2-Year",
                         "auction_date": "2026-07-27",
@@ -62,12 +70,21 @@ def test_treasury_provider_returns_latest_active_point_in_time_cusips() -> None:
                     },
                     {
                         "record_date": "2026-08-10",
-                        "cusip": "91282CFU0",
+                        "cusip": "91282CJN2",
                         "security_type": "Note",
                         "security_term": "2-Year",
                         "auction_date": "2026-08-20",
                         "issue_date": "2026-08-31",
                         "maturity_date": "2028-08-31",
+                    },
+                    {
+                        "record_date": "2026-08-10",
+                        "cusip": "91282CZZ9",
+                        "security_type": "Note",
+                        "security_term": "2-Year",
+                        "auction_date": "2026-07-27",
+                        "issue_date": "2026-07-31",
+                        "maturity_date": "2028-07-31",
                     },
                 ],
                 "meta": {"total-pages": 1},
@@ -79,11 +96,11 @@ def test_treasury_provider_returns_latest_active_point_in_time_cusips() -> None:
         as_of=datetime(2026, 8, 11, 19, 0, tzinfo=timezone.utc)
     )
 
-    assert [item.cusip for item in securities] == ["912797AB1", "91282CZZ9"]
+    assert [item.cusip for item in securities] == ["91282CFU0", "91282CJL6"]
     bill = securities[0]
     assert bill.record_date.isoformat() == "2026-08-10"
     assert bill.investment_rate == 4.25
-    assert bill.evidence_identifier == "treasury-fiscal-data:auctions_query:912797AB1:2026-08-10"
+    assert bill.evidence_identifier == "treasury-fiscal-data:auctions_query:91282CFU0:2026-08-10"
     assert calls
     params = calls[0][1]["params"]
     assert "record_date:lte:2026-08-11" in params["filter"]
