@@ -1,18 +1,146 @@
 """Pre-final-CIO global conviction assessment for simultaneous portfolio preview.
 
 The global cycle computes all six-specialist packets before final CIO synthesis so the
-joint portfolio preview is specialist-informed. The same immutable packets are then
-reused by the canonical final pass through a context-local cache, avoiding a second
-specialist analysis across a potentially large all-market candidate set. Nothing here
+joint portfolio preview is specialist-informed. Immutable specialist, candidate-risk,
+and joint-candidate results are reused by the canonical final pass through context-local
+memoization, avoiding duplicate all-market analysis and its memory cost. Nothing here
 has action, construction, execution, or canonical persistence authority.
 """
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from typing import Iterator
 
 from portfolio.global_rotation import GlobalConvictionDecision
+
+
+def _number_key(value: object) -> float:
+    return round(float(value), 12)
+
+
+class MemoizedCandidateRiskIntelligenceEngine:
+    """Reuse deterministic candidate-risk assessments inside one rotation cycle."""
+
+    def __init__(self, delegate) -> None:
+        self.delegate = delegate
+        self._active_cache: ContextVar[dict[tuple[object, ...], object] | None] = (
+            ContextVar(
+                f"global_rotation_candidate_risk_{id(self)}",
+                default=None,
+            )
+        )
+
+    def __getattr__(self, name: str):
+        return getattr(self.delegate, name)
+
+    def begin_cycle_cache(self) -> Token:
+        return self._active_cache.set({})
+
+    def end_cycle_cache(self, token: Token) -> None:
+        self._active_cache.reset(token)
+
+    def assess(
+        self,
+        candidate,
+        *,
+        portfolio_value,
+        proposed_weight,
+        alternative_return,
+        invalidation_clarity=0.50,
+    ):
+        cache = self._active_cache.get()
+        if cache is None:
+            return self.delegate.assess(
+                candidate,
+                portfolio_value=portfolio_value,
+                proposed_weight=proposed_weight,
+                alternative_return=alternative_return,
+                invalidation_clarity=invalidation_clarity,
+            )
+        key = (
+            candidate.identifier,
+            _number_key(portfolio_value),
+            _number_key(proposed_weight),
+            _number_key(alternative_return),
+            _number_key(invalidation_clarity),
+        )
+        assessment = cache.get(key)
+        if assessment is None:
+            assessment = self.delegate.assess(
+                candidate,
+                portfolio_value=portfolio_value,
+                proposed_weight=proposed_weight,
+                alternative_return=alternative_return,
+                invalidation_clarity=invalidation_clarity,
+            )
+            cache[key] = assessment
+        return assessment
+
+
+class MemoizedJointCandidateIntelligenceEngine:
+    """Reuse the potentially O(N²) joint-candidate assessment inside one cycle."""
+
+    def __init__(self, delegate) -> None:
+        self.delegate = delegate
+        self._active_cache: ContextVar[dict[tuple[object, ...], object] | None] = (
+            ContextVar(
+                f"global_rotation_joint_candidate_{id(self)}",
+                default=None,
+            )
+        )
+
+    def __getattr__(self, name: str):
+        return getattr(self.delegate, name)
+
+    def begin_cycle_cache(self) -> Token:
+        return self._active_cache.set({})
+
+    def end_cycle_cache(self, token: Token) -> None:
+        self._active_cache.reset(token)
+
+    @staticmethod
+    def _profile_key(profile) -> tuple[object, ...]:
+        return (
+            getattr(profile, "candidate_identifier", None),
+            tuple(getattr(profile, "factor_loadings", ()) or ()),
+            getattr(profile, "correlation_bucket", None),
+        )
+
+    def assess(self, candidates, risk_assessments, exposure_profiles):
+        cache = self._active_cache.get()
+        profiles = tuple(exposure_profiles)
+        if cache is None:
+            return self.delegate.assess(
+                candidates,
+                risk_assessments,
+                profiles,
+            )
+        key = (
+            tuple(item.identifier for item in candidates),
+            tuple(
+                (
+                    item.candidate_identifier,
+                    item.proposed_weight,
+                    item.probability_of_loss,
+                    item.expected_shortfall,
+                    item.stressed_execution_cost_return,
+                    item.fragility_score,
+                    item.hard_blocks,
+                )
+                for item in risk_assessments
+            ),
+            tuple(self._profile_key(item) for item in profiles),
+        )
+        result = cache.get(key)
+        if result is None:
+            result = self.delegate.assess(
+                candidates,
+                risk_assessments,
+                profiles,
+            )
+            cache[key] = result
+        return result
 
 
 class PrecomputedSpecialistService:
@@ -151,6 +279,8 @@ def assess_preliminary_global_conviction(
 
 
 __all__ = [
+    "MemoizedCandidateRiskIntelligenceEngine",
+    "MemoizedJointCandidateIntelligenceEngine",
     "PrecomputedSpecialistService",
     "assess_preliminary_global_conviction",
 ]
