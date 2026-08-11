@@ -76,8 +76,8 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ),
     ProviderActivationSpec(
         "twelve-data",
-        ("global_reference", "fx_reference", "crypto_reference"),
-        "comprehensive reference discovery and quote evidence",
+        ("global_reference", "fx_reference", "crypto_reference", "supplemental_quote"),
+        "comprehensive reference discovery and supplemental quote evidence",
         ("TWELVE_DATA_API_KEY",),
     ),
     ProviderActivationSpec(
@@ -85,6 +85,16 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
         ("supplemental_quote",),
         "supplemental quote cross-check",
         ("ALPHA_VANTAGE_API_KEY",),
+    ),
+    ProviderActivationSpec(
+        "tradier",
+        ("supplemental_quote", "us_equity_market_data", "us_option_market_data"),
+        "supplemental quote cross-check",
+        ("TRADIER_API_KEY",),
+        note=(
+            "Tradier is corroborating U.S. equity/options market data only; it has no "
+            "execution authority in the Capital Intelligence Platform."
+        ),
     ),
     ProviderActivationSpec(
         "openfigi",
@@ -165,8 +175,9 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
         None,
         ("FINRA_CLIENT_ID", "FINRA_CLIENT_SECRET"),
         note=(
-            "Credentials are normalized, but this audit requires a concrete production "
-            "consumer before FINRA is reported active."
+            "FINRA credentials and live fixed-income probing are wired, but FINRA market "
+            "context is intentionally reported unrouted until a governed CIO evidence "
+            "consumer is added; aggregate TRACE data is not substituted for bond prices."
         ),
     ),
 )
@@ -265,8 +276,6 @@ def audit_provider_activation(
             else all(_group_is_configured(env, group) for group in spec.credential_groups)
         )
         if spec.production_route is None:
-            # Presence in the registry/bundle is itself configuration; it is still not
-            # production consumption and therefore stays visibly unrouted.
             state = "configured_but_unrouted" if credential_configured or spec.keyless else "unrouted"
         elif credential_required and not credential_configured:
             state = "missing_credential"
