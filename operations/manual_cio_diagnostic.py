@@ -21,6 +21,7 @@ _SCHEMA_VERSION = "manual-cio-diagnostic.v1"
 _ACTIVE_STATES = frozenset({"pending", "in_progress"})
 _FINAL_STATES = frozenset({"completed", "failed"})
 _PROGRESS_ENABLED = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED"
+_CONTEXT_STATE_FILENAME = "production-context-publication-state.json"
 _PROGRESS_STAGES = frozenset(
     {
         "canonical_portfolio_initialization",
@@ -119,6 +120,7 @@ class ManualCIODiagnosticRequest:
     cycle_key: str | None = None
     snapshot_identifier: str | None = None
     detail: str | None = None
+    progress_stage: str | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id.strip():
@@ -136,6 +138,8 @@ class ManualCIODiagnosticRequest:
             raise ValueError("in-progress diagnostics require started_at")
         if self.state in _FINAL_STATES and self.completed_at is None:
             raise ValueError("final diagnostics require completed_at")
+        if self.progress_stage is not None and not self.progress_stage.strip():
+            raise ValueError("progress_stage cannot be empty")
 
     @property
     def trigger_key(self) -> str:
@@ -148,19 +152,12 @@ class ManualCIODiagnosticRequest:
             "requested_at": self.requested_at.astimezone(timezone.utc).isoformat(),
             "requested_by": self.requested_by,
             "state": self.state,
-            "started_at": (
-                None
-                if self.started_at is None
-                else self.started_at.astimezone(timezone.utc).isoformat()
-            ),
-            "completed_at": (
-                None
-                if self.completed_at is None
-                else self.completed_at.astimezone(timezone.utc).isoformat()
-            ),
+            "started_at": None if self.started_at is None else self.started_at.astimezone(timezone.utc).isoformat(),
+            "completed_at": None if self.completed_at is None else self.completed_at.astimezone(timezone.utc).isoformat(),
             "cycle_key": self.cycle_key,
             "snapshot_identifier": self.snapshot_identifier,
             "detail": self.detail,
+            "progress_stage": self.progress_stage,
             "paper_only": True,
             "real_money_authorized": False,
         }
@@ -171,43 +168,24 @@ class ManualCIODiagnosticRequest:
             raise ValueError("unsupported manual CIO diagnostic schema")
         return cls(
             request_id=str(payload.get("request_id") or "").strip(),
-            requested_at=_optional_datetime(payload.get("requested_at"))
-            or (_ for _ in ()).throw(ValueError("requested_at is required")),
+            requested_at=_optional_datetime(payload.get("requested_at")) or (_ for _ in ()).throw(ValueError("requested_at is required")),
             requested_by=str(payload.get("requested_by") or "").strip(),
             state=str(payload.get("state") or "").strip(),
             started_at=_optional_datetime(payload.get("started_at")),
             completed_at=_optional_datetime(payload.get("completed_at")),
-            cycle_key=(
-                None
-                if payload.get("cycle_key") is None
-                else str(payload.get("cycle_key")).strip() or None
-            ),
-            snapshot_identifier=(
-                None
-                if payload.get("snapshot_identifier") is None
-                else str(payload.get("snapshot_identifier")).strip() or None
-            ),
-            detail=(
-                None
-                if payload.get("detail") is None
-                else str(payload.get("detail"))[:2000]
-            ),
+            cycle_key=None if payload.get("cycle_key") is None else str(payload.get("cycle_key")).strip() or None,
+            snapshot_identifier=None if payload.get("snapshot_identifier") is None else str(payload.get("snapshot_identifier")).strip() or None,
+            detail=None if payload.get("detail") is None else str(payload.get("detail"))[:2000],
+            progress_stage=None if payload.get("progress_stage") is None else str(payload.get("progress_stage")).strip() or None,
         )
 
 
-def diagnostic_request_path(
-    values: Mapping[str, str] | None = None,
-) -> Path:
+def diagnostic_request_path(values: Mapping[str, str] | None = None) -> Path:
     resolved = os.environ if values is None else values
-    configured = resolved.get(
-        "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PATH",
-        "",
-    ).strip()
+    configured = resolved.get("CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PATH", "").strip()
     if configured:
         return Path(configured).expanduser()
-    data_root = Path(
-        resolved.get("CAPITAL_INTELLIGENCE_DATA_DIR", "database")
-    ).expanduser()
+    data_root = Path(resolved.get("CAPITAL_INTELLIGENCE_DATA_DIR", "database")).expanduser()
     return data_root / "manual-cio-diagnostic.json"
 
 
@@ -226,17 +204,26 @@ def _read(path: Path) -> ManualCIODiagnosticRequest | None:
 def _write(path: Path, request: ManualCIODiagnosticRequest) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(request.to_dict(), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    temporary.write_text(json.dumps(request.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temporary.replace(path)
 
 
-def latest_manual_cio_diagnostic(
-    *,
-    values: Mapping[str, str] | None = None,
-) -> ManualCIODiagnosticRequest | None:
+def _published_context_cycle(path: Path) -> str | None:
+    """Return a newly published production-context cycle colocated with diagnostic state."""
+    context_path = path.parent / _CONTEXT_STATE_FILENAME
+    try:
+        payload = json.loads(context_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    cycle_key = str(payload.get("cycle_key") or "").strip()
+    if not cycle_key or cycle_key.startswith("refresh-required:"):
+        return None
+    return cycle_key
+
+
+def latest_manual_cio_diagnostic(*, values: Mapping[str, str] | None = None) -> ManualCIODiagnosticRequest | None:
     return _read(diagnostic_request_path(values))
 
 
@@ -246,16 +233,7 @@ def record_manual_cio_diagnostic_progress(
     metrics: Mapping[str, int] | None = None,
     values: Mapping[str, str] | None = None,
 ) -> ManualCIODiagnosticRequest | None:
-    """Persist credential-safe progress for the active release diagnostic only.
-
-    This mutable file is operational coordination state, not investment evidence or
-    canonical lineage. Progress is enabled only in the release-diagnostic child
-    environment, so normal scheduled discovery cannot annotate an unrelated request.
-    The payload accepts only a constrained stage name and nonnegative integer metrics,
-    so provider payloads, symbols, credentials, or exception text cannot enter the
-    public terminal audit through this path.
-    """
-
+    """Persist credential-safe progress for the active release diagnostic only."""
     resolved = os.environ if values is None else values
     enabled = resolved.get(_PROGRESS_ENABLED, "").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
@@ -263,9 +241,7 @@ def record_manual_cio_diagnostic_progress(
     normalized_stage = str(stage).strip().lower()
     lane_stage = normalized_stage.split(":", 1)
     if normalized_stage not in _PROGRESS_STAGES and not (
-        len(lane_stage) == 2
-        and lane_stage[0] in _PROGRESS_LANE_STAGES
-        and lane_stage[1] in _PROGRESS_LANES
+        len(lane_stage) == 2 and lane_stage[0] in _PROGRESS_LANE_STAGES and lane_stage[1] in _PROGRESS_LANES
     ):
         raise ValueError("manual CIO diagnostic progress stage is invalid")
     normalized_metrics: list[tuple[str, int]] = []
@@ -283,19 +259,22 @@ def record_manual_cio_diagnostic_progress(
         return None
     message = f"governed_progress={normalized_stage}"
     if normalized_metrics:
-        message += "; " + "; ".join(
-            f"{name}={value}" for name, value in normalized_metrics
-        )
-    updated = replace(existing, detail=message)
+        message += "; " + "; ".join(f"{name}={value}" for name, value in normalized_metrics)
+
+    cycle_key = existing.cycle_key
+    # The context preparer publishes its cycle before the specialist/CIO phase begins.
+    # Bind that exact context cycle immediately so a watchdog termination cannot erase
+    # the lineage that was already durably produced by the governed context refresh.
+    if cycle_key is None and normalized_stage == "six_specialist_committee_cio_cycle":
+        cycle_key = _published_context_cycle(path)
+
+    updated = replace(existing, detail=message, progress_stage=normalized_stage, cycle_key=cycle_key)
     _write(path, updated)
     return updated
 
 
 def request_manual_cio_diagnostic(
-    *,
-    requested_by: str,
-    now: datetime | None = None,
-    values: Mapping[str, str] | None = None,
+    *, requested_by: str, now: datetime | None = None, values: Mapping[str, str] | None = None,
 ) -> tuple[ManualCIODiagnosticRequest, bool]:
     requester = requested_by.strip()
     if not requester:
@@ -305,19 +284,13 @@ def request_manual_cio_diagnostic(
     if existing is not None and existing.state in _ACTIVE_STATES:
         return existing, False
     requested_at = _aware(now or _utc_now(), field_name="now")
-    request = ManualCIODiagnosticRequest(
-        request_id=uuid4().hex,
-        requested_at=requested_at,
-        requested_by=requester,
-    )
+    request = ManualCIODiagnosticRequest(request_id=uuid4().hex, requested_at=requested_at, requested_by=requester)
     _write(path, request)
     return request, True
 
 
 def claim_manual_cio_diagnostic(
-    *,
-    now: datetime | None = None,
-    values: Mapping[str, str] | None = None,
+    *, now: datetime | None = None, values: Mapping[str, str] | None = None,
 ) -> ManualCIODiagnosticRequest | None:
     path = diagnostic_request_path(values)
     request = _read(path)
@@ -345,15 +318,21 @@ def finish_manual_cio_diagnostic(
 ) -> ManualCIODiagnosticRequest:
     if request.state != "in_progress":
         raise ValueError("only an in-progress diagnostic can be finished")
+    path = diagnostic_request_path(values)
+    latest = _read(path)
+    if latest is None or latest.request_id != request.request_id or latest.state != "in_progress":
+        raise ValueError("diagnostic finalization requires the current in-progress request")
+    if latest.cycle_key and cycle_key and latest.cycle_key != cycle_key:
+        raise ValueError("diagnostic context cycle cannot be rebound during finalization")
     finished = replace(
-        request,
+        latest,
         state="completed" if succeeded else "failed",
         completed_at=_aware(now or _utc_now(), field_name="now"),
-        cycle_key=cycle_key,
-        snapshot_identifier=snapshot_identifier,
+        cycle_key=cycle_key or latest.cycle_key,
+        snapshot_identifier=snapshot_identifier or latest.snapshot_identifier,
         detail=None if detail is None else detail[:2000],
     )
-    _write(diagnostic_request_path(values), finished)
+    _write(path, finished)
     return finished
 
 
