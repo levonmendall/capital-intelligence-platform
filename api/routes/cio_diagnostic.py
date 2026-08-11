@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from fastapi import APIRouter, Request, Response, status
 
 from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
 from production_context_publication_runtime import _load_json, _state_path
+from production_context_state_resilience import latest_attempt
 
 router = APIRouter(tags=["operations"])
 
@@ -35,21 +37,31 @@ def _count(payload: Mapping[str, Any], name: str) -> int:
     return max(0, parsed)
 
 
+def _parse_datetime(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _age_seconds(value: datetime | None, *, now: datetime) -> float | None:
+    if value is None:
+        return None
+    return round(max(0.0, (now - value.astimezone(timezone.utc)).total_seconds()), 3)
+
+
 def _market_lanes(
     payload: object,
     *,
     comprehensive_discovery_complete: bool,
 ) -> tuple[dict[str, object], ...]:
-    """Return lane coverage without requiring a qualifying investment candidate.
-
-    Comprehensive discovery v5 fails closed before publication unless every symbol in a
-    scheduled nonempty certified catalog has a terminal selected-or-excluded disposition.
-    Therefore a persisted complete discovery scope plus a nonempty scheduled lane catalog
-    is terminal coverage evidence even when unchanged policy gates exclude every symbol.
-    Requiring ``deep > 0`` or ``selected > 0`` here would incorrectly turn a legitimate
-    all-excluded market evaluation into an incomplete-market claim.
-    """
-
+    """Return lane coverage without requiring a qualifying investment candidate."""
     if not isinstance(payload, Mapping):
         return ()
     lanes: list[dict[str, object]] = []
@@ -67,11 +79,7 @@ def _market_lanes(
             {
                 "asset_class": str(asset_class),
                 "scheduled": scheduled,
-                "schedule_reason": (
-                    None
-                    if raw.get("schedule_reason") in (None, "")
-                    else str(raw.get("schedule_reason"))[:200]
-                ),
+                "schedule_reason": None if raw.get("schedule_reason") in (None, "") else str(raw.get("schedule_reason"))[:200],
                 "catalog_count": catalog,
                 "deep_analyzed_count": deep,
                 "selected_count": selected,
@@ -86,15 +94,12 @@ def build_cio_diagnostic_audit(
     settings: Any,
     values: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """Return only release, state, aggregate coverage, and market-lane counts.
+    """Return only release, lifecycle, aggregate coverage, and market-lane counts.
 
     Persisted production context is cycle-scoped evidence. It may be included only when
-    its cycle key exactly matches the current diagnostic request. A diagnostic that fails
-    before publishing its own context therefore reports fresh failure state with empty,
-    fail-closed aggregates instead of inheriting counts, sources, or limitations from an
-    older cycle.
+    its cycle key exactly matches the current diagnostic request. Lifecycle/freshness fields
+    are operational metadata only and cannot authorize an investment or execution action.
     """
-
     resolved = os.environ if values is None else values
     release = _release(resolved)
     diagnostic = latest_manual_cio_diagnostic(values=resolved)
@@ -110,28 +115,24 @@ def build_cio_diagnostic_audit(
             "market_lanes": [],
         }
 
+    now = datetime.now(timezone.utc)
     context_path: Path = _state_path(settings)
     persisted_context = _load_json(context_path) or {}
     cycle_matches = bool(
         diagnostic.cycle_key
-        and str(persisted_context.get("cycle_key") or "")
-        == diagnostic.cycle_key
+        and str(persisted_context.get("cycle_key") or "") == diagnostic.cycle_key
     )
-    # Never expose or evaluate persisted evidence from another diagnostic cycle.
     context: Mapping[str, Any] = persisted_context if cycle_matches else {}
 
     scope_required = context.get("comprehensive_discovery_required") is True
-    scope_state = str(
-        context.get("comprehensive_discovery_scope_state") or "missing"
-    )
+    scope_state = str(context.get("comprehensive_discovery_scope_state") or "missing")
     scope_complete = scope_state == "complete"
     instrument_count = _count(context, "instrument_count")
     candidate_count = _count(context, "candidate_count")
     exclusion_count = _count(context, "exclusion_count")
     qualified_candidate_count = _count(context, "qualified_candidate_count")
     terminal_screening_complete = (
-        instrument_count > 0
-        and candidate_count + exclusion_count == instrument_count
+        instrument_count > 0 and candidate_count + exclusion_count == instrument_count
     )
     lanes = _market_lanes(
         context.get("comprehensive_discovery_lane_counts"),
@@ -142,9 +143,7 @@ def build_cio_diagnostic_audit(
         item["represented"] is True for item in scheduled_lanes
     )
     expected_requester = f"render-release:{release}"
-    release_matches = (
-        release == "unknown" or diagnostic.requested_by == expected_requester
-    )
+    release_matches = release == "unknown" or diagnostic.requested_by == expected_requester
     diagnostic_completed = diagnostic.state == "completed"
     all_market_evaluation_complete = all(
         (
@@ -157,6 +156,16 @@ def build_cio_diagnostic_audit(
             terminal_screening_complete,
         )
     )
+
+    attempt = latest_attempt(settings) or {}
+    attempt_started = _parse_datetime(attempt.get("started_at"))
+    current_attempt = bool(
+        diagnostic.started_at is not None
+        and attempt_started is not None
+        and attempt_started >= diagnostic.started_at.astimezone(timezone.utc)
+    )
+    attempt_cycle = str(attempt.get("cycle_key") or "").strip() if current_attempt else ""
+
     return {
         "ready": all_market_evaluation_complete,
         "state": diagnostic.state,
@@ -164,18 +173,18 @@ def build_cio_diagnostic_audit(
         "active_release": release,
         "release_matches": release_matches,
         "request_id": diagnostic.request_id,
+        "diagnostic_id": diagnostic.request_id,
         "requested_at": diagnostic.requested_at.isoformat(),
-        "started_at": (
-            None if diagnostic.started_at is None else diagnostic.started_at.isoformat()
-        ),
-        "completed_at": (
-            None
-            if diagnostic.completed_at is None
-            else diagnostic.completed_at.isoformat()
-        ),
+        "started_at": None if diagnostic.started_at is None else diagnostic.started_at.isoformat(),
+        "completed_at": None if diagnostic.completed_at is None else diagnostic.completed_at.isoformat(),
+        "diagnostic_age_seconds": _age_seconds(diagnostic.requested_at, now=now),
+        "terminal_age_seconds": _age_seconds(diagnostic.completed_at, now=now),
+        "stage": diagnostic.progress_stage,
         "cycle_key": diagnostic.cycle_key,
         "snapshot_identifier": diagnostic.snapshot_identifier,
         "context_cycle_matches": cycle_matches,
+        "context_attempt_state": str(attempt.get("state") or "unknown") if current_attempt else "not_current",
+        "context_attempt_cycle_matches": bool(attempt_cycle and diagnostic.cycle_key and attempt_cycle == diagnostic.cycle_key),
         "comprehensive_discovery_required": scope_required,
         "comprehensive_discovery_scope_state": scope_state,
         "comprehensive_discovery_complete": scope_complete,
@@ -201,10 +210,7 @@ def build_cio_diagnostic_audit(
     "/v1/operations/cio-diagnostic",
     responses={503: {"description": "The current all-market CIO diagnostic is incomplete"}},
 )
-def cio_diagnostic_status(
-    request: Request,
-    response: Response,
-) -> dict[str, object]:
+def cio_diagnostic_status(request: Request, response: Response) -> dict[str, object]:
     payload = build_cio_diagnostic_audit(settings=request.app.state.settings)
     if payload["ready"] is not True:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
