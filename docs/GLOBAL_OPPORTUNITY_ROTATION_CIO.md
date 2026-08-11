@@ -130,11 +130,17 @@ Global rotation uses the separate `SQLiteGlobalRotationStore` table and independ
 
 This boundary is intentional: future global-rotation diagnostics must be added to the side store or another governed extension rather than truncating or replacing canonical CIO persistence.
 
-## Joint portfolio competition
+## Two-pass joint portfolio competition
 
-Before individual CIO synthesis, the rotation cycle creates one non-authoritative simultaneous construction preview using the globally ranked reviewed candidate set. Developing opportunities are previewed at bounded exploratory/provisional targets and stronger opportunities at larger targets within their candidate caps.
+The rotation cycle now separates portfolio-wide analysis from final CIO action without creating a second authority path.
 
-The preview can show that a basket of individually modest opportunities is jointly feasible. It cannot create a CIO action, and a zero preview target cannot become a hidden veto. Final construction still runs after CIO decisions and remains the independent sizing authority.
+**Pass one** freezes the canonical opportunity queue and completes the six-specialist packet for every reviewed candidate before any final CIO synthesis. Using the same canonical specialist return reconciliation, robust assessor, path-risk constraints, growth ensemble, and policy authority as the final CIO, it derives a non-authoritative preliminary conviction stage and bounded target for each candidate.
+
+Those preliminary targets are evaluated **simultaneously** through the existing construction engine. This allows a basket of individually modest opportunities to compete against excess cash and against each other using specialist-informed targets rather than raw candidate maximums or price-leadership scores.
+
+**Pass two** runs the normal canonical CIO decision path. The exact immutable specialist packets from pass one are reused and persisted once in the normal CIO journal order; candidate-risk and potentially O(N²) joint-candidate analyses are memoized within the cycle and reused rather than recomputed. This preserves production memory discipline while giving the final CIO portfolio-wide context.
+
+The preview can cap an eventual positive target downward but cannot create a CIO action. A zero preview target cannot become a hidden veto. Final construction still runs after CIO decisions and remains the independent sizing and implementation authority.
 
 ## Certification
 
