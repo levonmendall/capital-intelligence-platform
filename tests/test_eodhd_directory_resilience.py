@@ -95,22 +95,25 @@ def test_cc_directory_uses_active_endpoint_without_delisted_parameter(
     assert calls[0][2] == 90
 
 
-def test_transient_directory_failure_uses_recent_successful_cache(
+def test_recent_successful_directory_cache_skips_live_refresh(
     tmp_path: Path,
 ) -> None:
     provider([Response(live_payload())], cache_dir=tmp_path).fetch_dataset(query())
     later = NOW + timedelta(hours=2)
+    calls: list[tuple[str, dict[str, object], int]] = []
     snapshot = provider(
         [Response({}, 503)],
         cache_dir=tmp_path,
         now=later,
+        calls=calls,
     ).fetch_dataset(query(later))
 
     assert snapshot.quality_state is DataQualityState.CACHED
     assert snapshot.observed_at == NOW
     assert snapshot.payload["active"] == live_payload()
-    assert any("last successful directory" in item for item in snapshot.limitations)
-    assert any("HTTP 503" in item for item in snapshot.limitations)
+    assert calls == []
+    assert any("cache before live refresh" in item for item in snapshot.limitations)
+    assert any("cache age=2.0 hours" in item for item in snapshot.limitations)
 
 
 def test_expired_directory_cache_remains_fail_closed(tmp_path: Path) -> None:
