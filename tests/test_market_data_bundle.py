@@ -41,7 +41,16 @@ def _configured_binding(path: Path, member) -> None:
 
 
 def _activation(member) -> ProviderActivation:
-    domains = tuple(DataDomain(item.value) for item in member.required_dataset_types)
+    dataset_domain_overrides = {
+        "market_history": DataDomain.MARKET_PRICES,
+    }
+    domains = tuple(
+        dataset_domain_overrides.get(item.value, DataDomain(item.value))
+        if item.value in dataset_domain_overrides
+        else DataDomain(item.value)
+        for item in member.required_dataset_types
+    )
+    domains = tuple(dict.fromkeys(domains))
     return ProviderActivation(
         identifier=f"activation:{member.provider_identifier}:test",
         provider_identifier=member.provider_identifier,
