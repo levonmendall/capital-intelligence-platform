@@ -163,10 +163,12 @@ def test_bounded_screening_reproduces_existing_plan_and_cutoff_semantics(
         symbol: full_signals[symbol].observed_at
         for symbol in expected.selected_symbols
     }
-    assert result.preselection_evidence == tuple(
+    expected_evidence = tuple(
         (symbol, full_signals[symbol].evidence_identifiers)
         for symbol in expected.selected_symbols
     )
+    assert result.preselection_evidence == expected_evidence
+    assert not isinstance(result.preselection_evidence, tuple)
 
     selected_prices = {
         symbol: 1000.0 + index
@@ -213,6 +215,40 @@ def test_streamed_screening_is_chunk_size_invariant(tmp_path, monkeypatch):
     )
 
     assert single_record_chunks == wider_chunks
+
+
+def test_finalization_phases_are_durably_observable(tmp_path, monkeypatch):
+    records = tuple(_record(index) for index in range(21))
+    publication = tmp_path / "provider-enriched-preselection.json"
+    _publication(publication, records)
+    policy = _Policy(str(publication))
+    full_signals = {
+        record.symbol: _signal(index, record.symbol)
+        for index, record in enumerate(records)
+    }
+    _install_fixture_signals(monkeypatch, full_signals)
+    stages: list[str] = []
+    monkeypatch.setattr(
+        bounded,
+        "record_manual_cio_diagnostic_progress",
+        lambda stage, **_kwargs: stages.append(stage),
+    )
+
+    bounded.build_bounded_terminal_preselection(
+        records,
+        as_of=NOW,
+        policy=policy,
+        progress_label="international_equity",
+        chunk_size=5,
+    )
+
+    assert stages[-5:] == [
+        "terminal_screening_finalize_release:international_equity",
+        "terminal_screening_finalize_diversification:international_equity",
+        "terminal_screening_finalize_rankings:international_equity",
+        "terminal_screening_finalize_selection:international_equity",
+        "terminal_screening_finalize_plan:international_equity",
+    ]
 
 
 def test_terminal_screening_state_spool_keeps_record_state_out_of_python_heap():
