@@ -9,8 +9,8 @@ def test_every_root_command_has_exactly_one_classification() -> None:
     report = validate_manifest(manifest)
     assert report == {
         "ready": True,
-        "root_script_count": 100,
-        "classified_script_count": 100,
+        "root_script_count": 101,
+        "classified_script_count": 101,
         "missing": [],
         "extra": [],
         "duplicate_classifications": 0,
