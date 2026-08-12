@@ -110,6 +110,14 @@ _PROGRESS_METRICS = frozenset(
         "memory_reserve_kib",
         "governed_boundary_kib",
         "governed_headroom_kib",
+        "publication_bytes",
+        "publication_index_bytes",
+        "screening_spool_bytes",
+        "chunk_file_bytes",
+        "storage_reserve_bytes",
+        "storage_total_bytes",
+        "storage_used_bytes",
+        "storage_free_bytes",
     }
 )
 
