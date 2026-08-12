@@ -218,6 +218,10 @@ services:
       # requires valid bindings, commercial approvals, certifications, and
       # append-only provider activation evidence.
       - key: CAPITAL_INTELLIGENCE_CME_MARGIN_BINDING
+        value: config/cme_span_datamine_file_ids.json
+      - key: CAPITAL_INTELLIGENCE_CME_DATAMINE_API_ID
+        sync: false
+      - key: CAPITAL_INTELLIGENCE_CME_DATAMINE_API_PASSWORD
         sync: false
       - key: CAPITAL_INTELLIGENCE_CME_MARGIN_CERTIFICATION_ID
         sync: false
