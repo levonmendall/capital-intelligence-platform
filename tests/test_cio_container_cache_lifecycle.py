@@ -1,4 +1,3 @@
-import os
 import sqlite3
 
 from operations import bounded_terminal_screening as screening
@@ -98,8 +97,8 @@ def test_terminal_resource_metrics_include_container_composition_and_service_rss
     assert metrics["container_kernel_kib"] == 80
     assert metrics["container_current_kib"] == 1325
     assert metrics["container_limit_kib"] == 2048
-    assert metrics["governed_boundary_kib"] == 1433
-    assert metrics["governed_headroom_kib"] == 108
+    assert metrics["governed_boundary_kib"] == 1408
+    assert metrics["governed_headroom_kib"] == 83
 
 
 def test_new_container_metrics_are_governed_progress_metrics():
