@@ -95,8 +95,13 @@ _PROGRESS_METRICS = frozenset(
         "chunk_records",
         "rss_kib",
         "hwm_kib",
+        "service_rss_kib",
         "container_current_kib",
         "container_limit_kib",
+        "container_anon_kib",
+        "container_file_kib",
+        "container_shmem_kib",
+        "container_kernel_kib",
         "memory_reserve_kib",
         "governed_boundary_kib",
         "governed_headroom_kib",
@@ -167,6 +172,27 @@ def _read_byte_counter(path: Path) -> int | None:
         return None
 
 
+def _read_keyed_byte_counters(path: Path) -> dict[str, int]:
+    """Read nonnegative byte counters from a cgroup key/value file."""
+
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    counters: dict[str, int] = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            value = int(parts[1])
+        except ValueError:
+            continue
+        if value >= 0:
+            counters[parts[0]] = value
+    return counters
+
+
 def _cgroup_memory_kib() -> tuple[int | None, int | None]:
     v2_current = _read_byte_counter(Path("/sys/fs/cgroup/memory.current"))
     v2_limit = _read_byte_counter(Path("/sys/fs/cgroup/memory.max"))
@@ -178,6 +204,25 @@ def _cgroup_memory_kib() -> tuple[int | None, int | None]:
     if v1_current is not None and v1_limit is not None and 0 < v1_limit < (1 << 60):
         return v1_current // 1024, v1_limit // 1024
     return None, None
+
+
+def _cgroup_memory_stat_kib() -> dict[str, int]:
+    """Return credential-safe cgroup memory composition counters when available."""
+
+    counters = _read_keyed_byte_counters(Path("/sys/fs/cgroup/memory.stat"))
+    if not counters:
+        counters = _read_keyed_byte_counters(Path("/sys/fs/cgroup/memory/memory.stat"))
+    result: dict[str, int] = {}
+    for source, metric in (
+        ("anon", "container_anon_kib"),
+        ("file", "container_file_kib"),
+        ("shmem", "container_shmem_kib"),
+        ("kernel", "container_kernel_kib"),
+    ):
+        value = counters.get(source)
+        if value is not None and value >= 0:
+            result[metric] = value // 1024
+    return result
 
 
 def _proc_total_rss_kib() -> int | None:
@@ -261,6 +306,11 @@ def _terminal_screening_resource_metrics(values: Mapping[str, str]) -> dict[str,
         metrics["rss_kib"] = rss_kib
     if hwm_kib is not None and hwm_kib >= 0:
         metrics["hwm_kib"] = hwm_kib
+
+    service_rss_kib = _proc_total_rss_kib()
+    if service_rss_kib is not None and service_rss_kib >= 0:
+        metrics["service_rss_kib"] = service_rss_kib
+    metrics.update(_cgroup_memory_stat_kib())
 
     current_kib, limit_kib = _container_memory_kib(values)
     if current_kib is not None and current_kib >= 0:

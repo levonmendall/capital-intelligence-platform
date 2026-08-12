@@ -17,6 +17,7 @@ freshness, ranking, threshold, or authority rule is changed.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import tempfile
@@ -79,11 +80,35 @@ class BoundedTerminalPreselection:
     screened_signal_count: int
 
 
+def _advise_file_cache_dontneed(path: Path) -> None:
+    """Best-effort release of file-backed cache without changing durable contents."""
+
+    posix_fadvise = getattr(os, "posix_fadvise", None)
+    advice = getattr(os, "POSIX_FADV_DONTNEED", None)
+    if posix_fadvise is None or advice is None or not path.exists():
+        return
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        try:
+            posix_fadvise(descriptor, 0, 0, advice)
+        except OSError:
+            pass
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+
 def _configure_spool_connection(connection: sqlite3.Connection) -> None:
     """Keep SQLite working memory bounded for production diagnostic spools."""
 
     connection.execute("PRAGMA temp_store = FILE")
     connection.execute(f"PRAGMA cache_size = -{_SQLITE_CACHE_KIB}")
+    connection.execute("PRAGMA mmap_size = 0")
 
 
 class _PublicationSignalSpool:
@@ -262,6 +287,11 @@ class _PublicationSignalSpool:
                 "provider preselection publication available_at is missing"
             )
         self.connection.commit()
+        _advise_file_cache_dontneed(self.publication_path)
+        self.release_cached_pages()
+
+    def release_cached_pages(self) -> None:
+        _advise_file_cache_dontneed(self.database_path)
 
     def signals_for(self, records: Sequence[object]) -> dict[str, object]:
         result: dict[str, object] = {}
@@ -460,8 +490,12 @@ class _TerminalScreeningStateSpool:
                 ((symbol, str(reason)) for reason in reasons),
             )
 
+    def release_cached_pages(self) -> None:
+        _advise_file_cache_dontneed(self.database_path)
+
     def commit_chunk(self) -> None:
         self.connection.commit()
+        self.release_cached_pages()
 
     def finalize_diversification(self, *, batch_size: int = 512) -> None:
         cursor = self.connection.execute(
@@ -689,6 +723,11 @@ def build_bounded_terminal_preselection(
 
                     state_spool.commit_chunk()
                     processed += len(chunk)
+                    del normalized_signals
+                    del signals
+                    _advise_file_cache_dontneed(chunk_path)
+                    publication_spool.release_cached_pages()
+                    state_spool.release_cached_pages()
                     record_manual_cio_diagnostic_progress(
                         f"terminal_screening_chunk:{progress_label}",
                         metrics={
@@ -697,8 +736,6 @@ def build_bounded_terminal_preselection(
                             "chunk_records": len(chunk),
                         },
                     )
-                    del normalized_signals
-                    del signals
 
             authority_established = not records or substantive_provider_factor
             if not authority_established:
