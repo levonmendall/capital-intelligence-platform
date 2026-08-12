@@ -45,7 +45,7 @@ def _activation(member) -> ProviderActivation:
         "market_history": DataDomain.MARKET_PRICES,
     }
     domains = tuple(
-        dataset_domain_overrides.get(item.value, DataDomain(item.value))
+        dataset_domain_overrides[item.value]
         if item.value in dataset_domain_overrides
         else DataDomain(item.value)
         for item in member.required_dataset_types
