@@ -108,6 +108,42 @@ def test_datamine_client_authenticates_lists_and_prefers_final_eod_pa2(tmp_path)
     assert calls[0][0] == TOKEN_URL
 
 
+def test_list_api_5xx_uses_bounded_exact_file_api_fallback(tmp_path) -> None:
+    final_id = "20260811-SPAN_CUSTPA2TCC_S_CME_0"
+    direct_calls: list[str] = []
+
+    def fake_post(url, **kwargs):
+        assert url == TOKEN_URL
+        return FakeResponse(payload={"access_token": "short-lived-token"})
+
+    def fake_get(url, **kwargs):
+        assert kwargs["headers"]["Authorization"] == "Bearer short-lived-token"
+        if url == LIST_URL:
+            return FakeResponse(status_code=502, payload={"error": "gateway"})
+        assert url == DOWNLOAD_URL
+        file_id = kwargs["params"]["fid"]
+        direct_calls.append(file_id)
+        if file_id == final_id:
+            return FakeResponse(content=b"SPAN-DIRECT-FILE-API-PARAMETERS" * 4)
+        return FakeResponse(status_code=404)
+
+    result = CmeDataMineSpanClient(
+        "api-id",
+        "api-password",
+        catalog_path=_catalog(tmp_path),
+        maximum_direct_probes_per_date=2,
+        http_get=fake_get,
+        http_post=fake_post,
+    ).fetch_latest(as_of=NOW)
+
+    assert result.file.file_id == final_id
+    assert result.entitled_match_count == 1
+    assert result.catalog_pattern_count == 3
+    assert result.selection_policy == "list-5xx-direct-file-fallback.v1"
+    assert result.content.startswith(b"SPAN-DIRECT-FILE-API")
+    assert direct_calls == [final_id]
+
+
 def test_cme_span_provider_publishes_credential_safe_datamine_lineage(monkeypatch) -> None:
     final_id = "20260811-SPAN_CUSTPA2TCC_S_CME_0"
 
