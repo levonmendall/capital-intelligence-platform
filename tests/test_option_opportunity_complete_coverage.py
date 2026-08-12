@@ -1,16 +1,10 @@
 from __future__ import annotations
 
 import inspect
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
-from providers.alpaca_indicative_options import (
-    AlpacaIndicativeOptionBar,
-    AlpacaIndicativeOptionDefinition,
-    AlpacaIndicativeOptionSelection,
-    AlpacaIndicativeOptionsProvider,
-)
+from providers.alpaca_indicative_options import AlpacaIndicativeOptionsProvider
 from providers.alpaca_paper import AlpacaPaperSettings
-from providers.databento_options import DatabentoOptionsError
 from providers.redundant_options import RedundantOptionsProvider
 
 
@@ -50,13 +44,7 @@ class _AlpacaFixture:
                 if item.strip()
             )
             bars = {
-                symbol: [
-                    {
-                        "t": "2026-08-10T20:00:00Z",
-                        "c": 4.5,
-                        "v": 250,
-                    }
-                ]
+                symbol: [{"t": "2026-08-10T20:00:00Z", "c": 4.5, "v": 250}]
                 for symbol in symbols
             }
             return _Response({"bars": bars, "next_page_token": None})
@@ -74,9 +62,30 @@ def _settings() -> AlpacaPaperSettings:
     )
 
 
-def test_alpaca_secondary_preserves_every_eligible_expiration() -> None:
+class _NoTradier:
+    configured = False
+
+
+class _UnexpectedMassive:
+    configured = True
+
+    def __init__(self) -> None:
+        self.called = False
+
+    def select_contracts(self, *_args, **_kwargs):
+        self.called = True
+        raise AssertionError("Massive must not run when Alpaca supplies complete coverage")
+
+
+def test_alpaca_primary_preserves_every_eligible_expiration() -> None:
     http = _AlpacaFixture()
-    provider = AlpacaIndicativeOptionsProvider(settings=_settings(), http_get=http)
+    alpaca = AlpacaIndicativeOptionsProvider(settings=_settings(), http_get=http)
+    fallback = _UnexpectedMassive()
+    provider = RedundantOptionsProvider(
+        primary=alpaca,
+        secondary=_NoTradier(),
+        fallback=fallback,
+    )
 
     selections = provider.select_contracts(
         "ZZQ",
@@ -98,6 +107,7 @@ def test_alpaca_secondary_preserves_every_eligible_expiration() -> None:
             for item in selections
             if item.definition.expiration_at == expiration
         } == {"call", "put"}
+    assert fallback.called is False
 
     chain_calls = [
         call for call in http.calls if call[0].endswith("/v1beta1/options/snapshots/ZZQ")
@@ -116,88 +126,6 @@ def test_alpaca_secondary_preserves_every_eligible_expiration() -> None:
         end = datetime.fromisoformat(str(params["end"]))
         assert end == AS_OF - timedelta(minutes=16)
         assert end <= AS_OF - timedelta(minutes=15)
-
-
-class _CappedDatabento:
-    configured = True
-
-    def select_contracts(self, *_args, **_kwargs):
-        raise DatabentoOptionsError(
-            "Databento OPRA HTTP 402",
-            status_code=402,
-            retryable=False,
-        )
-
-
-class _CompleteSecondary:
-    configured = True
-
-    def __init__(self) -> None:
-        self.maximum_expirations: int | None = None
-
-    def select_contracts(self, *_args, **kwargs):
-        self.maximum_expirations = kwargs["maximum_expirations"]
-        result = []
-        for days in EXPIRATION_DAYS:
-            expiration = AS_OF + timedelta(days=days)
-            for right in ("call", "put"):
-                code = "C" if right == "call" else "P"
-                symbol = f"ZZQ{expiration.strftime('%y%m%d')}{code}00100000"
-                definition = AlpacaIndicativeOptionDefinition(
-                    symbol=symbol,
-                    raw_symbol=symbol,
-                    underlying="ZZQ",
-                    option_right=right,
-                    expiration_at=expiration,
-                    strike=100.0,
-                    contract_multiplier=100.0,
-                    session_date=date(2026, 8, 11),
-                    source_identifier=f"alpaca-option-contract:{symbol}",
-                )
-                bar = AlpacaIndicativeOptionBar(
-                    raw_symbol=symbol,
-                    observed_at=datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc),
-                    close=4.5,
-                    volume=250.0,
-                    source_identifier=f"alpaca-indicative-option-bar:{symbol}",
-                )
-                result.append(
-                    AlpacaIndicativeOptionSelection(definition=definition, bar=bar)
-                )
-        return tuple(result)
-
-
-class _UnexpectedMassive:
-    configured = True
-
-    def __init__(self) -> None:
-        self.called = False
-
-    def select_contracts(self, *_args, **_kwargs):
-        self.called = True
-        raise AssertionError("Massive must not truncate an opportunity-complete secondary")
-
-
-def test_router_uses_complete_secondary_without_touching_massive() -> None:
-    secondary = _CompleteSecondary()
-    fallback = _UnexpectedMassive()
-    provider = RedundantOptionsProvider(
-        primary=_CappedDatabento(),
-        secondary=secondary,
-        fallback=fallback,
-    )
-
-    selections = provider.select_contracts(
-        "ZZQ",
-        underlying_price=100.0,
-        as_of=AS_OF,
-        minimum_days_to_expiry=30,
-        maximum_days_to_expiry=365,
-    )
-
-    assert len(selections) == 6
-    assert secondary.maximum_expirations == 1_000
-    assert fallback.called is False
 
 
 def test_router_default_cannot_hide_a_small_expiration_limit() -> None:

@@ -10,47 +10,19 @@ from providers.alpaca_indicative_options import (
     AlpacaIndicativeOptionSelection,
     AlpacaIndicativeOptionsError,
 )
-from providers.databento_options import (
-    DatabentoOptionBar,
-    DatabentoOptionDefinition,
-    DatabentoOptionSelection,
-    DatabentoOptionsError,
-)
 from providers.massive_options import (
     MassiveOptionBar,
     MassiveOptionDefinition,
     MassiveOptionSelection,
-    MassiveOptionsError,
 )
 from providers.redundancy_audit import begin_redundancy_cycle
 from providers.redundant_options import RedundantOptionsError, RedundantOptionsProvider
+from providers.tradier_market_data import TradierMarketDataError
 
 
 AS_OF = datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc)
 EXPIRATION = AS_OF + timedelta(days=60)
-
-
-def _databento_selection() -> DatabentoOptionSelection:
-    definition = DatabentoOptionDefinition(
-        symbol="SPY261010C00650000",
-        raw_symbol="SPY   261010C00650000",
-        instrument_id=12345,
-        underlying="SPY",
-        option_right="call",
-        expiration_at=EXPIRATION,
-        strike=650.0,
-        contract_multiplier=100.0,
-        session_date=date(2026, 8, 10),
-    )
-    return DatabentoOptionSelection(
-        definition=definition,
-        bar=DatabentoOptionBar(
-            raw_symbol=definition.raw_symbol,
-            observed_at=datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc),
-            close=12.5,
-            volume=100.0,
-        ),
-    )
+RAW = "SPY261010C00650000"
 
 
 def _alpaca_selection(days: int = 60) -> AlpacaIndicativeOptionSelection:
@@ -81,15 +53,15 @@ def _alpaca_selection(days: int = 60) -> AlpacaIndicativeOptionSelection:
 
 def _massive_selection() -> MassiveOptionSelection:
     definition = MassiveOptionDefinition(
-        symbol="SPY261010C00650000",
-        raw_symbol="O:SPY261010C00650000",
+        symbol=RAW,
+        raw_symbol=f"O:{RAW}",
         underlying="SPY",
         option_right="call",
         expiration_at=EXPIRATION,
         strike=650.0,
         contract_multiplier=100.0,
         session_date=date(2026, 8, 11),
-        source_identifier="massive-opra-definition:2026-08-11:O:SPY261010C00650000",
+        source_identifier=f"massive-opra-definition:2026-08-11:O:{RAW}",
     )
     return MassiveOptionSelection(
         definition=definition,
@@ -98,56 +70,17 @@ def _massive_selection() -> MassiveOptionSelection:
             observed_at=datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc),
             close=12.7,
             volume=120.0,
-            source_identifier=(
-                "massive-opra-bar:O:SPY261010C00650000:"
-                "2026-08-10T20:00:00+00:00"
-            ),
+            source_identifier=f"massive-opra-bar:O:{RAW}:2026-08-10T20:00:00+00:00",
         ),
     )
 
 
-class _HealthyPrimary:
-    configured = True
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def select_contracts(self, *_args, **_kwargs):
-        self.calls += 1
-        return (_databento_selection(),)
-
-    def latest_daily_bars(self, *_args, **_kwargs):
-        selection = _databento_selection()
-        return selection.definition.session_date, {
-            selection.definition.raw_symbol: (selection.bar,)
-        }
-
-
-class _CappedPrimary:
-    configured = True
-
-    def select_contracts(self, *_args, **_kwargs):
-        raise DatabentoOptionsError(
-            "Databento OPRA HTTP 402",
-            status_code=402,
-            retryable=False,
-        )
-
-    def latest_daily_bars(self, *_args, **_kwargs):
-        raise DatabentoOptionsError(
-            "Databento OPRA HTTP 429",
-            status_code=429,
-            retryable=True,
-        )
-
-
-class _HealthySecondary:
+class _HealthyAlpaca:
     configured = True
 
     def __init__(self) -> None:
         self.select_calls = 0
         self.maximum_expirations = None
-        self.bar_inputs = ()
 
     def select_contracts(self, *_args, **kwargs):
         self.select_calls += 1
@@ -155,18 +88,14 @@ class _HealthySecondary:
         return tuple(_alpaca_selection(days) for days in (45, 75, 105))
 
     def latest_daily_bars(self, instruments, *_args, **_kwargs):
-        self.bar_inputs = tuple(instruments)
+        requested = tuple(symbol for _instrument_id, symbol in instruments)
         selection = _alpaca_selection()
         return date(2026, 8, 10), {
-            selection.definition.raw_symbol: (selection.bar,)
+            symbol: (selection.bar,) for symbol in requested
         }
 
 
-class _NoSecondary:
-    configured = False
-
-
-class _BrokenSecondary:
+class _BrokenAlpaca:
     configured = True
 
     def select_contracts(self, *_args, **_kwargs):
@@ -184,7 +113,41 @@ class _BrokenSecondary:
         )
 
 
-class _HealthyFallback:
+class _NoAlpaca:
+    configured = False
+
+
+class _HealthyTradier:
+    configured = True
+
+    def __init__(self) -> None:
+        self.symbols: list[str] = []
+
+    def daily_history(self, symbol, *, as_of, history_days):
+        assert as_of == AS_OF
+        assert history_days == 45
+        self.symbols.append(symbol)
+        return (
+            {
+                "t": datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc),
+                "c": 12.8,
+                "v": 130.0,
+            },
+        )
+
+
+class _BrokenTradier:
+    configured = True
+
+    def daily_history(self, *_args, **_kwargs):
+        raise TradierMarketDataError("Tradier HTTP 503", status_code=503, retryable=True)
+
+
+class _NoTradier:
+    configured = False
+
+
+class _HealthyMassive:
     configured = True
 
     def __init__(self) -> None:
@@ -203,152 +166,115 @@ class _HealthyFallback:
         }
 
 
-class _BrokenFallback:
-    configured = True
-
-    def select_contracts(self, *_args, **_kwargs):
-        raise MassiveOptionsError(
-            "Massive OPRA HTTP 429",
-            status_code=429,
-            retryable=True,
-        )
-
-    def latest_daily_bars(self, *_args, **_kwargs):
-        raise MassiveOptionsError(
-            "Massive OPRA HTTP 503",
-            status_code=503,
-            retryable=True,
-        )
+class _NoMassive:
+    configured = False
 
 
-def _select(provider: RedundantOptionsProvider):
+def _select(provider: RedundantOptionsProvider, *, maximum_expirations: int = 1_000):
     return provider.select_contracts(
         "SPY",
         underlying_price=640.0,
         as_of=AS_OF,
         minimum_days_to_expiry=30,
         maximum_days_to_expiry=365,
+        maximum_expirations=maximum_expirations,
     )
 
 
-def test_primary_provider_remains_authoritative_when_healthy() -> None:
-    primary = _HealthyPrimary()
-    secondary = _HealthySecondary()
-    fallback = _HealthyFallback()
+def test_alpaca_is_opportunity_complete_primary() -> None:
+    alpaca = _HealthyAlpaca()
+    massive = _HealthyMassive()
     provider = RedundantOptionsProvider(
-        primary=primary,
-        secondary=secondary,
-        fallback=fallback,
+        primary=alpaca,
+        secondary=_HealthyTradier(),
+        fallback=massive,
     )
 
     selections = _select(provider)
 
-    assert primary.calls == 1
-    assert secondary.select_calls == 0
-    assert fallback.select_calls == 0
-    assert selections[0].definition.provider_kind == "databento"
-    assert selections[0].definition.provider_instrument_id == 12345
-
-
-def test_access_cap_fails_over_to_expiration_complete_alpaca_secondary() -> None:
-    secondary = _HealthySecondary()
-    fallback = _HealthyFallback()
-    provider = RedundantOptionsProvider(
-        primary=_CappedPrimary(),
-        secondary=secondary,
-        fallback=fallback,
-    )
-
-    selections = _select(provider)
-
-    assert secondary.select_calls == 1
-    assert secondary.maximum_expirations == 1_000
-    assert fallback.select_calls == 0
+    assert alpaca.select_calls == 1
+    assert alpaca.maximum_expirations == 1_000
+    assert massive.select_calls == 0
     assert len({item.definition.expiration_at.date() for item in selections}) == 3
     assert all(item.definition.provider_kind == "alpaca_indicative" for item in selections)
-    assert all(item.definition.provider_instrument_id is None for item in selections)
-    assert all(item.definition.provider_stype_in == "raw_symbol" for item in selections)
 
 
-def test_daily_bar_failover_can_still_use_massive_as_history_tertiary() -> None:
-    fallback = _HealthyFallback()
+def test_multi_expiration_discovery_fails_closed_when_alpaca_is_unavailable() -> None:
+    massive = _HealthyMassive()
     provider = RedundantOptionsProvider(
-        primary=_CappedPrimary(),
-        secondary=_NoSecondary(),
-        fallback=fallback,
-    )
-    databento_raw = "SPY   261010C00650000"
-
-    session, bars = provider.latest_daily_bars(
-        ((12345, databento_raw),),
-        as_of=AS_OF,
-        history_days=45,
-    )
-
-    assert session == date(2026, 8, 10)
-    assert fallback.bar_inputs == ((None, "O:SPY261010C00650000"),)
-    assert databento_raw in bars
-    assert bars[databento_raw][0].provider_kind == "massive"
-
-
-def test_incomplete_selection_providers_remain_fail_closed_instead_of_using_massive() -> None:
-    fallback = _HealthyFallback()
-    provider = RedundantOptionsProvider(
-        primary=_CappedPrimary(),
-        secondary=_BrokenSecondary(),
-        fallback=fallback,
+        primary=_BrokenAlpaca(),
+        secondary=_HealthyTradier(),
+        fallback=massive,
     )
 
     with pytest.raises(RedundantOptionsError) as captured:
         _select(provider)
 
-    message = str(captured.value)
-    assert "primary=access_or_credit_cap" in message
-    assert "secondary=rate_limit" in message
-    assert "fallback=provider_evidence_unavailable" in message
-    assert fallback.select_calls == 0
+    assert "primary=rate_limit" in str(captured.value)
+    assert "opportunity-complete" in str(captured.value)
+    assert massive.select_calls == 0
 
 
-def test_option_failover_publishes_actual_attempt_sequence() -> None:
-    ledger = begin_redundancy_cycle("option-failover", AS_OF)
-    secondary = _HealthySecondary()
-    fallback = _HealthyFallback()
+def test_daily_history_uses_tradier_before_massive() -> None:
+    tradier = _HealthyTradier()
+    massive = _HealthyMassive()
     provider = RedundantOptionsProvider(
-        primary=_CappedPrimary(),
-        secondary=secondary,
-        fallback=fallback,
+        primary=_BrokenAlpaca(),
+        secondary=tradier,
+        fallback=massive,
     )
 
-    selections = _select(provider)
+    session, bars = provider.latest_daily_bars(
+        ((None, RAW),),
+        as_of=AS_OF,
+        history_days=45,
+    )
 
-    assert selections[0].definition.provider_kind == "alpaca_indicative"
-    records = {
-        (item["provider"], item["capability"]): item
-        for item in ledger.to_dict()["records"]
-    }
-    primary = records[("databento", "option_contract_selection")]
-    secondary_record = records[("alpaca_indicative", "option_contract_selection")]
-    fallback_record = records[("massive", "option_contract_selection")]
-    assert primary["configured"] is True
-    assert primary["attempted"] is True
-    assert primary["used"] is False
-    assert primary["failure_class"] == "access_or_credit_cap"
-    assert secondary_record["configured"] is True
-    assert secondary_record["attempted"] is True
-    assert secondary_record["authenticated"] is True
-    assert secondary_record["used"] is True
-    assert secondary_record["failed_over"] is True
-    assert fallback_record["configured"] is True
-    assert fallback_record["attempted"] is False
-    assert fallback_record["used"] is False
+    assert session == date(2026, 8, 10)
+    assert tradier.symbols == [RAW]
+    assert bars[RAW][0].provider_kind == "tradier"
+    assert massive.bar_inputs == ()
 
 
-def test_healthy_option_primary_keeps_secondary_and_fallback_visible_but_unattempted() -> None:
+def test_daily_history_falls_through_to_massive_when_tradier_fails() -> None:
+    massive = _HealthyMassive()
+    provider = RedundantOptionsProvider(
+        primary=_BrokenAlpaca(),
+        secondary=_BrokenTradier(),
+        fallback=massive,
+    )
+
+    session, bars = provider.latest_daily_bars(
+        ((None, RAW),),
+        as_of=AS_OF,
+        history_days=45,
+    )
+
+    assert session == date(2026, 8, 10)
+    assert massive.bar_inputs == ((None, f"O:{RAW}"),)
+    assert bars[RAW][0].provider_kind == "massive"
+
+
+def test_massive_remains_available_for_explicit_single_expiration_probe() -> None:
+    massive = _HealthyMassive()
+    provider = RedundantOptionsProvider(
+        primary=_NoAlpaca(),
+        secondary=_NoTradier(),
+        fallback=massive,
+    )
+
+    selections = _select(provider, maximum_expirations=1)
+
+    assert massive.select_calls == 1
+    assert selections[0].definition.provider_kind == "massive"
+
+
+def test_audit_records_alpaca_primary_and_unattempted_massive() -> None:
     ledger = begin_redundancy_cycle("option-primary", AS_OF)
     provider = RedundantOptionsProvider(
-        primary=_HealthyPrimary(),
-        secondary=_HealthySecondary(),
-        fallback=_HealthyFallback(),
+        primary=_HealthyAlpaca(),
+        secondary=_HealthyTradier(),
+        fallback=_HealthyMassive(),
     )
 
     _select(provider)
@@ -357,12 +283,10 @@ def test_healthy_option_primary_keeps_secondary_and_fallback_visible_but_unattem
         (item["provider"], item["capability"]): item
         for item in ledger.to_dict()["records"]
     }
-    primary = records[("databento", "option_contract_selection")]
-    secondary = records[("alpaca_indicative", "option_contract_selection")]
-    fallback = records[("massive", "option_contract_selection")]
+    primary = records[("alpaca_indicative", "option_contract_selection")]
+    tradier = records[("tradier", "option_contract_selection")]
+    massive = records[("massive", "option_contract_selection")]
+    assert primary["attempted"] is True
     assert primary["used"] is True
-    assert primary["authenticated"] is True
-    assert secondary["configured"] is True
-    assert secondary["attempted"] is False
-    assert fallback["configured"] is True
-    assert fallback["attempted"] is False
+    assert tradier["attempted"] is False
+    assert massive["attempted"] is False

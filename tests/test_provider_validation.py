@@ -46,42 +46,11 @@ class _MissingEODHD:
     configured = False
 
 
-class _Databento:
-    configured = True
-
-    def fetch_dataset(self, query):
-        assert query.dataset_type is ProviderDatasetType.ACCOUNT_ENTITLEMENT
-        return _Snapshot(
-            payload=["OPRA.PILLAR", "GLBX.MDP3"],
-            identifier="databento:datasets",
-        )
-
-
-class _MissingDatabento:
+class _DeprecatedProvider:
     configured = False
 
-
-class _DatabentoOptions:
-    configured = True
-
-    def validate_access(self, *, as_of, underlying_price):
-        assert as_of == NOW
-        assert underlying_price == 610.0
-        return {
-            "dataset": "OPRA.PILLAR",
-            "session_date": "2026-07-30",
-            "definition_count": 6_888,
-            "eligible_definition_count": 5_000,
-            "priced_sample_count": 4,
-            "sample_symbols": (
-                "SPY260918C00620000",
-                "SPY260918P00620000",
-            ),
-        }
-
-
-class _MissingDatabentoOptions:
-    configured = False
+    def __getattr__(self, name):
+        raise AssertionError(f"deprecated provider must not be contacted: {name}")
 
 
 class _Response:
@@ -134,25 +103,20 @@ def test_live_provider_validation_is_credential_safe_and_ready():
         clock=lambda: NOW,
         http_get=_http_get,
         eodhd_provider=_EODHD(),
-        databento_provider=_Databento(),
-        databento_options_provider=_DatabentoOptions(),
     )
     assert report.ready is True
-    assert len(report.checks) == 6
+    assert len(report.checks) == 3
     assert {item.name for item in report.checks if item.required} == {
         "eodhd_account_entitlement",
         "eodhd_exchange_directory",
         "yahoo_chart_evidence",
-        "databento_account_entitlement",
-        "databento_opra_definitions",
-        "databento_opra_daily_bars",
     }
     payload = report.to_dict()
     encoded = json.dumps(payload)
     assert payload["schema_version"] == "capital-intelligence-provider-validation.v1"
     assert payload["credentials_exposed"] is False
     assert payload["real_money_authorized"] is False
-    assert "api_token" not in encoded.lower()
+    assert "databento" not in encoded.lower()
     assert "secret" not in encoded.lower()
 
 
@@ -162,8 +126,6 @@ def test_missing_required_eodhd_credentials_fail_closed():
         clock=lambda: NOW,
         http_get=_http_get,
         eodhd_provider=_MissingEODHD(),
-        databento_provider=_Databento(),
-        databento_options_provider=_DatabentoOptions(),
     )
     assert report.ready is False
     assert report.failed_required_checks == (
@@ -174,21 +136,17 @@ def test_missing_required_eodhd_credentials_fail_closed():
         require_provider_validation(report)
 
 
-def test_missing_required_databento_credentials_fail_closed():
+def test_deprecated_databento_arguments_are_ignored_without_contact():
     report = validate_live_providers(
         release="release-1",
         clock=lambda: NOW,
         http_get=_http_get,
         eodhd_provider=_EODHD(),
-        databento_provider=_MissingDatabento(),
-        databento_options_provider=_MissingDatabentoOptions(),
+        databento_provider=_DeprecatedProvider(),
+        databento_options_provider=_DeprecatedProvider(),
     )
-    assert report.ready is False
-    assert report.failed_required_checks == (
-        "databento_account_entitlement",
-        "databento_opra_definitions",
-        "databento_opra_daily_bars",
-    )
+    assert report.ready is True
+    assert all("databento" not in item.name for item in report.checks)
 
 
 def test_provider_validation_report_round_trip(tmp_path):
@@ -205,10 +163,7 @@ def test_provider_validation_report_round_trip(tmp_path):
 def test_provider_validation_route_requires_current_release(monkeypatch, tmp_path):
     path = tmp_path / "provider-validation.json"
     now = datetime.now(timezone.utc)
-    write_provider_validation_report(
-        _passed_report(generated_at=now, release="release-1"),
-        path,
-    )
+    write_provider_validation_report(_passed_report(generated_at=now, release="release-1"), path)
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_PROVIDER_VALIDATION_REPORT", str(path))
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_RELEASE", "release-1")
     response = Response()
