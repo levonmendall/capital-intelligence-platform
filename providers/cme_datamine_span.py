@@ -3,8 +3,11 @@
 The client authenticates with a CME DataMine API ID/password, discovers entitled
 files for recent period dates, matches only file IDs in the governed SPAN catalog,
 and downloads one bounded representative risk-parameter artifact for access and
-lineage validation. It does not calculate portfolio margin or grant investment or
-execution authority.
+lineage validation. If CME's List API is temporarily unavailable with a 5xx gateway
+error, the client can fall back to a small ordered set of exact File API probes using
+only the governed catalog IDs supplied by the account entitlement export.
+
+It does not calculate portfolio margin or grant investment or execution authority.
 """
 
 from __future__ import annotations
@@ -28,6 +31,10 @@ DEFAULT_CATALOG_PATH = (
 
 class CmeDataMineSpanError(RuntimeError):
     """Raised when CME DataMine SPAN discovery or download fails safely."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +68,7 @@ class CmeDataMineSpanClient:
         maximum_bytes: int = 64 * 1024 * 1024,
         maximum_lookback_days: int = 7,
         maximum_pages_per_date: int = 4,
+        maximum_direct_probes_per_date: int = 6,
         http_get: Callable[..., Any] | None = None,
         http_post: Callable[..., Any] | None = None,
     ) -> None:
@@ -73,11 +81,13 @@ class CmeDataMineSpanClient:
         self.maximum_bytes = int(maximum_bytes)
         self.maximum_lookback_days = int(maximum_lookback_days)
         self.maximum_pages_per_date = int(maximum_pages_per_date)
+        self.maximum_direct_probes_per_date = int(maximum_direct_probes_per_date)
         if (
             self.timeout < 1
             or self.maximum_bytes < 1
             or self.maximum_lookback_days < 1
             or self.maximum_pages_per_date < 1
+            or self.maximum_direct_probes_per_date < 1
         ):
             raise ValueError("CME DataMine bounds must be positive")
         self._http_get = http_get or requests.get
@@ -91,16 +101,35 @@ class CmeDataMineSpanClient:
             "Authorization": f"Bearer {token}",
             "User-Agent": "Capital-Intelligence-Platform/CME-DataMine-SPAN",
         }
+        last_list_error: CmeDataMineSpanError | None = None
         for day_offset in range(self.maximum_lookback_days):
             period_date = (timestamp.date() - timedelta(days=day_offset)).strftime("%Y%m%d")
             candidates = {
                 pattern.replace("{YYYYMMDD}", period_date) for pattern in patterns
             }
-            matches = self._list_matches(
-                headers=headers,
-                period_date=period_date,
-                candidates=candidates,
-            )
+            try:
+                matches = self._list_matches(
+                    headers=headers,
+                    period_date=period_date,
+                    candidates=candidates,
+                )
+            except CmeDataMineSpanError as error:
+                # CME's File API is independently documented and can validate an
+                # exact entitled fid even when the entitlement List API gateway is
+                # temporarily unhealthy. Restrict fallback to CME 5xx responses and
+                # a small, policy-ordered subset of the governed catalog.
+                if error.status_code is None or not 500 <= error.status_code < 600:
+                    raise
+                last_list_error = error
+                direct = self._direct_file_probe(
+                    headers=headers,
+                    period_date=period_date,
+                    candidates=candidates,
+                    catalog_pattern_count=len(patterns),
+                )
+                if direct is not None:
+                    return direct
+                continue
             if not matches:
                 continue
             selected = min(matches, key=self._selection_key)
@@ -111,6 +140,12 @@ class CmeDataMineSpanClient:
                 entitled_match_count=len(matches),
                 catalog_pattern_count=len(patterns),
             )
+        if last_list_error is not None:
+            raise CmeDataMineSpanError(
+                "CME DataMine List API remained unavailable and bounded direct File API "
+                "fallback found no entitled SPAN artifact",
+                status_code=last_list_error.status_code,
+            ) from last_list_error
         raise CmeDataMineSpanError(
             "CME DataMine returned no entitled SPAN file matching the governed catalog "
             f"within {self.maximum_lookback_days} day(s)"
@@ -129,7 +164,8 @@ class CmeDataMineSpanClient:
         status = int(getattr(response, "status_code", 0))
         if status < 200 or status >= 300:
             raise CmeDataMineSpanError(
-                f"CME DataMine OAuth returned HTTP {status or 'unknown'}"
+                f"CME DataMine OAuth returned HTTP {status or 'unknown'}",
+                status_code=status or None,
             )
         try:
             payload = response.json()
@@ -167,7 +203,8 @@ class CmeDataMineSpanClient:
             status = int(getattr(response, "status_code", 0))
             if status < 200 or status >= 300:
                 raise CmeDataMineSpanError(
-                    f"CME DataMine List API returned HTTP {status or 'unknown'}"
+                    f"CME DataMine List API returned HTTP {status or 'unknown'}",
+                    status_code=status or None,
                 )
             try:
                 payload = response.json()
@@ -211,6 +248,77 @@ class CmeDataMineSpanClient:
             params = None
         return tuple(matches.values())
 
+    def _direct_file_probe(
+        self,
+        *,
+        headers: Mapping[str, str],
+        period_date: str,
+        candidates: set[str],
+        catalog_pattern_count: int,
+    ) -> CmeDataMineSpanDownload | None:
+        ordered = sorted(
+            (
+                CmeDataMineSpanFile(
+                    period_date=period_date,
+                    file_id=file_id,
+                    file_name="",
+                    api_download_link="",
+                    size=None,
+                )
+                for file_id in candidates
+            ),
+            key=self._selection_key,
+        )
+        saw_server_error = False
+        for file in ordered[: self.maximum_direct_probes_per_date]:
+            try:
+                response = self._http_get(
+                    DOWNLOAD_URL,
+                    headers=dict(headers),
+                    params={"fid": file.file_id},
+                    timeout=self.timeout,
+                )
+            except requests.RequestException:
+                saw_server_error = True
+                continue
+            status = int(getattr(response, "status_code", 0))
+            if status == 200:
+                content = bytes(getattr(response, "content", b""))
+                if len(content) > self.maximum_bytes:
+                    raise CmeDataMineSpanError(
+                        "CME DataMine SPAN artifact exceeds bounded size"
+                    )
+                if len(content) < 32:
+                    raise CmeDataMineSpanError(
+                        "CME DataMine SPAN artifact is empty or implausibly small"
+                    )
+                selected = CmeDataMineSpanFile(
+                    period_date=file.period_date,
+                    file_id=file.file_id,
+                    file_name="",
+                    api_download_link=DOWNLOAD_URL,
+                    size=len(content),
+                )
+                return CmeDataMineSpanDownload(
+                    file=selected,
+                    content=content,
+                    entitled_match_count=1,
+                    catalog_pattern_count=catalog_pattern_count,
+                    selection_policy="list-5xx-direct-file-fallback.v1",
+                )
+            if status in {401, 429}:
+                raise CmeDataMineSpanError(
+                    f"CME DataMine File API returned HTTP {status}",
+                    status_code=status,
+                )
+            if status >= 500:
+                saw_server_error = True
+                continue
+            # 403/404 are candidate-local: continue trying other exact governed fids.
+        if saw_server_error:
+            return None
+        return None
+
     def _download(
         self,
         *,
@@ -233,7 +341,8 @@ class CmeDataMineSpanClient:
         status = int(getattr(response, "status_code", 0))
         if status < 200 or status >= 300:
             raise CmeDataMineSpanError(
-                f"CME DataMine SPAN download returned HTTP {status or 'unknown'}"
+                f"CME DataMine SPAN download returned HTTP {status or 'unknown'}",
+                status_code=status or None,
             )
         content = bytes(getattr(response, "content", b""))
         if len(content) > self.maximum_bytes:
@@ -264,9 +373,6 @@ class CmeDataMineSpanClient:
     @staticmethod
     def _selection_key(file: CmeDataMineSpanFile) -> tuple[int, str]:
         identifier = file.file_id.upper()
-        # The conventional CME production final end-of-day SPAN file has historically
-        # used the "S" cycle and PA2 format. This preference is only for bounded access
-        # validation; the platform does not infer portfolio margin from the selected file.
         if "SPAN_CUSTPA2TCC_S_CME_0" in identifier:
             return (0, identifier)
         if identifier.endswith("_S_CME_0"):
