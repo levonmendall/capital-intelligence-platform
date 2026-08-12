@@ -128,9 +128,9 @@ def test_expired_directory_cache_remains_fail_closed(tmp_path: Path) -> None:
         ).fetch_dataset(query(later))
 
 
-def test_authentication_failure_never_uses_cache(tmp_path: Path) -> None:
+def test_authentication_failure_never_uses_expired_cache(tmp_path: Path) -> None:
     provider([Response(live_payload())], cache_dir=tmp_path).fetch_dataset(query())
-    later = NOW + timedelta(hours=1)
+    later = NOW + timedelta(hours=73)
 
     with pytest.raises(EODHDProviderError, match="HTTP 403.*non-retryable"):
         provider(
