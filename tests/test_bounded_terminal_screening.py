@@ -91,21 +91,10 @@ def _publication(path, records):
     )
 
 
-def test_bounded_screening_reproduces_existing_plan_and_cutoff_semantics(
-    tmp_path, monkeypatch
-):
-    records = tuple(_record(index) for index in range(37))
-    publication = tmp_path / "provider-enriched-preselection.json"
-    _publication(publication, records)
-    policy = _Policy(str(publication))
-    full_signals = {
-        record.symbol: _signal(index, record.symbol)
-        for index, record in enumerate(records)
-    }
-    observed_chunk_sizes: list[int] = []
-
+def _install_fixture_signals(monkeypatch, full_signals, observed_chunk_sizes=None):
     def chunk_probe(chunk, _as_of, _policy):
-        observed_chunk_sizes.append(len(chunk))
+        if observed_chunk_sizes is not None:
+            observed_chunk_sizes.append(len(chunk))
         return {record.symbol: full_signals[record.symbol] for record in chunk}
 
     monkeypatch.setattr(
@@ -118,6 +107,26 @@ def test_bounded_screening_reproduces_existing_plan_and_cutoff_semantics(
         "validate_provider_enriched_signals",
         lambda _records, signals, required_factors: signals,
     )
+    monkeypatch.setattr(
+        bounded,
+        "record_manual_cio_diagnostic_progress",
+        lambda *_args, **_kwargs: None,
+    )
+
+
+def test_bounded_screening_reproduces_existing_plan_and_cutoff_semantics(
+    tmp_path, monkeypatch
+):
+    records = tuple(_record(index) for index in range(37))
+    publication = tmp_path / "provider-enriched-preselection.json"
+    _publication(publication, records)
+    policy = _Policy(str(publication))
+    full_signals = {
+        record.symbol: _signal(index, record.symbol)
+        for index, record in enumerate(records)
+    }
+    observed_chunk_sizes: list[int] = []
+    _install_fixture_signals(monkeypatch, full_signals, observed_chunk_sizes)
 
     result = bounded.build_bounded_terminal_preselection(
         records,
@@ -145,6 +154,19 @@ def test_bounded_screening_reproduces_existing_plan_and_cutoff_semantics(
         next(record for record in records if record.symbol == symbol)
         for symbol in expected.selected_symbols
     )
+    assert result.signal_prices == {
+        symbol: signal.indicative_price
+        for symbol, signal in full_signals.items()
+        if signal.indicative_price is not None
+    }
+    assert result.signal_observed_at == {
+        symbol: full_signals[symbol].observed_at
+        for symbol in expected.selected_symbols
+    }
+    assert result.preselection_evidence == tuple(
+        (symbol, full_signals[symbol].evidence_identifiers)
+        for symbol in expected.selected_symbols
+    )
 
     selected_prices = {
         symbol: 1000.0 + index
@@ -162,6 +184,49 @@ def test_bounded_screening_reproduces_existing_plan_and_cutoff_semantics(
         selected_prices={**result.signal_prices, **selected_prices},
     )
     assert actual_observations == expected_observations
+
+
+def test_streamed_screening_is_chunk_size_invariant(tmp_path, monkeypatch):
+    records = tuple(_record(index) for index in range(97))
+    publication = tmp_path / "provider-enriched-preselection.json"
+    _publication(publication, records)
+    policy = _Policy(str(publication))
+    full_signals = {
+        record.symbol: _signal(index, record.symbol)
+        for index, record in enumerate(records)
+    }
+    _install_fixture_signals(monkeypatch, full_signals)
+
+    single_record_chunks = bounded.build_bounded_terminal_preselection(
+        records,
+        as_of=NOW,
+        policy=policy,
+        progress_label="international_equity",
+        chunk_size=1,
+    )
+    wider_chunks = bounded.build_bounded_terminal_preselection(
+        records,
+        as_of=NOW,
+        policy=policy,
+        progress_label="international_equity",
+        chunk_size=31,
+    )
+
+    assert single_record_chunks == wider_chunks
+
+
+def test_terminal_screening_state_spool_keeps_record_state_out_of_python_heap():
+    with bounded._TerminalScreeningStateSpool() as spool:
+        assert not hasattr(spool, "__dict__")
+        assert spool.connection.execute("PRAGMA temp_store").fetchone()[0] == 1
+        assert spool.connection.execute("PRAGMA cache_size").fetchone()[0] == -2048
+        tables = {
+            row[0]
+            for row in spool.connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert {"screened", "exclusions"}.issubset(tables)
 
 
 def test_publication_signal_spool_indexes_canonical_json_without_full_signal_mapping(
