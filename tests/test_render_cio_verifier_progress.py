@@ -26,6 +26,36 @@ def _running_payload(*, detail: str = "governed_progress=comprehensive_discovery
     }
 
 
+def _failed_payload(*, request_id: str = "failed-request") -> dict[str, object]:
+    return {
+        "active_release": EXPECTED_RELEASE,
+        "release_matches": True,
+        "request_id": request_id,
+        "state": "failed",
+        "completed_at": "2026-08-12T10:00:00+00:00",
+        "stage": "terminal_screening:international_equity",
+        "detail": "Resource Governor memory pressure",
+        "credential_safe": True,
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+
+
+def _success_payload(*, request_id: str = "fresh-request") -> dict[str, object]:
+    return {
+        "active_release": EXPECTED_RELEASE,
+        "release_matches": True,
+        "request_id": request_id,
+        "state": "completed",
+        "completed_at": "2026-08-12T10:05:00+00:00",
+        "stage": "paper_implementation_boundary",
+        "detail": "completed",
+        "credential_safe": True,
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+
+
 def _clock(values: list[float]):
     iterator = iter(values)
     return lambda: next(iterator)
@@ -39,6 +69,15 @@ def test_progress_fields_expose_only_allowlisted_phase_state_and_release_match()
     assert _progress_fields(payload, expected_release=EXPECTED_RELEASE) == (
         "comprehensive_discovery",
         "running",
+        "yes",
+    )
+
+
+def test_progress_fields_prefer_durable_terminal_stage_over_final_detail() -> None:
+    payload = _failed_payload()
+    assert _progress_fields(payload, expected_release=EXPECTED_RELEASE) == (
+        "terminal_screening:international_equity",
+        "failed",
         "yes",
     )
 
@@ -120,3 +159,59 @@ def test_phase_change_resets_stale_warning_timer(tmp_path: Path) -> None:
     assert "stage=instrument_catalog" in joined
     assert "stage=evidence_collection" in joined
     assert "phase unchanged" not in joined
+
+
+def test_poller_fails_quickly_when_exact_release_only_replays_failed_request(tmp_path: Path) -> None:
+    payload = _failed_payload(request_id="stale-request")
+    calls = 0
+
+    def fetcher(_url: str):
+        nonlocal calls
+        calls += 1
+        return payload
+
+    with pytest.raises(RenderAuditVerificationError, match="stale_diagnostic") as raised:
+        poll_render_audit(
+            url="https://example.invalid/audit.json",
+            expected_release=EXPECTED_RELEASE,
+            output_path=tmp_path / "audit.json",
+            maximum_attempts=20,
+            interval_seconds=15,
+            fresh_attempt_grace_attempts=2,
+            fetcher=fetcher,
+            sleeper=lambda _seconds: None,
+            clock=_clock([0.0, 0.0, 15.0, 30.0]),
+            progress_writer=None,
+        )
+
+    assert calls == 3
+    assert "request_id=stale-request" in str(raised.value)
+    assert "stage=terminal_screening:international_equity" in str(raised.value)
+
+
+def test_poller_accepts_new_request_identity_after_failed_baseline(tmp_path: Path) -> None:
+    fresh_running = _running_payload(detail="governed_progress=public_information_collection")
+    fresh_running.update({"request_id": "fresh-request", "state": "in_progress"})
+    payloads = iter(
+        [
+            _failed_payload(request_id="stale-request"),
+            fresh_running,
+            _success_payload(request_id="fresh-request"),
+        ]
+    )
+
+    result = poll_render_audit(
+        url="https://example.invalid/audit.json",
+        expected_release=EXPECTED_RELEASE,
+        output_path=tmp_path / "audit.json",
+        maximum_attempts=5,
+        interval_seconds=15,
+        fresh_attempt_grace_attempts=2,
+        fetcher=lambda _url: next(payloads),
+        sleeper=lambda _seconds: None,
+        clock=_clock([0.0, 0.0, 15.0, 30.0]),
+        progress_writer=None,
+    )
+
+    assert result["request_id"] == "fresh-request"
+    assert result["state"] == "completed"
