@@ -71,6 +71,23 @@ _PROGRESS_BOOLEAN_KEYS = (
     "terminal_screening_complete",
     "all_market_evaluation_complete",
 )
+_PROGRESS_METRIC_KEYS = (
+    "processed_records",
+    "total_records",
+    "chunk_records",
+    "rss_kib",
+    "hwm_kib",
+    "service_rss_kib",
+    "container_current_kib",
+    "container_limit_kib",
+    "container_anon_kib",
+    "container_file_kib",
+    "container_shmem_kib",
+    "container_kernel_kib",
+    "memory_reserve_kib",
+    "governed_boundary_kib",
+    "governed_headroom_kib",
+)
 
 
 class UnsafeTelemetryPayload(RuntimeError):
@@ -167,6 +184,17 @@ def _safe_nonnegative_number(value: object) -> float | None:
     return round(parsed, 3)
 
 
+def _safe_progress_metrics(value: object) -> dict[str, float]:
+    if not isinstance(value, Mapping):
+        return {}
+    safe: dict[str, float] = {}
+    for key in _PROGRESS_METRIC_KEYS:
+        parsed = _safe_nonnegative_number(value.get(key))
+        if parsed is not None:
+            safe[key] = parsed
+    return safe
+
+
 def _safe_market_lanes(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
@@ -235,6 +263,7 @@ def build_snapshot(
             else 0
         ),
         "market_lanes": _safe_market_lanes(payload.get("market_lanes")),
+        "progress_metrics": _safe_progress_metrics(payload.get("progress_metrics")),
     }
     for key in _DIAGNOSTIC_BOOLEAN_KEYS:
         value = payload.get(key)
