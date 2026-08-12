@@ -47,6 +47,7 @@ _DATABENTO_TRANSIENT_HTTP_MARKERS = (
 )
 _GOVERNED_OPRA_DEFINITIONS_CHECK = "governed_opra_definitions"
 _GOVERNED_OPRA_DAILY_BARS_CHECK = "governed_opra_daily_bars"
+_OPPORTUNITY_COMPLETE_MAX_EXPIRATIONS = 1_000
 
 HttpGet = Callable[..., Any]
 
@@ -107,13 +108,15 @@ def certify_redundant_option_provider(
     options_provider: RedundantOptionsProvider | None = None,
     http_get: HttpGet = requests.get,
 ) -> ProviderValidationReport:
-    """Certify the governed OPRA lane through Databento or its Massive fallback.
+    """Certify the governed option lane with expiration-complete provider evidence.
 
     The legacy provider-validation report predates the redundant options router and
     therefore reports the Databento OPRA checks as release-blocking even when the
-    production lane can lawfully fail over to Massive. Preserve those provider-specific
-    failures as diagnostics, but add required provider-neutral proof only when the exact
-    production router returns authentic completed-session near-money option evidence.
+    production lane can lawfully fail over. Preserve those provider-specific failures
+    as diagnostics, but waive them only when the exact governed router can scan the
+    effectively complete 30-365 day expiration opportunity window and return authentic
+    completed-session option evidence. A rate-limited provider that can prove only one
+    expiration cannot certify this release boundary.
     """
 
     legacy_checks = {
@@ -140,7 +143,7 @@ def certify_redundant_option_provider(
             as_of=report.generated_at,
             minimum_days_to_expiry=30,
             maximum_days_to_expiry=365,
-            maximum_expirations=1,
+            maximum_expirations=_OPPORTUNITY_COMPLETE_MAX_EXPIRATIONS,
             candidates_per_bucket=1,
         )
     except (
@@ -185,6 +188,9 @@ def certify_redundant_option_provider(
         )
     )
     session_date = max(item.bar.observed_at.date() for item in selections).isoformat()
+    expiration_dates = tuple(
+        sorted({item.definition.expiration_at.date().isoformat() for item in selections})
+    )
     datasets = tuple(
         sorted(
             {
@@ -201,7 +207,8 @@ def certify_redundant_option_provider(
             required=True,
             state="passed",
             detail=(
-                "governed redundant OPRA contract selection succeeded with "
+                "governed redundant option contract selection succeeded across "
+                f"{len(expiration_dates)} eligible expiration dates with "
                 f"{len(selections)} priced near-money contracts via {provider_label}"
             ),
             observed_at=report.generated_at,
@@ -211,6 +218,7 @@ def certify_redundant_option_provider(
                     "provider_kinds": provider_kinds,
                     "datasets": datasets,
                     "session_date": session_date,
+                    "expiration_dates": expiration_dates,
                     "sample_symbols": sample_symbols,
                     "sources": definition_sources,
                 }
@@ -222,7 +230,8 @@ def certify_redundant_option_provider(
             required=True,
             state="passed",
             detail=(
-                "production-aligned completed-session OPRA pricing succeeded with "
+                "production-aligned completed-session option pricing succeeded across "
+                f"{len(expiration_dates)} eligible expiration dates with "
                 f"{len(selections)} priced contracts via {provider_label}"
             ),
             observed_at=report.generated_at,
@@ -231,6 +240,7 @@ def certify_redundant_option_provider(
                 {
                     "provider_kinds": provider_kinds,
                     "session_date": session_date,
+                    "expiration_dates": expiration_dates,
                     "sample_symbols": sample_symbols,
                     "sources": bar_sources,
                 }
@@ -248,7 +258,7 @@ def certify_redundant_option_provider(
                     detail=(
                         f"{check.detail}; provider-specific Databento OPRA degradation is "
                         f"diagnostic because the governed redundant options lane certified "
-                        f"authentic evidence via {provider_label}"
+                        f"expiration-complete authentic evidence via {provider_label}"
                     ),
                 )
             )
@@ -264,7 +274,7 @@ def _transient_databento_server_degradation(
     """Return true only for an explicit provider-side Databento outage.
 
     The metadata endpoint currently collapses its final transport failure into a generic
-    credential-safe message.  Therefore it can be deferred only when both independent
+    credential-safe message. Therefore it can be deferred only when both independent
     OPRA checks explicitly report a retryable Databento 5xx response in the same report.
     Authentication denials, entitlement failures, missing keys, empty evidence, parsing
     errors, and any future unknown Databento check remain release-blocking.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from operations.provider_validation import ProviderValidationCheck, ProviderValidationReport
@@ -31,7 +31,7 @@ def _check(
 
 def _blocked_databento_report() -> ProviderValidationReport:
     return ProviderValidationReport(
-        release="release-570",
+        release="release-coverage",
         generated_at=NOW,
         checks=(
             _check("eodhd_account_entitlement", provider="EODHD"),
@@ -75,63 +75,76 @@ def _http_get(url, **_kwargs):
     return _YahooResponse()
 
 
-class _MassiveFallback:
+class _ExpirationCompleteSecondaryProof:
     configured = True
+
+    def __init__(self) -> None:
+        self.maximum_expirations: int | None = None
 
     def select_contracts(self, underlying, **kwargs):
         assert underlying == "SPY"
         assert kwargs["underlying_price"] == 650.0
         assert kwargs["minimum_days_to_expiry"] == 30
         assert kwargs["maximum_days_to_expiry"] == 365
-        return (
-            SimpleNamespace(
-                definition=SimpleNamespace(
-                    provider_kind="massive",
-                    provider_dataset="OPRA",
-                    source_identifier=(
-                        "massive-opra-definition:2026-08-11:O:SPY261010C00650000"
-                    ),
-                    symbol="SPY261010C00650000",
-                ),
-                bar=SimpleNamespace(
-                    observed_at=datetime(
-                        2026, 8, 10, 20, 0, tzinfo=timezone.utc
-                    ),
-                    source_identifier=(
-                        "massive-opra-bar:O:SPY261010C00650000:"
-                        "2026-08-10T20:00:00+00:00"
-                    ),
-                ),
-            ),
-        )
+        self.maximum_expirations = kwargs["maximum_expirations"]
+        selections = []
+        for days in (45, 75, 105):
+            expiration = NOW + timedelta(days=days)
+            for right in ("call", "put"):
+                code = "C" if right == "call" else "P"
+                symbol = f"SPY{expiration.strftime('%y%m%d')}{code}00650000"
+                selections.append(
+                    SimpleNamespace(
+                        definition=SimpleNamespace(
+                            provider_kind="alpaca_indicative",
+                            provider_dataset="ALPACA.OPTIONS.INDICATIVE",
+                            source_identifier=f"alpaca-option-contract:{symbol}",
+                            symbol=symbol,
+                            expiration_at=expiration,
+                        ),
+                        bar=SimpleNamespace(
+                            observed_at=datetime(
+                                2026, 8, 10, 20, 0, tzinfo=timezone.utc
+                            ),
+                            source_identifier=(
+                                f"alpaca-indicative-option-bar:{symbol}:"
+                                "2026-08-10T20:00:00+00:00"
+                            ),
+                        ),
+                    )
+                )
+        return tuple(selections)
 
 
 class _NoFallback:
     configured = False
 
 
-def test_databento_402_is_replaced_by_required_massive_proof() -> None:
+def test_databento_402_is_replaced_only_by_expiration_complete_governed_proof() -> None:
+    provider = _ExpirationCompleteSecondaryProof()
     report = certify_redundant_option_provider(
         _blocked_databento_report(),
-        options_provider=_MassiveFallback(),
+        options_provider=provider,
         http_get=_http_get,
     )
 
+    assert provider.maximum_expirations == 1_000
     assert report.ready is True
     by_name = {item.name: item for item in report.checks}
     assert by_name["databento_opra_definitions"].required is False
     assert by_name["databento_opra_definitions"].state == "failed"
     assert by_name["databento_opra_daily_bars"].required is False
     assert by_name["governed_opra_definitions"].required is True
-    assert by_name["governed_opra_definitions"].provider == "MASSIVE"
+    assert by_name["governed_opra_definitions"].provider == "ALPACA_INDICATIVE"
     assert by_name["governed_opra_definitions"].state == "passed"
-    assert by_name["governed_opra_daily_bars"].provider == "MASSIVE"
+    assert "3 eligible expiration dates" in by_name["governed_opra_definitions"].detail
+    assert by_name["governed_opra_daily_bars"].provider == "ALPACA_INDICATIVE"
     assert by_name["governed_opra_daily_bars"].state == "passed"
     assert by_name["governed_opra_definitions"].source_identifier.startswith(
-        "massive-opra-definition:"
+        "alpaca-option-contract:"
     )
     assert by_name["governed_opra_daily_bars"].source_identifier.startswith(
-        "massive-opra-bar:"
+        "alpaca-indicative-option-bar:"
     )
 
 

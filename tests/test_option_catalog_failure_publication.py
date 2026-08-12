@@ -81,8 +81,11 @@ def test_empty_option_catalog_preserves_credential_safe_provider_cause() -> None
 
     detail = str(captured.value)
     assert "provider_errors=2" in detail
-    assert "SPY=Databento OPRA HTTP 502: upstream unavailable" in detail
-    assert "QQQ=Databento OPRA HTTP 502: upstream unavailable" in detail
+    assert "SPY=Certified option providers cannot supply opportunity-complete evidence" in detail
+    assert "QQQ=Certified option providers cannot supply opportunity-complete evidence" in detail
+    assert detail.count(
+        "primary_detail=Databento OPRA HTTP 502: upstream unavailable"
+    ) == 2
     assert "no_eligible_priced_contracts=0" in detail
 
 

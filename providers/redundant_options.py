@@ -1,9 +1,13 @@
-"""Governed primary/fallback router for U.S. option evidence.
+"""Governed redundant router for U.S. option evidence.
 
-Databento remains the preferred OPRA provider. Massive is an independent fallback when
-Databento is unavailable, capped, rate-limited, unentitled, or otherwise unable to
-supply the required evidence. Provider switching never synthesizes evidence and never
-weakens the existing option qualification, CIO, construction, or paper-only controls.
+Databento OPRA remains the preferred source. Alpaca's authenticated indicative option
+feed is the opportunity-complete secondary path because it can enumerate every eligible
+expiration and retrieve multi-symbol history without the Massive Basic request ceiling.
+Massive remains an independent tertiary source for explicitly bounded requests and
+history continuity, but it is never allowed to silently truncate canonical discovery.
+
+Provider switching never synthesizes evidence and never weakens option qualification,
+CIO, construction, or paper-only controls.
 """
 
 from __future__ import annotations
@@ -12,6 +16,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Mapping, Sequence
 
+from providers.alpaca_indicative_options import (
+    ALPACA_INDICATIVE_OPTIONS_DATASET,
+    AlpacaIndicativeOptionBar,
+    AlpacaIndicativeOptionSelection,
+    AlpacaIndicativeOptionsError,
+    AlpacaIndicativeOptionsProvider,
+)
 from providers.databento_options import (
     DATABENTO_OPRA_DATASET,
     DatabentoOptionBar,
@@ -19,11 +30,6 @@ from providers.databento_options import (
     DatabentoOptionsError,
     DatabentoOptionsProvider,
 )
-from providers.redundancy_audit import (
-    ProviderCapabilityKey,
-    current_redundancy_ledger,
-)
-from providers.single_pass_massive_options import SinglePassMassiveOptionsProvider
 from providers.massive_options import (
     MASSIVE_OPRA_DATASET,
     MassiveOptionBar,
@@ -31,10 +37,18 @@ from providers.massive_options import (
     MassiveOptionsError,
     MassiveOptionsProvider,
 )
+from providers.redundancy_audit import (
+    ProviderCapabilityKey,
+    current_redundancy_ledger,
+)
 from providers.single_pass_massive_options import SinglePassMassiveOptionsProvider
 
 
-_MASSIVE_BASIC_FALLBACK_MAX_EXPIRATIONS = 1
+# There cannot be 1,000 distinct expiration dates inside the governed <=365-day DTE
+# window. This guard is therefore effectively opportunity-complete while retaining a
+# finite caller contract for legacy providers that accept an integer limit.
+_OPPORTUNITY_COMPLETE_MAX_EXPIRATIONS = 1_000
+_MASSIVE_BASIC_SAFE_MAX_EXPIRATIONS = 1
 
 
 class RedundantOptionsError(DatabentoOptionsError):
@@ -66,9 +80,33 @@ def _failure_class(error: BaseException | None) -> str:
     return "provider_evidence_unavailable"
 
 
+def _failure_detail(error: BaseException | None) -> str:
+    """Retain credential-safe provider cause without exposing transport payloads."""
+
+    if error is None:
+        return "none"
+    if not isinstance(
+        error,
+        (
+            DatabentoOptionsError,
+            AlpacaIndicativeOptionsError,
+            MassiveOptionsError,
+            RedundantOptionsError,
+        ),
+    ):
+        return type(error).__name__
+    detail = " ".join(str(error).strip().split())
+    return (detail or type(error).__name__)[:300]
+
+
 def _massive_ticker(raw_symbol: str) -> str:
     compact = "".join(str(raw_symbol).strip().upper().split())
     return compact if compact.startswith("O:") else f"O:{compact}"
+
+
+def _alpaca_ticker(raw_symbol: str) -> str:
+    compact = "".join(str(raw_symbol).strip().upper().split())
+    return compact[2:] if compact.startswith("O:") else compact
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,11 +142,23 @@ class RedundantOptionSelection:
     bar: RedundantOptionBar
 
 
+def _adapt_databento_bar(bar: DatabentoOptionBar) -> RedundantOptionBar:
+    return RedundantOptionBar(
+        raw_symbol=bar.raw_symbol,
+        observed_at=bar.observed_at,
+        close=bar.close,
+        volume=bar.volume,
+        provider_kind="databento",
+        source_identifier=(
+            f"databento-opra-bar:{bar.raw_symbol}:{bar.observed_at.isoformat()}"
+        ),
+    )
+
+
 def _adapt_databento_selection(
     selection: DatabentoOptionSelection,
 ) -> RedundantOptionSelection:
     definition = selection.definition
-    bar = selection.bar
     return RedundantOptionSelection(
         definition=RedundantOptionDefinition(
             symbol=definition.symbol,
@@ -128,26 +178,29 @@ def _adapt_databento_selection(
                 f"{definition.session_date.isoformat()}:{definition.symbol}"
             ),
         ),
-        bar=_adapt_databento_bar(bar),
+        bar=_adapt_databento_bar(selection.bar),
     )
 
 
-def _adapt_databento_bar(bar: DatabentoOptionBar) -> RedundantOptionBar:
+def _adapt_alpaca_bar(
+    bar: AlpacaIndicativeOptionBar,
+    *,
+    raw_symbol: str | None = None,
+) -> RedundantOptionBar:
     return RedundantOptionBar(
-        raw_symbol=bar.raw_symbol,
+        raw_symbol=raw_symbol or bar.raw_symbol,
         observed_at=bar.observed_at,
         close=bar.close,
         volume=bar.volume,
-        provider_kind="databento",
-        source_identifier=(
-            f"databento-opra-bar:{bar.raw_symbol}:{bar.observed_at.isoformat()}"
-        ),
+        provider_kind="alpaca_indicative",
+        source_identifier=bar.source_identifier,
     )
 
 
-def _adapt_massive_selection(selection: MassiveOptionSelection) -> RedundantOptionSelection:
+def _adapt_alpaca_selection(
+    selection: AlpacaIndicativeOptionSelection,
+) -> RedundantOptionSelection:
     definition = selection.definition
-    bar = selection.bar
     return RedundantOptionSelection(
         definition=RedundantOptionDefinition(
             symbol=definition.symbol,
@@ -158,13 +211,13 @@ def _adapt_massive_selection(selection: MassiveOptionSelection) -> RedundantOpti
             strike=definition.strike,
             contract_multiplier=definition.contract_multiplier,
             session_date=definition.session_date,
-            provider_kind="massive",
-            provider_dataset=MASSIVE_OPRA_DATASET,
+            provider_kind="alpaca_indicative",
+            provider_dataset=ALPACA_INDICATIVE_OPTIONS_DATASET,
             provider_stype_in="raw_symbol",
             provider_instrument_id=None,
             source_identifier=definition.source_identifier,
         ),
-        bar=_adapt_massive_bar(bar),
+        bar=_adapt_alpaca_bar(selection.bar),
     )
 
 
@@ -183,15 +236,40 @@ def _adapt_massive_bar(
     )
 
 
+def _adapt_massive_selection(selection: MassiveOptionSelection) -> RedundantOptionSelection:
+    definition = selection.definition
+    return RedundantOptionSelection(
+        definition=RedundantOptionDefinition(
+            symbol=definition.symbol,
+            raw_symbol=definition.raw_symbol,
+            underlying=definition.underlying,
+            option_right=definition.option_right,
+            expiration_at=definition.expiration_at,
+            strike=definition.strike,
+            contract_multiplier=definition.contract_multiplier,
+            session_date=definition.session_date,
+            provider_kind="massive",
+            provider_dataset=MASSIVE_OPRA_DATASET,
+            provider_stype_in="raw_symbol",
+            provider_instrument_id=None,
+            source_identifier=definition.source_identifier,
+        ),
+        bar=_adapt_massive_bar(selection.bar),
+    )
+
+
 def _option_audit_keys(capability: str):
     ledger = current_redundancy_ledger()
-    primary_key = ProviderCapabilityKey(
-        "databento", capability, DATABENTO_OPRA_DATASET
+    return (
+        ledger,
+        ProviderCapabilityKey("databento", capability, DATABENTO_OPRA_DATASET),
+        ProviderCapabilityKey(
+            "alpaca_indicative",
+            capability,
+            ALPACA_INDICATIVE_OPTIONS_DATASET,
+        ),
+        ProviderCapabilityKey("massive", capability, MASSIVE_OPRA_DATASET),
     )
-    fallback_key = ProviderCapabilityKey(
-        "massive", capability, MASSIVE_OPRA_DATASET
-    )
-    return ledger, primary_key, fallback_key
 
 
 def _selection_sources(selections: Sequence[RedundantOptionSelection]) -> tuple[str, ...]:
@@ -208,9 +286,24 @@ def _selection_sources(selections: Sequence[RedundantOptionSelection]) -> tuple[
     )
 
 
+def _declare(
+    ledger,
+    key: ProviderCapabilityKey,
+    *,
+    configured: bool,
+) -> None:
+    if ledger is not None:
+        ledger.declare(
+            key,
+            configured=configured,
+            authenticated=False,
+            routed=True,
+            certified_for_evidence_role=True,
+        )
+
 
 class RedundantOptionsProvider:
-    """Databento-primary, Massive-fallback option evidence router."""
+    """Databento -> Alpaca indicative -> Massive governed option router."""
 
     redundant_options_provider = True
 
@@ -218,18 +311,28 @@ class RedundantOptionsProvider:
         self,
         *,
         primary: DatabentoOptionsProvider | None = None,
+        secondary: AlpacaIndicativeOptionsProvider | None = None,
         fallback: MassiveOptionsProvider | None = None,
     ) -> None:
         self.primary = primary or DatabentoOptionsProvider()
+        self.secondary = secondary or AlpacaIndicativeOptionsProvider()
         self.fallback = fallback or SinglePassMassiveOptionsProvider()
 
     @property
     def configured(self) -> bool:
-        return bool(self.primary.configured or self.fallback.configured)
+        return bool(
+            self.primary.configured
+            or self.secondary.configured
+            or self.fallback.configured
+        )
 
     @property
     def primary_configured(self) -> bool:
         return bool(self.primary.configured)
+
+    @property
+    def secondary_configured(self) -> bool:
+        return bool(self.secondary.configured)
 
     @property
     def fallback_configured(self) -> bool:
@@ -243,27 +346,23 @@ class RedundantOptionsProvider:
         as_of: datetime,
         minimum_days_to_expiry: int,
         maximum_days_to_expiry: int,
-        maximum_expirations: int = 2,
+        maximum_expirations: int = _OPPORTUNITY_COMPLETE_MAX_EXPIRATIONS,
         candidates_per_bucket: int = 8,
     ) -> tuple[RedundantOptionSelection, ...]:
         timestamp = _aware(as_of, field_name="as_of")
-        ledger, primary_key, fallback_key = _option_audit_keys("option_contract_selection")
-        if ledger is not None:
-            ledger.declare(
-                primary_key,
-                configured=self.primary.configured,
-                authenticated=False,
-                routed=True,
-                certified_for_evidence_role=True,
-            )
-            ledger.declare(
-                fallback_key,
-                configured=self.fallback.configured,
-                authenticated=False,
-                routed=True,
-                certified_for_evidence_role=True,
-            )
+        if maximum_expirations < 1:
+            raise ValueError("maximum_expirations must be positive")
+        ledger, primary_key, secondary_key, fallback_key = _option_audit_keys(
+            "option_contract_selection"
+        )
+        _declare(ledger, primary_key, configured=self.primary.configured)
+        _declare(ledger, secondary_key, configured=self.secondary.configured)
+        _declare(ledger, fallback_key, configured=self.fallback.configured)
+
         primary_error: BaseException | None = None
+        secondary_error: BaseException | None = None
+        fallback_error: BaseException | None = None
+
         if self.primary.configured:
             if ledger is not None:
                 ledger.attempted(primary_key)
@@ -277,8 +376,8 @@ class RedundantOptionsProvider:
                     maximum_expirations=maximum_expirations,
                     candidates_per_bucket=candidates_per_bucket,
                 )
-                if selections:
-                    adapted = tuple(_adapt_databento_selection(item) for item in selections)
+                adapted = tuple(_adapt_databento_selection(item) for item in selections)
+                if adapted:
                     if ledger is not None:
                         ledger.used(
                             primary_key,
@@ -293,59 +392,91 @@ class RedundantOptionsProvider:
                 if ledger is not None:
                     ledger.failed(primary_key, _failure_class(error))
 
-        if self.fallback.configured:
+        if self.secondary.configured:
             if ledger is not None:
-                ledger.attempted(fallback_key)
+                ledger.attempted(secondary_key)
             try:
-                # Massive Options Basic is request-limited. Preserve the complete
-                # configured underlying universe, DTE window, moneyness rule, and
-                # call/put symmetry while bounding fallback I/O to one expiration.
-                # That reduces the normal fallback path from one definition plus four
-                # bar requests per underlying to one definition plus two bar requests.
-                # No price, evidence, qualification, CIO, or construction threshold is
-                # relaxed; missing authentic bars still fail closed.
-                selections = self.fallback.select_contracts(
+                selections = self.secondary.select_contracts(
                     underlying,
                     underlying_price=underlying_price,
                     as_of=timestamp,
                     minimum_days_to_expiry=minimum_days_to_expiry,
                     maximum_days_to_expiry=maximum_days_to_expiry,
-                    maximum_expirations=min(
-                        maximum_expirations,
-                        _MASSIVE_BASIC_FALLBACK_MAX_EXPIRATIONS,
-                    ),
-                    candidates_per_bucket=1,
+                    maximum_expirations=maximum_expirations,
+                    candidates_per_bucket=candidates_per_bucket,
                 )
-                adapted = tuple(_adapt_massive_selection(item) for item in selections)
+                adapted = tuple(_adapt_alpaca_selection(item) for item in selections)
                 if adapted:
                     if ledger is not None:
                         ledger.used(
-                            fallback_key,
+                            secondary_key,
                             source_identifiers=_selection_sources(adapted),
                             failed_over=bool(self.primary.configured),
                         )
                     return adapted
                 if ledger is not None:
-                    ledger.failed(fallback_key, "insufficient_evidence")
-                return adapted
-            except MassiveOptionsError as fallback_error:
+                    ledger.failed(secondary_key, "insufficient_evidence")
+            except AlpacaIndicativeOptionsError as error:
+                secondary_error = error
                 if ledger is not None:
-                    ledger.failed(fallback_key, _failure_class(fallback_error))
-                raise RedundantOptionsError(
-                    "Certified option providers are unavailable; "
-                    f"primary={_failure_class(primary_error)}; "
-                    f"fallback={_failure_class(fallback_error)}",
-                    status_code=getattr(fallback_error, "status_code", None),
-                    retryable=bool(getattr(fallback_error, "retryable", False)),
-                ) from fallback_error
+                    ledger.failed(secondary_key, _failure_class(error))
 
-        if primary_error is not None:
+        if self.fallback.configured:
+            # Massive Basic cannot scan every eligible expiration inside the production
+            # diagnostic budget. Canonical discovery therefore fails closed instead of
+            # silently narrowing the option opportunity set. Explicit single-expiration
+            # diagnostics may still use Massive as an independent tertiary proof path.
+            if maximum_expirations > _MASSIVE_BASIC_SAFE_MAX_EXPIRATIONS:
+                fallback_error = RedundantOptionsError(
+                    "Massive fallback cannot certify complete expiration opportunity "
+                    "coverage within the governed request budget"
+                )
+                if ledger is not None:
+                    ledger.failed(fallback_key, "incomplete_opportunity_coverage")
+            else:
+                if ledger is not None:
+                    ledger.attempted(fallback_key)
+                try:
+                    selections = self.fallback.select_contracts(
+                        underlying,
+                        underlying_price=underlying_price,
+                        as_of=timestamp,
+                        minimum_days_to_expiry=minimum_days_to_expiry,
+                        maximum_days_to_expiry=maximum_days_to_expiry,
+                        maximum_expirations=maximum_expirations,
+                        candidates_per_bucket=1,
+                    )
+                    adapted = tuple(_adapt_massive_selection(item) for item in selections)
+                    if adapted:
+                        if ledger is not None:
+                            ledger.used(
+                                fallback_key,
+                                source_identifiers=_selection_sources(adapted),
+                                failed_over=bool(
+                                    self.primary.configured or self.secondary.configured
+                                ),
+                            )
+                        return adapted
+                    if ledger is not None:
+                        ledger.failed(fallback_key, "insufficient_evidence")
+                except MassiveOptionsError as error:
+                    fallback_error = error
+                    if ledger is not None:
+                        ledger.failed(fallback_key, _failure_class(error))
+
+        active_error = fallback_error or secondary_error or primary_error
+        if active_error is not None:
             raise RedundantOptionsError(
-                f"{primary_error}; no certified fallback is configured; "
-                f"primary={_failure_class(primary_error)}",
-                status_code=getattr(primary_error, "status_code", None),
-                retryable=bool(getattr(primary_error, "retryable", False)),
-            ) from primary_error
+                "Certified option providers cannot supply opportunity-complete evidence; "
+                f"primary={_failure_class(primary_error)}; "
+                f"secondary={_failure_class(secondary_error)}; "
+                f"fallback={_failure_class(fallback_error)}; "
+                f"primary_detail={_failure_detail(primary_error)}; "
+                f"secondary_detail={_failure_detail(secondary_error)}; "
+                f"fallback_detail={_failure_detail(fallback_error)}",
+                status_code=getattr(active_error, "status_code", None),
+                retryable=bool(getattr(active_error, "retryable", False)),
+            ) from active_error
         return ()
 
     def latest_daily_bars(
@@ -356,22 +487,13 @@ class RedundantOptionsProvider:
         history_days: int = 45,
     ) -> tuple[date, Mapping[str, tuple[RedundantOptionBar, ...]]]:
         timestamp = _aware(as_of, field_name="as_of")
-        ledger, primary_key, fallback_key = _option_audit_keys("option_daily_history")
-        if ledger is not None:
-            ledger.declare(
-                primary_key,
-                configured=self.primary.configured,
-                authenticated=False,
-                routed=True,
-                certified_for_evidence_role=True,
-            )
-            ledger.declare(
-                fallback_key,
-                configured=self.fallback.configured,
-                authenticated=False,
-                routed=True,
-                certified_for_evidence_role=True,
-            )
+        ledger, primary_key, secondary_key, fallback_key = _option_audit_keys(
+            "option_daily_history"
+        )
+        _declare(ledger, primary_key, configured=self.primary.configured)
+        _declare(ledger, secondary_key, configured=self.secondary.configured)
+        _declare(ledger, fallback_key, configured=self.fallback.configured)
+
         normalized = tuple(
             (instrument_id, str(raw_symbol).strip().upper())
             for instrument_id, raw_symbol in instruments
@@ -382,6 +504,9 @@ class RedundantOptionsProvider:
 
         result: dict[str, tuple[RedundantOptionBar, ...]] = {}
         primary_error: BaseException | None = None
+        secondary_error: BaseException | None = None
+        fallback_error: BaseException | None = None
+
         primary_instruments = tuple(
             (instrument_id, raw_symbol)
             for instrument_id, raw_symbol in normalized
@@ -398,15 +523,15 @@ class RedundantOptionsProvider:
                     as_of=timestamp,
                     history_days=history_days,
                 )
-                primary_sources: list[str] = []
+                sources: list[str] = []
                 for raw_symbol, bars in primary_bars.items():
-                    adapted_bars = tuple(_adapt_databento_bar(item) for item in bars)
-                    result[str(raw_symbol).strip().upper()] = adapted_bars
-                    primary_sources.extend(item.source_identifier for item in adapted_bars)
-                if primary_sources and ledger is not None:
+                    adapted = tuple(_adapt_databento_bar(item) for item in bars)
+                    result[str(raw_symbol).strip().upper()] = adapted
+                    sources.extend(item.source_identifier for item in adapted)
+                if sources and ledger is not None:
                     ledger.used(
                         primary_key,
-                        source_identifiers=tuple(dict.fromkeys(primary_sources)),
+                        source_identifiers=tuple(dict.fromkeys(sources)),
                         failed_over=False,
                     )
             except DatabentoOptionsError as error:
@@ -415,9 +540,45 @@ class RedundantOptionsProvider:
                     ledger.failed(primary_key, _failure_class(error))
 
         missing = tuple(
-            raw_symbol for _instrument_id, raw_symbol in normalized if raw_symbol not in result
+            raw_symbol
+            for _instrument_id, raw_symbol in normalized
+            if raw_symbol not in result
         )
-        fallback_error: BaseException | None = None
+        if missing and self.secondary.configured:
+            aliases = {_alpaca_ticker(raw_symbol): raw_symbol for raw_symbol in missing}
+            if ledger is not None:
+                ledger.attempted(secondary_key)
+            try:
+                _session, secondary_bars = self.secondary.latest_daily_bars(
+                    tuple((None, symbol) for symbol in aliases),
+                    as_of=timestamp,
+                    history_days=history_days,
+                )
+                sources: list[str] = []
+                for alpaca_symbol, bars in secondary_bars.items():
+                    normalized_alpaca = _alpaca_ticker(str(alpaca_symbol))
+                    original = aliases.get(normalized_alpaca, normalized_alpaca)
+                    adapted = tuple(
+                        _adapt_alpaca_bar(item, raw_symbol=original) for item in bars
+                    )
+                    result[original] = adapted
+                    sources.extend(item.source_identifier for item in adapted)
+                if sources and ledger is not None:
+                    ledger.used(
+                        secondary_key,
+                        source_identifiers=tuple(dict.fromkeys(sources)),
+                        failed_over=bool(self.primary.configured),
+                    )
+            except AlpacaIndicativeOptionsError as error:
+                secondary_error = error
+                if ledger is not None:
+                    ledger.failed(secondary_key, _failure_class(error))
+
+        missing = tuple(
+            raw_symbol
+            for _instrument_id, raw_symbol in normalized
+            if raw_symbol not in result
+        )
         if missing and self.fallback.configured:
             aliases = {_massive_ticker(raw_symbol): raw_symbol for raw_symbol in missing}
             if ledger is not None:
@@ -428,20 +589,19 @@ class RedundantOptionsProvider:
                     as_of=timestamp,
                     history_days=history_days,
                 )
-                fallback_sources: list[str] = []
+                sources: list[str] = []
                 for massive_symbol, bars in fallback_bars.items():
-                    normalized_massive = str(massive_symbol).strip().upper()
-                    original_symbol = aliases.get(normalized_massive, normalized_massive)
-                    adapted_bars = tuple(
-                        _adapt_massive_bar(item, raw_symbol=original_symbol)
-                        for item in bars
+                    normalized_massive = _massive_ticker(str(massive_symbol))
+                    original = aliases.get(normalized_massive, normalized_massive)
+                    adapted = tuple(
+                        _adapt_massive_bar(item, raw_symbol=original) for item in bars
                     )
-                    result[original_symbol] = adapted_bars
-                    fallback_sources.extend(item.source_identifier for item in adapted_bars)
-                if fallback_sources and ledger is not None:
+                    result[original] = adapted
+                    sources.extend(item.source_identifier for item in adapted)
+                if sources and ledger is not None:
                     ledger.used(
                         fallback_key,
-                        source_identifiers=tuple(dict.fromkeys(fallback_sources)),
+                        source_identifiers=tuple(dict.fromkeys(sources)),
                         failed_over=True,
                     )
             except MassiveOptionsError as error:
@@ -449,12 +609,19 @@ class RedundantOptionsProvider:
                 if ledger is not None:
                     ledger.failed(fallback_key, _failure_class(error))
 
-        if not result and (primary_error is not None or fallback_error is not None):
-            active_error = fallback_error or primary_error
+        if not result and any(
+            error is not None
+            for error in (primary_error, secondary_error, fallback_error)
+        ):
+            active_error = fallback_error or secondary_error or primary_error
             raise RedundantOptionsError(
-                f"{active_error}; certified option daily bars are unavailable; "
+                "Certified option daily bars are unavailable; "
                 f"primary={_failure_class(primary_error)}; "
-                f"fallback={_failure_class(fallback_error)}",
+                f"secondary={_failure_class(secondary_error)}; "
+                f"fallback={_failure_class(fallback_error)}; "
+                f"primary_detail={_failure_detail(primary_error)}; "
+                f"secondary_detail={_failure_detail(secondary_error)}; "
+                f"fallback_detail={_failure_detail(fallback_error)}",
                 status_code=getattr(active_error, "status_code", None),
                 retryable=bool(getattr(active_error, "retryable", False)),
             ) from active_error
@@ -473,13 +640,18 @@ class RedundantOptionsProvider:
 def build_redundant_options_provider(
     *,
     primary: DatabentoOptionsProvider | RedundantOptionsProvider | None = None,
+    secondary: AlpacaIndicativeOptionsProvider | None = None,
     fallback: MassiveOptionsProvider | None = None,
 ) -> RedundantOptionsProvider:
     if isinstance(primary, RedundantOptionsProvider) or bool(
         getattr(primary, "redundant_options_provider", False)
     ):
         return primary  # type: ignore[return-value]
-    return RedundantOptionsProvider(primary=primary, fallback=fallback)
+    return RedundantOptionsProvider(
+        primary=primary,
+        secondary=secondary,
+        fallback=fallback,
+    )
 
 
 __all__ = [
