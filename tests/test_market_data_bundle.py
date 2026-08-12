@@ -76,7 +76,7 @@ def test_selected_provider_bundle_declares_every_required_operating_role() -> No
         "lseg-global-market-data",
         "lseg-global-reference-data",
         "ice-evaluated-fixed-income",
-        "databento-execution-data",
+        "cme-futures-market-data",
         "eodhd-primary",
         "coinbase-crypto-validation",
         "kraken-crypto-validation",
