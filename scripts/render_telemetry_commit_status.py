@@ -16,7 +16,7 @@ _ALLOWED_CAPTURE_STATES = frozenset({"ok", "unavailable", "unsafe_payload"})
 _FAILURE_STATES = frozenset(
     {"failed", "error", "timed_out", "timeout", "cancelled", "canceled", "terminated"}
 )
-_SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+_SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_:-]{1,100}$")
 _MAX_DESCRIPTION_LENGTH = 140
 
 

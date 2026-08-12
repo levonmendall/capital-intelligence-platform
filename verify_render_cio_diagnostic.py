@@ -14,6 +14,7 @@ from typing import Any
 
 
 _FINAL_STATES = frozenset({"completed", "failed"})
+_ACTIVE_STATES = frozenset({"pending", "in_progress", "running"})
 _SUCCESS_STATE = "completed"
 _FORBIDDEN_KEYS = frozenset(
     {
@@ -30,9 +31,10 @@ _FORBIDDEN_KEYS = frozenset(
         "secret",
     }
 )
-_SAFE_PROGRESS_TOKEN = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+_SAFE_PROGRESS_TOKEN = re.compile(r"^[A-Za-z0-9_:-]{1,120}$")
 _PROGRESS_HEARTBEAT_SECONDS = 30.0
 _STALE_PROGRESS_WARNING_SECONDS = 300.0
+_DEFAULT_FRESH_ATTEMPT_GRACE_ATTEMPTS = 8
 
 
 class RenderAuditVerificationError(RuntimeError):
@@ -82,6 +84,9 @@ def _safe_progress_token(value: object, *, fallback: str) -> str:
 
 
 def _progress_stage(payload: Mapping[str, Any]) -> str:
+    durable = _safe_progress_token(payload.get("stage"), fallback="")
+    if durable:
+        return durable
     raw = str(payload.get("detail") or "").strip()
     prefix = "governed_progress="
     if not raw.startswith(prefix):
@@ -101,7 +106,8 @@ def _progress_fields(
     if active_release:
         release_match = (
             "yes"
-            if active_release == expected_release and payload.get("release_matches") is True
+            if active_release == expected_release
+            and payload.get("release_matches") is True
             else "no"
         )
     else:
@@ -160,21 +166,41 @@ def audit_is_current_and_final(
     )
 
 
+def audit_is_current_active(
+    payload: Mapping[str, Any],
+    *,
+    expected_release: str,
+) -> bool:
+    """Return true for a governed exact-release attempt already under way."""
+    return all(
+        (
+            str(payload.get("active_release") or "") == expected_release,
+            payload.get("release_matches") is True,
+            str(payload.get("state") or "") in _ACTIVE_STATES,
+            payload.get("credential_safe") is True,
+            payload.get("paper_only") is True,
+            payload.get("real_money_authorized") is False,
+        )
+    )
+
+
 def audit_is_current_success(
     payload: Mapping[str, Any],
     *,
     expected_release: str,
 ) -> bool:
-    """Return true only for a current successful aggregate release audit.
-
-    A current failed audit can be an intermediate result while the release bootstrap is
-    performing its next bounded cache-resume attempt. The verifier therefore keeps
-    polling until a completed audit appears or its own finite polling budget expires.
-    """
-
     return (
         audit_is_current_and_final(payload, expected_release=expected_release)
         and str(payload.get("state") or "") == _SUCCESS_STATE
+    )
+
+
+def _terminal_failure_detail(payload: Mapping[str, Any]) -> str:
+    return (
+        "current_diagnostic_failed: exact-release diagnostic terminated fail-closed; "
+        f"request_id={str(payload.get('request_id') or '').strip() or 'unavailable'}; "
+        f"state={payload.get('state')!r}; stage={_progress_stage(payload)}; "
+        f"detail={str(payload.get('detail') or '')[:2000]!r}"
     )
 
 
@@ -185,6 +211,7 @@ def poll_render_audit(
     output_path: Path,
     maximum_attempts: int = 120,
     interval_seconds: float = 15.0,
+    fresh_attempt_grace_attempts: int = _DEFAULT_FRESH_ATTEMPT_GRACE_ATTEMPTS,
     fetcher: Callable[[str], Mapping[str, Any]] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
@@ -198,6 +225,9 @@ def poll_render_audit(
         raise ValueError("maximum_attempts must be positive")
     if interval_seconds < 0:
         raise ValueError("interval_seconds cannot be negative")
+    if fresh_attempt_grace_attempts < 1:
+        raise ValueError("fresh_attempt_grace_attempts must be positive")
+
     active_fetcher = fetcher or (lambda target: _fetch_json(target))
     last_detail = "the audit endpoint did not return a current release record"
     started_at = clock()
@@ -205,6 +235,10 @@ def poll_render_audit(
     last_progress_change_at = started_at
     last_heartbeat_at: float | None = None
     last_stale_warning_at: float | None = None
+    baseline_failed_request_id: str | None = None
+    baseline_failed_attempt: int | None = None
+    adopted_active_request_id: str | None = None
+    fresh_attempt_observed = False
 
     for attempt in range(1, maximum_attempts + 1):
         try:
@@ -234,7 +268,9 @@ def poll_render_audit(
                 last_heartbeat_at = now
         else:
             now = clock()
-            progress_key = _progress_fields(payload, expected_release=expected_release)
+            progress_key = _progress_fields(
+                payload, expected_release=expected_release
+            )
             progress_changed = progress_key != last_progress_key
             if progress_changed:
                 last_progress_key = progress_key
@@ -274,6 +310,56 @@ def poll_render_audit(
                 if stale_warning_due:
                     last_stale_warning_at = now
 
+            request_id = str(payload.get("request_id") or "").strip()
+            current_active = audit_is_current_active(
+                payload, expected_release=expected_release
+            )
+            current_failed = bool(
+                audit_is_current_and_final(
+                    payload, expected_release=expected_release
+                )
+                and str(payload.get("state") or "") == "failed"
+            )
+
+            # A scheduled verifier can begin after the release diagnostic has already
+            # started. Adopt that exact-release request rather than demanding a second
+            # request. This preserves freshness while ensuring its terminal failure is
+            # reported as the actual failure instead of being relabeled stale.
+            if (
+                adopted_active_request_id is None
+                and baseline_failed_attempt is None
+                and current_active
+                and request_id
+            ):
+                adopted_active_request_id = request_id
+                fresh_attempt_observed = True
+
+            if (
+                adopted_active_request_id
+                and request_id == adopted_active_request_id
+                and current_failed
+            ):
+                raise RenderAuditVerificationError(
+                    _terminal_failure_detail(payload)
+                )
+
+            if baseline_failed_attempt is None and current_failed:
+                baseline_failed_request_id = request_id
+                baseline_failed_attempt = attempt
+            elif baseline_failed_attempt is not None and not fresh_attempt_observed:
+                if request_id and request_id != baseline_failed_request_id:
+                    fresh_attempt_observed = True
+                    if current_active:
+                        adopted_active_request_id = request_id
+                elif attempt - baseline_failed_attempt >= fresh_attempt_grace_attempts:
+                    stage = _progress_stage(payload)
+                    raise RenderAuditVerificationError(
+                        "stale_diagnostic: exact-release certification did not observe a fresh "
+                        f"diagnostic request within {fresh_attempt_grace_attempts} polling attempts; "
+                        f"request_id={baseline_failed_request_id or 'unavailable'}; "
+                        f"state={payload.get('state')!r}; stage={stage}"
+                    )
+
             if audit_is_current_success(
                 payload,
                 expected_release=expected_release,
@@ -288,6 +374,7 @@ def poll_render_audit(
             )
         if attempt < maximum_attempts:
             sleeper(interval_seconds)
+
     raise RenderAuditVerificationError(
         "Render CIO diagnostic did not publish a current successful aggregate audit "
         f"after {maximum_attempts} attempts; last_detail={last_detail}"
@@ -338,7 +425,9 @@ def verify_complete_all_market_evaluation(
     if unrepresented:
         failed = (*failed, "unrepresented_market_lanes=" + ",".join(unrepresented))
     if failed:
-        detail = str(payload.get("detail") or "no diagnostic detail was published")
+        detail = str(
+            payload.get("detail") or "no diagnostic detail was published"
+        )
         limitations = payload.get("comprehensive_discovery_limitations")
         raise RenderAuditVerificationError(
             "all-market CIO evaluation failed closed; failed="
@@ -354,6 +443,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--maximum-attempts", type=int, default=120)
     parser.add_argument("--interval-seconds", type=float, default=15.0)
+    parser.add_argument(
+        "--fresh-attempt-grace-attempts",
+        type=int,
+        default=_DEFAULT_FRESH_ATTEMPT_GRACE_ATTEMPTS,
+    )
     args = parser.parse_args(argv)
     try:
         payload = poll_render_audit(
@@ -362,6 +456,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_path=args.output,
             maximum_attempts=args.maximum_attempts,
             interval_seconds=args.interval_seconds,
+            fresh_attempt_grace_attempts=args.fresh_attempt_grace_attempts,
         )
         verify_complete_all_market_evaluation(
             payload,
