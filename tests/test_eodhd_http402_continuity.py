@@ -34,14 +34,14 @@ def provider(
     *,
     cache_dir: Path,
     now: datetime = NOW,
-    calls: list[str] | None = None,
+    calls: list[tuple[str, dict[str, object]]] | None = None,
 ) -> EODHDProvider:
     queue = list(responses)
 
     def get(url, *, params, timeout):
-        del params, timeout
+        del timeout
         if calls is not None:
-            calls.append(url)
+            calls.append((url, dict(params)))
         return queue.pop(0)
 
     return EODHDProvider(
@@ -90,7 +90,7 @@ def test_recent_directory_cache_skips_status_probe(
         cache_dir=tmp_path,
     ).fetch_dataset(query())
     later = NOW + timedelta(hours=2)
-    calls: list[str] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
     snapshot = provider(
         [Response({}, status_code)],
@@ -107,7 +107,7 @@ def test_recent_directory_cache_skips_status_probe(
 
 
 @pytest.mark.parametrize("status_code", (402, 404))
-def test_lse_recent_directory_cache_skips_failed_refresh(
+def test_lse_recent_active_cache_keeps_bounded_delisted_probe(
     tmp_path: Path,
     status_code: int,
 ) -> None:
@@ -116,10 +116,10 @@ def test_lse_recent_directory_cache_skips_failed_refresh(
         cache_dir=tmp_path,
     ).fetch_dataset(query(provider_symbol="LSE"))
     later = NOW + timedelta(hours=2)
-    calls: list[str] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
     snapshot = provider(
-        [Response({}, status_code), Response({}, status_code)],
+        [Response({}, status_code)],
         cache_dir=tmp_path,
         now=later,
         calls=calls,
@@ -129,8 +129,12 @@ def test_lse_recent_directory_cache_skips_failed_refresh(
     assert snapshot.observed_at == NOW
     assert snapshot.payload["active"] == live_payload("LSE")
     assert snapshot.payload["delisted"] == []
-    assert calls == []
+    assert len(calls) == 1
+    assert calls[0][0].endswith("/exchange-symbol-list/LSE")
+    assert calls[0][1].get("delisted") == 1
     assert any("cache before live refresh" in item for item in snapshot.limitations)
+    assert any("delisted-symbol directory" in item for item in snapshot.limitations)
+    assert any(f"HTTP {status_code}" in item for item in snapshot.limitations)
 
 
 def test_http_402_without_recent_active_cache_remains_fail_closed(
