@@ -22,6 +22,9 @@ _ACTIVE_STATES = frozenset({"pending", "in_progress"})
 _FINAL_STATES = frozenset({"completed", "failed"})
 _PROGRESS_ENABLED = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED"
 _CONTEXT_STATE_FILENAME = "production-context-publication-state.json"
+_DEFAULT_MEMORY_HIGH_WATER_FRACTION = 0.70
+_DEFAULT_MEMORY_RESERVE_MB = 640.0
+_RENDER_MEMORY_LIMIT_FALLBACK_MB = 2048.0
 _PROGRESS_STAGE_ALIASES = {
     "catalog_databento_options": "catalog_options",
     "catalog_databento_options_complete": "catalog_options_complete",
@@ -90,6 +93,13 @@ _PROGRESS_METRICS = frozenset(
         "processed_records",
         "total_records",
         "chunk_records",
+        "rss_kib",
+        "hwm_kib",
+        "container_current_kib",
+        "container_limit_kib",
+        "memory_reserve_kib",
+        "governed_boundary_kib",
+        "governed_headroom_kib",
     }
 )
 
@@ -113,6 +123,167 @@ def _optional_datetime(value: object) -> datetime | None:
     return _aware(parsed, field_name="diagnostic timestamp")
 
 
+def _normalize_progress_metrics(metrics: Mapping[str, object] | None) -> tuple[tuple[str, int], ...]:
+    normalized: list[tuple[str, int]] = []
+    for raw_name, raw_value in sorted((metrics or {}).items()):
+        name = str(raw_name).strip().lower()
+        if name not in _PROGRESS_METRICS:
+            raise ValueError("manual CIO diagnostic progress metric name is invalid")
+        if isinstance(raw_value, bool) or not isinstance(raw_value, int) or raw_value < 0:
+            raise ValueError("manual CIO diagnostic progress metrics must be nonnegative integers")
+        normalized.append((name, raw_value))
+    return tuple(normalized)
+
+
+def _read_kib_field(path: Path, field: str) -> int | None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    prefix = field + ":"
+    for line in content.splitlines():
+        if not line.startswith(prefix):
+            continue
+        parts = line[len(prefix) :].strip().split()
+        if not parts:
+            return None
+        try:
+            return int(parts[0])
+        except ValueError:
+            return None
+    return None
+
+
+def _read_byte_counter(path: Path) -> int | None:
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not raw or raw == "max":
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def _cgroup_memory_kib() -> tuple[int | None, int | None]:
+    v2_current = _read_byte_counter(Path("/sys/fs/cgroup/memory.current"))
+    v2_limit = _read_byte_counter(Path("/sys/fs/cgroup/memory.max"))
+    if v2_current is not None and v2_limit is not None and v2_limit > 0:
+        return v2_current // 1024, v2_limit // 1024
+
+    v1_current = _read_byte_counter(Path("/sys/fs/cgroup/memory/memory.usage_in_bytes"))
+    v1_limit = _read_byte_counter(Path("/sys/fs/cgroup/memory/memory.limit_in_bytes"))
+    if v1_current is not None and v1_limit is not None and 0 < v1_limit < (1 << 60):
+        return v1_current // 1024, v1_limit // 1024
+    return None, None
+
+
+def _proc_total_rss_kib() -> int | None:
+    total = 0
+    observed = False
+    try:
+        entries = tuple(Path("/proc").iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        rss = _read_kib_field(entry / "status", "VmRSS")
+        if rss is None:
+            continue
+        observed = True
+        total += rss
+    return total if observed else None
+
+
+def _configured_memory_limit_kib(values: Mapping[str, str]) -> int | None:
+    raw = values.get("CAPITAL_INTELLIGENCE_CONTAINER_MEMORY_LIMIT_MB", "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return None
+        if value <= 0:
+            return None
+        return int(value * 1024)
+    if values.get("RENDER", "").strip().lower() == "true":
+        return int(_RENDER_MEMORY_LIMIT_FALLBACK_MB * 1024)
+    return None
+
+
+def _container_memory_kib(values: Mapping[str, str]) -> tuple[int | None, int | None]:
+    current, limit = _cgroup_memory_kib()
+    if current is not None and limit is not None:
+        return current, limit
+    configured_limit = _configured_memory_limit_kib(values)
+    if configured_limit is None:
+        return None, None
+    return _proc_total_rss_kib(), configured_limit
+
+
+def _configured_memory_reserve_kib(values: Mapping[str, str]) -> int | None:
+    raw = values.get("CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_MEMORY_RESERVE_MB", "").strip()
+    if not raw:
+        value = _DEFAULT_MEMORY_RESERVE_MB
+    else:
+        try:
+            value = float(raw)
+        except ValueError:
+            return None
+    if value < 256.0:
+        return None
+    return int(value * 1024)
+
+
+def _configured_memory_high_water_fraction(values: Mapping[str, str]) -> float | None:
+    raw = values.get(
+        "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_MEMORY_HIGH_WATER_FRACTION", ""
+    ).strip()
+    if not raw:
+        return _DEFAULT_MEMORY_HIGH_WATER_FRACTION
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if 0.5 <= value < 0.9 else None
+
+
+def _terminal_screening_resource_metrics(values: Mapping[str, str]) -> dict[str, int]:
+    """Return best-effort, credential-safe memory counters at a screening chunk boundary."""
+
+    metrics: dict[str, int] = {}
+    status = Path(f"/proc/{os.getpid()}/status")
+    rss_kib = _read_kib_field(status, "VmRSS")
+    hwm_kib = _read_kib_field(status, "VmHWM")
+    if rss_kib is not None and rss_kib >= 0:
+        metrics["rss_kib"] = rss_kib
+    if hwm_kib is not None and hwm_kib >= 0:
+        metrics["hwm_kib"] = hwm_kib
+
+    current_kib, limit_kib = _container_memory_kib(values)
+    if current_kib is not None and current_kib >= 0:
+        metrics["container_current_kib"] = current_kib
+    if limit_kib is not None and limit_kib > 0:
+        metrics["container_limit_kib"] = limit_kib
+
+    reserve_kib = _configured_memory_reserve_kib(values)
+    high_water_fraction = _configured_memory_high_water_fraction(values)
+    if reserve_kib is not None:
+        metrics["memory_reserve_kib"] = reserve_kib
+    if limit_kib is not None and limit_kib > 0 and reserve_kib is not None and high_water_fraction is not None:
+        fractional = int(limit_kib * high_water_fraction)
+        reserve_based = limit_kib - reserve_kib
+        if reserve_based <= 0:
+            reserve_based = int(limit_kib * 0.5)
+        boundary_kib = max(1, min(fractional, reserve_based))
+        metrics["governed_boundary_kib"] = boundary_kib
+        if current_kib is not None:
+            metrics["governed_headroom_kib"] = max(0, boundary_kib - current_kib)
+    return metrics
+
+
 @dataclass(frozen=True, slots=True)
 class ManualCIODiagnosticRequest:
     request_id: str
@@ -125,6 +296,8 @@ class ManualCIODiagnosticRequest:
     snapshot_identifier: str | None = None
     detail: str | None = None
     progress_stage: str | None = None
+    progress_metrics: tuple[tuple[str, int], ...] = ()
+    progress_recorded_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id.strip():
@@ -136,6 +309,8 @@ class ManualCIODiagnosticRequest:
             _aware(self.started_at, field_name="started_at")
         if self.completed_at is not None:
             _aware(self.completed_at, field_name="completed_at")
+        if self.progress_recorded_at is not None:
+            _aware(self.progress_recorded_at, field_name="progress_recorded_at")
         if self.state not in _ACTIVE_STATES | _FINAL_STATES:
             raise ValueError("unsupported manual diagnostic state")
         if self.state == "in_progress" and self.started_at is None:
@@ -144,6 +319,8 @@ class ManualCIODiagnosticRequest:
             raise ValueError("final diagnostics require completed_at")
         if self.progress_stage is not None and not self.progress_stage.strip():
             raise ValueError("progress_stage cannot be empty")
+        if _normalize_progress_metrics(dict(self.progress_metrics)) != self.progress_metrics:
+            raise ValueError("progress_metrics must be normalized and unique")
 
     @property
     def trigger_key(self) -> str:
@@ -162,6 +339,10 @@ class ManualCIODiagnosticRequest:
             "snapshot_identifier": self.snapshot_identifier,
             "detail": self.detail,
             "progress_stage": self.progress_stage,
+            "progress_metrics": dict(self.progress_metrics),
+            "progress_recorded_at": None
+            if self.progress_recorded_at is None
+            else self.progress_recorded_at.astimezone(timezone.utc).isoformat(),
             "paper_only": True,
             "real_money_authorized": False,
         }
@@ -170,6 +351,13 @@ class ManualCIODiagnosticRequest:
     def from_dict(cls, payload: Mapping[str, Any]) -> "ManualCIODiagnosticRequest":
         if payload.get("schema_version") != _SCHEMA_VERSION:
             raise ValueError("unsupported manual CIO diagnostic schema")
+        raw_progress_metrics = payload.get("progress_metrics")
+        if raw_progress_metrics is None:
+            progress_metrics: tuple[tuple[str, int], ...] = ()
+        elif isinstance(raw_progress_metrics, Mapping):
+            progress_metrics = _normalize_progress_metrics(raw_progress_metrics)
+        else:
+            raise ValueError("manual CIO diagnostic progress_metrics must be an object")
         return cls(
             request_id=str(payload.get("request_id") or "").strip(),
             requested_at=_optional_datetime(payload.get("requested_at")) or (_ for _ in ()).throw(ValueError("requested_at is required")),
@@ -181,6 +369,8 @@ class ManualCIODiagnosticRequest:
             snapshot_identifier=None if payload.get("snapshot_identifier") is None else str(payload.get("snapshot_identifier")).strip() or None,
             detail=None if payload.get("detail") is None else str(payload.get("detail"))[:2000],
             progress_stage=None if payload.get("progress_stage") is None else str(payload.get("progress_stage")).strip() or None,
+            progress_metrics=progress_metrics,
+            progress_recorded_at=_optional_datetime(payload.get("progress_recorded_at")),
         )
 
 
@@ -249,14 +439,12 @@ def record_manual_cio_diagnostic_progress(
         len(lane_stage) == 2 and lane_stage[0] in _PROGRESS_LANE_STAGES and lane_stage[1] in _PROGRESS_LANES
     ):
         raise ValueError("manual CIO diagnostic progress stage is invalid")
-    normalized_metrics: list[tuple[str, int]] = []
-    for raw_name, raw_value in sorted((metrics or {}).items()):
-        name = str(raw_name).strip().lower()
-        if name not in _PROGRESS_METRICS:
-            raise ValueError("manual CIO diagnostic progress metric name is invalid")
-        if isinstance(raw_value, bool) or not isinstance(raw_value, int) or raw_value < 0:
-            raise ValueError("manual CIO diagnostic progress metrics must be nonnegative integers")
-        normalized_metrics.append((name, raw_value))
+
+    combined_metrics: dict[str, object] = dict(metrics or {})
+    if lane_stage[0] == "terminal_screening_chunk":
+        for name, value in _terminal_screening_resource_metrics(resolved).items():
+            combined_metrics.setdefault(name, value)
+    normalized_metrics = _normalize_progress_metrics(combined_metrics)
 
     path = diagnostic_request_path(resolved)
     existing = _read(path)
@@ -273,7 +461,14 @@ def record_manual_cio_diagnostic_progress(
     if cycle_key is None and normalized_stage == "six_specialist_committee_cio_cycle":
         cycle_key = _published_context_cycle(path)
 
-    updated = replace(existing, detail=message, progress_stage=normalized_stage, cycle_key=cycle_key)
+    updated = replace(
+        existing,
+        detail=message,
+        progress_stage=normalized_stage,
+        progress_metrics=normalized_metrics,
+        progress_recorded_at=_utc_now(),
+        cycle_key=cycle_key,
+    )
     _write(path, updated)
     return updated
 
