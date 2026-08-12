@@ -30,9 +30,10 @@ _FORBIDDEN_KEYS = frozenset(
         "secret",
     }
 )
-_SAFE_PROGRESS_TOKEN = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+_SAFE_PROGRESS_TOKEN = re.compile(r"^[A-Za-z0-9_:-]{1,120}$")
 _PROGRESS_HEARTBEAT_SECONDS = 30.0
 _STALE_PROGRESS_WARNING_SECONDS = 300.0
+_DEFAULT_FRESH_ATTEMPT_GRACE_ATTEMPTS = 8
 
 
 class RenderAuditVerificationError(RuntimeError):
@@ -82,6 +83,9 @@ def _safe_progress_token(value: object, *, fallback: str) -> str:
 
 
 def _progress_stage(payload: Mapping[str, Any]) -> str:
+    durable = _safe_progress_token(payload.get("stage"), fallback="")
+    if durable:
+        return durable
     raw = str(payload.get("detail") or "").strip()
     prefix = "governed_progress="
     if not raw.startswith(prefix):
@@ -185,6 +189,7 @@ def poll_render_audit(
     output_path: Path,
     maximum_attempts: int = 120,
     interval_seconds: float = 15.0,
+    fresh_attempt_grace_attempts: int = _DEFAULT_FRESH_ATTEMPT_GRACE_ATTEMPTS,
     fetcher: Callable[[str], Mapping[str, Any]] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
@@ -198,6 +203,8 @@ def poll_render_audit(
         raise ValueError("maximum_attempts must be positive")
     if interval_seconds < 0:
         raise ValueError("interval_seconds cannot be negative")
+    if fresh_attempt_grace_attempts < 1:
+        raise ValueError("fresh_attempt_grace_attempts must be positive")
     active_fetcher = fetcher or (lambda target: _fetch_json(target))
     last_detail = "the audit endpoint did not return a current release record"
     started_at = clock()
@@ -205,6 +212,9 @@ def poll_render_audit(
     last_progress_change_at = started_at
     last_heartbeat_at: float | None = None
     last_stale_warning_at: float | None = None
+    baseline_failed_request_id: str | None = None
+    baseline_failed_attempt: int | None = None
+    fresh_attempt_observed = False
 
     for attempt in range(1, maximum_attempts + 1):
         try:
@@ -273,6 +283,26 @@ def poll_render_audit(
                 last_heartbeat_at = now
                 if stale_warning_due:
                     last_stale_warning_at = now
+
+            request_id = str(payload.get("request_id") or "").strip()
+            current_failed = bool(
+                audit_is_current_and_final(payload, expected_release=expected_release)
+                and str(payload.get("state") or "") == "failed"
+            )
+            if baseline_failed_attempt is None and current_failed:
+                baseline_failed_request_id = request_id
+                baseline_failed_attempt = attempt
+            elif baseline_failed_attempt is not None and not fresh_attempt_observed:
+                if request_id and request_id != baseline_failed_request_id:
+                    fresh_attempt_observed = True
+                elif attempt - baseline_failed_attempt >= fresh_attempt_grace_attempts:
+                    stage = _progress_stage(payload)
+                    raise RenderAuditVerificationError(
+                        "stale_diagnostic: exact-release certification did not observe a fresh "
+                        f"diagnostic request within {fresh_attempt_grace_attempts} polling attempts; "
+                        f"request_id={baseline_failed_request_id or 'unavailable'}; "
+                        f"state={payload.get('state')!r}; stage={stage}"
+                    )
 
             if audit_is_current_success(
                 payload,
@@ -354,6 +384,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--maximum-attempts", type=int, default=120)
     parser.add_argument("--interval-seconds", type=float, default=15.0)
+    parser.add_argument(
+        "--fresh-attempt-grace-attempts",
+        type=int,
+        default=_DEFAULT_FRESH_ATTEMPT_GRACE_ATTEMPTS,
+    )
     args = parser.parse_args(argv)
     try:
         payload = poll_render_audit(
@@ -362,6 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_path=args.output,
             maximum_attempts=args.maximum_attempts,
             interval_seconds=args.interval_seconds,
+            fresh_attempt_grace_attempts=args.fresh_attempt_grace_attempts,
         )
         verify_complete_all_market_evaluation(
             payload,
