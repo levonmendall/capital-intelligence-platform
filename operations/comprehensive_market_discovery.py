@@ -40,6 +40,7 @@ _MANIFEST_ENCODER = json.JSONEncoder(
     separators=(",", ":"),
     sort_keys=True,
 )
+_PRODUCTION_TERMINAL_SCREENING_CHUNK_SIZE = 64
 
 
 class _StreamingManifestFingerprint:
@@ -345,6 +346,7 @@ def discover_comprehensive_markets(
                     as_of=timestamp,
                     policy=resolved,
                     progress_label=asset_class.value,
+                    chunk_size=_PRODUCTION_TERMINAL_SCREENING_CHUNK_SIZE,
                 )
             except BoundedTerminalScreeningError as error:
                 raise _base._legacy.ComprehensiveMarketDiscoveryError(
