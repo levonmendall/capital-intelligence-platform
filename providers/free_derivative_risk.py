@@ -1,10 +1,11 @@
 """Free derivative-risk resources for governed paper-only analysis.
 
-CME SPAN/SPAN 2 and OCC OFRA are consumed as externally bound clearing-risk
-artifacts.  This module validates provenance and availability, but deliberately does
-not infer instrument margin requirements from opaque clearing files.  The existing
-canonical volatility-surface compiler is exposed as a derived-data provider without
-self-approving or self-certifying its model.
+CME SPAN/SPAN 2 and OCC OFRA are consumed as clearing-risk artifacts. CME can be
+retrieved directly through an entitled DataMine API ID/password or through an
+externally bound local/provider file. This module validates provenance and
+availability, but deliberately does not infer instrument margin requirements from
+opaque clearing files. The existing canonical volatility-surface compiler is exposed
+as a derived-data provider without self-approving or self-certifying its model.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from data.derivative_market import (
     VolatilitySurfaceSnapshot,
     build_volatility_surface,
 )
+from providers.cme_datamine_span import CmeDataMineSpanClient, CmeDataMineSpanError
 
 
 class FreeDerivativeRiskError(RuntimeError):
@@ -63,6 +65,11 @@ class ClearingRiskResourceEvidence:
     content_sha256: str
     byte_count: int
     source_identifier: str
+    access_mode: str = "bound-resource"
+    source_file_id: str | None = None
+    entitled_match_count: int | None = None
+    catalog_pattern_count: int | None = None
+    selection_policy: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +80,11 @@ class ClearingRiskResourceEvidence:
             "content_sha256": self.content_sha256,
             "byte_count": self.byte_count,
             "source_identifier": self.source_identifier,
+            "access_mode": self.access_mode,
+            "source_file_id": self.source_file_id,
+            "entitled_match_count": self.entitled_match_count,
+            "catalog_pattern_count": self.catalog_pattern_count,
+            "selection_policy": self.selection_policy,
             "individual_margin_requirement_inferred": False,
             "decision_authority_granted": False,
             "execution_authority_granted": False,
@@ -90,7 +102,7 @@ class FreeDerivativeRiskPreflight:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": "free-derivative-risk-preflight.v1",
+            "schema_version": "free-derivative-risk-preflight.v2",
             "evaluated_at": self.evaluated_at.isoformat(),
             "cme_span": dict(self.cme),
             "occ_ofra": dict(self.occ),
@@ -256,11 +268,81 @@ class _BoundRiskResourceProvider:
 
 
 class CmeSpanRiskProvider(_BoundRiskResourceProvider):
-    """Bound CME DataMine-delivered SPAN/SPAN 2 risk parameter evidence."""
+    """CME SPAN/SPAN 2 evidence via DataMine API or a bounded file binding."""
 
     provider_id = "cme-margin-data"
     binding_environment = "CAPITAL_INTELLIGENCE_CME_MARGIN_BINDING"
+    api_id_environment = "CAPITAL_INTELLIGENCE_CME_DATAMINE_API_ID"
+    api_password_environment = "CAPITAL_INTELLIGENCE_CME_DATAMINE_API_PASSWORD"
     allowed_host_suffixes = ("cmegroup.com",)
+
+    def __init__(
+        self,
+        binding: str | None = None,
+        *,
+        api_id: str | None = None,
+        api_password: str | None = None,
+        environment: Mapping[str, str] | None = None,
+        timeout: int = 20,
+        maximum_bytes: int = 64 * 1024 * 1024,
+        http_get=None,
+        http_post=None,
+    ) -> None:
+        env = dict(os.environ if environment is None else environment)
+        super().__init__(
+            binding or env.get(self.binding_environment),
+            timeout=timeout,
+            maximum_bytes=maximum_bytes,
+            http_get=http_get,
+        )
+        self.api_id = _text(api_id) or _text(env.get(self.api_id_environment))
+        self.api_password = _text(api_password) or _text(env.get(self.api_password_environment))
+        self._http_post = http_post or requests.post
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.binding or self.api_id or self.api_password)
+
+    def fetch(self, *, as_of: datetime) -> ClearingRiskResourceEvidence:
+        timestamp = _aware(as_of)
+        if self.api_id or self.api_password:
+            if not self.api_id or not self.api_password:
+                raise FreeDerivativeRiskError(
+                    "CME DataMine requires both API ID and API password"
+                )
+            try:
+                download = CmeDataMineSpanClient(
+                    self.api_id,
+                    self.api_password,
+                    timeout=self.timeout,
+                    maximum_bytes=self.maximum_bytes,
+                    http_get=self._http_get,
+                    http_post=self._http_post,
+                ).fetch_latest(as_of=timestamp)
+            except (CmeDataMineSpanError, TypeError, ValueError) as error:
+                raise FreeDerivativeRiskError(str(error)) from error
+            digest = hashlib.sha256(download.content).hexdigest()
+            return ClearingRiskResourceEvidence(
+                provider_id=self.provider_id,
+                dataset_role=self.dataset_role,
+                format_hint=self._format_hint(
+                    download.file.file_name or download.file.file_id,
+                    download.content,
+                ),
+                retrieved_at=timestamp,
+                content_sha256=digest,
+                byte_count=len(download.content),
+                source_identifier=(
+                    f"{self.provider_id}:{self.dataset_role}:datamine:"
+                    f"{download.file.file_id}:{digest[:16]}"
+                ),
+                access_mode="cme-datamine-api",
+                source_file_id=download.file.file_id,
+                entitled_match_count=download.entitled_match_count,
+                catalog_pattern_count=download.catalog_pattern_count,
+                selection_policy=download.selection_policy,
+            )
+        return super().fetch(as_of=timestamp)
 
 
 class OccOfraRiskProvider(_BoundRiskResourceProvider):
@@ -268,7 +350,9 @@ class OccOfraRiskProvider(_BoundRiskResourceProvider):
 
     provider_id = "occ-margin-data"
     binding_environment = "CAPITAL_INTELLIGENCE_OCC_MARGIN_BINDING"
-    allowed_host_suffixes = ("theocc.com",)
+    # OCC OFRA/SPAN files can be delivered from OCC itself or through CME's
+    # continuing SPAN distribution channel for partner-exchange files.
+    allowed_host_suffixes = ("theocc.com", "cmegroup.com")
 
 
 class DerivedVolatilitySurfaceProvider:
@@ -305,8 +389,6 @@ class DerivedVolatilitySurfaceProvider:
         minimum_expirations: int = 2,
         minimum_strikes_per_expiration: int = 5,
     ) -> VolatilitySurfaceSnapshot:
-        # Mathematical compilation is intentionally separate from governance approval.
-        # Successful compilation cannot manufacture an approval/certification record.
         try:
             return build_volatility_surface(
                 quotes,
@@ -336,6 +418,7 @@ def preflight_free_derivative_risk_resources(
     as_of: datetime,
     environment: Mapping[str, str] | None = None,
     http_get=None,
+    http_post=None,
 ) -> FreeDerivativeRiskPreflight:
     """Validate configured free derivative-risk resources without activating them."""
 
@@ -344,8 +427,22 @@ def preflight_free_derivative_risk_resources(
     blockers: list[str] = []
     statuses: dict[str, dict[str, Any]] = {}
     specs = (
-        ("cme", CmeSpanRiskProvider(env.get("CAPITAL_INTELLIGENCE_CME_MARGIN_BINDING"), http_get=http_get)),
-        ("occ", OccOfraRiskProvider(env.get("CAPITAL_INTELLIGENCE_OCC_MARGIN_BINDING"), http_get=http_get)),
+        (
+            "cme",
+            CmeSpanRiskProvider(
+                env.get("CAPITAL_INTELLIGENCE_CME_MARGIN_BINDING"),
+                environment=env,
+                http_get=http_get,
+                http_post=http_post,
+            ),
+        ),
+        (
+            "occ",
+            OccOfraRiskProvider(
+                env.get("CAPITAL_INTELLIGENCE_OCC_MARGIN_BINDING"),
+                http_get=http_get,
+            ),
+        ),
     )
     for name, provider in specs:
         if not provider.configured:
