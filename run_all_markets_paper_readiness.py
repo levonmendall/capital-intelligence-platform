@@ -21,6 +21,7 @@ from data.derivative_market import DerivativeDataCertificationReport
 from operations.paper_market_readiness import (
     assess_universal_paper_market_readiness,
 )
+from providers.free_derivative_risk import preflight_free_derivative_risk_resources
 
 
 def _timestamp(value: str | None) -> datetime:
@@ -102,6 +103,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         environment = _env_file(args.env_file)
+        evaluated_at = _timestamp(args.evaluated_at)
+        derivative_preflight = preflight_free_derivative_risk_resources(
+            as_of=evaluated_at,
+            environment=environment,
+        )
         canonical_binding_variables = (
             "CAPITAL_INTELLIGENCE_SECURITY_MASTER_DATASET_BINDING",
             "CAPITAL_INTELLIGENCE_UNIVERSE_METRICS_DATASET_BINDING",
@@ -127,7 +133,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             information_manifest=load_maximum_decision_information_manifest(
                 args.information_manifest
             ),
-            evaluated_at=_timestamp(args.evaluated_at),
+            evaluated_at=evaluated_at,
             environment=environment,
             provider_activation_store=SQLiteProviderActivationStore(
                 args.provider_activation_database
@@ -159,6 +165,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         payload = report.to_dict()
+        payload["free_derivative_risk_preflight"] = derivative_preflight.to_dict()
+        resource_ready = not derivative_preflight.blockers
+        if derivative_preflight.blockers:
+            payload["paper_ready"] = False
+            payload["free_derivative_risk_blockers"] = list(
+                derivative_preflight.blockers
+            )
         if args.output:
             destination = Path(args.output).expanduser()
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -168,10 +181,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         print(json.dumps(payload, indent=2, sort_keys=True))
         if args.require_paper_ready:
-            return 0 if report.paper_ready else 3
+            return 0 if report.paper_ready and resource_ready else 3
         if args.require_internal_ready:
-            return 0 if report.internal_ready else 3
-        return 0 if report.paper_ready else 2 if report.internal_ready else 3
+            return 0 if report.internal_ready and resource_ready else 3
+        if report.paper_ready and resource_ready:
+            return 0
+        if report.internal_ready and resource_ready:
+            return 2
+        return 3
     except Exception as error:
         if isinstance(error, (KeyboardInterrupt, SystemExit)):
             raise
