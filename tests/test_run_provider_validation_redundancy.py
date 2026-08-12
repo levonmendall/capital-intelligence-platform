@@ -159,4 +159,9 @@ def test_missing_redundant_provider_remains_fail_closed() -> None:
     assert report.failed_required_checks == (
         "databento_opra_definitions",
         "databento_opra_daily_bars",
+        "governed_opra_definitions",
     )
+    governed = {item.name: item for item in report.checks}["governed_opra_definitions"]
+    assert governed.state == "failed"
+    assert governed.required is True
+    assert "not configured" in governed.detail
