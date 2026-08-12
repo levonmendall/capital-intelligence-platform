@@ -1,19 +1,21 @@
 """Bound terminal all-market screening without changing admission semantics.
 
 The canonical provider-factor publication remains complete on disk. Provider signals,
-completed screening state, global sleeve rankings, and the complete-consideration
-selection are spooled through SQLite so chunk and finalization boundaries do not create
-multiple all-market Python object graphs. Global ranking is performed only after the
-complete lane is screened; no market, factor, evidence, liquidity, freshness, ranking,
-threshold, or authority rule is changed.
+completed screening state, global sleeve rankings, complete-consideration selection,
+and retained evidence are spooled through SQLite so screening and finalization do not
+create overlapping all-market Python object graphs. Global ranking is performed only
+after the complete lane is screened; no market, factor, evidence, liquidity, freshness,
+ranking, threshold, or authority rule is changed.
 """
 from __future__ import annotations
 
+import gc
 import json
 import os
 import re
 import sqlite3
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -63,7 +65,7 @@ class BoundedTerminalPreselection:
     nominated: tuple[object, ...]
     signal_prices: Mapping[str, float]
     signal_observed_at: Mapping[str, datetime]
-    preselection_evidence: tuple[tuple[str, tuple[str, ...]], ...]
+    preselection_evidence: Sequence[tuple[str, tuple[str, ...]]]
     provider_factor_authority_established: bool
     publication_failure_reasons: tuple[str, ...]
     screened_signal_count: int
@@ -106,6 +108,7 @@ class _PublicationSignalSpool:
         "connection",
         "metadata",
         "signal_count",
+        "_closed",
     )
 
     def __init__(self, publication_path: Path) -> None:
@@ -113,6 +116,7 @@ class _PublicationSignalSpool:
         self._temporary = tempfile.TemporaryDirectory(prefix="cio-terminal-screening-")
         self.database_path = Path(self._temporary.name) / "signals.sqlite3"
         self.connection = sqlite3.connect(self.database_path)
+        self._closed = False
         _configure_spool_connection(self.connection)
         self.connection.execute(
             "CREATE TABLE signals (symbol TEXT PRIMARY KEY, payload TEXT NOT NULL)"
@@ -122,6 +126,9 @@ class _PublicationSignalSpool:
         self._stream_publication()
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         try:
             self.connection.close()
         finally:
@@ -261,7 +268,8 @@ class _PublicationSignalSpool:
         self.release_cached_pages()
 
     def release_cached_pages(self) -> None:
-        _advise_file_cache_dontneed(self.database_path)
+        if not self._closed:
+            _advise_file_cache_dontneed(self.database_path)
 
     def signals_for(self, records: Sequence[object]) -> dict[str, object]:
         result: dict[str, object] = {}
@@ -300,14 +308,22 @@ class _PublicationSignalSpool:
 
 
 class _TerminalScreeningStateSpool:
-    """Persist screened state, global rankings, and selection outside the Python heap."""
+    """Persist screened state, global rankings, selection, and evidence on disk."""
 
-    __slots__ = ("_temporary", "database_path", "connection")
+    __slots__ = (
+        "_temporary",
+        "database_path",
+        "connection",
+        "_detached",
+        "_closed",
+    )
 
     def __init__(self) -> None:
         self._temporary = tempfile.TemporaryDirectory(prefix="cio-terminal-state-")
         self.database_path = Path(self._temporary.name) / "screening.sqlite3"
         self.connection = sqlite3.connect(self.database_path)
+        self._detached = False
+        self._closed = False
         _configure_spool_connection(self.connection)
         self.connection.executescript(
             """
@@ -345,16 +361,31 @@ class _TerminalScreeningStateSpool:
         )
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         try:
             self.connection.close()
         finally:
             self._temporary.cleanup()
 
+    def detach(self) -> "_TerminalScreeningStateSpool":
+        """Transfer lifecycle ownership to a returned disk-backed view."""
+        self._detached = True
+        return self
+
     def __enter__(self) -> "_TerminalScreeningStateSpool":
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        self.close()
+        if not self._detached:
+            self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def append(
         self,
@@ -419,13 +450,21 @@ class _TerminalScreeningStateSpool:
                 observed_at,
                 indicative_price,
                 evidence_json,
-                None if values[CandidateSleeve.QUALITY] is None else float(values[CandidateSleeve.QUALITY]),
+                None
+                if values[CandidateSleeve.QUALITY] is None
+                else float(values[CandidateSleeve.QUALITY]),
                 ties[CandidateSleeve.QUALITY],
-                None if values[CandidateSleeve.VALUE] is None else float(values[CandidateSleeve.VALUE]),
+                None
+                if values[CandidateSleeve.VALUE] is None
+                else float(values[CandidateSleeve.VALUE]),
                 ties[CandidateSleeve.VALUE],
-                None if values[CandidateSleeve.MOMENTUM] is None else float(values[CandidateSleeve.MOMENTUM]),
+                None
+                if values[CandidateSleeve.MOMENTUM] is None
+                else float(values[CandidateSleeve.MOMENTUM]),
                 ties[CandidateSleeve.MOMENTUM],
-                None if values[CandidateSleeve.CARRY] is None else float(values[CandidateSleeve.CARRY]),
+                None
+                if values[CandidateSleeve.CARRY] is None
+                else float(values[CandidateSleeve.CARRY]),
                 ties[CandidateSleeve.CARRY],
                 ties[CandidateSleeve.DIVERSIFICATION],
                 None
@@ -441,7 +480,8 @@ class _TerminalScreeningStateSpool:
             )
 
     def release_cached_pages(self) -> None:
-        _advise_file_cache_dontneed(self.database_path)
+        if not self._closed:
+            _advise_file_cache_dontneed(self.database_path)
 
     def commit_chunk(self) -> None:
         self.connection.commit()
@@ -587,13 +627,12 @@ class _TerminalScreeningStateSpool:
     def measured_rows(self):
         return self.connection.execute(
             """
-            SELECT selection.position, screened.ordinal,
+            SELECT selection.position,
                    screened.quality_score, screened.value_score,
                    screened.momentum_score, screened.carry_score,
                    screened.diversification_score,
                    screened.improving_conditions_score,
-                   screened.observed_at, screened.indicative_price,
-                   screened.evidence_json
+                   screened.observed_at
             FROM selection
             JOIN screened ON screened.symbol = selection.symbol
             ORDER BY selection.position
@@ -627,10 +666,99 @@ class _TerminalScreeningStateSpool:
             )
         }
 
+    def evidence_count(self) -> int:
+        row = self.connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM selection
+            JOIN screened ON screened.symbol = selection.symbol
+            WHERE screened.evidence_json IS NOT NULL
+            """
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def evidence_rows(self) -> Iterator[tuple[str, tuple[str, ...]]]:
+        cursor = self.connection.execute(
+            """
+            SELECT screened.symbol, screened.evidence_json
+            FROM selection
+            JOIN screened ON screened.symbol = selection.symbol
+            WHERE screened.evidence_json IS NOT NULL
+            ORDER BY selection.position
+            """
+        )
+        for symbol, evidence_json in cursor:
+            identifiers = json.loads(str(evidence_json))
+            yield (
+                str(symbol),
+                tuple(str(identifier) for identifier in identifiers),
+            )
+
+
+class _DiskBackedEvidenceSequence(Sequence[tuple[str, tuple[str, ...]]]):
+    """Expose complete retained lineage without copying it into the Python heap."""
+
+    __slots__ = ("_spool",)
+
+    def __init__(self, spool: _TerminalScreeningStateSpool) -> None:
+        self._spool = spool
+
+    def __len__(self) -> int:
+        return self._spool.evidence_count()
+
+    def __iter__(self) -> Iterator[tuple[str, tuple[str, ...]]]:
+        return self._spool.evidence_rows()
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return tuple(self)[index]
+        position = int(index)
+        if position < 0:
+            position += len(self)
+        if position < 0:
+            raise IndexError(index)
+        row = self._spool.connection.execute(
+            """
+            SELECT screened.symbol, screened.evidence_json
+            FROM selection
+            JOIN screened ON screened.symbol = selection.symbol
+            WHERE screened.evidence_json IS NOT NULL
+            ORDER BY selection.position
+            LIMIT 1 OFFSET ?
+            """,
+            (position,),
+        ).fetchone()
+        if row is None:
+            raise IndexError(index)
+        identifiers = json.loads(str(row[1]))
+        return str(row[0]), tuple(str(identifier) for identifier in identifiers)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Sequence):
+            return False
+        return tuple(self) == tuple(other)
+
 
 def _chunks(values: Sequence[object], size: int):
     for start in range(0, len(values), size):
         yield start, values[start : start + size]
+
+
+def _finalization_progress(
+    phase: str,
+    progress_label: str,
+    *,
+    processed_records: int,
+    total_records: int,
+) -> None:
+    record_manual_cio_diagnostic_progress(
+        f"terminal_screening_finalize_{phase}:{progress_label}",
+        metrics={
+            "processed_records": processed_records,
+            "total_records": total_records,
+            "chunk_records": 0,
+        },
+    )
 
 
 def build_bounded_terminal_preselection(
@@ -761,9 +889,37 @@ def build_bounded_terminal_preselection(
                     "chunk_records": 0,
                 },
             )
+
+            # The complete publication index is no longer needed after every record has
+            # been durably screened. Releasing it before ranking prevents the provider
+            # spool and finalization state from overlapping in the cgroup working set.
+            publication_spool.release_cached_pages()
+            publication_spool.close()
+            gc.collect()
+            _finalization_progress(
+                "release",
+                progress_label,
+                processed_records=len(records),
+                total_records=len(records),
+            )
+
             batch_size = min(chunk_size, DEFAULT_TERMINAL_SCREENING_CHUNK_SIZE)
             state_spool.finalize_diversification(batch_size=batch_size)
+            _finalization_progress(
+                "diversification",
+                progress_label,
+                processed_records=len(records),
+                total_records=len(records),
+            )
+
             state_spool.build_rankings(batch_size=batch_size)
+            _finalization_progress(
+                "rankings",
+                progress_label,
+                processed_records=len(records),
+                total_records=len(records),
+            )
+
             eligible_count = state_spool.eligible_count
             capacity = max(1, len(records))
             selected_count = state_spool.select_complete_consideration(capacity=capacity)
@@ -772,17 +928,21 @@ def build_bounded_terminal_preselection(
                     f"{progress_label} complete-consideration selection did not retain "
                     "every eligible catalog record"
                 )
+            _finalization_progress(
+                "selection",
+                progress_label,
+                processed_records=selected_count,
+                total_records=eligible_count,
+            )
 
             selected_symbols = state_spool.selected_symbols()
             shadow: tuple[str, ...] = ()
             membership_rows: list[tuple[str, tuple[str, ...]]] = []
             score_rows: list[tuple[str, tuple[tuple[str, float], ...]]] = []
             signal_observed_at: dict[str, datetime] = {}
-            evidence_rows: list[tuple[str, tuple[str, ...]]] = []
             for row in state_spool.measured_rows():
                 (
                     position,
-                    _ordinal,
                     quality,
                     value,
                     momentum,
@@ -790,8 +950,6 @@ def build_bounded_terminal_preselection(
                     diversification,
                     improving_conditions,
                     observed_at,
-                    _indicative_price,
-                    evidence_json,
                 ) = row
                 symbol = selected_symbols[int(position)]
                 values = (
@@ -822,16 +980,6 @@ def build_bounded_terminal_preselection(
                 )
                 if observed_at is not None:
                     signal_observed_at[symbol] = datetime.fromisoformat(str(observed_at))
-                if evidence_json is not None:
-                    evidence_rows.append(
-                        (
-                            symbol,
-                            tuple(
-                                str(identifier)
-                                for identifier in json.loads(str(evidence_json))
-                            ),
-                        )
-                    )
 
             sleeve_rankings = tuple(
                 (sleeve.value, state_spool.ranking(sleeve)) for sleeve in SLEEVES
@@ -854,12 +1002,24 @@ def build_bounded_terminal_preselection(
                 factor_coverage=factor_coverage,
                 exclusions=exclusions,
             )
+            _finalization_progress(
+                "plan",
+                progress_label,
+                processed_records=eligible_count,
+                total_records=eligible_count,
+            )
+
+            # Evidence can dominate retained finalization memory because each asset may
+            # carry several long lineage identifiers. Keep it in the already durable
+            # screening spool and expose a complete lazy sequence. The sequence owns the
+            # spool lifecycle and preserves every identifier and selection order.
+            preselection_evidence = _DiskBackedEvidenceSequence(state_spool.detach())
             return BoundedTerminalPreselection(
                 plan=plan,
                 nominated=nominated,
                 signal_prices=signal_prices,
                 signal_observed_at=signal_observed_at,
-                preselection_evidence=tuple(evidence_rows),
+                preselection_evidence=preselection_evidence,
                 provider_factor_authority_established=authority_established,
                 publication_failure_reasons=tuple(sorted(publication_failures)),
                 screened_signal_count=screened_signal_count,
