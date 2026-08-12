@@ -10,16 +10,16 @@ from run_provider_validation import certify_redundant_option_provider
 NOW = datetime(2026, 8, 12, 0, 30, tzinfo=timezone.utc)
 
 
-def _failed_databento(name: str) -> ProviderValidationCheck:
+def _passed_check(name: str, provider: str) -> ProviderValidationCheck:
     return ProviderValidationCheck(
         name=name,
-        provider="DATABENTO",
+        provider=provider,
         required=True,
-        state="failed",
-        detail="Databento OPRA HTTP 403",
+        state="passed",
+        detail="passed",
         observed_at=NOW,
-        source_identifier=None,
-        evidence_fingerprint=None,
+        source_identifier=f"{provider.lower()}:{name}",
+        evidence_fingerprint="a" * 64,
     )
 
 
@@ -29,8 +29,8 @@ class _BlockedRouter:
     def select_contracts(self, *_args, **_kwargs):
         raise RedundantOptionsError(
             "Certified option providers cannot supply opportunity-complete evidence; "
-            "primary=authentication_or_entitlement; secondary=provider_evidence_unavailable; "
-            "fallback=provider_evidence_unavailable; secondary_detail=Alpaca indicative options returned HTTP 403"
+            "primary=authentication_or_entitlement; fallback=provider_evidence_unavailable; "
+            "primary_detail=Alpaca indicative options returned HTTP 403"
         )
 
 
@@ -52,8 +52,8 @@ def test_governed_option_failure_is_published_credential_safely() -> None:
         release="release-test",
         generated_at=NOW,
         checks=(
-            _failed_databento("databento_opra_definitions"),
-            _failed_databento("databento_opra_daily_bars"),
+            _passed_check("eodhd_account_entitlement", "EODHD"),
+            _passed_check("yahoo_chart_evidence", "YAHOO"),
         ),
     )
 

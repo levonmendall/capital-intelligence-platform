@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from governance import load_data_readiness_manifest
+from governance.data_readiness_core import DataDomain
 from governance.market_data_bundle import (
     assess_all_market_provider_bundle,
     load_all_market_provider_bundle,
@@ -40,14 +40,24 @@ def _configured_binding(path: Path, member) -> None:
     )
 
 
-def _activation(provider) -> ProviderActivation:
+def _activation(member) -> ProviderActivation:
+    dataset_domain_overrides = {
+        "market_history": DataDomain.MARKET_PRICES,
+    }
+    domains = tuple(
+        dataset_domain_overrides[item.value]
+        if item.value in dataset_domain_overrides
+        else DataDomain(item.value)
+        for item in member.required_dataset_types
+    )
+    domains = tuple(dict.fromkeys(domains))
     return ProviderActivation(
-        identifier=f"activation:{provider.identifier}:test",
-        provider_identifier=provider.identifier,
-        provider_name=provider.provider_name,
+        identifier=f"activation:{member.provider_identifier}:test",
+        provider_identifier=member.provider_identifier,
+        provider_name=member.provider_name,
         enabled=True,
-        approved_domains=provider.domains,
-        authoritative_domains=provider.authoritative_domains,
+        approved_domains=domains,
+        authoritative_domains=domains,
         usage_rights_approved=True,
         point_in_time_supported=True,
         historical_coverage_supported=True,
@@ -56,13 +66,13 @@ def _activation(provider) -> ProviderActivation:
         storage_and_backup_approved=True,
         derived_analytics_approved=True,
         paper_simulation_approved=True,
-        certification_identifier=f"certification:{provider.identifier}:test",
+        certification_identifier=f"certification:{member.provider_identifier}:test",
         approved_by="data-governance-committee",
         rationale="Complete provider-bundle activation fixture.",
         approved_at=AS_OF - timedelta(days=2),
         effective_at=AS_OF - timedelta(days=1),
         expires_at=AS_OF + timedelta(days=30),
-        source_identifiers=(f"contract:{provider.identifier}:test",),
+        source_identifiers=(f"contract:{member.provider_identifier}:test",),
     )
 
 
@@ -76,7 +86,7 @@ def test_selected_provider_bundle_declares_every_required_operating_role() -> No
         "lseg-global-market-data",
         "lseg-global-reference-data",
         "ice-evaluated-fixed-income",
-        "databento-execution-data",
+        "cme-futures-market-data",
         "eodhd-primary",
         "coinbase-crypto-validation",
         "kraken-crypto-validation",
@@ -133,10 +143,6 @@ def test_complete_external_bundle_can_become_active(tmp_path: Path) -> None:
     bundle = load_all_market_provider_bundle(
         "config/all_market_provider_bundle.json"
     )
-    manifest = load_data_readiness_manifest(
-        "config/all_markets_data_readiness.json"
-    )
-    providers = {item.identifier: item for item in manifest.providers}
     store = SQLiteProviderActivationStore(tmp_path / "providers.db")
     environment: dict[str, str] = {}
 
@@ -168,7 +174,7 @@ def test_complete_external_bundle_can_become_active(tmp_path: Path) -> None:
                 _configured_binding(binding, member)
             for name in member.binding_environment_variables:
                 environment[name] = str(binding)
-        store.append(_activation(providers[member.provider_identifier]))
+        store.append(_activation(member))
 
     report = assess_all_market_provider_bundle(
         bundle,

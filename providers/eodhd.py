@@ -1,19 +1,16 @@
-"""EODHD provider facade with bounded symbol-directory continuity.
+"""EODHD provider facade with cache-first symbol-directory continuity.
 
-The implementation remains in :mod:`providers.eodhd_base`. This facade narrows two
-production resilience rules for symbol directories only:
-
-* an EODHD HTTP 402 entitlement response or HTTP 404 unsupported-directory response may
-  use a recent, previously successful EODHD active-directory cache; and
-* when no valid EODHD cache exists, an independent Twelve Data stock or forex catalog
-  may supply a configured market through a certified selector and bounded rate-limit
-  continuity.
+The implementation remains in :mod:`providers.eodhd_base`. This facade makes a valid
+recent EODHD directory cache the normal hot path so all-market certification does not
+re-download every exchange directory on every CIO cycle. When a cache is absent/stale,
+live EODHD retrieval remains authoritative; bounded continuity rules then apply exactly
+as before.
 
 A current active directory is not discarded solely because the historical delisted-
 symbol directory is temporarily unavailable. Missing or incomplete fallback evidence,
 authentication failures, persistent provider throttling, virtual markets without a
-certified reference selector, and every non-directory provider failure remain
-fail-closed.
+certified reference selector, and every non-directory provider failure remain fail-
+closed.
 """
 
 from __future__ import annotations
@@ -53,7 +50,6 @@ _DIRECTORY_CONTINUITY_STATUS_CODES = frozenset({402, 404})
 
 def __getattr__(name: str):
     """Preserve compatibility for non-exported constants and helpers."""
-
     try:
         return getattr(_base, name)
     except AttributeError as error:
@@ -63,7 +59,7 @@ def __getattr__(name: str):
 
 
 class EODHDProvider(_base.EODHDProvider):
-    """Apply bounded continuity only to EODHD symbol-directory retrieval."""
+    """Apply cache-first and bounded continuity to EODHD symbol directories."""
 
     def __init__(
         self,
@@ -209,6 +205,28 @@ class EODHDProvider(_base.EODHDProvider):
         *,
         retrieved_at: datetime,
     ) -> tuple[list[Any], DataQualityState, datetime | None, tuple[str, ...]]:
+        # Hot path: a recent integrity-checked cache is authoritative for discovery
+        # continuity until its configured TTL expires. This prevents 19+ directory
+        # downloads from being repeated during every exact-release CIO diagnostic.
+        cached = self._load_directory_cache(
+            provider_symbol,
+            evaluated_at=retrieved_at,
+        )
+        if cached is not None:
+            cached_at, payload = cached
+            age_hours = (retrieved_at - cached_at).total_seconds() / 3600.0
+            return (
+                payload,
+                DataQualityState.CACHED,
+                cached_at,
+                (
+                    "using recent EODHD symbol-directory cache before live refresh; "
+                    f"cache age={age_hours:.1f} hours",
+                    "cache-first reference evidence cannot independently authorize "
+                    "a no-superior-opportunity conclusion",
+                ),
+            )
+
         try:
             return super()._active_symbol_directory(
                 provider_symbol,
@@ -242,7 +260,6 @@ class EODHDProvider(_base.EODHDProvider):
 
 def build_eodhd_provider() -> EODHDProvider:
     """Deployment factory for the continuity-aware EODHD provider."""
-
     binding_path = os.getenv("CAPITAL_INTELLIGENCE_EODHD_BINDINGS")
     registry = (
         EODHDBindingRegistry(())

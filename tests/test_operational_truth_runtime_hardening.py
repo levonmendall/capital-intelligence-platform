@@ -43,7 +43,9 @@ def test_latest_cycle_exposes_failure_detail(tmp_path) -> None:
 def test_render_declares_market_provider_secrets_and_required_journal() -> None:
     source = open("render.yaml", encoding="utf-8").read()
     assert "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN" in source
-    assert "CAPITAL_INTELLIGENCE_DATABENTO_API_KEY" in source
+    assert "CAPITAL_INTELLIGENCE_CME_MARKET_DATA_API_KEY" in source
+    assert "CAPITAL_INTELLIGENCE_CME_MARKET_DATA_BINDING" in source
+    assert "CAPITAL_INTELLIGENCE_DATABENTO_API_KEY" not in source
     assert 'CAPITAL_INTELLIGENCE_REQUIRE_JOURNAL\n        value: "true"' in source
 
 

@@ -11,7 +11,7 @@ def _record(records, provider_id: str):
 def test_provider_alias_groups_populate_runtime_canonical_names() -> None:
     source = {
         "CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY": "massive-secret",
-        "DATABENTO_API_TOKEN": "databento-secret",
+        "DATABENTO_API_TOKEN": "legacy-databento-secret",
         "CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID": "finra-id",
         "CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET": "finra-secret",
         "LSEG_MARKET_DATA_API_KEY": "lseg-secret",
@@ -21,8 +21,10 @@ def test_provider_alias_groups_populate_runtime_canonical_names() -> None:
 
     assert normalized["MASSIVE_API_KEY"] == "massive-secret"
     assert normalized["CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY"] == "massive-secret"
-    assert normalized["DATABENTO_API_KEY"] == "databento-secret"
-    assert normalized["CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"] == "databento-secret"
+    # Legacy aliases remain normalization-compatible but no longer create an
+    # active provider role in the certification/activation graph.
+    assert normalized["DATABENTO_API_KEY"] == "legacy-databento-secret"
+    assert normalized["CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"] == "legacy-databento-secret"
     assert normalized["FINRA_CLIENT_ID"] == "finra-id"
     assert normalized["FINRA_CLIENT_SECRET"] == "finra-secret"
     assert normalized["CAPITAL_INTELLIGENCE_LSEG_MARKET_DATA_API_KEY"] == "lseg-secret"
@@ -39,7 +41,6 @@ def test_actual_repository_secret_aliases_reach_runtime_canonicals() -> None:
         "TWELVE_API_KEY": "twelve-secret",
         "MASSIVE_API_KEY": "massive-secret",
         "EODHD_API_KEY": "eodhd-secret",
-        "DATABENTO_API_KEY": "databento-secret",
     }
 
     normalized = normalize_provider_environment(source)
@@ -53,7 +54,6 @@ def test_actual_repository_secret_aliases_reach_runtime_canonicals() -> None:
     assert normalized["TWELVE_DATA_API_KEY"] == "twelve-secret"
     assert normalized["CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY"] == "massive-secret"
     assert normalized["CAPITAL_INTELLIGENCE_EODHD_API_TOKEN"] == "eodhd-secret"
-    assert normalized["CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"] == "databento-secret"
 
 
 def test_provider_alias_groups_never_replace_existing_canonical_value() -> None:
@@ -85,10 +85,10 @@ def test_activation_audit_distinguishes_routed_and_unrouted_sources(tmp_path) ->
               ]
             },
             {
-              "provider_identifier": "databento-execution-data",
-              "roles": ["derivative_contract_data"],
+              "provider_identifier": "cme-futures-market-data",
+              "roles": ["global_execution_market_data", "derivative_contract_data"],
               "credential_environment_variables": [
-                "CAPITAL_INTELLIGENCE_DATABENTO_API_KEY"
+                "CAPITAL_INTELLIGENCE_CME_MARKET_DATA_API_KEY"
               ]
             }
           ]
@@ -98,8 +98,8 @@ def test_activation_audit_distinguishes_routed_and_unrouted_sources(tmp_path) ->
     )
     environment = {
         "CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY": "massive-secret",
-        "DATABENTO_API_KEY": "databento-secret",
         "LSEG_MARKET_DATA_API_KEY": "lseg-secret",
+        "CAPITAL_INTELLIGENCE_CME_MARKET_DATA_API_KEY": "cme-secret",
         "FINRA_API_KEY": "finra-id",
         "FINRA_API_CLIENT_SECRET": "finra-secret",
         "TRADIER_API_KEY": "tradier-secret",
@@ -116,7 +116,10 @@ def test_activation_audit_distinguishes_routed_and_unrouted_sources(tmp_path) ->
     assert _record(records, "treasury-fiscal-data").state == "keyless_active"
     assert _record(records, "finra").state == "active"
     assert _record(records, "lseg-global-market-data").state == "configured_but_unrouted"
-    assert not any(item.provider_id == "databento-execution-data" for item in records)
+    cme = _record(records, "cme-futures-market-data")
+    assert cme.state == "configured_but_unrouted"
+    assert cme.production_route is None
+    assert not any(item.provider_id == "databento" for item in records)
 
 
 def test_lone_finra_api_key_is_not_misrepresented_as_complete_oauth_pair(tmp_path) -> None:

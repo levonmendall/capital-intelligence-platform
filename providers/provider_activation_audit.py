@@ -52,15 +52,19 @@ class ProviderActivationRecord:
 CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ProviderActivationSpec(
         "alpaca-market-data",
-        ("us_equity_market_data", "option_underlying_market_data"),
-        "option-underlying Alpaca/Yahoo redundancy and paper market-data adapters",
+        (
+            "us_equity_market_data",
+            "option_underlying_market_data",
+            "option_reference",
+            "option_history",
+            "crypto_history",
+        ),
+        "batched U.S. equity/crypto history and opportunity-complete indicative option evidence",
         ("ALPACA_MARKET_DATA_API_KEY", "ALPACA_MARKET_DATA_API_SECRET"),
-    ),
-    ProviderActivationSpec(
-        "databento",
-        ("option_reference", "option_history"),
-        "governed options primary provider",
-        ("DATABENTO_API_KEY",),
+        note=(
+            "Alpaca indicative options are explicitly identified as indicative rather than OPRA; "
+            "provider lineage remains attached to governed evidence."
+        ),
     ),
     ProviderActivationSpec(
         "massive",
@@ -73,19 +77,19 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
             "us_futures_reference",
             "us_futures_history",
         ),
-        "governed options fallback and capability-scoped all-asset market-history redundancy",
+        "bounded option tertiary fallback and capability-scoped all-asset market-history redundancy",
         ("MASSIVE_API_KEY",),
     ),
     ProviderActivationSpec(
         "eodhd",
         ("global_reference", "multi_asset_market_data", "fixed_income_market_data"),
-        "comprehensive all-market catalog and market evidence",
+        "cache-first comprehensive all-market catalog and international market evidence",
         ("EODHD_API_KEY",),
     ),
     ProviderActivationSpec(
         "twelve-data",
         ("global_reference", "fx_reference", "crypto_reference", "supplemental_quote"),
-        "comprehensive reference discovery and supplemental quote evidence",
+        "comprehensive reference discovery and supplemental quote/evidence redundancy",
         ("TWELVE_DATA_API_KEY",),
     ),
     ProviderActivationSpec(
@@ -101,12 +105,13 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
             "us_equity_market_data",
             "us_equity_history",
             "us_option_market_data",
+            "option_history",
             "active_option_chain_corroboration",
         ),
-        "supplemental quote, equity-history failover, and active option-chain corroboration",
+        "supplemental quote, equity-history failover, active option history, and option-chain corroboration",
         ("TRADIER_API_KEY",),
         note=(
-            "Tradier is corroborating U.S. equity/options market data only; it has no "
+            "Tradier supplies governed U.S. equity/options market evidence only; it has no "
             "execution authority in the Capital Intelligence Platform."
         ),
     ),
@@ -120,13 +125,13 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ProviderActivationSpec(
         "coinbase",
         ("crypto_quote_validation", "crypto_history"),
-        "crypto venue quote validation and native history evidence adapter",
+        "independent crypto venue quote validation and native history evidence adapter",
         keyless=True,
     ),
     ProviderActivationSpec(
         "kraken",
         ("crypto_quote_validation", "crypto_history"),
-        "crypto venue quote validation and native history evidence adapter",
+        "independent crypto venue quote validation and native history evidence adapter",
         keyless=True,
     ),
     ProviderActivationSpec(
@@ -198,7 +203,6 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
 
 _BUNDLE_PROVIDER_FAMILIES_WITH_DIRECT_ROUTES = frozenset(
     {
-        "databento-execution-data",
         "eodhd-primary",
         "coinbase-crypto-validation",
         "kraken-crypto-validation",

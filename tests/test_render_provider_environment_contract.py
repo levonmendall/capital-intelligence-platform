@@ -55,7 +55,6 @@ def test_render_declares_current_repository_provider_secret_aliases() -> None:
         "APCA_API_KEY_ID",
         "APCA_API_SECRET_KEY",
         "BEA_API_KEY",
-        "DATABENTO_API_KEY",
         "EIA_API_KEY",
         "EODHD_API_KEY",
         "FINRA_API_KEY",
@@ -68,8 +67,10 @@ def test_render_declares_current_repository_provider_secret_aliases() -> None:
         "USDA_NASS_API_KEY",
         "US_CENSUS_API_KEY",
     }
-    missing = sorted(required - _render_keys())
+    render_keys = _render_keys()
+    missing = sorted(required - render_keys)
     assert missing == [], f"Render is missing repository provider secret aliases: {missing}"
+    assert "DATABENTO_API_KEY" not in render_keys
 
 
 def test_render_does_not_embed_provider_secret_values() -> None:
