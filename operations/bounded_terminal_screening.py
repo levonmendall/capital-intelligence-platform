@@ -4,13 +4,15 @@ The canonical provider-factor publication is intentionally a complete JSON audit
 artifact. Loading that artifact together with a complete certified catalog, baseline
 signals, enriched signals, and a second validation mapping can create several complete
 in-memory representations of a large market lane. This module keeps the publication
-unchanged on disk but streams its signal members into a temporary SQLite spool, then
-screens fixed-size catalog chunks through the existing provider-enriched validator.
+unchanged on disk, streams its signal members into a temporary SQLite spool, and
+persists completed terminal-screening state to a second SQLite spool.
 
-Only compact fields required to reproduce the existing PreselectionPlan, cutoff
-observations, provider-factor lineage, and deep-evidence nominations survive each
-chunk. No market, factor, evidence, liquidity, freshness, ranking, or authority rule is
-changed.
+Only one fixed-size signal chunk is retained in Python while screening. Complete
+point-in-time results, exclusions, factor scores, prices, timestamps, and evidence
+lineage are persisted before the chunk is released. Global sleeve ranking and
+nomination are performed only after the complete lane has been screened, preserving
+the existing all-market comparison semantics. No market, factor, evidence, liquidity,
+freshness, ranking, threshold, or authority rule is changed.
 """
 from __future__ import annotations
 
@@ -18,7 +20,6 @@ import json
 import re
 import sqlite3
 import tempfile
-from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -43,8 +44,23 @@ from operations.provider_enriched_preselection import (
 
 
 DEFAULT_TERMINAL_SCREENING_CHUNK_SIZE = 512
+_SQLITE_CACHE_KIB = 2048
 _TOP_LEVEL_KEY = re.compile(r'^  (?P<key>"(?:\\.|[^"\\])+"): (?P<value>.*)$')
 _SIGNAL_KEY = re.compile(r'^    (?P<key>"(?:\\.|[^"\\])+"): (?P<value>\{.*)$')
+_SCORE_COLUMNS = {
+    CandidateSleeve.QUALITY: ("quality_score", "quality_tie"),
+    CandidateSleeve.VALUE: ("value_score", "value_tie"),
+    CandidateSleeve.MOMENTUM: ("momentum_score", "momentum_tie"),
+    CandidateSleeve.CARRY: ("carry_score", "carry_tie"),
+    CandidateSleeve.DIVERSIFICATION: (
+        "diversification_score",
+        "diversification_tie",
+    ),
+    CandidateSleeve.IMPROVING_CONDITIONS: (
+        "improving_conditions_score",
+        "improving_conditions_tie",
+    ),
+}
 
 
 class BoundedTerminalScreeningError(RuntimeError):
@@ -63,14 +79,31 @@ class BoundedTerminalPreselection:
     screened_signal_count: int
 
 
+def _configure_spool_connection(connection: sqlite3.Connection) -> None:
+    """Keep SQLite working memory bounded for production diagnostic spools."""
+
+    connection.execute("PRAGMA temp_store = FILE")
+    connection.execute(f"PRAGMA cache_size = -{_SQLITE_CACHE_KIB}")
+
+
 class _PublicationSignalSpool:
     """Stream one canonical pretty-JSON publication into a disk-backed signal index."""
+
+    __slots__ = (
+        "publication_path",
+        "_temporary",
+        "database_path",
+        "connection",
+        "metadata",
+        "signal_count",
+    )
 
     def __init__(self, publication_path: Path) -> None:
         self.publication_path = publication_path
         self._temporary = tempfile.TemporaryDirectory(prefix="cio-terminal-screening-")
         self.database_path = Path(self._temporary.name) / "signals.sqlite3"
         self.connection = sqlite3.connect(self.database_path)
+        _configure_spool_connection(self.connection)
         self.connection.execute(
             "CREATE TABLE signals (symbol TEXT PRIMARY KEY, payload TEXT NOT NULL)"
         )
@@ -263,9 +296,296 @@ class _PublicationSignalSpool:
         )
 
 
+class _TerminalScreeningStateSpool:
+    """Persist completed screening state so chunk results do not accumulate in RAM."""
+
+    __slots__ = ("_temporary", "database_path", "connection")
+
+    def __init__(self) -> None:
+        self._temporary = tempfile.TemporaryDirectory(prefix="cio-terminal-state-")
+        self.database_path = Path(self._temporary.name) / "screening.sqlite3"
+        self.connection = sqlite3.connect(self.database_path)
+        _configure_spool_connection(self.connection)
+        self.connection.executescript(
+            """
+            CREATE TABLE screened (
+                ordinal INTEGER PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                eligible INTEGER NOT NULL,
+                bucket_exposure TEXT NOT NULL,
+                bucket_venue TEXT NOT NULL,
+                bucket_country TEXT NOT NULL,
+                bucket_currency TEXT NOT NULL,
+                observed_at TEXT,
+                indicative_price REAL,
+                evidence_json TEXT,
+                quality_score REAL,
+                quality_tie REAL,
+                value_score REAL,
+                value_tie REAL,
+                momentum_score REAL,
+                momentum_tie REAL,
+                carry_score REAL,
+                carry_tie REAL,
+                diversification_score REAL,
+                diversification_tie REAL,
+                improving_conditions_score REAL,
+                improving_conditions_tie REAL
+            );
+            CREATE INDEX screened_symbol_idx ON screened(symbol);
+            CREATE TABLE exclusions (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                reason TEXT NOT NULL
+            );
+            """
+        )
+
+    def close(self) -> None:
+        try:
+            self.connection.close()
+        finally:
+            self._temporary.cleanup()
+
+    def __enter__(self) -> "_TerminalScreeningStateSpool":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def append(
+        self,
+        *,
+        ordinal: int,
+        record: object,
+        signal: object | None,
+        reasons: Sequence[str],
+        as_of: datetime,
+    ) -> None:
+        symbol = str(getattr(record, "symbol", "")).strip().upper()
+        bucket = tuple(str(item) for item in _bucket(record))
+        accepted = signal is not None and not reasons
+        observed_at = None
+        indicative_price = None
+        evidence_json = None
+        values: dict[CandidateSleeve, float | None] = {
+            CandidateSleeve.QUALITY: None,
+            CandidateSleeve.VALUE: None,
+            CandidateSleeve.MOMENTUM: None,
+            CandidateSleeve.CARRY: None,
+            CandidateSleeve.IMPROVING_CONDITIONS: None,
+        }
+        if signal is not None:
+            observed_at = signal.observed_at.isoformat() if accepted else None
+            indicative_price = (
+                None
+                if signal.indicative_price is None
+                else float(signal.indicative_price)
+            )
+            if accepted:
+                evidence_json = json.dumps(
+                    tuple(signal.evidence_identifiers),
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+                values = {
+                    CandidateSleeve.QUALITY: signal.quality_score,
+                    CandidateSleeve.VALUE: signal.value_score,
+                    CandidateSleeve.MOMENTUM: signal.momentum_score,
+                    CandidateSleeve.CARRY: signal.carry_score,
+                    CandidateSleeve.IMPROVING_CONDITIONS: (
+                        signal.improving_conditions_score
+                    ),
+                }
+
+        ties = {sleeve: _tie(as_of, sleeve, symbol) for sleeve in SLEEVES}
+        self.connection.execute(
+            """
+            INSERT INTO screened(
+                ordinal, symbol, eligible,
+                bucket_exposure, bucket_venue, bucket_country, bucket_currency,
+                observed_at, indicative_price, evidence_json,
+                quality_score, quality_tie,
+                value_score, value_tie,
+                momentum_score, momentum_tie,
+                carry_score, carry_tie,
+                diversification_score, diversification_tie,
+                improving_conditions_score, improving_conditions_tie
+            ) VALUES (
+                ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?,
+                ?, ?,
+                ?, ?,
+                ?, ?,
+                NULL, ?,
+                ?, ?
+            )
+            """,
+            (
+                ordinal,
+                symbol,
+                1 if accepted else 0,
+                *bucket,
+                observed_at,
+                indicative_price,
+                evidence_json,
+                None
+                if values[CandidateSleeve.QUALITY] is None
+                else float(values[CandidateSleeve.QUALITY]),
+                ties[CandidateSleeve.QUALITY],
+                None
+                if values[CandidateSleeve.VALUE] is None
+                else float(values[CandidateSleeve.VALUE]),
+                ties[CandidateSleeve.VALUE],
+                None
+                if values[CandidateSleeve.MOMENTUM] is None
+                else float(values[CandidateSleeve.MOMENTUM]),
+                ties[CandidateSleeve.MOMENTUM],
+                None
+                if values[CandidateSleeve.CARRY] is None
+                else float(values[CandidateSleeve.CARRY]),
+                ties[CandidateSleeve.CARRY],
+                ties[CandidateSleeve.DIVERSIFICATION],
+                None
+                if values[CandidateSleeve.IMPROVING_CONDITIONS] is None
+                else float(values[CandidateSleeve.IMPROVING_CONDITIONS]),
+                ties[CandidateSleeve.IMPROVING_CONDITIONS],
+            ),
+        )
+        if reasons:
+            self.connection.executemany(
+                "INSERT INTO exclusions(symbol, reason) VALUES (?, ?)",
+                ((symbol, str(reason)) for reason in reasons),
+            )
+
+    def commit_chunk(self) -> None:
+        self.connection.commit()
+
+    def finalize_diversification(self, *, batch_size: int = 512) -> None:
+        cursor = self.connection.execute(
+            """
+            SELECT
+                item.ordinal,
+                1.0 / bucket_counts.member_count AS diversification_score
+            FROM screened AS item
+            JOIN (
+                SELECT
+                    bucket_exposure,
+                    bucket_venue,
+                    bucket_country,
+                    bucket_currency,
+                    COUNT(*) AS member_count
+                FROM screened
+                WHERE eligible = 1
+                GROUP BY
+                    bucket_exposure,
+                    bucket_venue,
+                    bucket_country,
+                    bucket_currency
+            ) AS bucket_counts
+              ON bucket_counts.bucket_exposure = item.bucket_exposure
+             AND bucket_counts.bucket_venue = item.bucket_venue
+             AND bucket_counts.bucket_country = item.bucket_country
+             AND bucket_counts.bucket_currency = item.bucket_currency
+            WHERE item.eligible = 1
+            ORDER BY item.ordinal
+            """
+        )
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            self.connection.executemany(
+                "UPDATE screened SET diversification_score = ? WHERE ordinal = ?",
+                ((float(score), int(ordinal)) for ordinal, score in rows),
+            )
+        self.connection.commit()
+
+    @property
+    def eligible_count(self) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) FROM screened WHERE eligible = 1"
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def ranking(self, sleeve: CandidateSleeve) -> tuple[str, ...]:
+        score_column, tie_column = _SCORE_COLUMNS[sleeve]
+        query = (
+            "SELECT symbol FROM screened "
+            f"WHERE eligible = 1 AND {score_column} IS NOT NULL "
+            f"ORDER BY {score_column} DESC, {tie_column} DESC, symbol DESC"
+        )
+        return tuple(str(row[0]) for row in self.connection.execute(query))
+
+    def factor_coverage(self) -> tuple[tuple[str, int], ...]:
+        result = []
+        for sleeve in SLEEVES:
+            score_column, _tie_column = _SCORE_COLUMNS[sleeve]
+            row = self.connection.execute(
+                f"SELECT COUNT({score_column}) FROM screened WHERE eligible = 1"
+            ).fetchone()
+            result.append((sleeve.value, int(row[0]) if row is not None else 0))
+        return tuple(result)
+
+    def exclusions(self) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            (str(symbol), str(reason))
+            for symbol, reason in self.connection.execute(
+                "SELECT symbol, reason FROM exclusions ORDER BY sequence"
+            )
+        )
+
+    def prepare_measured(self, measured: Sequence[str]) -> None:
+        self.connection.execute("DROP TABLE IF EXISTS measured_order")
+        self.connection.execute(
+            "CREATE TEMP TABLE measured_order("
+            "position INTEGER PRIMARY KEY, symbol TEXT NOT NULL)"
+        )
+        self.connection.executemany(
+            "INSERT INTO measured_order(position, symbol) VALUES (?, ?)",
+            ((index, symbol) for index, symbol in enumerate(measured)),
+        )
+
+    def measured_rows(self):
+        return self.connection.execute(
+            """
+            SELECT
+                measured_order.position,
+                screened.ordinal,
+                screened.quality_score,
+                screened.value_score,
+                screened.momentum_score,
+                screened.carry_score,
+                screened.diversification_score,
+                screened.improving_conditions_score,
+                screened.observed_at,
+                screened.indicative_price,
+                screened.evidence_json
+            FROM measured_order
+            JOIN screened ON screened.symbol = measured_order.symbol
+            ORDER BY measured_order.position
+            """
+        )
+
+    def signal_prices(self) -> dict[str, float]:
+        return {
+            str(symbol): float(price)
+            for symbol, price in self.connection.execute(
+                """
+                SELECT symbol, indicative_price
+                FROM screened
+                WHERE indicative_price IS NOT NULL
+                ORDER BY ordinal
+                """
+            )
+        }
+
+
 def _chunks(values: Sequence[object], size: int):
     for start in range(0, len(values), size):
-        yield values[start : start + size]
+        yield start, values[start : start + size]
 
 
 def build_bounded_terminal_preselection(
@@ -276,265 +596,253 @@ def build_bounded_terminal_preselection(
     progress_label: str,
     chunk_size: int = DEFAULT_TERMINAL_SCREENING_CHUNK_SIZE,
 ) -> BoundedTerminalPreselection:
-    """Reproduce complete-consideration preselection with a bounded signal working set."""
+    """Reproduce complete-consideration preselection with disk-backed retained state."""
 
     timestamp = _aware(as_of)
     if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size < 1:
         raise ValueError("chunk_size must be a positive integer")
     publication_path = Path(str(getattr(policy, "provider_preselection_path"))).expanduser()
-    eligible: list[object] = []
-    exclusions: list[tuple[str, str]] = []
-    score_maps: dict[CandidateSleeve, dict[str, float]] = {
-        sleeve: {} for sleeve in SLEEVES
-    }
-    record_by_symbol: dict[str, object] = {}
-    signal_prices: dict[str, float] = {}
-    signal_observed_at: dict[str, datetime] = {}
-    evidence_by_symbol: dict[str, tuple[str, ...]] = {}
     publication_failures: set[str] = set()
     substantive_provider_factor = False
     screened_signal_count = 0
 
-    with _PublicationSignalSpool(publication_path) as spool:
-        with tempfile.TemporaryDirectory(prefix="cio-terminal-chunks-") as temporary:
-            chunk_path = Path(temporary) / "provider-preselection-chunk.json"
-            processed = 0
-            for chunk in _chunks(records, chunk_size):
-                spool.chunk_publication(chunk, chunk_path)
-                chunk_policy = replace(
-                    policy,
-                    provider_preselection_path=str(chunk_path),
-                )
-                signals = provider_enriched_catalog_screening_signals(
-                    chunk,
-                    timestamp,
-                    chunk_policy,
-                )
-                if not isinstance(signals, Mapping):
-                    raise BoundedTerminalScreeningError(
-                        "provider-enriched screening chunk did not return a mapping"
-                    )
-                signals = validate_provider_enriched_signals(
-                    chunk,
-                    signals,
-                    required_factors=getattr(
+    with _PublicationSignalSpool(publication_path) as publication_spool:
+        with _TerminalScreeningStateSpool() as state_spool:
+            with tempfile.TemporaryDirectory(prefix="cio-terminal-chunks-") as temporary:
+                chunk_path = Path(temporary) / "provider-preselection-chunk.json"
+                processed = 0
+                for start, chunk in _chunks(records, chunk_size):
+                    publication_spool.chunk_publication(chunk, chunk_path)
+                    chunk_policy = replace(
                         policy,
-                        "required_provider_preselection_factors",
-                    ),
-                )
-                normalized_signals = {
-                    str(symbol).strip().upper(): signal
-                    for symbol, signal in signals.items()
-                }
-                screened_signal_count += len(normalized_signals)
-                for record in chunk:
-                    symbol = str(getattr(record, "symbol", "")).strip().upper()
-                    signal = normalized_signals.get(symbol)
-                    if signal is None:
-                        exclusions.append(
-                            (symbol, "catalog_screening_signal_unavailable")
-                        )
-                        continue
-                    if signal.indicative_price is not None:
-                        signal_prices[symbol] = float(signal.indicative_price)
-                    substantive_provider_factor = substantive_provider_factor or any(
-                        identifier.startswith("provider-factor:")
-                        for identifier in signal.evidence_identifiers
+                        provider_preselection_path=str(chunk_path),
                     )
-                    publication_failures.update(
-                        reason
-                        for reason in signal.exclusion_reasons
-                        if reason.startswith(
-                            "provider_enriched_preselection_publication_invalid:"
-                        )
+                    signals = provider_enriched_catalog_screening_signals(
+                        chunk,
+                        timestamp,
+                        chunk_policy,
                     )
-                    reasons = list(signal.exclusion_reasons)
-                    age_seconds = (timestamp - signal.observed_at).total_seconds()
+                    if not isinstance(signals, Mapping):
+                        raise BoundedTerminalScreeningError(
+                            "provider-enriched screening chunk did not return a mapping"
+                        )
+                    signals = validate_provider_enriched_signals(
+                        chunk,
+                        signals,
+                        required_factors=getattr(
+                            policy,
+                            "required_provider_preselection_factors",
+                        ),
+                    )
+                    normalized_signals = {
+                        str(symbol).strip().upper(): signal
+                        for symbol, signal in signals.items()
+                    }
+                    screened_signal_count += len(normalized_signals)
                     freshness_days = int(
                         getattr(policy, "preselection_freshness_days", 3)
                     )
-                    if age_seconds < 0 or age_seconds > freshness_days * 86_400:
-                        reasons.append("catalog_screening_signal_stale")
                     minimum_liquidity = float(
                         getattr(policy, "preselection_minimum_liquidity_score", 0.0)
                     )
-                    if signal.liquidity_score is None:
-                        reasons.append("catalog_basic_liquidity_unavailable")
-                    elif signal.liquidity_score < minimum_liquidity:
-                        reasons.append("catalog_basic_liquidity_failed")
-                    if not signal.eligible:
-                        reasons.append("catalog_ineligible")
-                    if reasons:
-                        exclusions.extend(
-                            (symbol, reason) for reason in dict.fromkeys(reasons)
+                    for offset, record in enumerate(chunk):
+                        symbol = str(getattr(record, "symbol", "")).strip().upper()
+                        signal = normalized_signals.get(symbol)
+                        if signal is None:
+                            state_spool.append(
+                                ordinal=start + offset,
+                                record=record,
+                                signal=None,
+                                reasons=("catalog_screening_signal_unavailable",),
+                                as_of=timestamp,
+                            )
+                            continue
+
+                        substantive_provider_factor = substantive_provider_factor or any(
+                            identifier.startswith("provider-factor:")
+                            for identifier in signal.evidence_identifiers
                         )
-                        continue
-                    eligible.append(record)
-                    record_by_symbol[symbol] = record
-                    signal_observed_at[symbol] = signal.observed_at
-                    evidence_by_symbol[symbol] = tuple(signal.evidence_identifiers)
-                    values = {
-                        CandidateSleeve.QUALITY: signal.quality_score,
-                        CandidateSleeve.VALUE: signal.value_score,
-                        CandidateSleeve.MOMENTUM: signal.momentum_score,
-                        CandidateSleeve.CARRY: signal.carry_score,
-                        CandidateSleeve.IMPROVING_CONDITIONS: (
-                            signal.improving_conditions_score
-                        ),
-                    }
-                    for sleeve, value in values.items():
-                        if value is not None:
-                            score_maps[sleeve][symbol] = float(value)
-                processed += len(chunk)
-                record_manual_cio_diagnostic_progress(
-                    f"terminal_screening_chunk:{progress_label}",
-                    metrics={
-                        "processed_records": processed,
-                        "total_records": len(records),
-                        "chunk_records": len(chunk),
-                    },
+                        publication_failures.update(
+                            reason
+                            for reason in signal.exclusion_reasons
+                            if reason.startswith(
+                                "provider_enriched_preselection_publication_invalid:"
+                            )
+                        )
+                        reasons = list(signal.exclusion_reasons)
+                        age_seconds = (timestamp - signal.observed_at).total_seconds()
+                        if age_seconds < 0 or age_seconds > freshness_days * 86_400:
+                            reasons.append("catalog_screening_signal_stale")
+                        if signal.liquidity_score is None:
+                            reasons.append("catalog_basic_liquidity_unavailable")
+                        elif signal.liquidity_score < minimum_liquidity:
+                            reasons.append("catalog_basic_liquidity_failed")
+                        if not signal.eligible:
+                            reasons.append("catalog_ineligible")
+                        state_spool.append(
+                            ordinal=start + offset,
+                            record=record,
+                            signal=signal,
+                            reasons=tuple(dict.fromkeys(reasons)),
+                            as_of=timestamp,
+                        )
+
+                    state_spool.commit_chunk()
+                    processed += len(chunk)
+                    record_manual_cio_diagnostic_progress(
+                        f"terminal_screening_chunk:{progress_label}",
+                        metrics={
+                            "processed_records": processed,
+                            "total_records": len(records),
+                            "chunk_records": len(chunk),
+                        },
+                    )
+                    del normalized_signals
+                    del signals
+
+            authority_established = not records or substantive_provider_factor
+            if not authority_established:
+                detail = (
+                    "; " + ", ".join(sorted(publication_failures))
+                    if publication_failures
+                    else ""
                 )
-                del normalized_signals
-                del signals
+                raise BoundedTerminalScreeningError(
+                    f"{progress_label} provider factor authority is unavailable for the "
+                    f"complete certified catalog{detail}"
+                )
 
-    authority_established = not records or substantive_provider_factor
-    if not authority_established:
-        detail = (
-            "; " + ", ".join(sorted(publication_failures))
-            if publication_failures
-            else ""
-        )
-        raise BoundedTerminalScreeningError(
-            f"{progress_label} provider factor authority is unavailable for the "
-            f"complete certified catalog{detail}"
-        )
-
-    counts = Counter(_bucket(item) for item in eligible)
-    for record in eligible:
-        symbol = str(getattr(record, "symbol")).strip().upper()
-        score_maps[CandidateSleeve.DIVERSIFICATION][symbol] = 1.0 / max(
-            1, counts[_bucket(record)]
-        )
-
-    rankings = {
-        sleeve: tuple(
-            sorted(
-                values,
-                key=lambda symbol: (
-                    values[symbol],
-                    _tie(timestamp, sleeve, symbol),
-                    symbol,
-                ),
-                reverse=True,
+            state_spool.finalize_diversification(
+                batch_size=min(chunk_size, DEFAULT_TERMINAL_SCREENING_CHUNK_SIZE)
             )
-        )
-        for sleeve, values in score_maps.items()
-    }
-    capacity = max(1, len(records))
-    selected: list[str] = []
-    seen: set[str] = set()
-    cursors = {sleeve: 0 for sleeve in SLEEVES}
-    while len(selected) < min(capacity, len(eligible)):
-        progressed = False
-        for sleeve in SLEEVES:
-            ranking = rankings[sleeve]
-            index = cursors[sleeve]
-            while index < len(ranking) and ranking[index] in seen:
-                index += 1
-            cursors[sleeve] = index + 1
-            if index < len(ranking):
-                symbol = ranking[index]
-                selected.append(symbol)
-                seen.add(symbol)
-                progressed = True
-                if len(selected) == capacity:
-                    break
-        if not progressed:
-            break
-
-    aggregate: list[tuple[float, float, str]] = []
-    for record in eligible:
-        symbol = str(getattr(record, "symbol")).strip().upper()
-        known = [
-            values[symbol] for values in score_maps.values() if symbol in values
-        ]
-        aggregate.append(
-            (
-                fmean(known) if known else 0.0,
-                _tie(timestamp, CandidateSleeve.QUALITY, symbol),
-                symbol,
-            )
-        )
-    aggregate.sort(reverse=True)
-    for _score, _tie_value, symbol in aggregate:
-        if len(selected) >= capacity:
-            break
-        if symbol not in seen:
-            selected.append(symbol)
-            seen.add(symbol)
-    shadow_limit = int(
-        getattr(policy, "preselection_shadow_candidates_per_lane", 0)
-    )
-    shadow = tuple(
-        symbol for _score, _tie_value, symbol in aggregate if symbol not in seen
-    )[:shadow_limit]
-    measured = tuple(selected) + shadow
-    membership = tuple(
-        (
-            symbol,
-            tuple(
-                sleeve.value for sleeve in SLEEVES if symbol in score_maps[sleeve]
-            ),
-        )
-        for symbol in measured
-    )
-    score_rows = tuple(
-        (
-            symbol,
-            tuple(
-                (sleeve.value, round(score_maps[sleeve][symbol], 10))
+            rankings = {
+                sleeve: state_spool.ranking(sleeve)
                 for sleeve in SLEEVES
-                if symbol in score_maps[sleeve]
-            ),
-        )
-        for symbol in measured
-    )
-    plan = PreselectionPlan(
-        catalog_count=len(records),
-        eligible_count=len(eligible),
-        capacity=capacity,
-        selected_symbols=tuple(selected),
-        shadow_symbols=shadow,
-        sleeve_rankings=tuple(
-            (sleeve.value, rankings[sleeve]) for sleeve in SLEEVES
-        ),
-        sleeve_membership=membership,
-        scores=score_rows,
-        factor_coverage=tuple(
-            (sleeve.value, len(score_maps[sleeve])) for sleeve in SLEEVES
-        ),
-        exclusions=tuple(exclusions),
-    )
-    nominated = tuple(
-        record_by_symbol[symbol]
-        for symbol in plan.selected_symbols
-        if symbol in record_by_symbol
-    )
-    preselection_evidence = tuple(
-        (symbol, evidence_by_symbol[symbol])
-        for symbol in measured
-        if symbol in evidence_by_symbol
-    )
-    return BoundedTerminalPreselection(
-        plan=plan,
-        nominated=nominated,
-        signal_prices=signal_prices,
-        signal_observed_at=signal_observed_at,
-        preselection_evidence=preselection_evidence,
-        provider_factor_authority_established=authority_established,
-        publication_failure_reasons=tuple(sorted(publication_failures)),
-        screened_signal_count=screened_signal_count,
-    )
+            }
+            eligible_count = state_spool.eligible_count
+            capacity = max(1, len(records))
+            selected: list[str] = []
+            seen: set[str] = set()
+            cursors = {sleeve: 0 for sleeve in SLEEVES}
+            while len(selected) < min(capacity, eligible_count):
+                progressed = False
+                for sleeve in SLEEVES:
+                    ranking = rankings[sleeve]
+                    index = cursors[sleeve]
+                    while index < len(ranking) and ranking[index] in seen:
+                        index += 1
+                    cursors[sleeve] = index + 1
+                    if index < len(ranking):
+                        symbol = ranking[index]
+                        selected.append(symbol)
+                        seen.add(symbol)
+                        progressed = True
+                        if len(selected) == capacity:
+                            break
+                if not progressed:
+                    break
+
+            if len(selected) != eligible_count:
+                raise BoundedTerminalScreeningError(
+                    f"{progress_label} complete-consideration selection did not retain "
+                    "every eligible catalog record"
+                )
+
+            shadow: tuple[str, ...] = ()
+            measured = tuple(selected) + shadow
+            state_spool.prepare_measured(measured)
+            membership_rows: list[tuple[str, tuple[str, ...]]] = []
+            score_rows: list[tuple[str, tuple[tuple[str, float], ...]]] = []
+            signal_observed_at: dict[str, datetime] = {}
+            evidence_rows: list[tuple[str, tuple[str, ...]]] = []
+            selected_ordinals: list[int] = []
+            for row in state_spool.measured_rows():
+                (
+                    position,
+                    ordinal,
+                    quality,
+                    value,
+                    momentum,
+                    carry,
+                    diversification,
+                    improving_conditions,
+                    observed_at,
+                    _indicative_price,
+                    evidence_json,
+                ) = row
+                symbol = measured[int(position)]
+                values = (
+                    (CandidateSleeve.QUALITY, quality),
+                    (CandidateSleeve.VALUE, value),
+                    (CandidateSleeve.MOMENTUM, momentum),
+                    (CandidateSleeve.CARRY, carry),
+                    (CandidateSleeve.DIVERSIFICATION, diversification),
+                    (
+                        CandidateSleeve.IMPROVING_CONDITIONS,
+                        improving_conditions,
+                    ),
+                )
+                membership_rows.append(
+                    (
+                        symbol,
+                        tuple(
+                            sleeve.value
+                            for sleeve, score in values
+                            if score is not None
+                        ),
+                    )
+                )
+                score_rows.append(
+                    (
+                        symbol,
+                        tuple(
+                            (sleeve.value, round(float(score), 10))
+                            for sleeve, score in values
+                            if score is not None
+                        ),
+                    )
+                )
+                if observed_at is not None:
+                    signal_observed_at[symbol] = datetime.fromisoformat(
+                        str(observed_at)
+                    )
+                if evidence_json is not None:
+                    evidence_rows.append(
+                        (
+                            symbol,
+                            tuple(
+                                str(identifier)
+                                for identifier in json.loads(str(evidence_json))
+                            ),
+                        )
+                    )
+                selected_ordinals.append(int(ordinal))
+
+            plan = PreselectionPlan(
+                catalog_count=len(records),
+                eligible_count=eligible_count,
+                capacity=capacity,
+                selected_symbols=tuple(selected),
+                shadow_symbols=shadow,
+                sleeve_rankings=tuple(
+                    (sleeve.value, rankings[sleeve]) for sleeve in SLEEVES
+                ),
+                sleeve_membership=tuple(membership_rows),
+                scores=tuple(score_rows),
+                factor_coverage=state_spool.factor_coverage(),
+                exclusions=state_spool.exclusions(),
+            )
+            nominated = tuple(records[ordinal] for ordinal in selected_ordinals)
+            return BoundedTerminalPreselection(
+                plan=plan,
+                nominated=nominated,
+                signal_prices=state_spool.signal_prices(),
+                signal_observed_at=signal_observed_at,
+                preselection_evidence=tuple(evidence_rows),
+                provider_factor_authority_established=authority_established,
+                publication_failure_reasons=tuple(sorted(publication_failures)),
+                screened_signal_count=screened_signal_count,
+            )
 
 
 def build_bounded_cutoff_observations(
