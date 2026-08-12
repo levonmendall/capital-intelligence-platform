@@ -26,27 +26,8 @@ from providers.redundant_options import (
 
 
 _EODHD_DIRECTORY_CHECK = "eodhd_exchange_directory"
-_DATABENTO_TRANSIENT_CHECKS = frozenset(
-    {
-        "databento_account_entitlement",
-        "databento_opra_definitions",
-        "databento_opra_daily_bars",
-    }
-)
-_DATABENTO_OPRA_CHECKS = frozenset(
-    {
-        "databento_opra_definitions",
-        "databento_opra_daily_bars",
-    }
-)
-_DATABENTO_TRANSIENT_HTTP_MARKERS = (
-    "HTTP 500",
-    "HTTP 502",
-    "HTTP 503",
-    "HTTP 504",
-)
-_GOVERNED_OPRA_DEFINITIONS_CHECK = "governed_opra_definitions"
-_GOVERNED_OPRA_DAILY_BARS_CHECK = "governed_opra_daily_bars"
+_GOVERNED_OPTION_DEFINITIONS_CHECK = "governed_option_definitions"
+_GOVERNED_OPTION_DAILY_BARS_CHECK = "governed_option_daily_bars"
 _OPPORTUNITY_COMPLETE_MAX_EXPIRATIONS = 1_000
 
 HttpGet = Callable[..., Any]
@@ -102,38 +83,51 @@ def _spy_reference_price(
     return closes[-1]
 
 
+def _failed_option_checks(
+    report: ProviderValidationReport,
+    detail: str,
+) -> tuple[ProviderValidationCheck, ProviderValidationCheck]:
+    return (
+        ProviderValidationCheck(
+            name=_GOVERNED_OPTION_DEFINITIONS_CHECK,
+            provider="REDUNDANT_OPTIONS",
+            required=True,
+            state="failed",
+            detail=detail,
+            observed_at=report.generated_at,
+        ),
+        ProviderValidationCheck(
+            name=_GOVERNED_OPTION_DAILY_BARS_CHECK,
+            provider="REDUNDANT_OPTIONS",
+            required=True,
+            state="failed",
+            detail=detail,
+            observed_at=report.generated_at,
+        ),
+    )
+
+
 def certify_redundant_option_provider(
     report: ProviderValidationReport,
     *,
     options_provider: RedundantOptionsProvider | None = None,
     http_get: HttpGet = requests.get,
 ) -> ProviderValidationReport:
-    """Certify the governed option lane with expiration-complete provider evidence.
-
-    The legacy provider-validation report predates the redundant options router and
-    therefore reports the Databento OPRA checks as release-blocking even when the
-    production lane can lawfully fail over. Preserve those provider-specific failures
-    as diagnostics, but waive them only when the exact governed router can scan the
-    effectively complete 30-365 day expiration opportunity window and return authentic
-    completed-session option evidence. A rate-limited provider that can prove only one
-    expiration cannot certify this release boundary.
-    """
-
-    legacy_checks = {
-        check.name: check
-        for check in report.checks
-        if check.name in _DATABENTO_OPRA_CHECKS
-    }
-    if _DATABENTO_OPRA_CHECKS.issubset(legacy_checks) and all(
-        legacy_checks[name].passed for name in _DATABENTO_OPRA_CHECKS
-    ):
-        return report
-    if not legacy_checks:
-        return report
+    """Require opportunity-complete current option evidence without Databento."""
 
     provider = options_provider or build_redundant_options_provider()
     if not provider.configured:
-        return report
+        return replace(
+            report,
+            checks=(
+                *report.checks,
+                *_failed_option_checks(
+                    report,
+                    "no governed option provider is configured; Alpaca indicative "
+                    "options are the required opportunity-complete primary",
+                ),
+            ),
+        )
 
     try:
         reference_price = _spy_reference_price(report=report, http_get=http_get)
@@ -153,10 +147,28 @@ def certify_redundant_option_provider(
         TypeError,
         ValueError,
         requests.RequestException,
-    ):
-        return report
+    ) as error:
+        return replace(
+            report,
+            checks=(
+                *report.checks,
+                *_failed_option_checks(
+                    report,
+                    f"governed option certification failed: {type(error).__name__}: {error}",
+                ),
+            ),
+        )
     if not selections:
-        return report
+        return replace(
+            report,
+            checks=(
+                *report.checks,
+                *_failed_option_checks(
+                    report,
+                    "governed option provider returned no opportunity-complete selections",
+                ),
+            ),
+        )
 
     provider_kinds = tuple(
         sorted(
@@ -167,8 +179,6 @@ def certify_redundant_option_provider(
             }
         )
     )
-    if not provider_kinds:
-        return report
     provider_label = (
         provider_kinds[0].upper()
         if len(provider_kinds) == 1
@@ -202,12 +212,12 @@ def certify_redundant_option_provider(
     )
     governed_checks = (
         ProviderValidationCheck(
-            name=_GOVERNED_OPRA_DEFINITIONS_CHECK,
+            name=_GOVERNED_OPTION_DEFINITIONS_CHECK,
             provider=provider_label,
             required=True,
             state="passed",
             detail=(
-                "governed redundant option contract selection succeeded across "
+                "governed option contract selection succeeded across "
                 f"{len(expiration_dates)} eligible expiration dates with "
                 f"{len(selections)} priced near-money contracts via {provider_label}"
             ),
@@ -225,7 +235,7 @@ def certify_redundant_option_provider(
             ),
         ),
         ProviderValidationCheck(
-            name=_GOVERNED_OPRA_DAILY_BARS_CHECK,
+            name=_GOVERNED_OPTION_DAILY_BARS_CHECK,
             provider=provider_label,
             required=True,
             state="passed",
@@ -247,56 +257,7 @@ def certify_redundant_option_provider(
             ),
         ),
     )
-
-    checks: list[ProviderValidationCheck] = []
-    for check in report.checks:
-        if check.name in _DATABENTO_OPRA_CHECKS and not check.passed:
-            checks.append(
-                replace(
-                    check,
-                    required=False,
-                    detail=(
-                        f"{check.detail}; provider-specific Databento OPRA degradation is "
-                        f"diagnostic because the governed redundant options lane certified "
-                        f"expiration-complete authentic evidence via {provider_label}"
-                    ),
-                )
-            )
-        else:
-            checks.append(check)
-    checks.extend(governed_checks)
-    return replace(report, checks=tuple(checks))
-
-
-def _transient_databento_server_degradation(
-    report: ProviderValidationReport,
-) -> bool:
-    """Return true only for an explicit provider-side Databento outage.
-
-    The metadata endpoint currently collapses its final transport failure into a generic
-    credential-safe message. Therefore it can be deferred only when both independent
-    OPRA checks explicitly report a retryable Databento 5xx response in the same report.
-    Authentication denials, entitlement failures, missing keys, empty evidence, parsing
-    errors, and any future unknown Databento check remain release-blocking.
-    """
-
-    failed = tuple(
-        check
-        for check in report.checks
-        if check.provider == "DATABENTO" and check.required and not check.passed
-    )
-    if not failed:
-        return False
-    failed_names = {check.name for check in failed}
-    if not failed_names.issubset(_DATABENTO_TRANSIENT_CHECKS):
-        return False
-    if not _DATABENTO_OPRA_CHECKS.issubset(failed_names):
-        return False
-    by_name = {check.name: check for check in failed}
-    return all(
-        any(marker in by_name[name].detail for marker in _DATABENTO_TRANSIENT_HTTP_MARKERS)
-        for name in _DATABENTO_OPRA_CHECKS
-    )
+    return replace(report, checks=(*report.checks, *governed_checks))
 
 
 def release_preflight_report(
@@ -304,20 +265,11 @@ def release_preflight_report(
 ) -> ProviderValidationReport:
     """Apply the release-level provider authority boundary.
 
-    EODHD authentication remains required. Its exchange-directory endpoint is a
-    provider-specific catalog path, however, and is no longer an independent release
-    authority. Complete executable-market coverage is enforced later by aggregate
-    governed discovery and the exact-release CIO audit, which may use certified
-    provider-neutral or fallback catalogs. The check remains visible and failed when
-    unavailable so provider degradation is never hidden.
-
-    A Databento provider-side 5xx outage may also be diagnostic at deployment preflight,
-    but only when both OPRA checks explicitly prove the same transient server condition.
-    The deployed CIO still requires complete option definitions and prices, remains
-    fail-closed, and cannot certify or recommend an option without authentic evidence.
+    EODHD exchange-directory availability remains diagnostic because aggregate governed
+    discovery and the exact-release CIO audit enforce executable-market completeness.
+    No Databento exception or waiver exists.
     """
 
-    defer_databento = _transient_databento_server_degradation(report)
     checks = []
     for check in report.checks:
         if check.name == _EODHD_DIRECTORY_CHECK:
@@ -327,31 +279,13 @@ def release_preflight_report(
                     required=False,
                     detail=(
                         f"{check.detail}; provider-specific exchange-directory availability "
-                        "is diagnostic only because aggregate governed discovery and the "
+                        "is diagnostic because aggregate governed discovery and the "
                         "exact-release CIO audit enforce executable-market completeness"
                     ),
                 )
             )
-            continue
-        if (
-            defer_databento
-            and check.name in _DATABENTO_TRANSIENT_CHECKS
-            and not check.passed
-        ):
-            checks.append(
-                replace(
-                    check,
-                    required=False,
-                    detail=(
-                        f"{check.detail}; explicit Databento provider-side 5xx degradation "
-                        "is diagnostic at deployment preflight only; the deployed exact-release "
-                        "CIO must still retrieve complete authentic option evidence and remains "
-                        "fail-closed"
-                    ),
-                )
-            )
-            continue
-        checks.append(check)
+        else:
+            checks.append(check)
     return replace(report, checks=tuple(checks))
 
 
