@@ -1,10 +1,15 @@
-"""Opportunity-complete Alpaca indicative option evidence.
+"""Opportunity-complete Alpaca Basic option evidence.
 
-This provider uses the already-governed Alpaca paper credentials to enumerate every
-eligible expiration in the configured DTE window, then uses Alpaca's authenticated
-option-history API in bounded multi-symbol batches.  It never grants order authority.
-The free indicative feed is evidence, not an OPRA substitute, and its lineage remains
-explicit so downstream governance can distinguish it from Databento OPRA evidence.
+The provider uses Alpaca market-data endpoints only. Contract opportunity discovery is
+performed through the paginated option-chain endpoint with the free ``indicative``
+feed, so paper-brokerage options approval is never required merely to enumerate the
+candidate universe. Historical daily bars are requested only through a point in time
+that is safely outside Alpaca Basic's latest-15-minute restriction.
+
+This module grants no order authority. It does not reduce expiration coverage, lower
+qualification thresholds, fabricate evidence, or substitute indicative snapshots for
+historical bars. The option chain supplies contract identity; completed historical bars
+supply the evidence used by screening and downstream CIO analysis.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import threading
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Sequence
+from urllib.parse import quote
 
 import requests
 
@@ -22,13 +28,14 @@ from providers.alpaca_paper import AlpacaPaperSettings
 
 ALPACA_INDICATIVE_OPTIONS_DATASET = "ALPACA.OPTIONS.INDICATIVE"
 ALPACA_INDICATIVE_OPTIONS_FEED = "indicative"
-_MAX_CONTRACT_PAGES = 100
+_MAX_CHAIN_PAGES = 500
 _MAX_BAR_PAGES = 500
-_CONTRACT_PAGE_LIMIT = 10_000
+_CHAIN_PAGE_LIMIT = 1_000
 _BAR_PAGE_LIMIT = 10_000
 _BAR_SYMBOL_BATCH = 100
 _DEFAULT_SELECTION_HISTORY_DAYS = 365
 _DEFAULT_MONEYNESS_LIMIT = 0.20
+_BASIC_HISTORY_DELAY_MINUTES = 16
 
 
 class AlpacaIndicativeOptionsError(RuntimeError):
@@ -86,6 +93,27 @@ def _alpaca_symbol(raw_symbol: str) -> str:
     return compact[2:] if compact.startswith("O:") else compact
 
 
+def _occ_identity(symbol: str) -> tuple[date, str, float]:
+    """Parse OCC compact option identity from the final 15 characters."""
+
+    compact = _alpaca_symbol(symbol)
+    if len(compact) < 16:
+        raise ValueError("option symbol is too short for OCC compact format")
+    suffix = compact[-15:]
+    expiration = datetime.strptime(suffix[:6], "%y%m%d").date()
+    right_code = suffix[6]
+    if right_code == "C":
+        right = "call"
+    elif right_code == "P":
+        right = "put"
+    else:
+        raise ValueError("option symbol has an invalid OCC right code")
+    strike_text = suffix[7:]
+    if len(strike_text) != 8 or not strike_text.isdigit():
+        raise ValueError("option symbol has an invalid OCC strike")
+    return expiration, right, int(strike_text) / 1000.0
+
+
 @dataclass(frozen=True, slots=True)
 class AlpacaIndicativeOptionDefinition:
     symbol: str
@@ -125,7 +153,7 @@ _BAR_CACHE: dict[
 
 
 class AlpacaIndicativeOptionsProvider:
-    """Authenticated paper-data adapter with complete eligible-expiration coverage."""
+    """Authenticated market-data adapter with complete eligible-expiration coverage."""
 
     def __init__(
         self,
@@ -162,22 +190,15 @@ class AlpacaIndicativeOptionsProvider:
             return self._settings_candidates
         return (active, *tuple(item for item in self._settings_candidates if item != active))
 
-    def _get(
-        self,
-        *,
-        data_api: bool,
-        path: str,
-        params: Mapping[str, object],
-    ) -> Mapping[str, Any]:
+    def _get(self, *, path: str, params: Mapping[str, object]) -> Mapping[str, Any]:
         if not self.configured:
-            raise AlpacaIndicativeOptionsError("Alpaca paper credentials are not configured")
+            raise AlpacaIndicativeOptionsError("Alpaca market-data credentials are not configured")
         last_status: int | None = None
         last_error: str | None = None
         for settings in self._settings_order():
-            base_url = settings.data_base_url if data_api else settings.paper_base_url
             try:
                 response = self._http_get(
-                    base_url.rstrip("/") + path,
+                    settings.data_base_url.rstrip("/") + path,
                     headers={
                         "APCA-API-KEY-ID": settings.api_key_id,
                         "APCA-API-SECRET-KEY": settings.secret_key,
@@ -197,7 +218,7 @@ class AlpacaIndicativeOptionsProvider:
             if status < 200 or status >= 300:
                 retryable = status in {408, 425, 429} or 500 <= status <= 599
                 raise AlpacaIndicativeOptionsError(
-                    f"Alpaca indicative options returned HTTP {status}",
+                    f"Alpaca option market-data endpoint {path} returned HTTP {status}",
                     status_code=status,
                     retryable=retryable,
                 )
@@ -205,17 +226,17 @@ class AlpacaIndicativeOptionsProvider:
                 payload = response.json()
             except (TypeError, ValueError) as error:
                 raise AlpacaIndicativeOptionsError(
-                    "Alpaca indicative options returned invalid JSON"
+                    f"Alpaca option market-data endpoint {path} returned invalid JSON"
                 ) from error
             if not isinstance(payload, Mapping):
                 raise AlpacaIndicativeOptionsError(
-                    "Alpaca indicative options response must be a JSON object"
+                    f"Alpaca option market-data endpoint {path} must return a JSON object"
                 )
             with self._settings_lock:
                 self._active_settings = settings
             return payload
         raise AlpacaIndicativeOptionsError(
-            "Alpaca indicative options authentication is unavailable"
+            f"Alpaca option market-data access unavailable for {path}"
             + (f": {last_error}" if last_error else ""),
             status_code=last_status,
         )
@@ -240,80 +261,55 @@ class AlpacaIndicativeOptionsProvider:
         upper_strike = price * (1.0 + self._moneyness_limit)
         expiration_gte = (timestamp + timedelta(days=minimum_days_to_expiry)).date()
         expiration_lte = (timestamp + timedelta(days=maximum_days_to_expiry + 1)).date()
-        definitions: list[AlpacaIndicativeOptionDefinition] = []
+        definitions: dict[str, AlpacaIndicativeOptionDefinition] = {}
         page_token: str | None = None
-        for _page in range(_MAX_CONTRACT_PAGES):
+        path = f"/v1beta1/options/snapshots/{quote(normalized, safe='')}"
+        for _page in range(_MAX_CHAIN_PAGES):
             params: dict[str, object] = {
-                "underlying_symbols": normalized,
-                "status": "active",
+                "feed": ALPACA_INDICATIVE_OPTIONS_FEED,
                 "expiration_date_gte": expiration_gte.isoformat(),
                 "expiration_date_lte": expiration_lte.isoformat(),
                 "strike_price_gte": f"{lower_strike:.8f}",
                 "strike_price_lte": f"{upper_strike:.8f}",
-                "limit": _CONTRACT_PAGE_LIMIT,
+                "limit": _CHAIN_PAGE_LIMIT,
             }
             if page_token is not None:
                 params["page_token"] = page_token
-            payload = self._get(data_api=False, path="/v2/options/contracts", params=params)
-            raw_contracts = payload.get("option_contracts", ())
-            if not isinstance(raw_contracts, Sequence) or isinstance(raw_contracts, (str, bytes)):
+            payload = self._get(path=path, params=params)
+            raw_snapshots = payload.get("snapshots")
+            if not isinstance(raw_snapshots, Mapping):
                 raise AlpacaIndicativeOptionsError(
-                    "Alpaca option-contract response is missing option_contracts"
+                    "Alpaca option-chain response is missing snapshots"
                 )
-            for raw in raw_contracts:
-                if not isinstance(raw, Mapping):
-                    continue
+            for raw_symbol in raw_snapshots:
                 try:
-                    if raw.get("tradable") is False:
-                        continue
-                    symbol = _alpaca_symbol(_text(raw.get("symbol"), field_name="symbol"))
-                    row_underlying = _text(
-                        raw.get("underlying_symbol", normalized),
-                        field_name="underlying_symbol",
-                    ).upper()
-                    if row_underlying != normalized:
-                        continue
-                    right = _text(raw.get("type"), field_name="type").lower()
-                    if right not in {"call", "put"}:
-                        continue
-                    expiration_date = date.fromisoformat(
-                        _text(raw.get("expiration_date"), field_name="expiration_date")[:10]
-                    )
+                    symbol = _alpaca_symbol(str(raw_symbol))
+                    expiration_date, right, strike = _occ_identity(symbol)
                     expiration_at = datetime.combine(
                         expiration_date,
                         datetime.min.time(),
                         tzinfo=timezone.utc,
                     ) + timedelta(hours=21)
                     days = (expiration_at - timestamp).days
-                    strike = _number(raw.get("strike_price"), field_name="strike_price")
                     if not (
                         minimum_days_to_expiry <= days <= maximum_days_to_expiry
                         and strike > 0.0
                         and abs(strike / price - 1.0) <= self._moneyness_limit
                     ):
                         continue
-                    multiplier = _number(
-                        raw.get("size", raw.get("contract_size", 100.0)),
-                        field_name="contract_multiplier",
-                    )
-                    if multiplier <= 0.0:
-                        continue
-                    provider_id = str(raw.get("id", "")).strip() or symbol
-                    definitions.append(
-                        AlpacaIndicativeOptionDefinition(
-                            symbol=symbol,
-                            raw_symbol=symbol,
-                            underlying=normalized,
-                            option_right=right,
-                            expiration_at=expiration_at,
-                            strike=strike,
-                            contract_multiplier=multiplier,
-                            session_date=timestamp.date(),
-                            source_identifier=(
-                                "alpaca-option-contract:"
-                                f"{timestamp.date().isoformat()}:{provider_id}:{symbol}"
-                            ),
-                        )
+                    definitions[symbol] = AlpacaIndicativeOptionDefinition(
+                        symbol=symbol,
+                        raw_symbol=symbol,
+                        underlying=normalized,
+                        option_right=right,
+                        expiration_at=expiration_at,
+                        strike=strike,
+                        contract_multiplier=100.0,
+                        session_date=timestamp.date(),
+                        source_identifier=(
+                            "alpaca-indicative-option-chain:"
+                            f"{timestamp.date().isoformat()}:{normalized}:{symbol}"
+                        ),
                     )
                 except (TypeError, ValueError):
                     continue
@@ -323,17 +319,19 @@ class AlpacaIndicativeOptionsProvider:
             page_token = str(raw_token).strip()
         else:
             raise AlpacaIndicativeOptionsError(
-                "Alpaca option-contract pagination exceeded the completeness guard"
+                "Alpaca option-chain pagination exceeded the completeness guard"
             )
-        definitions.sort(
-            key=lambda item: (
-                item.expiration_at,
-                item.option_right,
-                item.strike,
-                item.symbol,
+        return tuple(
+            sorted(
+                definitions.values(),
+                key=lambda item: (
+                    item.expiration_at,
+                    item.option_right,
+                    item.strike,
+                    item.symbol,
+                ),
             )
         )
-        return tuple(definitions)
 
     def _cached_bars(
         self,
@@ -381,6 +379,9 @@ class AlpacaIndicativeOptionsProvider:
             elif cached:
                 result[symbol] = cached
 
+        # Alpaca Basic blocks requests that include the latest 15 minutes of options
+        # history. Keep the query point-in-time and safely behind that boundary.
+        safe_end = timestamp - timedelta(minutes=_BASIC_HISTORY_DELAY_MINUTES)
         start = timestamp - timedelta(days=history_days)
         for offset in range(0, len(missing), _BAR_SYMBOL_BATCH):
             batch = tuple(missing[offset : offset + _BAR_SYMBOL_BATCH])
@@ -393,13 +394,13 @@ class AlpacaIndicativeOptionsProvider:
                     "symbols": ",".join(batch),
                     "timeframe": "1Day",
                     "start": start.isoformat(),
-                    "end": timestamp.isoformat(),
+                    "end": safe_end.isoformat(),
                     "limit": _BAR_PAGE_LIMIT,
                     "sort": "asc",
                 }
                 if page_token is not None:
                     params["page_token"] = page_token
-                payload = self._get(data_api=True, path="/v1beta1/options/bars", params=params)
+                payload = self._get(path="/v1beta1/options/bars", params=params)
                 raw_bars = payload.get("bars")
                 if not isinstance(raw_bars, Mapping):
                     raise AlpacaIndicativeOptionsError(
@@ -420,7 +421,7 @@ class AlpacaIndicativeOptionsProvider:
                             volume = max(0.0, _number(raw.get("v", 0.0), field_name="bar volume"))
                         except (TypeError, ValueError):
                             continue
-                        if observed > timestamp or close <= 0.0:
+                        if observed > safe_end or close <= 0.0:
                             continue
                         grouped[symbol].append(
                             AlpacaIndicativeOptionBar(
@@ -429,7 +430,7 @@ class AlpacaIndicativeOptionsProvider:
                                 close=close,
                                 volume=volume,
                                 source_identifier=(
-                                    "alpaca-indicative-option-bar:"
+                                    "alpaca-basic-option-bar:"
                                     f"{symbol}:{observed.isoformat()}"
                                 ),
                             )
@@ -501,9 +502,6 @@ class AlpacaIndicativeOptionsProvider:
             maximum_days_to_expiry=maximum_days_to_expiry,
         )
         all_expirations = tuple(sorted({item.expiration_at for item in definitions}))
-        # 1,000 exceeds the physical number of distinct expiration dates inside the
-        # governed one-year DTE window. The guard protects callers without truncating
-        # any real expiration opportunity.
         expirations = all_expirations[:maximum_expirations]
         buckets: dict[
             tuple[datetime, str],
@@ -530,9 +528,6 @@ class AlpacaIndicativeOptionsProvider:
         if not candidates:
             return ()
 
-        # A short completed-history request determines which near-money candidates
-        # actually carry provider evidence. Only the winning contract in each bucket
-        # is then hydrated to 365 days, keeping later preselection single-pass.
         short_bars = self.daily_bars(
             tuple(item.raw_symbol for item in candidates),
             as_of=timestamp,

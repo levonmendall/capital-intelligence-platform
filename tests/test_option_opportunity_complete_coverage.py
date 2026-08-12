@@ -35,31 +35,14 @@ class _AlpacaFixture:
     def __call__(self, url, *, headers, params, timeout):
         del headers, timeout
         self.calls.append((url, dict(params)))
-        if url.endswith("/v2/options/contracts"):
-            contracts = []
+        if url.endswith("/v1beta1/options/snapshots/ZZQ"):
+            snapshots = {}
             for days in EXPIRATION_DAYS:
-                expiration = (AS_OF + timedelta(days=days)).date().isoformat()
                 compact_date = (AS_OF + timedelta(days=days)).strftime("%y%m%d")
-                for right, code in (("call", "C"), ("put", "P")):
+                for code in ("C", "P"):
                     symbol = f"ZZQ{compact_date}{code}00100000"
-                    contracts.append(
-                        {
-                            "id": f"id-{symbol}",
-                            "symbol": symbol,
-                            "underlying_symbol": "ZZQ",
-                            "type": right,
-                            "expiration_date": expiration,
-                            "strike_price": "100",
-                            "size": "100",
-                            "tradable": True,
-                        }
-                    )
-            return _Response(
-                {
-                    "option_contracts": contracts,
-                    "next_page_token": None,
-                }
-            )
+                    snapshots[symbol] = {"latestTrade": None, "latestQuote": None}
+            return _Response({"snapshots": snapshots, "next_page_token": None})
         if url.endswith("/v1beta1/options/bars"):
             symbols = tuple(
                 item.strip()
@@ -116,12 +99,23 @@ def test_alpaca_secondary_preserves_every_eligible_expiration() -> None:
             if item.definition.expiration_at == expiration
         } == {"call", "put"}
 
-    contract_calls = [call for call in http.calls if call[0].endswith("/v2/options/contracts")]
+    chain_calls = [
+        call for call in http.calls if call[0].endswith("/v1beta1/options/snapshots/ZZQ")
+    ]
     bar_calls = [call for call in http.calls if call[0].endswith("/v1beta1/options/bars")]
-    assert len(contract_calls) == 1
+    assert len(chain_calls) == 1
+    assert chain_calls[0][0].startswith("https://data.alpaca.markets/")
+    assert chain_calls[0][1]["feed"] == "indicative"
+    assert chain_calls[0][1]["expiration_date_gte"] == "2026-09-10"
+    assert chain_calls[0][1]["expiration_date_lte"] == "2027-08-12"
+    assert not any("paper-api.alpaca.markets" in url for url, _params in http.calls)
     assert len(bar_calls) == 2
     assert len(str(bar_calls[0][1]["symbols"]).split(",")) == 6
     assert len(str(bar_calls[1][1]["symbols"]).split(",")) == 6
+    for _url, params in bar_calls:
+        end = datetime.fromisoformat(str(params["end"]))
+        assert end == AS_OF - timedelta(minutes=16)
+        assert end <= AS_OF - timedelta(minutes=15)
 
 
 class _CappedDatabento:
