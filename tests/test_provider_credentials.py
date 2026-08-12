@@ -187,8 +187,9 @@ def test_command_report_remains_non_authoritative(monkeypatch, tmp_path) -> None
     monkeypatch.setattr(command, "_eodhd", lambda: passing("eodhd"))
     monkeypatch.setattr(command, "_openfigi", lambda: passing("openfigi"))
     monkeypatch.setattr(command, "_alpha_vantage", lambda: passing("alpha-vantage"))
-    monkeypatch.setattr(command, "_databento", lambda: passing("databento"))
     monkeypatch.setattr(command, "_twelve_data", lambda: passing("twelve-data"))
+    monkeypatch.setattr(command, "_tradier", lambda: passing("tradier"))
+    monkeypatch.setattr(command, "_finra", lambda: passing("finra-fixed-income"))
     output = tmp_path / "provider-validation.json"
 
     exit_code = command.main(["--require-all", "--output", str(output)])
@@ -196,8 +197,18 @@ def test_command_report_remains_non_authoritative(monkeypatch, tmp_path) -> None
 
     assert exit_code == 0
     assert payload["state"] == "passed"
-    assert payload["configured_provider_count"] == 7
-    assert payload["passed_provider_count"] == 7
+    assert payload["configured_provider_count"] == 8
+    assert payload["passed_provider_count"] == 8
+    assert {item["provider"] for item in payload["providers"]} == {
+        "alpaca-paper",
+        "fred",
+        "eodhd",
+        "openfigi",
+        "alpha-vantage",
+        "twelve-data",
+        "tradier",
+        "finra-fixed-income",
+    }
     assert payload["secret_values_disclosed"] is False
     assert payload["provider_certification_granted"] is False
     assert payload["paper_test_authorized"] is False
