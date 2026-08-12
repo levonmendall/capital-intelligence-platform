@@ -64,6 +64,38 @@ def _fingerprint(value: object) -> str:
     ).hexdigest()
 
 
+def _credential_safe_failure_detail(error: BaseException) -> str:
+    """Publish enough provider context to repair a blocked proof without credentials."""
+
+    detail = " ".join(str(error).strip().split())
+    if not detail:
+        detail = type(error).__name__
+    return f"{type(error).__name__}: {detail}"[:600]
+
+
+def _failed_governed_option_report(
+    report: ProviderValidationReport,
+    *,
+    detail: str,
+) -> ProviderValidationReport:
+    check = ProviderValidationCheck(
+        name=_GOVERNED_OPRA_DEFINITIONS_CHECK,
+        provider="REDUNDANT_OPTIONS",
+        required=True,
+        state="failed",
+        detail=detail,
+        observed_at=report.generated_at,
+        source_identifier=None,
+        evidence_fingerprint=None,
+    )
+    retained = tuple(
+        item
+        for item in report.checks
+        if item.name != _GOVERNED_OPRA_DEFINITIONS_CHECK
+    )
+    return replace(report, checks=(*retained, check))
+
+
 def _spy_reference_price(
     *,
     report: ProviderValidationReport,
@@ -133,7 +165,10 @@ def certify_redundant_option_provider(
 
     provider = options_provider or build_redundant_options_provider()
     if not provider.configured:
-        return report
+        return _failed_governed_option_report(
+            report,
+            detail="governed redundant option provider is not configured",
+        )
 
     try:
         reference_price = _spy_reference_price(report=report, http_get=http_get)
@@ -153,10 +188,22 @@ def certify_redundant_option_provider(
         TypeError,
         ValueError,
         requests.RequestException,
-    ):
-        return report
+    ) as error:
+        return _failed_governed_option_report(
+            report,
+            detail=(
+                "expiration-complete governed option proof failed: "
+                + _credential_safe_failure_detail(error)
+            ),
+        )
     if not selections:
-        return report
+        return _failed_governed_option_report(
+            report,
+            detail=(
+                "expiration-complete governed option proof returned zero priced "
+                "contracts across the 30-365 day SPY validation window"
+            ),
+        )
 
     provider_kinds = tuple(
         sorted(
@@ -168,7 +215,10 @@ def certify_redundant_option_provider(
         )
     )
     if not provider_kinds:
-        return report
+        return _failed_governed_option_report(
+            report,
+            detail="governed option proof returned selections without provider lineage",
+        )
     provider_label = (
         provider_kinds[0].upper()
         if len(provider_kinds) == 1
