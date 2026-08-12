@@ -34,11 +34,14 @@ def provider(
     *,
     cache_dir: Path,
     now: datetime = NOW,
+    calls: list[str] | None = None,
 ) -> EODHDProvider:
     queue = list(responses)
 
-    def get(_url, *, params, timeout):
+    def get(url, *, params, timeout):
         del params, timeout
+        if calls is not None:
+            calls.append(url)
         return queue.pop(0)
 
     return EODHDProvider(
@@ -78,7 +81,7 @@ def live_payload(exchange: str = "CC"):
 
 
 @pytest.mark.parametrize("status_code", (402, 404))
-def test_directory_status_uses_recent_successful_active_directory(
+def test_recent_directory_cache_skips_status_probe(
     tmp_path: Path,
     status_code: int,
 ) -> None:
@@ -87,21 +90,24 @@ def test_directory_status_uses_recent_successful_active_directory(
         cache_dir=tmp_path,
     ).fetch_dataset(query())
     later = NOW + timedelta(hours=2)
+    calls: list[str] = []
 
     snapshot = provider(
         [Response({}, status_code)],
         cache_dir=tmp_path,
         now=later,
+        calls=calls,
     ).fetch_dataset(query(later))
 
     assert snapshot.quality_state is DataQualityState.CACHED
     assert snapshot.observed_at == NOW
     assert snapshot.payload["active"] == live_payload()
-    assert any(f"HTTP {status_code}" in item for item in snapshot.limitations)
+    assert calls == []
+    assert any("cache before live refresh" in item for item in snapshot.limitations)
 
 
 @pytest.mark.parametrize("status_code", (402, 404))
-def test_lse_active_continuity_survives_delisted_directory_failure(
+def test_lse_recent_directory_cache_skips_failed_refresh(
     tmp_path: Path,
     status_code: int,
 ) -> None:
@@ -110,20 +116,21 @@ def test_lse_active_continuity_survives_delisted_directory_failure(
         cache_dir=tmp_path,
     ).fetch_dataset(query(provider_symbol="LSE"))
     later = NOW + timedelta(hours=2)
+    calls: list[str] = []
 
     snapshot = provider(
         [Response({}, status_code), Response({}, status_code)],
         cache_dir=tmp_path,
         now=later,
+        calls=calls,
     ).fetch_dataset(query(later, provider_symbol="LSE"))
 
     assert snapshot.quality_state is DataQualityState.CACHED
+    assert snapshot.observed_at == NOW
     assert snapshot.payload["active"] == live_payload("LSE")
     assert snapshot.payload["delisted"] == []
-    assert any("delisted-symbol directory" in item for item in snapshot.limitations)
-    assert sum(
-        f"HTTP {status_code}" in item for item in snapshot.limitations
-    ) >= 2
+    assert calls == []
+    assert any("cache before live refresh" in item for item in snapshot.limitations)
 
 
 def test_http_402_without_recent_active_cache_remains_fail_closed(
@@ -136,14 +143,14 @@ def test_http_402_without_recent_active_cache_remains_fail_closed(
         ).fetch_dataset(query())
 
 
-def test_authentication_failure_never_uses_continuity_cache(
+def test_authentication_failure_never_uses_expired_continuity_cache(
     tmp_path: Path,
 ) -> None:
     provider(
         [Response(live_payload())],
         cache_dir=tmp_path,
     ).fetch_dataset(query())
-    later = NOW + timedelta(hours=1)
+    later = NOW + timedelta(hours=73)
 
     with pytest.raises(EODHDProviderError, match="HTTP 403.*non-retryable"):
         provider(
