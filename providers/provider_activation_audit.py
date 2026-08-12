@@ -50,9 +50,6 @@ class ProviderActivationRecord:
         return asdict(self)
 
 
-# ``production_route`` names a concrete consumer, not merely an adapter module.
-# Entries with no route are deliberately visible as unrouted until production code
-# consumes them. This prevents a secret or config file from being mistaken for use.
 CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ProviderActivationSpec(
         "alpaca-market-data",
@@ -200,8 +197,11 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ProviderActivationSpec(
         "cme-margin-data",
         ("derivative_margin_data",),
-        "all-market readiness clearing-risk resource preflight",
-        keyless=True,
+        "all-market readiness CME DataMine SPAN/SPAN 2 resource preflight",
+        credential_groups=(
+            "CAPITAL_INTELLIGENCE_CME_DATAMINE_API_ID",
+            "CAPITAL_INTELLIGENCE_CME_DATAMINE_API_PASSWORD",
+        ),
         configuration_groups=(
             "CAPITAL_INTELLIGENCE_CME_MARGIN_BINDING",
             "CAPITAL_INTELLIGENCE_CME_MARGIN_TERMS_REFERENCE",
@@ -209,8 +209,9 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
             "CAPITAL_INTELLIGENCE_CME_MARGIN_CERTIFICATION_ID",
         ),
         note=(
-            "CME SPAN/SPAN 2 risk files are keyless evidence but still require an external "
-            "binding, terms/paper-use approval, certification, and append-only activation."
+            "Production CME SPAN access is authenticated through the DataMine API. The "
+            "repository binding contains the governed CME file-ID catalog; terms/paper-use "
+            "approval, certification, preflight validation, and append-only activation remain required."
         ),
     ),
     ProviderActivationSpec(
