@@ -1,11 +1,12 @@
 """Bound terminal all-market screening without changing admission semantics.
 
-The canonical provider-factor publication remains complete on disk. Provider signals,
+The canonical provider-factor publication remains complete on disk. Provider signals are
+indexed by byte offset instead of copied into a second complete payload store, while
 completed screening state, global sleeve rankings, complete-consideration selection,
-and retained evidence are spooled through SQLite so screening and finalization do not
-create overlapping all-market Python object graphs. Global ranking is performed only
-after the complete lane is screened; no market, factor, evidence, liquidity, freshness,
-ranking, threshold, or authority rule is changed.
+and retained evidence are spooled through SQLite. Screening and finalization therefore
+avoid overlapping all-market Python object graphs and duplicate provider payloads.
+Global ranking is performed only after the complete lane is screened; no market, factor,
+evidence, liquidity, freshness, ranking, threshold, or authority rule is changed.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import gc
 import json
 import os
 import re
+import shutil
 import sqlite3
 import tempfile
 from collections.abc import Iterator
@@ -40,6 +42,7 @@ from operations.provider_enriched_preselection import (
 
 DEFAULT_TERMINAL_SCREENING_CHUNK_SIZE = 512
 _SQLITE_CACHE_KIB = 2048
+_DEFAULT_STORAGE_RESERVE_MIB = 64
 _TOP_LEVEL_KEY = re.compile(r'^  (?P<key>"(?:\\.|[^"\\])+"): (?P<value>.*)$')
 _SIGNAL_KEY = re.compile(r'^    (?P<key>"(?:\\.|[^"\\])+"): (?P<value>\{.*)$')
 _SCORE_COLUMNS = {
@@ -98,8 +101,78 @@ def _configure_spool_connection(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA mmap_size = 0")
 
 
+def _path_size(path: Path) -> int:
+    try:
+        return int(path.stat().st_size)
+    except OSError:
+        return 0
+
+
+def _sqlite_footprint(path: Path) -> int:
+    return sum(
+        _path_size(candidate)
+        for candidate in (
+            path,
+            Path(f"{path}-journal"),
+            Path(f"{path}-wal"),
+            Path(f"{path}-shm"),
+        )
+    )
+
+
+def _storage_reserve_bytes() -> int:
+    raw = os.environ.get(
+        "MANUAL_CIO_SERVICE_STORAGE_RESERVE_MB",
+        str(_DEFAULT_STORAGE_RESERVE_MIB),
+    )
+    try:
+        reserve_mib = int(raw)
+    except (TypeError, ValueError):
+        reserve_mib = _DEFAULT_STORAGE_RESERVE_MIB
+    return max(1, reserve_mib) * 1024 * 1024
+
+
+def _storage_metrics(
+    *,
+    publication_path: Path,
+    publication_index_path: Path,
+    screening_spool_path: Path,
+    chunk_path: Path | None = None,
+) -> dict[str, int]:
+    metrics = {
+        "publication_bytes": _path_size(publication_path),
+        "publication_index_bytes": _sqlite_footprint(publication_index_path),
+        "screening_spool_bytes": _sqlite_footprint(screening_spool_path),
+        "chunk_file_bytes": 0 if chunk_path is None else _path_size(chunk_path),
+        "storage_reserve_bytes": _storage_reserve_bytes(),
+    }
+    try:
+        usage = shutil.disk_usage(screening_spool_path.parent)
+    except OSError:
+        return metrics
+    metrics.update(
+        {
+            "storage_total_bytes": int(usage.total),
+            "storage_used_bytes": int(usage.used),
+            "storage_free_bytes": int(usage.free),
+        }
+    )
+    return metrics
+
+
+def _ensure_storage_reserve(metrics: Mapping[str, int], *, phase: str) -> None:
+    free_bytes = metrics.get("storage_free_bytes")
+    reserve_bytes = metrics.get("storage_reserve_bytes")
+    if free_bytes is None or reserve_bytes is None or free_bytes >= reserve_bytes:
+        return
+    raise BoundedTerminalScreeningError(
+        f"{phase} storage reserve exhausted before filesystem capacity failure: "
+        f"free_bytes={free_bytes}; reserve_bytes={reserve_bytes}"
+    )
+
+
 class _PublicationSignalSpool:
-    """Stream one canonical pretty-JSON publication into a disk-backed signal index."""
+    """Index canonical pretty-JSON signals by byte range without duplicating payloads."""
 
     __slots__ = (
         "publication_path",
@@ -118,8 +191,15 @@ class _PublicationSignalSpool:
         self.connection = sqlite3.connect(self.database_path)
         self._closed = False
         _configure_spool_connection(self.connection)
+        # This database is a disposable lookup index over the immutable canonical
+        # publication. A journal would temporarily duplicate index pages on disk and is
+        # unnecessary: any interruption terminates the fail-closed diagnostic and the
+        # index is rebuilt from the canonical publication on the next attempt.
+        self.connection.execute("PRAGMA journal_mode = OFF")
         self.connection.execute(
-            "CREATE TABLE signals (symbol TEXT PRIMARY KEY, payload TEXT NOT NULL)"
+            "CREATE TABLE signals ("
+            "symbol TEXT PRIMARY KEY, payload_offset INTEGER NOT NULL, "
+            "payload_length INTEGER NOT NULL) WITHOUT ROWID"
         )
         self.metadata: dict[str, object] = {}
         self.signal_count = 0
@@ -147,22 +227,25 @@ class _PublicationSignalSpool:
         except json.JSONDecodeError:
             return None
 
-    def _insert_signal(self, symbol: str, value: object) -> None:
+    def _insert_signal_reference(
+        self,
+        symbol: str,
+        *,
+        payload_offset: int,
+        payload_length: int,
+        value: object,
+    ) -> None:
         if not isinstance(value, Mapping):
             raise BoundedTerminalScreeningError(
                 "provider publication signal must be a JSON object"
             )
+        if payload_offset < 0 or payload_length < 1:
+            raise BoundedTerminalScreeningError(
+                "provider publication signal byte range is invalid"
+            )
         self.connection.execute(
-            "INSERT INTO signals(symbol, payload) VALUES (?, ?)",
-            (
-                symbol,
-                json.dumps(
-                    dict(value),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    allow_nan=False,
-                ),
-            ),
+            "INSERT INTO signals(symbol, payload_offset, payload_length) VALUES (?, ?, ?)",
+            (symbol, payload_offset, payload_length),
         )
         self.signal_count += 1
 
@@ -176,29 +259,54 @@ class _PublicationSignalSpool:
         pending_value = ""
         signal_symbol: str | None = None
         signal_value = ""
+        signal_payload_offset: int | None = None
         saw_signals = False
         try:
-            handle = self.publication_path.open("r", encoding="utf-8")
+            handle = self.publication_path.open("rb")
         except OSError as error:
             raise BoundedTerminalScreeningError(
                 "provider preselection publication cannot be opened"
             ) from error
         with handle:
-            for line in handle:
+            while True:
+                line_start = handle.tell()
+                raw_line = handle.readline()
+                if not raw_line:
+                    break
+                try:
+                    line = raw_line.decode("utf-8")
+                except UnicodeDecodeError as error:
+                    raise BoundedTerminalScreeningError(
+                        "provider preselection publication is not UTF-8"
+                    ) from error
+
                 if mode == "signals":
                     if signal_symbol is not None:
                         signal_value += line
                         decoded = self._decode_value(signal_value)
                         if decoded is not None:
-                            value, _end = decoded
-                            self._insert_signal(signal_symbol, value)
+                            value, end = decoded
+                            if signal_payload_offset is None:
+                                raise BoundedTerminalScreeningError(
+                                    "provider publication signal byte range is unavailable"
+                                )
+                            payload_length = len(
+                                signal_value[:end].encode("utf-8")
+                            )
+                            self._insert_signal_reference(
+                                signal_symbol,
+                                payload_offset=signal_payload_offset,
+                                payload_length=payload_length,
+                                value=value,
+                            )
                             signal_symbol = None
                             signal_value = ""
+                            signal_payload_offset = None
                         continue
                     if line.startswith("  }"):
                         mode = "top"
                         continue
-                    match = _SIGNAL_KEY.match(line.rstrip("\n"))
+                    match = _SIGNAL_KEY.match(line.rstrip("\r\n"))
                     if match is None:
                         if not line.strip():
                             continue
@@ -210,13 +318,24 @@ class _PublicationSignalSpool:
                         raise BoundedTerminalScreeningError(
                             "provider publication contains an empty signal symbol"
                         )
-                    signal_value = match.group("value") + "\n"
+                    value_start = match.start("value")
+                    signal_payload_offset = line_start + len(
+                        line[:value_start].encode("utf-8")
+                    )
+                    signal_value = line[value_start:]
                     decoded = self._decode_value(signal_value)
                     if decoded is not None:
-                        value, _end = decoded
-                        self._insert_signal(signal_symbol, value)
+                        value, end = decoded
+                        payload_length = len(signal_value[:end].encode("utf-8"))
+                        self._insert_signal_reference(
+                            signal_symbol,
+                            payload_offset=signal_payload_offset,
+                            payload_length=payload_length,
+                            value=value,
+                        )
                         signal_symbol = None
                         signal_value = ""
+                        signal_payload_offset = None
                     continue
 
                 if pending_key is not None:
@@ -229,11 +348,11 @@ class _PublicationSignalSpool:
                         pending_value = ""
                     continue
 
-                match = _TOP_LEVEL_KEY.match(line.rstrip("\n"))
+                match = _TOP_LEVEL_KEY.match(line.rstrip("\r\n"))
                 if match is None:
                     continue
                 key = str(json.loads(match.group("key")))
-                value_text = match.group("value") + "\n"
+                value_text = line[match.start("value"):]
                 if key == "signals":
                     if not value_text.lstrip().startswith("{"):
                         raise BoundedTerminalScreeningError(
@@ -274,20 +393,47 @@ class _PublicationSignalSpool:
     def signals_for(self, records: Sequence[object]) -> dict[str, object]:
         result: dict[str, object] = {}
         cursor = self.connection.cursor()
-        for record in records:
-            symbol = str(getattr(record, "symbol", "")).strip().upper()
-            provider_symbol = str(
-                getattr(record, "provider_symbol", symbol)
-            ).strip().upper()
-            row = cursor.execute(
-                "SELECT payload FROM signals WHERE symbol = ?", (symbol,)
-            ).fetchone()
-            if row is None and provider_symbol and provider_symbol != symbol:
+        try:
+            handle = self.publication_path.open("rb")
+        except OSError as error:
+            raise BoundedTerminalScreeningError(
+                "provider preselection publication cannot be reopened"
+            ) from error
+        with handle:
+            for record in records:
+                symbol = str(getattr(record, "symbol", "")).strip().upper()
+                provider_symbol = str(
+                    getattr(record, "provider_symbol", symbol)
+                ).strip().upper()
                 row = cursor.execute(
-                    "SELECT payload FROM signals WHERE symbol = ?", (provider_symbol,)
+                    "SELECT payload_offset, payload_length FROM signals WHERE symbol = ?",
+                    (symbol,),
                 ).fetchone()
-            if row is not None:
-                result[symbol] = json.loads(str(row[0]))
+                if row is None and provider_symbol and provider_symbol != symbol:
+                    row = cursor.execute(
+                        "SELECT payload_offset, payload_length FROM signals WHERE symbol = ?",
+                        (provider_symbol,),
+                    ).fetchone()
+                if row is None:
+                    continue
+                payload_offset, payload_length = int(row[0]), int(row[1])
+                handle.seek(payload_offset)
+                payload = handle.read(payload_length)
+                if len(payload) != payload_length:
+                    raise BoundedTerminalScreeningError(
+                        "provider publication signal byte range is incomplete"
+                    )
+                try:
+                    value = json.loads(payload.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                    raise BoundedTerminalScreeningError(
+                        "provider publication indexed signal is invalid"
+                    ) from error
+                if not isinstance(value, Mapping):
+                    raise BoundedTerminalScreeningError(
+                        "provider publication indexed signal must be a JSON object"
+                    )
+                result[symbol] = value
         return result
 
     def chunk_publication(self, records: Sequence[object], target: Path) -> None:
@@ -769,7 +915,7 @@ def build_bounded_terminal_preselection(
     progress_label: str,
     chunk_size: int = DEFAULT_TERMINAL_SCREENING_CHUNK_SIZE,
 ) -> BoundedTerminalPreselection:
-    """Reproduce complete-consideration preselection with disk-backed retained state."""
+    """Reproduce complete-consideration preselection with bounded disk-backed state."""
     timestamp = _aware(as_of)
     if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size < 1:
         raise ValueError("chunk_size must be a positive integer")
@@ -783,7 +929,27 @@ def build_bounded_terminal_preselection(
             with tempfile.TemporaryDirectory(prefix="cio-terminal-chunks-") as temporary:
                 chunk_path = Path(temporary) / "provider-preselection-chunk.json"
                 processed = 0
+                initial_storage = _storage_metrics(
+                    publication_path=publication_path,
+                    publication_index_path=publication_spool.database_path,
+                    screening_spool_path=state_spool.database_path,
+                    chunk_path=chunk_path,
+                )
+                _ensure_storage_reserve(
+                    initial_storage,
+                    phase=f"terminal_screening:{progress_label}",
+                )
                 for start, chunk in _chunks(records, chunk_size):
+                    before_chunk = _storage_metrics(
+                        publication_path=publication_path,
+                        publication_index_path=publication_spool.database_path,
+                        screening_spool_path=state_spool.database_path,
+                        chunk_path=chunk_path,
+                    )
+                    _ensure_storage_reserve(
+                        before_chunk,
+                        phase=f"terminal_screening_chunk:{progress_label}",
+                    )
                     publication_spool.chunk_publication(chunk, chunk_path)
                     chunk_policy = replace(
                         policy, provider_preselection_path=str(chunk_path)
@@ -806,6 +972,13 @@ def build_bounded_terminal_preselection(
                         str(symbol).strip().upper(): signal
                         for symbol, signal in signals.items()
                     }
+                    # The provider reader has completed; no later stage needs the
+                    # materialized chunk publication. Unlink it before growing retained
+                    # screening state so those disk footprints do not overlap.
+                    try:
+                        chunk_path.unlink(missing_ok=True)
+                    except OSError:
+                        _advise_file_cache_dontneed(chunk_path)
                     screened_signal_count += len(normalized_signals)
                     freshness_days = int(
                         getattr(policy, "preselection_freshness_days", 3)
@@ -857,16 +1030,26 @@ def build_bounded_terminal_preselection(
                     processed += len(chunk)
                     del normalized_signals
                     del signals
-                    _advise_file_cache_dontneed(chunk_path)
                     publication_spool.release_cached_pages()
                     state_spool.release_cached_pages()
+                    progress_metrics = {
+                        "processed_records": processed,
+                        "total_records": len(records),
+                        "chunk_records": len(chunk),
+                        **_storage_metrics(
+                            publication_path=publication_path,
+                            publication_index_path=publication_spool.database_path,
+                            screening_spool_path=state_spool.database_path,
+                            chunk_path=chunk_path,
+                        ),
+                    }
                     record_manual_cio_diagnostic_progress(
                         f"terminal_screening_chunk:{progress_label}",
-                        metrics={
-                            "processed_records": processed,
-                            "total_records": len(records),
-                            "chunk_records": len(chunk),
-                        },
+                        metrics=progress_metrics,
+                    )
+                    _ensure_storage_reserve(
+                        progress_metrics,
+                        phase=f"terminal_screening_chunk:{progress_label}",
                     )
 
             authority_established = not records or substantive_provider_factor
@@ -887,12 +1070,17 @@ def build_bounded_terminal_preselection(
                     "processed_records": len(records),
                     "total_records": len(records),
                     "chunk_records": 0,
+                    **_storage_metrics(
+                        publication_path=publication_path,
+                        publication_index_path=publication_spool.database_path,
+                        screening_spool_path=state_spool.database_path,
+                    ),
                 },
             )
 
-            # The complete publication index is no longer needed after every record has
-            # been durably screened. Releasing it before ranking prevents the provider
-            # spool and finalization state from overlapping in the cgroup working set.
+            # The publication offset index is no longer needed after every record has
+            # been durably screened. Releasing it before ranking prevents even the compact
+            # lookup index and finalization state from overlapping unnecessarily.
             publication_spool.release_cached_pages()
             publication_spool.close()
             gc.collect()
