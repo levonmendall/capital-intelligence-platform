@@ -440,6 +440,7 @@ def record_manual_cio_diagnostic_progress(
     ):
         raise ValueError("manual CIO diagnostic progress stage is invalid")
 
+    explicit_metrics = _normalize_progress_metrics(metrics)
     combined_metrics: dict[str, object] = dict(metrics or {})
     if lane_stage[0] == "terminal_screening_chunk":
         for name, value in _terminal_screening_resource_metrics(resolved).items():
@@ -451,8 +452,8 @@ def record_manual_cio_diagnostic_progress(
     if existing is None or existing.state != "in_progress":
         return None
     message = f"governed_progress={normalized_stage}"
-    if normalized_metrics:
-        message += "; " + "; ".join(f"{name}={value}" for name, value in normalized_metrics)
+    if explicit_metrics:
+        message += "; " + "; ".join(f"{name}={value}" for name, value in explicit_metrics)
 
     cycle_key = existing.cycle_key
     # The context preparer publishes its cycle before the specialist/CIO phase begins.
