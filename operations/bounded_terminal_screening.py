@@ -633,34 +633,156 @@ class _TerminalScreeningStateSpool:
         self.connection.commit()
         self.release_cached_pages()
 
-    def finalize_diversification(self, *, batch_size: int = 512) -> None:
-        cursor = self.connection.execute(
-            """
-            SELECT item.ordinal, 1.0 / bucket_counts.member_count
-            FROM screened AS item
-            JOIN (
-                SELECT bucket_exposure, bucket_venue, bucket_country, bucket_currency,
-                       COUNT(*) AS member_count
-                FROM screened
-                WHERE eligible = 1
-                GROUP BY bucket_exposure, bucket_venue, bucket_country, bucket_currency
-            ) AS bucket_counts
-              ON bucket_counts.bucket_exposure = item.bucket_exposure
-             AND bucket_counts.bucket_venue = item.bucket_venue
-             AND bucket_counts.bucket_country = item.bucket_country
-             AND bucket_counts.bucket_currency = item.bucket_currency
-            WHERE item.eligible = 1
-            ORDER BY item.ordinal
-            """
+    def finalize_diversification(
+        self,
+        *,
+        batch_size: int = 512,
+        progress_label: str | None = None,
+    ) -> None:
+        """Finalize exact global diversification scores in bounded disk-backed passes."""
+        self.connection.execute("DROP TABLE IF EXISTS diversification_bucket_counts")
+        self.connection.execute(
+            "CREATE TABLE diversification_bucket_counts("
+            "bucket_exposure TEXT NOT NULL, bucket_venue TEXT NOT NULL, "
+            "bucket_country TEXT NOT NULL, bucket_currency TEXT NOT NULL, "
+            "member_count INTEGER NOT NULL, "
+            "PRIMARY KEY(bucket_exposure, bucket_venue, bucket_country, bucket_currency)"
+            ") WITHOUT ROWID"
         )
-        while True:
-            rows = cursor.fetchmany(batch_size)
+        self.connection.commit()
+        self.release_cached_pages()
+
+        total_records = self.eligible_count
+        progress_stride = max(1024, batch_size)
+
+        def record_progress(phase: str, processed_records: int) -> None:
+            if progress_label is None:
+                return
+            metrics = {
+                "processed_records": processed_records,
+                "total_records": total_records,
+                "chunk_records": 0,
+                "screening_spool_bytes": _sqlite_footprint(self.database_path),
+                "storage_reserve_bytes": _storage_reserve_bytes(),
+            }
+            try:
+                usage = shutil.disk_usage(self.database_path.parent)
+            except OSError:
+                pass
+            else:
+                metrics.update(
+                    {
+                        "storage_total_bytes": int(usage.total),
+                        "storage_used_bytes": int(usage.used),
+                        "storage_free_bytes": int(usage.free),
+                    }
+                )
+            stage = f"terminal_screening_finalize_{phase}:{progress_label}"
+            record_manual_cio_diagnostic_progress(stage, metrics=metrics)
+            _ensure_storage_reserve(metrics, phase=stage)
+
+        if total_records == 0:
+            record_progress("diversification_count", 0)
+            record_progress("diversification_apply", 0)
+            self.connection.execute("DROP TABLE diversification_bucket_counts")
+            self.connection.commit()
+            self.release_cached_pages()
+            return
+
+        # Build exact global bucket counts incrementally. Keyset pagination follows
+        # the screened INTEGER PRIMARY KEY, so SQLite never needs a global GROUP BY,
+        # derived-table join, or sort to materialize the complete eligible lane.
+        processed = 0
+        last_ordinal = -1
+        next_progress_at = 0
+        while processed < total_records:
+            rows = self.connection.execute(
+                "SELECT ordinal, bucket_exposure, bucket_venue, bucket_country, "
+                "bucket_currency FROM screened "
+                "WHERE eligible = 1 AND ordinal > ? ORDER BY ordinal LIMIT ?",
+                (last_ordinal, batch_size),
+            ).fetchall()
             if not rows:
                 break
+            batch_records = len(rows)
+            last_ordinal = int(rows[-1][0])
+            self.connection.executemany(
+                "INSERT INTO diversification_bucket_counts("
+                "bucket_exposure, bucket_venue, bucket_country, bucket_currency, "
+                "member_count) VALUES (?, ?, ?, ?, 1) "
+                "ON CONFLICT(bucket_exposure, bucket_venue, bucket_country, "
+                "bucket_currency) DO UPDATE SET member_count = member_count + 1",
+                (tuple(row[1:5]) for row in rows),
+            )
+            self.connection.commit()
+            processed += batch_records
+            del rows
+            self.release_cached_pages()
+            if processed >= next_progress_at or processed == total_records:
+                record_progress("diversification_count", processed)
+                next_progress_at = processed + progress_stride
+
+        if processed != total_records:
+            raise BoundedTerminalScreeningError(
+                "diversification count pass did not inspect every eligible catalog record"
+            )
+
+        # Apply the exact 1/member_count score with only one bounded row batch and
+        # one bounded per-batch bucket lookup cache resident in Python at a time.
+        processed = 0
+        last_ordinal = -1
+        next_progress_at = 0
+        while processed < total_records:
+            rows = self.connection.execute(
+                "SELECT ordinal, bucket_exposure, bucket_venue, bucket_country, "
+                "bucket_currency FROM screened "
+                "WHERE eligible = 1 AND ordinal > ? ORDER BY ordinal LIMIT ?",
+                (last_ordinal, batch_size),
+            ).fetchall()
+            if not rows:
+                break
+            batch_records = len(rows)
+            last_ordinal = int(rows[-1][0])
+            bucket_cache: dict[tuple[str, str, str, str], int] = {}
+            updates: list[tuple[float, int]] = []
+            for row in rows:
+                bucket = tuple(str(value) for value in row[1:5])
+                member_count = bucket_cache.get(bucket)
+                if member_count is None:
+                    count_row = self.connection.execute(
+                        "SELECT member_count FROM diversification_bucket_counts "
+                        "WHERE bucket_exposure = ? AND bucket_venue = ? "
+                        "AND bucket_country = ? AND bucket_currency = ?",
+                        bucket,
+                    ).fetchone()
+                    if count_row is None or int(count_row[0]) < 1:
+                        raise BoundedTerminalScreeningError(
+                            "diversification bucket count is unavailable for an "
+                            "eligible catalog record"
+                        )
+                    member_count = int(count_row[0])
+                    bucket_cache[bucket] = member_count
+                updates.append((1.0 / member_count, int(row[0])))
             self.connection.executemany(
                 "UPDATE screened SET diversification_score = ? WHERE ordinal = ?",
-                ((float(score), int(ordinal)) for ordinal, score in rows),
+                updates,
             )
+            self.connection.commit()
+            processed += batch_records
+            del updates
+            del bucket_cache
+            del rows
+            self.release_cached_pages()
+            if processed >= next_progress_at or processed == total_records:
+                record_progress("diversification_apply", processed)
+                next_progress_at = processed + progress_stride
+
+        if processed != total_records:
+            raise BoundedTerminalScreeningError(
+                "diversification score pass did not update every eligible catalog record"
+            )
+
+        self.connection.execute("DROP TABLE diversification_bucket_counts")
         self.connection.commit()
         self.release_cached_pages()
 
@@ -1092,7 +1214,10 @@ def build_bounded_terminal_preselection(
             )
 
             batch_size = min(chunk_size, DEFAULT_TERMINAL_SCREENING_CHUNK_SIZE)
-            state_spool.finalize_diversification(batch_size=batch_size)
+            state_spool.finalize_diversification(
+                batch_size=batch_size,
+                progress_label=progress_label,
+            )
             _finalization_progress(
                 "diversification",
                 progress_label,

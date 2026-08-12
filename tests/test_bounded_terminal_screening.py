@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -242,13 +243,85 @@ def test_finalization_phases_are_durably_observable(tmp_path, monkeypatch):
         chunk_size=5,
     )
 
-    assert stages[-5:] == [
+    top_level_stages = [
         "terminal_screening_finalize_release:international_equity",
         "terminal_screening_finalize_diversification:international_equity",
         "terminal_screening_finalize_rankings:international_equity",
         "terminal_screening_finalize_selection:international_equity",
         "terminal_screening_finalize_plan:international_equity",
     ]
+    positions = [stages.index(stage) for stage in top_level_stages]
+    assert positions == sorted(positions)
+    assert "terminal_screening_finalize_diversification_count:international_equity" in stages
+    assert "terminal_screening_finalize_diversification_apply:international_equity" in stages
+
+
+def test_diversification_finalization_avoids_global_aggregate_materialization(
+    monkeypatch,
+):
+    records = tuple(_record(index) for index in range(137))
+    stages: list[tuple[str, dict[str, int]]] = []
+    monkeypatch.setattr(
+        bounded,
+        "record_manual_cio_diagnostic_progress",
+        lambda stage, *, metrics: stages.append((stage, dict(metrics))),
+    )
+
+    with bounded._TerminalScreeningStateSpool() as spool:
+        for index, record in enumerate(records):
+            spool.append(
+                ordinal=index,
+                record=record,
+                signal=_signal(index, record.symbol),
+                reasons=(),
+                as_of=NOW,
+            )
+        spool.commit_chunk()
+        statements: list[str] = []
+        spool.connection.set_trace_callback(statements.append)
+        spool.finalize_diversification(
+            batch_size=7,
+            progress_label="international_equity",
+        )
+        spool.connection.set_trace_callback(None)
+
+        bucket_counts = Counter(
+            (
+                record.economic_exposure,
+                record.venue,
+                record.country_code,
+                record.currency,
+            )
+            for record in records
+        )
+        scored_rows = spool.connection.execute(
+            "SELECT bucket_exposure, bucket_venue, bucket_country, "
+            "bucket_currency, diversification_score FROM screened "
+            "WHERE eligible = 1 ORDER BY ordinal"
+        ).fetchall()
+        assert len(scored_rows) == len(records)
+        for exposure, venue, country, currency, score in scored_rows:
+            assert score == 1.0 / bucket_counts[
+                (exposure, venue, country, currency)
+            ]
+
+        temp_count_table = spool.connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'diversification_bucket_counts'"
+        ).fetchone()[0]
+        assert temp_count_table == 0
+
+    assert not any("GROUP BY" in statement.upper() for statement in statements)
+    assert any(
+        stage == "terminal_screening_finalize_diversification_count:international_equity"
+        for stage, _metrics in stages
+    )
+    assert any(
+        stage == "terminal_screening_finalize_diversification_apply:international_equity"
+        for stage, _metrics in stages
+    )
+    assert all(metrics["screening_spool_bytes"] >= 0 for _stage, metrics in stages)
+
 
 
 def test_terminal_screening_state_spool_keeps_record_state_out_of_python_heap():
