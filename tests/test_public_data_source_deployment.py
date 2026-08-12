@@ -43,7 +43,7 @@ def test_render_exposes_existing_bindings_and_optional_public_credentials() -> N
 
     for key in (
         "CAPITAL_INTELLIGENCE_EODHD_BINDINGS",
-        "CAPITAL_INTELLIGENCE_DATABENTO_INSTRUMENT_BINDINGS",
+        "CAPITAL_INTELLIGENCE_CME_MARKET_DATA_BINDING",
         "CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS",
         "OPENFIGI_API_KEY",
         "ALPHA_VANTAGE_API_KEY",
@@ -55,6 +55,8 @@ def test_render_exposes_existing_bindings_and_optional_public_credentials() -> N
         "USDA_NASS_API_KEY",
     ):
         assert f"- key: {key}" in source
+
+    assert "CAPITAL_INTELLIGENCE_DATABENTO_INSTRUMENT_BINDINGS" not in source
 
 
 def test_public_sources_remain_non_authoritative_for_capital() -> None:
