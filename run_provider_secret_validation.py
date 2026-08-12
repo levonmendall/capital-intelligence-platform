@@ -19,6 +19,7 @@ import requests
 from providers.alpaca_paper import AlpacaPaperProviderError, create_alpaca_paper_client
 from providers.finra_fixed_income import FinraFixedIncomeError, FinraFixedIncomeProvider
 from providers.fred import FREDProvider
+from providers.free_derivative_risk import CmeSpanRiskProvider, FreeDerivativeRiskError
 from providers.openfigi import OpenFigiMappingJob, OpenFigiProvider
 from providers.provider_credentials import (
     AlphaVantageCredentialProbe,
@@ -60,6 +61,16 @@ FINRA_CLIENT_SECRET_NAMES = (
     "FINRA_API_SECRET",
     "FINRA_API_SECRET_KEY",
 )
+CME_DATAMINE_ID_NAMES = (
+    "CAPITAL_INTELLIGENCE_CME_DATAMINE_API_ID",
+    "CME_DATAMINE_API_ID",
+    "CME_API_ID",
+)
+CME_DATAMINE_PASSWORD_NAMES = (
+    "CAPITAL_INTELLIGENCE_CME_DATAMINE_API_PASSWORD",
+    "CME_DATAMINE_API_PASSWORD",
+    "CME_API_PASSWORD",
+)
 ALL_SECRET_NAMES = tuple(
     dict.fromkeys(
         ALPACA_KEY_NAMES
@@ -70,6 +81,8 @@ ALL_SECRET_NAMES = tuple(
         + TRADIER_NAMES
         + FINRA_CLIENT_ID_NAMES
         + FINRA_CLIENT_SECRET_NAMES
+        + CME_DATAMINE_ID_NAMES
+        + CME_DATAMINE_PASSWORD_NAMES
         + AlphaVantageCredentialProbe.environment_names
         + TwelveDataCredentialProbe.environment_names
     )
@@ -283,6 +296,45 @@ def _finra() -> dict[str, Any]:
     return result
 
 
+def _cme_span() -> dict[str, Any]:
+    api_ids = _configured_values(CME_DATAMINE_ID_NAMES)
+    passwords = _configured_values(CME_DATAMINE_PASSWORD_NAMES)
+    credential_names = tuple(name for name, _value in (*api_ids, *passwords))
+    result = _base_result("cme-datamine-span", credential_names)
+    result["configured"] = bool(api_ids or passwords)
+    if not result["configured"]:
+        result["error"] = "CME DataMine credentials are not configured"
+        return result
+    if not api_ids or not passwords:
+        result["error"] = "CME DataMine requires both API ID and API password"
+        return result
+    try:
+        evidence = CmeSpanRiskProvider(
+            api_id=api_ids[0][1],
+            api_password=passwords[0][1],
+        ).fetch(as_of=datetime.now(timezone.utc)).to_dict()
+    except (FreeDerivativeRiskError, TypeError, ValueError) as error:
+        result["error"] = _safe_error(error)
+        return result
+    result.update(
+        {
+            "passed": True,
+            "selected_credential": "oauth-api-id-password-pair",
+            "evidence": {
+                "probe": "cme-datamine-span-risk-parameter-file",
+                "access_mode": evidence.get("access_mode"),
+                "source_file_id": evidence.get("source_file_id"),
+                "byte_count": evidence.get("byte_count"),
+                "entitled_match_count": evidence.get("entitled_match_count"),
+                "catalog_pattern_count": evidence.get("catalog_pattern_count"),
+                "selection_policy": evidence.get("selection_policy"),
+                "individual_margin_requirement_inferred": False,
+            },
+        }
+    )
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output")
@@ -322,13 +374,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         ]
         tradier = _tradier()
         finra = _finra()
-        providers = [*established_required, tradier, finra]
+        cme_span = _cme_span()
+        optional_providers = (tradier, finra, cme_span)
+        providers = [*established_required, *optional_providers]
         blockers = [
             f"{item['provider']}: {item.get('error', 'probe did not pass')}"
             for item in established_required
             if args.require_all and not item["passed"]
         ]
-        for optional in (tradier, finra):
+        for optional in optional_providers:
             if optional["configured"] and not optional["passed"]:
                 blockers.append(f"{optional['provider']}: {optional.get('error', 'probe did not pass')}")
         payload = {

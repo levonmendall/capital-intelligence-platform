@@ -208,7 +208,16 @@ def test_command_report_remains_non_authoritative(monkeypatch, tmp_path) -> None
         "twelve-data",
         "tradier",
         "finra-fixed-income",
+        "cme-datamine-span",
     }
+    cme = next(
+        item for item in payload["providers"] if item["provider"] == "cme-datamine-span"
+    )
+    assert cme["configured"] is False
+    assert cme["passed"] is False
+    assert cme["provider_certified"] is False
+    assert cme["paper_test_authorized"] is False
+    assert cme["real_money_authorized"] is False
     assert payload["secret_values_disclosed"] is False
     assert payload["provider_certification_granted"] is False
     assert payload["paper_test_authorized"] is False

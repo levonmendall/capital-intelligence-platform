@@ -28,6 +28,7 @@ class ProviderActivationSpec:
     credential_groups: tuple[str, ...] = ()
     keyless: bool = False
     note: str = ""
+    configuration_groups: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,14 +42,14 @@ class ProviderActivationRecord:
     state: str
     credential_names: tuple[str, ...]
     note: str
+    configuration_required: bool = False
+    configuration_configured: bool = True
+    configuration_names: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-# ``production_route`` names a concrete consumer, not merely an adapter module.
-# Entries with no route are deliberately visible as unrouted until production code
-# consumes them. This prevents a secret or config file from being mistaken for use.
 CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
     ProviderActivationSpec(
         "alpaca-market-data",
@@ -198,6 +199,57 @@ CORE_PROVIDER_ACTIVATION_SPECS: tuple[ProviderActivationSpec, ...] = (
             "it cannot satisfy individual-bond identity, price, history, valuation, or execution."
         ),
     ),
+    ProviderActivationSpec(
+        "cme-margin-data",
+        ("derivative_margin_data",),
+        "all-market readiness CME DataMine SPAN/SPAN 2 resource preflight",
+        credential_groups=(
+            "CAPITAL_INTELLIGENCE_CME_DATAMINE_API_ID",
+            "CAPITAL_INTELLIGENCE_CME_DATAMINE_API_PASSWORD",
+        ),
+        configuration_groups=(
+            "CAPITAL_INTELLIGENCE_CME_MARGIN_BINDING",
+            "CAPITAL_INTELLIGENCE_CME_MARGIN_TERMS_REFERENCE",
+            "CAPITAL_INTELLIGENCE_CME_MARGIN_PAPER_USE_APPROVAL",
+            "CAPITAL_INTELLIGENCE_CME_MARGIN_CERTIFICATION_ID",
+        ),
+        note=(
+            "Production CME SPAN access is authenticated through the DataMine API. The "
+            "repository binding contains the governed CME file-ID catalog; terms/paper-use "
+            "approval, certification, preflight validation, and append-only activation remain required."
+        ),
+    ),
+    ProviderActivationSpec(
+        "occ-margin-data",
+        ("derivative_margin_data",),
+        "all-market readiness clearing-risk resource preflight",
+        keyless=True,
+        configuration_groups=(
+            "CAPITAL_INTELLIGENCE_OCC_MARGIN_BINDING",
+            "CAPITAL_INTELLIGENCE_OCC_MARGIN_TERMS_REFERENCE",
+            "CAPITAL_INTELLIGENCE_OCC_MARGIN_PAPER_USE_APPROVAL",
+            "CAPITAL_INTELLIGENCE_OCC_MARGIN_CERTIFICATION_ID",
+        ),
+        note=(
+            "OCC OFRA is public/keyless clearing-risk evidence but still requires the "
+            "governed binding, approval, certification, and activation path."
+        ),
+    ),
+    ProviderActivationSpec(
+        "derived-volatility-surfaces",
+        ("volatility_surface_data",),
+        "canonical option-quote volatility-surface compiler and all-market readiness",
+        keyless=True,
+        configuration_groups=(
+            "CAPITAL_INTELLIGENCE_VOLATILITY_SURFACE_BINDING",
+            "CAPITAL_INTELLIGENCE_VOLATILITY_SURFACE_MODEL_APPROVAL",
+            "CAPITAL_INTELLIGENCE_VOLATILITY_SURFACE_CERTIFICATION_ID",
+        ),
+        note=(
+            "The compiler can produce surfaces from canonical option quotes, but compilation "
+            "cannot self-approve or self-certify the model."
+        ),
+    ),
 )
 
 
@@ -206,6 +258,9 @@ _BUNDLE_PROVIDER_FAMILIES_WITH_DIRECT_ROUTES = frozenset(
         "eodhd-primary",
         "coinbase-crypto-validation",
         "kraken-crypto-validation",
+        "cme-margin-data",
+        "occ-margin-data",
+        "derived-volatility-surfaces",
     }
 )
 
@@ -221,7 +276,7 @@ def _group_is_configured(environment: Mapping[str, str], canonical: str) -> bool
     )
 
 
-def _credential_names(groups: Sequence[str]) -> tuple[str, ...]:
+def _names(groups: Sequence[str]) -> tuple[str, ...]:
     names: list[str] = []
     for canonical in groups:
         names.extend(_group_names(canonical))
@@ -253,16 +308,29 @@ def _configured_dataset_specs(root: Path) -> tuple[ProviderActivationSpec, ...]:
             str(item).strip() for item in roles if str(item).strip()
         ) if isinstance(roles, list) else ()
         credentials = raw.get("credential_environment_variables")
-        groups = tuple(
+        credential_groups = tuple(
             str(item).strip() for item in credentials if str(item).strip()
         ) if isinstance(credentials, list) else ()
+        configuration_groups: list[str] = []
+        for field in (
+            "binding_environment_variables",
+            "contract_reference_environment_variables",
+            "license_approval_environment_variables",
+            "certification_environment_variables",
+        ):
+            values = raw.get(field)
+            if isinstance(values, list):
+                configuration_groups.extend(
+                    str(item).strip() for item in values if str(item).strip()
+                )
         specs.append(
             ProviderActivationSpec(
                 provider_id=provider_id,
                 evidence_roles=evidence_roles,
                 production_route=None,
-                credential_groups=groups,
-                keyless=not groups,
+                credential_groups=credential_groups,
+                keyless=not credential_groups,
+                configuration_groups=tuple(dict.fromkeys(configuration_groups)),
                 note=(
                     "Declared in all_market_provider_bundle.json, but no direct comprehensive-"
                     "discovery consumer is declared by the activation registry. Bundle readiness "
@@ -285,17 +353,27 @@ def audit_provider_activation(
     specs = (*CORE_PROVIDER_ACTIVATION_SPECS, *_configured_dataset_specs(root))
     records: list[ProviderActivationRecord] = []
     for spec in specs:
-        credential_names = _credential_names(spec.credential_groups)
+        credential_names = _names(spec.credential_groups)
+        configuration_names = _names(spec.configuration_groups)
         credential_required = bool(spec.credential_groups) and not spec.keyless
+        configuration_required = bool(spec.configuration_groups)
         credential_configured = (
             True
             if not spec.credential_groups
             else all(_group_is_configured(env, group) for group in spec.credential_groups)
         )
+        configuration_configured = (
+            True
+            if not spec.configuration_groups
+            else all(_group_is_configured(env, group) for group in spec.configuration_groups)
+        )
+        fully_configured = credential_configured and configuration_configured
         if spec.production_route is None:
-            state = "configured_but_unrouted" if credential_configured or spec.keyless else "unrouted"
+            state = "configured_but_unrouted" if fully_configured else "unrouted"
         elif credential_required and not credential_configured:
             state = "missing_credential"
+        elif configuration_required and not configuration_configured:
+            state = "missing_configuration"
         elif spec.keyless:
             state = "keyless_active"
         else:
@@ -311,6 +389,9 @@ def audit_provider_activation(
                 state=state,
                 credential_names=credential_names,
                 note=spec.note,
+                configuration_required=configuration_required,
+                configuration_configured=configuration_configured,
+                configuration_names=configuration_names,
             )
         )
     return tuple(sorted(records, key=lambda item: item.provider_id))
@@ -327,7 +408,7 @@ def activation_summary(
     )
     states = sorted({item.state for item in records})
     return {
-        "schema_version": "provider-activation-audit.v1",
+        "schema_version": "provider-activation-audit.v2",
         "credential_values_included": False,
         "providers": [item.to_dict() for item in records],
         "counts": {
@@ -341,6 +422,9 @@ def activation_summary(
         ],
         "missing_credential_provider_ids": [
             item.provider_id for item in records if item.state == "missing_credential"
+        ],
+        "missing_configuration_provider_ids": [
+            item.provider_id for item in records if item.state == "missing_configuration"
         ],
     }
 
