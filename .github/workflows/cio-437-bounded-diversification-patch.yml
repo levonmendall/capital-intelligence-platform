@@ -1,0 +1,358 @@
+name: Apply CIO 437 bounded diversification repair
+
+on:
+  push:
+    branches:
+      - fix/cio-437-bounded-diversification-finalization
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply bounded diversification repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("operations/bounded_terminal_screening.py")
+          source = source_path.read_text(encoding="utf-8")
+
+          old_function = '''    def finalize_diversification(self, *, batch_size: int = 512) -> None:
+              cursor = self.connection.execute(
+                  """
+                  SELECT item.ordinal, 1.0 / bucket_counts.member_count
+                  FROM screened AS item
+                  JOIN (
+                      SELECT bucket_exposure, bucket_venue, bucket_country, bucket_currency,
+                             COUNT(*) AS member_count
+                      FROM screened
+                      WHERE eligible = 1
+                      GROUP BY bucket_exposure, bucket_venue, bucket_country, bucket_currency
+                  ) AS bucket_counts
+                    ON bucket_counts.bucket_exposure = item.bucket_exposure
+                   AND bucket_counts.bucket_venue = item.bucket_venue
+                   AND bucket_counts.bucket_country = item.bucket_country
+                   AND bucket_counts.bucket_currency = item.bucket_currency
+                  WHERE item.eligible = 1
+                  ORDER BY item.ordinal
+                  """
+              )
+              while True:
+                  rows = cursor.fetchmany(batch_size)
+                  if not rows:
+                      break
+                  self.connection.executemany(
+                      "UPDATE screened SET diversification_score = ? WHERE ordinal = ?",
+                      ((float(score), int(ordinal)) for ordinal, score in rows),
+                  )
+              self.connection.commit()
+              self.release_cached_pages()
+          '''
+
+          new_function = '''    def finalize_diversification(
+              self,
+              *,
+              batch_size: int = 512,
+              progress_label: str | None = None,
+          ) -> None:
+              """Finalize exact global diversification scores in bounded disk-backed passes."""
+              self.connection.execute("DROP TABLE IF EXISTS diversification_bucket_counts")
+              self.connection.execute(
+                  "CREATE TABLE diversification_bucket_counts("
+                  "bucket_exposure TEXT NOT NULL, bucket_venue TEXT NOT NULL, "
+                  "bucket_country TEXT NOT NULL, bucket_currency TEXT NOT NULL, "
+                  "member_count INTEGER NOT NULL, "
+                  "PRIMARY KEY(bucket_exposure, bucket_venue, bucket_country, bucket_currency)"
+                  ") WITHOUT ROWID"
+              )
+              self.connection.commit()
+              self.release_cached_pages()
+
+              total_records = self.eligible_count
+              progress_stride = max(1024, batch_size)
+
+              def record_progress(phase: str, processed_records: int) -> None:
+                  if progress_label is None:
+                      return
+                  metrics = {
+                      "processed_records": processed_records,
+                      "total_records": total_records,
+                      "chunk_records": 0,
+                      "screening_spool_bytes": _sqlite_footprint(self.database_path),
+                      "storage_reserve_bytes": _storage_reserve_bytes(),
+                  }
+                  try:
+                      usage = shutil.disk_usage(self.database_path.parent)
+                  except OSError:
+                      pass
+                  else:
+                      metrics.update(
+                          {
+                              "storage_total_bytes": int(usage.total),
+                              "storage_used_bytes": int(usage.used),
+                              "storage_free_bytes": int(usage.free),
+                          }
+                      )
+                  stage = f"terminal_screening_finalize_{phase}:{progress_label}"
+                  record_manual_cio_diagnostic_progress(stage, metrics=metrics)
+                  _ensure_storage_reserve(metrics, phase=stage)
+
+              if total_records == 0:
+                  record_progress("diversification_count", 0)
+                  record_progress("diversification_apply", 0)
+                  self.connection.execute("DROP TABLE diversification_bucket_counts")
+                  self.connection.commit()
+                  self.release_cached_pages()
+                  return
+
+              # Build exact global bucket counts incrementally. Keyset pagination follows
+              # the screened INTEGER PRIMARY KEY, so SQLite never needs a global GROUP BY,
+              # derived-table join, or sort to materialize the complete eligible lane.
+              processed = 0
+              last_ordinal = -1
+              next_progress_at = 0
+              while processed < total_records:
+                  rows = self.connection.execute(
+                      "SELECT ordinal, bucket_exposure, bucket_venue, bucket_country, "
+                      "bucket_currency FROM screened "
+                      "WHERE eligible = 1 AND ordinal > ? ORDER BY ordinal LIMIT ?",
+                      (last_ordinal, batch_size),
+                  ).fetchall()
+                  if not rows:
+                      break
+                  batch_records = len(rows)
+                  last_ordinal = int(rows[-1][0])
+                  self.connection.executemany(
+                      "INSERT INTO diversification_bucket_counts("
+                      "bucket_exposure, bucket_venue, bucket_country, bucket_currency, "
+                      "member_count) VALUES (?, ?, ?, ?, 1) "
+                      "ON CONFLICT(bucket_exposure, bucket_venue, bucket_country, "
+                      "bucket_currency) DO UPDATE SET member_count = member_count + 1",
+                      (tuple(row[1:5]) for row in rows),
+                  )
+                  self.connection.commit()
+                  processed += batch_records
+                  del rows
+                  self.release_cached_pages()
+                  if processed >= next_progress_at or processed == total_records:
+                      record_progress("diversification_count", processed)
+                      next_progress_at = processed + progress_stride
+
+              if processed != total_records:
+                  raise BoundedTerminalScreeningError(
+                      "diversification count pass did not inspect every eligible catalog record"
+                  )
+
+              # Apply the exact 1/member_count score with only one bounded row batch and
+              # one bounded per-batch bucket lookup cache resident in Python at a time.
+              processed = 0
+              last_ordinal = -1
+              next_progress_at = 0
+              while processed < total_records:
+                  rows = self.connection.execute(
+                      "SELECT ordinal, bucket_exposure, bucket_venue, bucket_country, "
+                      "bucket_currency FROM screened "
+                      "WHERE eligible = 1 AND ordinal > ? ORDER BY ordinal LIMIT ?",
+                      (last_ordinal, batch_size),
+                  ).fetchall()
+                  if not rows:
+                      break
+                  batch_records = len(rows)
+                  last_ordinal = int(rows[-1][0])
+                  bucket_cache: dict[tuple[str, str, str, str], int] = {}
+                  updates: list[tuple[float, int]] = []
+                  for row in rows:
+                      bucket = tuple(str(value) for value in row[1:5])
+                      member_count = bucket_cache.get(bucket)
+                      if member_count is None:
+                          count_row = self.connection.execute(
+                              "SELECT member_count FROM diversification_bucket_counts "
+                              "WHERE bucket_exposure = ? AND bucket_venue = ? "
+                              "AND bucket_country = ? AND bucket_currency = ?",
+                              bucket,
+                          ).fetchone()
+                          if count_row is None or int(count_row[0]) < 1:
+                              raise BoundedTerminalScreeningError(
+                                  "diversification bucket count is unavailable for an "
+                                  "eligible catalog record"
+                              )
+                          member_count = int(count_row[0])
+                          bucket_cache[bucket] = member_count
+                      updates.append((1.0 / member_count, int(row[0])))
+                  self.connection.executemany(
+                      "UPDATE screened SET diversification_score = ? WHERE ordinal = ?",
+                      updates,
+                  )
+                  self.connection.commit()
+                  processed += batch_records
+                  del updates
+                  del bucket_cache
+                  del rows
+                  self.release_cached_pages()
+                  if processed >= next_progress_at or processed == total_records:
+                      record_progress("diversification_apply", processed)
+                      next_progress_at = processed + progress_stride
+
+              if processed != total_records:
+                  raise BoundedTerminalScreeningError(
+                      "diversification score pass did not update every eligible catalog record"
+                  )
+
+              self.connection.execute("DROP TABLE diversification_bucket_counts")
+              self.connection.commit()
+              self.release_cached_pages()
+          '''
+
+          if old_function not in source:
+              if "def finalize_diversification(" in source and "diversification_bucket_counts" in source:
+                  print("bounded diversification source repair already applied")
+              else:
+                  raise SystemExit("expected finalize_diversification implementation was not found")
+          else:
+              source = source.replace(old_function, new_function, 1)
+
+          old_call = "            state_spool.finalize_diversification(batch_size=batch_size)\n"
+          new_call = '''            state_spool.finalize_diversification(
+                  batch_size=batch_size,
+                  progress_label=progress_label,
+              )
+          '''
+          if old_call in source:
+              source = source.replace(old_call, new_call, 1)
+          elif "progress_label=progress_label" not in source:
+              raise SystemExit("expected finalize_diversification call was not found")
+
+          source_path.write_text(source, encoding="utf-8")
+
+          test_path = Path("tests/test_bounded_terminal_screening.py")
+          tests = test_path.read_text(encoding="utf-8")
+          if "from collections import Counter\n" not in tests:
+              tests = tests.replace(
+                  "from __future__ import annotations\n\n",
+                  "from __future__ import annotations\n\nfrom collections import Counter\n",
+                  1,
+              )
+
+          old_assert = '''    assert stages[-5:] == [
+              "terminal_screening_finalize_release:international_equity",
+              "terminal_screening_finalize_diversification:international_equity",
+              "terminal_screening_finalize_rankings:international_equity",
+              "terminal_screening_finalize_selection:international_equity",
+              "terminal_screening_finalize_plan:international_equity",
+          ]
+          '''
+          new_assert = '''    top_level_stages = [
+              "terminal_screening_finalize_release:international_equity",
+              "terminal_screening_finalize_diversification:international_equity",
+              "terminal_screening_finalize_rankings:international_equity",
+              "terminal_screening_finalize_selection:international_equity",
+              "terminal_screening_finalize_plan:international_equity",
+          ]
+              positions = [stages.index(stage) for stage in top_level_stages]
+              assert positions == sorted(positions)
+              assert "terminal_screening_finalize_diversification_count:international_equity" in stages
+              assert "terminal_screening_finalize_diversification_apply:international_equity" in stages
+          '''
+          if old_assert in tests:
+              tests = tests.replace(old_assert, new_assert, 1)
+          elif "terminal_screening_finalize_diversification_count:international_equity" not in tests:
+              raise SystemExit("expected finalization stage assertion was not found")
+
+          anchor = "\ndef test_terminal_screening_state_spool_keeps_record_state_out_of_python_heap():\n"
+          new_test = '''
+          def test_diversification_finalization_avoids_global_aggregate_materialization(
+              monkeypatch,
+          ):
+              records = tuple(_record(index) for index in range(137))
+              stages: list[tuple[str, dict[str, int]]] = []
+              monkeypatch.setattr(
+                  bounded,
+                  "record_manual_cio_diagnostic_progress",
+                  lambda stage, *, metrics: stages.append((stage, dict(metrics))),
+              )
+
+              with bounded._TerminalScreeningStateSpool() as spool:
+                  for index, record in enumerate(records):
+                      spool.append(
+                          ordinal=index,
+                          record=record,
+                          signal=_signal(index, record.symbol),
+                          reasons=(),
+                          as_of=NOW,
+                      )
+                  spool.commit_chunk()
+                  statements: list[str] = []
+                  spool.connection.set_trace_callback(statements.append)
+                  spool.finalize_diversification(
+                      batch_size=7,
+                      progress_label="international_equity",
+                  )
+                  spool.connection.set_trace_callback(None)
+
+                  bucket_counts = Counter(
+                      (
+                          record.economic_exposure,
+                          record.venue,
+                          record.country_code,
+                          record.currency,
+                      )
+                      for record in records
+                  )
+                  scored_rows = spool.connection.execute(
+                      "SELECT bucket_exposure, bucket_venue, bucket_country, "
+                      "bucket_currency, diversification_score FROM screened "
+                      "WHERE eligible = 1 ORDER BY ordinal"
+                  ).fetchall()
+                  assert len(scored_rows) == len(records)
+                  for exposure, venue, country, currency, score in scored_rows:
+                      assert score == 1.0 / bucket_counts[
+                          (exposure, venue, country, currency)
+                      ]
+
+                  temp_count_table = spool.connection.execute(
+                      "SELECT COUNT(*) FROM sqlite_master "
+                      "WHERE type = 'table' AND name = 'diversification_bucket_counts'"
+                  ).fetchone()[0]
+                  assert temp_count_table == 0
+
+              assert not any("GROUP BY" in statement.upper() for statement in statements)
+              assert any(
+                  stage == "terminal_screening_finalize_diversification_count:international_equity"
+                  for stage, _metrics in stages
+              )
+              assert any(
+                  stage == "terminal_screening_finalize_diversification_apply:international_equity"
+                  for stage, _metrics in stages
+              )
+              assert all(metrics["screening_spool_bytes"] >= 0 for _stage, metrics in stages)
+
+          '''
+          if "def test_diversification_finalization_avoids_global_aggregate_materialization" not in tests:
+              if anchor not in tests:
+                  raise SystemExit("expected test insertion anchor was not found")
+              tests = tests.replace(anchor, "\n" + new_test + anchor, 1)
+
+          test_path.write_text(tests, encoding="utf-8")
+          PY
+      - name: Compile repaired files
+        run: python -m py_compile operations/bounded_terminal_screening.py tests/test_bounded_terminal_screening.py
+      - name: Commit repair
+        shell: bash
+        run: |
+          if git diff --quiet -- operations/bounded_terminal_screening.py tests/test_bounded_terminal_screening.py; then
+            echo "No repair changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add operations/bounded_terminal_screening.py tests/test_bounded_terminal_screening.py
+          git commit -m "Bound CIO diversification finalization"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
