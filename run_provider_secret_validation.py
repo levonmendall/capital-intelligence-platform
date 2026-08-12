@@ -22,7 +22,6 @@ from providers.fred import FREDProvider
 from providers.openfigi import OpenFigiMappingJob, OpenFigiProvider
 from providers.provider_credentials import (
     AlphaVantageCredentialProbe,
-    DatabentoCredentialProbe,
     EODHDCredentialProbe,
     ProviderCredentialProbeError,
     TwelveDataCredentialProbe,
@@ -72,7 +71,6 @@ ALL_SECRET_NAMES = tuple(
         + FINRA_CLIENT_ID_NAMES
         + FINRA_CLIENT_SECRET_NAMES
         + AlphaVantageCredentialProbe.environment_names
-        + DatabentoCredentialProbe.environment_names
         + TwelveDataCredentialProbe.environment_names
     )
 )
@@ -211,14 +209,6 @@ def _alpha_vantage() -> dict[str, Any]:
     )
 
 
-def _databento() -> dict[str, Any]:
-    return _try_single_credentials(
-        "databento",
-        DatabentoCredentialProbe.environment_names,
-        lambda value: DatabentoCredentialProbe(value).probe(),
-    )
-
-
 def _twelve_data() -> dict[str, Any]:
     return _try_single_credentials(
         "twelve-data",
@@ -328,7 +318,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             _eodhd(),
             _openfigi(),
             _alpha_vantage(),
-            _databento(),
             _twelve_data(),
         ]
         tradier = _tradier()
