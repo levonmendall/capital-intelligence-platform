@@ -203,6 +203,10 @@ def build_cio_diagnostic_audit(
         "diagnostic_age_seconds": _age_seconds(diagnostic.requested_at, now=now),
         "terminal_age_seconds": _age_seconds(diagnostic.completed_at, now=now),
         "stage": diagnostic.progress_stage,
+        "progress_metrics": dict(diagnostic.progress_metrics),
+        "progress_recorded_at": None
+        if diagnostic.progress_recorded_at is None
+        else diagnostic.progress_recorded_at.isoformat(),
         "cycle_key": diagnostic.cycle_key,
         "snapshot_identifier": diagnostic.snapshot_identifier,
         "context_cycle_matches": cycle_matches,
