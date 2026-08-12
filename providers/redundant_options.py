@@ -80,6 +80,25 @@ def _failure_class(error: BaseException | None) -> str:
     return "provider_evidence_unavailable"
 
 
+def _failure_detail(error: BaseException | None) -> str:
+    """Retain credential-safe provider cause without exposing transport payloads."""
+
+    if error is None:
+        return "none"
+    if not isinstance(
+        error,
+        (
+            DatabentoOptionsError,
+            AlpacaIndicativeOptionsError,
+            MassiveOptionsError,
+            RedundantOptionsError,
+        ),
+    ):
+        return type(error).__name__
+    detail = " ".join(str(error).strip().split())
+    return (detail or type(error).__name__)[:300]
+
+
 def _massive_ticker(raw_symbol: str) -> str:
     compact = "".join(str(raw_symbol).strip().upper().split())
     return compact if compact.startswith("O:") else f"O:{compact}"
@@ -451,7 +470,10 @@ class RedundantOptionsProvider:
                 "Certified option providers cannot supply opportunity-complete evidence; "
                 f"primary={_failure_class(primary_error)}; "
                 f"secondary={_failure_class(secondary_error)}; "
-                f"fallback={_failure_class(fallback_error)}",
+                f"fallback={_failure_class(fallback_error)}; "
+                f"primary_detail={_failure_detail(primary_error)}; "
+                f"secondary_detail={_failure_detail(secondary_error)}; "
+                f"fallback_detail={_failure_detail(fallback_error)}",
                 status_code=getattr(active_error, "status_code", None),
                 retryable=bool(getattr(active_error, "retryable", False)),
             ) from active_error
@@ -596,7 +618,10 @@ class RedundantOptionsProvider:
                 "Certified option daily bars are unavailable; "
                 f"primary={_failure_class(primary_error)}; "
                 f"secondary={_failure_class(secondary_error)}; "
-                f"fallback={_failure_class(fallback_error)}",
+                f"fallback={_failure_class(fallback_error)}; "
+                f"primary_detail={_failure_detail(primary_error)}; "
+                f"secondary_detail={_failure_detail(secondary_error)}; "
+                f"fallback_detail={_failure_detail(fallback_error)}",
                 status_code=getattr(active_error, "status_code", None),
                 retryable=bool(getattr(active_error, "retryable", False)),
             ) from active_error
