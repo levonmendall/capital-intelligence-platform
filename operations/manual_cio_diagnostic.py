@@ -296,7 +296,7 @@ def _configured_memory_high_water_fraction(values: Mapping[str, str]) -> float |
 
 
 def _terminal_screening_resource_metrics(values: Mapping[str, str]) -> dict[str, int]:
-    """Return best-effort, credential-safe memory counters at a screening chunk boundary."""
+    """Return best-effort, credential-safe memory counters at a screening boundary."""
 
     metrics: dict[str, int] = {}
     status = Path(f"/proc/{os.getpid()}/status")
@@ -492,7 +492,7 @@ def record_manual_cio_diagnostic_progress(
 
     explicit_metrics = _normalize_progress_metrics(metrics)
     combined_metrics: dict[str, object] = dict(metrics or {})
-    if lane_stage[0] == "terminal_screening_chunk":
+    if lane_stage[0] in {"terminal_screening", "terminal_screening_chunk"}:
         for name, value in _terminal_screening_resource_metrics(resolved).items():
             combined_metrics.setdefault(name, value)
     normalized_metrics = _normalize_progress_metrics(combined_metrics)
