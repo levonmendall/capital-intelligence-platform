@@ -7,9 +7,17 @@ missing option-underlying Yahoo history once per probe, exposes it through the e
 Alpaca-history seam, and delegates all feature construction to the certified legacy
 probe with one bounded worker pool.
 
+Unresolved dated futures are the one intentional extension to that legacy path. The
+configured futures catalog is provider-neutral (``provider_kind=unbound``), while the
+certified redundant market router already delegates exact futures history to Massive.
+Only futures still missing after the legacy probe are therefore routed through that
+existing evidence authority. No synthetic factor is created: if Massive cannot return
+the governed minimum history, the future remains unresolved and publication stays
+fail-closed.
+
 The adapter changes no catalog membership, ranking, evidence thresholds, CIO authority,
-construction, execution, or paper-only controls. Missing provider evidence remains
-fail closed.
+construction, execution, or paper-only controls. Missing provider evidence remains fail
+closed.
 """
 
 from __future__ import annotations
@@ -22,6 +30,7 @@ import requests
 
 from cio import CandidateAssetClass
 from operations import comprehensive_market_discovery_legacy as _legacy
+from operations import redundant_market_probe as _redundant
 from providers.alpaca_paper import (
     AlpacaPaperClient,
     AlpacaPaperProviderError,
@@ -147,6 +156,43 @@ class _OptionUnderlyingHistoryClient:
         return result
 
 
+def _redundant_futures_features(
+    records: Sequence[_legacy.DiscoveryCatalogRecord],
+    *,
+    as_of: datetime,
+    policy: _legacy.ComprehensiveMarketDiscoveryPolicy,
+    http_get: Callable[..., Any],
+    maximum_workers: int,
+) -> Mapping[str, _legacy.DiscoveryMarketFeatures]:
+    """Use the certified Massive futures route without emitting deep-evidence stages."""
+
+    futures = tuple(records)
+    if not futures:
+        return {}
+    timestamp = _legacy._aware(as_of, field_name="as_of")
+    core = _redundant._core
+    return _redundant._fetch_missing_concurrently(
+        futures,
+        timestamp=timestamp,
+        policy=policy,
+        http_get=http_get,
+        eodhd=_legacy.build_eodhd_provider(),
+        tradier=core.TradierMarketDataProvider(),
+        massive=core.MassiveMultiAssetProvider(),
+        twelve=core.TwelveDataHistoryProvider(),
+        coinbase=core.CoinbaseHistoryProvider(),
+        kraken=core.KrakenHistoryProvider(),
+        alpaca_crypto_rows={},
+        already_processed=0,
+        already_evidence_complete=0,
+        decision_eligible_records=len(futures),
+        maximum_workers=min(_MAX_PROVIDER_IO_WORKERS, maximum_workers),
+        # Provider-preselection has its own governed progress stages. Reusing the deep
+        # evidence worker must not make telemetry appear to enter deep analysis early.
+        progress_callback=lambda *_args, **_kwargs: None,
+    )
+
+
 def default_provider_preselection_market_probe(
     records: Sequence[_legacy.DiscoveryCatalogRecord],
     as_of: datetime,
@@ -156,7 +202,7 @@ def default_provider_preselection_market_probe(
     alpaca_client: AlpacaPaperClient | None = None,
     maximum_workers: int = _MAX_PROVIDER_IO_WORKERS,
 ) -> Mapping[str, _legacy.DiscoveryMarketFeatures]:
-    """Run one bounded legacy market probe with unique option-underlying fallback I/O."""
+    """Run the bounded legacy probe, then resolve only missing dated futures."""
 
     if (
         isinstance(maximum_workers, bool)
@@ -184,14 +230,33 @@ def default_provider_preselection_market_probe(
         http_get=http_get,
         maximum_workers=maximum_workers,
     )
-    return _legacy.default_market_probe(
-        ordered,
-        as_of,
-        policy,
-        http_get=http_get,
-        alpaca_client=history_client,
-        maximum_workers=min(_MAX_PROVIDER_IO_WORKERS, maximum_workers),
+    result = dict(
+        _legacy.default_market_probe(
+            ordered,
+            as_of,
+            policy,
+            http_get=http_get,
+            alpaca_client=history_client,
+            maximum_workers=min(_MAX_PROVIDER_IO_WORKERS, maximum_workers),
+        )
     )
+    unresolved_futures = tuple(
+        record
+        for record in ordered
+        if record.asset_class is CandidateAssetClass.FUTURE
+        and record.symbol not in result
+    )
+    if unresolved_futures:
+        result.update(
+            _redundant_futures_features(
+                unresolved_futures,
+                as_of=as_of,
+                policy=policy,
+                http_get=http_get,
+                maximum_workers=maximum_workers,
+            )
+        )
+    return result
 
 
 __all__ = ["default_provider_preselection_market_probe"]
