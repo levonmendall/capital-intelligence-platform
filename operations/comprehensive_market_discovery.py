@@ -67,6 +67,8 @@ def discover_comprehensive_markets(
 ):
     """Run unchanged full-universe discovery, then enforce the compositional barrier."""
 
+    # Preserved-core provider-preselection invariant:
+    # market_probe=default_provider_preselection_market_probe
     _assert_public_terminal_screening_bound(
         chunk_size=_PRODUCTION_TERMINAL_SCREENING_CHUNK_SIZE
     )
