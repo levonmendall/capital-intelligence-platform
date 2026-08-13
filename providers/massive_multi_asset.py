@@ -1,12 +1,15 @@
 """Bounded Massive market-data adapters for independent multi-asset failover.
 
 Supported evidence roles are U.S. stocks/ETFs, spot FX, spot crypto, and exact U.S.
-dated futures contracts.  The adapter is evidence-only and has no ranking, CIO,
-construction, order-entry, or real-money authority.
+dated futures contracts. The adapter is evidence-only and has no ranking, CIO,
+construction, order-entry, or real-money authority. Retryable transport, rate-limit, and
+temporary service failures receive bounded backoff before the provider is declared
+unavailable.
 """
 
 from __future__ import annotations
 
+import time as time_module
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -48,7 +51,10 @@ class MassiveMultiAssetProvider:
         api_key: str | None = None,
         *,
         timeout: int = 15,
+        max_attempts: int = 4,
+        backoff_seconds: float = 1.0,
         http_get: Callable[..., Any] | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self.api_key = api_key or provider_environment_value("MASSIVE_API_KEY") or provider_environment_value(
             "CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY"
@@ -56,7 +62,18 @@ class MassiveMultiAssetProvider:
         self.timeout = int(timeout)
         if self.timeout < 1:
             raise ValueError("timeout must be positive")
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
+            raise TypeError("max_attempts must be an integer")
+        if max_attempts < 1 or max_attempts > 8:
+            raise ValueError("max_attempts must be between 1 and 8")
+        if isinstance(backoff_seconds, bool) or not isinstance(backoff_seconds, (int, float)):
+            raise TypeError("backoff_seconds must be numeric")
+        if float(backoff_seconds) < 0.0 or float(backoff_seconds) > 30.0:
+            raise ValueError("backoff_seconds must be between 0 and 30")
+        self.max_attempts = max_attempts
+        self.backoff_seconds = float(backoff_seconds)
         self._http_get = http_get or requests.get
+        self._sleeper = sleeper or time_module.sleep
 
     @property
     def configured(self) -> bool:
@@ -202,7 +219,6 @@ class MassiveMultiAssetProvider:
                 continue
             try:
                 raw_time = float(item["window_start"])
-                # Futures API publishes nanosecond timestamps for window_start.
                 observed = datetime.fromtimestamp(raw_time / 1_000_000_000.0, tz=timezone.utc)
                 close = float(item.get("settlement_price") or item["close"])
                 volume = max(0.0, float(item.get("volume", 0.0)))
@@ -229,29 +245,71 @@ class MassiveMultiAssetProvider:
     def _get(self, path: str, *, params: dict[str, object]) -> Mapping[str, Any]:
         return self._get_url(f"{MASSIVE_BASE_URL}{path}", params={**params, "apiKey": self.api_key})
 
+    @staticmethod
+    def _retry_after_seconds(response: Any) -> float | None:
+        headers = getattr(response, "headers", None)
+        if not isinstance(headers, Mapping):
+            return None
+        raw = headers.get("Retry-After") or headers.get("retry-after")
+        if raw in (None, ""):
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return max(0.0, min(value, 60.0))
+
     def _get_url(self, url: str, *, params: dict[str, object]) -> Mapping[str, Any]:
-        try:
-            response = self._http_get(url, params=params, timeout=self.timeout)
-        except requests.RequestException as error:
-            raise MassiveMultiAssetError("Massive request failed", retryable=True) from error
-        status = int(getattr(response, "status_code", 0))
-        if not 200 <= status < 300:
-            retryable = status in {408, 425, 429} or 500 <= status <= 599
-            raise MassiveMultiAssetError(
-                f"Massive returned HTTP {status or 'unknown'}",
-                status_code=status or None,
-                retryable=retryable,
-            )
-        try:
-            payload = response.json()
-        except (TypeError, ValueError) as error:
-            raise MassiveMultiAssetError("Massive returned invalid JSON") from error
-        if not isinstance(payload, Mapping):
-            raise MassiveMultiAssetError("Massive response must be an object")
-        status_text = str(payload.get("status") or "OK").upper()
-        if status_text not in {"OK", "SUCCESS"}:
-            raise MassiveMultiAssetError("Massive rejected the request")
-        return payload
+        last_error: MassiveMultiAssetError | None = None
+        for attempt in range(1, self.max_attempts + 1):
+            response = None
+            try:
+                response = self._http_get(url, params=params, timeout=self.timeout)
+            except requests.RequestException as error:
+                current = MassiveMultiAssetError(
+                    "Massive request failed",
+                    retryable=True,
+                )
+                last_error = current
+                cause: BaseException | None = error
+            else:
+                status = int(getattr(response, "status_code", 0))
+                if not 200 <= status < 300:
+                    retryable = status in {408, 425, 429} or 500 <= status <= 599
+                    current = MassiveMultiAssetError(
+                        f"Massive returned HTTP {status or 'unknown'}",
+                        status_code=status or None,
+                        retryable=retryable,
+                    )
+                    last_error = current
+                    cause = None
+                else:
+                    try:
+                        payload = response.json()
+                    except (TypeError, ValueError) as error:
+                        raise MassiveMultiAssetError("Massive returned invalid JSON") from error
+                    if not isinstance(payload, Mapping):
+                        raise MassiveMultiAssetError("Massive response must be an object")
+                    status_text = str(payload.get("status") or "OK").upper()
+                    if status_text not in {"OK", "SUCCESS"}:
+                        raise MassiveMultiAssetError("Massive rejected the request")
+                    return payload
+
+            assert last_error is not None
+            if not last_error.retryable or attempt >= self.max_attempts:
+                if cause is not None:
+                    raise last_error from cause
+                raise last_error
+            delay = self.backoff_seconds * (2 ** (attempt - 1))
+            if response is not None:
+                retry_after = self._retry_after_seconds(response)
+                if retry_after is not None:
+                    delay = max(delay, retry_after)
+            if delay > 0.0:
+                self._sleeper(min(delay, 60.0))
+
+        assert last_error is not None
+        raise last_error
 
 
 __all__ = [
