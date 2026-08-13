@@ -4,20 +4,21 @@ Provider preselection needs the same point-in-time historical feature contract a
 legacy market probe, but it must not amplify provider I/O. In particular, defined-risk
 option call/put records share an underlying price history. This adapter fetches each
 missing option-underlying Yahoo history once per probe, exposes it through the existing
-Alpaca-history seam, and delegates all feature construction to the certified legacy
-probe with one bounded worker pool.
+Alpaca-history seam, and delegates feature construction to the certified legacy probe
+with one bounded worker pool for non-crypto records.
 
-Unresolved dated futures are the one intentional extension to that legacy path. The
-configured futures catalog is provider-neutral (``provider_kind=unbound``), while the
-certified redundant market router already delegates exact futures history to Massive.
-Only futures still missing after the legacy probe are therefore routed through that
-existing evidence authority. No synthetic factor is created: if Massive cannot return
-the governed minimum history, the future remains unresolved and publication stays
-fail-closed.
+Unresolved dated futures and crypto are the intentional extensions to that legacy path.
+The configured futures catalog is provider-neutral, while crypto can originate from an
+EODHD directory whose direct per-symbol history path is unnecessarily slow for provider
+preselection. Crypto therefore bypasses that direct legacy probe and uses the existing
+certified redundant crypto-history path (Alpaca, Coinbase, Kraken); unresolved futures
+continue to use the redundant futures path. No synthetic factor is created: when the
+redundant providers cannot return the governed minimum point-in-time history, the
+instrument remains unresolved and publication stays fail-closed.
 
 The adapter changes no catalog membership, ranking, evidence thresholds, CIO authority,
-construction, execution, or paper-only controls. Missing provider evidence remains fail
-closed.
+construction, execution, market scope, or paper-only controls. Missing provider evidence
+remains fail closed.
 """
 
 from __future__ import annotations
@@ -156,7 +157,7 @@ class _OptionUnderlyingHistoryClient:
         return result
 
 
-def _redundant_futures_features(
+def _redundant_preselection_features(
     records: Sequence[_legacy.DiscoveryCatalogRecord],
     *,
     as_of: datetime,
@@ -164,15 +165,21 @@ def _redundant_futures_features(
     http_get: Callable[..., Any],
     maximum_workers: int,
 ) -> Mapping[str, _legacy.DiscoveryMarketFeatures]:
-    """Use the certified Massive futures route without emitting deep-evidence stages."""
+    """Use certified redundant history without emitting deep-evidence stages."""
 
-    futures = tuple(records)
-    if not futures:
+    unresolved = tuple(records)
+    if not unresolved:
         return {}
     timestamp = _legacy._aware(as_of, field_name="as_of")
     core = _redundant._core
+    alpaca_crypto_rows = core._prefetch_alpaca_crypto(
+        unresolved,
+        as_of=timestamp,
+        policy=policy,
+        provider=core.AlpacaCryptoHistoryProvider(http_get=http_get),
+    )
     return _redundant._fetch_missing_concurrently(
-        futures,
+        unresolved,
         timestamp=timestamp,
         policy=policy,
         http_get=http_get,
@@ -182,10 +189,10 @@ def _redundant_futures_features(
         twelve=core.TwelveDataHistoryProvider(),
         coinbase=core.CoinbaseHistoryProvider(),
         kraken=core.KrakenHistoryProvider(),
-        alpaca_crypto_rows={},
+        alpaca_crypto_rows=alpaca_crypto_rows,
         already_processed=0,
         already_evidence_complete=0,
-        decision_eligible_records=len(futures),
+        decision_eligible_records=len(unresolved),
         maximum_workers=min(_MAX_PROVIDER_IO_WORKERS, maximum_workers),
         # Provider-preselection has its own governed progress stages. Reusing the deep
         # evidence worker must not make telemetry appear to enter deep analysis early.
@@ -202,7 +209,7 @@ def default_provider_preselection_market_probe(
     alpaca_client: AlpacaPaperClient | None = None,
     maximum_workers: int = _MAX_PROVIDER_IO_WORKERS,
 ) -> Mapping[str, _legacy.DiscoveryMarketFeatures]:
-    """Run the bounded legacy probe, then resolve only missing dated futures."""
+    """Run bounded legacy probing plus certified redundant crypto/futures history."""
 
     if (
         isinstance(maximum_workers, bool)
@@ -211,10 +218,15 @@ def default_provider_preselection_market_probe(
     ):
         raise ValueError("maximum_workers must be a positive integer")
     ordered = tuple(records)
+    legacy_records = tuple(
+        record
+        for record in ordered
+        if record.asset_class is not CandidateAssetClass.CRYPTO
+    )
     option_underlyings = tuple(
         dict.fromkeys(
             item.underlying_symbol.upper()
-            for item in ordered
+            for item in legacy_records
             if item.asset_class is CandidateAssetClass.OPTION and item.underlying_symbol
         )
     )
@@ -232,7 +244,7 @@ def default_provider_preselection_market_probe(
     )
     result = dict(
         _legacy.default_market_probe(
-            ordered,
+            legacy_records,
             as_of,
             policy,
             http_get=http_get,
@@ -240,16 +252,19 @@ def default_provider_preselection_market_probe(
             maximum_workers=min(_MAX_PROVIDER_IO_WORKERS, maximum_workers),
         )
     )
-    unresolved_futures = tuple(
+    unresolved_redundant = tuple(
         record
         for record in ordered
-        if record.asset_class is CandidateAssetClass.FUTURE
-        and record.symbol not in result
+        if record.symbol not in result
+        and record.asset_class in (
+            CandidateAssetClass.CRYPTO,
+            CandidateAssetClass.FUTURE,
+        )
     )
-    if unresolved_futures:
+    if unresolved_redundant:
         result.update(
-            _redundant_futures_features(
-                unresolved_futures,
+            _redundant_preselection_features(
+                unresolved_redundant,
                 as_of=as_of,
                 policy=policy,
                 http_get=http_get,
