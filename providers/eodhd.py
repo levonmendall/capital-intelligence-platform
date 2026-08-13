@@ -7,17 +7,19 @@ live EODHD retrieval remains authoritative; bounded continuity rules then apply 
 as before.
 
 A configured market is never removed or provider-remapped merely because one EODHD
-symbol-directory request returns 402/404. That provider result routes the same requested
-market to the independent Twelve Data reference authority. The runtime deliberately does
-not add an exchange-list preflight ahead of normal physical-market requests: doing so
-would consume an extra provider call for every uncached market and would not itself
-establish investability. Provider aliases are never guessed.
+symbol-directory request returns 402/404 or exhausts bounded retries for a transient
+timeout, connection failure, rate limit, or temporary service status. That provider
+result routes the same requested market to the independent Twelve Data reference
+authority. The runtime deliberately does not add an exchange-list preflight ahead of
+normal physical-market requests: doing so would consume an extra provider call for every
+uncached market and would not itself establish investability. Provider aliases are never
+guessed.
 
 A current active directory is not discarded solely because the historical delisted-
 symbol directory is temporarily unavailable. Missing or incomplete fallback evidence,
-authentication failures, provider errors other than the explicitly governed continuity
-conditions, virtual markets without a certified reference selector, and every
-non-directory provider failure remain fail-closed.
+authentication or entitlement failures, malformed provider payloads, virtual markets
+without a certified reference selector, and every non-directory provider failure remain
+fail-closed.
 """
 
 from __future__ import annotations
@@ -53,6 +55,30 @@ from providers.twelve_data_reference import (
 
 
 _DIRECTORY_CONTINUITY_STATUS_CODES = frozenset({402, 404})
+_DIRECTORY_TRANSIENT_FALLBACK_STATUS_CODES = frozenset(
+    {408, 425, 429, 500, 502, 503, 504}
+)
+_DIRECTORY_TRANSIENT_FALLBACK_CATEGORIES = frozenset(
+    {
+        "timeout",
+        "connection_error",
+        "network_error",
+        "temporary_http_status",
+        "provider_rejection",
+    }
+)
+
+
+def _directory_reference_fallback_allowed(error: EODHDRetrievalFailure) -> bool:
+    """Return whether a completed directory failure may use reference failover."""
+
+    if error.status_code in _DIRECTORY_CONTINUITY_STATUS_CODES:
+        return True
+    if not error.retryable:
+        return False
+    if error.status_code is not None:
+        return error.status_code in _DIRECTORY_TRANSIENT_FALLBACK_STATUS_CODES
+    return error.category in _DIRECTORY_TRANSIENT_FALLBACK_CATEGORIES
 
 
 def __getattr__(name: str):
@@ -109,7 +135,7 @@ class EODHDProvider(_base.EODHDProvider):
                 retrieved_at=retrieved_at,
             )
         except EODHDRetrievalFailure as error:
-            if error.status_code not in _DIRECTORY_CONTINUITY_STATUS_CODES:
+            if not _directory_reference_fallback_allowed(error):
                 raise
             fallback = self._reference_provider
             if fallback is None:
@@ -119,9 +145,9 @@ class EODHDProvider(_base.EODHDProvider):
                 return fallback.fetch_dataset(query)
             except TwelveDataReferenceError as fallback_error:
                 raise EODHDProviderError(
-                    "EODHD symbol directory "
-                    f"{query.provider_symbol} returned HTTP {error.status_code} and the "
-                    "independent Twelve Data reference fallback is unavailable: "
+                    "EODHD symbol directory retrieval exhausted its governed primary "
+                    f"path ({error}) and the independent Twelve Data reference "
+                    "fallback is unavailable: "
                     f"{fallback_error}"
                 ) from fallback_error
 

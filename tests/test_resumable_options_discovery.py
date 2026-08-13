@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from operations.resumable_options_discovery import ResumableOptionsProvider
+from providers.alpaca_indicative_options import AlpacaIndicativeOptionsError
 
 
 NOW = datetime(2026, 8, 13, 18, 17, tzinfo=timezone.utc)
@@ -67,6 +68,29 @@ class _Delegate:
     primary = _PrimaryOptions()
 
 
+class _BrokenDefinitionPrimary:
+    def definitions(self, *_args, **_kwargs):
+        raise AlpacaIndicativeOptionsError(
+            "Alpaca definition discovery timed out",
+            retryable=True,
+        )
+
+
+class _FallbackDelegate:
+    configured = True
+    primary_configured = True
+    secondary_configured = True
+    fallback_configured = False
+    primary = _BrokenDefinitionPrimary()
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def select_contracts(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return ("tradier-complete-selection",)
+
+
 def test_registered_progress_stages_allow_resumable_option_provider_path(
     tmp_path, monkeypatch
 ) -> None:
@@ -91,3 +115,21 @@ def test_registered_progress_stages_allow_resumable_option_provider_path(
     checkpoint_root = tmp_path / "all-market-certification" / "options"
     assert tuple(checkpoint_root.rglob("definitions.json"))
     assert tuple(checkpoint_root.rglob("expiration-*.json"))
+
+
+def test_alpaca_definition_failure_reenters_tradier_capable_router() -> None:
+    delegate = _FallbackDelegate()
+
+    selections = ResumableOptionsProvider(delegate=delegate, environ={}).select_contracts(
+        "SPY",
+        underlying_price=500.0,
+        as_of=NOW,
+        minimum_days_to_expiry=7,
+        maximum_days_to_expiry=60,
+        maximum_expirations=1_000,
+        candidates_per_bucket=8,
+    )
+
+    assert selections == ("tradier-complete-selection",)
+    assert len(delegate.calls) == 1
+    assert delegate.calls[0][1]["maximum_expirations"] == 1_000

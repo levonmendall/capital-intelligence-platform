@@ -121,6 +121,10 @@ class MassiveMultiAssetProvider:
             raise MassiveMultiAssetError("Massive API key is not configured")
         if as_of.tzinfo is None or as_of.utcoffset() is None:
             raise ValueError("as_of must be timezone-aware")
+        if isinstance(maximum_pages, bool) or not isinstance(maximum_pages, int):
+            raise TypeError("maximum_pages must be an integer")
+        if maximum_pages < 1:
+            raise ValueError("maximum_pages must be positive")
         target_codes = {str(item).strip().upper() for item in product_codes if str(item).strip()}
         url = f"{MASSIVE_BASE_URL}/futures/v1/contracts"
         params: dict[str, object] = {
@@ -130,6 +134,7 @@ class MassiveMultiAssetProvider:
             "apiKey": self.api_key,
         }
         result: dict[str, MassiveFuturesContract] = {}
+        pagination_complete = False
         for _ in range(maximum_pages):
             payload = self._get_url(url, params=params)
             raw = payload.get("results") if isinstance(payload, Mapping) else None
@@ -147,6 +152,12 @@ class MassiveMultiAssetProvider:
                     continue
                 if target_codes and product not in target_codes:
                     continue
+                raw_active = item.get("active", True)
+                active = (
+                    raw_active.strip().lower() == "true"
+                    if isinstance(raw_active, str)
+                    else bool(raw_active)
+                )
                 result[ticker] = MassiveFuturesContract(
                     ticker=ticker,
                     product_code=product,
@@ -154,17 +165,22 @@ class MassiveMultiAssetProvider:
                     first_trade_date=first,
                     last_trade_date=last,
                     settlement_date=(str(item.get("settlement_date")).strip() if item.get("settlement_date") else None),
-                    active=bool(item.get("active", True)),
+                    active=active,
                     source_identifier=f"massive:futures-contract:{ticker}:{as_of.date().isoformat()}",
                 )
             next_url = str(payload.get("next_url") or "").strip() if isinstance(payload, Mapping) else ""
             if not next_url:
+                pagination_complete = True
                 break
             parsed = urlparse(next_url)
             if parsed.scheme != "https" or parsed.netloc != "api.massive.com":
                 raise MassiveMultiAssetError("Massive futures pagination returned an invalid next_url")
             url = next_url
             params = {"apiKey": self.api_key}
+        if not pagination_complete:
+            raise MassiveMultiAssetError(
+                "Massive futures contract pagination exceeded the completeness guard"
+            )
         return tuple(result[key] for key in sorted(result))
 
     def _future_history(self, ticker: str, *, start: datetime, cutoff: datetime) -> tuple[dict[str, object], ...]:

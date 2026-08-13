@@ -594,15 +594,39 @@ class ResumableOptionsProvider:
                 maximum_expirations=maximum_expirations,
                 candidates_per_bucket=candidates_per_bucket,
             )
-        definitions = self._definitions(
-            underlying=normalized,
-            underlying_price=price,
-            as_of=timestamp,
-            minimum_days_to_expiry=minimum_days_to_expiry,
-            maximum_days_to_expiry=maximum_days_to_expiry,
-            request=request,
-            directory=directory,
-        )
+        try:
+            definitions = self._definitions(
+                underlying=normalized,
+                underlying_price=price,
+                as_of=timestamp,
+                minimum_days_to_expiry=minimum_days_to_expiry,
+                maximum_days_to_expiry=maximum_days_to_expiry,
+                request=request,
+                directory=directory,
+            )
+        except AlpacaIndicativeOptionsError:
+            # Definition discovery has no usable Alpaca checkpoint. Re-enter the
+            # governed router so Tradier may independently establish the same complete
+            # expiration scope before the bounded Massive tertiary path is considered.
+            return self.delegate.select_contracts(
+                normalized,
+                underlying_price=price,
+                as_of=timestamp,
+                minimum_days_to_expiry=minimum_days_to_expiry,
+                maximum_days_to_expiry=maximum_days_to_expiry,
+                maximum_expirations=maximum_expirations,
+                candidates_per_bucket=candidates_per_bucket,
+            )
+        if not definitions:
+            return self.delegate.select_contracts(
+                normalized,
+                underlying_price=price,
+                as_of=timestamp,
+                minimum_days_to_expiry=minimum_days_to_expiry,
+                maximum_days_to_expiry=maximum_days_to_expiry,
+                maximum_expirations=maximum_expirations,
+                candidates_per_bucket=candidates_per_bucket,
+            )
         expirations = tuple(sorted({item.expiration_at for item in definitions}))[:maximum_expirations]
         selected: list[RedundantOptionSelection] = []
         for index, expiration in enumerate(expirations, start=1):

@@ -17,7 +17,12 @@ from providers.massive_options import (
 )
 from providers.redundancy_audit import begin_redundancy_cycle
 from providers.redundant_options import RedundantOptionsError, RedundantOptionsProvider
-from providers.tradier_market_data import TradierMarketDataError
+from providers.tradier_market_data import (
+    TradierMarketDataError,
+    TradierOptionBar,
+    TradierOptionDefinition,
+    TradierOptionSelection,
+)
 
 
 AS_OF = datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc)
@@ -75,6 +80,33 @@ def _massive_selection() -> MassiveOptionSelection:
     )
 
 
+def _tradier_selection(days: int, right: str) -> TradierOptionSelection:
+    expiration = AS_OF + timedelta(days=days)
+    right_code = "C" if right == "call" else "P"
+    symbol = f"SPY{expiration.strftime('%y%m%d')}{right_code}00650000"
+    definition = TradierOptionDefinition(
+        symbol=symbol,
+        raw_symbol=symbol,
+        underlying="SPY",
+        option_right=right,
+        expiration_at=expiration,
+        strike=650.0,
+        contract_multiplier=100.0,
+        session_date=date(2026, 8, 10),
+        source_identifier=f"tradier:active-option-chain:{symbol}",
+    )
+    return TradierOptionSelection(
+        definition=definition,
+        bar=TradierOptionBar(
+            raw_symbol=symbol,
+            observed_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+            close=12.8,
+            volume=130.0,
+            source_identifier=f"tradier:option-history:{symbol}:2026-08-10",
+        ),
+    )
+
+
 class _HealthyAlpaca:
     configured = True
 
@@ -122,6 +154,17 @@ class _HealthyTradier:
 
     def __init__(self) -> None:
         self.symbols: list[str] = []
+        self.select_calls = 0
+        self.maximum_expirations = None
+
+    def select_contracts(self, *_args, **kwargs):
+        self.select_calls += 1
+        self.maximum_expirations = kwargs["maximum_expirations"]
+        return tuple(
+            _tradier_selection(days, right)
+            for days in (45, 75)
+            for right in ("call", "put")
+        )
 
     def daily_history(self, symbol, *, as_of, history_days):
         assert as_of == AS_OF
@@ -138,6 +181,9 @@ class _HealthyTradier:
 
 class _BrokenTradier:
     configured = True
+
+    def select_contracts(self, *_args, **_kwargs):
+        raise TradierMarketDataError("Tradier HTTP 503", status_code=503, retryable=True)
 
     def daily_history(self, *_args, **_kwargs):
         raise TradierMarketDataError("Tradier HTTP 503", status_code=503, retryable=True)
@@ -199,11 +245,30 @@ def test_alpaca_is_opportunity_complete_primary() -> None:
     assert all(item.definition.provider_kind == "alpaca_indicative" for item in selections)
 
 
-def test_multi_expiration_discovery_fails_closed_when_alpaca_is_unavailable() -> None:
+def test_tradier_supplies_complete_multi_expiration_selection_after_alpaca_failure() -> None:
+    massive = _HealthyMassive()
+    tradier = _HealthyTradier()
+    provider = RedundantOptionsProvider(
+        primary=_BrokenAlpaca(),
+        secondary=tradier,
+        fallback=massive,
+    )
+
+    selections = _select(provider)
+
+    assert tradier.select_calls == 1
+    assert tradier.maximum_expirations == 1_000
+    assert len({item.definition.expiration_at.date() for item in selections}) == 2
+    assert {item.definition.option_right for item in selections} == {"call", "put"}
+    assert all(item.definition.provider_kind == "tradier" for item in selections)
+    assert massive.select_calls == 0
+
+
+def test_multi_expiration_discovery_still_fails_when_tradier_is_incomplete() -> None:
     massive = _HealthyMassive()
     provider = RedundantOptionsProvider(
         primary=_BrokenAlpaca(),
-        secondary=_HealthyTradier(),
+        secondary=_BrokenTradier(),
         fallback=massive,
     )
 
@@ -211,6 +276,7 @@ def test_multi_expiration_discovery_fails_closed_when_alpaca_is_unavailable() ->
         _select(provider)
 
     assert "primary=rate_limit" in str(captured.value)
+    assert "secondary=provider_5xx" in str(captured.value)
     assert "opportunity-complete" in str(captured.value)
     assert massive.select_calls == 0
 
