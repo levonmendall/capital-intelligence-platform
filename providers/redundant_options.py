@@ -31,11 +31,18 @@ from providers.massive_options import (
 )
 from providers.redundancy_audit import ProviderCapabilityKey, current_redundancy_ledger
 from providers.single_pass_massive_options import SinglePassMassiveOptionsProvider
-from providers.tradier_market_data import TradierMarketDataError, TradierMarketDataProvider
+from providers.tradier_market_data import (
+    TRADIER_OPTIONS_DATASET,
+    TradierMarketDataError,
+    TradierMarketDataProvider,
+    TradierOptionBar,
+    TradierOptionSelection,
+)
 
 _OPPORTUNITY_COMPLETE_MAX_EXPIRATIONS = 1_000
 _MASSIVE_BASIC_SAFE_MAX_EXPIRATIONS = 1
-_TRADIER_OPTIONS_DATASET = "markets/history"
+_TRADIER_OPTIONS_DATASET = TRADIER_OPTIONS_DATASET
+_TRADIER_HISTORY_DATASET = "markets/history"
 
 
 class RedundantOptionsError(RuntimeError):
@@ -194,12 +201,56 @@ def _adapt_massive_selection(selection: MassiveOptionSelection) -> RedundantOpti
     )
 
 
+def _adapt_tradier_bar(
+    bar: TradierOptionBar,
+    *,
+    raw_symbol: str | None = None,
+) -> RedundantOptionBar:
+    return RedundantOptionBar(
+        raw_symbol=raw_symbol or bar.raw_symbol,
+        observed_at=bar.observed_at,
+        close=bar.close,
+        volume=bar.volume,
+        provider_kind="tradier",
+        source_identifier=bar.source_identifier,
+    )
+
+
+def _adapt_tradier_selection(
+    selection: TradierOptionSelection,
+) -> RedundantOptionSelection:
+    definition = selection.definition
+    return RedundantOptionSelection(
+        definition=RedundantOptionDefinition(
+            symbol=definition.symbol,
+            raw_symbol=definition.raw_symbol,
+            underlying=definition.underlying,
+            option_right=definition.option_right,
+            expiration_at=definition.expiration_at,
+            strike=definition.strike,
+            contract_multiplier=definition.contract_multiplier,
+            session_date=definition.session_date,
+            provider_kind="tradier",
+            provider_dataset=TRADIER_OPTIONS_DATASET,
+            provider_stype_in="raw_symbol",
+            provider_instrument_id=None,
+            source_identifier=definition.source_identifier,
+        ),
+        bar=_adapt_tradier_bar(selection.bar),
+    )
+
+
 def _option_audit_keys(capability: str):
     ledger = current_redundancy_ledger()
+    tradier_dataset = (
+        _TRADIER_OPTIONS_DATASET
+        if capability == "option_contract_selection"
+        else _TRADIER_HISTORY_DATASET
+    )
     return (
         ledger,
         ProviderCapabilityKey("alpaca_indicative", capability, ALPACA_INDICATIVE_OPTIONS_DATASET),
-        ProviderCapabilityKey("tradier", capability, _TRADIER_OPTIONS_DATASET),
+        ProviderCapabilityKey("tradier", capability, tradier_dataset),
         ProviderCapabilityKey("massive", capability, MASSIVE_OPRA_DATASET),
     )
 
@@ -274,6 +325,7 @@ class RedundantOptionsProvider:
         _declare(ledger, secondary_key, configured=self.secondary.configured)
         _declare(ledger, fallback_key, configured=self.fallback.configured)
         primary_error: BaseException | None = None
+        secondary_error: BaseException | None = None
         fallback_error: BaseException | None = None
         if self.primary.configured:
             if ledger is not None:
@@ -299,6 +351,37 @@ class RedundantOptionsProvider:
                 primary_error = error
                 if ledger is not None:
                     ledger.failed(primary_key, _failure_class(error))
+        if self.secondary.configured:
+            if ledger is not None:
+                ledger.attempted(secondary_key)
+            try:
+                selections = self.secondary.select_contracts(
+                    underlying,
+                    underlying_price=underlying_price,
+                    as_of=timestamp,
+                    minimum_days_to_expiry=minimum_days_to_expiry,
+                    maximum_days_to_expiry=maximum_days_to_expiry,
+                    maximum_expirations=maximum_expirations,
+                    candidates_per_bucket=candidates_per_bucket,
+                )
+                adapted = tuple(_adapt_tradier_selection(item) for item in selections)
+                if adapted:
+                    if ledger is not None:
+                        ledger.used(
+                            secondary_key,
+                            source_identifiers=_selection_sources(adapted),
+                            failed_over=bool(self.primary.configured),
+                        )
+                    return adapted
+                secondary_error = RedundantOptionsError(
+                    "Tradier returned no complete eligible-expiration option evidence"
+                )
+                if ledger is not None:
+                    ledger.failed(secondary_key, "insufficient_evidence")
+            except TradierMarketDataError as error:
+                secondary_error = error
+                if ledger is not None:
+                    ledger.failed(secondary_key, _failure_class(error))
         if self.fallback.configured:
             if maximum_expirations > _MASSIVE_BASIC_SAFE_MAX_EXPIRATIONS:
                 fallback_error = RedundantOptionsError("Massive fallback cannot certify complete expiration opportunity coverage within the governed request budget")
@@ -320,7 +403,13 @@ class RedundantOptionsProvider:
                     adapted = tuple(_adapt_massive_selection(item) for item in selections)
                     if adapted:
                         if ledger is not None:
-                            ledger.used(fallback_key, source_identifiers=_selection_sources(adapted), failed_over=bool(self.primary.configured))
+                            ledger.used(
+                                fallback_key,
+                                source_identifiers=_selection_sources(adapted),
+                                failed_over=bool(
+                                    self.primary.configured or self.secondary.configured
+                                ),
+                            )
                         return adapted
                     if ledger is not None:
                         ledger.failed(fallback_key, "insufficient_evidence")
@@ -328,12 +417,16 @@ class RedundantOptionsProvider:
                     fallback_error = error
                     if ledger is not None:
                         ledger.failed(fallback_key, _failure_class(error))
-        active_error = fallback_error or primary_error
+        active_error = fallback_error or secondary_error or primary_error
         if active_error is not None:
             raise RedundantOptionsError(
                 "Certified option providers cannot supply opportunity-complete evidence; "
-                f"primary={_failure_class(primary_error)}; fallback={_failure_class(fallback_error)}; "
-                f"primary_detail={_failure_detail(primary_error)}; fallback_detail={_failure_detail(fallback_error)}",
+                f"primary={_failure_class(primary_error)}; "
+                f"secondary={_failure_class(secondary_error)}; "
+                f"fallback={_failure_class(fallback_error)}; "
+                f"primary_detail={_failure_detail(primary_error)}; "
+                f"secondary_detail={_failure_detail(secondary_error)}; "
+                f"fallback_detail={_failure_detail(fallback_error)}",
                 status_code=getattr(active_error, "status_code", None),
                 retryable=bool(getattr(active_error, "retryable", False)),
             ) from active_error

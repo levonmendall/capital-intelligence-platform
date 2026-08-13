@@ -9,9 +9,10 @@ classification, evidence, threshold, CIO, construction, or execution rule change
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from cio import CandidateAssetClass
+from data.observation import DataQualityState
 from data.provider_dataset import ProviderDatasetQuery, ProviderDatasetType
 from operations import _comprehensive_market_discovery_v4_serial as _base
 from operations._comprehensive_market_discovery_v4_serial import *  # noqa: F401,F403
@@ -105,10 +106,57 @@ def _catalog_from_eodhd(
 
     snapshots: dict[str, object] = {}
     if requested_exchanges:
+        attempted = len(requested_exchanges)
+        completed = 0
+        fallback_count = 0
+        failed = 0
+        _base.record_manual_cio_diagnostic_progress(
+            "catalog_eodhd_directory",
+            metrics={
+                "attempted_exchanges": attempted,
+                "completed_exchanges": completed,
+                "fallback_exchanges": fallback_count,
+                "failed_exchanges": failed,
+            },
+        )
         with ThreadPoolExecutor(
             max_workers=min(_MAX_DIRECTORY_IO_WORKERS, len(requested_exchanges))
         ) as executor:
-            snapshots.update(executor.map(fetch_directory, requested_exchanges))
+            pending = {
+                executor.submit(fetch_directory, exchange): index
+                for index, exchange in enumerate(requested_exchanges)
+            }
+            for future in as_completed(pending):
+                exchange_index = pending[future]
+                try:
+                    exchange, snapshot = future.result()
+                except Exception:
+                    failed += 1
+                    _base.record_manual_cio_diagnostic_progress(
+                        "catalog_eodhd_directory",
+                        metrics={
+                            "exchange_index": exchange_index,
+                            "attempted_exchanges": attempted,
+                            "completed_exchanges": completed,
+                            "fallback_exchanges": fallback_count,
+                            "failed_exchanges": failed,
+                        },
+                    )
+                    raise
+                snapshots[exchange] = snapshot
+                completed += 1
+                if getattr(snapshot, "quality_state", None) is DataQualityState.FALLBACK:
+                    fallback_count += 1
+                _base.record_manual_cio_diagnostic_progress(
+                    "catalog_eodhd_directory",
+                    metrics={
+                        "exchange_index": exchange_index,
+                        "attempted_exchanges": attempted,
+                        "completed_exchanges": completed,
+                        "fallback_exchanges": fallback_count,
+                        "failed_exchanges": failed,
+                    },
+                )
 
     return _base._catalog_from_eodhd(
         as_of=as_of,

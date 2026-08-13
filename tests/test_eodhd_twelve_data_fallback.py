@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import requests
 
 from data.observation import DataQualityState
 from data.provider_dataset import ProviderDatasetQuery, ProviderDatasetType
@@ -28,6 +29,11 @@ class Response:
 
     def json(self):
         return self.payload
+
+
+class MalformedResponse(Response):
+    def json(self):
+        raise ValueError("malformed JSON")
 
 
 def query(exchange: str = "HK") -> ProviderDatasetQuery:
@@ -57,13 +63,18 @@ def reference_provider(responses) -> TwelveDataReferenceProvider:
 def eodhd_provider(
     *,
     cache_dir: Path,
-    eodhd_response: Response,
+    eodhd_response: Response | Exception,
     fallback: TwelveDataReferenceProvider | None,
 ) -> EODHDProvider:
+    def get(*_args, **_kwargs):
+        if isinstance(eodhd_response, Exception):
+            raise eodhd_response
+        return eodhd_response
+
     return EODHDProvider(
         api_token="eodhd-secret",
         bindings=EODHDBindingRegistry(()),
-        http_get=lambda *_args, **_kwargs: eodhd_response,
+        http_get=get,
         clock=lambda: NOW,
         sleeper=lambda _: None,
         retrieval_policy=EODHDRetrievalPolicy(max_attempts=1),
@@ -149,6 +160,53 @@ def test_uncached_http_404_uses_certified_tokyo_reference(
     assert snapshot.provider_record_id.startswith(
         "twelve-data:stocks-reference:TSE:"
     )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        Response({}, 429),
+        Response({}, 503),
+        requests.Timeout("directory timed out"),
+    ),
+)
+def test_exhausted_transient_directory_failure_uses_reference_fallback(
+    tmp_path: Path,
+    failure: Response | Exception,
+) -> None:
+    fallback = reference_provider(
+        [
+            Response({"count": 1, "data": [tokyo_row()], "status": "ok"}),
+            Response({"count": 0, "data": [], "status": "ok"}),
+        ]
+    )
+    provider = eodhd_provider(
+        cache_dir=tmp_path,
+        eodhd_response=failure,
+        fallback=fallback,
+    )
+
+    snapshot = provider.fetch_dataset(query("TSE"))
+
+    assert snapshot.provider == "Twelve Data"
+    assert snapshot.quality_state is DataQualityState.FALLBACK
+    assert snapshot.query.provider_symbol == "TSE"
+
+
+def test_malformed_primary_payload_does_not_unlock_reference_fallback(
+    tmp_path: Path,
+) -> None:
+    fallback = reference_provider(
+        [Response({"count": 1, "data": [hk_row()], "status": "ok"})]
+    )
+    provider = eodhd_provider(
+        cache_dir=tmp_path,
+        eodhd_response=MalformedResponse({}),
+        fallback=fallback,
+    )
+
+    with pytest.raises(EODHDProviderError, match="invalid json.*retryable"):
+        provider.fetch_dataset(query())
 
 
 def test_non_directory_continuity_failure_does_not_route_to_reference_provider(

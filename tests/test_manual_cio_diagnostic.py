@@ -119,6 +119,28 @@ def test_progress_is_release_scoped_and_credential_safe(tmp_path) -> None:
     assert "symbol" not in updated.detail
     assert "provider" not in updated.detail
 
+    directory_progress = record_manual_cio_diagnostic_progress(
+        "catalog_eodhd_directory",
+        metrics={
+            "exchange_index": 7,
+            "attempted_exchanges": 19,
+            "completed_exchanges": 8,
+            "fallback_exchanges": 2,
+            "failed_exchanges": 0,
+        },
+        values=enabled,
+    )
+    assert directory_progress is not None
+    assert directory_progress.progress_stage == "catalog_eodhd_directory"
+    assert dict(directory_progress.progress_metrics) == {
+        "attempted_exchanges": 19,
+        "completed_exchanges": 8,
+        "exchange_index": 7,
+        "failed_exchanges": 0,
+        "fallback_exchanges": 2,
+    }
+    assert "provider" not in directory_progress.detail
+
     with pytest.raises(ValueError, match="stage is invalid"):
         record_manual_cio_diagnostic_progress("provider key leaked", values=enabled)
     with pytest.raises(ValueError, match="stage is invalid"):

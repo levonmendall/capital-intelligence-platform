@@ -38,6 +38,7 @@ _PROGRESS_STAGES = frozenset(
         "paper_implementation_boundary",
         "comprehensive_catalog_discovery",
         "catalog_eodhd_directories",
+        "catalog_eodhd_directory",
         "catalog_eodhd_directories_complete",
         "catalog_options",
         "catalog_options_partitioned",
@@ -90,6 +91,11 @@ _PROGRESS_LANES = frozenset(
 _PROGRESS_METRICS = frozenset(
     {
         "configured_exchanges",
+        "exchange_index",
+        "attempted_exchanges",
+        "completed_exchanges",
+        "fallback_exchanges",
+        "failed_exchanges",
         "configured_underlyings",
         "catalog_records",
         "continuity_records",

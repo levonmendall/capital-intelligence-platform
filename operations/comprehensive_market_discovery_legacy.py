@@ -38,6 +38,10 @@ from providers.redundant_options import (
     build_redundant_options_provider,
 )
 from providers.eodhd import EODHDProvider, EODHDProviderError, build_eodhd_provider
+from providers.massive_multi_asset import (
+    MassiveMultiAssetError,
+    MassiveMultiAssetProvider,
+)
 from providers.treasury_fiscal_data import (
     TreasuryFiscalDataError,
     build_treasury_fiscal_data_provider,
@@ -846,7 +850,107 @@ def _futures_catalog(
     *,
     as_of: datetime,
     config: ComprehensiveMarketDiscoveryConfig,
+    massive_futures_provider: MassiveMultiAssetProvider | None = None,
 ) -> Sequence[DiscoveryCatalogRecord]:
+    if not config.futures_roots:
+        return ()
+    massive = massive_futures_provider or MassiveMultiAssetProvider()
+    if massive.configured:
+        roots_by_code = {
+            str(item.get("root", "")).strip().upper(): item
+            for item in config.futures_roots
+            if str(item.get("root", "")).strip()
+        }
+        try:
+            contracts = massive.futures_contracts(
+                as_of=as_of,
+                product_codes=tuple(roots_by_code),
+            )
+        except MassiveMultiAssetError as error:
+            raise ComprehensiveMarketDiscoveryError(
+                f"Massive point-in-time futures contract discovery failed: {error}"
+            ) from error
+
+        point_in_time: list[DiscoveryCatalogRecord] = []
+        covered_roots: set[str] = set()
+        cutoff_date = as_of.astimezone(timezone.utc).date()
+        for contract in contracts:
+            root = roots_by_code.get(contract.product_code)
+            if root is None or not contract.active:
+                continue
+            try:
+                first_trade_date = datetime.fromisoformat(
+                    contract.first_trade_date
+                ).date()
+                last_trade_date = datetime.fromisoformat(contract.last_trade_date).date()
+            except ValueError:
+                continue
+            if not first_trade_date <= cutoff_date <= last_trade_date:
+                continue
+            expiration = datetime.combine(
+                last_trade_date,
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            )
+            if expiration <= as_of + timedelta(days=7):
+                continue
+
+            ticker = contract.ticker.strip().upper()
+            symbol_root = contract.product_code.strip().upper()
+            if not ticker.startswith(symbol_root):
+                continue
+            contract_suffix = ticker[len(symbol_root) :]
+            month_codes = {
+                str(item).strip().upper()
+                for item in root.get("month_codes", "FGHJKMNQUVXZ")
+                if str(item).strip()
+            }
+            if not contract_suffix or contract_suffix[0] not in month_codes:
+                continue
+            maximum_year = cutoff_date.year + max(
+                1,
+                int(root.get("years_forward", 2)),
+            )
+            if last_trade_date.year > maximum_year:
+                continue
+
+            multiplier = float(root.get("contract_multiplier", 1.0))
+            spread = float(root.get("quote_spread_bps", 3.0))
+            covered_roots.add(symbol_root)
+            point_in_time.append(
+                DiscoveryCatalogRecord(
+                    symbol=ticker,
+                    provider_symbol=ticker,
+                    name=f"{root.get('name', symbol_root)} {ticker} dated future",
+                    asset_class=CandidateAssetClass.FUTURE,
+                    economic_exposure=str(
+                        root.get("economic_exposure", "broad_commodities")
+                    ),
+                    venue=contract.trading_venue,
+                    country_code=str(root.get("country_code", "US")),
+                    currency=str(root.get("currency", "USD")),
+                    settlement_currency=str(
+                        root.get("settlement_currency", "USD")
+                    ),
+                    instrument_type="future",
+                    provider_kind="massive",
+                    provider_dataset="futures/v1/contracts",
+                    provider_stype_in="raw_symbol",
+                    source_identifier=contract.source_identifier,
+                    contract_multiplier=multiplier,
+                    quote_spread_bps=spread,
+                    expiration_at=expiration,
+                )
+            )
+
+        missing_roots = tuple(sorted(set(roots_by_code) - covered_roots))
+        if missing_roots:
+            raise ComprehensiveMarketDiscoveryError(
+                "Massive point-in-time futures discovery did not establish complete "
+                "configured-root coverage: " + ", ".join(missing_roots)
+            )
+        return tuple(sorted(point_in_time, key=lambda item: item.symbol))
+
     month_codes = "FGHJKMNQUVXZ"
     result: list[DiscoveryCatalogRecord] = []
     start_year = as_of.year
