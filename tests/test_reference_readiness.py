@@ -17,6 +17,7 @@ from operations.reference_readiness import (
     load_reference_catalogs,
     prepare_reference_readiness,
 )
+from providers.massive_multi_asset import MassiveMultiAssetProvider
 
 
 AS_OF = datetime(2026, 8, 13, 20, 30, tzinfo=timezone.utc)
@@ -205,3 +206,37 @@ def test_bound_manifest_skips_eodhd_and_massive_reference_calls(monkeypatch, tmp
         "VOD.L"
     ]
     assert [item.symbol for item in result[CandidateAssetClass.FUTURE]] == ["ESZ26"]
+
+
+def test_massive_rate_limit_retries_before_reference_failure() -> None:
+    class Response:
+        def __init__(self, payload, status_code):
+            self.payload = payload
+            self.status_code = status_code
+            self.headers = {"Retry-After": "0"}
+
+        def json(self):
+            return self.payload
+
+    responses = iter(
+        (
+            Response({}, 429),
+            Response({"status": "OK", "results": []}, 200),
+        )
+    )
+    calls = []
+
+    def get(*_args, **_kwargs):
+        calls.append(1)
+        return next(responses)
+
+    provider = MassiveMultiAssetProvider(
+        "test-key",
+        max_attempts=2,
+        backoff_seconds=0,
+        http_get=get,
+        sleeper=lambda _seconds: None,
+    )
+
+    assert provider.futures_contracts(as_of=AS_OF) == ()
+    assert len(calls) == 2
