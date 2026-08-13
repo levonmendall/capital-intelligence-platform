@@ -79,12 +79,12 @@ def test_preselection_routes_only_unresolved_futures_to_redundant_authority(
         legacy_calls.append(tuple(record.symbol for record in records))
         return {equity.symbol: _features(equity, provider="eodhd")}
 
-    def futures_features(records, **_kwargs):
+    def redundant_features(records, **_kwargs):
         futures_calls.append(tuple(record.symbol for record in records))
         return {future.symbol: _features(future, provider="massive")}
 
     monkeypatch.setattr(probe._legacy, "default_market_probe", legacy_market_probe)
-    monkeypatch.setattr(probe, "_redundant_futures_features", futures_features)
+    monkeypatch.setattr(probe, "_redundant_preselection_features", redundant_features)
 
     result = probe.default_provider_preselection_market_probe(
         (equity, future),
@@ -113,7 +113,7 @@ def test_resolved_future_does_not_trigger_redundant_provider(monkeypatch) -> Non
     def unexpected_fallback(*_args, **_kwargs):
         raise AssertionError("resolved futures must not trigger redundant provider I/O")
 
-    monkeypatch.setattr(probe, "_redundant_futures_features", unexpected_fallback)
+    monkeypatch.setattr(probe, "_redundant_preselection_features", unexpected_fallback)
 
     result = probe.default_provider_preselection_market_probe(
         (future,),
@@ -134,7 +134,7 @@ def test_missing_massive_future_evidence_remains_fail_closed(monkeypatch) -> Non
     )
     monkeypatch.setattr(
         probe,
-        "_redundant_futures_features",
+        "_redundant_preselection_features",
         lambda *_args, **_kwargs: {},
     )
 
@@ -184,6 +184,16 @@ def test_futures_router_uses_bounded_massive_cap_without_deep_stage(monkeypatch)
         "KrakenHistoryProvider",
         lambda: sentinels["kraken"],
     )
+    monkeypatch.setattr(
+        probe._redundant._core,
+        "AlpacaCryptoHistoryProvider",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        probe._redundant._core,
+        "_prefetch_alpaca_crypto",
+        lambda *_args, **_kwargs: {},
+    )
     captured: dict[str, object] = {}
 
     def fetch_missing(records, **kwargs):
@@ -199,7 +209,7 @@ def test_futures_router_uses_bounded_massive_cap_without_deep_stage(monkeypatch)
 
     monkeypatch.setattr(probe._redundant, "_fetch_missing_concurrently", fetch_missing)
 
-    result = probe._redundant_futures_features(
+    result = probe._redundant_preselection_features(
         (future,),
         as_of=AS_OF,
         policy=ComprehensiveMarketDiscoveryPolicy(),
