@@ -3,8 +3,11 @@
 The prior v4 implementation is preserved byte-for-byte in the adjacent serial module.
 This facade changes only independent EODHD symbol-directory I/O: configured exchange
 reads are prefetched with a small fixed concurrency bound and then replayed through the
-unchanged v4/legacy parser in configured order. No catalog, completeness sentinel,
-classification, evidence, threshold, CIO, construction, or execution rule changes.
+unchanged v4/legacy parser in configured order. A release diagnostic may additionally
+consume an explicitly bound, integrity-checked pre-CIO reference manifest so slow-changing
+exchange and futures catalog acquisition does not consume the bounded CIO analysis budget.
+No catalog, completeness sentinel, classification, evidence, threshold, CIO,
+construction, or execution rule changes.
 """
 
 from __future__ import annotations
@@ -175,38 +178,74 @@ def default_catalog_probe(
     eodhd_provider=None,
     databento_options_provider=None,
 ):
-    """Collect the unchanged executable catalogs using bounded directory prefetch."""
+    """Collect executable catalogs, preferring an explicitly bound reference manifest."""
+
+    from operations.reference_readiness import (
+        ReferenceReadinessError,
+        load_reference_catalogs,
+    )
 
     timestamp = _base._legacy._aware(as_of, field_name="as_of")
     resolved_config = config or _base.load_comprehensive_market_discovery_config()
     _base._reject_evidence_only_eodhd_directories(resolved_config)
     resolved_policy = policy or ComprehensiveMarketDiscoveryPolicy()
     active_lanes = _base.scheduled_discovery_lanes(timestamp)
-    provider = eodhd_provider or _base._legacy.build_eodhd_provider()
-    _base.record_manual_cio_diagnostic_progress(
-        "catalog_eodhd_directories",
-        metrics={"configured_exchanges": len(resolved_config.eodhd_exchange_codes)},
-    )
-    result = {
-        key: list(value)
-        for key, value in _catalog_from_eodhd(
+
+    try:
+        reference_catalogs = load_reference_catalogs(
             as_of=timestamp,
             config=resolved_config,
-            provider=provider,
-            policy=resolved_policy,
-            requested_asset_classes=active_lanes,
-        ).items()
-    }
-    _base.record_manual_cio_diagnostic_progress(
-        "catalog_eodhd_directories_complete",
-        metrics={"catalog_records": sum(len(items) for items in result.values())},
-    )
+            record_type=_base._legacy.DiscoveryCatalogRecord,
+        )
+    except ReferenceReadinessError as error:
+        raise _base._legacy.ComprehensiveMarketDiscoveryError(
+            f"governed reference readiness is unavailable: {error}"
+        ) from error
+
+    if reference_catalogs is None:
+        provider = eodhd_provider or _base._legacy.build_eodhd_provider()
+        _base.record_manual_cio_diagnostic_progress(
+            "catalog_eodhd_directories",
+            metrics={"configured_exchanges": len(resolved_config.eodhd_exchange_codes)},
+        )
+        result = {
+            key: list(value)
+            for key, value in _catalog_from_eodhd(
+                as_of=timestamp,
+                config=resolved_config,
+                provider=provider,
+                policy=resolved_policy,
+                requested_asset_classes=active_lanes,
+            ).items()
+        }
+        _base.record_manual_cio_diagnostic_progress(
+            "catalog_eodhd_directories_complete",
+            metrics={"catalog_records": sum(len(items) for items in result.values())},
+        )
+    else:
+        result = {
+            key: list(value)
+            for key, value in reference_catalogs.items()
+            if key in active_lanes
+        }
+
     for asset_class in _base._DEFAULT_REQUIRED_DISCOVERY_LANES:
         result.setdefault(asset_class, [])
+
     if CandidateAssetClass.FUTURE in active_lanes:
-        result[CandidateAssetClass.FUTURE] = list(
-            _base._legacy._futures_catalog(as_of=timestamp, config=resolved_config)
-        )
+        if reference_catalogs is None:
+            _base.record_manual_cio_diagnostic_progress(
+                "comprehensive_catalog_discovery",
+                metrics={"catalog_records": sum(len(items) for items in result.values())},
+            )
+            result[CandidateAssetClass.FUTURE] = list(
+                _base._legacy._futures_catalog(as_of=timestamp, config=resolved_config)
+            )
+        elif not result.get(CandidateAssetClass.FUTURE):
+            raise _base._legacy.ComprehensiveMarketDiscoveryError(
+                "bound reference manifest does not contain the scheduled futures catalog"
+            )
+
     if CandidateAssetClass.OPTION in active_lanes:
         _base.record_manual_cio_diagnostic_progress(
             "catalog_databento_options",
