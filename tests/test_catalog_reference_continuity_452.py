@@ -70,6 +70,18 @@ def _snapshot(
     )
 
 
+def _exchange_row(code: str, *, country: str = "GB", currency: str = "GBP"):
+    return {
+        "Name": f"{code} Exchange",
+        "Code": code,
+        "OperatingMIC": "XLON" if code == "LSE" else "XTEST",
+        "Country": country,
+        "Currency": currency,
+        "CountryISO2": country,
+        "CountryISO3": "GBR" if country == "GB" else "TST",
+    }
+
+
 class _Fallback:
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -79,16 +91,27 @@ class _Fallback:
         return _snapshot(query)
 
 
-def test_exchange_directory_parser_accepts_provider_code_shapes() -> None:
+def test_exchange_directory_parser_requires_provider_exchange_shape() -> None:
     assert eodhd._exchange_directory_codes(
         [
-            {"Code": "LSE"},
-            {"code": "PA"},
-            {"ExchangeCode": "TSE"},
-            {"exchange_code": "HK"},
+            _exchange_row("LSE"),
+            _exchange_row("PA", country="FR", currency="EUR"),
+            _exchange_row("HK", country="HK", currency="HKD"),
         ]
-    ) == frozenset({"LSE", "PA", "TSE", "HK"})
+    ) == frozenset({"LSE", "PA", "HK"})
     assert eodhd._exchange_directory_codes({"unexpected": "shape"}) is None
+    assert eodhd._exchange_directory_codes(
+        [
+            {
+                "Code": "VOD",
+                "Name": "Vodafone",
+                "Exchange": "LSE",
+                "Currency": "GBP",
+                "Type": "Common Stock",
+            }
+        ]
+    ) is None
+    assert eodhd._exchange_directory_codes([{"Code": "LSE"}]) is None
 
 
 def test_unadvertised_physical_market_routes_to_reference_without_direct_symbol_call(
@@ -108,7 +131,11 @@ def test_unadvertised_physical_market_routes_to_reference_without_direct_symbol_
         return _snapshot(
             query,
             provider="EODHD",
-            payload=[{"Code": "LSE"}, {"Code": "PA"}, {"Code": "HK"}],
+            payload=[
+                _exchange_row("LSE"),
+                _exchange_row("PA", country="FR", currency="EUR"),
+                _exchange_row("HK", country="HK", currency="HKD"),
+            ],
         )
 
     monkeypatch.setattr(eodhd._base.EODHDProvider, "fetch_dataset", fake_base_fetch)
@@ -127,6 +154,51 @@ def test_unadvertised_physical_market_routes_to_reference_without_direct_symbol_
     assert any("market was preserved" in item for item in result.limitations)
 
 
+def test_ambiguous_preflight_payload_preserves_prior_direct_path(monkeypatch) -> None:
+    provider = eodhd.EODHDProvider(
+        api_token="test-token",
+        clock=lambda: NOW,
+        reference_provider=_Fallback(),
+    )
+
+    monkeypatch.setattr(
+        eodhd._base.EODHDProvider,
+        "fetch_dataset",
+        lambda _self, query: _snapshot(
+            query,
+            provider="EODHD",
+            payload=[
+                {
+                    "Code": "VOD",
+                    "Name": "Vodafone",
+                    "Exchange": "LSE",
+                    "Currency": "GBP",
+                    "Type": "Common Stock",
+                }
+            ],
+        ),
+    )
+    monkeypatch.setattr(provider, "_load_directory_cache", lambda *_a, **_k: None)
+    direct_calls: list[str] = []
+    monkeypatch.setattr(
+        provider,
+        "_active_symbol_directory",
+        lambda symbol, **_kwargs: (
+            direct_calls.append(symbol)
+            or (
+                [{"Code": "VOD", "Exchange": symbol, "Type": "Common Stock"}],
+                DataQualityState.LIVE,
+                None,
+                (),
+            )
+        ),
+    )
+    monkeypatch.setattr(provider, "_request", lambda *_a, **_k: [])
+
+    assert provider.fetch_dataset(_query("LSE")).provider == "EODHD"
+    assert direct_calls == ["LSE"]
+
+
 def test_exchange_preflight_is_once_per_provider_and_advertised_market_stays_eodhd(
     monkeypatch,
 ) -> None:
@@ -142,7 +214,10 @@ def test_exchange_preflight_is_once_per_provider_and_advertised_market_stays_eod
         return _snapshot(
             query,
             provider="EODHD",
-            payload=[{"Code": "LSE"}, {"Code": "PA"}],
+            payload=[
+                _exchange_row("LSE"),
+                _exchange_row("PA", country="FR", currency="EUR"),
+            ],
         )
 
     monkeypatch.setattr(eodhd._base.EODHDProvider, "fetch_dataset", fake_base_fetch)
