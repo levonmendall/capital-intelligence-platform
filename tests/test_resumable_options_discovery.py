@@ -4,6 +4,9 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from operations.resumable_options_discovery import ResumableOptionsProvider
+from providers.massive_options import MassiveOptionsError
+from providers.redundant_options import RedundantOptionsProvider
+from providers.tradier_market_data import TradierMarketDataError
 
 
 NOW = datetime(2026, 8, 13, 18, 17, tzinfo=timezone.utc)
@@ -67,6 +70,27 @@ class _Delegate:
     primary = _PrimaryOptions()
 
 
+class _PrimaryNoHistory:
+    configured = True
+
+    def latest_daily_bars(self, identifiers, *, as_of, history_days):
+        return as_of.date(), {}
+
+
+class _TradierHistoryFailure:
+    configured = True
+
+    def daily_history(self, symbol, *, as_of, history_days):
+        raise TradierMarketDataError("Tradier history response is missing daily bars")
+
+
+class _MassiveHistoryFailure:
+    configured = True
+
+    def latest_daily_bars(self, instruments, *, as_of, history_days):
+        raise MassiveOptionsError("Massive OPRA daily bars are unavailable")
+
+
 def test_registered_progress_stages_allow_resumable_option_provider_path(
     tmp_path, monkeypatch
 ) -> None:
@@ -91,3 +115,20 @@ def test_registered_progress_stages_allow_resumable_option_provider_path(
     checkpoint_root = tmp_path / "all-market-certification" / "options"
     assert tuple(checkpoint_root.rglob("definitions.json"))
     assert tuple(checkpoint_root.rglob("expiration-*.json"))
+
+
+def test_successful_primary_no_history_is_not_reclassified_as_provider_outage() -> None:
+    provider = RedundantOptionsProvider(
+        primary=_PrimaryNoHistory(),
+        secondary=_TradierHistoryFailure(),
+        fallback=_MassiveHistoryFailure(),
+    )
+
+    session, bars = provider.latest_daily_bars(
+        ((None, "SPY260918C00650000"),),
+        as_of=NOW,
+        history_days=365,
+    )
+
+    assert session == NOW.date()
+    assert bars == {}
