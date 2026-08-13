@@ -107,7 +107,7 @@ def test_recent_directory_cache_skips_status_probe(
 
 
 @pytest.mark.parametrize("status_code", (402, 404))
-def test_lse_recent_active_cache_keeps_bounded_delisted_probe(
+def test_lse_recent_active_cache_defers_delisted_probe(
     tmp_path: Path,
     status_code: int,
 ) -> None:
@@ -129,12 +129,10 @@ def test_lse_recent_active_cache_keeps_bounded_delisted_probe(
     assert snapshot.observed_at == NOW
     assert snapshot.payload["active"] == live_payload("LSE")
     assert snapshot.payload["delisted"] == []
-    assert len(calls) == 1
-    assert calls[0][0].endswith("/exchange-symbol-list/LSE")
-    assert calls[0][1].get("delisted") == 1
+    assert calls == []
     assert any("cache before live refresh" in item for item in snapshot.limitations)
-    assert any("delisted-symbol directory" in item for item in snapshot.limitations)
-    assert any(f"HTTP {status_code}" in item for item in snapshot.limitations)
+    assert any("live delisted-symbol refresh was deferred" in item for item in snapshot.limitations)
+    assert any("remain fail-closed" in item for item in snapshot.limitations)
 
 
 def test_http_402_without_recent_active_cache_remains_fail_closed(
