@@ -10,11 +10,13 @@ from cio import CandidateAssetClass
 from operations import _comprehensive_market_discovery_v4 as discovery
 from operations.comprehensive_market_discovery_legacy import (
     ComprehensiveMarketDiscoveryConfig,
+    ComprehensiveMarketDiscoveryError,
     DiscoveryCatalogRecord,
 )
 from operations.reference_readiness import (
     ReferenceReadinessError,
     load_reference_catalogs,
+    load_reference_readiness_progress,
     prepare_reference_readiness,
 )
 from providers.massive_multi_asset import MassiveMultiAssetProvider
@@ -81,8 +83,7 @@ def _future() -> DiscoveryCatalogRecord:
     )
 
 
-def _prepare(monkeypatch, tmp_path):
-    config = _config()
+def _active_lanes(monkeypatch) -> None:
     monkeypatch.setattr(
         discovery._base,
         "scheduled_discovery_lanes",
@@ -93,6 +94,11 @@ def _prepare(monkeypatch, tmp_path):
             }
         ),
     )
+
+
+def _prepare(monkeypatch, tmp_path):
+    config = _config()
+    _active_lanes(monkeypatch)
     monkeypatch.setattr(
         discovery,
         "_catalog_from_eodhd",
@@ -137,6 +143,9 @@ def test_reference_manifest_round_trips_exact_catalogs(monkeypatch, tmp_path) ->
     assert [item.symbol for item in catalogs[CandidateAssetClass.FUTURE]] == ["ESZ26"]
     assert values["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"] == manifest.manifest_id
     assert manifest.path.exists()
+    progress = load_reference_readiness_progress(values)
+    assert progress is not None
+    assert progress["stage"] == "reference_manifest_ready"
 
 
 def test_reference_manifest_integrity_is_fail_closed(monkeypatch, tmp_path) -> None:
@@ -175,16 +184,7 @@ def test_bound_manifest_skips_eodhd_and_massive_reference_calls(monkeypatch, tmp
         manifest.manifest_id,
     )
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_RELEASE", values["CAPITAL_INTELLIGENCE_RELEASE"])
-    monkeypatch.setattr(
-        discovery._base,
-        "scheduled_discovery_lanes",
-        lambda _timestamp: frozenset(
-            {
-                CandidateAssetClass.INTERNATIONAL_EQUITY,
-                CandidateAssetClass.FUTURE,
-            }
-        ),
-    )
+    _active_lanes(monkeypatch)
     monkeypatch.setattr(
         discovery,
         "_catalog_from_eodhd",
@@ -206,6 +206,141 @@ def test_bound_manifest_skips_eodhd_and_massive_reference_calls(monkeypatch, tmp
         "VOD.L"
     ]
     assert [item.symbol for item in result[CandidateAssetClass.FUTURE]] == ["ESZ26"]
+
+
+def test_fresh_components_rebind_across_release_without_provider_calls(
+    monkeypatch, tmp_path
+) -> None:
+    config, _values, first = _prepare(monkeypatch, tmp_path)
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-next",
+    }
+    _active_lanes(monkeypatch)
+    monkeypatch.setattr(
+        discovery,
+        "_catalog_from_eodhd",
+        lambda **_kwargs: pytest.fail("fresh directory component was not reused"),
+    )
+    monkeypatch.setattr(
+        discovery._base._legacy,
+        "_futures_catalog",
+        lambda **_kwargs: pytest.fail("fresh futures component was not reused"),
+    )
+
+    rebound = prepare_reference_readiness(
+        values,
+        now=AS_OF + timedelta(minutes=10),
+        config=config,
+        policy=object(),
+        eodhd_provider=object(),
+        massive_futures_provider=object(),
+    )
+
+    assert rebound.release == "release-next"
+    assert rebound.manifest_id != first.manifest_id
+    assert rebound.captured_at == first.captured_at
+    catalogs = load_reference_catalogs(
+        as_of=AS_OF + timedelta(minutes=11),
+        config=config,
+        values=values,
+        record_type=DiscoveryCatalogRecord,
+    )
+    assert catalogs is not None
+    assert [item.symbol for item in catalogs[CandidateAssetClass.FUTURE]] == ["ESZ26"]
+
+
+def test_directory_checkpoint_survives_futures_failure_and_retry_reuses_it(
+    monkeypatch, tmp_path
+) -> None:
+    config = _config()
+    _active_lanes(monkeypatch)
+    directory_calls: list[int] = []
+    futures_calls: list[int] = []
+
+    def directories(**_kwargs):
+        directory_calls.append(1)
+        return {CandidateAssetClass.INTERNATIONAL_EQUITY: (_equity(),)}
+
+    def futures(**_kwargs):
+        futures_calls.append(1)
+        if len(futures_calls) == 1:
+            raise ComprehensiveMarketDiscoveryError(
+                "Massive point-in-time futures contract discovery failed: Massive returned HTTP 429"
+            )
+        return (_future(),)
+
+    monkeypatch.setattr(discovery, "_catalog_from_eodhd", directories)
+    monkeypatch.setattr(discovery._base._legacy, "_futures_catalog", futures)
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-retry",
+    }
+
+    with pytest.raises(ReferenceReadinessError, match="HTTP 429"):
+        prepare_reference_readiness(
+            values,
+            now=AS_OF,
+            config=config,
+            policy=object(),
+            eodhd_provider=object(),
+            massive_futures_provider=object(),
+        )
+
+    directory_checkpoint = (
+        tmp_path / "reference_readiness" / "eodhd_directories-latest-qualified.json"
+    )
+    assert directory_checkpoint.exists()
+    failed_progress = load_reference_readiness_progress(values)
+    assert failed_progress is not None
+    assert failed_progress["stage"] == "reference_futures_contracts"
+
+    manifest = prepare_reference_readiness(
+        values,
+        now=AS_OF + timedelta(minutes=2),
+        config=config,
+        policy=object(),
+        eodhd_provider=object(),
+        massive_futures_provider=object(),
+    )
+
+    assert manifest.path.exists()
+    assert len(directory_calls) == 1
+    assert len(futures_calls) == 2
+
+
+def test_stale_components_are_refreshed(monkeypatch, tmp_path) -> None:
+    config, _values, _manifest = _prepare(monkeypatch, tmp_path)
+    directory_calls: list[int] = []
+    futures_calls: list[int] = []
+    _active_lanes(monkeypatch)
+
+    def directories(**_kwargs):
+        directory_calls.append(1)
+        return {CandidateAssetClass.INTERNATIONAL_EQUITY: (_equity(),)}
+
+    def futures(**_kwargs):
+        futures_calls.append(1)
+        return (_future(),)
+
+    monkeypatch.setattr(discovery, "_catalog_from_eodhd", directories)
+    monkeypatch.setattr(discovery._base._legacy, "_futures_catalog", futures)
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-stale-refresh",
+    }
+
+    prepare_reference_readiness(
+        values,
+        now=AS_OF + timedelta(hours=3),
+        config=config,
+        policy=object(),
+        eodhd_provider=object(),
+        massive_futures_provider=object(),
+    )
+
+    assert len(directory_calls) == 1
+    assert len(futures_calls) == 1
 
 
 def test_massive_rate_limit_retries_before_reference_failure() -> None:
