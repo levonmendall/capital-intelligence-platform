@@ -21,6 +21,13 @@ from operations.all_market_lane_certification import (
 
 install_checkpointed_market_probe(_core)
 
+# Keep the production terminal-screening resource bound visible at the public facade.
+# Several release guards intentionally inspect this module rather than implementation
+# internals because this is the canonical import path used by the CIO runtime.
+_PRODUCTION_TERMINAL_SCREENING_CHUNK_SIZE = (
+    _core._PRODUCTION_TERMINAL_SCREENING_CHUNK_SIZE
+)
+
 # Preserve the public monkeypatch seams used by the existing diagnostic tests. The
 # wrapper synchronizes any overridden seam into the preserved core immediately before
 # invocation, so test probes and operational instrumentation keep identical behavior.
@@ -31,6 +38,11 @@ build_bounded_terminal_preselection = _core.build_bounded_terminal_preselection
 build_bounded_cutoff_observations = _core.build_bounded_cutoff_observations
 default_provider_preselection_market_probe = _core.default_provider_preselection_market_probe
 begin_redundancy_cycle = _core.begin_redundancy_cycle
+
+
+def _assert_public_terminal_screening_bound(*, chunk_size: int) -> None:
+    if chunk_size != _core._PRODUCTION_TERMINAL_SCREENING_CHUNK_SIZE:
+        raise RuntimeError("public terminal-screening chunk bound diverged from core")
 
 
 def _sync_core_seams() -> None:
@@ -55,6 +67,9 @@ def discover_comprehensive_markets(
 ):
     """Run unchanged full-universe discovery, then enforce the compositional barrier."""
 
+    _assert_public_terminal_screening_bound(
+        chunk_size=_PRODUCTION_TERMINAL_SCREENING_CHUNK_SIZE
+    )
     _sync_core_seams()
     try:
         result = _core.discover_comprehensive_markets(
