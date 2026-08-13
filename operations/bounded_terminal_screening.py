@@ -9,7 +9,9 @@ necessary by production diagnostic #440:
   identifier before it is copied into per-instrument evidence;
 * disable rollback journals for disposable terminal-screening SQLite scratch databases;
 * make the existing storage reserve metric transaction-aware by retaining the largest
-  observed chunk growth as the next-chunk budget.
+  observed chunk growth as the next-chunk budget;
+* normalize bounded diversification sub-stage telemetry to the already-governed
+  diversification progress stage so diagnostic instrumentation cannot terminate the run.
 
 No catalog membership, screening rule, factor requirement, ranking, threshold,
 portfolio authority, execution behavior, or paper-only control is changed.
@@ -33,6 +35,32 @@ _screening_spool_growth: dict[str, tuple[int, int]] = {}
 _core_configure_spool_connection = _configure_spool_connection
 _core_publication_spool_init = _PublicationSignalSpool.__init__
 _core_storage_metrics = _storage_metrics
+_core_record_manual_cio_diagnostic_progress = record_manual_cio_diagnostic_progress
+
+
+def _normalize_terminal_progress_stage(stage: str) -> str:
+    """Map bounded diversification detail to the governed diagnostic stage contract."""
+    normalized = str(stage).strip().lower()
+    for phase in ("diversification_count", "diversification_apply"):
+        prefix = f"terminal_screening_finalize_{phase}:"
+        if normalized.startswith(prefix):
+            lane = normalized.split(":", 1)[1]
+            return f"terminal_screening_finalize_diversification:{lane}"
+    return stage
+
+
+def record_manual_cio_diagnostic_progress(
+    stage: str,
+    *,
+    metrics: Mapping[str, int] | None = None,
+    values: Mapping[str, str] | None = None,
+):
+    """Persist terminal progress without expanding the governed public stage vocabulary."""
+    return _core_record_manual_cio_diagnostic_progress(
+        _normalize_terminal_progress_stage(stage),
+        metrics=metrics,
+        values=values,
+    )
 
 
 def _configure_spool_connection(connection: sqlite3.Connection) -> None:
