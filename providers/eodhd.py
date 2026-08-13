@@ -8,8 +8,11 @@ as before.
 
 Physical exchange codes are reconciled once per provider instance against EODHD's
 exchange directory before spending a symbol-directory request. A configured market that
-is not advertised by EODHD is preserved and routed to the independent reference
-provider; provider aliases are never guessed and market scope is never silently reduced.
+is not advertised by a positively identified exchange-directory response is preserved
+and routed to the independent reference provider; provider aliases are never guessed and
+market scope is never silently reduced. Ambiguous or symbol-directory-shaped preflight
+payloads cannot establish that a market is unsupported and therefore preserve the prior
+direct symbol-directory path.
 
 A current active directory is not discarded solely because the historical delisted-
 symbol directory is temporarily unavailable. Missing or incomplete fallback evidence,
@@ -53,6 +56,19 @@ from providers.twelve_data_reference import (
 _DIRECTORY_CONTINUITY_STATUS_CODES = frozenset({402, 404})
 _PHYSICAL_EXCHANGE_DIRECTORY_QUERY_SYMBOL = "ALL"
 _EXCHANGE_DIRECTORY_LIMIT = 10_000
+_EXCHANGE_DIRECTORY_SIGNATURE_FIELDS = frozenset(
+    {
+        "OperatingMIC",
+        "operating_mic",
+        "CountryISO2",
+        "country_iso2",
+        "CountryISO3",
+        "country_iso3",
+    }
+)
+_SYMBOL_DIRECTORY_SIGNATURE_FIELDS = frozenset(
+    {"Exchange", "exchange", "Type", "type"}
+)
 
 
 def __getattr__(name: str):
@@ -66,7 +82,15 @@ def __getattr__(name: str):
 
 
 def _exchange_directory_codes(payload: object) -> frozenset[str] | None:
-    """Return advertised exchange codes, or None when the payload is not certifiable."""
+    """Return codes only from a positively identified EODHD exchange directory.
+
+    EODHD's ``/exchanges-list/`` rows expose exchange metadata such as
+    ``OperatingMIC`` and country ISO fields. Symbol-directory rows instead expose
+    instrument-level ``Exchange``/``Type`` fields. A generic array containing ``Code``
+    is therefore not enough to certify a negative coverage conclusion: ambiguous or
+    symbol-shaped payloads return ``None`` and the existing direct retrieval path stays
+    authoritative.
+    """
 
     rows: object = payload
     if isinstance(payload, Mapping):
@@ -77,22 +101,36 @@ def _exchange_directory_codes(payload: object) -> frozenset[str] | None:
             ):
                 rows = candidate
                 break
-    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+    if (
+        not isinstance(rows, Sequence)
+        or isinstance(rows, (str, bytes))
+        or not rows
+    ):
         return None
 
     codes: set[str] = set()
+    exchange_signature_seen = False
     for item in rows:
         if not isinstance(item, Mapping):
-            continue
+            return None
+        if any(key in item for key in _SYMBOL_DIRECTORY_SIGNATURE_FIELDS):
+            return None
+        if any(key in item for key in _EXCHANGE_DIRECTORY_SIGNATURE_FIELDS):
+            exchange_signature_seen = True
+
         value = None
         for key in ("Code", "code", "ExchangeCode", "exchange_code"):
             candidate = item.get(key)
             if isinstance(candidate, str) and candidate.strip():
                 value = candidate
                 break
-        if value is not None:
-            codes.add(value.strip().upper())
-    return frozenset(codes) if codes else None
+        if value is None:
+            return None
+        codes.add(value.strip().upper())
+
+    if not exchange_signature_seen or not codes:
+        return None
+    return frozenset(codes)
 
 
 class EODHDProvider(_base.EODHDProvider):
