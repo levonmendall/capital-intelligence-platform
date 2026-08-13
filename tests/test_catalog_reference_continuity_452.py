@@ -21,12 +21,9 @@ from providers.twelve_data_reference import TwelveDataReferenceError
 NOW = datetime(2026, 8, 13, 4, 22, tzinfo=timezone.utc)
 
 
-def _query(
-    symbol: str,
-    dataset_type: ProviderDatasetType = ProviderDatasetType.SYMBOL_DIRECTORY,
-) -> ProviderDatasetQuery:
+def _query(symbol: str) -> ProviderDatasetQuery:
     return ProviderDatasetQuery(
-        dataset_type=dataset_type,
+        dataset_type=ProviderDatasetType.SYMBOL_DIRECTORY,
         provider_symbol=symbol,
         as_of=NOW,
         limit=10_000,
@@ -37,10 +34,17 @@ def _snapshot(
     query: ProviderDatasetQuery,
     *,
     provider: str = "Twelve Data",
-    payload: object | None = None,
 ) -> ProviderDatasetSnapshot:
-    if payload is None:
-        payload = {
+    return ProviderDatasetSnapshot(
+        query=query,
+        provider=provider,
+        source_version="test-reference.v1",
+        observed_at=NOW,
+        available_at=NOW,
+        retrieved_at=NOW,
+        quality_state=DataQualityState.LIVE,
+        availability_basis=AvailabilityBasis.RETRIEVAL_PROXY,
+        payload={
             "active": [
                 {
                     "Code": "7203",
@@ -54,32 +58,10 @@ def _snapshot(
                 }
             ],
             "delisted": [],
-        }
-    return ProviderDatasetSnapshot(
-        query=query,
-        provider=provider,
-        source_version="test-reference.v1",
-        observed_at=NOW,
-        available_at=NOW,
-        retrieved_at=NOW,
-        quality_state=DataQualityState.LIVE,
-        availability_basis=AvailabilityBasis.RETRIEVAL_PROXY,
-        payload=payload,
+        },
         provider_record_id=f"test:{query.provider_symbol}",
         limitations=("test reference evidence",),
     )
-
-
-def _exchange_row(code: str, *, country: str = "GB", currency: str = "GBP"):
-    return {
-        "Name": f"{code} Exchange",
-        "Code": code,
-        "OperatingMIC": "XLON" if code == "LSE" else "XTEST",
-        "Country": country,
-        "Currency": currency,
-        "CountryISO2": country,
-        "CountryISO3": "GBR" if country == "GB" else "TST",
-    }
 
 
 class _Fallback:
@@ -91,30 +73,36 @@ class _Fallback:
         return _snapshot(query)
 
 
-def test_exchange_directory_parser_requires_provider_exchange_shape() -> None:
-    assert eodhd._exchange_directory_codes(
-        [
-            _exchange_row("LSE"),
-            _exchange_row("PA", country="FR", currency="EUR"),
-            _exchange_row("HK", country="HK", currency="HKD"),
-        ]
-    ) == frozenset({"LSE", "PA", "HK"})
-    assert eodhd._exchange_directory_codes({"unexpected": "shape"}) is None
-    assert eodhd._exchange_directory_codes(
-        [
-            {
-                "Code": "VOD",
-                "Name": "Vodafone",
-                "Exchange": "LSE",
-                "Currency": "GBP",
-                "Type": "Common Stock",
-            }
-        ]
-    ) is None
-    assert eodhd._exchange_directory_codes([{"Code": "LSE"}]) is None
+def test_normal_physical_market_adds_no_exchange_directory_preflight(monkeypatch) -> None:
+    provider = eodhd.EODHDProvider(
+        api_token="test-token",
+        clock=lambda: NOW,
+        reference_provider=_Fallback(),
+    )
+
+    def unexpected_base_fetch(*_args, **_kwargs):
+        raise AssertionError("normal catalog retrieval must not add exchange-list I/O")
+
+    monkeypatch.setattr(eodhd._base.EODHDProvider, "fetch_dataset", unexpected_base_fetch)
+    monkeypatch.setattr(
+        provider,
+        "_active_symbol_directory",
+        lambda symbol, **_kwargs: (
+            [{"Code": "VOD", "Exchange": symbol, "Type": "Common Stock"}],
+            DataQualityState.LIVE,
+            None,
+            (),
+        ),
+    )
+    monkeypatch.setattr(provider, "_request", lambda *_args, **_kwargs: [])
+
+    result = provider.fetch_dataset(_query("LSE"))
+
+    assert result.provider == "EODHD"
+    assert result.query.provider_symbol == "LSE"
 
 
-def test_unadvertised_physical_market_routes_to_reference_without_direct_symbol_call(
+def test_eodhd_404_preserves_requested_market_through_reference_fallback(
     monkeypatch,
 ) -> None:
     fallback = _Fallback()
@@ -123,156 +111,43 @@ def test_unadvertised_physical_market_routes_to_reference_without_direct_symbol_
         clock=lambda: NOW,
         reference_provider=fallback,
     )
-    base_calls: list[ProviderDatasetType] = []
 
-    def fake_base_fetch(_self, query: ProviderDatasetQuery):
-        base_calls.append(query.dataset_type)
-        assert query.dataset_type is ProviderDatasetType.EXCHANGE_DIRECTORY
-        return _snapshot(
-            query,
-            provider="EODHD",
-            payload=[
-                _exchange_row("LSE"),
-                _exchange_row("PA", country="FR", currency="EUR"),
-                _exchange_row("HK", country="HK", currency="HKD"),
-            ],
+    def unavailable(*_args, **_kwargs):
+        raise eodhd.EODHDRetrievalFailure(
+            resource="active symbol directory TSE",
+            category="http_error",
+            retryable=False,
+            status_code=404,
         )
 
-    monkeypatch.setattr(eodhd._base.EODHDProvider, "fetch_dataset", fake_base_fetch)
-    monkeypatch.setattr(provider, "_load_directory_cache", lambda *_a, **_k: None)
-
-    def unexpected_active(*_a, **_k):
-        raise AssertionError("TSE must not spend a guaranteed-failing symbol request")
-
-    monkeypatch.setattr(provider, "_active_symbol_directory", unexpected_active)
+    monkeypatch.setattr(provider, "_active_symbol_directory", unavailable)
 
     result = provider.fetch_dataset(_query("TSE"))
 
     assert result.provider == "Twelve Data"
+    assert result.query.provider_symbol == "TSE"
     assert fallback.calls == ["TSE"]
-    assert base_calls == [ProviderDatasetType.EXCHANGE_DIRECTORY]
-    assert any("market was preserved" in item for item in result.limitations)
 
 
-def test_ambiguous_preflight_payload_preserves_prior_direct_path(monkeypatch) -> None:
+def test_non_continuity_eodhd_failure_remains_fail_closed(monkeypatch) -> None:
     provider = eodhd.EODHDProvider(
         api_token="test-token",
         clock=lambda: NOW,
         reference_provider=_Fallback(),
     )
 
-    monkeypatch.setattr(
-        eodhd._base.EODHDProvider,
-        "fetch_dataset",
-        lambda _self, query: _snapshot(
-            query,
-            provider="EODHD",
-            payload=[
-                {
-                    "Code": "VOD",
-                    "Name": "Vodafone",
-                    "Exchange": "LSE",
-                    "Currency": "GBP",
-                    "Type": "Common Stock",
-                }
-            ],
-        ),
-    )
-    monkeypatch.setattr(provider, "_load_directory_cache", lambda *_a, **_k: None)
-    direct_calls: list[str] = []
-    monkeypatch.setattr(
-        provider,
-        "_active_symbol_directory",
-        lambda symbol, **_kwargs: (
-            direct_calls.append(symbol)
-            or (
-                [{"Code": "VOD", "Exchange": symbol, "Type": "Common Stock"}],
-                DataQualityState.LIVE,
-                None,
-                (),
-            )
-        ),
-    )
-    monkeypatch.setattr(provider, "_request", lambda *_a, **_k: [])
-
-    assert provider.fetch_dataset(_query("LSE")).provider == "EODHD"
-    assert direct_calls == ["LSE"]
-
-
-def test_exchange_preflight_is_once_per_provider_and_advertised_market_stays_eodhd(
-    monkeypatch,
-) -> None:
-    provider = eodhd.EODHDProvider(
-        api_token="test-token",
-        clock=lambda: NOW,
-        reference_provider=_Fallback(),
-    )
-    base_calls: list[ProviderDatasetType] = []
-
-    def fake_base_fetch(_self, query: ProviderDatasetQuery):
-        base_calls.append(query.dataset_type)
-        return _snapshot(
-            query,
-            provider="EODHD",
-            payload=[
-                _exchange_row("LSE"),
-                _exchange_row("PA", country="FR", currency="EUR"),
-            ],
+    def unavailable(*_args, **_kwargs):
+        raise eodhd.EODHDRetrievalFailure(
+            resource="active symbol directory TSE",
+            category="authentication_failed",
+            retryable=False,
+            status_code=401,
         )
 
-    monkeypatch.setattr(eodhd._base.EODHDProvider, "fetch_dataset", fake_base_fetch)
-    monkeypatch.setattr(provider, "_load_directory_cache", lambda *_a, **_k: None)
-    monkeypatch.setattr(
-        provider,
-        "_active_symbol_directory",
-        lambda symbol, **_kwargs: (
-            [{"Code": "ABC", "Exchange": symbol, "Type": "Common Stock"}],
-            DataQualityState.LIVE,
-            None,
-            (),
-        ),
-    )
-    monkeypatch.setattr(provider, "_request", lambda *_a, **_k: [])
+    monkeypatch.setattr(provider, "_active_symbol_directory", unavailable)
 
-    assert provider.fetch_dataset(_query("LSE")).provider == "EODHD"
-    assert provider.fetch_dataset(_query("PA")).provider == "EODHD"
-    assert base_calls == [ProviderDatasetType.EXCHANGE_DIRECTORY]
-
-
-def test_exchange_preflight_failure_preserves_prior_direct_path(monkeypatch) -> None:
-    provider = eodhd.EODHDProvider(
-        api_token="test-token",
-        clock=lambda: NOW,
-        reference_provider=_Fallback(),
-    )
-
-    def unavailable_exchange_directory(_self, _query):
-        raise eodhd.EODHDProviderError("exchange directory unavailable")
-
-    monkeypatch.setattr(
-        eodhd._base.EODHDProvider,
-        "fetch_dataset",
-        unavailable_exchange_directory,
-    )
-    monkeypatch.setattr(provider, "_load_directory_cache", lambda *_a, **_k: None)
-    direct_calls: list[str] = []
-    monkeypatch.setattr(
-        provider,
-        "_active_symbol_directory",
-        lambda symbol, **_kwargs: (
-            direct_calls.append(symbol)
-            or (
-                [{"Code": "ABC", "Exchange": symbol, "Type": "Common Stock"}],
-                DataQualityState.LIVE,
-                None,
-                (),
-            )
-        ),
-    )
-    monkeypatch.setattr(provider, "_request", lambda *_a, **_k: [])
-
-    assert provider.fetch_dataset(_query("LSE")).provider == "EODHD"
-    assert direct_calls == ["LSE"]
+    with pytest.raises(eodhd.EODHDRetrievalFailure, match="HTTP 401"):
+        provider.fetch_dataset(_query("TSE"))
 
 
 def test_stale_reference_continuity_is_used_only_after_final_429(monkeypatch) -> None:
@@ -368,7 +243,7 @@ def test_final_429_marker_is_set_by_wrapped_rate_limiter(monkeypatch) -> None:
     monkeypatch.setattr(
         rate_limited.TwelveDataRateLimitedReferenceProvider,
         "_rate_limited_get",
-        lambda *_a, **_k: Response(),
+        lambda *_args, **_kwargs: Response(),
     )
 
     provider._rate_limited_get(
