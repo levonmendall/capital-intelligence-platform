@@ -340,6 +340,14 @@ class RedundantOptionsProvider:
         return ()
 
     def latest_daily_bars(self, instruments: Sequence[tuple[int | None, str]], *, as_of: datetime, history_days: int = 45) -> tuple[date, Mapping[str, tuple[RedundantOptionBar, ...]]]:
+        """Resolve daily history per symbol without confusing valid no-data with outages.
+
+        A successful provider response that contains no bars is a governed NO_DATA
+        disposition for that symbol. It never fabricates evidence: downstream option
+        screening still rejects the symbol for insufficient history. Provider errors are
+        tracked separately and remain fail-closed when no configured provider can
+        establish either DATA or NO_DATA for an unresolved symbol.
+        """
         timestamp = _aware(as_of, field_name="as_of")
         ledger, primary_key, secondary_key, fallback_key = _option_audit_keys("option_daily_history")
         _declare(ledger, primary_key, configured=self.primary.configured)
@@ -348,16 +356,24 @@ class RedundantOptionsProvider:
         normalized = tuple((instrument_id, str(raw_symbol).strip().upper()) for instrument_id, raw_symbol in instruments if str(raw_symbol).strip())
         if not normalized:
             return timestamp.date(), {}
+        symbols = tuple(dict.fromkeys(raw_symbol for _, raw_symbol in normalized))
         result: dict[str, tuple[RedundantOptionBar, ...]] = {}
+        resolved_no_data: set[str] = set()
+        errors_by_symbol: dict[str, list[BaseException]] = {}
         primary_error: BaseException | None = None
         secondary_error: BaseException | None = None
         fallback_error: BaseException | None = None
+
         if self.primary.configured:
-            aliases = {_alpaca_ticker(raw_symbol): raw_symbol for _, raw_symbol in normalized}
+            aliases = {_alpaca_ticker(raw_symbol): raw_symbol for raw_symbol in symbols}
             if ledger is not None:
                 ledger.attempted(primary_key)
             try:
-                _session, primary_bars = self.primary.latest_daily_bars(tuple((None, symbol) for symbol in aliases), as_of=timestamp, history_days=history_days)
+                _session, primary_bars = self.primary.latest_daily_bars(
+                    tuple((None, symbol) for symbol in aliases),
+                    as_of=timestamp,
+                    history_days=history_days,
+                )
                 sources: list[str] = []
                 for alpaca_symbol, bars in primary_bars.items():
                     normalized_alpaca = _alpaca_ticker(str(alpaca_symbol))
@@ -365,55 +381,108 @@ class RedundantOptionsProvider:
                     adapted = tuple(_adapt_alpaca_bar(item, raw_symbol=original) for item in bars)
                     if adapted:
                         result[original] = adapted
+                        resolved_no_data.discard(original)
                         sources.extend(item.source_identifier for item in adapted)
+                for original in aliases.values():
+                    if original not in result:
+                        resolved_no_data.add(original)
                 if sources and ledger is not None:
                     ledger.used(primary_key, source_identifiers=tuple(dict.fromkeys(sources)), failed_over=False)
             except AlpacaIndicativeOptionsError as error:
                 primary_error = error
+                for raw_symbol in symbols:
+                    errors_by_symbol.setdefault(raw_symbol, []).append(error)
                 if ledger is not None:
                     ledger.failed(primary_key, _failure_class(error))
-        missing = tuple(raw_symbol for _, raw_symbol in normalized if raw_symbol not in result)
+
+        missing = tuple(raw_symbol for raw_symbol in symbols if raw_symbol not in result)
         if missing and self.secondary.configured:
             if ledger is not None:
                 ledger.attempted(secondary_key)
             sources: list[str] = []
-            try:
-                for raw_symbol in missing:
-                    bars = _tradier_bars(self.secondary, raw_symbol, as_of=timestamp, history_days=history_days)
-                    if bars:
-                        result[raw_symbol] = bars
-                        sources.extend(item.source_identifier for item in bars)
-                if sources and ledger is not None:
-                    ledger.used(secondary_key, source_identifiers=tuple(dict.fromkeys(sources)), failed_over=bool(self.primary.configured))
-            except TradierMarketDataError as error:
-                secondary_error = error
-                if ledger is not None:
-                    ledger.failed(secondary_key, _failure_class(error))
-        missing = tuple(raw_symbol for _, raw_symbol in normalized if raw_symbol not in result)
+            secondary_errors: list[TradierMarketDataError] = []
+            for raw_symbol in missing:
+                try:
+                    bars = _tradier_bars(
+                        self.secondary,
+                        raw_symbol,
+                        as_of=timestamp,
+                        history_days=history_days,
+                    )
+                except TradierMarketDataError as error:
+                    secondary_error = error
+                    secondary_errors.append(error)
+                    errors_by_symbol.setdefault(raw_symbol, []).append(error)
+                    continue
+                if bars:
+                    result[raw_symbol] = bars
+                    resolved_no_data.discard(raw_symbol)
+                    sources.extend(item.source_identifier for item in bars)
+                else:
+                    resolved_no_data.add(raw_symbol)
+            if sources and ledger is not None:
+                ledger.used(
+                    secondary_key,
+                    source_identifiers=tuple(dict.fromkeys(sources)),
+                    failed_over=bool(self.primary.configured),
+                )
+            elif secondary_errors and ledger is not None:
+                ledger.failed(secondary_key, _failure_class(secondary_errors[-1]))
+
+        missing = tuple(raw_symbol for raw_symbol in symbols if raw_symbol not in result)
         if missing and self.fallback.configured:
-            aliases = {_massive_ticker(raw_symbol): raw_symbol for raw_symbol in missing}
             if ledger is not None:
                 ledger.attempted(fallback_key)
-            try:
-                _session, fallback_bars = self.fallback.latest_daily_bars(tuple((None, ticker) for ticker in aliases), as_of=timestamp, history_days=history_days)
-                sources: list[str] = []
+            sources: list[str] = []
+            fallback_errors: list[MassiveOptionsError] = []
+            for raw_symbol in missing:
+                ticker = _massive_ticker(raw_symbol)
+                try:
+                    _session, fallback_bars = self.fallback.latest_daily_bars(
+                        ((None, ticker),),
+                        as_of=timestamp,
+                        history_days=history_days,
+                    )
+                except MassiveOptionsError as error:
+                    fallback_error = error
+                    fallback_errors.append(error)
+                    errors_by_symbol.setdefault(raw_symbol, []).append(error)
+                    continue
+                adapted_for_symbol: list[RedundantOptionBar] = []
                 for massive_symbol, bars in fallback_bars.items():
-                    normalized_massive = _massive_ticker(str(massive_symbol))
-                    original = aliases.get(normalized_massive, normalized_massive)
-                    adapted = tuple(_adapt_massive_bar(item, raw_symbol=original) for item in bars)
-                    if adapted:
-                        result[original] = adapted
-                        sources.extend(item.source_identifier for item in adapted)
-                if sources and ledger is not None:
-                    ledger.used(fallback_key, source_identifiers=tuple(dict.fromkeys(sources)), failed_over=True)
-            except MassiveOptionsError as error:
-                fallback_error = error
-                if ledger is not None:
-                    ledger.failed(fallback_key, _failure_class(error))
-        if not result and any(error is not None for error in (primary_error, secondary_error, fallback_error)):
-            active_error = fallback_error or secondary_error or primary_error
+                    if _massive_ticker(str(massive_symbol)) != ticker:
+                        continue
+                    adapted_for_symbol.extend(
+                        _adapt_massive_bar(item, raw_symbol=raw_symbol) for item in bars
+                    )
+                if adapted_for_symbol:
+                    adapted = tuple(adapted_for_symbol)
+                    result[raw_symbol] = adapted
+                    resolved_no_data.discard(raw_symbol)
+                    sources.extend(item.source_identifier for item in adapted)
+                else:
+                    resolved_no_data.add(raw_symbol)
+            if sources and ledger is not None:
+                ledger.used(
+                    fallback_key,
+                    source_identifiers=tuple(dict.fromkeys(sources)),
+                    failed_over=True,
+                )
+            elif fallback_errors and ledger is not None:
+                ledger.failed(fallback_key, _failure_class(fallback_errors[-1]))
+
+        unresolved = tuple(
+            raw_symbol
+            for raw_symbol in symbols
+            if raw_symbol not in result
+            and raw_symbol not in resolved_no_data
+            and errors_by_symbol.get(raw_symbol)
+        )
+        if unresolved:
+            active_error = errors_by_symbol[unresolved[-1]][-1]
             raise RedundantOptionsError(
-                "Certified option daily bars are unavailable; "
+                "Certified option daily bars are unavailable for unresolved symbols; "
+                f"unresolved={','.join(unresolved[:10])}; unresolved_count={len(unresolved)}; "
                 f"primary={_failure_class(primary_error)}; secondary={_failure_class(secondary_error)}; fallback={_failure_class(fallback_error)}; "
                 f"primary_detail={_failure_detail(primary_error)}; secondary_detail={_failure_detail(secondary_error)}; fallback_detail={_failure_detail(fallback_error)}",
                 status_code=getattr(active_error, "status_code", None),
