@@ -1,0 +1,71 @@
+name: Repair Massive futures rate limit
+
+on:
+  push:
+    branches:
+      - repair/massive-futures-rate-limit
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply narrow futures retry repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('providers/massive_multi_asset.py')
+          source = path.read_text(encoding='utf-8')
+          source = source.replace('from datetime import datetime, timedelta, timezone\n', 'from datetime import datetime, timedelta, timezone\nimport time\n', 1)
+          source = source.replace(
+              'class MassiveMultiAssetError(RuntimeError):\n    def __init__(self, message: str, *, status_code: int | None = None, retryable: bool = False) -> None:\n        super().__init__(message)\n        self.status_code = status_code\n        self.retryable = retryable\n',
+              'class MassiveMultiAssetError(RuntimeError):\n    def __init__(\n        self,\n        message: str,\n        *,\n        status_code: int | None = None,\n        retryable: bool = False,\n        retry_after_seconds: float | None = None,\n    ) -> None:\n        super().__init__(message)\n        self.status_code = status_code\n        self.retryable = retryable\n        self.retry_after_seconds = retry_after_seconds\n',
+              1,
+          )
+          source = source.replace(
+              '        http_get: Callable[..., Any] | None = None,\n    ) -> None:\n',
+              '        http_get: Callable[..., Any] | None = None,\n        sleep: Callable[[float], None] | None = None,\n    ) -> None:\n',
+              1,
+          )
+          source = source.replace(
+              '        self._http_get = http_get or requests.get\n',
+              '        self._http_get = http_get or requests.get\n        self._sleep = sleep or time.sleep\n',
+              1,
+          )
+          source = source.replace(
+              '            payload = self._get_url(url, params=params)\n',
+              '            payload = self._get_futures_url_with_retry(url, params=params)\n',
+              1,
+          )
+          anchor = '    def _get(self, path: str, *, params: dict[str, object]) -> Mapping[str, Any]:\n'
+          helper = '''    def _get_futures_url_with_retry(\n        self,\n        url: str,\n        *,\n        params: dict[str, object],\n        maximum_attempts: int = 4,\n    ) -> Mapping[str, Any]:\n        """Retry only transient point-in-time futures catalog requests."""\n        for attempt in range(maximum_attempts):\n            try:\n                return self._get_url(url, params=params)\n            except MassiveMultiAssetError as error:\n                if not error.retryable or attempt + 1 >= maximum_attempts:\n                    raise\n                delay = error.retry_after_seconds\n                if delay is None:\n                    delay = float(2 ** (attempt + 1))\n                self._sleep(max(0.0, min(float(delay), 60.0)))\n        raise AssertionError("unreachable futures retry loop")\n\n'''
+          if helper not in source:
+              if anchor not in source:
+                  raise SystemExit('Massive helper insertion anchor missing')
+              source = source.replace(anchor, helper + anchor, 1)
+          old = '''            retryable = status in {408, 425, 429} or 500 <= status <= 599\n            raise MassiveMultiAssetError(\n                f"Massive returned HTTP {status or 'unknown'}",\n                status_code=status or None,\n                retryable=retryable,\n            )\n'''
+          new = '''            retryable = status in {408, 425, 429} or 500 <= status <= 599\n            retry_after_seconds = None\n            if status == 429:\n                raw_retry_after = getattr(response, "headers", {}).get("Retry-After")\n                if raw_retry_after is not None:\n                    try:\n                        retry_after_seconds = max(0.0, float(raw_retry_after))\n                    except (TypeError, ValueError):\n                        retry_after_seconds = None\n            raise MassiveMultiAssetError(\n                f"Massive returned HTTP {status or 'unknown'}",\n                status_code=status or None,\n                retryable=retryable,\n                retry_after_seconds=retry_after_seconds,\n            )\n'''
+          if old not in source:
+              raise SystemExit('Massive status block missing')
+          source = source.replace(old, new, 1)
+          path.write_text(source, encoding='utf-8')
+
+          test = Path('tests/test_massive_futures_rate_limit.py')
+          test.write_text('''from datetime import datetime, timezone\n\nimport pytest\n\nfrom providers.massive_multi_asset import MassiveMultiAssetError, MassiveMultiAssetProvider\n\n\nNOW = datetime(2026, 8, 13, 20, 0, tzinfo=timezone.utc)\n\n\nclass _Response:\n    def __init__(self, status_code, payload=None, headers=None):\n        self.status_code = status_code\n        self._payload = payload or {}\n        self.headers = headers or {}\n\n    def json(self):\n        return self._payload\n\n\ndef _contract_payload():\n    return {\n        "status": "OK",\n        "results": [{\n            "ticker": "ESZ26",\n            "product_code": "ES",\n            "trading_venue": "CME",\n            "first_trade_date": "2025-01-01",\n            "last_trade_date": "2026-12-18",\n            "active": True,\n        }],\n    }\n\n\ndef test_futures_contracts_retries_429_using_retry_after_without_relaxing_coverage():\n    responses = [\n        _Response(429, headers={"Retry-After": "1"}),\n        _Response(200, _contract_payload()),\n    ]\n    calls = []\n    sleeps = []\n\n    def http_get(*args, **kwargs):\n        calls.append((args, kwargs))\n        return responses.pop(0)\n\n    provider = MassiveMultiAssetProvider(\n        api_key="test", http_get=http_get, sleep=sleeps.append\n    )\n    contracts = provider.futures_contracts(as_of=NOW, product_codes=("ES",))\n\n    assert [item.ticker for item in contracts] == ["ESZ26"]\n    assert len(calls) == 2\n    assert sleeps == [1.0]\n\n\ndef test_futures_contracts_does_not_retry_nonretryable_auth_failure():\n    calls = []\n\n    def http_get(*args, **kwargs):\n        calls.append((args, kwargs))\n        return _Response(401)\n\n    provider = MassiveMultiAssetProvider(api_key="test", http_get=http_get, sleep=lambda _delay: None)\n    with pytest.raises(MassiveMultiAssetError) as exc_info:\n        provider.futures_contracts(as_of=NOW, product_codes=("ES",))\n\n    assert exc_info.value.status_code == 401\n    assert len(calls) == 1\n''', encoding='utf-8')
+          PY
+          python -m py_compile providers/massive_multi_asset.py tests/test_massive_futures_rate_limit.py
+          pytest -q tests/test_massive_futures_rate_limit.py
+          rm .github/workflows/repair-massive-futures-rate-limit.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add providers/massive_multi_asset.py tests/test_massive_futures_rate_limit.py .github/workflows/repair-massive-futures-rate-limit.yml
+          git commit -m 'Retry transient Massive futures catalog requests'
+          git push origin HEAD:${GITHUB_REF_NAME}
