@@ -31,11 +31,18 @@ from providers.massive_options import (
 )
 from providers.redundancy_audit import ProviderCapabilityKey, current_redundancy_ledger
 from providers.single_pass_massive_options import SinglePassMassiveOptionsProvider
-from providers.tradier_market_data import TradierMarketDataError, TradierMarketDataProvider
+from providers.tradier_market_data import (
+    TRADIER_OPTIONS_DATASET,
+    TradierMarketDataError,
+    TradierMarketDataProvider,
+    TradierOptionBar,
+    TradierOptionSelection,
+)
 
 _OPPORTUNITY_COMPLETE_MAX_EXPIRATIONS = 1_000
 _MASSIVE_BASIC_SAFE_MAX_EXPIRATIONS = 1
-_TRADIER_OPTIONS_DATASET = "markets/history"
+_TRADIER_OPTIONS_DATASET = TRADIER_OPTIONS_DATASET
+_TRADIER_HISTORY_DATASET = "markets/history"
 
 
 class RedundantOptionsError(RuntimeError):
@@ -194,12 +201,56 @@ def _adapt_massive_selection(selection: MassiveOptionSelection) -> RedundantOpti
     )
 
 
+def _adapt_tradier_bar(
+    bar: TradierOptionBar,
+    *,
+    raw_symbol: str | None = None,
+) -> RedundantOptionBar:
+    return RedundantOptionBar(
+        raw_symbol=raw_symbol or bar.raw_symbol,
+        observed_at=bar.observed_at,
+        close=bar.close,
+        volume=bar.volume,
+        provider_kind="tradier",
+        source_identifier=bar.source_identifier,
+    )
+
+
+def _adapt_tradier_selection(
+    selection: TradierOptionSelection,
+) -> RedundantOptionSelection:
+    definition = selection.definition
+    return RedundantOptionSelection(
+        definition=RedundantOptionDefinition(
+            symbol=definition.symbol,
+            raw_symbol=definition.raw_symbol,
+            underlying=definition.underlying,
+            option_right=definition.option_right,
+            expiration_at=definition.expiration_at,
+            strike=definition.strike,
+            contract_multiplier=definition.contract_multiplier,
+            session_date=definition.session_date,
+            provider_kind="tradier",
+            provider_dataset=TRADIER_OPTIONS_DATASET,
+            provider_stype_in="raw_symbol",
+            provider_instrument_id=None,
+            source_identifier=definition.source_identifier,
+        ),
+        bar=_adapt_tradier_bar(selection.bar),
+    )
+
+
 def _option_audit_keys(capability: str):
     ledger = current_redundancy_ledger()
+    tradier_dataset = (
+        _TRADIER_OPTIONS_DATASET
+        if capability == "option_contract_selection"
+        else _TRADIER_HISTORY_DATASET
+    )
     return (
         ledger,
         ProviderCapabilityKey("alpaca_indicative", capability, ALPACA_INDICATIVE_OPTIONS_DATASET),
-        ProviderCapabilityKey("tradier", capability, _TRADIER_OPTIONS_DATASET),
+        ProviderCapabilityKey("tradier", capability, tradier_dataset),
         ProviderCapabilityKey("massive", capability, MASSIVE_OPRA_DATASET),
     )
 
