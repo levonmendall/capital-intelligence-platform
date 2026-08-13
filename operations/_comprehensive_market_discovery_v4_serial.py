@@ -1,0 +1,740 @@
+"""Complete certified-universe discovery with provider-enriched factor evidence.
+
+The original provider/catalog implementation is retained in the adjacent legacy
+module. This module replaces only the pre-committee selection architecture.
+
+The canonical runtime screens every instrument in each scheduled certified catalog.
+Provider-enriched factor evidence remains mandatory when applicable, but explicit,
+provider-certified not-applicable determinations are permitted. No rank, static lane,
+shortlist, or deep-analysis count limit may prevent an otherwise eligible and
+evidence-complete asset from reaching the formal opportunity, six-specialist, and CIO
+decision path. A provider-neutral complete catalog may add any classified investable
+instrument without a code-level asset-class whitelist.
+
+Sovereign benchmark-yield directories are evidence inputs, not executable security
+masters. Direct fixed income therefore becomes a discovery lane only when a certified
+provider-neutral catalog supplies actual instruments with the complete identity,
+lifecycle, pricing, liquidity, cost, custody, settlement, and execution stack.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Callable, Mapping, Sequence
+
+from cio import CandidateAssetClass
+from operations import comprehensive_market_discovery_legacy as _legacy
+from operations.certified_investable_catalog import (
+    CertifiedInvestableCatalogError,
+    load_certified_investable_catalog,
+)
+from operations.comprehensive_market_discovery_legacy import *  # noqa: F401,F403
+from operations.market_discovery_preselection import (
+    CatalogScreeningSignal,
+    CutoffObservation,
+    CutoffOutcomeEvaluation,
+    PreselectionPlan,
+    build_cutoff_observations,
+    build_preselection_plan,
+    default_catalog_screening_signals,
+    evaluate_cutoff_outcomes,
+)
+from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress
+from operations.provider_enriched_preselection import (
+    DEFAULT_PROVIDER_PRESELECTION_PATH,
+    REQUIRED_PROVIDER_FACTORS,
+    provider_enriched_catalog_screening_signals,
+    validate_provider_enriched_signals,
+)
+
+
+_EVIDENCE_ONLY_EODHD_DIRECTORIES = frozenset({"BOND", "GBOND"})
+_DEFAULT_REQUIRED_DISCOVERY_LANES = tuple(
+    item
+    for item in _legacy._DISCOVERY_LANES
+    if item is not CandidateAssetClass.FIXED_INCOME
+)
+
+
+def _reject_evidence_only_eodhd_directories(
+    config: _legacy.ComprehensiveMarketDiscoveryConfig,
+) -> None:
+    configured = tuple(
+        item
+        for item in config.eodhd_exchange_codes
+        if item in _EVIDENCE_ONLY_EODHD_DIRECTORIES
+    )
+    if configured:
+        raise _legacy.ComprehensiveMarketDiscoveryError(
+            "sovereign benchmark-yield directories cannot enter investable discovery: "
+            + ", ".join(configured)
+        )
+
+
+def load_comprehensive_market_discovery_config(
+    path: str | Path = _legacy.DEFAULT_DISCOVERY_CONFIG_PATH,
+) -> _legacy.ComprehensiveMarketDiscoveryConfig:
+    """Load discovery configuration and reject evidence-only bond directories."""
+
+    config = _legacy.load_comprehensive_market_discovery_config(path)
+    _reject_evidence_only_eodhd_directories(config)
+    return config
+
+
+def scheduled_discovery_lanes(as_of: datetime) -> frozenset[CandidateAssetClass]:
+    """Return default executable discovery lanes scheduled at ``as_of``.
+
+    Direct fixed income is intentionally absent until a certified instrument catalog
+    supplies an executable bond lane. Listed fixed-income funds remain covered by the
+    listed-instrument universe, while sovereign rates remain analytical evidence.
+    """
+
+    return frozenset(
+        item
+        for item in _legacy.scheduled_discovery_lanes(as_of)
+        if item is not CandidateAssetClass.FIXED_INCOME
+    )
+
+
+def _catalog_from_eodhd(
+    *,
+    as_of: datetime,
+    config: _legacy.ComprehensiveMarketDiscoveryConfig,
+    provider,
+    policy: _legacy.ComprehensiveMarketDiscoveryPolicy,
+    requested_asset_classes: frozenset[CandidateAssetClass] | None = None,
+):
+    """Read executable directories while rejecting benchmark-yield catalogs."""
+
+    _reject_evidence_only_eodhd_directories(config)
+    return _legacy._catalog_from_eodhd(
+        as_of=as_of,
+        config=config,
+        provider=provider,
+        policy=policy,
+        requested_asset_classes=requested_asset_classes,
+    )
+
+
+def default_catalog_probe(
+    as_of: datetime,
+    *,
+    config: _legacy.ComprehensiveMarketDiscoveryConfig | None = None,
+    policy: _legacy.ComprehensiveMarketDiscoveryPolicy | None = None,
+    eodhd_provider=None,
+    databento_options_provider=None,
+):
+    """Collect the default executable catalogs without fabricating direct bonds."""
+
+    timestamp = _legacy._aware(as_of, field_name="as_of")
+    resolved_config = config or load_comprehensive_market_discovery_config()
+    _reject_evidence_only_eodhd_directories(resolved_config)
+    resolved_policy = policy or ComprehensiveMarketDiscoveryPolicy()
+    active_lanes = scheduled_discovery_lanes(timestamp)
+    provider = eodhd_provider or _legacy.build_eodhd_provider()
+    record_manual_cio_diagnostic_progress(
+        "catalog_eodhd_directories",
+        metrics={"configured_exchanges": len(resolved_config.eodhd_exchange_codes)},
+    )
+    result = {
+        key: list(value)
+        for key, value in _catalog_from_eodhd(
+            as_of=timestamp,
+            config=resolved_config,
+            provider=provider,
+            policy=resolved_policy,
+            requested_asset_classes=active_lanes,
+        ).items()
+    }
+    record_manual_cio_diagnostic_progress(
+        "catalog_eodhd_directories_complete",
+        metrics={"catalog_records": sum(len(items) for items in result.values())},
+    )
+    for asset_class in _DEFAULT_REQUIRED_DISCOVERY_LANES:
+        result.setdefault(asset_class, [])
+    if CandidateAssetClass.FUTURE in active_lanes:
+        result[CandidateAssetClass.FUTURE] = list(
+            _legacy._futures_catalog(as_of=timestamp, config=resolved_config)
+        )
+    if CandidateAssetClass.OPTION in active_lanes:
+        record_manual_cio_diagnostic_progress(
+            "catalog_databento_options",
+            metrics={"configured_underlyings": len(resolved_config.option_underlyings)},
+        )
+        result[CandidateAssetClass.OPTION] = list(
+            _legacy._option_catalog(
+                as_of=timestamp,
+                config=resolved_config,
+                policy=resolved_policy,
+                databento_options_provider=databento_options_provider,
+            )
+        )
+        record_manual_cio_diagnostic_progress(
+            "catalog_databento_options_complete",
+            metrics={"catalog_records": len(result[CandidateAssetClass.OPTION])},
+        )
+    record_manual_cio_diagnostic_progress(
+        "comprehensive_catalog_discovery_complete",
+        metrics={"catalog_records": sum(len(items) for items in result.values())},
+    )
+    return result
+
+
+def _optional_timestamp(value: object) -> datetime | None:
+    if value in (None, ""):
+        return None
+    parsed = _legacy._timestamp(value)
+    if parsed is None:
+        raise _legacy.ComprehensiveMarketDiscoveryError(
+            "certified catalog expiration_at must be a timezone-aware timestamp"
+        )
+    return parsed
+
+
+def _certified_catalog_record(
+    payload: Mapping[str, object],
+) -> _legacy.DiscoveryCatalogRecord:
+    """Normalize one provider-neutral certified catalog record."""
+
+    try:
+        asset_class = CandidateAssetClass(str(payload["asset_class"]))
+        provider_instrument_id = payload.get("provider_instrument_id")
+        if provider_instrument_id is not None:
+            provider_instrument_id = int(provider_instrument_id)
+        strike = payload.get("strike")
+        if strike is not None:
+            strike = float(strike)
+        return _legacy.DiscoveryCatalogRecord(
+            symbol=str(payload["symbol"]),
+            provider_symbol=str(payload.get("provider_symbol") or payload["symbol"]),
+            name=str(payload.get("name") or payload["symbol"]),
+            asset_class=asset_class,
+            economic_exposure=str(
+                payload.get("economic_exposure") or asset_class.value
+            ),
+            venue=str(payload["venue"]),
+            country_code=str(payload.get("country_code") or "GLOBAL"),
+            currency=str(payload.get("currency") or "USD"),
+            settlement_currency=str(
+                payload.get("settlement_currency")
+                or payload.get("currency")
+                or "USD"
+            ),
+            instrument_type=str(payload["instrument_type"]),
+            provider_kind=str(payload["provider_kind"]),
+            source_identifier=str(
+                payload.get("source_identifier")
+                or payload.get("instrument_identifier")
+            ),
+            instrument_identifier=str(payload["instrument_identifier"]),
+            contract_multiplier=float(payload.get("contract_multiplier", 1.0)),
+            quote_spread_bps=float(payload.get("quote_spread_bps", 5.0)),
+            expiration_at=_optional_timestamp(payload.get("expiration_at")),
+            underlying_symbol=(
+                None
+                if payload.get("underlying_symbol") in (None, "")
+                else str(payload["underlying_symbol"])
+            ),
+            strike=strike,
+            option_right=(
+                None
+                if payload.get("option_right") in (None, "")
+                else str(payload["option_right"]).strip().lower()
+            ),
+            provider_dataset=(
+                None
+                if payload.get("provider_dataset") in (None, "")
+                else str(payload["provider_dataset"])
+            ),
+            provider_stype_in=(
+                None
+                if payload.get("provider_stype_in") in (None, "")
+                else str(payload["provider_stype_in"])
+            ),
+            provider_instrument_id=provider_instrument_id,
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise _legacy.ComprehensiveMarketDiscoveryError(
+            "certified catalog contains an invalid instrument record"
+        ) from error
+
+
+def _merge_certified_catalog(
+    catalogs: Mapping[CandidateAssetClass, Sequence[_legacy.DiscoveryCatalogRecord]],
+    *,
+    as_of: datetime,
+) -> Mapping[CandidateAssetClass, tuple[_legacy.DiscoveryCatalogRecord, ...]]:
+    merged: dict[CandidateAssetClass, list[_legacy.DiscoveryCatalogRecord]] = {
+        key: list(value) for key, value in catalogs.items()
+    }
+    try:
+        external = load_certified_investable_catalog(as_of=as_of)
+    except CertifiedInvestableCatalogError as error:
+        raise _legacy.ComprehensiveMarketDiscoveryError(str(error)) from error
+    for payload in external:
+        record = _certified_catalog_record(payload)
+        merged.setdefault(record.asset_class, []).append(record)
+    return {
+        asset_class: _legacy._deduplicate(tuple(records))
+        for asset_class, records in merged.items()
+    }
+
+
+def _dynamic_discovery_lanes(
+    catalogs: Mapping[CandidateAssetClass, Sequence[_legacy.DiscoveryCatalogRecord]],
+) -> tuple[CandidateAssetClass, ...]:
+    required = set(_DEFAULT_REQUIRED_DISCOVERY_LANES)
+    required.update(
+        asset_class
+        for asset_class, records in catalogs.items()
+        if asset_class is not CandidateAssetClass.OTHER and bool(records)
+    )
+    return tuple(item for item in CandidateAssetClass if item in required)
+
+
+def _lane_is_scheduled(asset_class: CandidateAssetClass, timestamp: datetime) -> bool:
+    if timestamp.astimezone(_legacy._DISCOVERY_CALENDAR_TIMEZONE).weekday() < 5:
+        return True
+    return asset_class is CandidateAssetClass.CRYPTO
+
+
+def __getattr__(name: str):
+    try:
+        return getattr(_legacy, name)
+    except AttributeError as error:
+        raise AttributeError(
+            f"module 'operations.comprehensive_market_discovery' has no attribute {name!r}"
+        ) from error
+
+
+@dataclass(frozen=True, slots=True)
+class ComprehensiveMarketDiscoveryPolicy(_legacy.ComprehensiveMarketDiscoveryPolicy):
+    """Govern discovery quality without imposing candidate-count cutoffs.
+
+    ``maximum_deep_candidates_per_lane`` and the inherited ``selected_*`` values remain
+    readable for backward-compatible configuration parsing, but the canonical runtime
+    does not apply them. Eligibility, evidence completeness, liquidity, lifecycle, and
+    point-in-time market checks are the only pre-committee exclusion authorities.
+    """
+
+    version: str = "comprehensive-liquid-market-discovery.v4-complete-qualified-universe"
+    maximum_deep_candidates_per_lane: int | None = None
+    preselection_shadow_candidates_per_lane: int = 0
+    preselection_freshness_days: int = 3
+    preselection_minimum_liquidity_score: float = 0.0
+    provider_preselection_path: str = str(DEFAULT_PROVIDER_PRESELECTION_PATH)
+    required_provider_preselection_factors: tuple[str, ...] = (
+        REQUIRED_PROVIDER_FACTORS
+    )
+
+    def __post_init__(self) -> None:
+        _legacy.ComprehensiveMarketDiscoveryPolicy(
+            version=self.version,
+            maximum_directory_records_per_source=self.maximum_directory_records_per_source,
+            maximum_deep_candidates_per_lane=1,
+            selected_global_equities=self.selected_global_equities,
+            selected_fx_pairs=self.selected_fx_pairs,
+            selected_crypto_assets=self.selected_crypto_assets,
+            selected_futures_contracts=self.selected_futures_contracts,
+            selected_bonds=self.selected_bonds,
+            selected_options=self.selected_options,
+            minimum_history_bars=self.minimum_history_bars,
+            history_days=self.history_days,
+            minimum_price=self.minimum_price,
+            minimum_daily_dollar_volume=self.minimum_daily_dollar_volume,
+            option_minimum_days_to_expiry=self.option_minimum_days_to_expiry,
+            option_maximum_days_to_expiry=self.option_maximum_days_to_expiry,
+            maximum_global_equity_weight=self.maximum_global_equity_weight,
+            maximum_fx_weight=self.maximum_fx_weight,
+            maximum_crypto_weight=self.maximum_crypto_weight,
+            maximum_future_weight=self.maximum_future_weight,
+            maximum_bond_weight=self.maximum_bond_weight,
+            maximum_option_weight=self.maximum_option_weight,
+        )
+        if self.maximum_deep_candidates_per_lane is not None:
+            value = self.maximum_deep_candidates_per_lane
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(
+                    "maximum_deep_candidates_per_lane must be a positive integer or None"
+                )
+        for name in (
+            "preselection_shadow_candidates_per_lane",
+            "preselection_freshness_days",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        if not 0.0 <= float(self.preselection_minimum_liquidity_score) <= 1.0:
+            raise ValueError(
+                "preselection_minimum_liquidity_score must be between 0 and 1"
+            )
+        if not isinstance(self.provider_preselection_path, str) or not (
+            self.provider_preselection_path.strip()
+        ):
+            raise ValueError("provider_preselection_path cannot be empty")
+        factors = tuple(self.required_provider_preselection_factors)
+        if not factors or len(set(factors)) != len(factors):
+            raise ValueError(
+                "required_provider_preselection_factors must be unique and non-empty"
+            )
+        unsupported = tuple(
+            item for item in factors if item not in REQUIRED_PROVIDER_FACTORS
+        )
+        if unsupported:
+            raise ValueError(
+                "unsupported provider preselection factors: "
+                + ", ".join(unsupported)
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryLaneResult(_legacy.DiscoveryLaneResult):
+    continuity_count: int = 0
+    preselection: PreselectionPlan | None = None
+    preselection_evidence: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    cutoff_observations: tuple[CutoffObservation, ...] = ()
+    cutoff_outcomes: tuple[CutoffOutcomeEvaluation, ...] = ()
+
+    def __post_init__(self) -> None:
+        _legacy.DiscoveryLaneResult.__post_init__(self)
+        if self.continuity_count < 0 or self.continuity_count > self.deep_analyzed_count:
+            raise ValueError("continuity_count is outside the deep-analysis cohort")
+        evidence_symbols = tuple(symbol for symbol, _ in self.preselection_evidence)
+        if len(set(evidence_symbols)) != len(evidence_symbols):
+            raise ValueError("preselection evidence contains duplicate symbols")
+
+
+@dataclass(frozen=True, slots=True)
+class ComprehensiveMarketDiscoveryResult(_legacy.ComprehensiveMarketDiscoveryResult):
+    lanes: tuple[DiscoveryLaneResult, ...]
+
+    def to_dict(self):
+        payload = _legacy.ComprehensiveMarketDiscoveryResult.to_dict(self)
+        for lane_payload, lane in zip(payload["lanes"], self.lanes, strict=True):
+            lane_payload.update(
+                {
+                    "continuity_count": lane.continuity_count,
+                    "candidate_count_limit_applied": False,
+                    "preselection": (
+                        None
+                        if lane.preselection is None
+                        else lane.preselection.to_dict()
+                    ),
+                    "preselection_evidence": {
+                        symbol: list(identifiers)
+                        for symbol, identifiers in lane.preselection_evidence
+                    },
+                    "cutoff_observations": [
+                        item.to_dict() for item in lane.cutoff_observations
+                    ],
+                    "cutoff_outcomes": [
+                        item.to_dict() for item in lane.cutoff_outcomes
+                    ],
+                }
+            )
+        return payload
+
+
+PreselectionProbe = Callable[
+    [
+        Sequence[_legacy.DiscoveryCatalogRecord],
+        datetime,
+        ComprehensiveMarketDiscoveryPolicy,
+    ],
+    Mapping[str, CatalogScreeningSignal],
+]
+
+
+def discover_comprehensive_markets(
+    *,
+    as_of: datetime,
+    held_symbols: Sequence[str] = (),
+    tracked_symbols: Sequence[str] = (),
+    excluded_symbols: Sequence[str] = (),
+    catalog_probe: _legacy.CatalogProbe | None = None,
+    market_probe: _legacy.MarketProbe | None = None,
+    preselection_probe: PreselectionProbe | None = None,
+    prior_cutoff_observations: Sequence[CutoffObservation] = (),
+    policy: ComprehensiveMarketDiscoveryPolicy | None = None,
+) -> ComprehensiveMarketDiscoveryResult:
+    """Screen complete catalogs and forward every eligible evidence-complete asset.
+
+    The uninjected canonical path consumes the persisted provider-enriched factor
+    publication and fails closed when applicable factor evidence is missing. Explicit
+    catalog/market probes without a preselection probe remain a deterministic fixture
+    seam for tests and rehearsals; they do not describe the production authority path.
+
+    Candidate scores determine review order only. They never create a top-N cutoff.
+    """
+
+    timestamp = _legacy._aware(as_of, field_name="as_of")
+    resolved = policy or ComprehensiveMarketDiscoveryPolicy()
+    catalogs = (
+        catalog_probe(timestamp)
+        if catalog_probe is not None
+        else _merge_certified_catalog(
+            default_catalog_probe(timestamp, policy=resolved),
+            as_of=timestamp,
+        )
+    )
+    if not isinstance(catalogs, Mapping):
+        raise _legacy.ComprehensiveMarketDiscoveryError(
+            "catalog probe must return a mapping"
+        )
+    fixture_preselection = (
+        preselection_probe is None
+        and (catalog_probe is not None or market_probe is not None)
+    )
+    active_preselection_probe = (
+        preselection_probe
+        or (
+            default_catalog_screening_signals
+            if fixture_preselection
+            else provider_enriched_catalog_screening_signals
+        )
+    )
+    require_provider_factor_lineage = not fixture_preselection
+
+    held = {str(item).strip().upper() for item in held_symbols if str(item).strip()}
+    tracked = {
+        str(item).strip().upper() for item in tracked_symbols if str(item).strip()
+    }
+    excluded = {
+        str(item).strip().upper() for item in excluded_symbols if str(item).strip()
+    }
+    lanes: list[DiscoveryLaneResult] = []
+    manifest_material: list[dict[str, object]] = []
+
+    discovery_lanes = _dynamic_discovery_lanes(catalogs)
+    for asset_class in discovery_lanes:
+        if not _lane_is_scheduled(asset_class, timestamp):
+            reason = "weekend_market_closed"
+            lanes.append(
+                DiscoveryLaneResult(
+                    asset_class=asset_class,
+                    catalog_count=0,
+                    deep_analyzed_count=0,
+                    selected=(),
+                    exclusions=(("__lane__", reason),),
+                    source_identifiers=(),
+                    scheduled=False,
+                    schedule_reason=reason,
+                )
+            )
+            manifest_material.append(
+                {
+                    "asset_class": asset_class.value,
+                    "scheduled": False,
+                    "schedule_reason": reason,
+                    "catalog": 0,
+                    "deep": 0,
+                    "selected": [],
+                    "sources": [],
+                    "candidate_count_limit_applied": False,
+                    "provider_enriched_preselection_required": False,
+                }
+            )
+            continue
+
+        raw = catalogs.get(asset_class, ())
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            raise _legacy.ComprehensiveMarketDiscoveryError(
+                f"{asset_class.value} catalog must be a sequence"
+            )
+        records = tuple(
+            item
+            for item in _legacy._deduplicate(tuple(raw))
+            if item.symbol not in excluded
+            and (
+                item.expiration_at is None
+                or item.expiration_at > timestamp + timedelta(days=7)
+            )
+        )
+        state_symbols = held | tracked
+        continuity = tuple(item for item in records if item.symbol in state_symbols)
+        ordinary = tuple(item for item in records if item.symbol not in state_symbols)
+
+        signals = active_preselection_probe(ordinary, timestamp, resolved)
+        if not isinstance(signals, Mapping):
+            raise _legacy.ComprehensiveMarketDiscoveryError(
+                f"{asset_class.value} preselection probe must return a mapping"
+            )
+        if require_provider_factor_lineage:
+            signals = validate_provider_enriched_signals(
+                ordinary,
+                signals,
+                required_factors=resolved.required_provider_preselection_factors,
+            )
+
+        plan = build_preselection_plan(
+            ordinary,
+            signals,
+            as_of=timestamp,
+            capacity=max(1, len(ordinary)),
+            shadow_limit=resolved.preselection_shadow_candidates_per_lane,
+            freshness_days=resolved.preselection_freshness_days,
+            minimum_liquidity_score=resolved.preselection_minimum_liquidity_score,
+        )
+        ordinary_by_symbol = {item.symbol: item for item in ordinary}
+        nominated = tuple(
+            ordinary_by_symbol[symbol]
+            for symbol in plan.selected_symbols
+            if symbol in ordinary_by_symbol
+        )
+        deep_records = tuple(dict.fromkeys((*continuity, *nominated)))
+        features = (market_probe or _legacy.default_market_probe)(
+            deep_records, timestamp, resolved
+        )
+
+        selected: list[_legacy.DiscoveredMarketInstrument] = []
+        exclusions = list(plan.exclusions)
+        for record in deep_records:
+            item_features = features.get(record.symbol)
+            if item_features is None:
+                exclusions.append(
+                    (record.symbol, "point_in_time_market_evidence_unavailable")
+                )
+                continue
+            if item_features.price < resolved.minimum_price:
+                exclusions.append((record.symbol, "price_below_policy_floor"))
+                continue
+            if (
+                record.asset_class
+                not in {
+                    CandidateAssetClass.FX,
+                    CandidateAssetClass.FIXED_INCOME,
+                    CandidateAssetClass.OPTION,
+                }
+                and item_features.average_daily_dollar_volume
+                < resolved.minimum_daily_dollar_volume
+            ):
+                exclusions.append((record.symbol, "liquidity_below_policy_floor"))
+                continue
+            selected.append(
+                _legacy.DiscoveredMarketInstrument(
+                    catalog=record,
+                    features=item_features,
+                    retained_for_state=record.symbol in state_symbols,
+                )
+            )
+
+        selected.sort(key=lambda item: (item.score, item.catalog.symbol), reverse=True)
+        final = tuple(selected)
+
+        current_prices = {
+            symbol: item_features.price for symbol, item_features in features.items()
+        }
+        for symbol, signal in signals.items():
+            if signal.indicative_price is not None:
+                current_prices.setdefault(symbol, signal.indicative_price)
+        observations = build_cutoff_observations(
+            plan,
+            asset_class=asset_class.value,
+            signals=signals,
+            selected_prices=current_prices,
+        )
+        outcomes = evaluate_cutoff_outcomes(
+            prior_cutoff_observations,
+            asset_class=asset_class.value,
+            current_prices=current_prices,
+            as_of=timestamp,
+        )
+        measured_symbols = tuple(
+            dict.fromkeys((*plan.selected_symbols, *plan.shadow_symbols))
+        )
+        preselection_evidence = tuple(
+            (
+                symbol,
+                tuple(signals[symbol].evidence_identifiers),
+            )
+            for symbol in measured_symbols
+            if symbol in signals
+        )
+        source_identifiers = tuple(
+            dict.fromkeys(item.catalog.source_identifier for item in final)
+        )
+        lanes.append(
+            DiscoveryLaneResult(
+                asset_class=asset_class,
+                catalog_count=len(records),
+                deep_analyzed_count=len(deep_records),
+                selected=final,
+                exclusions=tuple(exclusions),
+                source_identifiers=source_identifiers,
+                continuity_count=len(continuity),
+                preselection=plan,
+                preselection_evidence=preselection_evidence,
+                cutoff_observations=observations,
+                cutoff_outcomes=outcomes,
+            )
+        )
+        manifest_material.append(
+            {
+                "asset_class": asset_class.value,
+                "scheduled": True,
+                "schedule_reason": None,
+                "catalog": len(records),
+                "deep": len(deep_records),
+                "continuity": len(continuity),
+                "candidate_count_limit_applied": False,
+                "provider_enriched_preselection_required": (
+                    require_provider_factor_lineage
+                ),
+                "preselection": plan.to_dict(),
+                "preselection_evidence": {
+                    symbol: list(identifiers)
+                    for symbol, identifiers in preselection_evidence
+                },
+                "cutoff_outcomes": [item.to_dict() for item in outcomes],
+                "selected": [item.catalog.symbol for item in final],
+                "sources": list(source_identifiers),
+            }
+        )
+
+    missing = tuple(
+        lane.asset_class.value
+        for lane in lanes
+        if lane.scheduled and not lane.selected
+    )
+    if missing:
+        raise _legacy.ComprehensiveMarketDiscoveryError(
+            "complete discovery cannot certify an empty requested lane: "
+            + ", ".join(missing)
+        )
+    fingerprint = _legacy._hash(
+        {
+            "as_of": timestamp.isoformat(),
+            "policy": resolved.version,
+            "candidate_count_limit_applied": False,
+            "lanes": manifest_material,
+        }
+    )
+    return ComprehensiveMarketDiscoveryResult(
+        identifier=(
+            "comprehensive-market-discovery:"
+            f"{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}:{fingerprint[:16]}"
+        ),
+        as_of=timestamp,
+        policy_version=resolved.version,
+        lanes=tuple(lanes),
+        manifest_fingerprint=fingerprint,
+    )
+
+
+__all__ = tuple(
+    dict.fromkeys(
+        (
+            *_legacy.__all__,
+            "CatalogScreeningSignal",
+            "CutoffObservation",
+            "CutoffOutcomeEvaluation",
+            "PreselectionPlan",
+            "PreselectionProbe",
+            "REQUIRED_PROVIDER_FACTORS",
+            "provider_enriched_catalog_screening_signals",
+            "load_certified_investable_catalog",
+        )
+    )
+)
