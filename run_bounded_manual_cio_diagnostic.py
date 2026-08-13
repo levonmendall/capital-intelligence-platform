@@ -1,9 +1,11 @@
 """Run one manual CIO diagnostic with hard container-memory isolation.
 
-The underlying diagnostic remains the only component that can prepare evidence, invoke the
-specialists and CIO, construct a portfolio, or attempt governed paper implementation. This
-wrapper protects the hosting service from diagnostic-driven OOM failure without changing
-market coverage, investment logic, governance, thresholds, or real-money authority.
+The underlying diagnostic remains the only component that can prepare current evidence,
+invoke the specialists and CIO, construct a portfolio, or attempt governed paper
+implementation. Slow-changing executable reference catalogs are frozen before the child
+CIO process is spawned, so reference-provider latency does not consume the governed CIO
+analysis deadline. This wrapper does not change market coverage, investment logic,
+governance, thresholds, or real-money authority.
 """
 
 from __future__ import annotations
@@ -23,12 +25,14 @@ from operations.manual_cio_diagnostic import (
     finish_manual_cio_diagnostic,
     latest_manual_cio_diagnostic,
 )
+from operations.reference_readiness import (
+    ReferenceReadinessError,
+    fail_reference_readiness_request,
+    prepare_reference_readiness,
+)
 
 
 _DEFAULT_TIMEOUT_SECONDS = 1800.0
-# Keep enough headroom for Streamlit, the read-only API, allocator bursts, and kernel
-# accounting lag on Render's 2 GB service. The diagnostic fails closed before service
-# availability is endangered; complete market coverage is never silently reduced.
 _DEFAULT_MEMORY_HIGH_WATER_FRACTION = 0.70
 _DEFAULT_MEMORY_RESERVE_MB = 640.0
 _DEFAULT_MEMORY_POLL_SECONDS = 0.10
@@ -140,8 +144,6 @@ def _configured_memory_limit_kib(values: Mapping[str, str]) -> int | None:
                 "CAPITAL_INTELLIGENCE_CONTAINER_MEMORY_LIMIT_MB must be positive"
             )
         return int(value * 1024)
-    # Render's currently configured Standard service is a 2 GB instance. This fallback
-    # is used only when neither cgroup-v2 nor cgroup-v1 exposes a usable limit.
     if values.get("RENDER", "").strip().lower() == "true":
         return int(_RENDER_MEMORY_LIMIT_FALLBACK_MB * 1024)
     return None
@@ -169,8 +171,6 @@ def _signal_process_group(
     process: subprocess.Popen[bytes] | subprocess.Popen[str],
     sig: signal.Signals,
 ) -> None:
-    """Signal the diagnostic process group so descendants cannot survive a cutoff."""
-
     pid = getattr(process, "pid", None)
     if os.name == "posix" and isinstance(pid, int) and pid > 0:
         try:
@@ -239,20 +239,16 @@ def _read_byte_counter(path: Path) -> int | None:
 
 
 def _cgroup_memory_kib() -> tuple[int | None, int | None]:
-    """Return container memory current/limit for cgroup v2 or v1."""
-
     v2_current = _read_byte_counter(Path("/sys/fs/cgroup/memory.current"))
     v2_limit = _read_byte_counter(Path("/sys/fs/cgroup/memory.max"))
     if v2_current is not None and v2_limit is not None and v2_limit > 0:
         return v2_current // 1024, v2_limit // 1024
-
     v1_current = _read_byte_counter(
         Path("/sys/fs/cgroup/memory/memory.usage_in_bytes")
     )
     v1_limit = _read_byte_counter(
         Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")
     )
-    # Some cgroup-v1 hosts report an effectively unlimited sentinel near 2^63.
     if (
         v1_current is not None
         and v1_limit is not None
@@ -263,8 +259,6 @@ def _cgroup_memory_kib() -> tuple[int | None, int | None]:
 
 
 def _proc_total_rss_kib() -> int | None:
-    """Conservative container-process RSS fallback when cgroup accounting is hidden."""
-
     total = 0
     observed = False
     try:
@@ -288,7 +282,6 @@ def _container_memory_kib(
     current, limit = _cgroup_memory_kib()
     if current is not None and limit is not None:
         return current, limit, "cgroup"
-
     configured_limit = _configured_memory_limit_kib(values)
     if configured_limit is None:
         return None, None, "unavailable"
@@ -316,8 +309,6 @@ def _close_failed_request(
     values: Mapping[str, str],
     detail: str,
 ) -> tuple[str | None, str | None]:
-    """Truthfully close only a request that the bounded child had claimed."""
-
     existing = latest_manual_cio_diagnostic(values=values)
     if existing is None:
         return None, None
@@ -363,8 +354,6 @@ def _wait_with_resource_bounds(
     memory_reserve_kib: int | None = None,
     poll_seconds: float | None = None,
 ) -> tuple[int | None, bool, bool, int, int]:
-    """Wait while continuously protecting the container's memory headroom."""
-
     resolved = {} if values is None else values
     reserve = (
         _memory_reserve_kib(resolved)
@@ -374,7 +363,6 @@ def _wait_with_resource_bounds(
     poll = _memory_poll_seconds(resolved) if poll_seconds is None else float(poll_seconds)
     if poll <= 0:
         raise ValueError("poll_seconds must be positive")
-
     sampler_stop = Event()
     memory_limited = Event()
     peaks = {"process": 0, "container": 0}
@@ -399,8 +387,6 @@ def _wait_with_resource_bounds(
         _signal_process_group(process, signal.SIGTERM)
         return True
 
-    # Sample synchronously before waiting so a fast import/allocation spike cannot get a
-    # full polling interval of unobserved headroom.
     sample_once()
 
     def sample_memory() -> None:
@@ -428,7 +414,6 @@ def _wait_with_resource_bounds(
         sampler_stop.set()
         if sampler.is_alive():
             sampler.join(timeout=1.0)
-
     return (
         return_code,
         timed_out,
@@ -453,6 +438,41 @@ def run_bounded_diagnostic(
     memory_reserve_kib = _memory_reserve_kib(resolved)
     memory_poll_seconds = _memory_poll_seconds(resolved)
 
+    _log(
+        "manual_cio_reference_readiness_starting",
+        release=release,
+        bounded_cio_started=False,
+        timeout_clock_started=False,
+        complete_market_coverage_required=True,
+    )
+    try:
+        manifest = prepare_reference_readiness(resolved)
+    except (ReferenceReadinessError, OSError, TypeError, ValueError, RuntimeError) as error:
+        detail = f"{type(error).__name__}: {error}"
+        fail_reference_readiness_request(resolved, detail=detail)
+        _log(
+            "manual_cio_reference_readiness_failed",
+            release=release,
+            error_type=type(error).__name__,
+            detail=str(error)[:500],
+            bounded_cio_started=False,
+            timeout_clock_started=False,
+            complete_market_coverage_required=True,
+        )
+        return 3
+    _log(
+        "manual_cio_reference_readiness_ready",
+        release=release,
+        manifest_id=manifest.manifest_id,
+        captured_at=manifest.captured_at.isoformat(),
+        catalog_records=sum(count for _, count in manifest.catalog_counts),
+        configured_exchanges=len(manifest.eodhd_exchanges),
+        configured_futures_roots=len(manifest.futures_roots),
+        bounded_cio_started=False,
+        timeout_clock_started=False,
+        complete_market_coverage_required=True,
+    )
+
     script = Path(__file__).resolve().with_name("run_manual_cio_diagnostic.py")
     current_kib, limit_kib, accounting_source = _container_memory_kib(resolved)
     boundary_kib = (
@@ -467,6 +487,7 @@ def run_bounded_diagnostic(
     _log(
         "manual_cio_diagnostic_run_started",
         release=release,
+        reference_manifest_id=manifest.manifest_id,
         timeout_seconds=timeout,
         memory_high_water_fraction=memory_high_water_fraction,
         memory_reserve_kib=memory_reserve_kib,
