@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -51,6 +52,21 @@ class TimedOutProcess:
         self.returncode = -9
 
 
+def _mock_reference_readiness(monkeypatch) -> None:
+    def prepare(values):
+        values["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"] = "reference.json"
+        values["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"] = "manifest-test"
+        return SimpleNamespace(
+            manifest_id="manifest-test",
+            captured_at=datetime(2026, 8, 13, 20, 30, tzinfo=timezone.utc),
+            catalog_counts=(("future", 1),),
+            eodhd_exchanges=("LSE",),
+            futures_roots=("ES",),
+        )
+
+    monkeypatch.setattr(watchdog, "prepare_reference_readiness", prepare)
+
+
 def test_watchdog_emits_start_and_finish_events(monkeypatch, capsys, tmp_path: Path) -> None:
     process = CompletedProcess()
     calls = []
@@ -59,6 +75,7 @@ def test_watchdog_emits_start_and_finish_events(monkeypatch, capsys, tmp_path: P
         calls.append((command, env, cwd, start_new_session))
         return process
 
+    _mock_reference_readiness(monkeypatch)
     monkeypatch.setattr(watchdog.subprocess, "Popen", popen)
     values = {
         "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
@@ -68,12 +85,14 @@ def test_watchdog_emits_start_and_finish_events(monkeypatch, capsys, tmp_path: P
     assert watchdog.run_bounded_diagnostic(values=values, timeout_seconds=17) == 3
 
     output = capsys.readouterr().out
+    assert "manual_cio_reference_readiness_ready" in output
     assert "manual_cio_diagnostic_run_started" in output
     assert "manual_cio_diagnostic_process_finished" in output
     assert "release-observable" in output
     assert Path(calls[0][0][1]).name == "run_manual_cio_diagnostic.py"
     assert Path(calls[0][2]) == Path(calls[0][0][1]).parent
     assert calls[0][3] is (os.name == "posix")
+    assert calls[0][1]["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"] == "manifest-test"
     assert process.wait_calls == [17.0]
 
 
@@ -87,6 +106,7 @@ def test_watchdog_passes_force_only_to_an_explicit_replacement(monkeypatch) -> N
         sessions.append(start_new_session)
         return CompletedProcess()
 
+    _mock_reference_readiness(monkeypatch)
     monkeypatch.setattr(watchdog.subprocess, "Popen", popen)
 
     assert watchdog.run_bounded_diagnostic(
@@ -114,6 +134,7 @@ def test_watchdog_times_out_and_closes_claimed_request(monkeypatch, capsys) -> N
     )
     finish_calls = []
 
+    _mock_reference_readiness(monkeypatch)
     monkeypatch.setattr(
         watchdog.subprocess,
         "Popen",
