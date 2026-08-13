@@ -21,7 +21,7 @@ def _assert_hidden_or_absent(locator) -> None:
 
     assert locator.count() <= 1
     if locator.count() == 1:
-        assert locator.first.is_visible() is False
+        locator.first.wait_for(state="hidden")
 
 
 def test_render_entrypoint_preserves_portfolio_refinement_contract() -> None:
