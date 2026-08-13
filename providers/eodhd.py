@@ -6,11 +6,18 @@ re-download every exchange directory on every CIO cycle. When a cache is absent/
 live EODHD retrieval remains authoritative; bounded continuity rules then apply exactly
 as before.
 
+A configured market is never removed or provider-remapped merely because one EODHD
+symbol-directory request returns 402/404. That provider result routes the same requested
+market to the independent Twelve Data reference authority. The runtime deliberately does
+not add an exchange-list preflight ahead of normal physical-market requests: doing so
+would consume an extra provider call for every uncached market and would not itself
+establish investability. Provider aliases are never guessed.
+
 A current active directory is not discarded solely because the historical delisted-
 symbol directory is temporarily unavailable. Missing or incomplete fallback evidence,
-authentication failures, persistent provider throttling, virtual markets without a
-certified reference selector, and every non-directory provider failure remain fail-
-closed.
+authentication failures, provider errors other than the explicitly governed continuity
+conditions, virtual markets without a certified reference selector, and every
+non-directory provider failure remain fail-closed.
 """
 
 from __future__ import annotations
@@ -28,6 +35,9 @@ from data.provider_dataset import (
     ProviderDatasetType,
 )
 from providers import eodhd_base as _base
+from providers.catalog_reference_continuity import (
+    build_catalog_reference_continuity_provider,
+)
 from providers.eodhd_base import (
     EODHDBindingRegistry,
     EODHDInstrumentBinding,
@@ -39,9 +49,6 @@ from providers.eodhd_base import (
 from providers.twelve_data_reference import (
     TwelveDataReferenceError,
     TwelveDataReferenceProvider,
-)
-from providers.twelve_data_reference_rate_limited import (
-    build_twelve_data_rate_limited_reference_provider,
 )
 
 
@@ -106,7 +113,7 @@ class EODHDProvider(_base.EODHDProvider):
                 raise
             fallback = self._reference_provider
             if fallback is None:
-                fallback = build_twelve_data_rate_limited_reference_provider()
+                fallback = build_catalog_reference_continuity_provider()
                 self._reference_provider = fallback
             try:
                 return fallback.fetch_dataset(query)
