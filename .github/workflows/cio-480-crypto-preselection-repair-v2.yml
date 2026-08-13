@@ -1,0 +1,123 @@
+name: Apply CIO 480 crypto preselection repair v2
+
+on:
+  push:
+    branches: [fix/cio-480-crypto-preselection-redundancy]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch source and tests
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('operations/provider_preselection_market_probe.py')
+          source = path.read_text(encoding='utf-8')
+
+          source = source.replace(
+              'Unresolved dated futures are the one intentional extension to that legacy path. The\nconfigured futures catalog is provider-neutral (``provider_kind=unbound``), while the\ncertified redundant market router already delegates exact futures history to Massive.\nOnly futures still missing after the legacy probe are therefore routed through that\nexisting evidence authority. No synthetic factor is created: if Massive cannot return\nthe governed minimum history, the future remains unresolved and publication stays\nfail-closed.\n',
+              'Unresolved dated futures and crypto are the intentional extensions to that legacy\npath. Futures are provider-neutral, while crypto may originate from an EODHD directory\nwhose per-symbol history path is unnecessarily slow for preselection. Crypto therefore\nbypasses that direct legacy probe and uses the already-certified redundant crypto history\nrouter (Alpaca, Coinbase, Kraken); futures still use the existing redundant futures route.\nNo synthetic factor is created: if the redundant providers cannot return the governed\nminimum point-in-time history, the instrument remains unresolved and publication stays\nfail-closed.\n', 1)
+
+          helper_start = source.index('def _redundant_futures_features(')
+          helper_end = source.index('\n\ndef default_provider_preselection_market_probe(', helper_start)
+          helper = '''def _redundant_preselection_features(
+              records: Sequence[_legacy.DiscoveryCatalogRecord],
+              *,
+              as_of: datetime,
+              policy: _legacy.ComprehensiveMarketDiscoveryPolicy,
+              http_get: Callable[..., Any],
+              maximum_workers: int,
+          ) -> Mapping[str, _legacy.DiscoveryMarketFeatures]:
+              """Use certified redundant history without emitting deep-evidence stages."""
+              unresolved = tuple(records)
+              if not unresolved:
+                  return {}
+              timestamp = _legacy._aware(as_of, field_name="as_of")
+              core = _redundant._core
+              alpaca_crypto_rows = core._prefetch_alpaca_crypto(
+                  unresolved,
+                  as_of=timestamp,
+                  policy=policy,
+                  provider=core.AlpacaCryptoHistoryProvider(http_get=http_get),
+              )
+              return _redundant._fetch_missing_concurrently(
+                  unresolved,
+                  timestamp=timestamp,
+                  policy=policy,
+                  http_get=http_get,
+                  eodhd=_legacy.build_eodhd_provider(),
+                  tradier=core.TradierMarketDataProvider(),
+                  massive=core.MassiveMultiAssetProvider(),
+                  twelve=core.TwelveDataHistoryProvider(),
+                  coinbase=core.CoinbaseHistoryProvider(),
+                  kraken=core.KrakenHistoryProvider(),
+                  alpaca_crypto_rows=alpaca_crypto_rows,
+                  already_processed=0,
+                  already_evidence_complete=0,
+                  decision_eligible_records=len(unresolved),
+                  maximum_workers=min(_MAX_PROVIDER_IO_WORKERS, maximum_workers),
+                  progress_callback=lambda *_args, **_kwargs: None,
+              )
+          '''
+          source = source[:helper_start] + helper + source[helper_end:]
+
+          source = source.replace(
+              '    ordered = tuple(records)\n    option_underlyings = tuple(',
+              '    ordered = tuple(records)\n    legacy_records = tuple(\n        record for record in ordered\n        if record.asset_class is not CandidateAssetClass.CRYPTO\n    )\n    option_underlyings = tuple(', 1)
+          source = source.replace('            for item in ordered\n', '            for item in legacy_records\n', 1)
+          source = source.replace('            ordered,\n            as_of,', '            legacy_records,\n            as_of,', 1)
+
+          tail_start = source.index('    unresolved_futures = tuple(')
+          tail_end = source.index('\n    return result', tail_start) + len('\n    return result')
+          tail = '''    unresolved_redundant = tuple(
+              record
+              for record in ordered
+              if record.symbol not in result
+              and record.asset_class in (
+                  CandidateAssetClass.CRYPTO,
+                  CandidateAssetClass.FUTURE,
+              )
+          )
+              if unresolved_redundant:
+                  result.update(
+                      _redundant_preselection_features(
+                          unresolved_redundant,
+                          as_of=as_of,
+                          policy=policy,
+                          http_get=http_get,
+                          maximum_workers=maximum_workers,
+                      )
+                  )
+              return result'''
+          source = source[:tail_start] + tail + source[tail_end:]
+          source = source.replace(
+              '"""Run the bounded legacy probe, then resolve only missing dated futures."""',
+              '"""Run bounded legacy probing plus certified redundant crypto/futures history."""', 1)
+          path.write_text(source, encoding='utf-8')
+
+          Path('tests/test_provider_preselection_crypto_redundancy.py').write_text('''from __future__ import annotations\n\nfrom datetime import datetime, timezone\nfrom types import SimpleNamespace\n\nfrom cio import CandidateAssetClass\nfrom operations import provider_preselection_market_probe as probe\nfrom operations.comprehensive_market_discovery_legacy import DiscoveryCatalogRecord\n\nNOW = datetime(2026, 8, 13, 15, 0, tzinfo=timezone.utc)\n\ndef _record(symbol, asset_class, provider_kind):\n    return DiscoveryCatalogRecord(symbol=symbol, provider_symbol=symbol, name=symbol, asset_class=asset_class, economic_exposure=asset_class.value, venue="TEST", country_code="US", currency="USD", settlement_currency="USD", instrument_type="spot" if asset_class is CandidateAssetClass.CRYPTO else "common_stock", provider_kind=provider_kind, source_identifier=f"test:{symbol}")\n\ndef _policy():\n    return SimpleNamespace(minimum_history_bars=2)\n\ndef test_crypto_bypasses_eodhd_legacy_probe_and_uses_redundant_route(monkeypatch):\n    equity = _record("EQ", CandidateAssetClass.INTERNATIONAL_EQUITY, "yahoo")\n    crypto = _record("BTC-USD", CandidateAssetClass.CRYPTO, "eodhd")\n    seen_legacy, seen_redundant = [], []\n    eq_feature, crypto_feature = object(), object()\n    def fake_legacy(records, *_args, **_kwargs):\n        seen_legacy.extend(records); return {"EQ": eq_feature}\n    def fake_redundant(records, **_kwargs):\n        seen_redundant.extend(records); return {"BTC-USD": crypto_feature}\n    monkeypatch.setattr(probe._legacy, "default_market_probe", fake_legacy)\n    monkeypatch.setattr(probe, "_redundant_preselection_features", fake_redundant)\n    monkeypatch.setattr(probe, "create_alpaca_paper_client", lambda: None)\n    result = probe.default_provider_preselection_market_probe((equity, crypto), NOW, _policy())\n    assert result == {"EQ": eq_feature, "BTC-USD": crypto_feature}\n    assert [r.symbol for r in seen_legacy] == ["EQ"]\n    assert [r.symbol for r in seen_redundant] == ["BTC-USD"]\n\ndef test_crypto_stays_unresolved_without_redundant_evidence(monkeypatch):\n    crypto = _record("ETH-USD", CandidateAssetClass.CRYPTO, "eodhd")\n    monkeypatch.setattr(probe._legacy, "default_market_probe", lambda *_a, **_k: {})\n    monkeypatch.setattr(probe, "_redundant_preselection_features", lambda *_a, **_k: {})\n    monkeypatch.setattr(probe, "create_alpaca_paper_client", lambda: None)\n    assert probe.default_provider_preselection_market_probe((crypto,), NOW, _policy()) == {}\n\ndef test_missing_future_still_uses_redundant_route(monkeypatch):\n    future = _record("ESZ6", CandidateAssetClass.FUTURE, "unbound")\n    seen, feature = [], object()\n    monkeypatch.setattr(probe._legacy, "default_market_probe", lambda *_a, **_k: {})\n    monkeypatch.setattr(probe, "create_alpaca_paper_client", lambda: None)\n    def fake_redundant(records, **_kwargs):\n        seen.extend(records); return {"ESZ6": feature}\n    monkeypatch.setattr(probe, "_redundant_preselection_features", fake_redundant)\n    assert probe.default_provider_preselection_market_probe((future,), NOW, _policy()) == {"ESZ6": feature}\n    assert [r.symbol for r in seen] == ["ESZ6"]\n''', encoding='utf-8')
+          PY
+      - name: Focused validation
+        run: |
+          python -m py_compile operations/provider_preselection_market_probe.py tests/test_provider_preselection_crypto_redundancy.py
+          pytest -q tests/test_provider_preselection_crypto_redundancy.py
+      - name: Commit source repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/cio-480-crypto-preselection-repair.yml .github/workflows/cio-480-crypto-preselection-repair-v2.yml
+          git add operations/provider_preselection_market_probe.py tests/test_provider_preselection_crypto_redundancy.py
+          git commit -m "Route crypto preselection through redundant history"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
