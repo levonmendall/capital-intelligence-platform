@@ -4,9 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from operations.resumable_options_discovery import ResumableOptionsProvider
-from providers.massive_options import MassiveOptionsError
-from providers.redundant_options import RedundantOptionsProvider
-from providers.tradier_market_data import TradierMarketDataError
+from providers.alpaca_indicative_options import AlpacaIndicativeOptionsError
 
 
 NOW = datetime(2026, 8, 13, 18, 17, tzinfo=timezone.utc)
@@ -70,25 +68,27 @@ class _Delegate:
     primary = _PrimaryOptions()
 
 
-class _PrimaryNoHistory:
+class _BrokenDefinitionPrimary:
+    def definitions(self, *_args, **_kwargs):
+        raise AlpacaIndicativeOptionsError(
+            "Alpaca definition discovery timed out",
+            retryable=True,
+        )
+
+
+class _FallbackDelegate:
     configured = True
+    primary_configured = True
+    secondary_configured = True
+    fallback_configured = False
+    primary = _BrokenDefinitionPrimary()
 
-    def latest_daily_bars(self, identifiers, *, as_of, history_days):
-        return as_of.date(), {}
+    def __init__(self) -> None:
+        self.calls = []
 
-
-class _TradierHistoryFailure:
-    configured = True
-
-    def daily_history(self, symbol, *, as_of, history_days):
-        raise TradierMarketDataError("Tradier history response is missing daily bars")
-
-
-class _MassiveHistoryFailure:
-    configured = True
-
-    def latest_daily_bars(self, instruments, *, as_of, history_days):
-        raise MassiveOptionsError("Massive OPRA daily bars are unavailable")
+    def select_contracts(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return ("tradier-complete-selection",)
 
 
 def test_registered_progress_stages_allow_resumable_option_provider_path(
@@ -117,18 +117,19 @@ def test_registered_progress_stages_allow_resumable_option_provider_path(
     assert tuple(checkpoint_root.rglob("expiration-*.json"))
 
 
-def test_successful_primary_no_history_is_not_reclassified_as_provider_outage() -> None:
-    provider = RedundantOptionsProvider(
-        primary=_PrimaryNoHistory(),
-        secondary=_TradierHistoryFailure(),
-        fallback=_MassiveHistoryFailure(),
-    )
+def test_alpaca_definition_failure_reenters_tradier_capable_router() -> None:
+    delegate = _FallbackDelegate()
 
-    session, bars = provider.latest_daily_bars(
-        ((None, "SPY260918C00650000"),),
+    selections = ResumableOptionsProvider(delegate=delegate, environ={}).select_contracts(
+        "SPY",
+        underlying_price=500.0,
         as_of=NOW,
-        history_days=365,
+        minimum_days_to_expiry=7,
+        maximum_days_to_expiry=60,
+        maximum_expirations=1_000,
+        candidates_per_bucket=8,
     )
 
-    assert session == NOW.date()
-    assert bars == {}
+    assert selections == ("tradier-complete-selection",)
+    assert len(delegate.calls) == 1
+    assert delegate.calls[0][1]["maximum_expirations"] == 1_000
