@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from cio import CandidateAssetClass
 from governance import TradingSessionModel
-from operations import comprehensive_market_discovery as comprehensive
+from operations import _comprehensive_market_discovery_v4 as discovery_v4
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryConfig,
     DiscoveryCatalogRecord,
@@ -155,9 +155,9 @@ def test_weekend_default_catalog_does_not_call_futures_or_options(monkeypatch):
     def unavailable_probe(**_kwargs):
         raise AssertionError("weekday-only provider path was called on a weekend")
 
-    monkeypatch.setattr(comprehensive, "_catalog_from_eodhd", directory_probe)
-    monkeypatch.setattr(comprehensive, "_futures_catalog", unavailable_probe)
-    monkeypatch.setattr(comprehensive, "_option_catalog", unavailable_probe)
+    monkeypatch.setattr(discovery_v4, "_catalog_from_eodhd", directory_probe)
+    monkeypatch.setattr(discovery_v4._base._legacy, "_futures_catalog", unavailable_probe)
+    monkeypatch.setattr(discovery_v4._base._legacy, "_option_catalog", unavailable_probe)
 
     result = default_catalog_probe(
         WEEKEND_AS_OF,
