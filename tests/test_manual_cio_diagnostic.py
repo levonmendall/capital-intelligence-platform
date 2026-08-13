@@ -266,3 +266,33 @@ def test_finalization_rejects_context_cycle_rebinding(tmp_path) -> None:
             detail="failed",
             values=values,
         )
+
+def test_resumable_option_progress_stages_are_registered(tmp_path) -> None:
+    values = {
+        **_values(tmp_path),
+        "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED": "true",
+    }
+    request_manual_cio_diagnostic(
+        requested_by="render-release:resumable-options", now=NOW, values=values
+    )
+    claimed = claim_manual_cio_diagnostic(now=NOW, values=values)
+    assert claimed is not None
+
+    stages = (
+        ("catalog_options_partitioned", {"configured_underlyings": 1}),
+        (
+            "catalog_options_expiration_partition",
+            {"processed_records": 1, "total_records": 3},
+        ),
+        (
+            "catalog_options_partitioned_complete",
+            {"configured_underlyings": 1, "catalog_records": 2},
+        ),
+    )
+    for stage, metrics in stages:
+        updated = record_manual_cio_diagnostic_progress(
+            stage, metrics=metrics, values=values
+        )
+        assert updated is not None
+        assert updated.progress_stage == stage
+        assert dict(updated.progress_metrics) == metrics
