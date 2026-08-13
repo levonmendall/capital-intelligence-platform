@@ -7,6 +7,7 @@ construction, order-entry, or real-money authority.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -22,10 +23,18 @@ MASSIVE_BASE_URL = "https://api.massive.com"
 
 
 class MassiveMultiAssetError(RuntimeError):
-    def __init__(self, message: str, *, status_code: int | None = None, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retryable: bool = False,
+        retry_after_seconds: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +58,7 @@ class MassiveMultiAssetProvider:
         *,
         timeout: int = 15,
         http_get: Callable[..., Any] | None = None,
+        sleep: Callable[[float], None] | None = None,
     ) -> None:
         self.api_key = api_key or provider_environment_value("MASSIVE_API_KEY") or provider_environment_value(
             "CAPITAL_INTELLIGENCE_MASSIVE_OPTIONS_API_KEY"
@@ -57,6 +67,7 @@ class MassiveMultiAssetProvider:
         if self.timeout < 1:
             raise ValueError("timeout must be positive")
         self._http_get = http_get or requests.get
+        self._sleep = sleep or time.sleep
 
     @property
     def configured(self) -> bool:
@@ -136,7 +147,7 @@ class MassiveMultiAssetProvider:
         result: dict[str, MassiveFuturesContract] = {}
         pagination_complete = False
         for _ in range(maximum_pages):
-            payload = self._get_url(url, params=params)
+            payload = self._get_futures_url_with_retry(url, params=params)
             raw = payload.get("results") if isinstance(payload, Mapping) else None
             if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
                 raise MassiveMultiAssetError("Massive futures contract response is missing results")
@@ -202,7 +213,6 @@ class MassiveMultiAssetProvider:
                 continue
             try:
                 raw_time = float(item["window_start"])
-                # Futures API publishes nanosecond timestamps for window_start.
                 observed = datetime.fromtimestamp(raw_time / 1_000_000_000.0, tz=timezone.utc)
                 close = float(item.get("settlement_price") or item["close"])
                 volume = max(0.0, float(item.get("volume", 0.0)))
@@ -226,6 +236,26 @@ class MassiveMultiAssetProvider:
             return normalized if normalized.startswith("X:") else "X:" + normalized.replace("-", "").replace("/", "")
         return normalized
 
+    def _get_futures_url_with_retry(
+        self,
+        url: str,
+        *,
+        params: dict[str, object],
+        maximum_attempts: int = 4,
+    ) -> Mapping[str, Any]:
+        """Retry only transient point-in-time futures catalog requests."""
+        for attempt in range(maximum_attempts):
+            try:
+                return self._get_url(url, params=params)
+            except MassiveMultiAssetError as error:
+                if not error.retryable or attempt + 1 >= maximum_attempts:
+                    raise
+                delay = error.retry_after_seconds
+                if delay is None:
+                    delay = float(2 ** (attempt + 1))
+                self._sleep(max(0.0, min(float(delay), 60.0)))
+        raise AssertionError("unreachable futures retry loop")
+
     def _get(self, path: str, *, params: dict[str, object]) -> Mapping[str, Any]:
         return self._get_url(f"{MASSIVE_BASE_URL}{path}", params={**params, "apiKey": self.api_key})
 
@@ -237,10 +267,19 @@ class MassiveMultiAssetProvider:
         status = int(getattr(response, "status_code", 0))
         if not 200 <= status < 300:
             retryable = status in {408, 425, 429} or 500 <= status <= 599
+            retry_after_seconds = None
+            if status == 429:
+                raw_retry_after = getattr(response, "headers", {}).get("Retry-After")
+                if raw_retry_after is not None:
+                    try:
+                        retry_after_seconds = max(0.0, float(raw_retry_after))
+                    except (TypeError, ValueError):
+                        retry_after_seconds = None
             raise MassiveMultiAssetError(
                 f"Massive returned HTTP {status or 'unknown'}",
                 status_code=status or None,
                 retryable=retryable,
+                retry_after_seconds=retry_after_seconds,
             )
         try:
             payload = response.json()
