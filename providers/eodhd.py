@@ -127,7 +127,19 @@ class EODHDProvider(_base.EODHDProvider):
 
         delisted_directory: list[Any] = []
         provider_symbol = query.provider_symbol.strip().upper()
-        if provider_symbol not in _base._ACTIVE_ONLY_SYMBOL_DIRECTORIES:
+        if cached_at is not None:
+            # The cache is already the governed continuity source for this active
+            # directory snapshot. Do not defeat that hot path with a live delisted
+            # request per exchange; historical lineage remains explicitly unavailable
+            # and non-authoritative until separately certified evidence refreshes it.
+            directory_limitations = (
+                *directory_limitations,
+                "cached active symbol directory used; live delisted-symbol refresh "
+                "was deferred to preserve bounded all-market certification throughput",
+                "Historical delisting and identifier lineage remain fail-closed until "
+                "separately certified evidence is available.",
+            )
+        elif provider_symbol not in _base._ACTIVE_ONLY_SYMBOL_DIRECTORIES:
             try:
                 raw_delisted = self._request(
                     f"/exchange-symbol-list/{provider_symbol}",
