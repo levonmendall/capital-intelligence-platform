@@ -364,16 +364,13 @@ class ResumableOptionsProvider:
                 )
         if not self.delegate.primary_configured:
             return ()
-        try:
-            raw = self.delegate.primary.definitions(
-                underlying,
-                underlying_price=underlying_price,
-                as_of=as_of,
-                minimum_days_to_expiry=minimum_days_to_expiry,
-                maximum_days_to_expiry=maximum_days_to_expiry,
-            )
-        except AlpacaIndicativeOptionsError:
-            raise
+        raw = self.delegate.primary.definitions(
+            underlying,
+            underlying_price=underlying_price,
+            as_of=as_of,
+            minimum_days_to_expiry=minimum_days_to_expiry,
+            maximum_days_to_expiry=maximum_days_to_expiry,
+        )
         definitions = tuple(_adapt_primary_definition(item) for item in raw)
         if path is not None:
             _atomic_json(
@@ -585,7 +582,7 @@ class ResumableOptionsProvider:
         directory = _checkpoint_dir(self._values, request=request)
         record_manual_cio_diagnostic_progress(
             "catalog_options_partitioned",
-            metrics={"underlying": normalized},
+            metrics={"configured_underlyings": 1},
         )
         if not self.delegate.primary_configured:
             return self.delegate.select_contracts(
@@ -612,9 +609,8 @@ class ResumableOptionsProvider:
             record_manual_cio_diagnostic_progress(
                 "catalog_options_expiration_partition",
                 metrics={
-                    "underlying": normalized,
-                    "partition": index,
-                    "partitions": len(expirations),
+                    "processed_records": index,
+                    "total_records": len(expirations),
                 },
             )
             selected.extend(
@@ -639,9 +635,8 @@ class ResumableOptionsProvider:
         record_manual_cio_diagnostic_progress(
             "catalog_options_partitioned_complete",
             metrics={
-                "underlying": normalized,
-                "expiration_partitions": len(expirations),
-                "selected_contracts": len(selected),
+                "configured_underlyings": 1,
+                "catalog_records": len(selected),
             },
         )
         return tuple(selected)
