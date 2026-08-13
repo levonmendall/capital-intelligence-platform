@@ -3,6 +3,16 @@
 Normal Twelve Data reference snapshots retain their existing short hot-cache window.
 When and only when the live provider exhausts bounded HTTP 429 retries, an older
 integrity-checked snapshot may be reused inside a separate explicit continuity window.
+
+A fallback can begin well after the comprehensive CIO cycle's original catalog cutoff
+because earlier provider directories are collected first. Before spending live fallback
+provider credits, this adapter therefore checks the cache against the original cutoff and,
+only when live collection is actually required, records a new collection-time cutoff.
+The original cutoff remains explicit in the returned limitations. This prevents a current
+reference catalog from being falsely represented as available before it was collected
+without changing the historical point-in-time rules for cached evidence or downstream
+market evidence.
+
 All existing payload, source-version, market-identity, query-limit, timestamp, and hash
 validation remains authoritative. This module changes reference availability only; it
 has no selection, sizing, construction, execution, or no-superior-opportunity authority.
@@ -41,7 +51,7 @@ def _status_code(response: Any) -> int | None:
 class TwelveDataCatalogContinuityProvider(
     _base.TwelveDataRateLimitedReferenceProvider
 ):
-    """Permit validated stale reference reuse only after bounded live throttling."""
+    """Apply collection-time lineage plus bounded stale-on-429 continuity."""
 
     def __init__(
         self,
@@ -67,27 +77,36 @@ class TwelveDataCatalogContinuityProvider(
         self,
         query: ProviderDatasetQuery,
     ) -> ProviderDatasetSnapshot:
-        """Keep the normal cache path, then use stale continuity only on final 429."""
+        """Use original-cutoff cache first, then timestamp live collection truthfully."""
 
         if query.dataset_type is not ProviderDatasetType.SYMBOL_DIRECTORY:
             return super().fetch_dataset(query)
 
         with self._continuity_state_lock:
             self._live_rate_limit_exhausted = False
+
+            # Preserve the strict original point-in-time cutoff for already-collected
+            # reference evidence. Only a cache miss/expiry can reach live collection.
             try:
-                return super().fetch_dataset(query)
+                return self._load_cached_snapshot(query)
+            except TwelveDataReferenceError:
+                pass
+
+            collection_query = self._collection_query(query)
+            try:
+                snapshot = super().fetch_dataset(collection_query)
             except TwelveDataReferenceError as live_error:
                 if not self._live_rate_limit_exhausted:
                     raise
 
                 try:
-                    snapshot = self._load_continuity_cached_snapshot(query)
+                    snapshot = self._load_continuity_cached_snapshot(collection_query)
                 except TwelveDataReferenceError as continuity_error:
                     raise TwelveDataReferenceError(
                         f"{live_error}; governed stale-on-429 reference continuity "
                         f"unavailable: {continuity_error}"
                     ) from live_error
-                return replace(
+                snapshot = replace(
                     snapshot,
                     quality_state=DataQualityState.CACHED,
                     limitations=tuple(snapshot.limitations)
@@ -100,6 +119,47 @@ class TwelveDataCatalogContinuityProvider(
                         "execution, or a no-superior-opportunity conclusion",
                     ),
                 )
+
+            return self._record_collection_cutoff(
+                snapshot,
+                original_query=query,
+                collection_query=collection_query,
+            )
+
+    def _collection_query(
+        self,
+        query: ProviderDatasetQuery,
+    ) -> ProviderDatasetQuery:
+        """Anchor current-only live reference evidence when collection actually starts."""
+
+        collection_started_at = self._now()
+        if collection_started_at <= query.as_of:
+            return query
+        return replace(query, as_of=collection_started_at)
+
+    @staticmethod
+    def _record_collection_cutoff(
+        snapshot: ProviderDatasetSnapshot,
+        *,
+        original_query: ProviderDatasetQuery,
+        collection_query: ProviderDatasetQuery,
+    ) -> ProviderDatasetSnapshot:
+        if collection_query.as_of == original_query.as_of:
+            return snapshot
+        return replace(
+            snapshot,
+            limitations=tuple(snapshot.limitations)
+            + (
+                "current reference fallback collection began after the original CIO "
+                f"catalog cutoff {original_query.as_of.isoformat()}; the reference "
+                f"collection cutoff was recorded as {collection_query.as_of.isoformat()} "
+                "so retrieval-time evidence is not backdated",
+                "collection-time reference evidence preserves discovery identity only; "
+                "the original CIO cutoff remains authoritative for historical evidence "
+                "and this adjustment cannot authorize selection, sizing, construction, "
+                "execution, or a no-superior-opportunity conclusion",
+            ),
+        )
 
     def _load_continuity_cached_snapshot(
         self,
