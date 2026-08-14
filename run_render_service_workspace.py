@@ -3,13 +3,15 @@
 Render's service plan enforces a hard 2 GB /tmp quota. Comprehensive evidence
 collection and encrypted-backup verification can legitimately require larger
 cycle-local working sets. This entrypoint creates the configured TMPDIR on the
-persistent service disk, removes abandoned backup staging directories, and
-reclaims only superseded release-bound reference-readiness cache before importing
-the governed memory-safe bootstrap.
+persistent service disk, removes abandoned disposable runtime state, reclaims only
+superseded release-bound reference-readiness cache, and establishes the governed
+persistent-filesystem reserve before importing the memory-safe bootstrap.
 
-Reusable reference components, the current exact-release manifest/progress, evidence
-spools, canonical state, backups, and all investment/CIO artifacts are preserved. This
-entrypoint has no investment, CIO, construction, execution, or real-money authority.
+Reusable reference components, the current exact-release manifest/progress, canonical
+state, backups, and all investment/CIO artifacts are preserved. Historical market
+history is a rebuildable performance cache and may be reset only when storage governance
+requires it. This entrypoint has no investment, CIO, construction, execution, or
+real-money authority.
 """
 
 from __future__ import annotations
@@ -18,12 +20,9 @@ import os
 import shutil
 from pathlib import Path
 
+from storage_governance import preflight_storage_capacity
 
-_DISPOSABLE_BACKUP_PREFIXES = (
-    "capital-intelligence-backup-",
-    "capital-intelligence-verify-",
-    "capital-intelligence-restore-",
-)
+
 _REFERENCE_RELEASE_PREFIXES = (
     "instrument-master-",
     "progress-",
@@ -54,6 +53,24 @@ def _reference_root(values: dict[str, str]) -> Path | None:
     return Path(raw).expanduser() / "reference_readiness"
 
 
+def _cleanup_disposable_workspace(workspace: Path) -> None:
+    """Remove prior-process contents from the dedicated non-authority TMPDIR.
+
+    The production TMPDIR is explicitly reserved for cycle-local scratch, paper-evidence
+    spools, and backup staging. At service startup no prior process can retain authority
+    over those files. Symlinks are never followed or removed.
+    """
+
+    for candidate in workspace.iterdir():
+        if candidate.is_symlink():
+            continue
+        if candidate.is_dir():
+            shutil.rmtree(candidate)
+            continue
+        if candidate.is_file():
+            candidate.unlink(missing_ok=True)
+
+
 def _cleanup_reference_readiness_cache(values: dict[str, str]) -> None:
     """Reclaim only non-authoritative readiness scratch and stale release bindings.
 
@@ -68,9 +85,9 @@ def _cleanup_reference_readiness_cache(values: dict[str, str]) -> None:
     if root is None or not root.is_dir():
         return
 
-    # Atomic JSON writers can leave a full-sized .tmp after ENOSPC/interruption. A
-    # scratch file is never authoritative until os.replace/Path.replace succeeds.
-    for candidate in root.glob("*.json.tmp"):
+    # Atomic JSON writers can leave full-sized .tmp files after ENOSPC/interruption.
+    # Scratch is never authoritative until os.replace/Path.replace succeeds.
+    for candidate in root.rglob("*.json.tmp"):
         if candidate.is_file() and not candidate.is_symlink():
             candidate.unlink(missing_ok=True)
 
@@ -101,14 +118,9 @@ def prepare_runtime_workspace(values: dict[str, str] | None = None) -> Path:
     workspace = Path(raw).expanduser()
     workspace.mkdir(parents=True, exist_ok=True)
 
-    for candidate in workspace.iterdir():
-        if not candidate.is_dir() or candidate.is_symlink():
-            continue
-        if not candidate.name.startswith(_DISPOSABLE_BACKUP_PREFIXES):
-            continue
-        shutil.rmtree(candidate)
-
+    _cleanup_disposable_workspace(workspace)
     _cleanup_reference_readiness_cache(environment)
+    preflight_storage_capacity(environment)
 
     # tempfile.gettempdir() consults TMPDIR only if the directory exists. The
     # workspace must therefore be created before importing the production

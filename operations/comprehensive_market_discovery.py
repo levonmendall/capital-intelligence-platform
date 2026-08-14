@@ -28,12 +28,14 @@ from operations.continuous_evidence_plane import (
 from operations.persistent_historical_evidence import install_persistent_historical_evidence
 from operations.persistent_option_reference import install_persistent_option_reference
 from operations.resumable_options_discovery import install_resumable_options_catalog
+from storage_governance import install_persistent_history_storage_governance
 
 
 install_checkpointed_market_probe(_core)
 install_resumable_options_catalog(_core)
 install_persistent_option_reference(_core)
 install_persistent_historical_evidence()
+install_persistent_history_storage_governance()
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
 _SNAPSHOT_ID_ENV = "CAPITAL_INTELLIGENCE_CIO_EVIDENCE_SNAPSHOT_ID"
