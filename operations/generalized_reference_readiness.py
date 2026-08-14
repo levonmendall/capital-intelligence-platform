@@ -31,6 +31,9 @@ _CATALOG_SCOPE = "catalog"
 _EODHD_REFERENCE_LANES = frozenset(
     {
         CandidateAssetClass.INTERNATIONAL_EQUITY,
+        CandidateAssetClass.REAL_ESTATE,
+        CandidateAssetClass.ALTERNATIVE,
+        CandidateAssetClass.COMMODITY,
         CandidateAssetClass.FX,
         CandidateAssetClass.CRYPTO,
     }
