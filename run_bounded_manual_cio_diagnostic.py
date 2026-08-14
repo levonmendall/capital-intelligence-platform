@@ -20,8 +20,10 @@ from operations.cme_futures_reference_runtime import (
     install_cme_futures_reference_lineage,
 )
 from operations.continuous_evidence_plane import (
+    ContinuousEvidencePlaneError,
     ensure_point_in_time_snapshot,
     evidence_plane_enabled,
+    refresh_continuous_evidence_plane,
 )
 from operations.generalized_reference_readiness import (
     prepare_reference_readiness as _prepare_reference,
@@ -38,6 +40,9 @@ from providers.massive_futures_reference_rate_resilient import (
 )
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
+_REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
+_REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
+_STALE_EVIDENCE_DETAIL = "continuous evidence plane is missing or stale for the CIO cutoff"
 _RECOVERY_PROGRESS_METRICS = frozenset(
     {
         "recovery_exchanges",
@@ -92,6 +97,14 @@ def _production_plane_enabled(values: Mapping[str, str]) -> bool:
     return (bool(explicit) or production) and evidence_plane_enabled(values)
 
 
+def _restore_environment(prior: Mapping[str, str | None]) -> None:
+    for name, value in prior.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
 def _prepare_with_rate_budget(
     values: Mapping[str, str],
     **kwargs: object,
@@ -109,18 +122,55 @@ def _prepare_with_rate_budget(
     if not _production_plane_enabled(values):
         return manifest
 
+    manifest_path = values.get(_REFERENCE_MANIFEST_PATH_ENV, "").strip()
+    manifest_id = values.get(_REFERENCE_MANIFEST_ID_ENV, "").strip()
+    qualified_manifest_id = str(getattr(manifest, "manifest_id", "")).strip()
+    if not manifest_path or not manifest_id:
+        raise ContinuousEvidencePlaneError(
+            "qualified reference readiness did not bind its manifest for evidence discovery"
+        )
+    if not qualified_manifest_id or qualified_manifest_id != manifest_id:
+        raise ContinuousEvidencePlaneError(
+            "qualified reference manifest identity changed before evidence discovery"
+        )
+
     # Comprehensive discovery is itself used to populate the evidence plane. Mark this
     # pre-clock preparation so the discovery facade does not recursively request a
-    # snapshot while the snapshot is being built.
-    prior = os.environ.get(_PREPARING_ENV)
+    # snapshot while the snapshot is being built. Discovery ultimately resolves the
+    # governed reference manifest from os.environ, while the watchdog carries readiness
+    # state in its own values dictionary. Bind the exact qualified path/id into the
+    # process environment for this preparation only, and make the evidence refresh reuse
+    # the already-qualified manifest instead of performing a second provider walk.
+    bound_names = (
+        _PREPARING_ENV,
+        _REFERENCE_MANIFEST_PATH_ENV,
+        _REFERENCE_MANIFEST_ID_ENV,
+    )
+    prior = {name: os.environ.get(name) for name in bound_names}
     os.environ[_PREPARING_ENV] = "true"
+    os.environ[_REFERENCE_MANIFEST_PATH_ENV] = manifest_path
+    os.environ[_REFERENCE_MANIFEST_ID_ENV] = manifest_id
     try:
-        ensure_point_in_time_snapshot(values=values, allow_refresh=True)
+        snapshot = None
+        try:
+            snapshot = ensure_point_in_time_snapshot(values=values, allow_refresh=False)
+        except ContinuousEvidencePlaneError as error:
+            if str(error) != _STALE_EVIDENCE_DETAIL:
+                raise
+
+        if snapshot is None or snapshot.reference_manifest_id != manifest_id:
+            refresh_continuous_evidence_plane(
+                values=values,
+                reference_preparer=lambda _resolved: manifest,
+            )
+            snapshot = ensure_point_in_time_snapshot(values=values, allow_refresh=False)
+
+        if snapshot.reference_manifest_id != manifest_id:
+            raise ContinuousEvidencePlaneError(
+                "point-in-time snapshot is not bound to the qualified reference manifest"
+            )
     finally:
-        if prior is None:
-            os.environ.pop(_PREPARING_ENV, None)
-        else:
-            os.environ[_PREPARING_ENV] = prior
+        _restore_environment(prior)
     return manifest
 
 
