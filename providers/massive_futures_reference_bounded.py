@@ -8,6 +8,11 @@ response for that combined query, it retries the same product-scoped single-cont
 index without the provider-side active/trade-window filters and leaves the inherited
 local point-in-time validation authoritative and fail closed.
 
+For near-current multi-root requests each configured root is resolved independently:
+strict dated data is retained for roots that succeed, while only roots whose strict
+response is empty are eligible for the existing bounded compatibility fallback. Complete
+configured-root coverage is still required before any result is returned.
+
 No investment, construction, execution, threshold, market-scope, or real-money behavior
 is changed here.
 """
@@ -21,7 +26,10 @@ from typing import Any
 from providers.massive_futures_reference_resilient import (
     MassiveFuturesReferenceProvider as _ResilientMassiveFuturesReferenceProvider,
 )
-from providers.massive_multi_asset import MassiveFuturesContract
+from providers.massive_multi_asset import (
+    MassiveFuturesContract,
+    MassiveMultiAssetError,
+)
 
 
 class MassiveFuturesReferenceProvider(_ResilientMassiveFuturesReferenceProvider):
@@ -87,9 +95,9 @@ class MassiveFuturesReferenceProvider(_ResilientMassiveFuturesReferenceProvider)
         ):
             return payload
 
-        # Production telemetry #307 proved that Massive can return HTTP 200 with no
-        # records for the otherwise valid combination of active=true, type=single, and
-        # current trade-window modifiers. Retry only that empty response against the
+        # Production telemetry proved that Massive can return HTTP 200 with no records
+        # for the otherwise valid combination of active=true, type=single, and current
+        # trade-window modifiers. Retry only that empty response against the
         # product-scoped outright-contract index. This avoids reintroducing combo/spread
         # pagination pressure while the resilient provider still applies the original
         # first_trade_date <= as_of <= last_trade_date rule locally before accepting any
@@ -122,6 +130,59 @@ class MassiveFuturesReferenceProvider(_ResilientMassiveFuturesReferenceProvider)
             root_telemetry=root_telemetry,
         )
 
+    def _near_current_root_scoped_contracts(
+        self,
+        *,
+        as_of: datetime,
+        product_codes: Sequence[str],
+        maximum_pages: int,
+    ) -> tuple[MassiveFuturesContract, ...]:
+        """Resolve near-current configured roots independently without weakening coverage."""
+
+        target_codes = tuple(
+            sorted(
+                {
+                    str(item).strip().upper()
+                    for item in product_codes
+                    if str(item).strip()
+                }
+            )
+        )
+        contracts_by_ticker: dict[str, MassiveFuturesContract] = {}
+        telemetry_by_root: dict[str, dict[str, object]] = {}
+
+        for index, target_code in enumerate(target_codes):
+            # A singleton strict call owns no inter-root pacing, so preserve the strict
+            # provider's governed call interval explicitly between configured roots.
+            if index and self.minimum_call_interval_seconds > 0.0:
+                self._sleeper(self.minimum_call_interval_seconds)
+
+            try:
+                root_contracts = super().futures_contracts(
+                    as_of=as_of,
+                    product_codes=(target_code,),
+                    maximum_pages=maximum_pages,
+                )
+            except MassiveMultiAssetError:
+                for row in self.reference_telemetry:
+                    root = str(row.get("root") or "").strip().upper()
+                    if root:
+                        telemetry_by_root[root] = dict(row)
+                self._reference_telemetry = telemetry_by_root
+                raise
+
+            for row in self.reference_telemetry:
+                root = str(row.get("root") or "").strip().upper()
+                if root:
+                    telemetry_by_root[root] = dict(row)
+            for contract in root_contracts:
+                contracts_by_ticker[contract.ticker] = contract
+
+        self._reference_telemetry = telemetry_by_root
+        return tuple(
+            contracts_by_ticker[ticker] for ticker in sorted(contracts_by_ticker)
+        )
+
     def futures_contracts(
         self,
         *,
@@ -132,6 +193,21 @@ class MassiveFuturesReferenceProvider(_ResilientMassiveFuturesReferenceProvider)
         previous_reference_date = self._fallback_reference_date
         self._fallback_reference_date = as_of.astimezone(timezone.utc).date().isoformat()
         try:
+            target_codes = tuple(
+                sorted(
+                    {
+                        str(item).strip().upper()
+                        for item in product_codes
+                        if str(item).strip()
+                    }
+                )
+            )
+            if len(target_codes) > 1 and self._current_fallback_allowed(as_of):
+                return self._near_current_root_scoped_contracts(
+                    as_of=as_of,
+                    product_codes=target_codes,
+                    maximum_pages=maximum_pages,
+                )
             return super().futures_contracts(
                 as_of=as_of,
                 product_codes=product_codes,

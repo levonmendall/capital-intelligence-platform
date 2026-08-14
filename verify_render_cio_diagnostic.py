@@ -138,6 +138,19 @@ def _await_fresh_deployment_request(
     )
 
 
+def _replacement_wait_detail(
+    primary_failure_detail: str,
+    secondary_detail: str,
+) -> str:
+    """Keep the exact terminal CIO failure primary when its replacement never appears."""
+
+    return (
+        f"{primary_failure_detail}; "
+        "secondary_context=replacement_attempt_not_observed; "
+        f"replacement_wait_detail={secondary_detail}"
+    )
+
+
 def _retry_aware_poll_render_audit(
     *,
     url: str,
@@ -177,6 +190,7 @@ def _retry_aware_poll_render_audit(
 
     adopted_failures = 0
     awaiting_replacement = False
+    primary_failure_detail: str | None = None
     remaining_attempts = max(1, maximum_attempts - max(0, freshness_attempts - 1))
     while True:
         active_grace_attempts = (
@@ -203,7 +217,23 @@ def _retry_aware_poll_render_audit(
         except _core.RenderAuditVerificationError as error:
             detail = str(error)
             if not detail.startswith("current_diagnostic_failed:"):
+                if (
+                    awaiting_replacement
+                    and primary_failure_detail is not None
+                    and (
+                        detail.startswith("stale_diagnostic:")
+                        or detail.startswith(
+                            "Render CIO diagnostic did not publish a current successful aggregate audit"
+                        )
+                    )
+                ):
+                    raise _core.RenderAuditVerificationError(
+                        _replacement_wait_detail(primary_failure_detail, detail)
+                    ) from error
                 raise
+
+            if primary_failure_detail is None:
+                primary_failure_detail = detail
             adopted_failures += 1
             if adopted_failures >= _MAX_ADOPTED_FAILURES:
                 raise
@@ -228,7 +258,8 @@ def _retry_aware_poll_render_audit(
                 )
             # Re-enter the core verifier. The failed adopted request is now the baseline,
             # so the extended grace applies only while waiting for its replacement. If no
-            # new request_id appears, the core still terminates fail-closed.
+            # new request_id appears, the core still terminates fail-closed, while this
+            # wrapper preserves the original terminal failure as the primary evidence.
 
 
 _core.poll_render_audit = _retry_aware_poll_render_audit
