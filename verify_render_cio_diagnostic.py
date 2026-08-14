@@ -2,8 +2,9 @@
 
 The verifier core remains unchanged. This shim treats a terminal failure from an adopted
 server-side attempt as provisional because the Render release bootstrap can issue a
-bounded replacement attempt for the same exact release. All other verifier failures stay
-fail-closed.
+bounded replacement attempt for the same exact release. A diagnostic that is already
+failed when polling begins keeps the caller's normal stale-failure grace. All verifier
+paths remain fail-closed.
 """
 
 from __future__ import annotations
@@ -36,7 +37,16 @@ def _retry_aware_poll_render_audit(
     progress_writer: Callable[[str], None] | None = print,
 ) -> Mapping[str, Any]:
     adopted_failures = 0
+    awaiting_replacement = False
     while True:
+        active_grace_attempts = (
+            max(
+                fresh_attempt_grace_attempts,
+                _SERVER_REPLACEMENT_GRACE_ATTEMPTS,
+            )
+            if awaiting_replacement
+            else fresh_attempt_grace_attempts
+        )
         try:
             return _original_poll_render_audit(
                 url=url,
@@ -44,10 +54,7 @@ def _retry_aware_poll_render_audit(
                 output_path=output_path,
                 maximum_attempts=maximum_attempts,
                 interval_seconds=interval_seconds,
-                fresh_attempt_grace_attempts=max(
-                    fresh_attempt_grace_attempts,
-                    _SERVER_REPLACEMENT_GRACE_ATTEMPTS,
-                ),
+                fresh_attempt_grace_attempts=active_grace_attempts,
                 fetcher=fetcher,
                 sleeper=sleeper,
                 clock=clock,
@@ -60,6 +67,7 @@ def _retry_aware_poll_render_audit(
             adopted_failures += 1
             if adopted_failures >= _MAX_ADOPTED_FAILURES:
                 raise
+            awaiting_replacement = True
             if progress_writer is not None:
                 progress_writer(
                     json.dumps(
@@ -78,8 +86,9 @@ def _retry_aware_poll_render_audit(
                     f"failed_server_attempt={adopted_failures} "
                     "state=awaiting_replacement_attempt release_match=yes"
                 )
-            # Re-enter the core verifier. The failed request is now the baseline, so the
-            # core waits for a new request_id and still fails closed if none appears.
+            # Re-enter the core verifier. The failed adopted request is now the baseline,
+            # so the extended grace applies only while waiting for its replacement. If no
+            # new request_id appears, the core still terminates fail-closed.
 
 
 _core.poll_render_audit = _retry_aware_poll_render_audit
