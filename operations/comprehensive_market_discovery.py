@@ -72,11 +72,23 @@ def _sync_core_seams() -> None:
             setattr(_core, name, current[name])
 
 
+def _production_plane_enabled(values) -> bool:
+    explicit = values.get(
+        "CAPITAL_INTELLIGENCE_CONTINUOUS_EVIDENCE_PLANE_ENABLED", ""
+    ).strip()
+    production = (
+        values.get("CAPITAL_INTELLIGENCE_ENVIRONMENT", "").strip().lower()
+        == "production"
+        or values.get("RENDER", "").strip().lower() == "true"
+    )
+    return (bool(explicit) or production) and evidence_plane_enabled(values)
+
+
 def _point_in_time_snapshot_barrier(as_of):
     """Require a qualified evidence-plane snapshot before governed discovery begins."""
 
     values = os.environ
-    if not evidence_plane_enabled(values):
+    if not _production_plane_enabled(values):
         return None
     if values.get(_PREPARING_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
         # The background/pre-clock evidence preparation itself must be able to execute
