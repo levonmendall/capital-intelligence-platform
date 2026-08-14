@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import publish_cio_diagnostic_audit as publisher
+
+
+def _settings(tmp_path: Path) -> SimpleNamespace:
+    return SimpleNamespace(portfolio_database=tmp_path / "canonical_portfolio.db")
 
 
 def test_publish_writes_only_redacted_audit_payload(
@@ -16,7 +21,7 @@ def test_publish_writes_only_redacted_audit_payload(
         "CAPITAL_INTELLIGENCE_RELEASE": "release-123",
         "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
     }
-    settings = object()
+    settings = _settings(tmp_path)
     monkeypatch.setattr(
         publisher.ApiSettings,
         "from_env",
@@ -50,7 +55,7 @@ def test_publish_writes_only_redacted_audit_payload(
     persisted = json.loads(output.read_text(encoding="utf-8"))
 
     assert payload == persisted
-    assert persisted["schema_version"] == "public-cio-diagnostic-audit.v1"
+    assert persisted["schema_version"] == "public-cio-diagnostic-audit.v2-end-to-end"
     assert persisted["credential_safe"] is True
     assert persisted["active_release"] == "release-123"
     assert persisted["market_lanes"][0]["asset_class"] == "crypto"
@@ -91,7 +96,11 @@ def test_publish_surfaces_pre_cio_reference_progress_when_canonical_stage_is_abs
     (progress_dir / "progress-release-reference.json").write_text(
         json.dumps(progress), encoding="utf-8"
     )
-    monkeypatch.setattr(publisher.ApiSettings, "from_env", lambda _resolved: object())
+    monkeypatch.setattr(
+        publisher.ApiSettings,
+        "from_env",
+        lambda _resolved: _settings(tmp_path),
+    )
     monkeypatch.setattr(
         publisher,
         "build_cio_diagnostic_audit",

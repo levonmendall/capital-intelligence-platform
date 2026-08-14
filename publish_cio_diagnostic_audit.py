@@ -10,7 +10,9 @@ from typing import Mapping, Sequence
 
 from api.config import ApiSettings
 from api.routes.cio_diagnostic import build_cio_diagnostic_audit
+from operations.all_market_certification_audit import public_all_market_certification
 from operations.reference_readiness import load_reference_readiness_progress
+from production_context_publication_runtime import _load_json, _state_path
 
 
 def audit_output_path(values: Mapping[str, str] | None = None) -> Path:
@@ -56,6 +58,74 @@ def _with_reference_progress(
     return published
 
 
+def _paper_implementation_complete(payload: Mapping[str, object]) -> bool:
+    if str(payload.get("state") or "") != "completed":
+        return False
+    detail = str(payload.get("detail") or "")
+    return detail in {
+        "CIO diagnostic completed; paper_execution=completed.",
+        "CIO diagnostic completed; paper_execution=no_action.",
+    }
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _certificate_matches_current_context(
+    *,
+    payload: Mapping[str, object],
+    certification: Mapping[str, object],
+    context: Mapping[str, object],
+) -> bool:
+    """Bind the immutable lane proof to this diagnostic's exact discovery state.
+
+    Comprehensive discovery is frozen before downstream evidence collection finishes, so
+    its certification epoch is expected to precede the later production-context
+    decision_as_of. The exact discovery-manifest fingerprint is the stable same-cycle
+    identity; timestamps additionally prove the certificate is not future-known.
+    """
+
+    decision_as_of = _parse_timestamp(context.get("decision_as_of"))
+    certification_epoch = _parse_timestamp(
+        certification.get("all_market_certification_epoch")
+    )
+    discovery_fingerprint = str(
+        context.get("comprehensive_discovery_manifest_fingerprint") or ""
+    ).strip()
+    certified_fingerprint = str(
+        certification.get("all_market_certification_discovery_manifest_fingerprint")
+        or ""
+    ).strip()
+    return bool(
+        payload.get("context_cycle_matches") is True
+        and decision_as_of is not None
+        and certification_epoch is not None
+        and certification_epoch <= decision_as_of
+        and discovery_fingerprint
+        and certified_fingerprint == discovery_fingerprint
+    )
+
+
+def _load_persisted_context(settings: object) -> Mapping[str, object]:
+    """Read the context proof if available; missing operational state stays fail-closed."""
+
+    try:
+        context = _load_json(_state_path(settings))
+    except (AttributeError, OSError, TypeError, ValueError):
+        return {}
+    return context if isinstance(context, Mapping) else {}
+
+
 def publish_cio_diagnostic_audit(
     *,
     values: Mapping[str, str] | None = None,
@@ -66,10 +136,31 @@ def publish_cio_diagnostic_audit(
         build_cio_diagnostic_audit(settings=settings, values=resolved),
         values=resolved,
     )
+    certification = public_all_market_certification(resolved)
+    persisted_context = _load_persisted_context(settings)
+    certification_context_matches = _certificate_matches_current_context(
+        payload=payload,
+        certification=certification,
+        context=persisted_context,
+    )
+    paper_implementation_complete = _paper_implementation_complete(payload)
+    end_to_end_complete = bool(
+        payload.get("all_market_evaluation_complete") is True
+        and certification.get("all_market_runtime_certified") is True
+        and certification.get("all_market_certification_integrity_valid") is True
+        and certification.get("all_market_certification_release_matches") is True
+        and certification_context_matches
+        and paper_implementation_complete
+    )
     published = {
         **payload,
+        **certification,
+        "all_market_certification_context_matches": certification_context_matches,
+        "paper_implementation_complete": paper_implementation_complete,
+        "all_market_evaluation_complete": end_to_end_complete,
+        "ready": end_to_end_complete,
         "published_at": datetime.now(timezone.utc).isoformat(),
-        "schema_version": "public-cio-diagnostic-audit.v1",
+        "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
         "credential_safe": True,
     }
     path = audit_output_path(resolved)
@@ -109,6 +200,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "active_release": payload.get("active_release"),
                 "state": payload.get("state"),
                 "stage": payload.get("stage"),
+                "all_market_runtime_certified": payload.get(
+                    "all_market_runtime_certified"
+                ),
+                "all_market_certification_context_matches": payload.get(
+                    "all_market_certification_context_matches"
+                ),
+                "paper_implementation_complete": payload.get(
+                    "paper_implementation_complete"
+                ),
                 "all_market_evaluation_complete": payload.get(
                     "all_market_evaluation_complete"
                 ),

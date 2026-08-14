@@ -62,6 +62,8 @@ _SECRET_ENVIRONMENT_NAMES = (
     "USDA_NASS_API_KEY",
 )
 _REDACTED = "[REDACTED]"
+_OWNER_LEASE_FILENAME = "manual-cio-diagnostic-owner.json"
+_NO_ACTION_STATUSES = frozenset({"no_superior_opportunity", "insufficient_evidence"})
 
 
 def _boolean(value: str | None, *, default: bool = False) -> bool:
@@ -184,6 +186,100 @@ def _record_memory_phase(phase: str) -> None:
         hwm_kib=hwm_kib,
         container_current_kib=container_current_kib,
         container_limit_kib=container_limit_kib,
+    )
+
+
+def _owner_lease_path(values: Mapping[str, str]) -> Path:
+    configured = values.get("CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PATH", "").strip()
+    if configured:
+        return Path(configured).expanduser().parent / _OWNER_LEASE_FILENAME
+    data_root = Path(values.get("CAPITAL_INTELLIGENCE_DATA_DIR", "database")).expanduser()
+    return data_root / _OWNER_LEASE_FILENAME
+
+
+def _lease_payload(path: Path) -> Mapping[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, Mapping) else None
+
+
+def _process_alive(pid: object) -> bool:
+    if isinstance(pid, bool):
+        return False
+    try:
+        value = int(pid)
+    except (TypeError, ValueError):
+        return False
+    return value > 0 and Path(f"/proc/{value}").exists()
+
+
+def _active_owner_exists(request_id: str, values: Mapping[str, str]) -> bool:
+    payload = _lease_payload(_owner_lease_path(values))
+    return bool(
+        payload is not None
+        and str(payload.get("request_id") or "") == request_id
+        and _process_alive(payload.get("pid"))
+    )
+
+
+def _acquire_owner_lease(request_id: str, values: Mapping[str, str]) -> bool:
+    """Acquire exclusive process ownership for one durable diagnostic request."""
+
+    path = _owner_lease_path(values)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            existing = _lease_payload(path)
+            if existing is not None and _process_alive(existing.get("pid")):
+                return False
+            try:
+                path.unlink()
+            except OSError:
+                return False
+            continue
+        try:
+            payload = json.dumps(
+                {
+                    "request_id": request_id,
+                    "pid": os.getpid(),
+                    "acquired_at": datetime.now(timezone.utc).isoformat(),
+                },
+                sort_keys=True,
+            ) + "\n"
+            os.write(descriptor, payload.encode("utf-8"))
+        finally:
+            os.close(descriptor)
+        return True
+    return False
+
+
+def _release_owner_lease(request_id: str, values: Mapping[str, str]) -> None:
+    path = _owner_lease_path(values)
+    payload = _lease_payload(path)
+    if payload is None:
+        return
+    if (
+        str(payload.get("request_id") or "") == request_id
+        and int(payload.get("pid") or -1) == os.getpid()
+    ):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _governed_no_action(briefing: object) -> bool:
+    if not isinstance(briefing, Mapping):
+        return False
+    return bool(
+        str(briefing.get("identifier") or "").strip()
+        and str(briefing.get("as_of") or "").strip()
+        and str(briefing.get("portfolio_decision") or "").strip()
+        and str(briefing.get("status") or "").strip().lower() in _NO_ACTION_STATUSES
     )
 
 
@@ -319,6 +415,15 @@ def run_diagnostic_once(
     existing = latest_manual_cio_diagnostic(values=resolved)
     recovered_interrupted_request = False
     if existing is not None and existing.state == "in_progress":
+        if _active_owner_exists(existing.request_id, resolved):
+            _log(
+                "manual_cio_diagnostic_request_busy",
+                release=release,
+                request_id=existing.request_id,
+                state=existing.state,
+                active_owner=True,
+            )
+            return 3
         recovered_interrupted_request = True
         interrupted = finish_manual_cio_diagnostic(
             existing,
@@ -327,7 +432,7 @@ def run_diagnostic_once(
             snapshot_identifier=existing.snapshot_identifier,
             detail=(
                 "Diagnostic execution was interrupted by a prior service process; "
-                "the new service process may issue a replacement request."
+                "no live owner lease remains, so a replacement request may proceed."
             ),
             values=resolved,
         )
@@ -336,6 +441,7 @@ def run_diagnostic_once(
             release=release,
             request_id=interrupted.request_id,
             prior_requester=interrupted.requested_by,
+            live_owner_observed=False,
         )
         existing = interrupted
 
@@ -367,7 +473,7 @@ def run_diagnostic_once(
             request_id=request.request_id,
             state=request.state,
         )
-        return 0
+        return 3
     claimed = claim_manual_cio_diagnostic(values=resolved)
     if claimed is None:
         _log(
@@ -376,7 +482,15 @@ def run_diagnostic_once(
             request_id=request.request_id,
             state=request.state,
         )
-        return 0
+        return 3
+    if not _acquire_owner_lease(claimed.request_id, resolved):
+        _log(
+            "manual_cio_diagnostic_owner_busy",
+            release=release,
+            request_id=claimed.request_id,
+            state=claimed.state,
+        )
+        return 3
 
     settings = ApiSettings.from_env(resolved)
     operational = OperationalSettings.from_env(resolved)
@@ -440,8 +554,7 @@ def run_diagnostic_once(
             worker.dispatch_pending()
             snapshot_identifier = result.snapshot_identifier
             detail = result.detail
-            succeeded = result.status == "completed"
-            if succeeded:
+            if result.status == "completed":
                 record_manual_cio_diagnostic_progress(
                     "paper_implementation_boundary",
                     values=resolved,
@@ -453,7 +566,16 @@ def run_diagnostic_once(
                     expected_as_of=context.decision_as_of,
                 )
                 execution_now = datetime.now(timezone.utc)
-                if paper_trading_launch_open(execution_now):
+                if construction is None and _governed_no_action(briefing):
+                    publish_pending_transaction_report(
+                        construction=construction,
+                        briefing=briefing,
+                        generated_at=execution_now,
+                        execution_state="no_action",
+                    )
+                    succeeded = True
+                    detail = "CIO diagnostic completed; paper_execution=no_action."
+                elif paper_trading_launch_open(execution_now):
                     attempt = attempt_paper_execution(
                         construction=construction,
                         briefing=briefing,
@@ -465,10 +587,12 @@ def run_diagnostic_once(
                         generated_at=execution_now,
                         execution_state=attempt.state,
                     )
+                    succeeded = bool(attempt.completed)
                     detail = (
                         f"CIO diagnostic completed; paper_execution={attempt.state}."
                     )
                 else:
+                    succeeded = False
                     detail = (
                         "CIO diagnostic completed; paper execution remains held by "
                         "the configured launch boundary."
@@ -490,6 +614,7 @@ def run_diagnostic_once(
             detail=detail,
             values=resolved,
         )
+        _release_owner_lease(claimed.request_id, resolved)
 
     _record_memory_phase("process_finish")
     _log(

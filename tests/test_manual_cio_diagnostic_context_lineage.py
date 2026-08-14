@@ -70,7 +70,7 @@ def test_successful_diagnostic_preserves_persisted_context_cycle_key(
     monkeypatch.setattr(
         diagnostic,
         "attempt_paper_execution",
-        lambda **_: SimpleNamespace(state="idle"),
+        lambda **_: SimpleNamespace(state="completed", completed=True),
     )
     monkeypatch.setattr(
         diagnostic,
