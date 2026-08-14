@@ -3,9 +3,13 @@
 Render's service plan enforces a hard 2 GB /tmp quota. Comprehensive evidence
 collection and encrypted-backup verification can legitimately require larger
 cycle-local working sets. This entrypoint creates the configured TMPDIR on the
-persistent service disk and removes only abandoned, explicitly disposable
-backup staging directories before importing the governed memory-safe bootstrap.
-It has no investment, CIO, construction, execution, or real-money authority.
+persistent service disk, removes abandoned backup staging directories, and
+reclaims only superseded release-bound reference-readiness cache before importing
+the governed memory-safe bootstrap.
+
+Reusable reference components, the current exact-release manifest/progress, evidence
+spools, canonical state, backups, and all investment/CIO artifacts are preserved. This
+entrypoint has no investment, CIO, construction, execution, or real-money authority.
 """
 
 from __future__ import annotations
@@ -20,6 +24,73 @@ _DISPOSABLE_BACKUP_PREFIXES = (
     "capital-intelligence-verify-",
     "capital-intelligence-restore-",
 )
+_REFERENCE_RELEASE_PREFIXES = (
+    "instrument-master-",
+    "progress-",
+)
+
+
+def _release(values: dict[str, str]) -> str:
+    return (
+        values.get("CAPITAL_INTELLIGENCE_RELEASE")
+        or values.get("RENDER_GIT_COMMIT")
+        or values.get("GITHUB_SHA")
+        or ""
+    ).strip()
+
+
+def _safe_release(release: str) -> str:
+    return "".join(
+        character
+        for character in release
+        if character.isalnum() or character in {"-", "_"}
+    ) or "unknown"
+
+
+def _reference_root(values: dict[str, str]) -> Path | None:
+    raw = values.get("CAPITAL_INTELLIGENCE_DATA_DIR", "").strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser() / "reference_readiness"
+
+
+def _cleanup_reference_readiness_cache(values: dict[str, str]) -> None:
+    """Reclaim only non-authoritative readiness scratch and stale release bindings.
+
+    Component checkpoints are deliberately retained because they are the reusable,
+    freshness/integrity-qualified source used to avoid recollecting slow reference
+    directories. Exact-release manifests and progress files from older commits cannot
+    certify the current release and are safe to rebuild when that old release is no
+    longer running.
+    """
+
+    root = _reference_root(values)
+    if root is None or not root.is_dir():
+        return
+
+    # Atomic JSON writers can leave a full-sized .tmp after ENOSPC/interruption. A
+    # scratch file is never authoritative until os.replace/Path.replace succeeds.
+    for candidate in root.glob("*.json.tmp"):
+        if candidate.is_file() and not candidate.is_symlink():
+            candidate.unlink(missing_ok=True)
+
+    current_release = _release(values)
+    if not current_release:
+        # Without an exact deployment identity, preserve all release-bound cache.
+        return
+
+    safe_release = _safe_release(current_release)
+    keep = {
+        f"instrument-master-{safe_release}.json",
+        f"progress-{safe_release}.json",
+    }
+    for candidate in root.iterdir():
+        if not candidate.is_file() or candidate.is_symlink():
+            continue
+        if candidate.name in keep or not candidate.name.endswith(".json"):
+            continue
+        if candidate.name.startswith(_REFERENCE_RELEASE_PREFIXES):
+            candidate.unlink(missing_ok=True)
 
 
 def prepare_runtime_workspace(values: dict[str, str] | None = None) -> Path:
@@ -36,6 +107,8 @@ def prepare_runtime_workspace(values: dict[str, str] | None = None) -> Path:
         if not candidate.name.startswith(_DISPOSABLE_BACKUP_PREFIXES):
             continue
         shutil.rmtree(candidate)
+
+    _cleanup_reference_readiness_cache(environment)
 
     # tempfile.gettempdir() consults TMPDIR only if the directory exists. The
     # workspace must therefore be created before importing the production
