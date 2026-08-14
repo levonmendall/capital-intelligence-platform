@@ -16,6 +16,8 @@ from operations.composite_readiness import component_heartbeat_path
 from operations.continuous_evidence_plane import refresh_continuous_evidence_plane
 from operations.heartbeat import WorkerHeartbeatStore
 
+_PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
+
 
 def _seconds(values: Mapping[str, str], name: str, default: float) -> float:
     raw = values.get(name, "").strip()
@@ -32,10 +34,18 @@ def _seconds(values: Mapping[str, str], name: str, default: float) -> float:
 
 def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
     resolved = dict(os.environ if values is None else values)
-    generation = refresh_continuous_evidence_plane(
-        as_of=datetime.now(timezone.utc),
-        values=resolved,
-    )
+    prior = os.environ.get(_PREPARING_ENV)
+    os.environ[_PREPARING_ENV] = "true"
+    try:
+        generation = refresh_continuous_evidence_plane(
+            as_of=datetime.now(timezone.utc),
+            values=resolved,
+        )
+    finally:
+        if prior is None:
+            os.environ.pop(_PREPARING_ENV, None)
+        else:
+            os.environ[_PREPARING_ENV] = prior
     return {
         "state": "available",
         "generation_id": generation.generation_id,
