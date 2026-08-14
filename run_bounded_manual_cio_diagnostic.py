@@ -42,6 +42,7 @@ from providers.massive_futures_reference_rate_resilient import (
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
+_STALE_EVIDENCE_DETAIL = "continuous evidence plane is missing or stale for the CIO cutoff"
 _RECOVERY_PROGRESS_METRICS = frozenset(
     {
         "recovery_exchanges",
@@ -153,8 +154,9 @@ def _prepare_with_rate_budget(
         snapshot = None
         try:
             snapshot = ensure_point_in_time_snapshot(values=values, allow_refresh=False)
-        except ContinuousEvidencePlaneError:
-            pass
+        except ContinuousEvidencePlaneError as error:
+            if str(error) != _STALE_EVIDENCE_DETAIL:
+                raise
 
         if snapshot is None or snapshot.reference_manifest_id != manifest_id:
             refresh_continuous_evidence_plane(
