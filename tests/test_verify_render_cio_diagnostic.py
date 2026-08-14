@@ -14,7 +14,7 @@ from verify_render_cio_diagnostic import (
 
 def _complete_payload(release: str) -> dict[str, object]:
     return {
-        "schema_version": "public-cio-diagnostic-audit.v1",
+        "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
         "credential_safe": True,
         "active_release": release,
         "release_matches": True,
@@ -27,6 +27,15 @@ def _complete_payload(release: str) -> dict[str, object]:
         "scheduled_market_coverage_complete": True,
         "terminal_screening_complete": True,
         "all_market_evaluation_complete": True,
+        "all_market_runtime_certified": True,
+        "all_market_certification_integrity_valid": True,
+        "all_market_certification_release_matches": True,
+        "all_market_certification_context_matches": True,
+        "all_market_certification_id": "certification-release-current",
+        "all_market_certification_epoch": "2026-08-05T18:59:00+00:00",
+        "all_market_certification_aggregate_sha256": "a" * 64,
+        "all_market_certification_discovery_manifest_fingerprint": "discovery-manifest-abc",
+        "paper_implementation_complete": True,
         "market_lanes": [
             {
                 "asset_class": "crypto",
@@ -60,6 +69,9 @@ def _failed_payload(release: str, detail: str = "provider throttled") -> dict[st
         "scheduled_market_coverage_complete": False,
         "terminal_screening_complete": False,
         "all_market_evaluation_complete": False,
+        "all_market_runtime_certified": False,
+        "all_market_certification_context_matches": False,
+        "paper_implementation_complete": False,
         "market_lanes": [],
         "detail": detail,
     }
