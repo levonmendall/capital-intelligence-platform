@@ -20,6 +20,9 @@ import verify_render_cio_diagnostic_core as _core
 
 
 _original_poll_render_audit = _core.poll_render_audit
+_original_verify_complete_all_market_evaluation = (
+    _core.verify_complete_all_market_evaluation
+)
 _SERVER_REPLACEMENT_GRACE_ATTEMPTS = 45
 _MAX_ADOPTED_FAILURES = 4
 _FRESH_AFTER_ENV = "CIO_DIAGNOSTIC_FRESH_AFTER"
@@ -262,12 +265,52 @@ def _retry_aware_poll_render_audit(
             # wrapper preserves the original terminal failure as the primary evidence.
 
 
+def _verify_end_to_end_all_market_evaluation(
+    payload: Mapping[str, Any],
+    *,
+    expected_release: str,
+) -> None:
+    """Require the immutable lane proof and paper implementation boundary as well."""
+
+    _original_verify_complete_all_market_evaluation(
+        payload,
+        expected_release=expected_release,
+    )
+    failed: list[str] = []
+    for name in (
+        "all_market_runtime_certified",
+        "all_market_certification_integrity_valid",
+        "all_market_certification_release_matches",
+        "paper_implementation_complete",
+    ):
+        if payload.get(name) is not True:
+            failed.append(name)
+    for name in (
+        "all_market_certification_id",
+        "all_market_certification_epoch",
+        "all_market_certification_aggregate_sha256",
+    ):
+        if not str(payload.get(name) or "").strip():
+            failed.append(name)
+    if str(payload.get("schema_version") or "") != (
+        "public-cio-diagnostic-audit.v2-end-to-end"
+    ):
+        failed.append("end_to_end_audit_schema")
+    if failed:
+        raise _core.RenderAuditVerificationError(
+            "end-to-end all-market certification failed closed; failed="
+            + ", ".join(failed)
+            + f"; detail={str(payload.get('detail') or '')[:1000]}"
+        )
+
+
 _core.poll_render_audit = _retry_aware_poll_render_audit
+_core.verify_complete_all_market_evaluation = _verify_end_to_end_all_market_evaluation
 
 
 if __name__ == "__main__":
     raise SystemExit(_core.main())
 
 # Preserve historical imports and test monkeypatch behavior while exposing the patched
-# poller through the canonical module name.
+# poller and strict verifier through the canonical module name.
 sys.modules[__name__] = _core
