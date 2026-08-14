@@ -45,7 +45,12 @@ def validate_manifest(
         | set(inventory["specialized_supported"])
         | set(inventory["legacy"])
     )
-    actual = {path.name for path in root.glob("run_*.py")}
+    # Internal *_core.py modules back governed wrappers; they are not supported root commands.
+    actual = {
+        path.name
+        for path in root.glob("run_*.py")
+        if not path.name.endswith("_core.py")
+    }
     duplicates = sum(len(inventory[key]) for key in inventory) - len(classified)
     missing = sorted(actual - classified)
     extra = sorted(classified - actual)
