@@ -61,6 +61,7 @@ def public_all_market_certification(
         "all_market_certification_id": None,
         "all_market_certification_epoch": None,
         "all_market_certification_aggregate_sha256": None,
+        "all_market_certification_discovery_manifest_fingerprint": None,
     }
     latest = _load_object(_root(values) / "latest.json")
     if latest is None:
@@ -98,6 +99,9 @@ def public_all_market_certification(
 
     body = {str(key): value for key, value in aggregate.items() if key != "sha256"}
     embedded_sha = str(aggregate.get("sha256") or "").strip()
+    discovery_fingerprint = str(
+        aggregate.get("discovery_manifest_fingerprint") or ""
+    ).strip()
     integrity_valid = bool(
         embedded_sha
         and embedded_sha == aggregate_sha
@@ -105,6 +109,7 @@ def public_all_market_certification(
         and str(aggregate.get("certification_id") or "") == certification_id
         and str(aggregate.get("release_sha") or "") == release
         and str(aggregate.get("decision_epoch") or "") == decision_epoch
+        and discovery_fingerprint
     )
     certified = bool(
         integrity_valid and aggregate.get("all_market_runtime_certified") is True
@@ -116,6 +121,9 @@ def public_all_market_certification(
         "all_market_certification_id": certification_id,
         "all_market_certification_epoch": decision_epoch or None,
         "all_market_certification_aggregate_sha256": aggregate_sha,
+        "all_market_certification_discovery_manifest_fingerprint": (
+            discovery_fingerprint or None
+        ),
     }
 
 
