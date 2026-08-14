@@ -1,8 +1,18 @@
 """Focused regressions for the Render runtime-workspace bootstrap."""
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import run_render_service_workspace
 from run_render_service_workspace import prepare_runtime_workspace
+
+
+def _no_projected_headroom() -> dict[str, str]:
+    return {
+        "CAPITAL_INTELLIGENCE_REFERENCE_PUBLISH_HEADROOM_MB": "0",
+        "CAPITAL_INTELLIGENCE_RUNTIME_WORKSPACE_HEADROOM_MB": "0",
+    }
 
 
 def test_workspace_is_created_before_tempfile_users_start(tmp_path) -> None:
@@ -79,14 +89,14 @@ def test_reference_cleanup_reclaims_only_superseded_release_bindings(tmp_path) -
     ):
         path.write_text(path.name, encoding="utf-8")
 
-    prepare_runtime_workspace(
-        {
-            "TMPDIR": str(workspace),
-            "CAPITAL_INTELLIGENCE_DATA_DIR": str(data_root),
-            "RENDER_GIT_COMMIT": "current_release",
-            "CAPITAL_INTELLIGENCE_STORAGE_RESERVE_MB": "1",
-        }
-    )
+    environment = {
+        "TMPDIR": str(workspace),
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(data_root),
+        "RENDER_GIT_COMMIT": "current_release",
+        "CAPITAL_INTELLIGENCE_STORAGE_RESERVE_MB": "1",
+        **_no_projected_headroom(),
+    }
+    prepare_runtime_workspace(environment)
 
     assert not stale_manifest.exists()
     assert not stale_progress.exists()
@@ -96,6 +106,9 @@ def test_reference_cleanup_reclaims_only_superseded_release_bindings(tmp_path) -
     assert lane_component.exists()
     assert not interrupted_write.exists()
     assert not nested_interrupted_write.exists()
+    telemetry = json.loads(environment["CAPITAL_INTELLIGENCE_STORAGE_PREFLIGHT_JSON"])
+    assert telemetry["workspace_shared_filesystem"] is True
+    assert telemetry["required_free_mb"] == 1
 
 
 def test_reference_cleanup_preserves_release_bindings_without_identity(tmp_path) -> None:
@@ -115,12 +128,45 @@ def test_reference_cleanup_preserves_release_bindings_without_identity(tmp_path)
             "TMPDIR": str(workspace),
             "CAPITAL_INTELLIGENCE_DATA_DIR": str(data_root),
             "CAPITAL_INTELLIGENCE_STORAGE_RESERVE_MB": "1",
+            **_no_projected_headroom(),
         }
     )
 
     assert manifest.exists()
     assert progress.exists()
     assert not interrupted_write.exists()
+
+
+def test_storage_preflight_is_published_for_runtime_diagnostics(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    workspace = tmp_path / "runtime_transient"
+    data_root = tmp_path / "data"
+    snapshot = SimpleNamespace(
+        telemetry=lambda: {
+            "filesystem_total_mb": 25600,
+            "filesystem_free_mb": 20480,
+            "required_free_mb": 7168,
+            "workspace_shared_filesystem": True,
+        }
+    )
+    monkeypatch.setattr(
+        run_render_service_workspace,
+        "preflight_storage_capacity",
+        lambda _environment: snapshot,
+    )
+    environment = {
+        "TMPDIR": str(workspace),
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(data_root),
+    }
+
+    prepare_runtime_workspace(environment)
+
+    payload = json.loads(environment["CAPITAL_INTELLIGENCE_STORAGE_PREFLIGHT_JSON"])
+    assert payload["filesystem_total_mb"] == 25600
+    assert payload["filesystem_free_mb"] == 20480
+    assert payload["required_free_mb"] == 7168
+    assert "[storage-governance]" in capsys.readouterr().out
 
 
 def test_workspace_requires_explicit_tmpdir() -> None:
