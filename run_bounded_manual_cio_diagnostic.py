@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Mapping
 
-import run_bounded_manual_cio_diagnostic_core as _core
+import _bounded_manual_cio_diagnostic_core as _core
 from operations.reference_readiness import prepare_reference_readiness as _prepare_reference
 from providers.massive_futures_reference import MassiveFuturesReferenceProvider
 
