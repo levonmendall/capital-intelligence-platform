@@ -15,6 +15,9 @@ import sys
 from collections.abc import Mapping
 
 import run_bounded_manual_cio_diagnostic_core as _core
+from operations.cme_futures_reference_runtime import (
+    install_cme_futures_reference_lineage,
+)
 from operations.continuous_evidence_plane import (
     ensure_point_in_time_snapshot,
     evidence_plane_enabled,
@@ -68,6 +71,7 @@ def _prepare_with_rate_budget(
     values: Mapping[str, str],
     **kwargs: object,
 ):
+    install_cme_futures_reference_lineage()
     kwargs.setdefault(
         "massive_futures_provider",
         CmeFuturesReferenceProvider(
