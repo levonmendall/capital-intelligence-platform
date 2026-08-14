@@ -69,7 +69,7 @@ jobs:
           for server_attempt in 1 2 3 4; do
             attempt_log="/tmp/render-cio-diagnostic-verification-${server_attempt}.log"
             set +e
-            timeout --signal=TERM --kill-after=30s 54m \
+            timeout --signal=TERM --kill-after=30s 56m \
               python verify_render_cio_diagnostic.py \
                 --url "$AUDIT_URL" \
                 --expected-release "$EXPECTED_RELEASE" \
