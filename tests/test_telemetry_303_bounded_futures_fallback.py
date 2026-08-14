@@ -162,6 +162,7 @@ def test_empty_bounded_query_retries_single_index_with_local_point_in_time_filte
     assert telemetry["server_side_point_in_time_bound"] is False
     assert telemetry["local_point_in_time_validation"] is True
     assert telemetry["server_side_contract_type_bound"] is True
+    assert telemetry["request_attempts"] == 2
     assert telemetry["request_params"] == {
         "limit": 1000,
         "product_code": "ES",
