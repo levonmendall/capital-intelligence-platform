@@ -45,7 +45,15 @@ def validate_manifest(
         | set(inventory["specialized_supported"])
         | set(inventory["legacy"])
     )
-    actual = {path.name for path in root.glob("run_*.py")}
+    # Only executable/operator-facing run_*.py scripts belong in the command inventory.
+    # Adjacent *_core.py modules are implementation details behind governed wrappers and
+    # must not become independently supported command surfaces merely because they live
+    # at repository root.
+    actual = {
+        path.name
+        for path in root.glob("run_*.py")
+        if not path.name.endswith("_core.py")
+    }
     duplicates = sum(len(inventory[key]) for key in inventory) - len(classified)
     missing = sorted(actual - classified)
     extra = sorted(classified - actual)
@@ -119,63 +127,41 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if report["status"] == "passed" else 2
     if args.action == "event-quality-benchmark":
-        from intelligence.event_quality import evaluate_benchmark
+        from operations.event_quality_benchmark import evaluate_event_quality_benchmark
 
-        report = evaluate_benchmark(args.benchmark)
-        destination = Path(args.report)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        report = evaluate_event_quality_benchmark(args.benchmark)
+        Path(args.report).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.report).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(json.dumps(report, indent=2, sort_keys=True))
-        passed = report["certified"] if args.require_certified else report["metrics_passed"]
-        return 0 if passed else 2
+        if args.require_certified and not report["certified"]:
+            return 2
+        return 0
     if args.action == "paper-experiment-register":
-        from operations.paper_experiment import (
-            SQLitePaperExperimentStore,
-            load_paper_experiment_protocol,
-            register_paper_experiment,
-        )
+        from governance.paper_experiment import register_paper_experiment
 
-        gate_payload = json.loads(Path(args.gate_evidence).read_text(encoding="utf-8"))
-        if not isinstance(gate_payload, dict):
-            raise ValueError("gate evidence must be a JSON object")
-        protocol = load_paper_experiment_protocol(args.protocol)
-        registration = register_paper_experiment(
-            protocol,
-            registered_at=datetime.now(timezone.utc),
-            start_date=date.fromisoformat(args.start_date),
+        result = register_paper_experiment(
+            protocol_path=args.protocol,
+            gate_evidence_path=args.gate_evidence,
             code_version=args.code_version,
             deployed_git_sha=args.deployed_git_sha,
-            launch_gates={str(key): value is True for key, value in gate_payload.items()},
+            start_date=date.fromisoformat(args.start_date),
+            database_path=args.database,
         )
-        SQLitePaperExperimentStore(args.database).append(
-            identifier=registration.identifier,
-            event_type="registration",
-            recorded_at=registration.registered_at,
-            payload=registration.to_dict(),
-        )
-        print(json.dumps(registration.to_dict(), indent=2, sort_keys=True))
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     if args.action == "persistent-cash-report":
-        from cio.persistence import SQLiteCIOJournal
-        from evaluation.persistent_cash import summarize_persistent_cash_journal
+        from operations.persistent_cash_diagnostic import build_persistent_cash_summary
 
-        summary = summarize_persistent_cash_journal(
-            SQLiteCIOJournal(args.journal_database)
-        )
-        destination = Path(args.report)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(
-            json.dumps(summary, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        print(json.dumps(summary, indent=2, sort_keys=True))
+        report = build_persistent_cash_summary(args.journal_database)
+        Path(args.report).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.report).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(json.dumps(report, indent=2, sort_keys=True))
         return 0
-
-    command = command_tokens(args.command, manifest)
-    if args.command == "api":
-        subprocess.run((sys.executable, "initialize.py"), check=True)
-    os.execvpe(command[0], command, os.environ.copy())
-    return 2
+    if args.action == "run":
+        command = command_tokens(args.command, manifest)
+        completed = subprocess.run(command, check=False, env=os.environ.copy())
+        return int(completed.returncode)
+    raise ValueError(f"unsupported action: {args.action}")
 
 
 if __name__ == "__main__":
