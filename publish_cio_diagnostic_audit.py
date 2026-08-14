@@ -116,6 +116,16 @@ def _certificate_matches_current_context(
     )
 
 
+def _load_persisted_context(settings: object) -> Mapping[str, object]:
+    """Read the context proof if available; missing operational state stays fail-closed."""
+
+    try:
+        context = _load_json(_state_path(settings))
+    except (AttributeError, OSError, TypeError, ValueError):
+        return {}
+    return context if isinstance(context, Mapping) else {}
+
+
 def publish_cio_diagnostic_audit(
     *,
     values: Mapping[str, str] | None = None,
@@ -127,7 +137,7 @@ def publish_cio_diagnostic_audit(
         values=resolved,
     )
     certification = public_all_market_certification(resolved)
-    persisted_context = _load_json(_state_path(settings)) or {}
+    persisted_context = _load_persisted_context(settings)
     certification_context_matches = _certificate_matches_current_context(
         payload=payload,
         certification=certification,
