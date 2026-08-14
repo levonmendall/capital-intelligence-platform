@@ -20,12 +20,14 @@ from operations.all_market_lane_certification import (
 from operations.persistent_historical_evidence import install_persistent_historical_evidence
 from operations.persistent_option_reference import install_persistent_option_reference
 from operations.resumable_options_discovery import install_resumable_options_catalog
+from storage_governance import install_persistent_history_storage_governance
 
 
 install_checkpointed_market_probe(_core)
 install_resumable_options_catalog(_core)
 install_persistent_option_reference(_core)
 install_persistent_historical_evidence()
+install_persistent_history_storage_governance()
 
 # Keep the production terminal-screening resource bound visible at the public facade.
 # Several release guards intentionally inspect this module rather than implementation
