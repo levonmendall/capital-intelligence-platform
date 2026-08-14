@@ -68,31 +68,51 @@ def _paper_implementation_complete(payload: Mapping[str, object]) -> bool:
     }
 
 
+def _parse_timestamp(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
 def _certificate_matches_current_context(
     *,
     payload: Mapping[str, object],
     certification: Mapping[str, object],
     context: Mapping[str, object],
 ) -> bool:
-    """Bind the immutable lane proof to this diagnostic's exact PIT context."""
+    """Bind the immutable lane proof to this diagnostic's exact discovery state.
 
-    decision_as_of = str(context.get("decision_as_of") or "").strip()
+    Comprehensive discovery is frozen before downstream evidence collection finishes, so
+    its certification epoch is expected to precede the later production-context
+    decision_as_of. The exact discovery-manifest fingerprint is the stable same-cycle
+    identity; timestamps additionally prove the certificate is not future-known.
+    """
+
+    decision_as_of = _parse_timestamp(context.get("decision_as_of"))
+    certification_epoch = _parse_timestamp(
+        certification.get("all_market_certification_epoch")
+    )
     discovery_fingerprint = str(
         context.get("comprehensive_discovery_manifest_fingerprint") or ""
     ).strip()
+    certified_fingerprint = str(
+        certification.get("all_market_certification_discovery_manifest_fingerprint")
+        or ""
+    ).strip()
     return bool(
         payload.get("context_cycle_matches") is True
-        and decision_as_of
+        and decision_as_of is not None
+        and certification_epoch is not None
+        and certification_epoch <= decision_as_of
         and discovery_fingerprint
-        and str(certification.get("all_market_certification_epoch") or "").strip()
-        == decision_as_of
-        and str(
-            certification.get(
-                "all_market_certification_discovery_manifest_fingerprint"
-            )
-            or ""
-        ).strip()
-        == discovery_fingerprint
+        and certified_fingerprint == discovery_fingerprint
     )
 
 
