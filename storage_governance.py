@@ -383,6 +383,13 @@ def _finish_historical_write(store: object) -> None:
         # VACUUM-sized temporary copy. Resetting this rebuildable cache is the narrow,
         # immediately reclaiming option under disk pressure.
         _reset_historical_cache(root)
+        usage = shutil.disk_usage(root)
+    if usage.free < required:
+        raise StorageCapacityError(
+            "historical cache completion could not preserve projected all-market "
+            f"working-set capacity: free_bytes={usage.free} "
+            f"required_free_bytes={required}"
+        )
 
 
 def install_persistent_history_storage_governance(
