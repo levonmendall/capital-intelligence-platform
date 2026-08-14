@@ -38,7 +38,18 @@ def test_force_retry_primes_fresh_request_before_reference_readiness(tmp_path) -
     assert replacement is not None
     assert replacement.request_id != original.request_id
     assert replacement.state == "pending"
-    assert replacement.requested_by == "render-release-retry:release-536-repair"
+    assert replacement.requested_by == "render-release:release-536-repair"
+
+    child_request, child_created = request_manual_cio_diagnostic(
+        requested_by="render-release:release-536-repair",
+        values=values,
+    )
+    assert child_created is False
+    assert child_request.request_id == replacement.request_id
+    child_claim = claim_manual_cio_diagnostic(values=values)
+    assert child_claim is not None
+    assert child_claim.request_id == replacement.request_id
+    assert child_claim.state == "in_progress"
 
 
 def test_force_retry_does_not_replace_active_request(tmp_path) -> None:
