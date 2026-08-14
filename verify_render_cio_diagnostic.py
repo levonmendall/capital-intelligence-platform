@@ -1,17 +1,18 @@
 """Retry-aware entrypoint for exact-release Render CIO verification.
 
-The verifier core remains unchanged. This shim treats a terminal failure from an adopted
-server-side attempt as provisional because the Render release bootstrap can issue a
-bounded replacement attempt for the same exact release. A diagnostic that is already
-failed when polling begins keeps the caller's normal stale-failure grace. All verifier
-paths remain fail-closed.
+Deployment-triggered verification also enforces a request freshness boundary supplied by
+``CIO_DIAGNOSTIC_FRESH_AFTER``. This prevents an old exact-release diagnostic snapshot
+from being adopted after a redeploy of the same commit while preserving scheduled/manual
+verification behavior. All verifier paths remain fail-closed.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,120 @@ import verify_render_cio_diagnostic_core as _core
 _original_poll_render_audit = _core.poll_render_audit
 _SERVER_REPLACEMENT_GRACE_ATTEMPTS = 45
 _MAX_ADOPTED_FAILURES = 4
+_FRESH_AFTER_ENV = "CIO_DIAGNOSTIC_FRESH_AFTER"
+
+
+def _parse_utc(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _freshness_boundary() -> datetime | None:
+    return _parse_utc(os.getenv(_FRESH_AFTER_ENV))
+
+
+def _request_is_fresh(
+    payload: Mapping[str, Any],
+    *,
+    expected_release: str,
+    boundary: datetime,
+) -> bool:
+    request_id = str(payload.get("request_id") or "").strip()
+    requested_at = _parse_utc(payload.get("requested_at"))
+    return bool(
+        request_id
+        and requested_at is not None
+        and requested_at >= boundary
+        and str(payload.get("active_release") or "") == expected_release
+        and payload.get("release_matches") is True
+    )
+
+
+def _freshness_detail(
+    payload: Mapping[str, Any],
+    *,
+    boundary: datetime,
+) -> str:
+    return (
+        "stale_diagnostic_snapshot: exact-release verification did not observe a "
+        "post-deployment diagnostic request; "
+        f"request_id={str(payload.get('request_id') or '').strip() or 'unavailable'}; "
+        f"requested_at={str(payload.get('requested_at') or '').strip() or 'unavailable'}; "
+        f"fresh_after={boundary.isoformat()}; "
+        f"state={payload.get('state')!r}; stage={_core._progress_stage(payload)}"
+    )
+
+
+def _await_fresh_deployment_request(
+    *,
+    url: str,
+    expected_release: str,
+    output_path: Path,
+    fetcher: Callable[[str], Mapping[str, Any]],
+    sleeper: Callable[[float], None],
+    progress_writer: Callable[[str], None] | None,
+    interval_seconds: float,
+    boundary: datetime,
+) -> tuple[Mapping[str, Any], int]:
+    last_payload: Mapping[str, Any] | None = None
+    for attempt in range(1, _SERVER_REPLACEMENT_GRACE_ATTEMPTS + 1):
+        payload = fetcher(url)
+        last_payload = payload
+        _core._write_json(output_path, payload)
+        if _request_is_fresh(
+            payload,
+            expected_release=expected_release,
+            boundary=boundary,
+        ):
+            if progress_writer is not None:
+                progress_writer(
+                    json.dumps(
+                        {
+                            "event": "render_cio_diagnostic_fresh_request_observed",
+                            "attempt": attempt,
+                            "request_id": str(payload.get("request_id") or ""),
+                            "requested_at": str(payload.get("requested_at") or ""),
+                            "release_match": "yes",
+                        },
+                        sort_keys=True,
+                    )
+                )
+            return payload, attempt
+
+        if progress_writer is not None and (attempt == 1 or attempt % 2 == 0):
+            progress_writer(
+                json.dumps(
+                    {
+                        "event": "render_cio_diagnostic_freshness_wait",
+                        "attempt": attempt,
+                        "request_id": str(payload.get("request_id") or "") or None,
+                        "requested_at": str(payload.get("requested_at") or "") or None,
+                        "fresh_after": boundary.isoformat(),
+                        "release_match": (
+                            "yes"
+                            if str(payload.get("active_release") or "") == expected_release
+                            and payload.get("release_matches") is True
+                            else "no"
+                        ),
+                    },
+                    sort_keys=True,
+                )
+            )
+        if attempt < _SERVER_REPLACEMENT_GRACE_ATTEMPTS:
+            sleeper(interval_seconds)
+
+    assert last_payload is not None
+    raise _core.RenderAuditVerificationError(
+        _freshness_detail(last_payload, boundary=boundary)
+    )
 
 
 def _retry_aware_poll_render_audit(
@@ -36,8 +151,33 @@ def _retry_aware_poll_render_audit(
     clock: Callable[[], float] = _core.time.monotonic,
     progress_writer: Callable[[str], None] | None = print,
 ) -> Mapping[str, Any]:
+    active_fetcher = fetcher or (lambda target: _core._fetch_json(target))
+    boundary = _freshness_boundary()
+    prefetched: Mapping[str, Any] | None = None
+    freshness_attempts = 0
+    if boundary is not None:
+        prefetched, freshness_attempts = _await_fresh_deployment_request(
+            url=url,
+            expected_release=expected_release,
+            output_path=output_path,
+            fetcher=active_fetcher,
+            sleeper=sleeper,
+            progress_writer=progress_writer,
+            interval_seconds=interval_seconds,
+            boundary=boundary,
+        )
+
+    def next_fetch(target: str) -> Mapping[str, Any]:
+        nonlocal prefetched
+        if prefetched is not None:
+            payload = prefetched
+            prefetched = None
+            return payload
+        return active_fetcher(target)
+
     adopted_failures = 0
     awaiting_replacement = False
+    remaining_attempts = max(1, maximum_attempts - max(0, freshness_attempts - 1))
     while True:
         active_grace_attempts = (
             max(
@@ -52,10 +192,10 @@ def _retry_aware_poll_render_audit(
                 url=url,
                 expected_release=expected_release,
                 output_path=output_path,
-                maximum_attempts=maximum_attempts,
+                maximum_attempts=remaining_attempts,
                 interval_seconds=interval_seconds,
                 fresh_attempt_grace_attempts=active_grace_attempts,
-                fetcher=fetcher,
+                fetcher=next_fetch,
                 sleeper=sleeper,
                 clock=clock,
                 progress_writer=progress_writer,

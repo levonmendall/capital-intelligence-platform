@@ -41,6 +41,10 @@ jobs:
       EXPECTED_RELEASE: ${{ github.event.deployment.sha || github.event.inputs.expected_release || github.sha }}
       AUDIT_OUTPUT: /tmp/render-cio-diagnostic.json
       VERIFICATION_LOG: /tmp/render-cio-diagnostic-verification.log
+      # For deployment-triggered certification, accept only a diagnostic request
+      # created after this deployment was created. Scheduled/manual verification
+      # leaves the boundary empty and preserves its existing exact-release behavior.
+      CIO_DIAGNOSTIC_FRESH_AFTER: ${{ github.event.deployment.created_at || '' }}
     steps:
       - name: Check out exact release to verify
         uses: actions/checkout@v4
