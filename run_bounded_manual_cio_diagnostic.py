@@ -12,7 +12,7 @@ from collections.abc import Mapping
 
 import run_bounded_manual_cio_diagnostic_core as _core
 from operations.reference_readiness import prepare_reference_readiness as _prepare_reference
-from providers.massive_futures_reference_resilient import MassiveFuturesReferenceProvider
+from providers.massive_futures_reference_bounded import MassiveFuturesReferenceProvider
 
 
 def _prepare_with_rate_budget(
