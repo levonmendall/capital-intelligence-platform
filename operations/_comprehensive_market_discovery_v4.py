@@ -127,8 +127,6 @@ def _catalog_from_eodhd(
                 "completed_exchanges": completed,
                 "fallback_exchanges": fallback_count,
                 "failed_exchanges": 0,
-                "recovery_exchanges": 0,
-                "recovered_exchanges": 0,
             },
         )
         with ThreadPoolExecutor(
@@ -172,8 +170,6 @@ def _catalog_from_eodhd(
                         "completed_exchanges": completed,
                         "fallback_exchanges": fallback_count,
                         "failed_exchanges": len(failures),
-                        "recovery_exchanges": len(failures),
-                        "recovered_exchanges": 0,
                     },
                 )
 
@@ -182,7 +178,7 @@ def _catalog_from_eodhd(
             recovered = 0
             unresolved: list[tuple[int, str, Exception]] = []
             for exchange_index in sorted(failures):
-                exchange, initial_error = failures[exchange_index]
+                exchange, _initial_error = failures[exchange_index]
                 try:
                     recovered_exchange, snapshot = fetch_directory(exchange)
                 except Exception as recovery_error:
@@ -217,7 +213,6 @@ def _catalog_from_eodhd(
                         "recovered_exchanges": recovered,
                     },
                 )
-                del initial_error
 
             if unresolved:
                 exchange_index, _exchange, error = unresolved[0]
