@@ -55,7 +55,7 @@ def _prime_forced_replacement(values: Mapping[str, str]) -> None:
     if existing is None or existing.state not in {"completed", "failed"}:
         return
     request_manual_cio_diagnostic(
-        requested_by=f"render-release-retry:{_release(values)}",
+        requested_by=f"render-release:{_release(values)}",
         values=values,
     )
 
