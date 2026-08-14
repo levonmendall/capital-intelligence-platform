@@ -270,7 +270,7 @@ def _verify_end_to_end_all_market_evaluation(
     *,
     expected_release: str,
 ) -> None:
-    """Require the immutable lane proof and paper implementation boundary as well."""
+    """Require one exact-release, exact-context proof through paper implementation."""
 
     _original_verify_complete_all_market_evaluation(
         payload,
@@ -281,6 +281,7 @@ def _verify_end_to_end_all_market_evaluation(
         "all_market_runtime_certified",
         "all_market_certification_integrity_valid",
         "all_market_certification_release_matches",
+        "all_market_certification_context_matches",
         "paper_implementation_complete",
     ):
         if payload.get(name) is not True:
@@ -289,6 +290,7 @@ def _verify_end_to_end_all_market_evaluation(
         "all_market_certification_id",
         "all_market_certification_epoch",
         "all_market_certification_aggregate_sha256",
+        "all_market_certification_discovery_manifest_fingerprint",
     ):
         if not str(payload.get(name) or "").strip():
             failed.append(name)
