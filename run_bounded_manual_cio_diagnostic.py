@@ -1,8 +1,9 @@
 """Runtime entrypoint for the bounded CIO diagnostic reference layer.
 
-The watchdog core stays unchanged. This entrypoint injects the governed, rate-budgeted
-Massive futures-reference provider before the core starts reference readiness. Imported
-callers receive the core module so existing tests and monkeypatches keep their behavior.
+The watchdog core stays unchanged. This entrypoint injects generalized persistent
+reference readiness plus the governed, rate-budgeted Massive futures provider before the
+core starts reference preparation. Imported callers receive the core module so existing
+tests and monkeypatches keep their behavior.
 """
 
 from __future__ import annotations
@@ -11,7 +12,9 @@ import sys
 from collections.abc import Mapping
 
 import run_bounded_manual_cio_diagnostic_core as _core
-from operations.reference_readiness import prepare_reference_readiness as _prepare_reference
+from operations.generalized_reference_readiness import (
+    prepare_reference_readiness as _prepare_reference,
+)
 from providers.massive_futures_reference_bounded import MassiveFuturesReferenceProvider
 
 
