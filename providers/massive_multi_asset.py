@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 import requests
 
 from provider_environment import provider_environment_value
+from providers.massive_quota_governor import reserve_massive_request
 
 
 MASSIVE_BASE_URL = "https://api.massive.com"
@@ -72,12 +73,18 @@ class MassiveMultiAssetProvider:
             raise ValueError("backoff_seconds must be between 0 and 30")
         self.max_attempts = max_attempts
         self.backoff_seconds = float(backoff_seconds)
+        self._uses_default_http_get = http_get is None
         self._http_get = http_get or requests.get
         self._sleeper = sleeper or time_module.sleep
 
     @property
     def configured(self) -> bool:
         return bool(self.api_key)
+
+    def _reserve_request(self) -> float:
+        if not self._uses_default_http_get:
+            return 0.0
+        return reserve_massive_request(sleeper=self._sleeper)
 
     def daily_history(
         self,
@@ -264,6 +271,7 @@ class MassiveMultiAssetProvider:
         for attempt in range(1, self.max_attempts + 1):
             response = None
             try:
+                self._reserve_request()
                 response = self._http_get(url, params=params, timeout=self.timeout)
             except requests.RequestException as error:
                 current = MassiveMultiAssetError(

@@ -67,6 +67,7 @@ class MassiveFuturesReferenceProvider(_BoundedMassiveFuturesReferenceProvider):
     ) -> Mapping[str, Any]:
         response = None
         try:
+            self._reserve_request()
             response = self._http_get(url, params=params, timeout=self.timeout)
         except requests.RequestException as error:
             raise _ReferenceRequestError(
