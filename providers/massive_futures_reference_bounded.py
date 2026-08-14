@@ -3,8 +3,8 @@
 The strict dated provider remains the canonical path. The resilient provider owns the
 near-current compatibility fallback when Massive accepts the dated request but returns
 no records. This wrapper narrows only that fallback at the provider using the original
-as-of trade window before pagination starts, while the inherited local point-in-time
-checks remain authoritative and fail closed.
+as-of trade window and the governed outright-contract type before pagination starts,
+while the inherited local point-in-time checks remain authoritative and fail closed.
 
 No investment, construction, execution, threshold, market-scope, or real-money behavior
 is changed here.
@@ -23,7 +23,7 @@ from providers.massive_multi_asset import MassiveFuturesContract
 
 
 class MassiveFuturesReferenceProvider(_ResilientMassiveFuturesReferenceProvider):
-    """Apply an as-of trade-window bound to the near-current compatibility fallback."""
+    """Apply governed server-side bounds to the near-current compatibility fallback."""
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
@@ -51,13 +51,20 @@ class MassiveFuturesReferenceProvider(_ResilientMassiveFuturesReferenceProvider)
             bounded_params = dict(params)
             bounded_params["first_trade_date.lte"] = reference_date
             bounded_params["last_trade_date.gte"] = reference_date
+            # The governed futures lane represents outright dated futures only. Massive
+            # returns both single and combo contracts when type is omitted; requesting
+            # singles prevents non-investable spread/combo rows from consuming the
+            # completeness pagination budget without changing configured product roots.
+            bounded_params["type"] = "single"
 
             sanitized = root_telemetry.get("request_params")
             if isinstance(sanitized, dict):
                 sanitized["first_trade_date.lte"] = reference_date
                 sanitized["last_trade_date.gte"] = reference_date
-            root_telemetry["query_mode"] = "current_active_trade_window_without_date"
+                sanitized["type"] = "single"
+            root_telemetry["query_mode"] = "current_active_single_trade_window_without_date"
             root_telemetry["server_side_point_in_time_bound"] = True
+            root_telemetry["server_side_contract_type_bound"] = True
 
         return super()._reference_get(
             url,
