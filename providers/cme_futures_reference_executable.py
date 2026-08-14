@@ -5,6 +5,12 @@ publish exchange/Globex aliases. Databento and the existing exact-futures eviden
 consume CME raw symbols, which are usually one-year-digit symbols (for example ESU6) but
 can be two-year-digit symbols for newer listings. Prefer CME's explicit Globex alias when
 present and derive the conventional one-digit symbol only as a fallback.
+
+CME clearing product IDs are not always the same as Globex roots. For example, CME
+publishes 10-Year T-Note as clearing code ``21`` with Globex root ``ZN`` and major FX
+contracts as clearing codes such as ``EC``/``BP``/``J1`` with Globex roots
+``6E``/``6B``/``6J``. Configured-root completeness therefore resolves each FPRF
+instrument through its Globex alias before applying the fail-closed coverage test.
 """
 
 from __future__ import annotations
@@ -24,6 +30,9 @@ from providers.cme_futures_reference import (
     _parse_date,
 )
 from providers.massive_multi_asset import MassiveFuturesContract, MassiveMultiAssetError
+
+
+_GLOBEX_ALIAS_SOURCES = ("101", "103", "8")
 
 
 def _valid_raw_symbol(candidate: object, product: str) -> str | None:
@@ -50,6 +59,48 @@ def _derived_raw_symbol(product: str, maturity: str) -> str | None:
     return f"{product}{month_code}{str(year)[-1]}"
 
 
+def _instrument_aliases(element: ElementTree.Element) -> dict[str, tuple[str, ...]]:
+    aliases: dict[str, list[str]] = {}
+    for child in element:
+        if _local_name(child.tag) != "AID":
+            continue
+        source = str(child.attrib.get("AltIDSrc") or "").strip()
+        value = str(child.attrib.get("AltID") or "").strip()
+        if source and value:
+            aliases.setdefault(source, []).append(value)
+    return {source: tuple(values) for source, values in aliases.items()}
+
+
+def _configured_root_for_instrument(
+    element: ElementTree.Element,
+    roots: set[str],
+) -> str | None:
+    """Resolve a configured Globex root from one CME clearing instrument.
+
+    FPRF ``Instrmt.ID`` is a clearing code and cannot be treated as the executable root.
+    Exact equality remains valid for products whose clearing and Globex codes coincide,
+    while Globex aliases are authoritative when the codes differ.
+    """
+
+    ordered_roots = tuple(sorted(roots, key=lambda item: (-len(item), item)))
+    clearing_id = str(element.attrib.get("ID") or "").strip().upper()
+    direct_symbol = str(element.attrib.get("Sym") or "").strip().upper()
+
+    for root in ordered_roots:
+        if clearing_id == root or direct_symbol == root:
+            return root
+        if _valid_raw_symbol(direct_symbol, root) is not None:
+            return root
+
+    aliases = _instrument_aliases(element)
+    for source in _GLOBEX_ALIAS_SOURCES:
+        for candidate in aliases.get(source, ()):  # CME Globex is normally source 101.
+            for root in ordered_roots:
+                if _valid_raw_symbol(candidate, root) is not None:
+                    return root
+    return None
+
+
 class CmeExecutableFuturesReferenceProvider(CmeFuturesReferenceProvider):
     """CME-primary reference provider that preserves executable Globex symbology."""
 
@@ -58,18 +109,12 @@ class CmeExecutableFuturesReferenceProvider(CmeFuturesReferenceProvider):
         direct = _valid_raw_symbol(element.attrib.get("Sym"), product)
         if direct is not None:
             return direct
-        aliases: dict[str, str] = {}
-        for child in element:
-            if _local_name(child.tag) != "AID":
-                continue
-            source = str(child.attrib.get("AltIDSrc") or "").strip()
-            value = str(child.attrib.get("AltID") or "").strip()
-            if source and value:
-                aliases[source] = value
-        for source in ("103", "8"):
-            alias = _valid_raw_symbol(aliases.get(source), product)
-            if alias is not None:
-                return alias
+        aliases = _instrument_aliases(element)
+        for source in _GLOBEX_ALIAS_SOURCES:
+            for candidate in aliases.get(source, ()):
+                alias = _valid_raw_symbol(candidate, product)
+                if alias is not None:
+                    return alias
         return _derived_raw_symbol(product, maturity)
 
     def _collect_file(
@@ -102,6 +147,7 @@ class CmeExecutableFuturesReferenceProvider(CmeFuturesReferenceProvider):
         current_business_date: date | None = None
         instrument_count = 0
         matched_count = 0
+        matched_roots: set[str] = set()
         try:
             for event, element in ElementTree.iterparse(self._stream(response), events=("start", "end")):
                 name = _local_name(element.tag)
@@ -114,10 +160,13 @@ class CmeExecutableFuturesReferenceProvider(CmeFuturesReferenceProvider):
                     continue
                 if name == "Instrmt":
                     instrument_count += 1
-                    product = str(element.attrib.get("ID") or "").strip().upper()
                     security_type = str(element.attrib.get("SecTyp") or "").strip().upper()
                     status_text = str(element.attrib.get("Status") or "").strip()
-                    if product not in roots or security_type != "FUT" or status_text != "1":
+                    if security_type != "FUT" or status_text != "1":
+                        element.clear()
+                        continue
+                    product = _configured_root_for_instrument(element, roots)
+                    if product is None:
                         element.clear()
                         continue
                     maturity = str(element.attrib.get("MMY") or "").strip()
@@ -158,6 +207,7 @@ class CmeExecutableFuturesReferenceProvider(CmeFuturesReferenceProvider):
                         )
                     )
                     matched_count += 1
+                    matched_roots.add(product)
                     element.clear()
                 elif name == "SecDef":
                     current_business_date = None
@@ -175,6 +225,8 @@ class CmeExecutableFuturesReferenceProvider(CmeFuturesReferenceProvider):
             "http_status": status,
             "instrument_count": instrument_count,
             "matched_contract_count": matched_count,
+            "matched_roots": sorted(matched_roots),
+            "missing_roots": sorted(roots - matched_roots),
             "failure_reason": "ok",
         }
 
