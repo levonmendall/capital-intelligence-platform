@@ -79,7 +79,14 @@ def _catalog_from_eodhd(
     policy,
     requested_asset_classes: frozenset[CandidateAssetClass] | None = None,
 ):
-    """Prefetch independent requested directories, then use unchanged v4 parsing."""
+    """Prefetch requested directories with bounded serial recovery, then parse.
+
+    The normal path remains bounded parallel I/O. If one or more exchange reads fail,
+    successful exchange snapshots are retained and only the failed exchanges receive one
+    serial recovery attempt. This removes burst/rate-limit sensitivity without changing
+    completeness: any exchange that remains unresolved after that bounded recovery still
+    aborts the catalog fail-closed.
+    """
 
     _base._reject_evidence_only_eodhd_directories(config)
     directory_lanes = frozenset(
@@ -112,14 +119,14 @@ def _catalog_from_eodhd(
         attempted = len(requested_exchanges)
         completed = 0
         fallback_count = 0
-        failed = 0
+        failures: dict[int, tuple[str, Exception]] = {}
         _base.record_manual_cio_diagnostic_progress(
             "catalog_eodhd_directory",
             metrics={
                 "attempted_exchanges": attempted,
                 "completed_exchanges": completed,
                 "fallback_exchanges": fallback_count,
-                "failed_exchanges": failed,
+                "failed_exchanges": 0,
             },
         )
         with ThreadPoolExecutor(
@@ -133,8 +140,11 @@ def _catalog_from_eodhd(
                 exchange_index = pending[future]
                 try:
                     exchange, snapshot = future.result()
-                except Exception:
-                    failed += 1
+                except Exception as error:
+                    failures[exchange_index] = (
+                        requested_exchanges[exchange_index],
+                        error,
+                    )
                     _base.record_manual_cio_diagnostic_progress(
                         "catalog_eodhd_directory",
                         metrics={
@@ -142,10 +152,12 @@ def _catalog_from_eodhd(
                             "attempted_exchanges": attempted,
                             "completed_exchanges": completed,
                             "fallback_exchanges": fallback_count,
-                            "failed_exchanges": failed,
+                            "failed_exchanges": len(failures),
+                            "recovery_exchanges": len(failures),
+                            "recovered_exchanges": 0,
                         },
                     )
-                    raise
+                    continue
                 snapshots[exchange] = snapshot
                 completed += 1
                 if getattr(snapshot, "quality_state", None) is DataQualityState.FALLBACK:
@@ -157,9 +169,66 @@ def _catalog_from_eodhd(
                         "attempted_exchanges": attempted,
                         "completed_exchanges": completed,
                         "fallback_exchanges": fallback_count,
-                        "failed_exchanges": failed,
+                        "failed_exchanges": len(failures),
                     },
                 )
+
+        if failures:
+            recovery_total = len(failures)
+            recovered = 0
+            unresolved: list[tuple[int, str, Exception]] = []
+            for exchange_index in sorted(failures):
+                exchange, _initial_error = failures[exchange_index]
+                try:
+                    recovered_exchange, snapshot = fetch_directory(exchange)
+                except Exception as recovery_error:
+                    unresolved.append((exchange_index, exchange, recovery_error))
+                    _base.record_manual_cio_diagnostic_progress(
+                        "catalog_eodhd_directory",
+                        metrics={
+                            "exchange_index": exchange_index,
+                            "attempted_exchanges": attempted,
+                            "completed_exchanges": completed,
+                            "fallback_exchanges": fallback_count,
+                            "failed_exchanges": len(unresolved),
+                            "recovery_exchanges": recovery_total,
+                            "recovered_exchanges": recovered,
+                        },
+                    )
+                    continue
+                snapshots[recovered_exchange] = snapshot
+                completed += 1
+                recovered += 1
+                if getattr(snapshot, "quality_state", None) is DataQualityState.FALLBACK:
+                    fallback_count += 1
+                _base.record_manual_cio_diagnostic_progress(
+                    "catalog_eodhd_directory",
+                    metrics={
+                        "exchange_index": exchange_index,
+                        "attempted_exchanges": attempted,
+                        "completed_exchanges": completed,
+                        "fallback_exchanges": fallback_count,
+                        "failed_exchanges": len(unresolved),
+                        "recovery_exchanges": recovery_total,
+                        "recovered_exchanges": recovered,
+                    },
+                )
+
+            if unresolved:
+                exchange_index, _exchange, error = unresolved[0]
+                _base.record_manual_cio_diagnostic_progress(
+                    "catalog_eodhd_directory",
+                    metrics={
+                        "exchange_index": exchange_index,
+                        "attempted_exchanges": attempted,
+                        "completed_exchanges": completed,
+                        "fallback_exchanges": fallback_count,
+                        "failed_exchanges": len(unresolved),
+                        "recovery_exchanges": recovery_total,
+                        "recovered_exchanges": recovered,
+                    },
+                )
+                raise error
 
     return _base._catalog_from_eodhd(
         as_of=as_of,
