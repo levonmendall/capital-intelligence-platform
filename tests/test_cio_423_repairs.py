@@ -36,15 +36,19 @@ def _failed_payload(release: str, request_id: str) -> dict[str, object]:
     }
 
 
-def test_verifier_adopts_active_exact_release_and_reports_its_terminal_failure(
+def test_verifier_waits_for_bounded_replacements_then_reports_terminal_failure(
     tmp_path: Path,
 ) -> None:
     release = "release-current"
-    request_id = "fresh-active-request"
+    request_ids = tuple(f"fresh-active-request-{index}" for index in range(1, 5))
     payloads = iter(
-        (
-            _active_payload(release, request_id),
-            _failed_payload(release, request_id),
+        tuple(
+            payload
+            for request_id in request_ids
+            for payload in (
+                _active_payload(release, request_id),
+                _failed_payload(release, request_id),
+            )
         )
     )
     sleeps: list[float] = []
@@ -61,7 +65,7 @@ def test_verifier_adopts_active_exact_release_and_reports_its_terminal_failure(
             progress_writer=None,
         )
 
-    assert sleeps == [0.25]
+    assert sleeps == [0.25, 0.25, 0.25, 0.25]
 
 
 def test_production_style_catalog_stage_records_resource_metrics(
