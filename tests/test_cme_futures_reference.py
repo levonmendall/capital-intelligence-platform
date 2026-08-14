@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from providers.cme_futures_reference import CmeFuturesReferenceProvider
+from providers.cme_futures_reference_executable import (
+    CmeExecutableFuturesReferenceProvider,
+)
 from providers.massive_multi_asset import MassiveFuturesContract, MassiveMultiAssetError
 
 
@@ -57,6 +59,16 @@ def _fprf(*rows: tuple[str, str, str, str]) -> str:
     return "<FIXML><Batch>" + "".join(secdefs) + "</Batch></FIXML>"
 
 
+def _fprf_with_globex_alias() -> str:
+    return '''<FIXML><Batch><SecDef BizDt="2026-08-14">
+  <Instrmt ID="NG" Src="H" MMY="202507" SecTyp="FUT" Exch="NYMEX" Status="1" MatDt="2026-09-18">
+    <AID AltID="NGN25" AltIDSrc="103" />
+    <Evnt EventTyp="5" Dt="2025-01-01" />
+    <Evnt EventTyp="7" Dt="2026-09-18" />
+  </Instrmt>
+</SecDef></Batch></FIXML>'''
+
+
 def _massive_contract(root: str, ticker: str, venue: str) -> MassiveFuturesContract:
     return MassiveFuturesContract(
         ticker=ticker,
@@ -78,9 +90,9 @@ def test_cme_is_primary_and_daily_snapshot_is_reused(tmp_path) -> None:
             "https://example/nymex.xml": _fprf(("CL", "NYMEX", "202609", "2026-09-18")),
         }
     )
-    fallback = _Fallback((_massive_contract("ES", "ESU26", "CME"),))
+    fallback = _Fallback((_massive_contract("ES", "ESU6", "CME"),))
     as_of = datetime(2026, 8, 14, 18, 0, tzinfo=timezone.utc)
-    provider = CmeFuturesReferenceProvider(
+    provider = CmeExecutableFuturesReferenceProvider(
         fallback_provider=fallback,
         http_get=getter,
         file_urls=urls,
@@ -91,7 +103,7 @@ def test_cme_is_primary_and_daily_snapshot_is_reused(tmp_path) -> None:
     first = provider.futures_contracts(as_of=as_of, product_codes=("ES", "CL"))
     second = provider.futures_contracts(as_of=as_of, product_codes=("ES", "CL"))
 
-    assert [(item.product_code, item.ticker) for item in first] == [("CL", "CLU26"), ("ES", "ESU26")]
+    assert [(item.product_code, item.ticker) for item in first] == [("CL", "CLU6"), ("ES", "ESU6")]
     assert second == first
     assert fallback.calls == 0
     assert getter.calls == ["https://example/cme.xml", "https://example/nymex.xml"]
@@ -101,17 +113,33 @@ def test_cme_is_primary_and_daily_snapshot_is_reused(tmp_path) -> None:
     assert len(cache_files) == 1
 
 
+def test_explicit_cme_globex_alias_wins_over_derived_symbol(tmp_path) -> None:
+    provider = CmeExecutableFuturesReferenceProvider(
+        http_get=_MappedGet({"https://example/nymex.xml": _fprf_with_globex_alias()}),
+        file_urls=(("NYMEX", "https://example/nymex.xml"),),
+        values={"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)},
+        now=lambda: datetime(2026, 8, 14, 18, 0, tzinfo=timezone.utc),
+    )
+
+    contracts = provider.futures_contracts(
+        as_of=datetime(2026, 8, 14, 18, 0, tzinfo=timezone.utc),
+        product_codes=("NG",),
+    )
+
+    assert [item.ticker for item in contracts] == ["NGN25"]
+
+
 def test_incomplete_cme_uses_complete_massive_fallback(tmp_path) -> None:
     getter = _MappedGet(
         {"https://example/cme.xml": _fprf(("ES", "CME", "202609", "2026-09-18"))}
     )
     fallback = _Fallback(
         (
-            _massive_contract("ES", "ESU26", "CME"),
-            _massive_contract("CL", "CLU26", "NYMEX"),
+            _massive_contract("ES", "ESU6", "CME"),
+            _massive_contract("CL", "CLU6", "NYMEX"),
         )
     )
-    provider = CmeFuturesReferenceProvider(
+    provider = CmeExecutableFuturesReferenceProvider(
         fallback_provider=fallback,
         http_get=getter,
         file_urls=(("CME", "https://example/cme.xml"),),
@@ -129,7 +157,7 @@ def test_incomplete_cme_uses_complete_massive_fallback(tmp_path) -> None:
 
 
 def test_incomplete_cme_without_fallback_remains_fail_closed(tmp_path) -> None:
-    provider = CmeFuturesReferenceProvider(
+    provider = CmeExecutableFuturesReferenceProvider(
         http_get=_MappedGet(
             {"https://example/cme.xml": _fprf(("ES", "CME", "202609", "2026-09-18"))}
         ),
