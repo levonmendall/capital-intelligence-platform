@@ -142,7 +142,7 @@ def test_successful_diagnostic_uses_triggered_cycle_and_paper_controls(
     monkeypatch.setattr(
         diagnostic,
         "attempt_paper_execution",
-        lambda **_: SimpleNamespace(state="idle"),
+        lambda **_: SimpleNamespace(state="idle", completed=True),
     )
     published = []
     monkeypatch.setattr(
