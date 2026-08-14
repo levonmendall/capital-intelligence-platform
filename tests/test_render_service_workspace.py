@@ -14,27 +14,29 @@ def test_workspace_is_created_before_tempfile_users_start(tmp_path) -> None:
     assert workspace.is_dir()
 
 
-def test_workspace_cleanup_removes_only_disposable_backup_staging(tmp_path) -> None:
+def test_workspace_cleanup_reclaims_all_non_symlink_disposable_contents(tmp_path) -> None:
     workspace = tmp_path / "runtime_transient"
     workspace.mkdir()
     abandoned_backup = workspace / "capital-intelligence-backup-old"
     abandoned_verify = workspace / "capital-intelligence-verify-old"
     abandoned_restore = workspace / "capital-intelligence-restore-old"
     evidence_spool = workspace / "paper_evidence_spool"
-    unrelated = workspace / "canonical-looking-do-not-delete"
+    unrelated_scratch = workspace / "old-provider-scratch"
+    stale_file = workspace / "partial-download.tmp"
     symlink_target = tmp_path / "outside"
     symlink_target.mkdir()
-    symlink = workspace / "capital-intelligence-backup-link"
+    symlink = workspace / "external-link"
 
     for directory in (
         abandoned_backup,
         abandoned_verify,
         abandoned_restore,
         evidence_spool,
-        unrelated,
+        unrelated_scratch,
     ):
         directory.mkdir()
-        (directory / "sentinel").write_text("preserve semantics", encoding="utf-8")
+        (directory / "sentinel").write_text("disposable", encoding="utf-8")
+    stale_file.write_text("disposable", encoding="utf-8")
     symlink.symlink_to(symlink_target, target_is_directory=True)
 
     prepare_runtime_workspace({"TMPDIR": str(workspace)})
@@ -42,8 +44,9 @@ def test_workspace_cleanup_removes_only_disposable_backup_staging(tmp_path) -> N
     assert not abandoned_backup.exists()
     assert not abandoned_verify.exists()
     assert not abandoned_restore.exists()
-    assert evidence_spool.exists()
-    assert unrelated.exists()
+    assert not evidence_spool.exists()
+    assert not unrelated_scratch.exists()
+    assert not stale_file.exists()
     assert symlink.is_symlink()
     assert symlink_target.exists()
 
@@ -62,6 +65,7 @@ def test_reference_cleanup_reclaims_only_superseded_release_bindings(tmp_path) -
     aggregate_component = reference_root / "eodhd_directories-latest-qualified.json"
     lane_component = components / "catalog-latest-qualified.json"
     interrupted_write = reference_root / "eodhd_directories-latest-qualified.json.tmp"
+    nested_interrupted_write = components / "catalog-latest-qualified.json.tmp"
 
     for path in (
         stale_manifest,
@@ -71,6 +75,7 @@ def test_reference_cleanup_reclaims_only_superseded_release_bindings(tmp_path) -
         aggregate_component,
         lane_component,
         interrupted_write,
+        nested_interrupted_write,
     ):
         path.write_text(path.name, encoding="utf-8")
 
@@ -79,6 +84,7 @@ def test_reference_cleanup_reclaims_only_superseded_release_bindings(tmp_path) -
             "TMPDIR": str(workspace),
             "CAPITAL_INTELLIGENCE_DATA_DIR": str(data_root),
             "RENDER_GIT_COMMIT": "current_release",
+            "CAPITAL_INTELLIGENCE_STORAGE_RESERVE_MB": "1",
         }
     )
 
@@ -89,6 +95,7 @@ def test_reference_cleanup_reclaims_only_superseded_release_bindings(tmp_path) -
     assert aggregate_component.exists()
     assert lane_component.exists()
     assert not interrupted_write.exists()
+    assert not nested_interrupted_write.exists()
 
 
 def test_reference_cleanup_preserves_release_bindings_without_identity(tmp_path) -> None:
@@ -107,6 +114,7 @@ def test_reference_cleanup_preserves_release_bindings_without_identity(tmp_path)
         {
             "TMPDIR": str(workspace),
             "CAPITAL_INTELLIGENCE_DATA_DIR": str(data_root),
+            "CAPITAL_INTELLIGENCE_STORAGE_RESERVE_MB": "1",
         }
     )
 
