@@ -29,7 +29,9 @@ from operations.manual_cio_diagnostic import (
     latest_manual_cio_diagnostic,
     request_manual_cio_diagnostic,
 )
-from providers.cme_futures_reference import CmeFuturesReferenceProvider
+from providers.cme_futures_reference_executable import (
+    CmeExecutableFuturesReferenceProvider,
+)
 from providers.massive_futures_reference_rate_resilient import (
     MassiveFuturesReferenceProvider,
 )
@@ -74,7 +76,7 @@ def _prepare_with_rate_budget(
     install_cme_futures_reference_lineage()
     kwargs.setdefault(
         "massive_futures_provider",
-        CmeFuturesReferenceProvider(
+        CmeExecutableFuturesReferenceProvider(
             fallback_provider=MassiveFuturesReferenceProvider(),
             values=values,
         ),
