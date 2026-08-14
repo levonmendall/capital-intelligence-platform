@@ -5,7 +5,7 @@ collection and encrypted-backup verification can legitimately require larger
 cycle-local working sets. This entrypoint creates the configured TMPDIR on the
 persistent service disk, removes abandoned disposable runtime state, reclaims only
 superseded release-bound reference-readiness cache, and establishes the governed
-persistent-filesystem reserve before importing the memory-safe bootstrap.
+persistent-filesystem capacity before importing the memory-safe bootstrap.
 
 Reusable reference components, the current exact-release manifest/progress, canonical
 state, backups, and all investment/CIO artifacts are preserved. Historical market
@@ -16,6 +16,7 @@ real-money authority.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -27,6 +28,7 @@ _REFERENCE_RELEASE_PREFIXES = (
     "instrument-master-",
     "progress-",
 )
+_STORAGE_PREFLIGHT_ENV = "CAPITAL_INTELLIGENCE_STORAGE_PREFLIGHT_JSON"
 
 
 def _release(values: dict[str, str]) -> str:
@@ -110,6 +112,22 @@ def _cleanup_reference_readiness_cache(values: dict[str, str]) -> None:
             candidate.unlink(missing_ok=True)
 
 
+def _publish_storage_preflight(
+    environment: dict[str, str],
+    snapshot: object,
+) -> None:
+    telemetry = getattr(snapshot, "telemetry", None)
+    if not callable(telemetry):
+        return
+    payload = json.dumps(
+        telemetry(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    environment[_STORAGE_PREFLIGHT_ENV] = payload
+    print(f"[storage-governance] {payload}", flush=True)
+
+
 def prepare_runtime_workspace(values: dict[str, str] | None = None) -> Path:
     environment = os.environ if values is None else values
     raw = environment.get("TMPDIR", "").strip()
@@ -120,7 +138,9 @@ def prepare_runtime_workspace(values: dict[str, str] | None = None) -> Path:
 
     _cleanup_disposable_workspace(workspace)
     _cleanup_reference_readiness_cache(environment)
-    preflight_storage_capacity(environment)
+    snapshot = preflight_storage_capacity(environment)
+    if snapshot is not None:
+        _publish_storage_preflight(environment, snapshot)
 
     # tempfile.gettempdir() consults TMPDIR only if the directory exists. The
     # workspace must therefore be created before importing the production
