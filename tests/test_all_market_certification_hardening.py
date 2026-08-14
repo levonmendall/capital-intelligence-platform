@@ -93,6 +93,7 @@ def test_public_all_market_certificate_requires_exact_hash_and_release(
     release = "abc123"
     certification_id = "cert-1"
     epoch = "2026-08-14T20:00:00+00:00"
+    discovery_fingerprint = "discovery-manifest-abc"
     body = {
         "schema_version": "all-market-lane-certification.v1",
         "certification_id": certification_id,
@@ -100,6 +101,7 @@ def test_public_all_market_certificate_requires_exact_hash_and_release(
         "decision_epoch": epoch,
         "required_lanes": ["crypto"],
         "lane_artifact_sha256": {"crypto": "lane-hash"},
+        "discovery_manifest_fingerprint": discovery_fingerprint,
         "all_market_runtime_certified": True,
         "blocking_reasons": [],
         "candidate_count_limit_applied": False,
@@ -136,6 +138,10 @@ def test_public_all_market_certificate_requires_exact_hash_and_release(
     assert proof["all_market_runtime_certified"] is True
     assert proof["all_market_certification_integrity_valid"] is True
     assert proof["all_market_certification_release_matches"] is True
+    assert (
+        proof["all_market_certification_discovery_manifest_fingerprint"]
+        == discovery_fingerprint
+    )
 
     (certification_dir / "aggregate.json").write_text(
         json.dumps({**body, "blocking_reasons": ["tampered"], "sha256": aggregate_sha}),
@@ -172,9 +178,11 @@ def _successful_public_audit() -> dict[str, object]:
         "all_market_runtime_certified": True,
         "all_market_certification_integrity_valid": True,
         "all_market_certification_release_matches": True,
+        "all_market_certification_context_matches": True,
         "all_market_certification_id": "cert-1",
         "all_market_certification_epoch": "2026-08-14T20:00:00+00:00",
         "all_market_certification_aggregate_sha256": "a" * 64,
+        "all_market_certification_discovery_manifest_fingerprint": "discovery-manifest-abc",
         "paper_implementation_complete": True,
         "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
     }
@@ -193,5 +201,13 @@ def test_verifier_requires_end_to_end_proof() -> None:
     with pytest.raises(verifier.RenderAuditVerificationError):
         verifier.verify_complete_all_market_evaluation(
             incomplete,
+            expected_release="release-1",
+        )
+
+    stale_context = _successful_public_audit()
+    stale_context["all_market_certification_context_matches"] = False
+    with pytest.raises(verifier.RenderAuditVerificationError):
+        verifier.verify_complete_all_market_evaluation(
+            stale_context,
             expected_release="release-1",
         )
