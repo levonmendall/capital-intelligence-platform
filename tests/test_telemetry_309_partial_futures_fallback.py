@@ -103,6 +103,9 @@ def test_partial_fallback_remains_fail_closed_and_preserves_root_telemetry() -> 
             _FakeResponse(200, {"results": []}),
             _FakeResponse(200, {"results": []}),
             _FakeResponse(200, {"results": []}),
+            # Telemetry #512 repair retries an empty type=single index without the
+            # provider-side type predicate. An empty response must still fail closed.
+            _FakeResponse(200, {"results": []}),
         ]
     )
 
@@ -113,11 +116,18 @@ def test_partial_fallback_remains_fail_closed_and_preserves_root_telemetry() -> 
             maximum_pages=1,
         )
 
-    assert len(getter.calls) == 4
+    assert len(getter.calls) == 5
+    assert getter.calls[3][1]["product_code"] == "NQ"
+    assert getter.calls[3][1]["type"] == "single"
+    assert getter.calls[4][1]["product_code"] == "NQ"
+    assert "type" not in getter.calls[4][1]
+
     telemetry = {str(row["root"]): row for row in provider.reference_telemetry}
     assert set(telemetry) == {"ES", "NQ"}
     assert telemetry["ES"]["usable_count"] == 1
     assert telemetry["ES"]["failure_reason"] == "ok"
     assert telemetry["NQ"]["usable_count"] == 0
     assert telemetry["NQ"]["fallback_used"] is True
+    assert telemetry["NQ"]["untyped_empty_retry_used"] is True
+    assert telemetry["NQ"]["local_contract_type_validation"] is True
     assert telemetry["NQ"]["failure_reason"] == "empty_current_fallback_response"
