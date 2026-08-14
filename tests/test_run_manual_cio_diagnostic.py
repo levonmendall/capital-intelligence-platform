@@ -142,7 +142,7 @@ def test_successful_diagnostic_uses_triggered_cycle_and_paper_controls(
     monkeypatch.setattr(
         diagnostic,
         "attempt_paper_execution",
-        lambda **_: SimpleNamespace(state="idle", completed=True),
+        lambda **_: SimpleNamespace(state="completed", completed=True),
     )
     published = []
     monkeypatch.setattr(
@@ -154,7 +154,7 @@ def test_successful_diagnostic_uses_triggered_cycle_and_paper_controls(
     assert diagnostic.run_diagnostic_once(values=values) == 0
     assert len(calls) == 1
     assert calls[0][0].startswith("manual-diagnostic-")
-    assert published[0]["execution_state"] == "idle"
+    assert published[0]["execution_state"] == "completed"
 
     record = latest_manual_cio_diagnostic(values=values)
     assert record is not None
