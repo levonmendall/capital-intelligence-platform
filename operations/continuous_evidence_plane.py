@@ -265,12 +265,24 @@ def _historical_coverage_summary(
 
 
 def _default_reference_preparer(values: Mapping[str, str]):
+    from operations.cme_futures_reference_runtime import (
+        install_cme_futures_reference_lineage,
+    )
     from operations.generalized_reference_readiness import prepare_reference_readiness
-    from providers.massive_futures_reference_bounded import MassiveFuturesReferenceProvider
+    from providers.cme_futures_reference_executable import (
+        CmeExecutableFuturesReferenceProvider,
+    )
+    from providers.massive_futures_reference_rate_resilient import (
+        MassiveFuturesReferenceProvider,
+    )
 
+    install_cme_futures_reference_lineage()
     return prepare_reference_readiness(
         values,
-        massive_futures_provider=MassiveFuturesReferenceProvider(),
+        massive_futures_provider=CmeExecutableFuturesReferenceProvider(
+            fallback_provider=MassiveFuturesReferenceProvider(),
+            values=values,
+        ),
     )
 
 
