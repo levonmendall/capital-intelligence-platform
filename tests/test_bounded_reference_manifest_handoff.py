@@ -29,6 +29,11 @@ def _install_lightweight_runtime(monkeypatch: pytest.MonkeyPatch):
     return prepare, globals_
 
 
+def _bind_manifest(resolved, manifest) -> None:
+    resolved[_MANIFEST_PATH_ENV] = "/tmp/test-data/reference-qualified.json"
+    resolved[_MANIFEST_ID_ENV] = manifest.manifest_id
+
+
 def test_bounded_preclock_discovery_reuses_qualified_manifest_and_restores_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -39,8 +44,7 @@ def test_bounded_preclock_discovery_reuses_qualified_manifest_and_restores_env(
 
     def fake_reference(resolved, **_kwargs):
         calls["reference"] += 1
-        resolved[_MANIFEST_PATH_ENV] = "/tmp/test-data/reference-qualified.json"
-        resolved[_MANIFEST_ID_ENV] = manifest.manifest_id
+        _bind_manifest(resolved, manifest)
         return manifest
 
     def fake_snapshot(*, values, allow_refresh):
@@ -85,8 +89,7 @@ def test_bounded_manifest_handoff_restores_env_when_discovery_fails(
     values = {"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data"}
 
     def fake_reference(resolved, **_kwargs):
-        resolved[_MANIFEST_PATH_ENV] = "/tmp/test-data/reference-qualified.json"
-        resolved[_MANIFEST_ID_ENV] = manifest.manifest_id
+        _bind_manifest(resolved, manifest)
         return manifest
 
     monkeypatch.setitem(globals_, "_prepare_reference", fake_reference)
@@ -112,6 +115,36 @@ def test_bounded_manifest_handoff_restores_env_when_discovery_fails(
     assert os.environ[_PREPARING_ENV] == "prior-preparing"
     assert os.environ[_MANIFEST_PATH_ENV] == "/tmp/prior-reference.json"
     assert os.environ[_MANIFEST_ID_ENV] == "manifest:prior"
+
+
+def test_bounded_manifest_handoff_does_not_refresh_integrity_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare, globals_ = _install_lightweight_runtime(monkeypatch)
+    manifest = SimpleNamespace(manifest_id="manifest:new")
+    values = {"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data"}
+    refresh_calls = 0
+
+    def fake_reference(resolved, **_kwargs):
+        _bind_manifest(resolved, manifest)
+        return manifest
+
+    def fail_integrity(**_kwargs):
+        raise ContinuousEvidencePlaneError("evidence-plane manifest integrity mismatch")
+
+    def unexpected_refresh(**_kwargs):
+        nonlocal refresh_calls
+        refresh_calls += 1
+        return object()
+
+    monkeypatch.setitem(globals_, "_prepare_reference", fake_reference)
+    monkeypatch.setitem(globals_, "ensure_point_in_time_snapshot", fail_integrity)
+    monkeypatch.setitem(globals_, "refresh_continuous_evidence_plane", unexpected_refresh)
+
+    with pytest.raises(ContinuousEvidencePlaneError, match="integrity mismatch"):
+        prepare(values)
+
+    assert refresh_calls == 0
 
 
 def test_bounded_manifest_handoff_fails_closed_without_qualified_binding(
