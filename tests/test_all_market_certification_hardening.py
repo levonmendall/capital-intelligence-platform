@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import publish_cio_diagnostic_audit as audit_publisher
 import run_manual_cio_diagnostic as manual_runner
 from operations import manual_cio_diagnostic as coordination
 from operations.all_market_certification_audit import public_all_market_certification
@@ -150,6 +151,41 @@ def test_public_all_market_certificate_requires_exact_hash_and_release(
     tampered = public_all_market_certification(values)
     assert tampered["all_market_runtime_certified"] is False
     assert tampered["all_market_certification_integrity_valid"] is False
+
+
+def test_certificate_context_binding_uses_discovery_identity_not_later_clock() -> None:
+    payload = {"context_cycle_matches": True}
+    certification = {
+        "all_market_certification_epoch": "2026-08-14T20:00:00+00:00",
+        "all_market_certification_discovery_manifest_fingerprint": "discovery-abc",
+    }
+    context = {
+        "decision_as_of": "2026-08-14T20:03:00+00:00",
+        "comprehensive_discovery_manifest_fingerprint": "discovery-abc",
+    }
+    assert audit_publisher._certificate_matches_current_context(
+        payload=payload,
+        certification=certification,
+        context=context,
+    )
+
+    future_certificate = dict(certification)
+    future_certificate["all_market_certification_epoch"] = "2026-08-14T20:04:00+00:00"
+    assert not audit_publisher._certificate_matches_current_context(
+        payload=payload,
+        certification=future_certificate,
+        context=context,
+    )
+
+    wrong_discovery = dict(certification)
+    wrong_discovery["all_market_certification_discovery_manifest_fingerprint"] = (
+        "discovery-other"
+    )
+    assert not audit_publisher._certificate_matches_current_context(
+        payload=payload,
+        certification=wrong_discovery,
+        context=context,
+    )
 
 
 def _successful_public_audit() -> dict[str, object]:
