@@ -15,6 +15,7 @@ import sys
 from collections.abc import Mapping
 
 import run_bounded_manual_cio_diagnostic_core as _core
+from operations import manual_cio_diagnostic as _diagnostic_coordination
 from operations.cme_futures_reference_runtime import (
     install_cme_futures_reference_lineage,
 )
@@ -37,6 +38,12 @@ from providers.massive_futures_reference_rate_resilient import (
 )
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
+_RECOVERY_PROGRESS_METRICS = frozenset(
+    {
+        "recovery_exchanges",
+        "recovered_exchanges",
+    }
+)
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -46,6 +53,22 @@ def _release(values: Mapping[str, str]) -> str:
         or values.get("GITHUB_SHA")
         or "unknown"
     ).strip()
+
+
+def _install_recovery_progress_contract() -> None:
+    """Keep provider recovery telemetry from aborting the recovery it describes.
+
+    The bounded EODHD directory path emits recovery_exchanges/recovered_exchanges when
+    parallel directory reads fall back to bounded serial recovery. Those are safe,
+    nonnegative operational counters and must be accepted by the release diagnostic's
+    credential-safe progress contract.
+    """
+
+    current = frozenset(getattr(_diagnostic_coordination, "_PROGRESS_METRICS", ()))
+    if not _RECOVERY_PROGRESS_METRICS.issubset(current):
+        _diagnostic_coordination._PROGRESS_METRICS = frozenset(
+            (*current, *_RECOVERY_PROGRESS_METRICS)
+        )
 
 
 def _prime_forced_replacement(values: Mapping[str, str]) -> None:
@@ -73,6 +96,7 @@ def _prepare_with_rate_budget(
     values: Mapping[str, str],
     **kwargs: object,
 ):
+    _install_recovery_progress_contract()
     install_cme_futures_reference_lineage()
     kwargs.setdefault(
         "massive_futures_provider",
@@ -100,6 +124,7 @@ def _prepare_with_rate_budget(
     return manifest
 
 
+_install_recovery_progress_contract()
 _core.prepare_reference_readiness = _prepare_with_rate_budget
 _core._prime_forced_replacement = _prime_forced_replacement
 
