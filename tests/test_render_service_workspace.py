@@ -48,6 +48,73 @@ def test_workspace_cleanup_removes_only_disposable_backup_staging(tmp_path) -> N
     assert symlink_target.exists()
 
 
+def test_reference_cleanup_reclaims_only_superseded_release_bindings(tmp_path) -> None:
+    workspace = tmp_path / "runtime_transient"
+    data_root = tmp_path / "data"
+    reference_root = data_root / "reference_readiness"
+    components = reference_root / "assets" / "crypto"
+    components.mkdir(parents=True)
+
+    stale_manifest = reference_root / "instrument-master-old-release.json"
+    stale_progress = reference_root / "progress-old-release.json"
+    current_manifest = reference_root / "instrument-master-current_release.json"
+    current_progress = reference_root / "progress-current_release.json"
+    aggregate_component = reference_root / "eodhd_directories-latest-qualified.json"
+    lane_component = components / "catalog-latest-qualified.json"
+    interrupted_write = reference_root / "eodhd_directories-latest-qualified.json.tmp"
+
+    for path in (
+        stale_manifest,
+        stale_progress,
+        current_manifest,
+        current_progress,
+        aggregate_component,
+        lane_component,
+        interrupted_write,
+    ):
+        path.write_text(path.name, encoding="utf-8")
+
+    prepare_runtime_workspace(
+        {
+            "TMPDIR": str(workspace),
+            "CAPITAL_INTELLIGENCE_DATA_DIR": str(data_root),
+            "RENDER_GIT_COMMIT": "current_release",
+        }
+    )
+
+    assert not stale_manifest.exists()
+    assert not stale_progress.exists()
+    assert current_manifest.exists()
+    assert current_progress.exists()
+    assert aggregate_component.exists()
+    assert lane_component.exists()
+    assert not interrupted_write.exists()
+
+
+def test_reference_cleanup_preserves_release_bindings_without_identity(tmp_path) -> None:
+    workspace = tmp_path / "runtime_transient"
+    data_root = tmp_path / "data"
+    reference_root = data_root / "reference_readiness"
+    reference_root.mkdir(parents=True)
+    manifest = reference_root / "instrument-master-unknown-release.json"
+    progress = reference_root / "progress-unknown-release.json"
+    interrupted_write = reference_root / "progress-unknown-release.json.tmp"
+    manifest.write_text("manifest", encoding="utf-8")
+    progress.write_text("progress", encoding="utf-8")
+    interrupted_write.write_text("scratch", encoding="utf-8")
+
+    prepare_runtime_workspace(
+        {
+            "TMPDIR": str(workspace),
+            "CAPITAL_INTELLIGENCE_DATA_DIR": str(data_root),
+        }
+    )
+
+    assert manifest.exists()
+    assert progress.exists()
+    assert not interrupted_write.exists()
+
+
 def test_workspace_requires_explicit_tmpdir() -> None:
     try:
         prepare_runtime_workspace({})
