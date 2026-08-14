@@ -1,7 +1,7 @@
 """Runtime entrypoint for bounded CIO reference and evidence readiness.
 
 The watchdog core stays unchanged. This entrypoint injects generalized persistent
-reference readiness plus the governed, rate-budgeted Massive futures provider.  In the
+reference readiness plus the governed, rate-budgeted Massive futures provider. In the
 production service it also qualifies the continuous evidence plane before the bounded
 CIO child starts, so a cold historical bootstrap cannot consume the CIO's 30-minute
 analysis deadline. Imported callers receive the core module so existing tests and
@@ -22,9 +22,36 @@ from operations.continuous_evidence_plane import (
 from operations.generalized_reference_readiness import (
     prepare_reference_readiness as _prepare_reference,
 )
-from providers.massive_futures_reference_bounded import MassiveFuturesReferenceProvider
+from operations.manual_cio_diagnostic import (
+    latest_manual_cio_diagnostic,
+    request_manual_cio_diagnostic,
+)
+from providers.massive_futures_reference_rate_resilient import (
+    MassiveFuturesReferenceProvider,
+)
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
+
+
+def _release(values: Mapping[str, str]) -> str:
+    return (
+        values.get("CAPITAL_INTELLIGENCE_RELEASE")
+        or values.get("RENDER_GIT_COMMIT")
+        or values.get("GITHUB_SHA")
+        or "unknown"
+    ).strip()
+
+
+def _prime_forced_replacement(values: Mapping[str, str]) -> None:
+    """Create retry coordination before reference readiness can fail again."""
+
+    existing = latest_manual_cio_diagnostic(values=values)
+    if existing is None or existing.state not in {"completed", "failed"}:
+        return
+    request_manual_cio_diagnostic(
+        requested_by=f"render-release-retry:{_release(values)}",
+        values=values,
+    )
 
 
 def _production_plane_enabled(values: Mapping[str, str]) -> bool:
@@ -64,9 +91,12 @@ def _prepare_with_rate_budget(
 
 
 _core.prepare_reference_readiness = _prepare_with_rate_budget
+_core._prime_forced_replacement = _prime_forced_replacement
 
 
 if __name__ == "__main__":
+    if "--force" in sys.argv[1:]:
+        _prime_forced_replacement(os.environ)
     raise SystemExit(_core.main())
 
 # Preserve the historical import surface. Test and library imports of
