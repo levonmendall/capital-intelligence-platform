@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.error
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,8 +90,35 @@ def _await_fresh_deployment_request(
     boundary: datetime,
 ) -> tuple[Mapping[str, Any], int]:
     last_payload: Mapping[str, Any] | None = None
+    last_fetch_error: BaseException | None = None
     for attempt in range(1, _SERVER_REPLACEMENT_GRACE_ATTEMPTS + 1):
-        payload = fetcher(url)
+        try:
+            payload = fetcher(url)
+        except (
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+            urllib.error.URLError,
+            _core.RenderAuditVerificationError,
+        ) as error:
+            last_fetch_error = error
+            if progress_writer is not None and (attempt == 1 or attempt % 2 == 0):
+                progress_writer(
+                    json.dumps(
+                        {
+                            "event": "render_cio_diagnostic_freshness_unavailable",
+                            "attempt": attempt,
+                            "error_type": type(error).__name__,
+                            "fresh_after": boundary.isoformat(),
+                            "release_match": "unknown",
+                        },
+                        sort_keys=True,
+                    )
+                )
+            if attempt < _SERVER_REPLACEMENT_GRACE_ATTEMPTS:
+                sleeper(interval_seconds)
+            continue
+
         last_payload = payload
         _core._write_json(output_path, payload)
         if _request_is_fresh(
@@ -135,9 +163,16 @@ def _await_fresh_deployment_request(
         if attempt < _SERVER_REPLACEMENT_GRACE_ATTEMPTS:
             sleeper(interval_seconds)
 
-    assert last_payload is not None
+    if last_payload is not None:
+        raise _core.RenderAuditVerificationError(
+            _freshness_detail(last_payload, boundary=boundary)
+        )
     raise _core.RenderAuditVerificationError(
-        _freshness_detail(last_payload, boundary=boundary)
+        "stale_diagnostic_snapshot: exact-release verification could not read a "
+        "post-deployment diagnostic request; "
+        f"fresh_after={boundary.isoformat()}; state='unavailable'; "
+        "stage=audit_unavailable; "
+        f"last_error={type(last_fetch_error).__name__ if last_fetch_error else 'unknown'}"
     )
 
 
