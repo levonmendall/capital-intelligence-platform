@@ -57,6 +57,7 @@ def _valid_es_contract() -> dict[str, object]:
         "last_trade_date": "2026-09-18",
         "settlement_date": "2026-09-18",
         "active": True,
+        "type": "single",
     }
 
 
@@ -82,17 +83,21 @@ def test_current_fallback_is_server_bounded_before_pagination() -> None:
     strict_params = getter.calls[0][1]
     fallback_params = getter.calls[1][1]
     assert strict_params["date"] == "2026-08-14"
+    assert "type" not in strict_params
     assert fallback_params["product_code"] == "ES"
     assert fallback_params["active"] == "true"
+    assert fallback_params["type"] == "single"
     assert "date" not in fallback_params
     assert fallback_params["first_trade_date.lte"] == "2026-08-14"
     assert fallback_params["last_trade_date.gte"] == "2026-08-14"
 
     telemetry = provider.reference_telemetry[0]
-    assert telemetry["query_mode"] == "current_active_trade_window_without_date"
+    assert telemetry["query_mode"] == "current_active_single_trade_window_without_date"
     assert telemetry["server_side_point_in_time_bound"] is True
+    assert telemetry["server_side_contract_type_bound"] is True
     assert telemetry["request_params"]["first_trade_date.lte"] == "2026-08-14"
     assert telemetry["request_params"]["last_trade_date.gte"] == "2026-08-14"
+    assert telemetry["request_params"]["type"] == "single"
     assert telemetry["usable_count"] == 1
     assert telemetry["failure_reason"] == "ok"
     assert "apiKey" not in telemetry["request_params"]
@@ -126,6 +131,7 @@ def test_bounded_fallback_keeps_existing_pagination_completeness_guard() -> None
     assert len(getter.calls) == 2
     assert getter.calls[1][1]["first_trade_date.lte"] == "2026-08-14"
     assert getter.calls[1][1]["last_trade_date.gte"] == "2026-08-14"
+    assert getter.calls[1][1]["type"] == "single"
     telemetry = provider.reference_telemetry[0]
     assert telemetry["failure_reason"] == "pagination_incomplete"
     assert telemetry["usable_count"] == 1
@@ -149,3 +155,4 @@ def test_historical_strict_empty_does_not_use_bounded_current_fallback() -> None
     assert params["date"] == "2026-06-01"
     assert "first_trade_date.lte" not in params
     assert "last_trade_date.gte" not in params
+    assert "type" not in params
