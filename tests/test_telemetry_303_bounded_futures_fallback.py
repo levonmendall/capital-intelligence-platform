@@ -61,6 +61,19 @@ def _valid_es_contract() -> dict[str, object]:
     }
 
 
+def _expired_es_contract() -> dict[str, object]:
+    return {
+        "ticker": "ESM6",
+        "product_code": "ES",
+        "trading_venue": "XCME",
+        "first_trade_date": "2025-12-19",
+        "last_trade_date": "2026-06-19",
+        "settlement_date": "2026-06-19",
+        "active": False,
+        "type": "single",
+    }
+
+
 def test_current_fallback_is_server_bounded_before_pagination() -> None:
     as_of = datetime(2026, 8, 14, 1, 35, tzinfo=timezone.utc)
     provider, getter = _provider(
@@ -95,12 +108,69 @@ def test_current_fallback_is_server_bounded_before_pagination() -> None:
     assert telemetry["query_mode"] == "current_active_single_trade_window_without_date"
     assert telemetry["server_side_point_in_time_bound"] is True
     assert telemetry["server_side_contract_type_bound"] is True
+    assert telemetry["bounded_empty_retry_used"] is False
     assert telemetry["request_params"]["first_trade_date.lte"] == "2026-08-14"
     assert telemetry["request_params"]["last_trade_date.gte"] == "2026-08-14"
     assert telemetry["request_params"]["type"] == "single"
     assert telemetry["usable_count"] == 1
     assert telemetry["failure_reason"] == "ok"
     assert "apiKey" not in telemetry["request_params"]
+    assert "super-secret-key" not in repr(telemetry)
+
+
+def test_empty_bounded_query_retries_single_index_with_local_point_in_time_filter() -> None:
+    as_of = datetime(2026, 8, 14, 1, 35, tzinfo=timezone.utc)
+    provider, getter = _provider(
+        [
+            _FakeResponse(200, {"results": []}),
+            _FakeResponse(200, {"results": []}),
+            _FakeResponse(
+                200,
+                {"results": [_expired_es_contract(), _valid_es_contract()]},
+            ),
+        ],
+        now=datetime(2026, 8, 14, 1, 40, tzinfo=timezone.utc),
+    )
+
+    contracts = provider.futures_contracts(
+        as_of=as_of,
+        product_codes=("ES",),
+        maximum_pages=1,
+    )
+
+    assert [contract.ticker for contract in contracts] == ["ESU6"]
+    assert len(getter.calls) == 3
+
+    bounded_params = getter.calls[1][1]
+    index_params = getter.calls[2][1]
+    assert bounded_params["active"] == "true"
+    assert bounded_params["type"] == "single"
+    assert bounded_params["first_trade_date.lte"] == "2026-08-14"
+    assert bounded_params["last_trade_date.gte"] == "2026-08-14"
+
+    assert index_params["product_code"] == "ES"
+    assert index_params["type"] == "single"
+    assert index_params["limit"] == 1000
+    assert "active" not in index_params
+    assert "date" not in index_params
+    assert "first_trade_date.lte" not in index_params
+    assert "last_trade_date.gte" not in index_params
+
+    telemetry = provider.reference_telemetry[0]
+    assert telemetry["query_mode"] == "current_single_index_without_active_window"
+    assert telemetry["bounded_empty_retry_used"] is True
+    assert telemetry["server_side_point_in_time_bound"] is False
+    assert telemetry["local_point_in_time_validation"] is True
+    assert telemetry["server_side_contract_type_bound"] is True
+    assert telemetry["request_params"] == {
+        "limit": 1000,
+        "product_code": "ES",
+        "type": "single",
+    }
+    assert telemetry["raw_result_count"] == 2
+    assert telemetry["point_in_time_valid_count"] == 1
+    assert telemetry["usable_count"] == 1
+    assert telemetry["failure_reason"] == "ok"
     assert "super-secret-key" not in repr(telemetry)
 
 
