@@ -69,6 +69,23 @@ def _fprf_with_globex_alias() -> str:
 </SecDef></Batch></FIXML>'''
 
 
+def _realistic_fprf(
+    *,
+    clearing_code: str,
+    globex_symbol: str,
+    exchange: str,
+    maturity: str = "202609",
+    last_trade: str = "2026-09-18",
+) -> str:
+    return f'''<FIXML><Batch><SecDef BizDt="2026-08-14">
+  <Instrmt Sym="{clearing_code}" ID="{clearing_code}" Src="H" MMY="{maturity}" SecTyp="FUT" Exch="{exchange}" Status="1" MatDt="{last_trade}">
+    <AID AltID="{globex_symbol}" AltIDSrc="101" />
+    <Evnt EventTyp="5" Dt="2025-01-01" />
+    <Evnt EventTyp="7" Dt="{last_trade}" />
+  </Instrmt>
+</SecDef></Batch></FIXML>'''
+
+
 def _massive_contract(root: str, ticker: str, venue: str) -> MassiveFuturesContract:
     return MassiveFuturesContract(
         ticker=ticker,
@@ -127,6 +144,50 @@ def test_explicit_cme_globex_alias_wins_over_derived_symbol(tmp_path) -> None:
     )
 
     assert [item.ticker for item in contracts] == ["NGN25"]
+
+
+def test_cme_globex_alias_maps_clearing_codes_to_configured_roots(tmp_path) -> None:
+    urls = (("CBOT", "https://example/cbot.xml"), ("CME", "https://example/cme.xml"))
+    getter = _MappedGet(
+        {
+            "https://example/cbot.xml": _realistic_fprf(
+                clearing_code="21",
+                globex_symbol="ZNU6",
+                exchange="CBT",
+            ),
+            "https://example/cme.xml": _realistic_fprf(
+                clearing_code="EC",
+                globex_symbol="6EU6",
+                exchange="CME",
+            ),
+        }
+    )
+    fallback = _Fallback(
+        (
+            _massive_contract("ZN", "ZNU6", "CBT"),
+            _massive_contract("6E", "6EU6", "CME"),
+        )
+    )
+    as_of = datetime(2026, 8, 14, 18, 0, tzinfo=timezone.utc)
+    provider = CmeExecutableFuturesReferenceProvider(
+        fallback_provider=fallback,
+        http_get=getter,
+        file_urls=urls,
+        values={"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)},
+        now=lambda: as_of,
+    )
+
+    contracts = provider.futures_contracts(
+        as_of=as_of,
+        product_codes=("ZN", "6E"),
+    )
+
+    assert [(item.product_code, item.ticker) for item in contracts] == [
+        ("6E", "6EU6"),
+        ("ZN", "ZNU6"),
+    ]
+    assert fallback.calls == 0
+    assert {item.trading_venue for item in contracts} == {"CBOT", "CME"}
 
 
 def test_incomplete_cme_uses_complete_massive_fallback(tmp_path) -> None:
