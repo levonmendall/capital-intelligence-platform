@@ -17,11 +17,13 @@ from operations.all_market_lane_certification import (
     install_checkpointed_market_probe,
     publish_compositional_certification,
 )
+from operations.persistent_option_reference import install_persistent_option_reference
 from operations.resumable_options_discovery import install_resumable_options_catalog
 
 
 install_checkpointed_market_probe(_core)
 install_resumable_options_catalog(_core)
+install_persistent_option_reference(_core)
 
 # Keep the production terminal-screening resource bound visible at the public facade.
 # Several release guards intentionally inspect this module rather than implementation
