@@ -9,8 +9,10 @@ each individual task was bounded.
 This entrypoint preserves the existing supervisor and governed release diagnostic while
 replacing heavyweight resident loops with lightweight coordinators.  Each expensive pass
 runs in a short-lived, memory-bounded child and shares one cross-process memory lane.
-Noncritical jobs are staggered after the release diagnostic.  No market scope, CIO rule,
-threshold, construction logic, paper-execution authority, or real-money capability changes.
+The same lane now continuously maintains the governed evidence plane after the release
+diagnostic completes. Noncritical jobs are staggered after the release diagnostic. No
+market scope, CIO rule, threshold, construction logic, paper-execution authority, or
+real-money capability changes.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ def memory_safe_managed_processes(
     port: int,
     python_executable: str | None = None,
 ) -> tuple[render_supervisor.ManagedProcess, ...]:
-    """Replace only heavyweight resident loops with bounded coordinators."""
+    """Replace heavyweight loops and add the bounded continuous evidence coordinator."""
 
     python = python_executable or sys.executable
     resolved: list[render_supervisor.ManagedProcess] = []
@@ -83,6 +85,18 @@ def memory_safe_managed_processes(
                 restart_delay_seconds=spec.restart_delay_seconds,
             )
         resolved.append(spec)
+
+    # The base supervisor intentionally remains unchanged. Production's memory-safe
+    # facade adds this noncritical coordinator only after the release diagnostic gate,
+    # so it cannot compete with exact-release certification during startup.
+    resolved.append(
+        render_supervisor.ManagedProcess(
+            name="continuous-evidence-plane",
+            command=(python, "run_bounded_continuous_evidence_plane.py"),
+            critical=False,
+            restart_delay_seconds=60,
+        )
+    )
     return tuple(resolved)
 
 
