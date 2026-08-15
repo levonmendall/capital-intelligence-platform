@@ -1,10 +1,11 @@
 """Canonical production-context publication runtime surface.
 
-The governed publisher owns production-context construction.  This module retains the
+The governed publisher owns production-context construction. This module retains the
 shared compatibility helpers consumed by that publisher and provides the single public
-entrypoint used by production callers.  Broad U.S.-equity discovery defaults to the
+entrypoint used by production callers. Broad U.S.-equity discovery defaults to the
 provider-free qualified snapshot consumer; explicit probes remain available for tests and
-rehearsals.
+rehearsals. Successful governed publication advances durable certification through the
+screening stage using the exact persisted screening publication identifier.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ from typing import Callable, Mapping
 from zoneinfo import ZoneInfo
 
 from api.config import ApiSettings
+from operations.certification_runtime_state import advance_linear_state_for_cutoff
+from operations.certification_state_machine import CertificationState
 from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     FreePaperPilotUniverse,
@@ -131,6 +134,27 @@ def _cycle_key(*, scheduled_for: datetime, timezone_name: str) -> str:
     return f"canonical-cio:{timezone_name}:{local_date}"
 
 
+def _advance_screening_if_ready(result: ProductionContextPublicationResult) -> None:
+    if not result.ready:
+        return
+    if result.decision_as_of is None:
+        raise RuntimeError("ready production context is missing decision_as_of")
+    source_id = str(result.screening_publication_identifier or "").strip()
+    if not source_id:
+        raise RuntimeError("ready production context is missing screening publication identity")
+    advance_linear_state_for_cutoff(
+        cutoff=result.decision_as_of,
+        target=CertificationState.SCREENING_COMPLETE,
+        source_id=source_id,
+        detail="canonical full-universe screening publication persisted",
+        metadata={
+            "cycle_key": result.cycle_key,
+            "context_identifier": result.context_identifier,
+            "eligible_universe_identifier": result.eligible_universe_identifier,
+        },
+    )
+
+
 def prepare_production_context_for_cycle(
     *,
     settings: ApiSettings,
@@ -142,7 +166,7 @@ def prepare_production_context_for_cycle(
     equity_discovery_probe=None,
     clock: Clock | None = None,
 ) -> ProductionContextPublicationResult:
-    """Publish one governed context using already-qualified broad discovery evidence."""
+    """Publish one governed context and certify its persisted screening artifact."""
 
     from production_context_publication_governed import (
         prepare_governed_production_context_for_cycle,
@@ -155,7 +179,7 @@ def prepare_production_context_for_cycle(
 
         equity_discovery_probe = qualified_equity_discovery_probe
 
-    return prepare_governed_production_context_for_cycle(
+    result = prepare_governed_production_context_for_cycle(
         settings=settings,
         scheduled_for=scheduled_for,
         universe_path=universe_path,
@@ -165,6 +189,8 @@ def prepare_production_context_for_cycle(
         equity_discovery_probe=equity_discovery_probe,
         clock=clock,
     )
+    _advance_screening_if_ready(result)
+    return result
 
 
 __all__ = [
