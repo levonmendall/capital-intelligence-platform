@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +27,11 @@ def _release(values: Mapping[str, str]) -> str:
         or values.get("GITHUB_SHA")
         or "unknown"
     ).strip()
+
+
+def _safe(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value).strip())
+    return normalized.strip("-.") or "unknown"
 
 
 def _count(payload: Mapping[str, Any], name: str) -> int:
@@ -101,19 +108,69 @@ def _market_lanes(
     return tuple(lanes)
 
 
+def _v2_evidence_as_of(
+    certification: Mapping[str, object],
+    *,
+    values: Mapping[str, str],
+) -> datetime | None:
+    """Read the already-integrity-verified immutable input's evidence timestamp."""
+
+    if certification.get("all_market_certification_v2_input_integrity_valid") is not True:
+        return None
+    certification_id = str(
+        certification.get("all_market_certification_v2_id") or ""
+    ).strip()
+    data_root = str(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "").strip()
+    release = _release(values)
+    if not certification_id or not data_root or release == "unknown":
+        return None
+    path = (
+        Path(data_root).expanduser()
+        / "all-market-certification-v2"
+        / "inputs"
+        / _safe(release)
+        / f"{certification_id}.json"
+    )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    if (
+        str(payload.get("record_id") or "") != certification_id
+        or str(payload.get("release") or "") != release
+        or str(payload.get("evidence_generation_id") or "")
+        != str(certification.get("all_market_evidence_generation_id") or "")
+        or str(payload.get("global_discovery_snapshot_id") or "")
+        != str(certification.get("all_market_global_discovery_snapshot_id") or "")
+    ):
+        return None
+    return _parse_datetime(payload.get("evidence_as_of"))
+
+
 def _certification_context_matches(
     certification: Mapping[str, object],
     *,
+    values: Mapping[str, str],
     context_decision_as_of: datetime | None,
 ) -> tuple[bool, bool]:
-    """Require legacy and v2 certificates to describe the exact context cutoff."""
+    """Prove the two intentionally different point-in-time bindings.
+
+    The legacy compositional lane certificate is tied to the qualified evidence/global-
+    discovery epoch. Certification v2 may reuse that still-fresh evidence at a later CIO
+    cutoff, so its own cutoff must equal the production-context decision timestamp.
+    """
 
     if context_decision_as_of is None:
         return False, False
     legacy_epoch = _parse_datetime(certification.get("all_market_certification_epoch"))
+    evidence_as_of = _v2_evidence_as_of(certification, values=values)
     v2_cutoff = _parse_datetime(certification.get("certification_v2_cutoff"))
     return (
-        legacy_epoch == context_decision_as_of,
+        legacy_epoch is not None
+        and evidence_as_of is not None
+        and legacy_epoch == evidence_as_of,
         v2_cutoff == context_decision_as_of,
     )
 
@@ -192,6 +249,7 @@ def build_cio_diagnostic_audit(
     context_decision_as_of = _parse_datetime(context.get("decision_as_of"))
     legacy_context_matches, v2_context_matches = _certification_context_matches(
         certification,
+        values=resolved,
         context_decision_as_of=context_decision_as_of,
     )
     analytical_certification_complete = all(
