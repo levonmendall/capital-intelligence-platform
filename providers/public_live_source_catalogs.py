@@ -13,6 +13,7 @@ from providers.public_live_information import (
 _SUPPLEMENTAL_SUFFIXES = (
     "official_expansion",
     "free_depth",
+    "global_depth",
 )
 
 
@@ -30,11 +31,7 @@ def load_operating_public_live_source_catalog(
         if supplemental_path.exists():
             catalogs.append(load_public_live_source_catalog(supplemental_path))
 
-    sources = tuple(
-        source
-        for catalog in catalogs
-        for source in catalog.sources
-    )
+    sources = tuple(source for catalog in catalogs for source in catalog.sources)
     identifiers = tuple(item.identifier for item in sources)
     if len(identifiers) != len(set(identifiers)):
         raise ValueError("public live source identifiers cannot repeat across catalogs")
