@@ -50,6 +50,14 @@ def _equity_snapshot(as_of: datetime):
     )
 
 
+def _paper_snapshot(as_of: datetime):
+    return SimpleNamespace(
+        snapshot_id="paper-snapshot-test",
+        evidence_as_of=as_of,
+        universe_signature="paper-universe-test",
+    )
+
+
 def test_freeze_certification_input_binds_release_evidence_snapshot_and_policy(
     tmp_path: Path,
 ) -> None:
@@ -69,6 +77,7 @@ def test_freeze_certification_input_binds_release_evidence_snapshot_and_policy(
         snapshot=snapshot,
         global_snapshot=_global_snapshot(generation.as_of),
         equity_snapshot=_equity_snapshot(generation.as_of),
+        paper_snapshot=_paper_snapshot(generation.as_of),
     )
 
     assert record.release == "release-test"
@@ -76,12 +85,14 @@ def test_freeze_certification_input_binds_release_evidence_snapshot_and_policy(
     assert record.snapshot_id == snapshot.snapshot_id
     assert record.global_discovery_snapshot_id == "global-snapshot-test"
     assert record.us_equity_discovery_snapshot_id == "equity-snapshot-test"
+    assert record.paper_evidence_snapshot_id == "paper-snapshot-test"
     assert record.cutoff == cutoff
     assert record.reference_manifest_id == "manifest:test"
     assert record.path.exists()
     payload = json.loads(record.path.read_text(encoding="utf-8"))
     assert payload["global_discovery_snapshot_id"] == "global-snapshot-test"
     assert payload["us_equity_discovery_snapshot_id"] == "equity-snapshot-test"
+    assert payload["paper_evidence_snapshot_id"] == "paper-snapshot-test"
     assert payload["consumer_provider_refresh_permitted"] is False
     assert payload["evidence_owner"] == "continuous_evidence_plane"
     assert payload["evidence_certification"] == "certified"
@@ -106,6 +117,7 @@ def test_freeze_certification_input_binds_release_evidence_snapshot_and_policy(
     assert ledger_payload["record_id"] == record.record_id
     assert ledger_payload["global_discovery_snapshot_id"] == "global-snapshot-test"
     assert ledger_payload["us_equity_discovery_snapshot_id"] == "equity-snapshot-test"
+    assert ledger_payload["paper_evidence_snapshot_id"] == "paper-snapshot-test"
 
 
 def test_freeze_without_snapshot_can_never_refresh_evidence(
@@ -148,6 +160,7 @@ def test_freeze_without_snapshot_can_never_refresh_evidence(
         values=values,
         global_snapshot=_global_snapshot(generation.as_of),
         equity_snapshot=_equity_snapshot(generation.as_of),
+        paper_snapshot=_paper_snapshot(generation.as_of),
     )
 
     assert observed["allow_refresh"] is False
@@ -166,12 +179,14 @@ def test_policy_compatibility_change_changes_record_identity(tmp_path: Path) -> 
     )
     global_snapshot = _global_snapshot(generation.as_of)
     equity_snapshot = _equity_snapshot(generation.as_of)
+    paper_snapshot = _paper_snapshot(generation.as_of)
     first = certification.freeze_certification_input(
         cutoff=cutoff,
         values=first_values,
         snapshot=snapshot,
         global_snapshot=global_snapshot,
         equity_snapshot=equity_snapshot,
+        paper_snapshot=paper_snapshot,
     )
 
     changed_values = dict(first_values)
@@ -182,11 +197,13 @@ def test_policy_compatibility_change_changes_record_identity(tmp_path: Path) -> 
         snapshot=snapshot,
         global_snapshot=global_snapshot,
         equity_snapshot=equity_snapshot,
+        paper_snapshot=paper_snapshot,
     )
 
     assert second.snapshot_id == first.snapshot_id
     assert second.global_discovery_snapshot_id == first.global_discovery_snapshot_id
     assert second.us_equity_discovery_snapshot_id == first.us_equity_discovery_snapshot_id
+    assert second.paper_evidence_snapshot_id == first.paper_evidence_snapshot_id
     assert second.evidence_generation_id == first.evidence_generation_id
     assert second.policy_compatibility_hash != first.policy_compatibility_hash
     assert second.record_id != first.record_id
