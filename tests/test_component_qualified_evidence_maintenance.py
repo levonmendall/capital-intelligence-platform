@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from operations import component_qualified_evidence_maintenance as maintenance
+from operations.continuous_evidence_plane import EvidencePlaneGeneration
+from operations.qualified_evidence_maintenance import EvidenceMaintenanceResult
+
+
+def _generation(*, as_of: datetime, manifest_id: str = "manifest-old") -> EvidencePlaneGeneration:
+    return EvidencePlaneGeneration(
+        generation_id="generation-old",
+        as_of=as_of,
+        completed_at=as_of + timedelta(seconds=1),
+        reference_manifest_id=manifest_id,
+        scheduled_lanes=("future",),
+        historical_scope_count=11,
+        historical_coverage_digest="history-digest",
+        public_live_state="available",
+    )
+
+
+def test_prior_release_generation_rebinds_without_legacy_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    now = datetime.now(timezone.utc)
+    current = _generation(as_of=now - timedelta(minutes=2))
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-new",
+    }
+    rebound = _generation(as_of=current.as_of, manifest_id="manifest-new")
+    rebound = EvidencePlaneGeneration(
+        generation_id="generation-new",
+        as_of=rebound.as_of,
+        completed_at=now,
+        reference_manifest_id=rebound.reference_manifest_id,
+        scheduled_lanes=rebound.scheduled_lanes,
+        historical_scope_count=rebound.historical_scope_count,
+        historical_coverage_digest=rebound.historical_coverage_digest,
+        public_live_state=rebound.public_live_state,
+    )
+    calls = {"bind": 0, "legacy": 0}
+
+    monkeypatch.setattr(maintenance._plane, "evidence_plane_enabled", lambda _values: True)
+    monkeypatch.setattr(maintenance._plane, "load_latest_evidence_plane", lambda _values: current)
+    monkeypatch.setattr(maintenance, "_latest_payload", lambda _values: {"release": "release-old"})
+    monkeypatch.setattr(maintenance, "_generation_base_qualified", lambda *_args, **_kwargs: True)
+
+    def bind(_values, *, now):
+        calls["bind"] += 1
+        assert now == current.as_of
+        return SimpleNamespace(manifest_id="manifest-new")
+
+    monkeypatch.setattr(maintenance, "bind_reference_manifest_from_components", bind)
+    monkeypatch.setattr(maintenance, "_publish_release_rebind", lambda **_kwargs: rebound)
+    monkeypatch.setattr(
+        maintenance._legacy_maintenance,
+        "_archive_generation",
+        lambda _values, _generation: Path(tmp_path) / "archive.json",
+    )
+
+    def unexpected_legacy(**_kwargs):
+        calls["legacy"] += 1
+        raise AssertionError("provider/reference refresh must not run for a fresh rebind")
+
+    monkeypatch.setattr(
+        maintenance._legacy_maintenance,
+        "maintain_continuous_evidence_plane",
+        unexpected_legacy,
+    )
+
+    result = maintenance.maintain_component_qualified_evidence_plane(
+        as_of=now,
+        values=values,
+    )
+
+    assert result.state == "release_rebound"
+    assert result.refreshed is False
+    assert result.preparation_passes == 0
+    assert result.generation.generation_id == "generation-new"
+    assert calls == {"bind": 1, "legacy": 0}
+
+
+def test_refresh_uses_provider_free_manifest_when_components_are_current(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    now = datetime.now(timezone.utc)
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-new",
+    }
+    manifest = SimpleNamespace(manifest_id="manifest-components")
+    expected = EvidenceMaintenanceResult(
+        generation=_generation(as_of=now, manifest_id=manifest.manifest_id),
+        state="refreshed",
+        refreshed=True,
+        preparation_passes=1,
+        archived_generation_path=Path(tmp_path) / "archive.json",
+    )
+
+    monkeypatch.setattr(maintenance._plane, "evidence_plane_enabled", lambda _values: True)
+    monkeypatch.setattr(maintenance._plane, "load_latest_evidence_plane", lambda _values: None)
+    monkeypatch.setattr(maintenance, "_latest_payload", lambda _values: None)
+    monkeypatch.setattr(
+        maintenance,
+        "bind_reference_manifest_from_components",
+        lambda _values, *, now: manifest,
+    )
+
+    def legacy(**kwargs):
+        prepared = kwargs["reference_preparer"](kwargs["values"])
+        assert prepared is manifest
+        return expected
+
+    monkeypatch.setattr(
+        maintenance._legacy_maintenance,
+        "maintain_continuous_evidence_plane",
+        legacy,
+    )
+
+    result = maintenance.maintain_component_qualified_evidence_plane(
+        as_of=now,
+        values=values,
+    )
+
+    assert result is expected
