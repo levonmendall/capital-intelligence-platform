@@ -134,14 +134,14 @@ def test_prequalified_reference_loader_is_disk_only_and_binds_snapshot_manifest(
     monkeypatch.setattr(
         maintenance,
         "load_reference_catalogs",
-        lambda **kwargs: {CandidateAssetClass.EQUITY: (object(), object())},
+        lambda **kwargs: {CandidateAssetClass.INTERNATIONAL_EQUITY: (object(), object())},
     )
 
     manifest = maintenance.load_prequalified_reference_manifest(values)
 
     assert manifest.manifest_id == "manifest:test"
     assert manifest.release == "release-test"
-    assert manifest.catalog_counts == ((CandidateAssetClass.EQUITY.value, 2),)
+    assert manifest.catalog_counts == ((CandidateAssetClass.INTERNATIONAL_EQUITY.value, 2),)
     assert values["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"] == str(path)
     assert values["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"] == "manifest:test"
 
