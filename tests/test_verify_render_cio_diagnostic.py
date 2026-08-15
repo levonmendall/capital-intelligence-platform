@@ -35,6 +35,26 @@ def _complete_payload(release: str) -> dict[str, object]:
         "all_market_certification_epoch": "2026-08-05T18:59:00+00:00",
         "all_market_certification_aggregate_sha256": "a" * 64,
         "all_market_certification_discovery_manifest_fingerprint": "discovery-manifest-abc",
+        "all_market_certification_v2_available": True,
+        "all_market_certification_v2_input_integrity_valid": True,
+        "all_market_certification_v2_state_integrity_valid": True,
+        "all_market_certification_v2_release_matches": True,
+        "all_market_certification_v2_id": "certification-v2-release-current",
+        "all_market_evidence_generation_id": "generation-current",
+        "all_market_point_in_time_snapshot_id": "pit-current",
+        "all_market_global_discovery_snapshot_id": "global-current",
+        "all_market_us_equity_discovery_snapshot_id": "equity-current",
+        "all_market_paper_evidence_snapshot_id": "paper-current",
+        "all_market_policy_compatibility_hash": "b" * 64,
+        "all_market_certification_v2_state": "CERTIFIED",
+        "all_market_evidence_certified": True,
+        "all_market_screening_certified": True,
+        "all_market_committee_certified": True,
+        "all_market_cio_certified": True,
+        "all_market_construction_certified": True,
+        "all_market_paper_implementation_certified": True,
+        "all_market_no_action_certified": False,
+        "all_market_operational_certified": True,
         "paper_implementation_complete": True,
         "market_lanes": [
             {
@@ -71,6 +91,13 @@ def _failed_payload(release: str, detail: str = "provider throttled") -> dict[st
         "all_market_evaluation_complete": False,
         "all_market_runtime_certified": False,
         "all_market_certification_context_matches": False,
+        "all_market_certification_v2_available": False,
+        "all_market_certification_v2_state_integrity_valid": False,
+        "all_market_screening_certified": False,
+        "all_market_committee_certified": False,
+        "all_market_cio_certified": False,
+        "all_market_construction_certified": False,
+        "all_market_operational_certified": False,
         "paper_implementation_complete": False,
         "market_lanes": [],
         "detail": detail,
@@ -166,6 +193,42 @@ def test_complete_all_market_audit_passes() -> None:
         payload,
         expected_release="release-current",
     )
+
+
+def test_analytical_certification_passes_while_paper_implementation_is_pending() -> None:
+    payload = {
+        **_complete_payload("release-current"),
+        "all_market_certification_v2_state": "CONSTRUCTION_COMPLETE",
+        "all_market_paper_implementation_certified": False,
+        "all_market_no_action_certified": False,
+        "all_market_operational_certified": False,
+        "paper_implementation_complete": False,
+    }
+
+    verify_complete_all_market_evaluation(
+        payload,
+        expected_release="release-current",
+    )
+
+
+def test_incomplete_cio_or_construction_lineage_fails_closed() -> None:
+    payload = {
+        **_complete_payload("release-current"),
+        "all_market_cio_certified": False,
+        "all_market_construction_certified": False,
+        "all_market_certification_v2_state": "COMMITTEE_COMPLETE",
+        "all_market_operational_certified": False,
+        "paper_implementation_complete": False,
+    }
+
+    with pytest.raises(
+        RenderAuditVerificationError,
+        match="analytical certification failed closed",
+    ):
+        verify_complete_all_market_evaluation(
+            payload,
+            expected_release="release-current",
+        )
 
 
 def test_degraded_market_scope_fails_closed() -> None:

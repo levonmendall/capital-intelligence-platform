@@ -20,6 +20,7 @@ from application.decision_intelligence_v3_runtime import (
 from application.marginal_targeting_runtime import (
     install_construction_backed_marginal_targeting,
 )
+from operations.certification_cycle_lineage import certify_completed_cio_cycle
 
 _LOGGER = logging.getLogger("capital_intelligence.decision_intelligence_v3")
 _ORIGINAL_CANDIDATE_AUTHORITY_UNIVERSE = (
@@ -92,6 +93,13 @@ class ProductionCanonicalCIOExecutor(
         self.context_provider = cached_provider
         try:
             result = super().run(as_of=as_of)
+
+            # Operational certification is derived from the canonical artifacts after
+            # authority has already acted. It cannot alter the CIO decision, but a
+            # production lineage failure must remain visible/fail-closed to operational
+            # certification instead of being silently inferred later.
+            certify_completed_cio_cycle(result)
+
             # Decision Intelligence v3 is downstream and read-only. A persistence
             # failure may reduce explainability/measurement coverage, but it must not
             # invalidate or change a CIO decision already produced by the canonical

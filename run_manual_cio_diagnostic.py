@@ -1,8 +1,8 @@
 """Run one fully governed, paper-only CIO diagnostic outside the normal schedule.
 
-The diagnostic bypasses only the calendar due check. It still requires fresh production
-context, governed evidence, specialist review, CIO qualification, portfolio construction,
-and every paper-execution control. It never authorizes real money.
+The diagnostic bypasses only the calendar due check. It still requires a qualified
+provider-free production context, specialist review, CIO qualification, portfolio
+construction, and every paper-execution control. It never authorizes real money.
 
 Heavy application modules are intentionally imported only at the phase that needs them.
 This keeps the release diagnostic's startup/canonical-state memory footprint bounded and
@@ -35,11 +35,11 @@ ensure_canonical_portfolio_store = None
 prepare_production_context_for_cycle = None
 invalidate_reuse_preserving_success = None
 recording_context_preparer = None
-collect_public_live_information_if_due = None
 build_worker = None
 paper_trading_launch_open = None
 publish_pending_transaction_report = None
 attempt_paper_execution = None
+reconcile_terminal_certification = None
 _payloads = None
 
 
@@ -332,16 +332,6 @@ def _load_canonical_dependency() -> None:
         ensure_canonical_portfolio_store = implementation
 
 
-def _load_collection_dependency() -> None:
-    global collect_public_live_information_if_due
-    if collect_public_live_information_if_due is None:
-        from public_live_collection_runtime import (
-            collect_public_live_information_if_due as implementation,
-        )
-
-        collect_public_live_information_if_due = implementation
-
-
 def _load_context_dependencies() -> None:
     global prepare_production_context_for_cycle
     global invalidate_reuse_preserving_success, recording_context_preparer
@@ -372,7 +362,7 @@ def _load_worker_dependency() -> None:
 
 def _load_execution_dependencies() -> None:
     global paper_trading_launch_open, publish_pending_transaction_report
-    global attempt_paper_execution, _payloads
+    global attempt_paper_execution, reconcile_terminal_certification, _payloads
 
     if paper_trading_launch_open is None or publish_pending_transaction_report is None:
         from cio_pending_transactions import (
@@ -386,6 +376,12 @@ def _load_execution_dependencies() -> None:
         from paper_execution_runtime import attempt_paper_execution as attempt_impl
 
         attempt_paper_execution = attempt_impl
+    if reconcile_terminal_certification is None:
+        from operations.certification_terminal_reconciliation import (
+            reconcile_terminal_certification as reconcile_impl,
+        )
+
+        reconcile_terminal_certification = reconcile_impl
     if _payloads is None:
         from run_autonomous_paper_operator import _payloads as payloads_impl
 
@@ -511,15 +507,15 @@ def run_diagnostic_once(
         ensure_canonical_portfolio_store(settings.portfolio_database)
         _record_memory_phase("after_canonical_portfolio_initialization")
 
+        # Release diagnostics consume the continuous evidence plane. They never force
+        # public-information collection, global discovery, reference repair, or history
+        # acquisition inside the diagnostic transaction.
         now = datetime.now(timezone.utc)
         record_manual_cio_diagnostic_progress(
-            "public_information_collection",
+            "qualified_evidence_consumption",
             values=resolved,
         )
-        _record_memory_phase("before_comprehensive_discovery")
-        _load_collection_dependency()
-        collect_public_live_information_if_due(now=now, force=True)
-        _record_memory_phase("after_comprehensive_discovery")
+        _record_memory_phase("before_qualified_evidence_consumption")
 
         _load_context_dependencies()
         invalidate_reuse_preserving_success(settings)
@@ -555,53 +551,89 @@ def run_diagnostic_once(
             snapshot_identifier = result.snapshot_identifier
             detail = result.detail
             if result.status == "completed":
+                # Analytical certification has completed. Paper implementation remains
+                # governed by its independent launch/session/liquidity/execution controls
+                # and cannot retroactively turn a completed CIO analysis into a failure.
+                succeeded = True
                 record_manual_cio_diagnostic_progress(
                     "paper_implementation_boundary",
                     values=resolved,
                 )
                 _record_memory_phase("before_paper_implementation")
-                _load_execution_dependencies()
-                construction, briefing = _payloads(
-                    settings,
-                    expected_as_of=context.decision_as_of,
-                )
-                execution_now = datetime.now(timezone.utc)
-                if construction is None and _governed_no_action(briefing):
-                    publish_pending_transaction_report(
-                        construction=construction,
-                        briefing=briefing,
-                        generated_at=execution_now,
-                        execution_state="no_action",
+                try:
+                    _load_execution_dependencies()
+                    construction, briefing = _payloads(
+                        settings,
+                        expected_as_of=context.decision_as_of,
                     )
-                    succeeded = True
-                    detail = "CIO diagnostic completed; paper_execution=no_action."
-                elif paper_trading_launch_open(execution_now):
-                    attempt = attempt_paper_execution(
-                        construction=construction,
-                        briefing=briefing,
-                        now=execution_now,
+                    execution_now = datetime.now(timezone.utc)
+                    if construction is None and _governed_no_action(briefing):
+                        report = publish_pending_transaction_report(
+                            construction=construction,
+                            briefing=briefing,
+                            generated_at=execution_now,
+                            execution_state="no_action",
+                        )
+                        reconcile_terminal_certification(report, values=resolved)
+                        detail = (
+                            "CIO diagnostic completed; analytical_certification=complete; "
+                            "paper_execution=no_action; operational_certification=complete."
+                        )
+                    elif paper_trading_launch_open(execution_now):
+                        attempt = attempt_paper_execution(
+                            construction=construction,
+                            briefing=briefing,
+                            now=execution_now,
+                        )
+                        report = publish_pending_transaction_report(
+                            construction=construction,
+                            briefing=briefing,
+                            generated_at=execution_now,
+                            execution_state=attempt.state,
+                        )
+                        terminal = reconcile_terminal_certification(
+                            report,
+                            values=resolved,
+                        )
+                        operational = bool(
+                            isinstance(terminal, Mapping)
+                            and terminal.get("reconciled") is True
+                        )
+                        detail = (
+                            "CIO diagnostic completed; analytical_certification=complete; "
+                            f"paper_execution={attempt.state}; "
+                            "operational_certification="
+                            f"{'complete' if operational else 'pending'}."
+                        )
+                    else:
+                        report = publish_pending_transaction_report(
+                            construction=construction,
+                            briefing=briefing,
+                            generated_at=execution_now,
+                            execution_state="scheduled",
+                        )
+                        reconcile_terminal_certification(report, values=resolved)
+                        detail = (
+                            "CIO diagnostic completed; analytical_certification=complete; "
+                            "paper implementation remains held by the configured launch "
+                            "boundary; operational_certification=pending."
+                        )
+                except Exception as implementation_error:
+                    logger.error(
+                        "paper implementation/reconciliation remains incomplete after "
+                        "successful analytical CIO diagnostic; error_type=%s",
+                        type(implementation_error).__name__,
                     )
-                    publish_pending_transaction_report(
-                        construction=construction,
-                        briefing=briefing,
-                        generated_at=execution_now,
-                        execution_state=attempt.state,
-                    )
-                    succeeded = bool(attempt.completed)
                     detail = (
-                        f"CIO diagnostic completed; paper_execution={attempt.state}."
-                    )
-                else:
-                    succeeded = False
-                    detail = (
-                        "CIO diagnostic completed; paper execution remains held by "
-                        "the configured launch boundary."
+                        "CIO diagnostic completed; analytical_certification=complete; "
+                        "paper implementation or certification reconciliation remains "
+                        f"pending ({type(implementation_error).__name__})."
                     )
                 _record_memory_phase("after_paper_implementation")
-    except Exception as error:  # Operational boundary; preserve fail-closed detail.
+    except Exception as error:  # Analytical/operational boundary; preserve fail-closed detail.
         detail = f"{type(error).__name__}: {error}"
         logger.error(
-            "manual CIO diagnostic failed closed; error_type=%s",
+            "manual CIO diagnostic failed closed before analytical completion; error_type=%s",
             type(error).__name__,
         )
     finally:

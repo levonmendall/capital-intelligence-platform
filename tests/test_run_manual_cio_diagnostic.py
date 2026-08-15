@@ -45,6 +45,8 @@ def test_context_failure_is_persisted_and_credentials_are_redacted(
         detail=f"provider request failed?api_token={secret}",
     )
 
+    diagnostic._load_coordination_dependencies()
+    assert not hasattr(diagnostic, "collect_public_live_information_if_due")
     monkeypatch.setattr(diagnostic.ApiSettings, "from_env", lambda _: settings)
     monkeypatch.setattr(
         diagnostic.OperationalSettings,
@@ -58,11 +60,6 @@ def test_context_failure_is_persisted_and_credentials_are_redacted(
         diagnostic,
         "recording_context_preparer",
         lambda _preparer: lambda **_: context,
-    )
-    monkeypatch.setattr(
-        diagnostic,
-        "collect_public_live_information_if_due",
-        lambda **_: SimpleNamespace(state="available"),
     )
     monkeypatch.setattr(diagnostic, "invalidate_reuse_preserving_success", lambda _: None)
 
@@ -117,6 +114,8 @@ def test_successful_diagnostic_uses_triggered_cycle_and_paper_controls(
         def dispatch_pending(self):
             return ()
 
+    diagnostic._load_coordination_dependencies()
+    assert not hasattr(diagnostic, "collect_public_live_information_if_due")
     monkeypatch.setattr(diagnostic.ApiSettings, "from_env", lambda _: settings)
     monkeypatch.setattr(
         diagnostic.OperationalSettings,
@@ -130,11 +129,6 @@ def test_successful_diagnostic_uses_triggered_cycle_and_paper_controls(
         diagnostic,
         "recording_context_preparer",
         lambda _preparer: lambda **_: context,
-    )
-    monkeypatch.setattr(
-        diagnostic,
-        "collect_public_live_information_if_due",
-        lambda **_: SimpleNamespace(state="available"),
     )
     monkeypatch.setattr(diagnostic, "invalidate_reuse_preserving_success", lambda _: None)
     monkeypatch.setattr(diagnostic, "_payloads", lambda *_args, **_kwargs: ({}, {}))

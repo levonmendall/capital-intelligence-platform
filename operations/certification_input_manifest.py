@@ -10,7 +10,7 @@ resulting immutable record binds identities that must not be conflated:
 
 * application release identity (R),
 * evidence generation / point-in-time snapshot identity (G),
-* immutable comprehensive-global and U.S.-equity discovery snapshot identities, and
+* immutable comprehensive-global, U.S.-equity, and paper-evidence snapshot identities,
 * evidence-policy compatibility identity (P).
 
 Publishing this record performs no provider, discovery, reference, public-information,
@@ -37,6 +37,12 @@ from operations.equity_discovery_snapshot import (
     EquityDiscoverySnapshot,
     EquityDiscoverySnapshotError,
     load_equity_discovery_snapshot,
+)
+from operations.evidence_collection_universe import build_evidence_collection_universe
+from operations.paper_evidence_snapshot import (
+    PaperEvidenceSnapshot,
+    PaperEvidenceSnapshotError,
+    load_paper_evidence_snapshot,
 )
 from operations.qualified_comprehensive_discovery_snapshot import (
     ComprehensiveDiscoverySnapshotError,
@@ -69,6 +75,7 @@ class CertificationInputRecord:
     snapshot_id: str
     global_discovery_snapshot_id: str
     us_equity_discovery_snapshot_id: str
+    paper_evidence_snapshot_id: str
     cutoff: datetime
     reference_manifest_id: str
     policy_compatibility_hash: str
@@ -106,6 +113,12 @@ def _release(values: Mapping[str, str]) -> str:
 def _safe(value: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value).strip())
     return normalized.strip("-.") or "unknown"
+
+
+def _stamp(value: datetime) -> str:
+    return _aware(value, field_name="certification_cutoff").strftime(
+        "%Y%m%dT%H%M%S%fZ"
+    )
 
 
 def _root(values: Mapping[str, str]) -> Path:
@@ -148,10 +161,19 @@ def _immutable_json(path: Path, payload: Mapping[str, object]) -> None:
             pass
 
 
-def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _integrity_payload(payload: Mapping[str, object]) -> dict[str, object]:
     body = dict(payload)
     body["integrity_sha256"] = _digest(payload)
+    return body
+
+
+def _immutable_integrity_json(path: Path, payload: Mapping[str, object]) -> None:
+    _immutable_json(path, _integrity_payload(payload))
+
+
+def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = _integrity_payload(payload)
     temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
     temporary.write_text(
         json.dumps(body, sort_keys=True, indent=2, allow_nan=False) + "\n",
@@ -185,12 +207,14 @@ def freeze_certification_input(
     snapshot: _plane.PointInTimeEvidenceSnapshot | None = None,
     global_snapshot: QualifiedComprehensiveDiscoverySnapshot | None = None,
     equity_snapshot: EquityDiscoverySnapshot | None = None,
+    paper_snapshot: PaperEvidenceSnapshot | None = None,
 ) -> CertificationInputRecord:
-    """Freeze an immutable provider-free R+G+discovery-snapshots+P CIO handoff.
+    """Freeze an immutable provider-free R+G+component-snapshots+P CIO handoff.
 
     The function deliberately calls ``ensure_point_in_time_snapshot`` with
-    ``allow_refresh=False`` when a PIT snapshot was not supplied. Discovery components
-    are loaded by exact evidence-generation cutoff with no provider fallback.
+    ``allow_refresh=False`` when a PIT snapshot was not supplied. Discovery and paper
+    evidence components are loaded by exact evidence-generation cutoff with no provider
+    fallback.
     """
 
     resolved = dict(os.environ if values is None else values)
@@ -251,6 +275,33 @@ def freeze_certification_input(
             "U.S.-equity discovery snapshot is not bound to the qualified evidence generation"
         )
 
+    try:
+        if paper_snapshot is None:
+            evidence_universe, _holding_only = build_evidence_collection_universe(
+                evidence_as_of=generation.as_of,
+                held_symbols=qualified_global.held_symbols,
+                tracked_symbols=qualified_global.tracked_symbols,
+                values=resolved,
+            )
+            qualified_paper = load_paper_evidence_snapshot(
+                evidence_as_of=generation.as_of,
+                universe=evidence_universe,
+                values=resolved,
+            )
+        else:
+            qualified_paper = paper_snapshot
+    except (PaperEvidenceSnapshotError, OSError, TypeError, ValueError) as error:
+        raise CertificationInputError(
+            f"qualified paper evidence snapshot is unavailable: {error}"
+        ) from error
+    if _aware(
+        qualified_paper.evidence_as_of,
+        field_name="paper_evidence_as_of",
+    ) != generation.as_of:
+        raise CertificationInputError(
+            "paper evidence snapshot is not bound to the qualified evidence generation"
+        )
+
     release = _release(resolved)
     policy_material = _policy_material(resolved, generation=generation)
     policy_hash = _digest(policy_material)
@@ -272,6 +323,8 @@ def freeze_certification_input(
             "tracked_symbols": list(qualified_equity.tracked_symbols),
             "excluded_symbols": list(qualified_equity.excluded_symbols),
         },
+        "paper_evidence_snapshot_id": qualified_paper.snapshot_id,
+        "paper_evidence_universe_signature": qualified_paper.universe_signature,
         "reference_manifest_id": generation.reference_manifest_id,
         "historical_scope_count": generation.historical_scope_count,
         "historical_coverage_digest": generation.historical_coverage_digest,
@@ -300,18 +353,20 @@ def freeze_certification_input(
     )
     _immutable_json(path, payload)
 
+    component_metadata = {
+        "reference_manifest_id": generation.reference_manifest_id,
+        "evidence_as_of": generation.as_of.isoformat(),
+        "global_discovery_snapshot_id": qualified_global.snapshot_id,
+        "us_equity_discovery_snapshot_id": qualified_equity.snapshot_id,
+        "paper_evidence_snapshot_id": qualified_paper.snapshot_id,
+    }
     advance_certification_state(
         certification_id=record_id,
         target=CertificationState.EVIDENCE_READY,
         source_id=generation.generation_id,
         values=resolved,
         detail="qualified evidence generation accepted by provider-free consumer",
-        metadata={
-            "reference_manifest_id": generation.reference_manifest_id,
-            "evidence_as_of": generation.as_of.isoformat(),
-            "global_discovery_snapshot_id": qualified_global.snapshot_id,
-            "us_equity_discovery_snapshot_id": qualified_equity.snapshot_id,
-        },
+        metadata=component_metadata,
     )
     advance_certification_state(
         certification_id=record_id,
@@ -322,30 +377,34 @@ def freeze_certification_input(
         metadata={
             "snapshot_cutoff": requested.isoformat(),
             "policy_compatibility_hash": policy_hash,
-            "global_discovery_snapshot_id": qualified_global.snapshot_id,
-            "us_equity_discovery_snapshot_id": qualified_equity.snapshot_id,
+            **component_metadata,
         },
     )
 
-    _atomic_json(
-        _root(resolved) / "ledger" / _safe(release) / "latest-input.json",
-        {
-            "schema_version": _SCHEMA,
-            "record_id": record_id,
-            "release": release,
-            "evidence_generation_id": generation.generation_id,
-            "snapshot_id": frozen.snapshot_id,
-            "global_discovery_snapshot_id": qualified_global.snapshot_id,
-            "us_equity_discovery_snapshot_id": qualified_equity.snapshot_id,
-            "snapshot_cutoff": requested.isoformat(),
-            "policy_compatibility_hash": policy_hash,
-            "record_path": str(path),
-            "certification_state": CertificationState.SNAPSHOT_FROZEN.value,
-            "cio_eligible": True,
-            "paper_only": True,
-            "real_money_authorized": False,
-        },
+    pointer = {
+        "schema_version": _SCHEMA,
+        "record_id": record_id,
+        "release": release,
+        "evidence_generation_id": generation.generation_id,
+        "snapshot_id": frozen.snapshot_id,
+        "global_discovery_snapshot_id": qualified_global.snapshot_id,
+        "us_equity_discovery_snapshot_id": qualified_equity.snapshot_id,
+        "paper_evidence_snapshot_id": qualified_paper.snapshot_id,
+        "snapshot_cutoff": requested.isoformat(),
+        "policy_compatibility_hash": policy_hash,
+        "record_path": str(path),
+        "certification_state": CertificationState.SNAPSHOT_FROZEN.value,
+        "cio_eligible": True,
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+    ledger_root = _root(resolved) / "ledger" / _safe(release)
+    _immutable_integrity_json(
+        ledger_root / "by-cutoff" / f"{_stamp(requested)}.json",
+        pointer,
     )
+    _atomic_json(ledger_root / "latest-input.json", pointer)
+
     return CertificationInputRecord(
         record_id=record_id,
         release=release,
@@ -354,6 +413,7 @@ def freeze_certification_input(
         snapshot_id=frozen.snapshot_id,
         global_discovery_snapshot_id=qualified_global.snapshot_id,
         us_equity_discovery_snapshot_id=qualified_equity.snapshot_id,
+        paper_evidence_snapshot_id=qualified_paper.snapshot_id,
         cutoff=requested,
         reference_manifest_id=generation.reference_manifest_id,
         policy_compatibility_hash=policy_hash,

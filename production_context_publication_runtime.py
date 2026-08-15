@@ -17,6 +17,8 @@ from typing import Callable, Mapping
 from zoneinfo import ZoneInfo
 
 from api.config import ApiSettings
+from operations.certification_runtime_state import advance_linear_state_for_cutoff
+from operations.certification_state_machine import CertificationState
 from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     FreePaperPilotUniverse,
@@ -131,6 +133,54 @@ def _cycle_key(*, scheduled_for: datetime, timezone_name: str) -> str:
     return f"canonical-cio:{timezone_name}:{local_date}"
 
 
+def _advance_screening_if_ready(result: ProductionContextPublicationResult) -> None:
+    """Bind a persisted full-universe screening publication to its exact input cutoff."""
+
+    if not result.ready:
+        return
+    if result.decision_as_of is None:
+        raise RuntimeError("ready production context is missing decision_as_of")
+    source = str(result.screening_publication_identifier or "").strip()
+    if not source:
+        raise RuntimeError(
+            "ready production context is missing screening publication identity"
+        )
+    advance_linear_state_for_cutoff(
+        cutoff=result.decision_as_of,
+        target=CertificationState.SCREENING_COMPLETE,
+        source_id=source,
+        detail="canonical full-universe screening publication persisted",
+        metadata={
+            "cycle_key": result.cycle_key,
+            "context_identifier": result.context_identifier,
+            "eligible_universe_identifier": result.eligible_universe_identifier,
+            "candidate_count": result.candidate_count,
+            "qualified_candidate_count": result.qualified_candidate_count,
+            "exclusion_count": result.exclusion_count,
+        },
+    )
+
+
+def _stable_production_snapshot_clock() -> Clock:
+    """Freeze the governed cutoff on first use after current readiness observations.
+
+    The governed publisher reads its clock first after bounded readiness/cash checks and
+    again after evidence loading. A provider-free evidence snapshot must keep those reads
+    on one cutoff so the immutable certification input, screening publication, committee,
+    CIO decision, and construction all share the same point-in-time identity.
+    """
+
+    frozen: datetime | None = None
+
+    def clock() -> datetime:
+        nonlocal frozen
+        if frozen is None:
+            frozen = _utc_now()
+        return frozen
+
+    return clock
+
+
 def prepare_production_context_for_cycle(
     *,
     settings: ApiSettings,
@@ -155,16 +205,21 @@ def prepare_production_context_for_cycle(
 
         equity_discovery_probe = qualified_equity_discovery_probe
 
+    snapshot_probe_active = False
     if evidence_probe is None:
         from operations.qualified_paper_evidence import (
             production_snapshot_probe_enabled,
             qualified_paper_evidence_probe,
         )
 
-        if production_snapshot_probe_enabled():
+        snapshot_probe_active = production_snapshot_probe_enabled()
+        if snapshot_probe_active:
             evidence_probe = qualified_paper_evidence_probe
 
-    return prepare_governed_production_context_for_cycle(
+    if snapshot_probe_active and clock is None:
+        clock = _stable_production_snapshot_clock()
+
+    result = prepare_governed_production_context_for_cycle(
         settings=settings,
         scheduled_for=scheduled_for,
         universe_path=universe_path,
@@ -174,6 +229,8 @@ def prepare_production_context_for_cycle(
         equity_discovery_probe=equity_discovery_probe,
         clock=clock,
     )
+    _advance_screening_if_ready(result)
+    return result
 
 
 __all__ = [

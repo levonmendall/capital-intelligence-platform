@@ -20,6 +20,7 @@ def test_successful_diagnostic_preserves_persisted_context_cycle_key(
     # governed phase that needs them. Load only the coordination/configuration boundary
     # before replacing those dependencies with deterministic test doubles.
     diagnostic._load_coordination_dependencies()
+    assert not hasattr(diagnostic, "collect_public_live_information_if_due")
     settings = SimpleNamespace(
         portfolio_database=tmp_path / "portfolio.db",
         journal_database=tmp_path / "journal.db",
@@ -58,11 +59,6 @@ def test_successful_diagnostic_preserves_persisted_context_cycle_key(
         diagnostic,
         "recording_context_preparer",
         lambda _preparer: lambda **_: context,
-    )
-    monkeypatch.setattr(
-        diagnostic,
-        "collect_public_live_information_if_due",
-        lambda **_: SimpleNamespace(state="available"),
     )
     monkeypatch.setattr(diagnostic, "invalidate_reuse_preserving_success", lambda _: None)
     monkeypatch.setattr(diagnostic, "_payloads", lambda *_args, **_kwargs: ({}, {}))

@@ -62,12 +62,11 @@ def test_release_start_recovers_interrupted_prior_process(
         "recording_context_preparer",
         lambda _preparer: lambda **_: context,
     )
-    monkeypatch.setattr(
-        diagnostic,
-        "collect_public_live_information_if_due",
-        lambda **_: SimpleNamespace(state="available"),
-    )
     monkeypatch.setattr(diagnostic, "invalidate_reuse_preserving_success", lambda _: None)
+
+    # Certification v2 invariant: the release diagnostic consumes already-qualified
+    # evidence and must not retain a public-information provider acquisition dependency.
+    assert not hasattr(diagnostic, "collect_public_live_information_if_due")
 
     assert diagnostic.run_diagnostic_once(values=values) == 3
 
