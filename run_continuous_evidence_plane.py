@@ -11,9 +11,11 @@ from pathlib import Path
 from types import FrameType
 from typing import Mapping, Sequence
 
+from operations.component_qualified_evidence_maintenance import (
+    maintain_component_qualified_evidence_plane,
+)
 from operations.composite_readiness import component_heartbeat_path
 from operations.heartbeat import WorkerHeartbeatStore
-from operations.qualified_evidence_maintenance import maintain_continuous_evidence_plane
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
 
@@ -36,7 +38,7 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
     prior = os.environ.get(_PREPARING_ENV)
     os.environ[_PREPARING_ENV] = "true"
     try:
-        maintenance = maintain_continuous_evidence_plane(values=resolved)
+        maintenance = maintain_component_qualified_evidence_plane(values=resolved)
     finally:
         if prior is None:
             os.environ.pop(_PREPARING_ENV, None)

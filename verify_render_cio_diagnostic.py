@@ -27,6 +27,7 @@ _original_verify_complete_all_market_evaluation = (
 _SERVER_REPLACEMENT_GRACE_ATTEMPTS = 45
 _MAX_ADOPTED_FAILURES = 4
 _FRESH_AFTER_ENV = "CIO_DIAGNOSTIC_FRESH_AFTER"
+_PREQUALIFICATION_FAILURE_STAGE = "evidence_prequalification_failed"
 
 
 def _parse_utc(value: object) -> datetime | None:
@@ -180,8 +181,6 @@ def _replacement_wait_detail(
     primary_failure_detail: str,
     secondary_detail: str,
 ) -> str:
-    """Keep the exact terminal CIO failure primary when its replacement never appears."""
-
     return (
         f"{primary_failure_detail}; "
         "secondary_context=replacement_attempt_not_observed; "
@@ -217,6 +216,17 @@ def _retry_aware_poll_render_audit(
             interval_seconds=interval_seconds,
             boundary=boundary,
         )
+        if (
+            str(prefetched.get("state") or "") == "failed"
+            and _core._progress_stage(prefetched) == _PREQUALIFICATION_FAILURE_STAGE
+            and _core.audit_is_current_and_final(
+                prefetched,
+                expected_release=expected_release,
+            )
+        ):
+            raise _core.RenderAuditVerificationError(
+                _core._terminal_failure_detail(prefetched)
+            )
 
     def next_fetch(target: str) -> Mapping[str, Any]:
         nonlocal prefetched
@@ -269,7 +279,8 @@ def _retry_aware_poll_render_audit(
                         _replacement_wait_detail(primary_failure_detail, detail)
                     ) from error
                 raise
-
+            if f"stage={_PREQUALIFICATION_FAILURE_STAGE}" in detail:
+                raise
             if primary_failure_detail is None:
                 primary_failure_detail = detail
             adopted_failures += 1
@@ -294,10 +305,6 @@ def _retry_aware_poll_render_audit(
                     f"failed_server_attempt={adopted_failures} "
                     "state=awaiting_replacement_attempt release_match=yes"
                 )
-            # Re-enter the core verifier. The failed adopted request is now the baseline,
-            # so the extended grace applies only while waiting for its replacement. If no
-            # new request_id appears, the core still terminates fail-closed, while this
-            # wrapper preserves the original terminal failure as the primary evidence.
 
 
 def _verify_end_to_end_all_market_evaluation(
@@ -305,8 +312,6 @@ def _verify_end_to_end_all_market_evaluation(
     *,
     expected_release: str,
 ) -> None:
-    """Require one exact-release, exact-context proof through paper implementation."""
-
     _original_verify_complete_all_market_evaluation(
         payload,
         expected_release=expected_release,
@@ -348,6 +353,4 @@ _core.verify_complete_all_market_evaluation = _verify_end_to_end_all_market_eval
 if __name__ == "__main__":
     raise SystemExit(_core.main())
 
-# Preserve historical imports and test monkeypatch behavior while exposing the patched
-# poller and strict verifier through the canonical module name.
 sys.modules[__name__] = _core
