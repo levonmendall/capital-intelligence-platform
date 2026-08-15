@@ -6,10 +6,11 @@ paper-execution control.
 
 The continuous evidence plane owns provider acquisition. A CIO/certification consumer
 may only freeze a point-in-time snapshot that already exists and is fresh enough. The
-resulting immutable record binds three identities that must not be conflated:
+resulting immutable record binds identities that must not be conflated:
 
 * application release identity (R),
-* evidence generation / point-in-time snapshot identity (G), and
+* evidence generation / point-in-time snapshot identity (G),
+* immutable global discovery snapshot identity, and
 * evidence-policy compatibility identity (P).
 
 Publishing this record performs no provider, discovery, reference, public-information,
@@ -31,6 +32,11 @@ from operations import continuous_evidence_plane as _plane
 from operations.certification_state_machine import (
     CertificationState,
     advance_certification_state,
+)
+from operations.qualified_comprehensive_discovery_snapshot import (
+    ComprehensiveDiscoverySnapshotError,
+    QualifiedComprehensiveDiscoverySnapshot,
+    load_qualified_comprehensive_discovery_snapshot,
 )
 
 
@@ -56,6 +62,7 @@ class CertificationInputRecord:
     evidence_generation_id: str
     evidence_as_of: datetime
     snapshot_id: str
+    global_discovery_snapshot_id: str
     cutoff: datetime
     reference_manifest_id: str
     policy_compatibility_hash: str
@@ -170,12 +177,13 @@ def freeze_certification_input(
     cutoff: datetime,
     values: Mapping[str, str] | None = None,
     snapshot: _plane.PointInTimeEvidenceSnapshot | None = None,
+    global_snapshot: QualifiedComprehensiveDiscoverySnapshot | None = None,
 ) -> CertificationInputRecord:
-    """Freeze an immutable provider-free R+G+P handoff for one CIO cutoff.
+    """Freeze an immutable provider-free R+G+global-snapshot+P CIO handoff.
 
     The function deliberately calls ``ensure_point_in_time_snapshot`` with
-    ``allow_refresh=False`` when a snapshot was not supplied. It therefore cannot turn
-    a CIO/read path into an evidence acquisition path.
+    ``allow_refresh=False`` when a PIT snapshot was not supplied. The global discovery
+    component is loaded by exact evidence-generation cutoff with no provider fallback.
     """
 
     resolved = dict(os.environ if values is None else values)
@@ -202,6 +210,23 @@ def freeze_certification_input(
             "point-in-time snapshot reference manifest does not match evidence generation"
         )
 
+    try:
+        qualified_global = global_snapshot or load_qualified_comprehensive_discovery_snapshot(
+            evidence_as_of=generation.as_of,
+            values=resolved,
+        )
+    except ComprehensiveDiscoverySnapshotError as error:
+        raise CertificationInputError(
+            f"qualified global discovery snapshot is unavailable: {error}"
+        ) from error
+    if _aware(
+        qualified_global.evidence_as_of,
+        field_name="global_discovery_evidence_as_of",
+    ) != generation.as_of:
+        raise CertificationInputError(
+            "global discovery snapshot is not bound to the qualified evidence generation"
+        )
+
     release = _release(resolved)
     policy_material = _policy_material(resolved, generation=generation)
     policy_hash = _digest(policy_material)
@@ -212,6 +237,11 @@ def freeze_certification_input(
         "evidence_as_of": generation.as_of.isoformat(),
         "snapshot_id": frozen.snapshot_id,
         "snapshot_cutoff": requested.isoformat(),
+        "global_discovery_snapshot_id": qualified_global.snapshot_id,
+        "global_discovery_state_scope": {
+            "held_symbols": list(qualified_global.held_symbols),
+            "tracked_symbols": list(qualified_global.tracked_symbols),
+        },
         "reference_manifest_id": generation.reference_manifest_id,
         "historical_scope_count": generation.historical_scope_count,
         "historical_coverage_digest": generation.historical_coverage_digest,
@@ -253,6 +283,7 @@ def freeze_certification_input(
         metadata={
             "reference_manifest_id": generation.reference_manifest_id,
             "evidence_as_of": generation.as_of.isoformat(),
+            "global_discovery_snapshot_id": qualified_global.snapshot_id,
         },
     )
     advance_certification_state(
@@ -264,6 +295,7 @@ def freeze_certification_input(
         metadata={
             "snapshot_cutoff": requested.isoformat(),
             "policy_compatibility_hash": policy_hash,
+            "global_discovery_snapshot_id": qualified_global.snapshot_id,
         },
     )
 
@@ -275,6 +307,7 @@ def freeze_certification_input(
             "release": release,
             "evidence_generation_id": generation.generation_id,
             "snapshot_id": frozen.snapshot_id,
+            "global_discovery_snapshot_id": qualified_global.snapshot_id,
             "snapshot_cutoff": requested.isoformat(),
             "policy_compatibility_hash": policy_hash,
             "record_path": str(path),
@@ -290,6 +323,7 @@ def freeze_certification_input(
         evidence_generation_id=generation.generation_id,
         evidence_as_of=generation.as_of,
         snapshot_id=frozen.snapshot_id,
+        global_discovery_snapshot_id=qualified_global.snapshot_id,
         cutoff=requested,
         reference_manifest_id=generation.reference_manifest_id,
         policy_compatibility_hash=policy_hash,
