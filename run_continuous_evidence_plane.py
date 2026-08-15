@@ -17,12 +17,14 @@ from operations import continuous_evidence_plane as _plane
 from operations import qualified_evidence_maintenance as _legacy_maintenance
 from operations.composite_readiness import component_heartbeat_path
 from operations.comprehensive_discovery_snapshot import (
-    ComprehensiveDiscoverySnapshotError,
-    load_comprehensive_discovery_snapshot,
     publish_comprehensive_discovery_snapshot,
 )
 from operations.evidence_state_scope import load_evidence_state_scope
 from operations.heartbeat import WorkerHeartbeatStore
+from operations.qualified_comprehensive_discovery_snapshot import (
+    ComprehensiveDiscoverySnapshotError,
+    load_qualified_comprehensive_discovery_snapshot,
+)
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
 
@@ -49,7 +51,7 @@ def _snapshot_matches_current_scope(
     if generation is None:
         return False
     try:
-        snapshot = load_comprehensive_discovery_snapshot(
+        snapshot = load_qualified_comprehensive_discovery_snapshot(
             evidence_as_of=generation.as_of,
             values=values,
         )
@@ -165,8 +167,9 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
             os.environ[_PREPARING_ENV] = prior
     generation = maintenance.generation
     # Qualification is incomplete if the generation cannot be paired with the exact
-    # release-independent comprehensive snapshot it claims to have prepared.
-    global_snapshot = load_comprehensive_discovery_snapshot(
+    # release-independent comprehensive snapshot it claims to have prepared and restored
+    # with the provider-factor/continuity metadata required by the qualified runtime.
+    global_snapshot = load_qualified_comprehensive_discovery_snapshot(
         evidence_as_of=generation.as_of,
         values=resolved,
     )
