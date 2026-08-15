@@ -2,17 +2,17 @@
 
 Render persistent disks attach to a single service instance. This supervisor therefore
 runs the authenticated Streamlit console, read-only API, autonomous CIO/paper operator,
-redundant headline collector, historical backfill loop, and encrypted backup loop as
-child processes that share one durable SQLite and research-data state root.
+redundant public-information workers, historical backfill loop, and encrypted backup
+loop as child processes that share one durable SQLite and research-data state root.
 
 The supervisor is intentionally fail-closed:
 
 * initialization must succeed before any child starts;
 * the public web, API, and CIO operator are critical processes;
 * loss of a critical process terminates the service so Render restarts it;
-* headline, historical, backup, and readiness-monitoring loops are restarted with
-  bounded delay without taking the trading console down during a transient or
-  persistently blocked operational condition;
+* public-evidence, headline, historical, backup, and readiness-monitoring loops are
+  restarted with bounded delay without taking the trading console down during a
+  transient or persistently blocked operational condition;
 * an explicitly supplied release-diagnostic barrier starts only API and Streamlit until
   the bounded all-market diagnostic finishes, avoiding duplicate heavyweight workers;
 * SIGTERM is forwarded to every child for an orderly deployment shutdown; and
@@ -168,6 +168,10 @@ def prepare_render_environment(
         "CAPITAL_INTELLIGENCE_PUBLIC_HEADLINE_INTERVAL_SECONDS",
         "300",
     )
+    values.setdefault(
+        "CAPITAL_INTELLIGENCE_GLOBAL_PUBLIC_EVIDENCE_INTERVAL_SECONDS",
+        "900",
+    )
     values.setdefault("CAPITAL_INTELLIGENCE_SCHEDULER_TIMEZONE", "America/New_York")
     values.setdefault("CAPITAL_INTELLIGENCE_SCHEDULER_HOUR", "7")
     values.setdefault("CAPITAL_INTELLIGENCE_SCHEDULER_POLL_SECONDS", "60")
@@ -246,6 +250,12 @@ def managed_processes(
             command=(python, "run_public_headline_collector.py", "--loop"),
             critical=False,
             restart_delay_seconds=60,
+        ),
+        ManagedProcess(
+            name="global-public-evidence",
+            command=(python, "run_global_public_evidence.py", "--loop"),
+            critical=False,
+            restart_delay_seconds=300,
         ),
         ManagedProcess(
             name="historical-backfill",
