@@ -4,8 +4,8 @@ This module establishes the all-market certification v2 boundary without changin
 investment strategy, screening threshold, specialist authority, construction rule, or
 paper-execution control.
 
-The continuous evidence plane owns provider acquisition.  A CIO/certification consumer
-may only freeze a point-in-time snapshot that already exists and is fresh enough.  The
+The continuous evidence plane owns provider acquisition. A CIO/certification consumer
+may only freeze a point-in-time snapshot that already exists and is fresh enough. The
 resulting immutable record binds three identities that must not be conflated:
 
 * application release identity (R),
@@ -13,7 +13,7 @@ resulting immutable record binds three identities that must not be conflated:
 * evidence-policy compatibility identity (P).
 
 Publishing this record performs no provider, discovery, reference, public-information,
-or history refresh.  Missing or stale evidence fails closed.
+or history refresh. Missing or stale evidence fails closed.
 """
 
 from __future__ import annotations
@@ -28,6 +28,10 @@ from pathlib import Path
 from typing import Mapping
 
 from operations import continuous_evidence_plane as _plane
+from operations.certification_state_machine import (
+    CertificationState,
+    advance_certification_state,
+)
 
 
 _SCHEMA = "all-market-certification-input.v2"
@@ -170,7 +174,7 @@ def freeze_certification_input(
     """Freeze an immutable provider-free R+G+P handoff for one CIO cutoff.
 
     The function deliberately calls ``ensure_point_in_time_snapshot`` with
-    ``allow_refresh=False`` when a snapshot was not supplied.  It therefore cannot turn
+    ``allow_refresh=False`` when a snapshot was not supplied. It therefore cannot turn
     a CIO/read path into an evidence acquisition path.
     """
 
@@ -235,6 +239,34 @@ def freeze_certification_input(
         / f"{record_id}.json"
     )
     _immutable_json(path, payload)
+
+    # The evidence owner and snapshot freezer are separate durable facts. Later owners
+    # can advance this same certification_id through screening, committee, CIO,
+    # construction, implementation/no-action, and final certification without replaying
+    # acquisition or inferring missing stages.
+    advance_certification_state(
+        certification_id=record_id,
+        target=CertificationState.EVIDENCE_READY,
+        source_id=generation.generation_id,
+        values=resolved,
+        detail="qualified evidence generation accepted by provider-free consumer",
+        metadata={
+            "reference_manifest_id": generation.reference_manifest_id,
+            "evidence_as_of": generation.as_of.isoformat(),
+        },
+    )
+    advance_certification_state(
+        certification_id=record_id,
+        target=CertificationState.SNAPSHOT_FROZEN,
+        source_id=frozen.snapshot_id,
+        values=resolved,
+        detail="point-in-time CIO input snapshot frozen",
+        metadata={
+            "snapshot_cutoff": requested.isoformat(),
+            "policy_compatibility_hash": policy_hash,
+        },
+    )
+
     _atomic_json(
         _root(resolved) / "ledger" / _safe(release) / "latest-input.json",
         {
@@ -246,6 +278,7 @@ def freeze_certification_input(
             "snapshot_cutoff": requested.isoformat(),
             "policy_compatibility_hash": policy_hash,
             "record_path": str(path),
+            "certification_state": CertificationState.SNAPSHOT_FROZEN.value,
             "cio_eligible": True,
             "paper_only": True,
             "real_money_authorized": False,
