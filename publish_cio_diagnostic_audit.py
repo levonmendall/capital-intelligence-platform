@@ -12,6 +12,9 @@ from api.config import ApiSettings
 from api.routes.cio_diagnostic import build_cio_diagnostic_audit
 from operations.all_market_certification_audit import public_all_market_certification
 from operations.reference_readiness import load_reference_readiness_progress
+from operations.release_evidence_prequalification import (
+    load_release_evidence_prequalification,
+)
 from production_context_publication_runtime import _load_json, _state_path
 
 
@@ -58,16 +61,6 @@ def _with_reference_progress(
     return published
 
 
-def _paper_implementation_complete(payload: Mapping[str, object]) -> bool:
-    if str(payload.get("state") or "") != "completed":
-        return False
-    detail = str(payload.get("detail") or "")
-    return detail in {
-        "CIO diagnostic completed; paper_execution=completed.",
-        "CIO diagnostic completed; paper_execution=no_action.",
-    }
-
-
 def _parse_timestamp(value: object) -> datetime | None:
     raw = str(value or "").strip()
     if not raw:
@@ -81,19 +74,118 @@ def _parse_timestamp(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _with_release_prequalification(
+    payload: Mapping[str, object],
+    *,
+    values: Mapping[str, str],
+) -> dict[str, object]:
+    """Expose release evidence work without manufacturing a CIO request.
+
+    The public audit uses the prequalification identifier as a generic polling identity so
+    deployment verification can observe fresh progress. Internally no manual CIO request
+    exists until evidence_generation_ready has been published.
+    """
+
+    status = load_release_evidence_prequalification(values)
+    if status is None:
+        return dict(payload)
+
+    started_at = _parse_timestamp(status.get("started_at"))
+    canonical_requested_at = _parse_timestamp(payload.get("requested_at"))
+    canonical_current = bool(
+        str(payload.get("active_release") or "") == str(status.get("release") or "")
+        and payload.get("release_matches") is True
+        and str(payload.get("request_id") or "").strip()
+        and started_at is not None
+        and canonical_requested_at is not None
+        and canonical_requested_at >= started_at
+    )
+    if canonical_current:
+        return dict(payload)
+
+    state = str(status.get("state") or "").strip().lower()
+    if state not in {"pending", "in_progress", "completed", "failed"}:
+        return dict(payload)
+
+    published = dict(payload)
+    reference = load_reference_readiness_progress(values)
+    component_stage = None
+    component_metrics: dict[str, int] = {}
+    if isinstance(reference, Mapping):
+        reference_updated = _parse_timestamp(reference.get("updated_at"))
+        if (
+            started_at is not None
+            and reference_updated is not None
+            and reference_updated >= started_at
+        ):
+            raw_stage = str(reference.get("stage") or "").strip()
+            raw_metrics = reference.get("progress_metrics")
+            if raw_stage:
+                component_stage = raw_stage
+            if isinstance(raw_metrics, Mapping):
+                component_metrics = {
+                    str(name): int(value)
+                    for name, value in raw_metrics.items()
+                    if isinstance(name, str)
+                    and isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and value >= 0
+                }
+
+    # "prequalifying" is intentionally not a CIO active state. It keeps the verifier
+    # polling while ensuring the core verifier does not adopt this identity as the later
+    # manual CIO request identity.
+    public_state = "failed" if state == "failed" else "prequalifying"
+    published.update(
+        {
+            "request_id": str(status.get("prequalification_id") or ""),
+            "request_kind": "evidence_prequalification",
+            "requested_at": status.get("started_at"),
+            "completed_at": status.get("completed_at") if state == "failed" else None,
+            "active_release": status.get("release"),
+            "release_matches": True,
+            "state": public_state,
+            "stage": status.get("stage"),
+            "detail": status.get("detail"),
+            "progress_metrics": dict(status.get("metrics") or {}),
+            "prequalification_component_stage": component_stage,
+            "prequalification_component_metrics": component_metrics,
+            "prequalification_generation_id": status.get("generation_id"),
+            "prequalification_state": state,
+            "prequalification_active": state in {"pending", "in_progress", "completed"},
+            "ready": False,
+            "context_cycle_matches": False,
+            "context_attempt_cycle_matches": False,
+            "comprehensive_discovery_complete": False,
+            "scheduled_market_coverage_complete": False,
+            "terminal_screening_complete": False,
+            "all_market_evaluation_complete": False,
+            "market_lanes": [],
+            "paper_only": True,
+            "real_money_authorized": False,
+            "credential_safe": True,
+        }
+    )
+    return published
+
+
+def _paper_implementation_complete(payload: Mapping[str, object]) -> bool:
+    if str(payload.get("state") or "") != "completed":
+        return False
+    detail = str(payload.get("detail") or "")
+    return detail in {
+        "CIO diagnostic completed; paper_execution=completed.",
+        "CIO diagnostic completed; paper_execution=no_action.",
+    }
+
+
 def _certificate_matches_current_context(
     *,
     payload: Mapping[str, object],
     certification: Mapping[str, object],
     context: Mapping[str, object],
 ) -> bool:
-    """Bind the immutable lane proof to this diagnostic's exact discovery state.
-
-    Comprehensive discovery is frozen before downstream evidence collection finishes, so
-    its certification epoch is expected to precede the later production-context
-    decision_as_of. The exact discovery-manifest fingerprint is the stable same-cycle
-    identity; timestamps additionally prove the certificate is not future-known.
-    """
+    """Bind the immutable lane proof to this diagnostic's exact discovery state."""
 
     decision_as_of = _parse_timestamp(context.get("decision_as_of"))
     certification_epoch = _parse_timestamp(
@@ -136,6 +228,7 @@ def publish_cio_diagnostic_audit(
         build_cio_diagnostic_audit(settings=settings, values=resolved),
         values=resolved,
     )
+    payload = _with_release_prequalification(payload, values=resolved)
     certification = public_all_market_certification(resolved)
     persisted_context = _load_persisted_context(settings)
     certification_context_matches = _certificate_matches_current_context(
@@ -200,6 +293,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "active_release": payload.get("active_release"),
                 "state": payload.get("state"),
                 "stage": payload.get("stage"),
+                "request_kind": payload.get("request_kind"),
                 "all_market_runtime_certified": payload.get(
                     "all_market_runtime_certified"
                 ),
