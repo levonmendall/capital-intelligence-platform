@@ -1,10 +1,10 @@
 """Canonical production-context publication runtime surface.
 
-The governed publisher owns production-context construction.  This module retains the
+The governed publisher owns production-context construction. This module retains the
 shared compatibility helpers consumed by that publisher and provides the single public
-entrypoint used by production callers.  Broad U.S.-equity discovery defaults to the
-provider-free qualified snapshot consumer; explicit probes remain available for tests and
-rehearsals.
+entrypoint used by production callers. Broad discovery and heavy paper evidence default
+to provider-free qualified snapshot consumers in production; explicit probes remain
+available for tests and rehearsals.
 """
 
 from __future__ import annotations
@@ -142,7 +142,7 @@ def prepare_production_context_for_cycle(
     equity_discovery_probe=None,
     clock: Clock | None = None,
 ) -> ProductionContextPublicationResult:
-    """Publish one governed context using already-qualified broad discovery evidence."""
+    """Publish one governed context using already-qualified evidence in production."""
 
     from production_context_publication_governed import (
         prepare_governed_production_context_for_cycle,
@@ -154,6 +154,15 @@ def prepare_production_context_for_cycle(
         )
 
         equity_discovery_probe = qualified_equity_discovery_probe
+
+    if evidence_probe is None:
+        from operations.qualified_paper_evidence import (
+            production_snapshot_probe_enabled,
+            qualified_paper_evidence_probe,
+        )
+
+        if production_snapshot_probe_enabled():
+            evidence_probe = qualified_paper_evidence_probe
 
     return prepare_governed_production_context_for_cycle(
         settings=settings,
