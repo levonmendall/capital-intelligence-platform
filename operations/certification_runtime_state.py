@@ -3,7 +3,8 @@
 Downstream owners never trust process-local environment variables for certification
 identity. They resolve the immutable input ledger from disk, require its point-in-time
 cutoff to match the authoritative artifact timestamp exactly, verify pointer integrity,
-and then advance only the state they can prove.
+and then advance only the state they can prove. Non-production tests and rehearsals do
+not require a production certification ledger.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from operations.certification_state_machine import (
     CertificationStateRecord,
     advance_certification_state,
 )
+from operations.continuous_evidence_plane import evidence_plane_enabled
 
 
 class CertificationRuntimeStateError(RuntimeError):
@@ -38,6 +40,16 @@ class CertificationRuntimeBinding:
     snapshot_id: str
     current_state: CertificationState
     current_source_id: str
+
+
+def certification_runtime_enabled(values: Mapping[str, str] | None = None) -> bool:
+    resolved = os.environ if values is None else values
+    production = (
+        str(resolved.get("CAPITAL_INTELLIGENCE_ENVIRONMENT", "")).strip().lower()
+        == "production"
+        or str(resolved.get("RENDER", "")).strip().lower() == "true"
+    )
+    return production and evidence_plane_enabled(resolved)
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -177,6 +189,8 @@ def advance_linear_state_for_cutoff(
     if target not in _LINEAR_RANK:
         raise ValueError("target must be a pre-implementation linear certification state")
     resolved = dict(os.environ if values is None else values)
+    if not certification_runtime_enabled(resolved):
+        return None
     binding = resolve_certification_for_cutoff(cutoff, values=resolved)
     current_rank = _LINEAR_RANK.get(binding.current_state)
     target_rank = _LINEAR_RANK[target]
@@ -184,7 +198,6 @@ def advance_linear_state_for_cutoff(
     if not normalized_source:
         raise ValueError("source_id is required")
     if current_rank is None:
-        # A branch/terminal state necessarily proves every earlier linear state.
         return None
     if current_rank > target_rank:
         return None
@@ -215,5 +228,6 @@ __all__ = [
     "CertificationRuntimeBinding",
     "CertificationRuntimeStateError",
     "advance_linear_state_for_cutoff",
+    "certification_runtime_enabled",
     "resolve_certification_for_cutoff",
 ]
