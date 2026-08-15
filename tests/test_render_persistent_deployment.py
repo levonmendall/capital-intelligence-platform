@@ -123,6 +123,7 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
         "api",
         "cio-paper-operator",
         "public-headline-collector",
+        "global-public-evidence",
         "historical-backfill",
         "encrypted-backup",
         "streamlit",
@@ -154,6 +155,13 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
     )
     assert by_name["public-headline-collector"].critical is False
     assert by_name["public-headline-collector"].restart_delay_seconds == 60
+    assert by_name["global-public-evidence"].command == (
+        "python",
+        "run_global_public_evidence.py",
+        "--loop",
+    )
+    assert by_name["global-public-evidence"].critical is False
+    assert by_name["global-public-evidence"].restart_delay_seconds == 300
     assert by_name["historical-backfill"].command == (
         "python",
         "run_historical_backfill.py",
@@ -182,6 +190,7 @@ def test_render_supervisor_starts_complete_operating_topology() -> None:
         if process.name
         not in {
             "public-headline-collector",
+            "global-public-evidence",
             "historical-backfill",
             "encrypted-backup",
             "composite-readiness-watchdog",
