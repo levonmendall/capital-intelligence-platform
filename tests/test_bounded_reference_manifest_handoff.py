@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import os
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
@@ -9,153 +8,139 @@ import run_bounded_manual_cio_diagnostic as runtime
 from operations.continuous_evidence_plane import ContinuousEvidencePlaneError
 
 
-_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
-_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
-_PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
-
-
 def _install_lightweight_runtime(monkeypatch: pytest.MonkeyPatch):
     prepare = runtime.prepare_reference_readiness
     globals_ = prepare.__globals__
     monkeypatch.setitem(globals_, "_install_recovery_progress_contract", lambda: None)
     monkeypatch.setitem(globals_, "install_cme_futures_reference_lineage", lambda: None)
-    monkeypatch.setitem(globals_, "MassiveFuturesReferenceProvider", lambda: object())
+    monkeypatch.setitem(globals_, "MassiveFuturesReferenceProvider", lambda: "massive")
     monkeypatch.setitem(
         globals_,
         "CmeExecutableFuturesReferenceProvider",
-        lambda **_kwargs: object(),
+        lambda **kwargs: ("cme", kwargs),
     )
-    monkeypatch.setitem(globals_, "_production_plane_enabled", lambda _values: True)
     return prepare, globals_
 
 
-def _bind_manifest(resolved, manifest) -> None:
-    resolved[_MANIFEST_PATH_ENV] = "/tmp/test-data/reference-qualified.json"
-    resolved[_MANIFEST_ID_ENV] = manifest.manifest_id
-
-
-def test_bounded_preclock_discovery_reuses_qualified_manifest_and_restores_env(
+def test_production_bounded_cio_consumes_prequalified_manifest_without_provider_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prepare, globals_ = _install_lightweight_runtime(monkeypatch)
     manifest = SimpleNamespace(manifest_id="manifest:new")
-    calls = {"reference": 0, "refresh": 0, "snapshot": 0}
-    values = {"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data"}
+    calls = {"loader": 0, "reference": 0}
+    values = {
+        "CAPITAL_INTELLIGENCE_ENVIRONMENT": "production",
+        "CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data",
+    }
 
-    def fake_reference(resolved, **_kwargs):
-        calls["reference"] += 1
-        _bind_manifest(resolved, manifest)
+    def load_prequalified(resolved):
+        calls["loader"] += 1
+        assert resolved is values
+        resolved["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"] = (
+            "/tmp/test-data/reference-qualified.json"
+        )
+        resolved["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"] = manifest.manifest_id
         return manifest
 
-    def fake_snapshot(*, values, allow_refresh):
-        calls["snapshot"] += 1
-        assert allow_refresh is False
-        assert values[_MANIFEST_ID_ENV] == manifest.manifest_id
-        assert os.environ[_PREPARING_ENV] == "true"
-        assert os.environ[_MANIFEST_PATH_ENV] == values[_MANIFEST_PATH_ENV]
-        assert os.environ[_MANIFEST_ID_ENV] == manifest.manifest_id
-        if calls["snapshot"] == 1:
-            return SimpleNamespace(reference_manifest_id="manifest:previous")
-        return SimpleNamespace(reference_manifest_id=manifest.manifest_id)
+    def unexpected_reference(*_args, **_kwargs):
+        calls["reference"] += 1
+        raise AssertionError("production CIO must not acquire reference/provider evidence")
 
-    def fake_refresh(*, values, reference_preparer):
-        calls["refresh"] += 1
-        assert reference_preparer(values) is manifest
-        assert os.environ[_MANIFEST_PATH_ENV] == values[_MANIFEST_PATH_ENV]
-        assert os.environ[_MANIFEST_ID_ENV] == manifest.manifest_id
-        return object()
-
-    monkeypatch.setitem(globals_, "_prepare_reference", fake_reference)
-    monkeypatch.setitem(globals_, "ensure_point_in_time_snapshot", fake_snapshot)
-    monkeypatch.setitem(globals_, "refresh_continuous_evidence_plane", fake_refresh)
-    monkeypatch.setenv(_PREPARING_ENV, "prior-preparing")
-    monkeypatch.setenv(_MANIFEST_PATH_ENV, "/tmp/prior-reference.json")
-    monkeypatch.setenv(_MANIFEST_ID_ENV, "manifest:prior")
+    monkeypatch.setitem(globals_, "_production_plane_enabled", lambda _values: True)
+    monkeypatch.setitem(
+        globals_,
+        "load_prequalified_reference_manifest",
+        load_prequalified,
+    )
+    monkeypatch.setitem(globals_, "_prepare_reference", unexpected_reference)
 
     result = prepare(values)
 
     assert result is manifest
-    assert calls == {"reference": 1, "refresh": 1, "snapshot": 2}
-    assert os.environ[_PREPARING_ENV] == "prior-preparing"
-    assert os.environ[_MANIFEST_PATH_ENV] == "/tmp/prior-reference.json"
-    assert os.environ[_MANIFEST_ID_ENV] == "manifest:prior"
+    assert calls == {"loader": 1, "reference": 0}
+    assert values["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"] == manifest.manifest_id
 
 
-def test_bounded_manifest_handoff_restores_env_when_discovery_fails(
+def test_production_bounded_cio_propagates_missing_or_stale_prequalified_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prepare, globals_ = _install_lightweight_runtime(monkeypatch)
-    manifest = SimpleNamespace(manifest_id="manifest:new")
-    values = {"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data"}
+    reference_calls = 0
+    values = {
+        "CAPITAL_INTELLIGENCE_ENVIRONMENT": "production",
+        "CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data",
+    }
 
-    def fake_reference(resolved, **_kwargs):
-        _bind_manifest(resolved, manifest)
-        return manifest
+    def fail_loader(_resolved):
+        raise ContinuousEvidencePlaneError(
+            "continuous evidence plane is missing or stale for the CIO cutoff"
+        )
 
-    monkeypatch.setitem(globals_, "_prepare_reference", fake_reference)
-    monkeypatch.setitem(
-        globals_,
-        "ensure_point_in_time_snapshot",
-        lambda **_kwargs: SimpleNamespace(reference_manifest_id="manifest:previous"),
-    )
-
-    def fail_refresh(**_kwargs):
-        assert os.environ[_PREPARING_ENV] == "true"
-        assert os.environ[_MANIFEST_ID_ENV] == manifest.manifest_id
-        raise ContinuousEvidencePlaneError("discovery failed")
-
-    monkeypatch.setitem(globals_, "refresh_continuous_evidence_plane", fail_refresh)
-    monkeypatch.setenv(_PREPARING_ENV, "prior-preparing")
-    monkeypatch.setenv(_MANIFEST_PATH_ENV, "/tmp/prior-reference.json")
-    monkeypatch.setenv(_MANIFEST_ID_ENV, "manifest:prior")
-
-    with pytest.raises(ContinuousEvidencePlaneError, match="discovery failed"):
-        prepare(values)
-
-    assert os.environ[_PREPARING_ENV] == "prior-preparing"
-    assert os.environ[_MANIFEST_PATH_ENV] == "/tmp/prior-reference.json"
-    assert os.environ[_MANIFEST_ID_ENV] == "manifest:prior"
-
-
-def test_bounded_manifest_handoff_does_not_refresh_integrity_failures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    prepare, globals_ = _install_lightweight_runtime(monkeypatch)
-    manifest = SimpleNamespace(manifest_id="manifest:new")
-    values = {"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data"}
-    refresh_calls = 0
-
-    def fake_reference(resolved, **_kwargs):
-        _bind_manifest(resolved, manifest)
-        return manifest
-
-    def fail_integrity(**_kwargs):
-        raise ContinuousEvidencePlaneError("evidence-plane manifest integrity mismatch")
-
-    def unexpected_refresh(**_kwargs):
-        nonlocal refresh_calls
-        refresh_calls += 1
+    def unexpected_reference(*_args, **_kwargs):
+        nonlocal reference_calls
+        reference_calls += 1
         return object()
 
-    monkeypatch.setitem(globals_, "_prepare_reference", fake_reference)
-    monkeypatch.setitem(globals_, "ensure_point_in_time_snapshot", fail_integrity)
-    monkeypatch.setitem(globals_, "refresh_continuous_evidence_plane", unexpected_refresh)
-
-    with pytest.raises(ContinuousEvidencePlaneError, match="integrity mismatch"):
-        prepare(values)
-
-    assert refresh_calls == 0
-
-
-def test_bounded_manifest_handoff_fails_closed_without_qualified_binding(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    prepare, globals_ = _install_lightweight_runtime(monkeypatch)
-    manifest = SimpleNamespace(manifest_id="manifest:new")
-    monkeypatch.setitem(globals_, "_prepare_reference", lambda _values, **_kwargs: manifest)
+    monkeypatch.setitem(globals_, "_production_plane_enabled", lambda _values: True)
+    monkeypatch.setitem(
+        globals_,
+        "load_prequalified_reference_manifest",
+        fail_loader,
+    )
+    monkeypatch.setitem(globals_, "_prepare_reference", unexpected_reference)
 
     with pytest.raises(
         ContinuousEvidencePlaneError,
-        match="did not bind its manifest",
+        match="missing or stale",
     ):
-        prepare({"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data"})
+        prepare(values)
+
+    assert reference_calls == 0
+
+
+def test_production_bounded_cio_requires_mutable_child_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare, globals_ = _install_lightweight_runtime(monkeypatch)
+    monkeypatch.setitem(globals_, "_production_plane_enabled", lambda _values: True)
+    monkeypatch.setitem(
+        globals_,
+        "load_prequalified_reference_manifest",
+        lambda _values: object(),
+    )
+
+    with pytest.raises(TypeError, match="mutable watchdog environment"):
+        prepare(MappingProxyType({"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data"}))
+
+
+def test_nonproduction_bounded_cio_retains_reference_preparation_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare, globals_ = _install_lightweight_runtime(monkeypatch)
+    manifest = SimpleNamespace(manifest_id="manifest:local")
+    observed: dict[str, object] = {}
+    values = {"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test-data"}
+
+    def reference(resolved, **kwargs):
+        observed["resolved"] = resolved
+        observed["provider"] = kwargs["massive_futures_provider"]
+        return manifest
+
+    monkeypatch.setitem(globals_, "_production_plane_enabled", lambda _values: False)
+    monkeypatch.setitem(globals_, "_prepare_reference", reference)
+    monkeypatch.setitem(
+        globals_,
+        "load_prequalified_reference_manifest",
+        lambda _values: (_ for _ in ()).throw(
+            AssertionError("nonproduction must not require a production evidence generation")
+        ),
+    )
+
+    result = prepare(values)
+
+    assert result is manifest
+    assert observed["resolved"] is values
+    provider = observed["provider"]
+    assert provider[0] == "cme"
+    assert provider[1]["fallback_provider"] == "massive"
+    assert provider[1]["values"] is values
