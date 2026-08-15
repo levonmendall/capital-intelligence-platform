@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request, Response, status
 
+from operations.all_market_certification_audit import public_all_market_certification
 from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
 from production_context_publication_runtime import _load_json, _state_path
 from production_context_state_resilience import latest_attempt
@@ -100,30 +101,55 @@ def _market_lanes(
     return tuple(lanes)
 
 
+def _certification_context_matches(
+    certification: Mapping[str, object],
+    *,
+    context_decision_as_of: datetime | None,
+) -> tuple[bool, bool]:
+    """Require legacy and v2 certificates to describe the exact context cutoff."""
+
+    if context_decision_as_of is None:
+        return False, False
+    legacy_epoch = _parse_datetime(certification.get("all_market_certification_epoch"))
+    v2_cutoff = _parse_datetime(certification.get("certification_v2_cutoff"))
+    return (
+        legacy_epoch == context_decision_as_of,
+        v2_cutoff == context_decision_as_of,
+    )
+
+
 def build_cio_diagnostic_audit(
     *,
     settings: Any,
     values: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """Return only release, lifecycle, aggregate coverage, and market-lane counts.
+    """Return release, lifecycle, coverage, and integrity-proven certification state.
 
     Persisted production context is cycle-scoped evidence. It may be included only when
-    its cycle key exactly matches the current diagnostic request. Lifecycle/freshness fields
-    are operational metadata only and cannot authorize an investment or execution action.
+    its cycle key exactly matches the current diagnostic request. The compositional lane
+    certificate and certification-v2 ledger are read-only operational proof: neither can
+    authorize a portfolio action or paper execution.
     """
     resolved = os.environ if values is None else values
     release = _release(resolved)
+    certification = public_all_market_certification(resolved)
     diagnostic = latest_manual_cio_diagnostic(values=resolved)
     if diagnostic is None:
         return {
+            "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
+            "credential_safe": True,
             "ready": False,
             "state": "not_recorded",
             "detail": "no release-triggered CIO diagnostic has been recorded",
             "active_release": release,
+            "release_matches": False,
             "paper_only": True,
             "real_money_authorized": False,
             "all_market_evaluation_complete": False,
+            "all_market_certification_context_matches": False,
+            "all_market_certification_v2_context_matches": False,
             "market_lanes": [],
+            **certification,
         }
 
     now = datetime.now(timezone.utc)
@@ -160,8 +186,32 @@ def build_cio_diagnostic_audit(
         item["represented"] is True for item in scheduled_lanes
     )
     expected_requester = f"render-release:{release}"
-    release_matches = release == "unknown" or diagnostic.requested_by == expected_requester
+    release_matches = release != "unknown" and diagnostic.requested_by == expected_requester
     diagnostic_completed = diagnostic.state == "completed"
+
+    context_decision_as_of = _parse_datetime(context.get("decision_as_of"))
+    legacy_context_matches, v2_context_matches = _certification_context_matches(
+        certification,
+        context_decision_as_of=context_decision_as_of,
+    )
+    analytical_certification_complete = all(
+        (
+            certification.get("all_market_runtime_certified") is True,
+            certification.get("all_market_certification_integrity_valid") is True,
+            certification.get("all_market_certification_release_matches") is True,
+            legacy_context_matches,
+            certification.get("all_market_certification_v2_available") is True,
+            certification.get("all_market_certification_v2_input_integrity_valid") is True,
+            certification.get("all_market_certification_v2_state_integrity_valid") is True,
+            certification.get("all_market_certification_v2_release_matches") is True,
+            v2_context_matches,
+            certification.get("all_market_evidence_certified") is True,
+            certification.get("all_market_screening_certified") is True,
+            certification.get("all_market_committee_certified") is True,
+            certification.get("all_market_cio_certified") is True,
+            certification.get("all_market_construction_certified") is True,
+        )
+    )
     all_market_evaluation_complete = all(
         (
             diagnostic_completed,
@@ -171,6 +221,7 @@ def build_cio_diagnostic_audit(
             scope_complete,
             scheduled_market_coverage_complete,
             terminal_screening_complete,
+            analytical_certification_complete,
         )
     )
 
@@ -188,6 +239,8 @@ def build_cio_diagnostic_audit(
     progress_recorded_at = getattr(diagnostic, "progress_recorded_at", None)
 
     return {
+        "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
+        "credential_safe": True,
         "ready": all_market_evaluation_complete,
         "state": diagnostic.state,
         "detail": diagnostic.detail,
@@ -235,9 +288,12 @@ def build_cio_diagnostic_audit(
         "terminal_screening_complete": terminal_screening_complete,
         "scheduled_market_coverage_complete": scheduled_market_coverage_complete,
         "all_market_evaluation_complete": all_market_evaluation_complete,
+        "all_market_certification_context_matches": legacy_context_matches,
+        "all_market_certification_v2_context_matches": v2_context_matches,
         "market_lanes": list(lanes),
         "paper_only": True,
         "real_money_authorized": False,
+        **certification,
     }
 
 
@@ -259,8 +315,7 @@ def cio_diagnostic_status(request: Request, response: Response) -> dict[str, obj
 def cio_diagnostic_telemetry(request: Request) -> dict[str, object]:
     """Expose live progress without using readiness HTTP status as transport state."""
 
-    payload = build_cio_diagnostic_audit(settings=request.app.state.settings)
-    return {**payload, "credential_safe": True}
+    return build_cio_diagnostic_audit(settings=request.app.state.settings)
 
 
 __all__ = [
