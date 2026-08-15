@@ -30,7 +30,7 @@
       "source_name": "FCA Financial Instruments Reference Data System",
       "endpoint": "https://www.fca.org.uk/markets/transaction-reporting/instrument-reference-data",
       "endpoint_environment_variable": "CAPITAL_INTELLIGENCE_FCA_FIRDS_DOWNLOAD_URL",
-      "parser": "csv",
+      "parser": "fca_firds_zip_xml",
       "venue": "UK_MIFIR",
       "country_code": "GB",
       "enabled": true,
@@ -47,7 +47,8 @@
       "service_level_defined": false,
       "readiness_authority": false,
       "limitations": [
-        "FCA full/delta file download URLs are supplied at runtime so publication URL changes do not require source-code edits.",
+        "FCA full/delta ZIP/XML file download URLs are supplied at runtime so publication URL changes do not require source-code edits.",
+        "Compressed XML is streamed to bounded temporary disk and parsed incrementally; it is never materialized synchronously inside a CIO request.",
         "Reference evidence remains non-authoritative for investment readiness without complete capability certification."
       ]
     },
