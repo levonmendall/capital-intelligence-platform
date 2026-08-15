@@ -134,38 +134,41 @@ def _input_pointer_for_cutoff(
         / "by-cutoff"
         / f"{_stamp(cutoff)}.json"
     )
-    try:
+    if exact_path.exists():
+        # If an exact index exists, any unreadable/corrupt content is authoritative
+        # evidence of a lineage problem. Never hide it by falling back to a mutable
+        # latest pointer.
         return _read_integrity_json(
             exact_path,
             label="certification input cutoff ledger",
         )
-    except CertificationRuntimeStateError:
-        # Compatibility for inputs created before the exact-cutoff index existed. The
-        # mutable latest pointer is accepted only when its own recorded cutoff exactly
-        # matches the requested cutoff; it can never bind an older stage to a newer cycle.
-        latest = _read_integrity_json(
-            root / "ledger" / _safe(release) / "latest-input.json",
-            label="certification input ledger",
+
+    # Compatibility only for inputs created before the exact-cutoff index existed. The
+    # mutable latest pointer is accepted only when its own recorded cutoff exactly
+    # matches the requested cutoff; it can never bind an older stage to a newer cycle.
+    latest = _read_integrity_json(
+        root / "ledger" / _safe(release) / "latest-input.json",
+        label="certification input ledger",
+    )
+    raw_cutoff = latest.get("snapshot_cutoff")
+    if not isinstance(raw_cutoff, str):
+        raise CertificationRuntimeStateError(
+            "certification input cutoff is missing"
         )
-        raw_cutoff = latest.get("snapshot_cutoff")
-        if not isinstance(raw_cutoff, str):
-            raise CertificationRuntimeStateError(
-                "certification input cutoff is missing"
-            )
-        try:
-            recorded = _aware(
-                datetime.fromisoformat(raw_cutoff.replace("Z", "+00:00")),
-                field_name="recorded_certification_cutoff",
-            )
-        except ValueError as error:
-            raise CertificationRuntimeStateError(
-                "certification input cutoff is invalid"
-            ) from error
-        if recorded != cutoff:
-            raise CertificationRuntimeStateError(
-                "certification input cutoff does not match the authoritative artifact timestamp"
-            )
-        return latest
+    try:
+        recorded = _aware(
+            datetime.fromisoformat(raw_cutoff.replace("Z", "+00:00")),
+            field_name="recorded_certification_cutoff",
+        )
+    except ValueError as error:
+        raise CertificationRuntimeStateError(
+            "certification input cutoff is invalid"
+        ) from error
+    if recorded != cutoff:
+        raise CertificationRuntimeStateError(
+            "certification input cutoff does not match the authoritative artifact timestamp"
+        )
+    return latest
 
 
 def resolve_certification_for_cutoff(
