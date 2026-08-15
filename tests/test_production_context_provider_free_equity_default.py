@@ -5,43 +5,13 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import production_context_publication_runtime as runtime
-from operations import qualified_equity_discovery
+from operations import qualified_equity_discovery, qualified_paper_evidence
 
 
-def test_runtime_defaults_to_qualified_equity_discovery(monkeypatch, tmp_path) -> None:
-    scheduled = datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc)
-    observed: dict[str, object] = {}
-
+def _install_governed(monkeypatch, observed):
     def governed(**kwargs):
         observed.update(kwargs)
         return "context-result"
-
-    fake_governed = SimpleNamespace(
-        prepare_governed_production_context_for_cycle=governed
-    )
-    monkeypatch.setitem(sys.modules, "production_context_publication_governed", fake_governed)
-
-    settings = SimpleNamespace(scheduler_timezone="America/Los_Angeles")
-    actual = runtime.prepare_production_context_for_cycle(
-        settings=settings,
-        scheduled_for=scheduled,
-        universe_path=tmp_path / "universe.json",
-    )
-
-    assert actual == "context-result"
-    assert observed["equity_discovery_probe"] is qualified_equity_discovery.discover_us_equities
-
-
-def test_runtime_preserves_explicit_equity_probe(monkeypatch, tmp_path) -> None:
-    scheduled = datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc)
-    observed: dict[str, object] = {}
-
-    def governed(**kwargs):
-        observed.update(kwargs)
-        return "context-result"
-
-    def explicit_probe(**kwargs):
-        return kwargs
 
     monkeypatch.setitem(
         sys.modules,
@@ -49,11 +19,71 @@ def test_runtime_preserves_explicit_equity_probe(monkeypatch, tmp_path) -> None:
         SimpleNamespace(prepare_governed_production_context_for_cycle=governed),
     )
 
+
+def test_runtime_defaults_to_qualified_equity_discovery(monkeypatch, tmp_path) -> None:
+    scheduled = datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc)
+    observed: dict[str, object] = {}
+    _install_governed(monkeypatch, observed)
+    monkeypatch.setattr(
+        qualified_paper_evidence,
+        "production_snapshot_probe_enabled",
+        lambda values=None: False,
+    )
+
+    actual = runtime.prepare_production_context_for_cycle(
+        settings=SimpleNamespace(scheduler_timezone="America/Los_Angeles"),
+        scheduled_for=scheduled,
+        universe_path=tmp_path / "universe.json",
+    )
+
+    assert actual == "context-result"
+    assert observed["equity_discovery_probe"] is qualified_equity_discovery.discover_us_equities
+    assert observed["evidence_probe"] is None
+
+
+def test_production_runtime_defaults_to_qualified_paper_evidence(monkeypatch, tmp_path) -> None:
+    scheduled = datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc)
+    observed: dict[str, object] = {}
+    _install_governed(monkeypatch, observed)
+    monkeypatch.setattr(
+        qualified_paper_evidence,
+        "production_snapshot_probe_enabled",
+        lambda values=None: True,
+    )
+
     runtime.prepare_production_context_for_cycle(
         settings=SimpleNamespace(scheduler_timezone="America/Los_Angeles"),
         scheduled_for=scheduled,
         universe_path=tmp_path / "universe.json",
-        equity_discovery_probe=explicit_probe,
     )
 
-    assert observed["equity_discovery_probe"] is explicit_probe
+    assert observed["equity_discovery_probe"] is qualified_equity_discovery.discover_us_equities
+    assert observed["evidence_probe"] is qualified_paper_evidence.qualified_paper_evidence_probe
+
+
+def test_runtime_preserves_explicit_provider_probes(monkeypatch, tmp_path) -> None:
+    scheduled = datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc)
+    observed: dict[str, object] = {}
+    _install_governed(monkeypatch, observed)
+    monkeypatch.setattr(
+        qualified_paper_evidence,
+        "production_snapshot_probe_enabled",
+        lambda values=None: True,
+    )
+
+    def explicit_equity(**kwargs):
+        return kwargs
+
+    def explicit_evidence(*args, **kwargs):
+        return args, kwargs
+
+    runtime.prepare_production_context_for_cycle(
+        settings=SimpleNamespace(scheduler_timezone="America/Los_Angeles"),
+        scheduled_for=scheduled,
+        universe_path=tmp_path / "universe.json",
+        equity_discovery_probe=explicit_equity,
+        evidence_probe=explicit_evidence,
+    )
+
+    assert observed["equity_discovery_probe"] is explicit_equity
+    assert observed["evidence_probe"] is explicit_evidence

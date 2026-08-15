@@ -16,26 +16,30 @@ from operations import component_qualified_evidence_maintenance as _component_ma
 from operations import continuous_evidence_plane as _plane
 from operations import qualified_evidence_maintenance as _legacy_maintenance
 from operations.composite_readiness import component_heartbeat_path
-from operations.comprehensive_discovery_snapshot import (
-    publish_comprehensive_discovery_snapshot,
-)
+from operations.comprehensive_discovery_snapshot import publish_comprehensive_discovery_snapshot
+from operations.evidence_collection_universe import build_evidence_collection_universe
 from operations.evidence_state_scope import load_evidence_state_scope
 from operations.equity_discovery_snapshot import (
     EquityDiscoverySnapshotError,
     load_equity_discovery_snapshot,
     publish_equity_discovery_snapshot,
 )
-from operations.free_paper_pilot import (
-    DEFAULT_UNIVERSE_PATH,
-    load_free_paper_pilot_universe,
-)
+from operations.free_paper_pilot import DEFAULT_UNIVERSE_PATH, load_free_paper_pilot_universe
 from operations.heartbeat import WorkerHeartbeatStore
+from operations.owned_paper_evidence_collection import collect_owned_paper_evidence
+from operations.paper_evidence_snapshot import (
+    PaperEvidenceSnapshotError,
+    load_paper_evidence_snapshot,
+    publish_paper_evidence_snapshot,
+)
+from operations.paper_evidence_spool_concurrent import close_spooled_paper_evidence
 from operations.qualified_comprehensive_discovery_snapshot import (
     ComprehensiveDiscoverySnapshotError,
     load_qualified_comprehensive_discovery_snapshot,
 )
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
+_PAPER_HISTORY_DAYS = 365 * 10 + 20
 
 
 def _seconds(values: Mapping[str, str], name: str, default: float) -> float:
@@ -56,6 +60,17 @@ def _base_universe_symbols() -> tuple[str, ...]:
     return tuple(sorted(universe.symbol_map))
 
 
+def _qualified_evidence_universe(generation, *, values: Mapping[str, str], cutoff):
+    scope = load_evidence_state_scope(as_of=cutoff, values=values)
+    universe, holding_only = build_evidence_collection_universe(
+        evidence_as_of=generation.as_of,
+        held_symbols=scope.held_symbols,
+        tracked_symbols=scope.tracked_symbols,
+        values=values,
+    )
+    return scope, universe, holding_only
+
+
 def _snapshots_match_current_scope(
     generation,
     *,
@@ -73,11 +88,21 @@ def _snapshots_match_current_scope(
             evidence_as_of=generation.as_of,
             values=values,
         )
-        scope = load_evidence_state_scope(as_of=cutoff, values=values)
+        scope, evidence_universe, _holding_only = _qualified_evidence_universe(
+            generation,
+            values=values,
+            cutoff=cutoff,
+        )
+        paper_snapshot = load_paper_evidence_snapshot(
+            evidence_as_of=generation.as_of,
+            universe=evidence_universe,
+            values=values,
+        )
         base_symbols = _base_universe_symbols()
     except (
         ComprehensiveDiscoverySnapshotError,
         EquityDiscoverySnapshotError,
+        PaperEvidenceSnapshotError,
         OSError,
         TypeError,
         ValueError,
@@ -89,6 +114,7 @@ def _snapshots_match_current_scope(
         and equity_snapshot.held_symbols == scope.held_symbols
         and equity_snapshot.tracked_symbols == scope.tracked_symbols
         and equity_snapshot.excluded_symbols == base_symbols
+        and paper_snapshot.evidence_as_of == generation.as_of
     )
 
 
@@ -96,14 +122,7 @@ def _snapshots_match_current_scope(
 def _install_global_snapshot_owner(
     values: Mapping[str, str],
 ) -> Iterator[None]:
-    """Make the evidence worker the sole broad-discovery acquisition owner.
-
-    The hooks extend existing qualification predicates instead of adding another
-    scheduler. A generation is reusable only when both comprehensive global and broad
-    U.S.-equity snapshots exist, restore correctly, and match current canonical
-    holdings/learning/base-universe scope. Otherwise the existing bounded evidence pass
-    refreshes them before any CIO consumer can proceed.
-    """
+    """Make the evidence worker the sole broad discovery/evidence acquisition owner."""
 
     original_discovery = _plane._default_discovery
     original_legacy_qualified = _legacy_maintenance._generation_qualified
@@ -141,6 +160,29 @@ def _install_global_snapshot_owner(
             tracked_symbols=scope.tracked_symbols,
             values=values,
         )
+
+        evidence_universe, _holding_only = build_evidence_collection_universe(
+            evidence_as_of=as_of,
+            held_symbols=scope.held_symbols,
+            tracked_symbols=scope.tracked_symbols,
+            values=values,
+        )
+        payload = collect_owned_paper_evidence(
+            evidence_universe,
+            as_of,
+            required_holding_symbols=scope.held_symbols,
+            values=values,
+        )
+        try:
+            publish_paper_evidence_snapshot(
+                payload,
+                universe=evidence_universe,
+                evidence_as_of=as_of,
+                values=values,
+                requested_history_days=_PAPER_HISTORY_DAYS,
+            )
+        finally:
+            close_spooled_paper_evidence(payload)
         return result
 
     def legacy_qualified(
@@ -200,10 +242,8 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
     os.environ[_PREPARING_ENV] = "true"
     try:
         with _install_global_snapshot_owner(resolved):
-            maintenance = (
-                _component_maintenance.maintain_component_qualified_evidence_plane(
-                    values=resolved
-                )
+            maintenance = _component_maintenance.maintain_component_qualified_evidence_plane(
+                values=resolved
             )
     finally:
         if prior is None:
@@ -219,6 +259,16 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
         evidence_as_of=generation.as_of,
         values=resolved,
     )
+    scope, evidence_universe, _holding_only = _qualified_evidence_universe(
+        generation,
+        values=resolved,
+        cutoff=generation.as_of,
+    )
+    paper_snapshot = load_paper_evidence_snapshot(
+        evidence_as_of=generation.as_of,
+        universe=evidence_universe,
+        values=resolved,
+    )
     return {
         "state": "available",
         "maintenance_state": maintenance.state,
@@ -230,9 +280,10 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
         "reference_manifest_id": generation.reference_manifest_id,
         "global_discovery_snapshot_id": global_snapshot.snapshot_id,
         "us_equity_discovery_snapshot_id": equity_snapshot.snapshot_id,
+        "paper_evidence_snapshot_id": paper_snapshot.snapshot_id,
         "state_scope": {
-            "held_symbols": list(global_snapshot.held_symbols),
-            "tracked_symbols": list(global_snapshot.tracked_symbols),
+            "held_symbols": list(scope.held_symbols),
+            "tracked_symbols": list(scope.tracked_symbols),
             "base_universe_symbols": list(equity_snapshot.excluded_symbols),
         },
         "scheduled_lanes": list(generation.scheduled_lanes),
@@ -297,6 +348,8 @@ def run_loop(values: Mapping[str, str] | None = None) -> int:
                     + str(report["global_discovery_snapshot_id"])
                     + " us_equity_snapshot="
                     + str(report["us_equity_discovery_snapshot_id"])
+                    + " paper_evidence_snapshot="
+                    + str(report["paper_evidence_snapshot_id"])
                     + " maintenance_state="
                     + str(report["maintenance_state"])
                 )[:1000],
