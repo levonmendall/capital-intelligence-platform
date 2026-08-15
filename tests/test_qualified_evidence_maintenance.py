@@ -146,34 +146,70 @@ def test_prequalified_reference_loader_is_disk_only_and_binds_snapshot_manifest(
     assert values["CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"] == "manifest:test"
 
 
-def test_release_diagnostic_executor_prequalifies_evidence_first(monkeypatch) -> None:
+def test_release_prequalification_publishes_generation_before_cio_can_start(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import operations.continuous_evidence_plane as plane
     import run_render_service_memory_safe as runtime
 
     events: list[tuple[str, object]] = []
+    values = _values(tmp_path)
+
+    def write_state(
+        resolved,
+        *,
+        state,
+        stage,
+        prequalification_id=None,
+        started_at=None,
+        detail="",
+        metrics=None,
+        generation_id=None,
+    ):
+        del resolved, started_at, detail, metrics
+        events.append(("state", (state, stage, generation_id)))
+        return {"prequalification_id": prequalification_id or "prequal-test"}
 
     def run(command, *, env, check):
         assert check is False
+        assert env["CAPITAL_INTELLIGENCE_RELEASE"] == "release-test"
         events.append(("evidence", tuple(command)))
         return SimpleNamespace(returncode=0)
 
-    def diagnostic(command, *, diagnostic_values, refresh_seconds):
-        events.append(("diagnostic", tuple(command)))
-        return 0
+    generation = SimpleNamespace(
+        generation_id="generation-test",
+        scheduled_lanes=("future", "us_equity"),
+        historical_scope_count=42,
+    )
 
+    monkeypatch.setattr(runtime, "write_release_evidence_prequalification", write_state)
     monkeypatch.setattr(runtime.subprocess, "run", run)
-    monkeypatch.setattr(runtime, "_ORIGINAL_RELEASE_DIAGNOSTIC_EXECUTOR", diagnostic)
-    result = runtime._run_release_diagnostic_with_prequalified_evidence(
-        ("python", "run_bounded_manual_cio_diagnostic.py"),
-        diagnostic_values={"CAPITAL_INTELLIGENCE_RELEASE": "release-test"},
+    monkeypatch.setattr(plane, "load_latest_evidence_plane", lambda _values: generation)
+    monkeypatch.setattr(
+        runtime.render_bootstrap,
+        "_publish_release_diagnostic_audit",
+        lambda _values: events.append(("audit", None)),
     )
+    monkeypatch.setattr(runtime.render_bootstrap, "_log", lambda *_args, **_kwargs: None)
 
-    assert result == 0
-    assert events[0][0] == "evidence"
-    assert events[0][1][-2:] == ("run_bounded_continuous_evidence_plane.py", "--once")
-    assert events[1] == (
-        "diagnostic",
-        ("python", "run_bounded_manual_cio_diagnostic.py"),
+    result = runtime._prequalify_release_evidence(values)
+
+    assert result is True
+    assert events[0] == (
+        "state",
+        ("in_progress", "evidence_prequalifying", None),
     )
+    assert events[2][0] == "evidence"
+    assert events[2][1][-2:] == (
+        "run_bounded_continuous_evidence_plane.py",
+        "--once",
+    )
+    assert events[-2] == (
+        "state",
+        ("completed", "evidence_generation_ready", "generation-test"),
+    )
+    assert events[-1] == ("audit", None)
 
 
 def test_bounded_evidence_coordinator_supports_one_shot(monkeypatch) -> None:
