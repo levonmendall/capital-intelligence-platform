@@ -12,6 +12,7 @@ authority, portfolio construction, execution behavior, or paper-only control cha
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
 from operations import _comprehensive_market_discovery_v6 as _core
 from operations._comprehensive_market_discovery_v6 import *  # noqa: F401,F403
@@ -91,8 +92,19 @@ def _production_plane_enabled(values) -> bool:
     return (bool(explicit) or production) and evidence_plane_enabled(values)
 
 
-def _point_in_time_snapshot_barrier(as_of):
-    """Require prequalified evidence; the CIO/read path may never refresh it."""
+def _point_in_time_snapshot_barrier(
+    as_of,
+    *,
+    snapshot_loader: Callable[..., object] | None = None,
+    input_freezer: Callable[..., object] | None = None,
+):
+    """Require prequalified evidence; the CIO/read path may never refresh it.
+
+    The optional callables are explicit test/diagnostic seams. Production callers omit
+    them and therefore always use the real governed disk loader and immutable input
+    publisher. Keeping the seam in the call signature avoids relying on module-global
+    monkeypatch behavior while leaving the production dependency graph unchanged.
+    """
 
     values = os.environ
     if not _production_plane_enabled(values):
@@ -102,16 +114,19 @@ def _point_in_time_snapshot_barrier(as_of):
         # discovery while preparing the stores and lane artifacts it owns.
         return None
 
+    loader = ensure_point_in_time_snapshot if snapshot_loader is None else snapshot_loader
+    freezer = freeze_certification_input if input_freezer is None else input_freezer
+
     # Critical v2 invariant: a consumer can freeze an already-qualified generation but
     # cannot construct, refresh, discover, or repair the global evidence plane. Missing
     # or stale evidence therefore fails closed here and must be repaired by the evidence
     # worker outside the CIO/certification transaction.
-    snapshot = ensure_point_in_time_snapshot(
+    snapshot = loader(
         cutoff=as_of,
         values=values,
         allow_refresh=False,
     )
-    certification_input = freeze_certification_input(
+    certification_input = freezer(
         cutoff=as_of,
         values=values,
         snapshot=snapshot,
