@@ -1,17 +1,15 @@
 """Run the Render service with post-diagnostic heavyweight memory isolation.
 
-The release diagnostic already owns an exclusive startup window, but the legacy supervisor
-released every deferred background process at the same instant when that diagnostic ended.
-On a 2 GB Render instance, the combined imports/working sets of the CIO operator, historical
-backfill, backup, and provider validation could therefore OOM-kill the instance even when
-each individual task was bounded.
+The release diagnostic owns an exclusive startup window, and the legacy supervisor
+releases deferred background processes only after that diagnostic ends. On a 2 GB Render
+instance, heavyweight provider/discovery work is therefore run through one serialized,
+memory-bounded lane.
 
-This entrypoint preserves the existing supervisor and governed release diagnostic while
-replacing heavyweight resident loops with lightweight coordinators.  Each expensive pass
-runs in a short-lived, memory-bounded child and shares one cross-process memory lane.
-The same lane now continuously maintains the governed evidence plane after the release
-diagnostic completes. Noncritical jobs are staggered after the release diagnostic. No
-market scope, CIO rule, threshold, construction logic, paper-execution authority, or
+Before every release diagnostic attempt this entrypoint now runs one bounded continuous-
+evidence maintenance pass. The diagnostic itself only consumes the resulting exact-release
+point-in-time generation; it cannot synchronously acquire provider/reference/public data.
+The normal continuous coordinator remains deferred until the release diagnostic finishes.
+No market scope, CIO rule, threshold, construction logic, paper-execution authority, or
 real-money capability changes.
 """
 
@@ -27,6 +25,9 @@ import run_render_service_nonblocking as render_bootstrap
 
 
 _ORIGINAL_MANAGED_PROCESSES = render_supervisor.managed_processes
+_ORIGINAL_RELEASE_DIAGNOSTIC_EXECUTOR = (
+    render_bootstrap._run_release_diagnostic_with_live_audit
+)
 
 
 def memory_safe_managed_processes(
@@ -86,9 +87,8 @@ def memory_safe_managed_processes(
             )
         resolved.append(spec)
 
-    # The base supervisor intentionally remains unchanged. Production's memory-safe
-    # facade adds this noncritical coordinator only after the release diagnostic gate,
-    # so it cannot compete with exact-release certification during startup.
+    # The normal coordinator remains noncritical and deferred until the release
+    # diagnostic gate opens. Release attempts receive their own one-shot bounded pass.
     resolved.append(
         render_supervisor.ManagedProcess(
             name="continuous-evidence-plane",
@@ -98,6 +98,60 @@ def memory_safe_managed_processes(
         )
     )
     return tuple(resolved)
+
+
+def _run_release_diagnostic_with_prequalified_evidence(
+    command: Sequence[str],
+    *,
+    diagnostic_values: MutableMapping[str, str],
+    refresh_seconds: float = render_bootstrap._DEFAULT_RELEASE_DIAGNOSTIC_AUDIT_REFRESH_SECONDS,
+) -> int:
+    """Maintain exact-release evidence before invoking one bounded CIO attempt."""
+
+    evidence_command = (
+        sys.executable,
+        "run_bounded_continuous_evidence_plane.py",
+        "--once",
+    )
+    render_bootstrap._log(
+        "release_evidence_prequalification_starting",
+        command=list(evidence_command),
+        release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+        exact_release_required=True,
+        provider_work_inside_cio_diagnostic=False,
+        paper_only=True,
+    )
+    try:
+        completed = subprocess.run(
+            evidence_command,
+            env=dict(diagnostic_values),
+            check=False,
+        )
+    except OSError as error:
+        render_bootstrap._log(
+            "release_evidence_prequalification_start_failed",
+            error_type=type(error).__name__,
+            release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+            diagnostic_will_fail_closed=True,
+            paper_only=True,
+        )
+    else:
+        render_bootstrap._log(
+            "release_evidence_prequalification_finished",
+            return_code=completed.returncode,
+            release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+            diagnostic_will_fail_closed=completed.returncode != 0,
+            paper_only=True,
+        )
+
+    # Always invoke the diagnostic. If maintenance failed, its production reference
+    # loader performs no provider work and closes the request quickly with the missing/
+    # stale prequalified-evidence reason, giving the verifier a terminal fail-closed state.
+    return _ORIGINAL_RELEASE_DIAGNOSTIC_EXECUTOR(
+        command,
+        diagnostic_values=diagnostic_values,
+        refresh_seconds=refresh_seconds,
+    )
 
 
 def run_memory_safe_render_service(
@@ -144,10 +198,15 @@ def run_memory_safe_render_service(
 
     validation_process: subprocess.Popen[bytes] | subprocess.Popen[str] | None = None
     previous_managed_processes = render_supervisor.managed_processes
+    previous_release_executor = render_bootstrap._run_release_diagnostic_with_live_audit
     render_supervisor.managed_processes = memory_safe_managed_processes
+    render_bootstrap._run_release_diagnostic_with_live_audit = (
+        _run_release_diagnostic_with_prequalified_evidence
+    )
     try:
-        # The durable diagnostic request is primed before the provider coordinator starts,
-        # preserving the existing fail-closed release ordering.
+        # Prime the durable request before any background provider coordinator starts.
+        # Each release attempt then enters the bounded evidence maintainer before the
+        # disk-only CIO watchdog is invoked.
         diagnostic_thread = render_bootstrap._start_release_diagnostic(values)
 
         if background_enabled:
@@ -182,6 +241,7 @@ def run_memory_safe_render_service(
         )
     finally:
         render_supervisor.managed_processes = previous_managed_processes
+        render_bootstrap._run_release_diagnostic_with_live_audit = previous_release_executor
         render_bootstrap._terminate(validation_process)
         render_bootstrap._log("render_memory_safe_bootstrap_stopped")
 

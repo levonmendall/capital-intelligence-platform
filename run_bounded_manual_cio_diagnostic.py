@@ -1,36 +1,36 @@
 """Runtime entrypoint for bounded CIO reference and evidence readiness.
 
-The watchdog core stays unchanged. This entrypoint injects generalized persistent
-reference readiness plus the governed CME-primary futures reference provider. Massive is
-retained only as a bounded secondary fallback. In the production service it also
-qualifies the continuous evidence plane before the bounded CIO child starts, so a cold
-historical bootstrap cannot consume the CIO's 30-minute analysis deadline. Imported
-callers receive the core module so existing tests and monkeypatches keep their behavior.
+Production release diagnostics consume an already-qualified exact-release evidence
+generation. Expensive reference/public/discovery acquisition is owned by the continuous
+evidence maintainer and never runs from this bounded CIO wrapper. The watchdog remains
+fail-closed: if the immutable point-in-time generation or its current configuration-bound
+reference manifest is unavailable, the CIO child is not started.
+
+Non-production callers retain the historical reference-readiness fallback so tests and
+local tooling without a persistent production evidence plane preserve their behavior.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 
 import run_bounded_manual_cio_diagnostic_core as _core
 from operations import manual_cio_diagnostic as _diagnostic_coordination
 from operations.cme_futures_reference_runtime import (
     install_cme_futures_reference_lineage,
 )
-from operations.continuous_evidence_plane import (
-    ContinuousEvidencePlaneError,
-    ensure_point_in_time_snapshot,
-    evidence_plane_enabled,
-    refresh_continuous_evidence_plane,
-)
+from operations.continuous_evidence_plane import evidence_plane_enabled
 from operations.generalized_reference_readiness import (
     prepare_reference_readiness as _prepare_reference,
 )
 from operations.manual_cio_diagnostic import (
     latest_manual_cio_diagnostic,
     request_manual_cio_diagnostic,
+)
+from operations.qualified_evidence_maintenance import (
+    load_prequalified_reference_manifest,
 )
 from providers.cme_futures_reference_executable import (
     CmeExecutableFuturesReferenceProvider,
@@ -39,10 +39,6 @@ from providers.massive_futures_reference_rate_resilient import (
     MassiveFuturesReferenceProvider,
 )
 
-_PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
-_REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
-_REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
-_STALE_EVIDENCE_DETAIL = "continuous evidence plane is missing or stale for the CIO cutoff"
 _RECOVERY_PROGRESS_METRICS = frozenset(
     {
         "recovery_exchanges",
@@ -61,13 +57,7 @@ def _release(values: Mapping[str, str]) -> str:
 
 
 def _install_recovery_progress_contract() -> None:
-    """Keep provider recovery telemetry from aborting the recovery it describes.
-
-    The bounded EODHD directory path emits recovery_exchanges/recovered_exchanges when
-    parallel directory reads fall back to bounded serial recovery. Those are safe,
-    nonnegative operational counters and must be accepted by the release diagnostic's
-    credential-safe progress contract.
-    """
+    """Keep provider recovery telemetry from aborting the recovery it describes."""
 
     current = frozenset(getattr(_diagnostic_coordination, "_PROGRESS_METRICS", ()))
     if not _RECOVERY_PROGRESS_METRICS.issubset(current):
@@ -97,20 +87,23 @@ def _production_plane_enabled(values: Mapping[str, str]) -> bool:
     return (bool(explicit) or production) and evidence_plane_enabled(values)
 
 
-def _restore_environment(prior: Mapping[str, str | None]) -> None:
-    for name, value in prior.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
-
-
 def _prepare_with_rate_budget(
     values: Mapping[str, str],
     **kwargs: object,
 ):
     _install_recovery_progress_contract()
     install_cme_futures_reference_lineage()
+
+    if _production_plane_enabled(values):
+        if not isinstance(values, MutableMapping):
+            raise TypeError(
+                "production prequalified evidence requires a mutable watchdog environment"
+            )
+        # Disk/config validation only. This binds the exact manifest path/id into the
+        # child environment after validating the current immutable evidence generation.
+        # No reference/public/discovery provider acquisition is permitted here.
+        return load_prequalified_reference_manifest(values)
+
     kwargs.setdefault(
         "massive_futures_provider",
         CmeExecutableFuturesReferenceProvider(
@@ -118,60 +111,7 @@ def _prepare_with_rate_budget(
             values=values,
         ),
     )
-    manifest = _prepare_reference(values, **kwargs)
-    if not _production_plane_enabled(values):
-        return manifest
-
-    manifest_path = values.get(_REFERENCE_MANIFEST_PATH_ENV, "").strip()
-    manifest_id = values.get(_REFERENCE_MANIFEST_ID_ENV, "").strip()
-    qualified_manifest_id = str(getattr(manifest, "manifest_id", "")).strip()
-    if not manifest_path or not manifest_id:
-        raise ContinuousEvidencePlaneError(
-            "qualified reference readiness did not bind its manifest for evidence discovery"
-        )
-    if not qualified_manifest_id or qualified_manifest_id != manifest_id:
-        raise ContinuousEvidencePlaneError(
-            "qualified reference manifest identity changed before evidence discovery"
-        )
-
-    # Comprehensive discovery is itself used to populate the evidence plane. Mark this
-    # pre-clock preparation so the discovery facade does not recursively request a
-    # snapshot while the snapshot is being built. Discovery ultimately resolves the
-    # governed reference manifest from os.environ, while the watchdog carries readiness
-    # state in its own values dictionary. Bind the exact qualified path/id into the
-    # process environment for this preparation only, and make the evidence refresh reuse
-    # the already-qualified manifest instead of performing a second provider walk.
-    bound_names = (
-        _PREPARING_ENV,
-        _REFERENCE_MANIFEST_PATH_ENV,
-        _REFERENCE_MANIFEST_ID_ENV,
-    )
-    prior = {name: os.environ.get(name) for name in bound_names}
-    os.environ[_PREPARING_ENV] = "true"
-    os.environ[_REFERENCE_MANIFEST_PATH_ENV] = manifest_path
-    os.environ[_REFERENCE_MANIFEST_ID_ENV] = manifest_id
-    try:
-        snapshot = None
-        try:
-            snapshot = ensure_point_in_time_snapshot(values=values, allow_refresh=False)
-        except ContinuousEvidencePlaneError as error:
-            if str(error) != _STALE_EVIDENCE_DETAIL:
-                raise
-
-        if snapshot is None or snapshot.reference_manifest_id != manifest_id:
-            refresh_continuous_evidence_plane(
-                values=values,
-                reference_preparer=lambda _resolved: manifest,
-            )
-            snapshot = ensure_point_in_time_snapshot(values=values, allow_refresh=False)
-
-        if snapshot.reference_manifest_id != manifest_id:
-            raise ContinuousEvidencePlaneError(
-                "point-in-time snapshot is not bound to the qualified reference manifest"
-            )
-    finally:
-        _restore_environment(prior)
-    return manifest
+    return _prepare_reference(values, **kwargs)
 
 
 _install_recovery_progress_contract()

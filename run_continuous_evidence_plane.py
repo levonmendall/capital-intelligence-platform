@@ -7,14 +7,13 @@ import json
 import os
 import signal
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from types import FrameType
 from typing import Mapping, Sequence
 
 from operations.composite_readiness import component_heartbeat_path
-from operations.continuous_evidence_plane import refresh_continuous_evidence_plane
 from operations.heartbeat import WorkerHeartbeatStore
+from operations.qualified_evidence_maintenance import maintain_continuous_evidence_plane
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
 
@@ -37,17 +36,18 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
     prior = os.environ.get(_PREPARING_ENV)
     os.environ[_PREPARING_ENV] = "true"
     try:
-        generation = refresh_continuous_evidence_plane(
-            as_of=datetime.now(timezone.utc),
-            values=resolved,
-        )
+        maintenance = maintain_continuous_evidence_plane(values=resolved)
     finally:
         if prior is None:
             os.environ.pop(_PREPARING_ENV, None)
         else:
             os.environ[_PREPARING_ENV] = prior
+    generation = maintenance.generation
     return {
         "state": "available",
+        "maintenance_state": maintenance.state,
+        "refreshed": maintenance.refreshed,
+        "preparation_passes": maintenance.preparation_passes,
         "generation_id": generation.generation_id,
         "as_of": generation.as_of.isoformat(),
         "completed_at": generation.completed_at.isoformat(),
@@ -56,6 +56,7 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
         "historical_scope_count": generation.historical_scope_count,
         "historical_coverage_digest": generation.historical_coverage_digest,
         "public_live_state": generation.public_live_state,
+        "archived_generation_path": str(maintenance.archived_generation_path),
         "investment_authority": False,
         "execution_authority": False,
         "paper_only": True,
@@ -86,7 +87,7 @@ def run_loop(values: Mapping[str, str] | None = None) -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     while not stopping:
-        heartbeat.write("starting", detail="continuous evidence preparation started")
+        heartbeat.write("starting", detail="continuous evidence qualification started")
         try:
             report = run_once(resolved)
         except Exception as error:
@@ -109,6 +110,8 @@ def run_loop(values: Mapping[str, str] | None = None) -> int:
                 detail=(
                     "continuous evidence plane qualified generation="
                     + str(report["generation_id"])
+                    + " maintenance_state="
+                    + str(report["maintenance_state"])
                 )[:1000],
             )
             print(
