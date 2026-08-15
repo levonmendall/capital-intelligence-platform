@@ -1,10 +1,10 @@
 """Extended global public catalog provider with streamed FCA FIRDS support.
 
-FCA FIRDS full/delta publications can be large compressed XML files.  This
+FCA FIRDS full/delta publications can be large compressed XML files. This
 provider streams the archive to bounded temporary disk and iterates XML records
-incrementally.  Cursor state is row-based so continuous evidence maintenance can
-resume without materializing the source in memory or invoking it from a CIO
-request.
+incrementally. Cursor state carries the XML-member index and row offset so
+continuous evidence maintenance can resume without materializing the source in
+memory or invoking it from a CIO request.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ import zipfile
 from pathlib import Path
 from typing import Any, Mapping
 
-from data.security import AssetClass, InstrumentType
 from providers.public_security_catalog import (
     NormalizedPublicInstrument,
     PublicCatalogPage,
@@ -40,13 +39,41 @@ def _child_text(element: ET.Element, name: str) -> str:
     return ""
 
 
+def _parse_cursor(cursor: str | None) -> tuple[int, int]:
+    if cursor in {None, "", "0"}:
+        return 0, 0
+    raw = str(cursor)
+    if ":" not in raw:
+        # Backward-compatible interpretation of the earliest row-only cursor.
+        try:
+            row_offset = int(raw)
+        except ValueError as error:
+            raise PublicSecurityCatalogError("invalid FCA FIRDS cursor") from error
+        if row_offset < 0:
+            raise PublicSecurityCatalogError("FCA FIRDS cursor cannot be negative")
+        return 0, row_offset
+    member_raw, row_raw = raw.split(":", 1)
+    try:
+        member_index = int(member_raw)
+        row_offset = int(row_raw)
+    except ValueError as error:
+        raise PublicSecurityCatalogError("invalid FCA FIRDS cursor") from error
+    if member_index < 0 or row_offset < 0:
+        raise PublicSecurityCatalogError("FCA FIRDS cursor cannot be negative")
+    return member_index, row_offset
+
+
 class GlobalPublicSecurityCatalogProvider(PublicSecurityCatalogProvider):
     """Public catalog provider with disk-bounded compressed regulator parsing."""
 
-    def _download_to_disk(self) -> tuple[Path, str, tempfile.TemporaryDirectory[str]]:
+    def _download_to_disk(
+        self,
+    ) -> tuple[Path, str, tempfile.TemporaryDirectory[str]]:
         response = self._http_get(
             self.source.endpoint,
-            headers={"Accept": "application/zip,application/octet-stream,application/xml"},
+            headers={
+                "Accept": "application/zip,application/octet-stream,application/xml"
+            },
             timeout=self.timeout,
             stream=True,
         )
@@ -61,13 +88,19 @@ class GlobalPublicSecurityCatalogProvider(PublicSecurityCatalogProvider):
             raise PublicSecurityCatalogError(
                 "public catalog download budget must be between 1MB and 1GB"
             )
-        temporary = tempfile.TemporaryDirectory(prefix="capital-intelligence-firds-")
+        temporary = tempfile.TemporaryDirectory(
+            prefix="capital-intelligence-firds-"
+        )
         path = Path(temporary.name) / "firds-download"
         digest = hashlib.sha256()
         total = 0
         with path.open("wb") as handle:
             iterator = getattr(response, "iter_content", None)
-            chunks = iterator(chunk_size=1024 * 1024) if callable(iterator) else (bytes(response.content),)
+            chunks = (
+                iterator(chunk_size=1024 * 1024)
+                if callable(iterator)
+                else (bytes(response.content),)
+            )
             for chunk in chunks:
                 if not chunk:
                     continue
@@ -115,7 +148,9 @@ class GlobalPublicSecurityCatalogProvider(PublicSecurityCatalogProvider):
             seen += 1
             element.clear()
 
-    def _normalize_firds(self, values: Mapping[str, str]) -> NormalizedPublicInstrument:
+    def _normalize_firds(
+        self, values: Mapping[str, str]
+    ) -> NormalizedPublicInstrument:
         isin = _text(values.get("isin"))
         name = _text(values.get("name")) or isin
         symbol = _text(values.get("symbol")) or isin
@@ -126,6 +161,9 @@ class GlobalPublicSecurityCatalogProvider(PublicSecurityCatalogProvider):
             provider_instrument_identifier=isin,
             name=name,
             symbol=symbol,
+            # FCA full/delta files establish UK FIRDS reference identity. A specific
+            # venue MIC is not invented when it is outside the generic-attributes
+            # element; later venue catalogs/reconciliation may enrich it.
             venue=self.source.venue,
             country_code=self.source.country_code,
             isin=isin if len(isin) == 12 else "",
@@ -134,15 +172,27 @@ class GlobalPublicSecurityCatalogProvider(PublicSecurityCatalogProvider):
             instrument_type=instrument_type,
         )
 
+    def _page_from_handle(
+        self,
+        handle: Any,
+        *,
+        row_offset: int,
+    ) -> tuple[list[NormalizedPublicInstrument], int, bool]:
+        rows: list[NormalizedPublicInstrument] = []
+        last_index = row_offset
+        exhausted = True
+        for index, values in self._iter_firds_xml(handle, skip=row_offset):
+            if len(rows) >= self.source.page_size:
+                exhausted = False
+                break
+            rows.append(self._normalize_firds(values))
+            last_index = index + 1
+        return rows, last_index, exhausted
+
     def _fetch_fca_firds_zip_xml(self, *, cursor: str | None) -> PublicCatalogPage:
-        start = int(cursor or "0")
-        if start < 0:
-            raise PublicSecurityCatalogError("FCA FIRDS cursor cannot be negative")
+        member_index, row_offset = _parse_cursor(cursor)
         path, archive_hash, temporary = self._download_to_disk()
         try:
-            rows: list[NormalizedPublicInstrument] = []
-            consumed = start
-            source_complete = True
             if zipfile.is_zipfile(path):
                 with zipfile.ZipFile(path) as archive:
                     members = sorted(
@@ -154,44 +204,55 @@ class GlobalPublicSecurityCatalogProvider(PublicSecurityCatalogProvider):
                         raise PublicSecurityCatalogError(
                             "FCA FIRDS archive contained no XML member"
                         )
-                    # FCA publishes one logical full/delta file per archive in the
-                    # ordinary case. Multiple members are processed as one stream.
-                    logical_index = 0
-                    for member in members:
-                        with archive.open(member) as xml_handle:
-                            for _, values in self._iter_firds_xml(
-                                xml_handle, skip=max(0, start - logical_index)
-                            ):
-                                rows.append(self._normalize_firds(values))
-                                logical_index += 1
-                                consumed = logical_index
-                                if len(rows) >= self.source.page_size:
-                                    source_complete = False
-                                    break
-                        if not source_complete:
-                            break
+                    if member_index >= len(members):
+                        raise PublicSecurityCatalogError(
+                            "FCA FIRDS cursor references a missing XML member"
+                        )
+                    member = members[member_index]
+                    with archive.open(member) as xml_handle:
+                        rows, next_row, member_complete = self._page_from_handle(
+                            xml_handle, row_offset=row_offset
+                        )
+                    if member_complete:
+                        source_complete = member_index == len(members) - 1
+                        next_cursor = (
+                            None
+                            if source_complete
+                            else f"{member_index + 1}:0"
+                        )
+                    else:
+                        source_complete = False
+                        next_cursor = f"{member_index}:{next_row}"
             else:
+                if member_index != 0:
+                    raise PublicSecurityCatalogError(
+                        "non-ZIP FCA FIRDS cursor cannot reference another member"
+                    )
                 with path.open("rb") as xml_handle:
-                    for index, values in self._iter_firds_xml(xml_handle, skip=start):
-                        rows.append(self._normalize_firds(values))
-                        consumed = index + 1
-                        if len(rows) >= self.source.page_size:
-                            source_complete = False
-                            break
-            if not rows and start == 0:
+                    rows, next_row, source_complete = self._page_from_handle(
+                        xml_handle, row_offset=row_offset
+                    )
+                next_cursor = None if source_complete else f"0:{next_row}"
+
+            if not rows and not source_complete:
+                raise PublicSecurityCatalogError(
+                    "FCA FIRDS page made no progress before completion"
+                )
+            if not rows and member_index == 0 and row_offset == 0:
                 raise PublicSecurityCatalogError(
                     "FCA FIRDS file contained no normalizable instruments"
                 )
-            # The archive hash binds every page to the exact upstream publication;
-            # the cursor suffix prevents different pages from colliding downstream.
             page_hash = hashlib.sha256(
-                f"{archive_hash}:{start}:{consumed}".encode("utf-8")
+                (
+                    f"{archive_hash}:{member_index}:{row_offset}:"
+                    f"{next_cursor or 'complete'}"
+                ).encode("utf-8")
             ).hexdigest()
             return PublicCatalogPage(
                 source_identifier=self.source.identifier,
                 retrieved_at=self._clock(),
                 records=tuple(rows),
-                next_cursor=None if source_complete else str(consumed),
+                next_cursor=next_cursor,
                 complete=source_complete,
                 content_hash=page_hash,
             )
