@@ -171,11 +171,13 @@ def test_release_prequalification_publishes_generation_before_cio_can_start(
         events.append(("state", (state, stage, generation_id)))
         return {"prequalification_id": prequalification_id or "prequal-test"}
 
-    def run(command, *, env, check):
+    def run(command, *, env, check, stderr, text):
         assert check is False
+        assert stderr is runtime.subprocess.PIPE
+        assert text is True
         assert env["CAPITAL_INTELLIGENCE_RELEASE"] == "release-test"
         events.append(("evidence", tuple(command)))
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stderr="")
 
     generation = SimpleNamespace(
         generation_id="generation-test",
