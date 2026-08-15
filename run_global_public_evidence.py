@@ -1,7 +1,7 @@
 """Maintain free global catalog, macro, positioning and research evidence.
 
-This process is deliberately non-critical and provider-facing.  It runs beside,
-not inside, CIO analysis.  All outputs remain supporting evidence until normal
+This process is deliberately non-critical and provider-facing. It runs beside,
+not inside, CIO analysis. All outputs remain supporting evidence until normal
 point-in-time qualification/capability gates admit them.
 """
 
@@ -20,6 +20,7 @@ from operations.composite_readiness import component_heartbeat_path
 from operations.global_public_catalog_maintenance import maintain_global_public_catalogs
 from operations.global_public_research_maintenance import maintain_global_public_research
 from operations.heartbeat import WorkerHeartbeatStore
+from providers.global_public_security_catalog import GlobalPublicSecurityCatalogProvider
 from providers.public_live_information_global_depth import (
     GlobalDecisionDepthInformationProvider,
 )
@@ -50,7 +51,10 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
         force=False,
         provider_factory=GlobalDecisionDepthInformationProvider,
     )
-    catalogs = maintain_global_public_catalogs(values=resolved)
+    catalogs = maintain_global_public_catalogs(
+        values=resolved,
+        provider_factory=GlobalPublicSecurityCatalogProvider,
+    )
     research = maintain_global_public_research(values=resolved)
     return {
         "schema_version": "global-public-evidence-maintenance.v1",
