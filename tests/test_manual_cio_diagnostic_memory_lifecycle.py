@@ -36,17 +36,24 @@ def test_manual_diagnostic_keeps_heavy_application_imports_out_of_process_startu
     assert roots.isdisjoint(forbidden)
 
 
-def test_manual_diagnostic_exposes_memory_telemetry_across_critical_phases() -> None:
+def test_manual_diagnostic_exposes_memory_telemetry_across_provider_free_phases() -> None:
     source = DIAGNOSTIC.read_text(encoding="utf-8")
     required_phases = {
         '"process_start"',
         '"before_canonical_portfolio_initialization"',
         '"after_canonical_portfolio_initialization"',
-        '"before_comprehensive_discovery"',
-        '"after_comprehensive_discovery"',
+        '"before_qualified_evidence_consumption"',
+        '"before_production_context_preparation"',
+        '"after_production_context_preparation"',
         '"before_worker_initialization"',
+        '"after_worker_initialization"',
+        '"before_paper_implementation"',
+        '"after_paper_implementation"',
+        '"process_finish"',
     }
     assert all(phase in source for phase in required_phases)
+    assert '"before_comprehensive_discovery"' not in source
+    assert '"after_comprehensive_discovery"' not in source
 
 
 def test_worker_is_built_only_after_production_context_is_ready() -> None:
