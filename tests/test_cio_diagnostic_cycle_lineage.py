@@ -9,6 +9,7 @@ from operations.manual_cio_diagnostic import ManualCIODiagnosticRequest
 
 
 UTC = timezone.utc
+_DECISION_AS_OF = datetime(2026, 8, 5, 20, 2, tzinfo=UTC)
 
 
 def _diagnostic(
@@ -23,7 +24,7 @@ def _diagnostic(
         requested_by="render-release:release-123",
         state=state,
         started_at=datetime(2026, 8, 5, 20, 1, tzinfo=UTC),
-        completed_at=datetime(2026, 8, 5, 20, 2, tzinfo=UTC),
+        completed_at=_DECISION_AS_OF,
         cycle_key=cycle_key,
         snapshot_identifier=None if cycle_key is None else "snapshot-123",
         detail=detail,
@@ -33,6 +34,7 @@ def _diagnostic(
 def _stale_context() -> dict[str, object]:
     return {
         "cycle_key": "older-cycle",
+        "decision_as_of": _DECISION_AS_OF.isoformat(),
         "comprehensive_discovery_required": True,
         "comprehensive_discovery_scope_state": "complete",
         "comprehensive_discovery_limitations": [
@@ -50,6 +52,39 @@ def _stale_context() -> dict[str, object]:
                 "selected": 10,
             }
         },
+    }
+
+
+def _certified_analytical_lineage() -> dict[str, object]:
+    return {
+        "all_market_runtime_certified": True,
+        "all_market_certification_integrity_valid": True,
+        "all_market_certification_release_matches": True,
+        "all_market_certification_id": "legacy-cert",
+        "all_market_certification_epoch": "2026-08-05T19:58:00+00:00",
+        "all_market_certification_aggregate_sha256": "a" * 64,
+        "all_market_certification_discovery_manifest_fingerprint": "global-manifest",
+        "all_market_certification_v2_available": True,
+        "all_market_certification_v2_input_integrity_valid": True,
+        "all_market_certification_v2_state_integrity_valid": True,
+        "all_market_certification_v2_release_matches": True,
+        "all_market_certification_v2_id": "v2-cert",
+        "all_market_evidence_generation_id": "generation-1",
+        "all_market_point_in_time_snapshot_id": "pit-1",
+        "all_market_global_discovery_snapshot_id": "global-1",
+        "all_market_us_equity_discovery_snapshot_id": "equity-1",
+        "all_market_paper_evidence_snapshot_id": "paper-1",
+        "all_market_policy_compatibility_hash": "b" * 64,
+        "all_market_certification_v2_state": "CONSTRUCTION_COMPLETE",
+        "all_market_evidence_certified": True,
+        "all_market_screening_certified": True,
+        "all_market_committee_certified": True,
+        "all_market_cio_certified": True,
+        "all_market_construction_certified": True,
+        "all_market_paper_implementation_certified": False,
+        "all_market_no_action_certified": False,
+        "all_market_operational_certified": False,
+        "certification_v2_cutoff": _DECISION_AS_OF.isoformat(),
     }
 
 
@@ -108,7 +143,7 @@ def test_failed_diagnostic_does_not_reuse_context_from_an_older_cycle(
     assert audit["real_money_authorized"] is False
 
 
-def test_matching_diagnostic_cycle_can_publish_its_own_aggregate_evidence(
+def test_matching_diagnostic_cycle_requires_certified_analytical_lineage(
     monkeypatch,
 ) -> None:
     diagnostic = _diagnostic(
@@ -118,6 +153,7 @@ def test_matching_diagnostic_cycle_can_publish_its_own_aggregate_evidence(
     )
     context = {
         "cycle_key": "current-cycle",
+        "decision_as_of": _DECISION_AS_OF.isoformat(),
         "comprehensive_discovery_required": True,
         "comprehensive_discovery_scope_state": "complete",
         "comprehensive_discovery_limitations": ["Current-cycle limitation."],
@@ -145,6 +181,18 @@ def test_matching_diagnostic_cycle_can_publish_its_own_aggregate_evidence(
         lambda _: Path("unused-context.json"),
     )
     monkeypatch.setattr(cio_diagnostic, "_load_json", lambda _: context)
+    monkeypatch.setattr(
+        cio_diagnostic,
+        "public_all_market_certification",
+        lambda _values: _certified_analytical_lineage(),
+    )
+    # Exact two-clock behavior is separately covered by the certification integration
+    # tests. This cycle-lineage test supplies an already-proven certification binding.
+    monkeypatch.setattr(
+        cio_diagnostic,
+        "_certification_context_matches",
+        lambda *_args, **_kwargs: (True, True),
+    )
 
     audit = cio_diagnostic.build_cio_diagnostic_audit(
         settings=SimpleNamespace(),
@@ -153,6 +201,8 @@ def test_matching_diagnostic_cycle_can_publish_its_own_aggregate_evidence(
 
     assert audit["ready"] is True
     assert audit["context_cycle_matches"] is True
+    assert audit["all_market_construction_certified"] is True
+    assert audit["all_market_operational_certified"] is False
     assert audit["comprehensive_discovery_limitations"] == [
         "Current-cycle limitation."
     ]
