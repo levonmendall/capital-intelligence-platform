@@ -1,0 +1,82 @@
+{
+  "identifier": "public-live-information-sources.global-depth.v1",
+  "sources": [
+    {
+      "identifier": "oecd-leading-indicators-global",
+      "source_name": "OECD Composite Leading Indicators",
+      "parser": "sdmx_csv",
+      "endpoint": "https://sdmx.oecd.org/public/rest/data/OECD.SDD.STES,DSD_STES@DF_CLI/.M.LI...AA...H",
+      "source_type": "official",
+      "independence_group": "oecd-statistics",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [],
+      "parameters": {
+        "startPeriod": "2023-01",
+        "dimensionAtObservation": "AllDimensions",
+        "format": "csvfilewithlabels"
+      },
+      "headers": {"Accept": "text/csv"},
+      "maximum_records": 1200,
+      "domains": ["economic_data_releases", "global_growth_activity"],
+      "impact_channels": ["growth", "policy", "earnings", "credit", "demand", "currency", "volatility"],
+      "reliability": 0.99,
+      "relevance": 0.9,
+      "materiality": 0.8,
+      "license_identifier": "OECD-public-data",
+      "usage_rights_identifier": "official-public-api.internal-analysis",
+      "limitations": [
+        "Leading indicators are macro evidence, not instrument-level investment authority.",
+        "Historical revisions remain subject to the point-in-time evidence policy."
+      ]
+    },
+    {
+      "identifier": "imf-real-gdp-growth-global",
+      "source_name": "IMF DataMapper real GDP growth",
+      "parser": "imf_datamapper",
+      "endpoint": "https://www.imf.org/external/datamapper/api/v1/NGDP_RPCH",
+      "source_type": "official",
+      "independence_group": "imf-datamapper",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [],
+      "parameters": {},
+      "headers": {"Accept": "application/json"},
+      "maximum_records": 1500,
+      "domains": ["economic_data_releases", "global_growth_activity"],
+      "impact_channels": ["growth", "policy", "earnings", "credit", "demand", "currency", "volatility"],
+      "reliability": 0.99,
+      "relevance": 0.9,
+      "materiality": 0.8,
+      "license_identifier": "IMF-public-data",
+      "usage_rights_identifier": "official-public-api.internal-analysis",
+      "limitations": [
+        "DataMapper observations can include forecasts and revisions; their publication/revision lineage must remain explicit before historical decision reliance."
+      ]
+    },
+    {
+      "identifier": "bis-us-credit-gap",
+      "source_name": "BIS credit-to-GDP gap statistics",
+      "parser": "sdmx_csv",
+      "endpoint": "https://stats.bis.org/api/v1/data/WS_CREDIT_GAP/Q.US.P.A.C/all",
+      "source_type": "official",
+      "independence_group": "bis-statistics",
+      "enabled": true,
+      "required": false,
+      "credential_environment_variables": [],
+      "parameters": {"startPeriod": "2000-Q1"},
+      "headers": {"Accept": "text/csv"},
+      "maximum_records": 200,
+      "domains": ["economic_data_releases", "credit_ratings_defaults", "fund_flows_positioning"],
+      "impact_channels": ["growth", "liquidity", "credit", "risk", "volatility"],
+      "reliability": 0.99,
+      "relevance": 0.85,
+      "materiality": 0.8,
+      "license_identifier": "BIS-public-statistics",
+      "usage_rights_identifier": "BIS-statistics-terms.internal-analysis",
+      "limitations": [
+        "Credit gaps are systemic-risk context and never independently authorize an instrument recommendation."
+      ]
+    }
+  ]
+}
