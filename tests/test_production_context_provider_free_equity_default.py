@@ -9,21 +9,30 @@ from operations import qualified_equity_discovery, qualified_paper_evidence
 
 
 def _install_governed(monkeypatch, observed):
+    result = runtime.ProductionContextPublicationResult(
+        state="blocked",
+        cycle_key="canonical-cio:test",
+        scheduled_for=datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc),
+        decision_as_of=None,
+        detail="fixture only: verify provider-free probe selection",
+    )
+
     def governed(**kwargs):
         observed.update(kwargs)
-        return "context-result"
+        return result
 
     monkeypatch.setitem(
         sys.modules,
         "production_context_publication_governed",
         SimpleNamespace(prepare_governed_production_context_for_cycle=governed),
     )
+    return result
 
 
 def test_runtime_defaults_to_qualified_equity_discovery(monkeypatch, tmp_path) -> None:
     scheduled = datetime(2026, 8, 15, 3, 0, tzinfo=timezone.utc)
     observed: dict[str, object] = {}
-    _install_governed(monkeypatch, observed)
+    expected = _install_governed(monkeypatch, observed)
     monkeypatch.setattr(
         qualified_paper_evidence,
         "production_snapshot_probe_enabled",
@@ -36,7 +45,7 @@ def test_runtime_defaults_to_qualified_equity_discovery(monkeypatch, tmp_path) -
         universe_path=tmp_path / "universe.json",
     )
 
-    assert actual == "context-result"
+    assert actual is expected
     assert observed["equity_discovery_probe"] is qualified_equity_discovery.discover_us_equities
     assert observed["evidence_probe"] is None
 
