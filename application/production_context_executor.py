@@ -4,8 +4,8 @@ The implementation preloads the governed context before binding exact market
 participation authority. Legacy and rehearsal contexts then delegate to the base
 executor. This facade memoizes that load for the duration of one run so every cycle
 observes one point-in-time context read, regardless of which execution path applies.
-It also preserves the module-level monkeypatch boundary used by authority tests and
-operational adapters.
+Successful canonical results also advance durable committee, CIO, and construction
+certification lineage before downstream read-only analytics are attempted.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from application.decision_intelligence_v3_runtime import (
 from application.marginal_targeting_runtime import (
     install_construction_backed_marginal_targeting,
 )
+from operations.certification_cycle_lineage import certify_completed_cio_cycle
 
 _LOGGER = logging.getLogger("capital_intelligence.decision_intelligence_v3")
 _ORIGINAL_CANDIDATE_AUTHORITY_UNIVERSE = (
@@ -37,10 +38,6 @@ for _name, _value in vars(_implementation).items():
     globals()[_name] = _value
 
 
-# Production ranking and portfolio-specialist previews use the same canonical
-# construction engine instead of a maximum-position proxy. The binding is idempotent
-# and leaves direct imports of the historical cycle untouched until the production
-# executor is composed.
 install_construction_backed_marginal_targeting()
 
 
@@ -83,7 +80,7 @@ def _candidate_authority_universe(executor, *, context):
 class ProductionCanonicalCIOExecutor(
     _implementation.ProductionCanonicalCIOExecutor
 ):
-    """Execute one cycle from exactly one provider context read."""
+    """Execute one cycle from one context read and persist certification lineage."""
 
     def run(self, *, as_of: datetime):
         _synchronize_runtime_bindings()
@@ -92,10 +89,13 @@ class ProductionCanonicalCIOExecutor(
         self.context_provider = cached_provider
         try:
             result = super().run(as_of=as_of)
-            # Decision Intelligence v3 is downstream and read-only. A persistence
-            # failure may reduce explainability/measurement coverage, but it must not
-            # invalidate or change a CIO decision already produced by the canonical
-            # authority path.
+            # Certification is downstream of decision authority but upstream of declaring
+            # the operational cycle complete. If its durable lineage cannot be written in
+            # production, the scheduler fails closed while the already-created CIO result
+            # remains immutable.
+            certify_completed_cio_cycle(result)
+            # Decision Intelligence v3 is read-only and non-authoritative; its persistence
+            # failure must not invalidate an already-certified canonical CIO result.
             try:
                 append_post_cycle_decision_intelligence(
                     result=result,
