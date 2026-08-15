@@ -3,7 +3,8 @@
 The complete terminal-accounting implementation is preserved byte-for-byte in
 ``operations._comprehensive_market_discovery_v6``. This facade adds durable,
 exact-release/epoch evidence checkpoints, an immutable provider-free point-in-time
-certification-input barrier, and immutable lane certification artifacts.
+certification-input barrier, immutable lane certification artifacts, and provider-free
+reuse of a qualified global discovery snapshot.
 
 No catalog membership, screening rule, factor requirement, ranking, threshold, CIO
 authority, portfolio construction, execution behavior, or paper-only control changes.
@@ -32,6 +33,11 @@ from operations.continuous_evidence_plane import (
 )
 from operations.persistent_historical_evidence import install_persistent_historical_evidence
 from operations.persistent_option_reference import install_persistent_option_reference
+from operations.qualified_comprehensive_discovery_snapshot import (
+    ComprehensiveDiscoverySnapshotError,
+    load_qualified_comprehensive_discovery_snapshot,
+    view_qualified_comprehensive_discovery_snapshot,
+)
 from operations.resumable_options_discovery import install_resumable_options_catalog
 from storage_governance import install_persistent_history_storage_governance
 
@@ -47,6 +53,9 @@ _SNAPSHOT_ID_ENV = "CAPITAL_INTELLIGENCE_CIO_EVIDENCE_SNAPSHOT_ID"
 _SNAPSHOT_AS_OF_ENV = "CAPITAL_INTELLIGENCE_CIO_EVIDENCE_SNAPSHOT_AS_OF"
 _SNAPSHOT_PLANE_ENV = "CAPITAL_INTELLIGENCE_CIO_EVIDENCE_PLANE_GENERATION_ID"
 _CERTIFICATION_INPUT_ENV = "CAPITAL_INTELLIGENCE_CIO_CERTIFICATION_INPUT_ID"
+_GLOBAL_DISCOVERY_SNAPSHOT_ENV = (
+    "CAPITAL_INTELLIGENCE_CIO_GLOBAL_DISCOVERY_SNAPSHOT_ID"
+)
 
 # Keep the production terminal-screening resource bound visible at the public facade.
 # Several release guards intentionally inspect this module rather than implementation
@@ -100,10 +109,8 @@ def _point_in_time_snapshot_barrier(
 ):
     """Require prequalified evidence; the CIO/read path may never refresh it.
 
-    The optional callables are explicit test/diagnostic seams. Production callers omit
-    them and therefore always use the real governed disk loader and immutable input
-    publisher. Keeping the seam in the call signature avoids relying on module-global
-    monkeypatch behavior while leaving the production dependency graph unchanged.
+    Optional callables are explicit test/diagnostic seams. Production callers omit them
+    and therefore always use the governed disk loader and immutable input publisher.
     """
 
     values = os.environ
@@ -138,6 +145,31 @@ def _point_in_time_snapshot_barrier(
     return snapshot
 
 
+def _provider_free_global_discovery(
+    *,
+    point_snapshot,
+    held_symbols,
+    tracked_symbols,
+    excluded_symbols,
+):
+    global_snapshot = load_qualified_comprehensive_discovery_snapshot(
+        evidence_as_of=point_snapshot.plane_as_of,
+        values=os.environ,
+    )
+    result = view_qualified_comprehensive_discovery_snapshot(
+        global_snapshot,
+        held_symbols=held_symbols,
+        tracked_symbols=tracked_symbols,
+        excluded_symbols=excluded_symbols,
+    )
+    os.environ[_GLOBAL_DISCOVERY_SNAPSHOT_ENV] = global_snapshot.snapshot_id
+    # Preserve the current release-bound public certification contract without provider
+    # work. The aggregate and lane artifacts are derived solely from the immutable
+    # restored result and remain non-authorizing operational proof.
+    publish_compositional_certification(result)
+    return result
+
+
 def discover_comprehensive_markets(
     *,
     as_of,
@@ -150,7 +182,7 @@ def discover_comprehensive_markets(
     prior_cutoff_observations=(),
     policy=None,
 ):
-    """Freeze provider-free PIT evidence, run unchanged discovery, enforce composition."""
+    """Consume qualified global evidence in production; discover only as evidence owner."""
 
     # Preserved-core provider-preselection invariant:
     # market_probe=default_provider_preselection_market_probe
@@ -158,11 +190,39 @@ def discover_comprehensive_markets(
         chunk_size=_PRODUCTION_TERMINAL_SCREENING_CHUNK_SIZE
     )
     try:
-        _point_in_time_snapshot_barrier(as_of)
+        point_snapshot = _point_in_time_snapshot_barrier(as_of)
     except (ContinuousEvidencePlaneError, CertificationInputError) as error:
         raise _core._base._legacy.ComprehensiveMarketDiscoveryError(
             f"point-in-time evidence snapshot is not ready: {error}"
         ) from error
+
+    if point_snapshot is not None:
+        # Once the production consumer crosses the PIT barrier, provider/discovery probes
+        # are forbidden. Policy or cutoff-observation overrides would describe a different
+        # evidence generation, so they fail closed rather than silently falling back to
+        # synchronous global acquisition.
+        if any(
+            item is not None
+            for item in (catalog_probe, market_probe, preselection_probe, policy)
+        ) or tuple(prior_cutoff_observations):
+            raise _core._base._legacy.ComprehensiveMarketDiscoveryError(
+                "production CIO discovery consumer cannot override qualified global evidence"
+            )
+        try:
+            return _provider_free_global_discovery(
+                point_snapshot=point_snapshot,
+                held_symbols=held_symbols,
+                tracked_symbols=tracked_symbols,
+                excluded_symbols=excluded_symbols,
+            )
+        except (ComprehensiveDiscoverySnapshotError, AllMarketLaneCertificationError) as error:
+            raise _core._base._legacy.ComprehensiveMarketDiscoveryError(
+                f"qualified global discovery snapshot is not ready: {error}"
+            ) from error
+
+    # Non-production callers and the continuous evidence owner preserve the canonical
+    # implementation. Only the owner is allowed to reach this path in production because
+    # it holds CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING=true.
     _sync_core_seams()
     try:
         result = _core.discover_comprehensive_markets(
