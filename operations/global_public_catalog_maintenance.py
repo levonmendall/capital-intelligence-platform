@@ -1,9 +1,9 @@
 """Continuously acquire public global instrument catalogs outside the CIO path.
 
-Each maintenance pass is intentionally bounded.  Page results are written
-atomically, projected into the canonical append-only security-master store as
-non-authoritative discovery catalogs, and checkpointed for the next pass.
-No public catalog in this module can activate itself for screening.
+Each maintenance pass is bounded. Page results are written atomically, projected
+into the canonical append-only security-master store as non-authoritative
+discovery catalogs, and checkpointed for the next pass. No public catalog in
+this module can activate itself for screening.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from providers.public_security_catalog import (
     PublicSecurityCatalogProvider,
     security_master_delivery_from_public_records,
 )
-
 
 _DEFAULT_CONFIG = Path("config/global_public_security_catalogs.json")
 
@@ -104,8 +103,8 @@ def _load_config(
         if configured_endpoint:
             endpoint = configured_endpoint
         elif bool(raw.get("requires_endpoint_configuration", False)):
-            # The source remains installed but dormant until an official current
-            # download URL is supplied.  This avoids scraping HTML landing pages.
+            # Dynamic regulator/exchange download links are configured at runtime;
+            # never scrape an HTML landing page as though it were reference data.
             continue
         source = PublicCatalogSourceDefinition(
             identifier=str(raw["identifier"]),
@@ -116,7 +115,9 @@ def _load_config(
             country_code=str(raw.get("country_code", "ZZ")),
             page_size=int(raw.get("page_size", 500)),
             maximum_pages_per_pass=int(raw.get("maximum_pages_per_pass", 1)),
-            licensed_for_internal_analysis=bool(raw.get("licensed_for_internal_analysis", True)),
+            licensed_for_internal_analysis=bool(
+                raw.get("licensed_for_internal_analysis", True)
+            ),
             point_in_time=bool(raw.get("point_in_time", False)),
             historical_identifiers=bool(raw.get("historical_identifiers", False)),
             listing_history=bool(raw.get("listing_history", False)),
@@ -142,10 +143,14 @@ def maintain_global_public_catalogs(
     evaluated_at = clock()
     state_root = Path(resolved.get("CAPITAL_INTELLIGENCE_DATA_DIR", "database"))
     root = state_root / "global_public_catalogs"
-    store = SQLiteSecurityMasterStore(root / "public_discovery_security_master.sqlite3")
+    store = SQLiteSecurityMasterStore(
+        root / "public_discovery_security_master.sqlite3"
+    )
     results: list[PublicCatalogMaintenanceResult] = []
 
-    for source, minimum_refresh_seconds in _load_config(Path(config_path), values=resolved):
+    for source, minimum_refresh_seconds in _load_config(
+        Path(config_path), values=resolved
+    ):
         source_root = root / source.identifier
         checkpoint_path = source_root / "checkpoint.json"
         checkpoint: dict[str, Any] = {}
@@ -155,6 +160,7 @@ def maintain_global_public_catalogs(
                 checkpoint = decoded if isinstance(decoded, dict) else {}
             except (OSError, json.JSONDecodeError):
                 checkpoint = {}
+
         completed_at_raw = str(checkpoint.get("completed_at", "")).strip()
         if completed_at_raw:
             try:
@@ -171,8 +177,12 @@ def maintain_global_public_catalogs(
                             record_count=0,
                             next_cursor=None,
                             complete=True,
-                            catalog_identifier=str(checkpoint.get("catalog_identifier") or "") or None,
-                            content_hash=str(checkpoint.get("content_hash") or "") or None,
+                            catalog_identifier=(
+                                str(checkpoint.get("catalog_identifier") or "") or None
+                            ),
+                            content_hash=(
+                                str(checkpoint.get("content_hash") or "") or None
+                            ),
                             detail=f"refresh deferred; age_seconds={max(0, int(age))}",
                         )
                     )
@@ -183,17 +193,19 @@ def maintain_global_public_catalogs(
         try:
             page = provider_factory(source).fetch_page(cursor=cursor)
             if not page.records:
-                raise ValueError("public catalog page contained no normalized instruments")
-            # Each page is a complete immutable supporting catalog in its own right,
-            # but never claims complete-universe authority unless this page is also
-            # the terminal source snapshot.  Even then other authority deficiencies
-            # keep it fail closed for screening activation.
+                raise ValueError(
+                    "public catalog page contained no normalized instruments"
+                )
+            # Content hash makes every immutable page independently addressable. It
+            # prevents a multi-page FIRDS traversal from colliding with an earlier
+            # page while retaining append-only history across refreshes.
             delivery = security_master_delivery_from_public_records(
                 source,
                 page.records,
                 observed_at=page.retrieved_at,
                 retrieved_at=page.retrieved_at,
                 complete_source_snapshot=page.complete and cursor in {None, "0"},
+                catalog_fingerprint=page.content_hash,
             )
             event = store.append(delivery.catalog, recorded_at=page.retrieved_at)
             page_path = source_root / "pages" / f"{page.content_hash}.json"
@@ -214,7 +226,9 @@ def maintain_global_public_catalogs(
             checkpoint_payload = {
                 "source_identifier": source.identifier,
                 "next_cursor": page.next_cursor,
-                "completed_at": page.retrieved_at.isoformat() if page.complete else None,
+                "completed_at": (
+                    page.retrieved_at.isoformat() if page.complete else None
+                ),
                 "catalog_identifier": delivery.catalog.identifier,
                 "content_hash": event.content_hash,
             }
