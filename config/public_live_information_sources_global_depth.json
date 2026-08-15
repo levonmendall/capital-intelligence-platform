@@ -68,7 +68,7 @@
       "headers": {"Accept": "text/csv"},
       "maximum_records": 200,
       "domains": ["economic_data_releases", "credit_ratings_defaults", "fund_flows_positioning"],
-      "impact_channels": ["growth", "liquidity", "credit", "risk", "volatility"],
+      "impact_channels": ["growth", "liquidity", "credit", "positioning", "volatility"],
       "reliability": 0.99,
       "relevance": 0.85,
       "materiality": 0.8,
