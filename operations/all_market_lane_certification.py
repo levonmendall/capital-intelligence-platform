@@ -354,6 +354,19 @@ def install_checkpointed_market_probe(core_module) -> None:
     core_module._compositional_probe_installed = True
 
 
+def _update_serialized_sequence_digest(digest, values) -> None:
+    """Hash an evidence sequence without materializing or serializing its container."""
+
+    digest.update(b"[")
+    first = True
+    for item in values:
+        if not first:
+            digest.update(b",")
+        digest.update(_canonical(_serialize(item)))
+        first = False
+    digest.update(b"]")
+
+
 def _lane_evidence_fingerprint(lane: object) -> str:
     selected_evidence = []
     for item in getattr(lane, "selected", ()):
@@ -364,15 +377,25 @@ def _lane_evidence_fingerprint(lane: object) -> str:
                 "evidence_identifiers": list(item.features.evidence_identifiers),
             }
         )
-    return _digest(
-        {
-            "preselection_evidence": _serialize(
-                getattr(lane, "preselection_evidence", ())
-            ),
-            "selected_evidence": selected_evidence,
-            "source_identifiers": list(getattr(lane, "source_identifiers", ())),
-        }
+
+    # Keep the canonical bytes identical to _digest({...}) for ordinary list/tuple
+    # evidence while permitting replayable disk-backed iterables. The strict generic
+    # serializer remains fail-closed for unsupported checkpoint values.
+    digest = hashlib.sha256()
+    digest.update(b'{"preselection_evidence":')
+    _update_serialized_sequence_digest(
+        digest,
+        getattr(lane, "preselection_evidence", ()),
     )
+    digest.update(b',"selected_evidence":')
+    _update_serialized_sequence_digest(digest, selected_evidence)
+    digest.update(b',"source_identifiers":')
+    _update_serialized_sequence_digest(
+        digest,
+        getattr(lane, "source_identifiers", ()),
+    )
+    digest.update(b"}")
+    return digest.hexdigest()
 
 
 def _artifact_body(artifact: Mapping[str, object]) -> dict[str, object]:

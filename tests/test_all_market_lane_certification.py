@@ -11,6 +11,8 @@ import pytest
 from cio import CandidateAssetClass
 from operations.all_market_lane_certification import (
     AllMarketLaneCertificationError,
+    _lane_evidence_fingerprint,
+    _serialize,
     checkpointed_market_probe,
     evaluate_lane_artifacts,
     publish_compositional_certification,
@@ -126,6 +128,37 @@ def test_common_epoch_lane_artifacts_certify_complete_universe(tmp_path: Path) -
     assert artifact["candidate_count_limit_applied"] is False
     assert artifact["evidence_effective_at"] == EPOCH.isoformat()
     assert artifact["completed_at"] != artifact["evidence_effective_at"]
+
+
+def test_disk_backed_evidence_fingerprint_streams_without_relaxing_serializer(
+    tmp_path: Path,
+) -> None:
+    class _ReplayableDiskBackedEvidence:
+        def __init__(self, rows):
+            self._rows = tuple(rows)
+
+        def __iter__(self):
+            return iter(self._rows)
+
+    baseline_lane = _lane(CandidateAssetClass.FX, catalog_count=0)
+    disk_backed_lane = _lane(CandidateAssetClass.FX, catalog_count=0)
+    disk_backed_lane.preselection_evidence = _ReplayableDiskBackedEvidence(
+        baseline_lane.preselection_evidence
+    )
+
+    with pytest.raises(TypeError, match="unsupported checkpoint value"):
+        _serialize(disk_backed_lane.preselection_evidence)
+
+    assert _lane_evidence_fingerprint(disk_backed_lane) == _lane_evidence_fingerprint(
+        baseline_lane
+    )
+
+    aggregate = publish_compositional_certification(
+        _result(disk_backed_lane),
+        values=_values(tmp_path),
+    )
+    assert aggregate is not None
+    assert aggregate["all_market_runtime_certified"] is True
 
 
 def test_incomplete_terminal_accounting_fails_closed(tmp_path: Path) -> None:
