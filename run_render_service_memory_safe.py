@@ -17,8 +17,9 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
-from typing import MutableMapping, Sequence
+from typing import Mapping, MutableMapping, Sequence
 
 import run_render_service as render_supervisor
 import run_render_service_nonblocking as render_bootstrap
@@ -29,6 +30,59 @@ from operations.release_evidence_prequalification import (
 
 _ORIGINAL_MANAGED_PROCESSES = render_supervisor.managed_processes
 _PROVIDER_VALIDATION_BACKGROUND_ENABLED = False
+
+
+def _positive_int(
+    values: Mapping[str, str],
+    name: str,
+    default: int,
+) -> int:
+    raw = str(values.get(name, "")).strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer") from error
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _nonnegative_seconds(
+    values: Mapping[str, str],
+    name: str,
+    default: float,
+) -> float:
+    raw = str(values.get(name, "")).strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} must be numeric") from error
+    if value < 0:
+        raise ValueError(f"{name} cannot be negative")
+    return value
+
+
+def _qualifier_metrics(
+    *,
+    attempt: int,
+    maximum_attempts: int,
+    return_code: int | None = None,
+    generation_missing: bool = False,
+) -> dict[str, int]:
+    metrics = {
+        "attempt": attempt,
+        "maximum_attempts": maximum_attempts,
+    }
+    if return_code is not None:
+        metrics["qualifier_return_code"] = abs(int(return_code))
+        metrics["qualifier_return_code_negative"] = int(int(return_code) < 0)
+    if generation_missing:
+        metrics["qualified_generation_missing"] = 1
+    return metrics
 
 
 def memory_safe_managed_processes(
@@ -115,17 +169,34 @@ def memory_safe_managed_processes(
 def _prequalify_release_evidence(
     diagnostic_values: MutableMapping[str, str],
 ) -> bool:
-    """Publish one exact-release generation before any CIO request exists."""
+    """Publish one exact-release generation before any CIO request exists.
+
+    Evidence qualification is intentionally resumable. A transient provider, memory-lane,
+    or child-process failure never creates a CIO request and never causes the CIO to repair
+    evidence. Instead the evidence owner retries in the same exclusive heavy-memory lane
+    until a bounded release qualification budget is exhausted.
+    """
 
     from operations.continuous_evidence_plane import load_latest_evidence_plane
 
     started_at = datetime.now(timezone.utc)
+    maximum_attempts = _positive_int(
+        diagnostic_values,
+        "CAPITAL_INTELLIGENCE_RELEASE_EVIDENCE_PREQUALIFICATION_ATTEMPTS",
+        6,
+    )
+    retry_seconds = _nonnegative_seconds(
+        diagnostic_values,
+        "CAPITAL_INTELLIGENCE_RELEASE_EVIDENCE_PREQUALIFICATION_RETRY_SECONDS",
+        30.0,
+    )
     status = write_release_evidence_prequalification(
         diagnostic_values,
         state="in_progress",
         stage="evidence_prequalifying",
         started_at=started_at,
         detail="validating release-independent evidence components",
+        metrics={"attempt": 1, "maximum_attempts": maximum_attempts},
     )
     prequalification_id = str(status["prequalification_id"])
     render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
@@ -135,96 +206,166 @@ def _prequalify_release_evidence(
         "run_bounded_continuous_evidence_plane.py",
         "--once",
     )
-    render_bootstrap._log(
-        "release_evidence_prequalification_starting",
-        command=list(evidence_command),
-        release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
-        prequalification_id=prequalification_id,
-        diagnostic_request_created=False,
-        exact_release_required=True,
-        paper_only=True,
-    )
-    try:
-        completed = subprocess.run(
-            evidence_command,
-            env=dict(diagnostic_values),
-            check=False,
-        )
-    except OSError as error:
-        write_release_evidence_prequalification(
-            diagnostic_values,
-            state="failed",
-            stage="evidence_prequalification_failed",
-            prequalification_id=prequalification_id,
-            started_at=started_at,
-            detail=f"evidence qualifier could not start: {type(error).__name__}",
-        )
-        render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
+
+    for attempt in range(1, maximum_attempts + 1):
+        if attempt > 1:
+            write_release_evidence_prequalification(
+                diagnostic_values,
+                state="in_progress",
+                stage="evidence_refresh",
+                prequalification_id=prequalification_id,
+                started_at=started_at,
+                detail=(
+                    f"retrying release-independent evidence qualification attempt "
+                    f"{attempt} of {maximum_attempts}"
+                ),
+                metrics={"attempt": attempt, "maximum_attempts": maximum_attempts},
+            )
+            render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
+
         render_bootstrap._log(
-            "release_evidence_prequalification_start_failed",
-            error_type=type(error).__name__,
+            "release_evidence_prequalification_starting",
+            command=list(evidence_command),
             release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+            prequalification_id=prequalification_id,
+            attempt=attempt,
+            maximum_attempts=maximum_attempts,
             diagnostic_request_created=False,
+            exact_release_required=True,
             paper_only=True,
         )
-        return False
 
-    if completed.returncode != 0:
+        completed: subprocess.CompletedProcess | None = None
+        start_error: OSError | None = None
+        try:
+            completed = subprocess.run(
+                evidence_command,
+                env=dict(diagnostic_values),
+                check=False,
+            )
+        except OSError as error:
+            start_error = error
+
+        generation = None
+        return_code: int | None = None
+        if completed is not None:
+            return_code = int(completed.returncode)
+            if return_code == 0:
+                generation = load_latest_evidence_plane(diagnostic_values)
+
+        if return_code == 0 and generation is not None:
+            write_release_evidence_prequalification(
+                diagnostic_values,
+                state="completed",
+                stage="evidence_generation_ready",
+                prequalification_id=prequalification_id,
+                started_at=started_at,
+                detail="immutable exact-release evidence generation ready",
+                generation_id=generation.generation_id,
+                metrics={
+                    "attempt": attempt,
+                    "maximum_attempts": maximum_attempts,
+                    "scheduled_lanes": len(generation.scheduled_lanes),
+                    "historical_scope_count": generation.historical_scope_count,
+                },
+            )
+            render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
+            render_bootstrap._log(
+                "release_evidence_prequalification_finished",
+                return_code=0,
+                release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+                prequalification_id=prequalification_id,
+                generation_id=generation.generation_id,
+                attempt=attempt,
+                maximum_attempts=maximum_attempts,
+                diagnostic_request_created=False,
+                paper_only=True,
+            )
+            return True
+
+        generation_missing = return_code == 0 and generation is None
+        if start_error is not None:
+            failure_detail = (
+                "evidence qualifier could not start: " + type(start_error).__name__
+            )
+            metrics = {
+                "attempt": attempt,
+                "maximum_attempts": maximum_attempts,
+                "qualifier_start_failed": 1,
+            }
+            error_type = type(start_error).__name__
+        elif generation_missing:
+            failure_detail = "evidence qualifier returned success without a qualified generation"
+            metrics = _qualifier_metrics(
+                attempt=attempt,
+                maximum_attempts=maximum_attempts,
+                return_code=0,
+                generation_missing=True,
+            )
+            error_type = None
+        else:
+            failure_detail = f"bounded evidence qualification returned code {return_code}"
+            metrics = _qualifier_metrics(
+                attempt=attempt,
+                maximum_attempts=maximum_attempts,
+                return_code=return_code,
+            )
+            error_type = None
+
+        if attempt < maximum_attempts:
+            write_release_evidence_prequalification(
+                diagnostic_values,
+                state="in_progress",
+                stage="evidence_refresh",
+                prequalification_id=prequalification_id,
+                started_at=started_at,
+                detail=(
+                    failure_detail
+                    + f"; retrying after bounded backoff ({attempt}/{maximum_attempts})"
+                ),
+                metrics=metrics,
+            )
+            render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
+            render_bootstrap._log(
+                "release_evidence_prequalification_retrying",
+                return_code=return_code,
+                error_type=error_type,
+                release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+                prequalification_id=prequalification_id,
+                attempt=attempt,
+                maximum_attempts=maximum_attempts,
+                retry_seconds=retry_seconds,
+                diagnostic_request_created=False,
+                paper_only=True,
+            )
+            if retry_seconds:
+                time.sleep(retry_seconds)
+            continue
+
         write_release_evidence_prequalification(
             diagnostic_values,
             state="failed",
             stage="evidence_prequalification_failed",
             prequalification_id=prequalification_id,
             started_at=started_at,
-            detail=f"bounded evidence qualification returned code {completed.returncode}",
+            detail=failure_detail,
+            metrics=metrics,
         )
         render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
         render_bootstrap._log(
             "release_evidence_prequalification_failed",
-            return_code=completed.returncode,
+            return_code=return_code,
+            error_type=error_type,
             release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
+            prequalification_id=prequalification_id,
+            attempt=attempt,
+            maximum_attempts=maximum_attempts,
             diagnostic_request_created=False,
             paper_only=True,
         )
         return False
 
-    generation = load_latest_evidence_plane(diagnostic_values)
-    if generation is None:
-        write_release_evidence_prequalification(
-            diagnostic_values,
-            state="failed",
-            stage="evidence_prequalification_failed",
-            prequalification_id=prequalification_id,
-            started_at=started_at,
-            detail="evidence qualifier returned success without a qualified generation",
-        )
-        render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
-        return False
-
-    write_release_evidence_prequalification(
-        diagnostic_values,
-        state="completed",
-        stage="evidence_generation_ready",
-        prequalification_id=prequalification_id,
-        started_at=started_at,
-        detail="immutable exact-release evidence generation ready",
-        generation_id=generation.generation_id,
-        metrics={
-            "scheduled_lanes": len(generation.scheduled_lanes),
-            "historical_scope_count": generation.historical_scope_count,
-        },
-    )
-    render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
-    render_bootstrap._log(
-        "release_evidence_prequalification_finished",
-        return_code=0,
-        release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
-        prequalification_id=prequalification_id,
-        generation_id=generation.generation_id,
-        diagnostic_request_created=False,
-        paper_only=True,
-    )
-    return True
+    return False
 
 
 def _start_release_diagnostic_after_prequalification(
