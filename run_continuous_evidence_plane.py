@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -40,6 +42,18 @@ from operations.qualified_comprehensive_discovery_snapshot import (
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
 _PAPER_HISTORY_DAYS = 365 * 10 + 20
+_FAILURE_STAGE_ATTRIBUTE = "_capital_intelligence_evidence_failure_stage"
+_FAILURE_CONTEXT_EVENT = "continuous_evidence_plane_failure_context"
+_REDACTED = "[REDACTED]"
+_SENSITIVE_ENV_MARKERS = (
+    "API_KEY",
+    "API_TOKEN",
+    "ACCESS_TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "CREDENTIAL",
+    "PRIVATE_KEY",
+)
 
 
 def _seconds(values: Mapping[str, str], name: str, default: float) -> float:
@@ -53,6 +67,46 @@ def _seconds(values: Mapping[str, str], name: str, default: float) -> float:
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
+
+
+def _credential_safe_error_detail(
+    error: BaseException,
+    values: Mapping[str, str],
+) -> str:
+    """Return bounded failure provenance without disclosing configured credentials."""
+
+    text = str(error).strip() or type(error).__name__
+    secrets = {
+        str(secret).strip()
+        for name, secret in values.items()
+        if any(marker in str(name).upper() for marker in _SENSITIVE_ENV_MARKERS)
+        and len(str(secret).strip()) >= 4
+    }
+    for secret in sorted(secrets, key=len, reverse=True):
+        text = text.replace(secret, _REDACTED)
+    text = re.sub(
+        r"(?i)([?&](?:api[_-]?key|apikey|api_token|access_token|token|secret|password)=)[^&\s]+",
+        rf"\1{_REDACTED}",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}",
+        rf"\1{_REDACTED}",
+        text,
+    )
+    return text[:1600]
+
+
+def _tag_failure_stage(error: BaseException, stage: str) -> None:
+    try:
+        setattr(error, _FAILURE_STAGE_ATTRIBUTE, stage)
+    except (AttributeError, TypeError):
+        return
+
+
+def _failure_stage(error: BaseException) -> str:
+    stage = str(getattr(error, _FAILURE_STAGE_ATTRIBUTE, "") or "").strip()
+    return stage or "continuous_evidence_plane"
 
 
 def _base_universe_symbols() -> tuple[str, ...]:
@@ -238,64 +292,74 @@ def _install_global_snapshot_owner(
 
 def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
     resolved = dict(os.environ if values is None else values)
-    prior = os.environ.get(_PREPARING_ENV)
-    os.environ[_PREPARING_ENV] = "true"
+    stage = "component_qualified_evidence_maintenance"
     try:
-        with _install_global_snapshot_owner(resolved):
-            maintenance = _component_maintenance.maintain_component_qualified_evidence_plane(
-                values=resolved
-            )
-    finally:
-        if prior is None:
-            os.environ.pop(_PREPARING_ENV, None)
-        else:
-            os.environ[_PREPARING_ENV] = prior
-    generation = maintenance.generation
-    global_snapshot = load_qualified_comprehensive_discovery_snapshot(
-        evidence_as_of=generation.as_of,
-        values=resolved,
-    )
-    equity_snapshot = load_equity_discovery_snapshot(
-        evidence_as_of=generation.as_of,
-        values=resolved,
-    )
-    scope, evidence_universe, _holding_only = _qualified_evidence_universe(
-        generation,
-        values=resolved,
-        cutoff=generation.as_of,
-    )
-    paper_snapshot = load_paper_evidence_snapshot(
-        evidence_as_of=generation.as_of,
-        universe=evidence_universe,
-        values=resolved,
-    )
-    return {
-        "state": "available",
-        "maintenance_state": maintenance.state,
-        "refreshed": maintenance.refreshed,
-        "preparation_passes": maintenance.preparation_passes,
-        "generation_id": generation.generation_id,
-        "as_of": generation.as_of.isoformat(),
-        "completed_at": generation.completed_at.isoformat(),
-        "reference_manifest_id": generation.reference_manifest_id,
-        "global_discovery_snapshot_id": global_snapshot.snapshot_id,
-        "us_equity_discovery_snapshot_id": equity_snapshot.snapshot_id,
-        "paper_evidence_snapshot_id": paper_snapshot.snapshot_id,
-        "state_scope": {
-            "held_symbols": list(scope.held_symbols),
-            "tracked_symbols": list(scope.tracked_symbols),
-            "base_universe_symbols": list(equity_snapshot.excluded_symbols),
-        },
-        "scheduled_lanes": list(generation.scheduled_lanes),
-        "historical_scope_count": generation.historical_scope_count,
-        "historical_coverage_digest": generation.historical_coverage_digest,
-        "public_live_state": generation.public_live_state,
-        "archived_generation_path": str(maintenance.archived_generation_path),
-        "investment_authority": False,
-        "execution_authority": False,
-        "paper_only": True,
-        "real_money_authorized": False,
-    }
+        prior = os.environ.get(_PREPARING_ENV)
+        os.environ[_PREPARING_ENV] = "true"
+        try:
+            with _install_global_snapshot_owner(resolved):
+                maintenance = _component_maintenance.maintain_component_qualified_evidence_plane(
+                    values=resolved
+                )
+        finally:
+            if prior is None:
+                os.environ.pop(_PREPARING_ENV, None)
+            else:
+                os.environ[_PREPARING_ENV] = prior
+        generation = maintenance.generation
+
+        stage = "qualified_global_discovery_snapshot"
+        global_snapshot = load_qualified_comprehensive_discovery_snapshot(
+            evidence_as_of=generation.as_of,
+            values=resolved,
+        )
+        stage = "qualified_us_equity_discovery_snapshot"
+        equity_snapshot = load_equity_discovery_snapshot(
+            evidence_as_of=generation.as_of,
+            values=resolved,
+        )
+        stage = "qualified_evidence_universe"
+        scope, evidence_universe, _holding_only = _qualified_evidence_universe(
+            generation,
+            values=resolved,
+            cutoff=generation.as_of,
+        )
+        stage = "qualified_paper_evidence_snapshot"
+        paper_snapshot = load_paper_evidence_snapshot(
+            evidence_as_of=generation.as_of,
+            universe=evidence_universe,
+            values=resolved,
+        )
+        return {
+            "state": "available",
+            "maintenance_state": maintenance.state,
+            "refreshed": maintenance.refreshed,
+            "preparation_passes": maintenance.preparation_passes,
+            "generation_id": generation.generation_id,
+            "as_of": generation.as_of.isoformat(),
+            "completed_at": generation.completed_at.isoformat(),
+            "reference_manifest_id": generation.reference_manifest_id,
+            "global_discovery_snapshot_id": global_snapshot.snapshot_id,
+            "us_equity_discovery_snapshot_id": equity_snapshot.snapshot_id,
+            "paper_evidence_snapshot_id": paper_snapshot.snapshot_id,
+            "state_scope": {
+                "held_symbols": list(scope.held_symbols),
+                "tracked_symbols": list(scope.tracked_symbols),
+                "base_universe_symbols": list(equity_snapshot.excluded_symbols),
+            },
+            "scheduled_lanes": list(generation.scheduled_lanes),
+            "historical_scope_count": generation.historical_scope_count,
+            "historical_coverage_digest": generation.historical_coverage_digest,
+            "public_live_state": generation.public_live_state,
+            "archived_generation_path": str(maintenance.archived_generation_path),
+            "investment_authority": False,
+            "execution_authority": False,
+            "paper_only": True,
+            "real_money_authorized": False,
+        }
+    except Exception as error:
+        _tag_failure_stage(error, stage)
+        raise
 
 
 def run_loop(values: Mapping[str, str] | None = None) -> int:
@@ -325,12 +389,16 @@ def run_loop(values: Mapping[str, str] | None = None) -> int:
         try:
             report = run_once(resolved)
         except Exception as error:
-            heartbeat.write("degraded", detail=str(error)[:1000])
+            error_detail = _credential_safe_error_detail(error, resolved)
+            heartbeat.write("degraded", detail=error_detail[:1000])
             print(
                 json.dumps(
                     {
                         "event": "continuous_evidence_plane_failed",
                         "error_type": type(error).__name__,
+                        "failure_stage": _failure_stage(error),
+                        "error_detail": error_detail,
+                        "credential_safe": True,
                         "paper_only": True,
                         "real_money_authorized": False,
                     },
@@ -384,16 +452,39 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(report, sort_keys=True))
         return 0
     except (OSError, TypeError, ValueError, RuntimeError) as error:
+        error_detail = _credential_safe_error_detail(error, os.environ)
+        failure_stage = _failure_stage(error)
         print(
             json.dumps(
                 {
                     "event": "continuous_evidence_plane_start_failed",
                     "error_type": type(error).__name__,
+                    "failure_stage": failure_stage,
+                    "credential_safe": True,
                     "paper_only": True,
                     "real_money_authorized": False,
                 },
                 sort_keys=True,
             ),
+            flush=True,
+        )
+        # The bounded release qualifier captures only this credential-safe structured
+        # stderr record. Normal stdout remains live in Render, avoiding a multi-minute
+        # logging blind spot while still making the exact child cause durable upstream.
+        print(
+            json.dumps(
+                {
+                    "event": _FAILURE_CONTEXT_EVENT,
+                    "error_type": type(error).__name__,
+                    "failure_stage": failure_stage,
+                    "error_detail": error_detail,
+                    "credential_safe": True,
+                    "paper_only": True,
+                    "real_money_authorized": False,
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
             flush=True,
         )
         return 2
