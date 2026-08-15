@@ -161,6 +161,26 @@ def _advance_screening_if_ready(result: ProductionContextPublicationResult) -> N
     )
 
 
+def _stable_production_snapshot_clock() -> Clock:
+    """Freeze the governed cutoff on first use after current readiness observations.
+
+    The governed publisher reads its clock first after bounded readiness/cash checks and
+    again after evidence loading. A provider-free evidence snapshot must keep those reads
+    on one cutoff so the immutable certification input, screening publication, committee,
+    CIO decision, and construction all share the same point-in-time identity.
+    """
+
+    frozen: datetime | None = None
+
+    def clock() -> datetime:
+        nonlocal frozen
+        if frozen is None:
+            frozen = _utc_now()
+        return frozen
+
+    return clock
+
+
 def prepare_production_context_for_cycle(
     *,
     settings: ApiSettings,
@@ -185,14 +205,19 @@ def prepare_production_context_for_cycle(
 
         equity_discovery_probe = qualified_equity_discovery_probe
 
+    snapshot_probe_active = False
     if evidence_probe is None:
         from operations.qualified_paper_evidence import (
             production_snapshot_probe_enabled,
             qualified_paper_evidence_probe,
         )
 
-        if production_snapshot_probe_enabled():
+        snapshot_probe_active = production_snapshot_probe_enabled()
+        if snapshot_probe_active:
             evidence_probe = qualified_paper_evidence_probe
+
+    if snapshot_probe_active and clock is None:
+        clock = _stable_production_snapshot_clock()
 
     result = prepare_governed_production_context_for_cycle(
         settings=settings,
