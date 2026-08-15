@@ -13,6 +13,7 @@ paper-execution authority, or real-money capability changes.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -30,6 +31,7 @@ from operations.release_evidence_prequalification import (
 
 _ORIGINAL_MANAGED_PROCESSES = render_supervisor.managed_processes
 _PROVIDER_VALIDATION_BACKGROUND_ENABLED = False
+_QUALIFIER_FAILURE_CONTEXT_EVENT = "continuous_evidence_plane_failure_context"
 
 
 def _positive_int(
@@ -83,6 +85,42 @@ def _qualifier_metrics(
     if generation_missing:
         metrics["qualified_generation_missing"] = 1
     return metrics
+
+
+def _qualifier_failure_context(stderr: object) -> dict[str, str] | None:
+    """Extract only the child's explicitly credential-safe structured failure record."""
+
+    if not isinstance(stderr, str) or not stderr.strip():
+        return None
+    for raw_line in reversed(stderr.splitlines()):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        if payload.get("event") != _QUALIFIER_FAILURE_CONTEXT_EVENT:
+            continue
+        if payload.get("credential_safe") is not True:
+            continue
+        if payload.get("paper_only") is not True:
+            continue
+        if payload.get("real_money_authorized") is not False:
+            continue
+        error_type = str(payload.get("error_type") or "").strip()[:120]
+        failure_stage = str(payload.get("failure_stage") or "").strip()[:160]
+        error_detail = str(payload.get("error_detail") or "").strip()[:1600]
+        if not error_type or not error_detail:
+            continue
+        return {
+            "error_type": error_type,
+            "failure_stage": failure_stage or "continuous_evidence_plane",
+            "error_detail": error_detail,
+        }
+    return None
 
 
 def memory_safe_managed_processes(
@@ -242,14 +280,18 @@ def _prequalify_release_evidence(
                 evidence_command,
                 env=dict(diagnostic_values),
                 check=False,
+                stderr=subprocess.PIPE,
+                text=True,
             )
         except OSError as error:
             start_error = error
 
         generation = None
         return_code: int | None = None
+        qualifier_context: dict[str, str] | None = None
         if completed is not None:
             return_code = int(completed.returncode)
+            qualifier_context = _qualifier_failure_context(completed.stderr)
             if return_code == 0:
                 generation = load_latest_evidence_plane(diagnostic_values)
 
@@ -284,6 +326,8 @@ def _prequalify_release_evidence(
             return True
 
         generation_missing = return_code == 0 and generation is None
+        failure_stage: str | None = None
+        failure_error_detail: str | None = None
         if start_error is not None:
             failure_detail = (
                 "evidence qualifier could not start: " + type(start_error).__name__
@@ -304,13 +348,23 @@ def _prequalify_release_evidence(
             )
             error_type = None
         else:
-            failure_detail = f"bounded evidence qualification returned code {return_code}"
             metrics = _qualifier_metrics(
                 attempt=attempt,
                 maximum_attempts=maximum_attempts,
                 return_code=return_code,
             )
-            error_type = None
+            if qualifier_context is None:
+                failure_detail = f"bounded evidence qualification returned code {return_code}"
+                error_type = None
+            else:
+                failure_stage = qualifier_context["failure_stage"]
+                error_type = qualifier_context["error_type"]
+                failure_error_detail = qualifier_context["error_detail"]
+                failure_detail = (
+                    f"bounded evidence qualification returned code {return_code}; "
+                    f"child_stage={failure_stage}; child_error_type={error_type}; "
+                    f"child_detail={failure_error_detail}"
+                )
 
         if attempt < maximum_attempts:
             write_release_evidence_prequalification(
@@ -330,6 +384,8 @@ def _prequalify_release_evidence(
                 "release_evidence_prequalification_retrying",
                 return_code=return_code,
                 error_type=error_type,
+                failure_stage=failure_stage,
+                failure_detail=failure_error_detail,
                 release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
                 prequalification_id=prequalification_id,
                 attempt=attempt,
@@ -356,6 +412,8 @@ def _prequalify_release_evidence(
             "release_evidence_prequalification_failed",
             return_code=return_code,
             error_type=error_type,
+            failure_stage=failure_stage,
+            failure_detail=failure_error_detail,
             release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
             prequalification_id=prequalification_id,
             attempt=attempt,

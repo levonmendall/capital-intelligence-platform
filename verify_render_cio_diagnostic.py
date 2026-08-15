@@ -69,6 +69,23 @@ def _request_is_fresh(
     )
 
 
+def _terminal_prequalification_failure(
+    payload: Mapping[str, Any],
+    *,
+    expected_release: str,
+) -> bool:
+    """Return true when evidence failed before a new CIO request may lawfully exist."""
+
+    return bool(
+        str(payload.get("state") or "") == "failed"
+        and _core._progress_stage(payload) == _PREQUALIFICATION_FAILURE_STAGE
+        and _core.audit_is_current_and_final(
+            payload,
+            expected_release=expected_release,
+        )
+    )
+
+
 def _freshness_detail(
     payload: Mapping[str, Any],
     *,
@@ -127,6 +144,17 @@ def _await_fresh_deployment_request(
 
         last_payload = payload
         _core._write_json(output_path, payload)
+        # Evidence prequalification intentionally happens before a fresh CIO request is
+        # created. If it terminates fail-closed, freshness must not mask that root cause as
+        # a stale request. The verifier reports the current release's terminal evidence
+        # failure immediately and still requires freshness for every actual CIO request.
+        if _terminal_prequalification_failure(
+            payload,
+            expected_release=expected_release,
+        ):
+            raise _core.RenderAuditVerificationError(
+                _core._terminal_failure_detail(payload)
+            )
         if _request_is_fresh(
             payload,
             expected_release=expected_release,
@@ -221,17 +249,39 @@ def _retry_aware_poll_render_audit(
             interval_seconds=interval_seconds,
             boundary=boundary,
         )
-        if (
-            str(prefetched.get("state") or "") == "failed"
-            and _core._progress_stage(prefetched) == _PREQUALIFICATION_FAILURE_STAGE
-            and _core.audit_is_current_and_final(
-                prefetched,
-                expected_release=expected_release,
-            )
+    else:
+        # Scheduled/manual verification has no deployment freshness timestamp. Prefetch one
+        # snapshot so a release-level prequalification failure is still terminal immediately
+        # instead of becoming the baseline failed request that the core later relabels stale.
+        try:
+            candidate = active_fetcher(url)
+        except (
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+            urllib.error.URLError,
+            _core.RenderAuditVerificationError,
         ):
-            raise _core.RenderAuditVerificationError(
-                _core._terminal_failure_detail(prefetched)
-            )
+            candidate = None
+        if candidate is not None:
+            prefetched = candidate
+            freshness_attempts = 1
+            _core._write_json(output_path, candidate)
+            if _terminal_prequalification_failure(
+                candidate,
+                expected_release=expected_release,
+            ):
+                raise _core.RenderAuditVerificationError(
+                    _core._terminal_failure_detail(candidate)
+                )
+
+    if prefetched is not None and _terminal_prequalification_failure(
+        prefetched,
+        expected_release=expected_release,
+    ):
+        raise _core.RenderAuditVerificationError(
+            _core._terminal_failure_detail(prefetched)
+        )
 
     def next_fetch(target: str) -> Mapping[str, Any]:
         nonlocal prefetched
