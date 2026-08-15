@@ -1,15 +1,9 @@
 """Bounded public security-catalog ingestion for global discovery evidence.
 
-Public catalogs can materially widen instrument discovery without becoming
-investment authority.  This module normalizes heterogeneous regulator/exchange
-rows, preserves provider provenance, and can project a *completed* page set into
-the canonical point-in-time security-master contracts.  Coverage is deliberately
-non-authoritative unless a separately governed source definition can satisfy all
-security-master authority requirements.
-
-The collector is page-oriented so very large sources such as FIRDS are never
-materialized synchronously inside a CIO request.  Continuous maintenance owns
-page acquisition and may persist/resume the returned cursor between passes.
+Large regulator and exchange catalogs are acquired only by background evidence
+maintenance.  A bounded page can be projected into the canonical temporal
+security-master contracts, but public discovery catalogs never gain investment
+or screening authority merely because retrieval succeeded.
 """
 
 from __future__ import annotations
@@ -17,7 +11,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Mapping
@@ -32,9 +25,16 @@ from data.security import (
     InstrumentType,
     TradingCalendar,
 )
-from data.security_master import SecurityMasterCatalog, SecurityMasterCoverage
+from data.security_master import (
+    IdentifierAssignment,
+    InstrumentRecord,
+    ListingRecord,
+    ListingStatus,
+    SecurityEntityType,
+    SecurityMasterCatalog,
+    SecurityMasterCoverage,
+)
 from data.security_master_ingestion import SecurityMasterCatalogDelivery
-from data.security import SecurityMasterSnapshot, VenueListing
 
 
 class PublicSecurityCatalogError(RuntimeError):
@@ -63,16 +63,7 @@ def _first(row: Mapping[str, Any], *names: str) -> str:
     return ""
 
 
-def _classify(cfi: str, kind: str = "") -> tuple[AssetClass, InstrumentType]:
-    normalized_kind = kind.casefold()
-    if normalized_kind == "option":
-        return AssetClass.CRYPTO, InstrumentType.OPTION
-    if normalized_kind in {"future", "future_combo"}:
-        return AssetClass.CRYPTO, InstrumentType.FUTURE
-    if normalized_kind == "spot":
-        return AssetClass.CRYPTO, InstrumentType.SPOT
-    if normalized_kind == "perpetual":
-        return AssetClass.CRYPTO, InstrumentType.PERPETUAL
+def _classify(cfi: str) -> tuple[AssetClass, InstrumentType]:
     prefix = cfi[:1].upper()
     if prefix == "E":
         return AssetClass.EQUITY, InstrumentType.COMMON_STOCK
@@ -136,10 +127,16 @@ class NormalizedPublicInstrument:
     settlement_currency: str | None = None
 
     def __post_init__(self) -> None:
-        if not _text(self.provider_instrument_identifier):
-            raise ValueError("provider_instrument_identifier cannot be empty")
-        if not _text(self.name):
-            raise ValueError("name cannot be empty")
+        for name in (
+            "source_identifier",
+            "provider_instrument_identifier",
+            "name",
+            "symbol",
+            "venue",
+            "country_code",
+        ):
+            if not _text(getattr(self, name)):
+                raise ValueError(f"{name} cannot be empty")
         if not isinstance(self.asset_class, AssetClass):
             raise TypeError("asset_class must be AssetClass")
         if not isinstance(self.instrument_type, InstrumentType):
@@ -157,7 +154,7 @@ class PublicCatalogPage:
 
 
 class PublicSecurityCatalogProvider:
-    """Fetch one bounded page from regulator/exchange discovery catalogs."""
+    """Fetch one bounded page from a regulator/exchange discovery catalog."""
 
     def __init__(
         self,
@@ -184,7 +181,12 @@ class PublicSecurityCatalogProvider:
         response = self._http_get(
             self.source.endpoint,
             params=dict(params or {}),
-            headers={"Accept": "application/json,text/csv,text/plain,application/xml"},
+            headers={
+                "Accept": (
+                    "application/json,text/csv,text/plain,application/xml,"
+                    "application/zip,application/octet-stream"
+                )
+            },
             timeout=self.timeout,
         )
         response.raise_for_status()
@@ -198,19 +200,18 @@ class PublicSecurityCatalogProvider:
         next_cursor: str | None,
         complete: bool,
     ) -> PublicCatalogPage:
-        raw = bytes(response.content)
-        deduplicated: dict[tuple[str, str, str], NormalizedPublicInstrument] = {}
+        # Canonical master contracts require one active venue-symbol mapping.  If a
+        # public file contains duplicates, retain the first deterministic row rather
+        # than allowing a low-authority discovery source to create ambiguity.
+        by_venue_symbol: dict[tuple[str, str], NormalizedPublicInstrument] = {}
         for item in records:
-            key = (
-                item.provider_instrument_identifier,
-                item.venue.upper(),
-                item.symbol.upper(),
-            )
-            deduplicated[key] = item
+            key = (item.venue.upper(), item.symbol.upper())
+            by_venue_symbol.setdefault(key, item)
+        raw = bytes(response.content)
         return PublicCatalogPage(
             source_identifier=self.source.identifier,
             retrieved_at=self._clock(),
-            records=tuple(deduplicated.values()),
+            records=tuple(by_venue_symbol.values()),
             next_cursor=next_cursor,
             complete=complete,
             content_hash=hashlib.sha256(raw).hexdigest(),
@@ -218,35 +219,47 @@ class PublicSecurityCatalogProvider:
 
     def _fetch_esma_solr(self, *, cursor: str | None) -> PublicCatalogPage:
         start = int(cursor or "0")
-        params = {
-            "q": "*:*",
-            "rows": self.source.page_size,
-            "start": start,
-            "wt": "json",
-        }
-        response = self._request(params=params)
+        if start < 0:
+            raise PublicSecurityCatalogError("ESMA cursor cannot be negative")
+        response = self._request(
+            params={
+                "q": "*:*",
+                "rows": self.source.page_size,
+                "start": start,
+                "wt": "json",
+            }
+        )
         payload = response.json()
         body = payload.get("response", {}) if isinstance(payload, Mapping) else {}
         docs = body.get("docs", []) if isinstance(body, Mapping) else []
-        num_found = int(body.get("numFound", len(docs))) if isinstance(body, Mapping) else len(docs)
-        records = [self._normalize_generic(row) for row in docs if isinstance(row, Mapping)]
-        records = [item for item in records if item is not None]
+        if not isinstance(docs, list):
+            raise PublicSecurityCatalogError("ESMA response docs are malformed")
+        num_found = int(body.get("numFound", len(docs)))
+        normalized = tuple(
+            item
+            for row in docs
+            if isinstance(row, Mapping)
+            if (item := self._normalize_generic(row)) is not None
+        )
         next_start = start + len(docs)
         complete = not docs or next_start >= num_found
         return self._finish(
             response,
-            records,
+            normalized,
             next_cursor=None if complete else str(next_start),
             complete=complete,
         )
 
     def _fetch_nasdaq_pipe(self, *, cursor: str | None) -> PublicCatalogPage:
         if cursor not in {None, "0"}:
-            raise PublicSecurityCatalogError("nasdaq symbol directories are single-page snapshots")
+            raise PublicSecurityCatalogError(
+                "Nasdaq symbol directories are single-page snapshots"
+            )
         response = self._request()
-        text = response.text.lstrip("\ufeff")
-        reader = csv.DictReader(io.StringIO(text), delimiter="|")
-        rows: list[NormalizedPublicInstrument] = []
+        reader = csv.DictReader(
+            io.StringIO(response.text.lstrip("\ufeff")), delimiter="|"
+        )
+        output: list[NormalizedPublicInstrument] = []
         for raw in reader:
             if not isinstance(raw, Mapping):
                 continue
@@ -263,7 +276,7 @@ class PublicSecurityCatalogProvider:
                 "V": "IEX",
             }.get(exchange.upper(), self.source.venue)
             provider_id = f"{venue}:{symbol}"
-            rows.append(
+            output.append(
                 NormalizedPublicInstrument(
                     source_identifier=f"{self.source.identifier}:{provider_id}",
                     provider_instrument_identifier=provider_id,
@@ -271,54 +284,57 @@ class PublicSecurityCatalogProvider:
                     symbol=symbol,
                     venue=venue,
                     country_code=self.source.country_code,
-                    asset_class=AssetClass.UNKNOWN,
-                    instrument_type=InstrumentType.OTHER,
                 )
             )
-        return self._finish(response, rows, next_cursor=None, complete=True)
+        return self._finish(response, output, next_cursor=None, complete=True)
 
     def _fetch_csv(self, *, cursor: str | None) -> PublicCatalogPage:
         if cursor not in {None, "0"}:
             raise PublicSecurityCatalogError("CSV catalog is a single-page snapshot")
         response = self._request()
         reader = csv.DictReader(io.StringIO(response.text.lstrip("\ufeff")))
-        rows = [self._normalize_generic(raw) for raw in reader if isinstance(raw, Mapping)]
-        return self._finish(
-            response,
-            (item for item in rows if item is not None),
-            next_cursor=None,
-            complete=True,
+        output = tuple(
+            item
+            for raw in reader
+            if isinstance(raw, Mapping)
+            if (item := self._normalize_generic(raw)) is not None
         )
+        return self._finish(response, output, next_cursor=None, complete=True)
 
     def _fetch_deribit_instruments(self, *, cursor: str | None) -> PublicCatalogPage:
-        # Cursor is the currency index.  One currency per pass keeps the public
-        # derivative catalog small and rate-limit friendly.
         currencies = ("BTC", "ETH", "USDC", "USDT")
         index = int(cursor or "0")
         if not 0 <= index < len(currencies):
             raise PublicSecurityCatalogError("invalid Deribit catalog cursor")
-        response = self._request(params={"currency": currencies[index], "expired": "false"})
+        response = self._request(
+            params={"currency": currencies[index], "expired": "false"}
+        )
         payload = response.json()
         rows = payload.get("result", []) if isinstance(payload, Mapping) else []
-        normalized: list[NormalizedPublicInstrument] = []
+        if not isinstance(rows, list):
+            raise PublicSecurityCatalogError("Deribit instrument result is malformed")
+        output: list[NormalizedPublicInstrument] = []
         for raw in rows:
             if not isinstance(raw, Mapping):
                 continue
             name = _text(raw.get("instrument_name"))
             if not name:
                 continue
-            kind = _text(raw.get("kind"))
-            instrument_type = InstrumentType.OTHER
+            kind = _text(raw.get("kind")).casefold()
+            settlement = _text(raw.get("settlement_period")).casefold()
             if kind == "option":
                 instrument_type = InstrumentType.OPTION
             elif kind == "future":
-                settlement = _text(raw.get("settlement_period"))
                 instrument_type = (
-                    InstrumentType.PERPETUAL if settlement == "perpetual" else InstrumentType.FUTURE
+                    InstrumentType.PERPETUAL
+                    if settlement == "perpetual"
+                    else InstrumentType.FUTURE
                 )
             elif kind == "spot":
                 instrument_type = InstrumentType.SPOT
-            normalized.append(
+            else:
+                instrument_type = InstrumentType.OTHER
+            output.append(
                 NormalizedPublicInstrument(
                     source_identifier=f"{self.source.identifier}:{name}",
                     provider_instrument_identifier=name,
@@ -336,7 +352,7 @@ class PublicSecurityCatalogProvider:
         complete = index == len(currencies) - 1
         return self._finish(
             response,
-            normalized,
+            output,
             next_cursor=None if complete else str(index + 1),
             complete=complete,
         )
@@ -345,14 +361,24 @@ class PublicSecurityCatalogProvider:
         self,
         raw: Mapping[str, Any],
     ) -> NormalizedPublicInstrument | None:
+        # Include both human-readable labels and common FIRDS field aliases.  Unknown
+        # columns remain raw-provider concerns and never silently become authority.
         isin = _first(
             raw,
             "isin",
             "instrument identification code",
             "instrument_identification_code",
+            "FinInstrmGnlAttrbts_Id",
             "id",
         )
-        symbol = _first(raw, "symbol", "ticker", "code", "local code")
+        symbol = _first(
+            raw,
+            "symbol",
+            "ticker",
+            "code",
+            "local code",
+            "FinInstrmGnlAttrbts_ShrtNm",
+        )
         name = _first(
             raw,
             "instrument full name",
@@ -360,9 +386,23 @@ class PublicSecurityCatalogProvider:
             "security name",
             "name",
             "issue name",
+            "FinInstrmGnlAttrbts_FullNm",
         )
-        venue = _first(raw, "trading venue", "mic", "venue", "exchange") or self.source.venue
-        cfi = _first(raw, "instrument classification", "cfi", "cfi code")
+        venue = _first(
+            raw,
+            "trading venue",
+            "mic",
+            "venue",
+            "exchange",
+            "TradgVnRltdAttrbts_Id",
+        ) or self.source.venue
+        cfi = _first(
+            raw,
+            "instrument classification",
+            "cfi",
+            "cfi code",
+            "FinInstrmGnlAttrbts_ClssfctnTp",
+        )
         figi = _first(raw, "figi", "composite figi")
         provider_id = isin or figi or (f"{venue}:{symbol}" if symbol else "")
         if not provider_id:
@@ -392,17 +432,31 @@ def security_master_delivery_from_public_records(
     observed_at: datetime,
     retrieved_at: datetime,
     complete_source_snapshot: bool,
+    catalog_fingerprint: str,
 ) -> SecurityMasterCatalogDelivery:
-    """Project public discovery rows into canonical point-in-time master records.
+    """Project one immutable public page into canonical security-master records."""
 
-    The projection is intentionally conservative: public catalogs are stored as
-    discovery/reference evidence and their coverage cannot become authoritative
-    merely because a complete download succeeded.
-    """
+    rows = tuple(records)
+    if not rows:
+        raise PublicSecurityCatalogError("cannot publish an empty public security catalog")
+    fingerprint = _text(catalog_fingerprint)
+    if not fingerprint:
+        raise ValueError("catalog_fingerprint cannot be empty")
 
-    instruments: list[Instrument] = []
-    listings: list[VenueListing] = []
-    for row in records:
+    instrument_records: list[InstrumentRecord] = []
+    identifier_records: list[IdentifierAssignment] = []
+    listing_records: list[ListingRecord] = []
+    seen_venue_symbols: set[tuple[str, str]] = set()
+
+    for position, row in enumerate(rows, start=1):
+        venue_symbol = (row.venue.upper(), row.symbol.upper())
+        if venue_symbol in seen_venue_symbols:
+            continue
+        seen_venue_symbols.add(venue_symbol)
+        canonical_id = (
+            "instrument:public:"
+            + _stable(source.identifier, row.provider_instrument_identifier)[:24]
+        )
         identifiers: list[InstrumentIdentifier] = [
             InstrumentIdentifier(
                 IdentifierScheme.PROVIDER,
@@ -414,63 +468,91 @@ def security_master_delivery_from_public_records(
             identifiers.append(InstrumentIdentifier(IdentifierScheme.ISIN, row.isin))
         if row.figi:
             identifiers.append(InstrumentIdentifier(IdentifierScheme.FIGI, row.figi))
-        if row.symbol:
-            identifiers.append(
-                InstrumentIdentifier(
-                    IdentifierScheme.TICKER,
-                    row.symbol,
-                    provider=source.identifier,
-                )
+        identifiers.append(
+            InstrumentIdentifier(
+                IdentifierScheme.TICKER,
+                row.symbol,
+                provider=source.identifier,
             )
-        canonical_id = f"instrument:public:{_stable(source.identifier, row.provider_instrument_identifier)[:24]}"
-        kwargs: dict[str, object] = {}
+        )
+        instrument_kwargs: dict[str, object] = {}
         if row.instrument_type in {
             InstrumentType.SPOT,
             InstrumentType.FUTURE,
             InstrumentType.PERPETUAL,
         }:
-            kwargs.update(
+            instrument_kwargs.update(
                 base_asset=row.base_asset or row.symbol.split("-")[0],
                 quote_currency=row.quote_currency or "USD",
                 settlement_currency=row.settlement_currency,
             )
-        instruments.append(
-            Instrument(
-                instrument_id=canonical_id,
-                name=row.name,
-                asset_class=row.asset_class,
-                instrument_type=row.instrument_type,
-                identifiers=tuple(identifiers),
-                uses_derivatives=row.instrument_type
-                in {InstrumentType.FUTURE, InstrumentType.PERPETUAL, InstrumentType.OPTION},
-                **kwargs,
+        instrument = Instrument(
+            instrument_id=canonical_id,
+            name=row.name,
+            asset_class=row.asset_class,
+            instrument_type=row.instrument_type,
+            identifiers=tuple(identifiers),
+            uses_derivatives=row.instrument_type
+            in {InstrumentType.FUTURE, InstrumentType.PERPETUAL, InstrumentType.OPTION},
+            **instrument_kwargs,
+        )
+        base_record_id = f"{source.identifier}:{fingerprint}:{position}"
+        instrument_records.append(
+            InstrumentRecord(
+                record_identifier=f"{base_record_id}:instrument",
+                instrument=instrument,
+                effective_from=observed_at,
+                effective_until=None,
+                available_at=retrieved_at,
+                source_identifier=row.source_identifier,
             )
         )
-        listings.append(
-            VenueListing(
-                instrument_id=canonical_id,
-                venue=row.venue or source.venue,
-                symbol=row.symbol or row.provider_instrument_identifier,
+        for id_position, identifier in enumerate(identifiers, start=1):
+            assignment_id = (
+                f"{canonical_id}:{identifier.scheme.value}:{identifier.value}:{id_position}"
+            )
+            identifier_records.append(
+                IdentifierAssignment(
+                    record_identifier=f"{base_record_id}:identifier:{id_position}",
+                    assignment_identifier=assignment_id,
+                    entity_type=SecurityEntityType.INSTRUMENT,
+                    entity_identifier=canonical_id,
+                    identifier=identifier,
+                    effective_from=observed_at,
+                    effective_until=None,
+                    available_at=retrieved_at,
+                    source_identifier=row.source_identifier,
+                )
+            )
+        listing_records.append(
+            ListingRecord(
+                record_identifier=f"{base_record_id}:listing",
+                listing_identifier=f"listing:{canonical_id}:{row.venue}:{row.symbol}",
+                instrument_identifier=canonical_id,
+                venue=row.venue,
+                symbol=row.symbol,
+                country_code=row.country_code,
                 trading_calendar=(
                     TradingCalendar.CONTINUOUS
                     if row.asset_class is AssetClass.CRYPTO
                     else TradingCalendar.EXCHANGE
                 ),
+                status=ListingStatus.ACTIVE,
+                primary=True,
+                effective_from=observed_at,
+                effective_until=None,
+                available_at=retrieved_at,
+                source_identifier=row.source_identifier,
             )
         )
-    if not instruments:
-        raise PublicSecurityCatalogError("cannot publish an empty public security catalog")
-    snapshot = SecurityMasterSnapshot(
-        observed_at=observed_at,
-        retrieved_at=retrieved_at,
-        issuers=(),
-        instruments=tuple(instruments),
-        listings=tuple(listings),
-        source=source.identifier,
-    )
+
+    if not instrument_records:
+        raise PublicSecurityCatalogError(
+            "public catalog contained no unique venue-symbol instruments"
+        )
     coverage = SecurityMasterCoverage(
         source=source.source_name,
-        source_version=f"public-discovery:{retrieved_at.date().isoformat()}",
+        source_version=f"public-discovery:{fingerprint[:24]}",
         licensed=source.licensed_for_internal_analysis,
         complete_universe=bool(complete_source_snapshot),
         point_in_time=source.point_in_time,
@@ -481,17 +563,23 @@ def security_master_delivery_from_public_records(
         provenance_complete=source.provenance_complete,
         service_level_defined=source.service_level_defined,
     )
-    catalog = SecurityMasterCatalog.from_current_snapshot(
-        snapshot,
-        identifier=f"catalog:{source.identifier}:{retrieved_at.date().isoformat()}",
-        version=f"{retrieved_at.isoformat()}",
+    catalog = SecurityMasterCatalog(
+        identifier=f"catalog:{source.identifier}:{fingerprint[:32]}",
+        version=retrieved_at.isoformat(),
+        issuers=(),
+        instruments=tuple(instrument_records),
+        identifiers=tuple(identifier_records),
+        listings=tuple(listing_records),
+        actions=(),
         coverage=coverage,
     )
     return SecurityMasterCatalogDelivery(
         catalog=catalog,
         observed_at=observed_at,
         retrieved_at=retrieved_at,
-        request_identifier=f"public-catalog:{source.identifier}:{_stable(retrieved_at.isoformat())[:16]}",
+        request_identifier=(
+            f"public-catalog:{source.identifier}:{fingerprint[:24]}"
+        ),
     )
 
 
