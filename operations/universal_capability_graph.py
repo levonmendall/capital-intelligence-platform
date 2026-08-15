@@ -103,11 +103,52 @@ _ASSET_FAMILY_BY_CLASS: Mapping[CandidateAssetClass, AssetFamily] = {
     CandidateAssetClass.CRYPTO: AssetFamily.CRYPTO,
 }
 
+_FAMILY_BY_INSTRUMENT_TYPE: Mapping[str, AssetFamily] = {
+    "stock": AssetFamily.EQUITY,
+    "equity": AssetFamily.EQUITY,
+    "common_stock": AssetFamily.EQUITY,
+    "preferred_stock": AssetFamily.EQUITY,
+    "adr": AssetFamily.EQUITY,
+    "reit": AssetFamily.EQUITY,
+    "etf": AssetFamily.FUND,
+    "etn": AssetFamily.FUND,
+    "fund": AssetFamily.FUND,
+    "trust": AssetFamily.FUND,
+    "bond": AssetFamily.FIXED_INCOME,
+    "note": AssetFamily.FIXED_INCOME,
+    "bill": AssetFamily.FIXED_INCOME,
+    "fixed_income": AssetFamily.FIXED_INCOME,
+    "future": AssetFamily.FUTURE,
+    "futures": AssetFamily.FUTURE,
+    "perpetual": AssetFamily.FUTURE,
+    "option": AssetFamily.OPTION,
+    "fx": AssetFamily.FX,
+    "spot_fx": AssetFamily.FX,
+    "currency_pair": AssetFamily.FX,
+    "crypto": AssetFamily.CRYPTO,
+    "spot_crypto": AssetFamily.CRYPTO,
+    "digital_asset": AssetFamily.CRYPTO,
+}
+
 
 def family_for_asset_class(asset_class: CandidateAssetClass) -> AssetFamily | None:
     if not isinstance(asset_class, CandidateAssetClass):
         raise TypeError("asset_class must be CandidateAssetClass")
     return _ASSET_FAMILY_BY_CLASS.get(asset_class)
+
+
+def family_for_instrument(
+    asset_class: CandidateAssetClass, instrument_type: str
+) -> AssetFamily | None:
+    """Resolve lifecycle family using exact structure before broad asset taxonomy."""
+
+    if not isinstance(asset_class, CandidateAssetClass):
+        raise TypeError("asset_class must be CandidateAssetClass")
+    normalized = str(instrument_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    structural = _FAMILY_BY_INSTRUMENT_TYPE.get(normalized)
+    if structural is not None:
+        return structural
+    return family_for_asset_class(asset_class)
 
 
 def required_capabilities(family: AssetFamily) -> frozenset[str]:
@@ -169,10 +210,6 @@ class InstrumentCapabilityEvidence:
             _text(getattr(self, name), name=name)
         if not isinstance(self.asset_class, CandidateAssetClass):
             raise TypeError("asset_class must be CandidateAssetClass")
-        if self.asset_class is CandidateAssetClass.OTHER:
-            # Keep discovery broad while remaining explicit that OTHER cannot be
-            # certified by the universal paper authority.
-            pass
         observed = _aware(self.observed_at, name="observed_at")
         expires = _aware(self.expires_at, name="expires_at")
         if expires <= observed:
@@ -194,7 +231,11 @@ class InstrumentCapabilityEvidence:
                 + ", ".join(missing_proofs)
             )
         object.__setattr__(self, "proof_identifiers", normalized_proofs)
-        sources = tuple(dict.fromkeys(_text(x, name="source_identifier") for x in self.source_identifiers))
+        sources = tuple(
+            dict.fromkeys(
+                _text(x, name="source_identifier") for x in self.source_identifiers
+            )
+        )
         if not sources:
             raise ValueError("source_identifiers requires at least one source")
         object.__setattr__(self, "source_identifiers", sources)
@@ -209,6 +250,10 @@ class InstrumentCapabilityEvidence:
                 raise TypeError(f"{name} must be numeric")
             if float(value) < 0.0:
                 raise ValueError(f"{name} cannot be negative")
+        if self.minimum_average_daily_dollar_volume <= 0.0:
+            raise ValueError("minimum_average_daily_dollar_volume must be positive")
+        if self.leverage_multiplier <= 0.0:
+            raise ValueError("leverage_multiplier must be positive")
         if self.maximum_gross_leverage <= 0.0:
             raise ValueError("maximum_gross_leverage must be positive")
         if self.provider_authority:
@@ -279,9 +324,10 @@ def evaluate_capabilities(
     if not isinstance(evidence, InstrumentCapabilityEvidence):
         raise TypeError("evidence must be InstrumentCapabilityEvidence")
     timestamp = _aware(evaluated_at, name="evaluated_at")
-    family = family_for_asset_class(evidence.asset_class)
+    family = family_for_instrument(evidence.asset_class, evidence.instrument_type)
     blockers: list[str] = []
-    if family is None:
+    if evidence.asset_class is CandidateAssetClass.OTHER or family is None:
+        family = None
         blockers.append("unsupported_asset_family")
         missing: tuple[str, ...] = ()
     else:
@@ -291,7 +337,7 @@ def evaluate_capabilities(
         blockers.append("capability_evidence_stale")
     if evidence.average_daily_dollar_volume < evidence.minimum_average_daily_dollar_volume:
         blockers.append("liquidity_below_certified_floor")
-    if abs(evidence.leverage_multiplier) > evidence.maximum_gross_leverage + 1e-12:
+    if evidence.leverage_multiplier > evidence.maximum_gross_leverage + 1e-12:
         blockers.append("leverage_exceeds_certified_limit")
 
     available = evidence.capabilities
@@ -338,9 +384,21 @@ def investability_coverage(
     evaluations: Iterable[CapabilityEvaluation],
     *,
     paper_certified_identifiers: Iterable[str] = (),
+    cio_eligible_identifiers: Iterable[str] = (),
 ) -> dict[str, Any]:
     values = tuple(evaluations)
-    certified = frozenset(str(value).strip() for value in paper_certified_identifiers if str(value).strip())
+    certified = frozenset(
+        str(value).strip()
+        for value in paper_certified_identifiers
+        if str(value).strip()
+    )
+    cio_eligible = frozenset(
+        str(value).strip()
+        for value in cio_eligible_identifiers
+        if str(value).strip()
+    )
+    if not cio_eligible.issubset(certified):
+        raise ValueError("CIO-eligible instruments must be paper-certified")
     identifiers = [item.instrument_identifier for item in values]
     if len(identifiers) != len(set(identifiers)):
         raise ValueError("investability coverage contains duplicate instruments")
@@ -374,10 +432,15 @@ def investability_coverage(
             "certifiable",
         )
     }
-    stage_totals["paper_certified"] = sum(identifier in certified for identifier in identifiers)
-    # Paper certification permits CIO consideration; it is not a CIO decision.
-    stage_totals["cio_eligible"] = stage_totals["paper_certified"]
-    evaluated_at = max((item.evaluated_at for item in values), default=datetime.now(timezone.utc))
+    stage_totals["paper_certified"] = sum(
+        identifier in certified for identifier in identifiers
+    )
+    stage_totals["cio_eligible"] = sum(
+        identifier in cio_eligible for identifier in identifiers
+    )
+    evaluated_at = max(
+        (item.evaluated_at for item in values), default=datetime.now(timezone.utc)
+    )
     return {
         "schema_version": "global-investability-coverage.v1",
         "evaluated_at": evaluated_at.isoformat(),
@@ -400,6 +463,7 @@ __all__ = [
     "UNIVERSAL_CAPABILITIES",
     "evaluate_capabilities",
     "family_for_asset_class",
+    "family_for_instrument",
     "investability_coverage",
     "required_capabilities",
 ]
