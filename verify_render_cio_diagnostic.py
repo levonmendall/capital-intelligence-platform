@@ -4,6 +4,11 @@ Deployment-triggered verification also enforces a request freshness boundary sup
 ``CIO_DIAGNOSTIC_FRESH_AFTER``. This prevents an old exact-release diagnostic snapshot
 from being adopted after a redeploy of the same commit while preserving scheduled/manual
 verification behavior. All verifier paths remain fail-closed.
+
+The exact-release gate proves the complete analytical path through portfolio construction.
+Paper implementation is a separate terminal operational state: a scheduled or held paper
+transaction cannot invalidate evidence, screening, committee, CIO, or construction that
+already completed under the same immutable certification input.
 """
 
 from __future__ import annotations
@@ -312,17 +317,28 @@ def _verify_end_to_end_all_market_evaluation(
     *,
     expected_release: str,
 ) -> None:
+    """Verify the exact-release analytical path through canonical construction.
+
+    Terminal paper implementation is intentionally reported but not required here. The
+    release gate proves that qualified all-market evidence reached screening, the six-
+    specialist committee, CIO authority, and portfolio construction under one immutable
+    certification input. A pending launch/session boundary therefore cannot manufacture
+    an analytical failure after construction has already completed.
+    """
+
     _original_verify_complete_all_market_evaluation(
         payload,
         expected_release=expected_release,
     )
     failed: list[str] = []
+
+    # Preserve the existing compositional market-lane proof. Certification v2 adds the
+    # downstream deterministic lineage; it does not weaken the lane aggregate contract.
     for name in (
         "all_market_runtime_certified",
         "all_market_certification_integrity_valid",
         "all_market_certification_release_matches",
         "all_market_certification_context_matches",
-        "paper_implementation_complete",
     ):
         if payload.get(name) is not True:
             failed.append(name)
@@ -334,13 +350,54 @@ def _verify_end_to_end_all_market_evaluation(
     ):
         if not str(payload.get(name) or "").strip():
             failed.append(name)
+
+    # Certification v2 is the authoritative release/evidence/decision handoff. Require
+    # every analytical stage through construction and every immutable component identity.
+    for name in (
+        "all_market_certification_v2_available",
+        "all_market_certification_v2_input_integrity_valid",
+        "all_market_certification_v2_state_integrity_valid",
+        "all_market_certification_v2_release_matches",
+        "all_market_evidence_certified",
+        "all_market_screening_certified",
+        "all_market_committee_certified",
+        "all_market_cio_certified",
+        "all_market_construction_certified",
+    ):
+        if payload.get(name) is not True:
+            failed.append(name)
+    for name in (
+        "all_market_certification_v2_id",
+        "all_market_evidence_generation_id",
+        "all_market_point_in_time_snapshot_id",
+        "all_market_global_discovery_snapshot_id",
+        "all_market_us_equity_discovery_snapshot_id",
+        "all_market_paper_evidence_snapshot_id",
+        "all_market_policy_compatibility_hash",
+        "all_market_certification_v2_state",
+    ):
+        if not str(payload.get(name) or "").strip():
+            failed.append(name)
+
+    # Operational certification is a separate truth. If it is complete, the audit must
+    # prove a terminal no-action or paper-implemented branch. If it is pending, the
+    # analytical gate still succeeds only because CONSTRUCTION_COMPLETE was proven above.
+    if payload.get("all_market_operational_certified") is True:
+        if str(payload.get("all_market_certification_v2_state") or "") != "CERTIFIED":
+            failed.append("all_market_operational_state")
+        if not (
+            payload.get("all_market_paper_implementation_certified") is True
+            or payload.get("all_market_no_action_certified") is True
+        ):
+            failed.append("all_market_terminal_outcome")
+
     if str(payload.get("schema_version") or "") != (
         "public-cio-diagnostic-audit.v2-end-to-end"
     ):
         failed.append("end_to_end_audit_schema")
     if failed:
         raise _core.RenderAuditVerificationError(
-            "end-to-end all-market certification failed closed; failed="
+            "end-to-end all-market analytical certification failed closed; failed="
             + ", ".join(failed)
             + f"; detail={str(payload.get('detail') or '')[:1000]}"
         )
