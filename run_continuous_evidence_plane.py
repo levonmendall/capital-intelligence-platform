@@ -7,14 +7,21 @@ import json
 import os
 import signal
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
-from typing import Mapping, Sequence
+from typing import Iterator, Mapping, Sequence
 
-from operations.component_qualified_evidence_maintenance import (
-    maintain_component_qualified_evidence_plane,
-)
+from operations import component_qualified_evidence_maintenance as _component_maintenance
+from operations import continuous_evidence_plane as _plane
+from operations import qualified_evidence_maintenance as _legacy_maintenance
 from operations.composite_readiness import component_heartbeat_path
+from operations.comprehensive_discovery_snapshot import (
+    ComprehensiveDiscoverySnapshotError,
+    load_comprehensive_discovery_snapshot,
+    publish_comprehensive_discovery_snapshot,
+)
+from operations.evidence_state_scope import load_evidence_state_scope
 from operations.heartbeat import WorkerHeartbeatStore
 
 _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
@@ -33,18 +40,136 @@ def _seconds(values: Mapping[str, str], name: str, default: float) -> float:
     return value
 
 
+def _snapshot_matches_current_scope(
+    generation,
+    *,
+    values: Mapping[str, str],
+    cutoff,
+) -> bool:
+    if generation is None:
+        return False
+    try:
+        snapshot = load_comprehensive_discovery_snapshot(
+            evidence_as_of=generation.as_of,
+            values=values,
+        )
+        scope = load_evidence_state_scope(as_of=cutoff, values=values)
+    except (ComprehensiveDiscoverySnapshotError, OSError, TypeError, ValueError):
+        return False
+    return bool(
+        snapshot.held_symbols == scope.held_symbols
+        and snapshot.tracked_symbols == scope.tracked_symbols
+    )
+
+
+@contextmanager
+def _install_global_snapshot_owner(
+    values: Mapping[str, str],
+) -> Iterator[None]:
+    """Make the evidence worker own global discovery snapshot production.
+
+    The hooks extend the existing qualification predicates rather than adding another
+    scheduler or acquisition path. A generation that predates this component, or whose
+    canonical holdings/learning scope changed, is no longer considered current. The
+    existing evidence maintainer then performs its normal bounded refresh, and only that
+    refresh is allowed to execute comprehensive provider discovery.
+    """
+
+    original_discovery = _plane._default_discovery
+    original_legacy_qualified = _legacy_maintenance._generation_qualified
+    original_component_qualified = _component_maintenance._generation_base_qualified
+
+    def owned_discovery(as_of):
+        from operations.comprehensive_market_discovery import discover_comprehensive_markets
+
+        scope = load_evidence_state_scope(as_of=as_of, values=values)
+        result = discover_comprehensive_markets(
+            as_of=as_of,
+            held_symbols=scope.held_symbols,
+            tracked_symbols=scope.tracked_symbols,
+        )
+        publish_comprehensive_discovery_snapshot(
+            result,
+            held_symbols=scope.held_symbols,
+            tracked_symbols=scope.tracked_symbols,
+            values=values,
+        )
+        return result
+
+    def legacy_qualified(
+        generation,
+        *,
+        values,
+        cutoff,
+        reference_manifest_id,
+    ):
+        return bool(
+            original_legacy_qualified(
+                generation,
+                values=values,
+                cutoff=cutoff,
+                reference_manifest_id=reference_manifest_id,
+            )
+            and _snapshot_matches_current_scope(
+                generation,
+                values=values,
+                cutoff=cutoff,
+            )
+        )
+
+    def component_qualified(
+        generation,
+        *,
+        values,
+        cutoff,
+    ):
+        return bool(
+            original_component_qualified(
+                generation,
+                values=values,
+                cutoff=cutoff,
+            )
+            and _snapshot_matches_current_scope(
+                generation,
+                values=values,
+                cutoff=cutoff,
+            )
+        )
+
+    _plane._default_discovery = owned_discovery
+    _legacy_maintenance._generation_qualified = legacy_qualified
+    _component_maintenance._generation_base_qualified = component_qualified
+    try:
+        yield
+    finally:
+        _plane._default_discovery = original_discovery
+        _legacy_maintenance._generation_qualified = original_legacy_qualified
+        _component_maintenance._generation_base_qualified = original_component_qualified
+
+
 def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
     resolved = dict(os.environ if values is None else values)
     prior = os.environ.get(_PREPARING_ENV)
     os.environ[_PREPARING_ENV] = "true"
     try:
-        maintenance = maintain_component_qualified_evidence_plane(values=resolved)
+        with _install_global_snapshot_owner(resolved):
+            maintenance = (
+                _component_maintenance.maintain_component_qualified_evidence_plane(
+                    values=resolved
+                )
+            )
     finally:
         if prior is None:
             os.environ.pop(_PREPARING_ENV, None)
         else:
             os.environ[_PREPARING_ENV] = prior
     generation = maintenance.generation
+    # Qualification is incomplete if the generation cannot be paired with the exact
+    # release-independent comprehensive snapshot it claims to have prepared.
+    global_snapshot = load_comprehensive_discovery_snapshot(
+        evidence_as_of=generation.as_of,
+        values=resolved,
+    )
     return {
         "state": "available",
         "maintenance_state": maintenance.state,
@@ -54,6 +179,11 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
         "as_of": generation.as_of.isoformat(),
         "completed_at": generation.completed_at.isoformat(),
         "reference_manifest_id": generation.reference_manifest_id,
+        "global_discovery_snapshot_id": global_snapshot.snapshot_id,
+        "state_scope": {
+            "held_symbols": list(global_snapshot.held_symbols),
+            "tracked_symbols": list(global_snapshot.tracked_symbols),
+        },
         "scheduled_lanes": list(generation.scheduled_lanes),
         "historical_scope_count": generation.historical_scope_count,
         "historical_coverage_digest": generation.historical_coverage_digest,
@@ -112,6 +242,8 @@ def run_loop(values: Mapping[str, str] | None = None) -> int:
                 detail=(
                     "continuous evidence plane qualified generation="
                     + str(report["generation_id"])
+                    + " global_snapshot="
+                    + str(report["global_discovery_snapshot_id"])
                     + " maintenance_state="
                     + str(report["maintenance_state"])
                 )[:1000],
