@@ -25,6 +25,8 @@ def _request() -> SimpleNamespace:
 
 def _in_progress_payload() -> dict[str, object]:
     return {
+        "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
+        "credential_safe": True,
         "ready": False,
         "state": "in_progress",
         "detail": "governed_progress=public_information_collection",
@@ -74,7 +76,7 @@ def test_readiness_endpoint_remains_fail_closed_but_telemetry_transport_stays_li
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert readiness_payload == payload
-    assert telemetry_payload == {**payload, "credential_safe": True}
+    assert telemetry_payload == payload
 
     snapshot = telemetry.build_snapshot(
         telemetry_payload,
