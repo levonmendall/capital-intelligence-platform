@@ -8,6 +8,11 @@ module.
 The snapshot is deliberately release-independent. Application release identity is bound
 later by the certification-input record, so a compatible new release can consume the same
 qualified market snapshot without recollecting the world.
+
+Held and unresolved-learning symbols are part of the snapshot identity because canonical
+comprehensive discovery deliberately gives those symbols continuity treatment. A consumer
+must present exactly the same state scope. Runtime overlap exclusions are then applied as
+a deterministic local view; they never require provider acquisition.
 """
 
 from __future__ import annotations
@@ -17,9 +22,10 @@ import json
 import math
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from cio import CandidateAssetClass
 from operations import comprehensive_market_discovery_legacy as _legacy
@@ -33,10 +39,31 @@ class ComprehensiveDiscoverySnapshotError(RuntimeError):
     """Raised when a qualified global discovery snapshot cannot be trusted."""
 
 
+@dataclass(frozen=True, slots=True)
+class ComprehensiveDiscoverySnapshot:
+    snapshot_id: str
+    evidence_as_of: datetime
+    held_symbols: tuple[str, ...]
+    tracked_symbols: tuple[str, ...]
+    result: _legacy.ComprehensiveMarketDiscoveryResult
+
+
 def _aware(value: datetime, *, field_name: str) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
     return value.astimezone(timezone.utc)
+
+
+def _symbols(values: Sequence[str]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                str(item).strip().upper()
+                for item in values
+                if str(item).strip()
+            }
+        )
+    )
 
 
 def _canonical(value: object) -> bytes:
@@ -62,7 +89,11 @@ def _root(values: Mapping[str, str]) -> Path:
 
 
 def _stamp(value: datetime) -> str:
-    return re.sub(r"[^0-9A-Za-z]+", "-", _aware(value, field_name="as_of").isoformat()).strip("-")
+    return re.sub(
+        r"[^0-9A-Za-z]+",
+        "-",
+        _aware(value, field_name="as_of").isoformat(),
+    ).strip("-")
 
 
 def _immutable_json(path: Path, payload: Mapping[str, object]) -> None:
@@ -186,6 +217,8 @@ def _lane_payload(lane: object) -> dict[str, object]:
 def publish_comprehensive_discovery_snapshot(
     result: object,
     *,
+    held_symbols: Sequence[str] = (),
+    tracked_symbols: Sequence[str] = (),
     values: Mapping[str, str] | None = None,
 ) -> str:
     """Publish one release-independent global discovery result immutably."""
@@ -193,12 +226,18 @@ def publish_comprehensive_discovery_snapshot(
     resolved = dict(os.environ if values is None else values)
     as_of = _aware(getattr(result, "as_of"), field_name="discovery_as_of")
     lanes = tuple(getattr(result, "lanes"))
+    held = _symbols(held_symbols)
+    tracked = _symbols(tracked_symbols)
     body: dict[str, object] = {
         "schema_version": _SCHEMA,
         "as_of": as_of.isoformat(),
         "identifier": str(getattr(result, "identifier")),
         "policy_version": str(getattr(result, "policy_version")),
         "manifest_fingerprint": str(getattr(result, "manifest_fingerprint")),
+        "state_scope": {
+            "held_symbols": list(held),
+            "tracked_symbols": list(tracked),
+        },
         "scheduled_lanes": [
             lane.asset_class.value for lane in lanes if bool(lane.scheduled)
         ],
@@ -224,6 +263,7 @@ def publish_comprehensive_discovery_snapshot(
         "snapshot_id": snapshot_id,
         "as_of": as_of.isoformat(),
         "manifest_fingerprint": body["manifest_fingerprint"],
+        "state_scope_sha256": _digest(body["state_scope"]),
         "snapshot_path": str(snapshot_path),
         "paper_only": True,
         "real_money_authorized": False,
@@ -329,17 +369,25 @@ def _restore_catalog(payload: Mapping[str, object]) -> _legacy.DiscoveryCatalogR
             quote_spread_bps=_finite_number(payload, "quote_spread_bps"),
             expiration_at=_parse_optional_time(payload.get("expiration_at")),
             underlying_symbol=(
-                None if payload.get("underlying_symbol") in (None, "") else str(payload["underlying_symbol"])
+                None
+                if payload.get("underlying_symbol") in (None, "")
+                else str(payload["underlying_symbol"])
             ),
             strike=strike,
             option_right=(
-                None if payload.get("option_right") in (None, "") else str(payload["option_right"])
+                None
+                if payload.get("option_right") in (None, "")
+                else str(payload["option_right"])
             ),
             provider_dataset=(
-                None if payload.get("provider_dataset") in (None, "") else str(payload["provider_dataset"])
+                None
+                if payload.get("provider_dataset") in (None, "")
+                else str(payload["provider_dataset"])
             ),
             provider_stype_in=(
-                None if payload.get("provider_stype_in") in (None, "") else str(payload["provider_stype_in"])
+                None
+                if payload.get("provider_stype_in") in (None, "")
+                else str(payload["provider_stype_in"])
             ),
             provider_instrument_id=provider_instrument_id,
         )
@@ -381,12 +429,22 @@ def _restore_lane(payload: Mapping[str, object]) -> _legacy.DiscoveryLaneResult:
     raw_selected = payload.get("selected")
     raw_exclusions = payload.get("exclusions")
     raw_sources = payload.get("source_identifiers")
-    if not isinstance(raw_selected, list) or not isinstance(raw_exclusions, list) or not isinstance(raw_sources, list):
+    if (
+        not isinstance(raw_selected, list)
+        or not isinstance(raw_exclusions, list)
+        or not isinstance(raw_sources, list)
+    ):
         raise ComprehensiveDiscoverySnapshotError("snapshot lane collections are invalid")
     selected = []
     for item in raw_selected:
-        if not isinstance(item, Mapping) or not isinstance(item.get("catalog"), Mapping) or not isinstance(item.get("features"), Mapping):
-            raise ComprehensiveDiscoverySnapshotError("snapshot selected instrument is invalid")
+        if (
+            not isinstance(item, Mapping)
+            or not isinstance(item.get("catalog"), Mapping)
+            or not isinstance(item.get("features"), Mapping)
+        ):
+            raise ComprehensiveDiscoverySnapshotError(
+                "snapshot selected instrument is invalid"
+            )
         selected.append(
             _legacy.DiscoveredMarketInstrument(
                 catalog=_restore_catalog(item["catalog"]),
@@ -409,7 +467,9 @@ def _restore_lane(payload: Mapping[str, object]) -> _legacy.DiscoveryLaneResult:
             source_identifiers=tuple(str(item) for item in raw_sources),
             scheduled=bool(payload.get("scheduled", True)),
             schedule_reason=(
-                None if payload.get("schedule_reason") in (None, "") else str(payload["schedule_reason"])
+                None
+                if payload.get("schedule_reason") in (None, "")
+                else str(payload["schedule_reason"])
             ),
         )
     except (KeyError, TypeError, ValueError) as error:
@@ -420,7 +480,7 @@ def load_comprehensive_discovery_snapshot(
     *,
     evidence_as_of: datetime,
     values: Mapping[str, str] | None = None,
-) -> tuple[str, _legacy.ComprehensiveMarketDiscoveryResult]:
+) -> ComprehensiveDiscoverySnapshot:
     """Load the exact evidence-cutoff global snapshot without any provider fallback."""
 
     resolved = dict(os.environ if values is None else values)
@@ -448,6 +508,19 @@ def load_comprehensive_discovery_snapshot(
         raise ComprehensiveDiscoverySnapshotError(
             "comprehensive discovery snapshot evidence cutoff changed"
         )
+    state_scope = payload.get("state_scope")
+    if not isinstance(state_scope, Mapping):
+        raise ComprehensiveDiscoverySnapshotError("snapshot state scope is invalid")
+    held_raw = state_scope.get("held_symbols")
+    tracked_raw = state_scope.get("tracked_symbols")
+    if not isinstance(held_raw, list) or not isinstance(tracked_raw, list):
+        raise ComprehensiveDiscoverySnapshotError("snapshot state scope is malformed")
+    held = _symbols(tuple(str(item) for item in held_raw))
+    tracked = _symbols(tuple(str(item) for item in tracked_raw))
+    if list(held) != held_raw or list(tracked) != tracked_raw:
+        raise ComprehensiveDiscoverySnapshotError(
+            "snapshot state scope is not canonical"
+        )
     raw_lanes = payload.get("lanes")
     if not isinstance(raw_lanes, list):
         raise ComprehensiveDiscoverySnapshotError("snapshot lanes are invalid")
@@ -469,11 +542,76 @@ def load_comprehensive_discovery_snapshot(
         raise ComprehensiveDiscoverySnapshotError(
             "snapshot discovery identity is incomplete"
         )
-    return snapshot_id, result
+    return ComprehensiveDiscoverySnapshot(
+        snapshot_id=snapshot_id,
+        evidence_as_of=expected_as_of,
+        held_symbols=held,
+        tracked_symbols=tracked,
+        result=result,
+    )
+
+
+def view_comprehensive_discovery_snapshot(
+    snapshot: ComprehensiveDiscoverySnapshot,
+    *,
+    held_symbols: Sequence[str],
+    tracked_symbols: Sequence[str],
+    excluded_symbols: Sequence[str],
+) -> _legacy.ComprehensiveMarketDiscoveryResult:
+    """Return a provider-free CIO view after proving continuity scope compatibility."""
+
+    held = _symbols(held_symbols)
+    tracked = _symbols(tracked_symbols)
+    if held != snapshot.held_symbols or tracked != snapshot.tracked_symbols:
+        raise ComprehensiveDiscoverySnapshotError(
+            "comprehensive discovery snapshot state scope does not match current portfolio/learning state"
+        )
+    excluded = frozenset(_symbols(excluded_symbols))
+    if not excluded:
+        return snapshot.result
+
+    lanes: list[_legacy.DiscoveryLaneResult] = []
+    for lane in snapshot.result.lanes:
+        removed = tuple(
+            item for item in lane.selected if item.catalog.symbol in excluded
+        )
+        selected = tuple(
+            item for item in lane.selected if item.catalog.symbol not in excluded
+        )
+        exclusions = tuple(
+            (*lane.exclusions, *((item.catalog.symbol, "explicit_discovery_exclusion") for item in removed))
+        )
+        lanes.append(
+            _legacy.DiscoveryLaneResult(
+                asset_class=lane.asset_class,
+                catalog_count=lane.catalog_count,
+                deep_analyzed_count=lane.deep_analyzed_count,
+                selected=selected,
+                exclusions=exclusions,
+                source_identifiers=lane.source_identifiers,
+                scheduled=lane.scheduled,
+                schedule_reason=lane.schedule_reason,
+            )
+        )
+    view_material = {
+        "source_snapshot_id": snapshot.snapshot_id,
+        "source_manifest_fingerprint": snapshot.result.manifest_fingerprint,
+        "excluded_symbols": sorted(excluded),
+    }
+    view_id = _digest(view_material)
+    return _legacy.ComprehensiveMarketDiscoveryResult(
+        identifier=f"{snapshot.result.identifier}:consumer-view:{view_id[:16]}",
+        as_of=snapshot.result.as_of,
+        policy_version=snapshot.result.policy_version,
+        lanes=tuple(lanes),
+        manifest_fingerprint=view_id,
+    )
 
 
 __all__ = [
+    "ComprehensiveDiscoverySnapshot",
     "ComprehensiveDiscoverySnapshotError",
     "load_comprehensive_discovery_snapshot",
     "publish_comprehensive_discovery_snapshot",
+    "view_comprehensive_discovery_snapshot",
 ]
