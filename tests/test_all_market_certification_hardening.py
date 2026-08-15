@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import publish_cio_diagnostic_audit as audit_publisher
+import api.routes.cio_diagnostic as cio_audit
 import run_manual_cio_diagnostic as manual_runner
 from operations import manual_cio_diagnostic as coordination
 from operations.all_market_certification_audit import public_all_market_certification
@@ -153,39 +153,50 @@ def test_public_all_market_certificate_requires_exact_hash_and_release(
     assert tampered["all_market_certification_integrity_valid"] is False
 
 
-def test_certificate_context_binding_uses_discovery_identity_not_later_clock() -> None:
-    payload = {"context_cycle_matches": True}
+def test_certificate_context_binding_uses_evidence_epoch_not_later_cio_clock(
+    monkeypatch,
+) -> None:
+    evidence_as_of = datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc)
+    decision_as_of = datetime(2026, 8, 14, 20, 3, tzinfo=timezone.utc)
     certification = {
-        "all_market_certification_epoch": "2026-08-14T20:00:00+00:00",
-        "all_market_certification_discovery_manifest_fingerprint": "discovery-abc",
+        "all_market_certification_epoch": evidence_as_of.isoformat(),
+        "certification_v2_cutoff": decision_as_of.isoformat(),
     }
-    context = {
-        "decision_as_of": "2026-08-14T20:03:00+00:00",
-        "comprehensive_discovery_manifest_fingerprint": "discovery-abc",
-    }
-    assert audit_publisher._certificate_matches_current_context(
-        payload=payload,
-        certification=certification,
-        context=context,
+    monkeypatch.setattr(
+        cio_audit,
+        "_v2_evidence_as_of",
+        lambda _certification, *, values: evidence_as_of,
     )
+
+    legacy_matches, v2_matches = cio_audit._certification_context_matches(
+        certification,
+        values={},
+        context_decision_as_of=decision_as_of,
+    )
+    assert legacy_matches is True
+    assert v2_matches is True
 
     future_certificate = dict(certification)
-    future_certificate["all_market_certification_epoch"] = "2026-08-14T20:04:00+00:00"
-    assert not audit_publisher._certificate_matches_current_context(
-        payload=payload,
-        certification=future_certificate,
-        context=context,
+    future_certificate["all_market_certification_epoch"] = (
+        "2026-08-14T20:04:00+00:00"
     )
+    legacy_matches, v2_matches = cio_audit._certification_context_matches(
+        future_certificate,
+        values={},
+        context_decision_as_of=decision_as_of,
+    )
+    assert legacy_matches is False
+    assert v2_matches is True
 
-    wrong_discovery = dict(certification)
-    wrong_discovery["all_market_certification_discovery_manifest_fingerprint"] = (
-        "discovery-other"
+    wrong_cutoff = dict(certification)
+    wrong_cutoff["certification_v2_cutoff"] = "2026-08-14T20:04:00+00:00"
+    legacy_matches, v2_matches = cio_audit._certification_context_matches(
+        wrong_cutoff,
+        values={},
+        context_decision_as_of=decision_as_of,
     )
-    assert not audit_publisher._certificate_matches_current_context(
-        payload=payload,
-        certification=wrong_discovery,
-        context=context,
-    )
+    assert legacy_matches is True
+    assert v2_matches is False
 
 
 def _successful_public_audit() -> dict[str, object]:
@@ -216,24 +227,49 @@ def _successful_public_audit() -> dict[str, object]:
         "all_market_certification_release_matches": True,
         "all_market_certification_context_matches": True,
         "all_market_certification_id": "cert-1",
-        "all_market_certification_epoch": "2026-08-14T20:00:00+00:00",
+        "all_market_certification_epoch": "2026-08-14T19:55:00+00:00",
         "all_market_certification_aggregate_sha256": "a" * 64,
         "all_market_certification_discovery_manifest_fingerprint": "discovery-manifest-abc",
-        "paper_implementation_complete": True,
+        "all_market_certification_v2_available": True,
+        "all_market_certification_v2_input_integrity_valid": True,
+        "all_market_certification_v2_state_integrity_valid": True,
+        "all_market_certification_v2_release_matches": True,
+        "all_market_certification_v2_context_matches": True,
+        "all_market_certification_v2_id": "cert-v2-1",
+        "all_market_evidence_generation_id": "generation-1",
+        "all_market_point_in_time_snapshot_id": "pit-1",
+        "all_market_global_discovery_snapshot_id": "global-1",
+        "all_market_us_equity_discovery_snapshot_id": "equity-1",
+        "all_market_paper_evidence_snapshot_id": "paper-1",
+        "all_market_policy_compatibility_hash": "b" * 64,
+        "all_market_certification_v2_state": "CONSTRUCTION_COMPLETE",
+        "all_market_evidence_certified": True,
+        "all_market_screening_certified": True,
+        "all_market_committee_certified": True,
+        "all_market_cio_certified": True,
+        "all_market_construction_certified": True,
+        "all_market_paper_implementation_certified": False,
+        "all_market_no_action_certified": False,
+        "all_market_operational_certified": False,
+        "paper_implementation_complete": False,
         "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
     }
 
 
-def test_verifier_requires_end_to_end_proof() -> None:
+def test_verifier_requires_analytical_end_to_end_proof() -> None:
     import verify_render_cio_diagnostic as verifier
 
+    # A complete analytical path through construction is valid even while paper
+    # implementation is independently pending.
     verifier.verify_complete_all_market_evaluation(
         _successful_public_audit(),
         expected_release="release-1",
     )
 
     incomplete = _successful_public_audit()
-    incomplete["paper_implementation_complete"] = False
+    incomplete["all_market_cio_certified"] = False
+    incomplete["all_market_construction_certified"] = False
+    incomplete["all_market_certification_v2_state"] = "COMMITTEE_COMPLETE"
     with pytest.raises(verifier.RenderAuditVerificationError):
         verifier.verify_complete_all_market_evaluation(
             incomplete,
