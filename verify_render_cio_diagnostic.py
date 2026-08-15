@@ -181,8 +181,6 @@ def _replacement_wait_detail(
     primary_failure_detail: str,
     secondary_detail: str,
 ) -> str:
-    """Keep the exact terminal CIO failure primary when its replacement never appears."""
-
     return (
         f"{primary_failure_detail}; "
         "secondary_context=replacement_attempt_not_observed; "
@@ -218,6 +216,17 @@ def _retry_aware_poll_render_audit(
             interval_seconds=interval_seconds,
             boundary=boundary,
         )
+        if (
+            str(prefetched.get("state") or "") == "failed"
+            and _core._progress_stage(prefetched) == _PREQUALIFICATION_FAILURE_STAGE
+            and _core.audit_is_current_and_final(
+                prefetched,
+                expected_release=expected_release,
+            )
+        ):
+            raise _core.RenderAuditVerificationError(
+                _core._terminal_failure_detail(prefetched)
+            )
 
     def next_fetch(target: str) -> Mapping[str, Any]:
         nonlocal prefetched
@@ -270,13 +279,8 @@ def _retry_aware_poll_render_audit(
                         _replacement_wait_detail(primary_failure_detail, detail)
                     ) from error
                 raise
-
-            # Evidence qualification precedes creation of a CIO request. A failure here
-            # has no server-side CIO replacement attempt to await, so preserve the exact
-            # component/prequalification failure as the terminal certification evidence.
             if f"stage={_PREQUALIFICATION_FAILURE_STAGE}" in detail:
                 raise
-
             if primary_failure_detail is None:
                 primary_failure_detail = detail
             adopted_failures += 1
@@ -308,8 +312,6 @@ def _verify_end_to_end_all_market_evaluation(
     *,
     expected_release: str,
 ) -> None:
-    """Require one exact-release, exact-context proof through paper implementation."""
-
     _original_verify_complete_all_market_evaluation(
         payload,
         expected_release=expected_release,
