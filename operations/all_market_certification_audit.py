@@ -1,9 +1,10 @@
-"""Credential-safe reader for the immutable compositional all-market certificate.
+"""Credential-safe reader for all-market certification evidence and runtime state.
 
-The discovery engine publishes release/epoch-bound lane artifacts and an integrity-bound
-aggregate under the governed data directory. This module exposes only the minimum safe
-proof needed by release verification; it has no investment, construction, execution, or
-real-money authority.
+The legacy compositional certificate remains exposed for backward-compatible evidence
+verification. Certification v2 adds the immutable release/evidence/policy handoff and a
+durable end-to-end operational state machine. This audit surface is strictly read-only:
+it never advances certification, reruns evidence, or exercises investment/execution
+authority.
 """
 
 from __future__ import annotations
@@ -12,6 +13,13 @@ import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path
+
+from operations.certification_runtime_state import (
+    CertificationRuntimeStateError,
+    certification_runtime_enabled,
+    resolve_latest_certification,
+)
+from operations.certification_state_machine import CertificationState
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -48,12 +56,74 @@ def _digest(payload: Mapping[str, object]) -> str:
     ).hexdigest()
 
 
+def _runtime_v2_audit(values: Mapping[str, str]) -> dict[str, object]:
+    enabled = certification_runtime_enabled(values)
+    unavailable = {
+        "all_market_operational_certified": False,
+        "certification_v2_enabled": enabled,
+        "certification_v2_id": None,
+        "certification_v2_state": None,
+        "certification_v2_cutoff": None,
+        "certification_v2_evidence_generation_id": None,
+        "certification_v2_snapshot_id": None,
+        "certification_v2_global_discovery_snapshot_id": None,
+        "certification_v2_us_equity_discovery_snapshot_id": None,
+        "certification_v2_paper_evidence_snapshot_id": None,
+        "certification_v2_policy_compatibility_hash": None,
+        "certification_v2_blocker": (
+            None if enabled else "certification_v2_disabled"
+        ),
+    }
+    if not enabled:
+        return unavailable
+    try:
+        binding = resolve_latest_certification(values=values)
+    except CertificationRuntimeStateError as error:
+        return {
+            **unavailable,
+            "certification_v2_blocker": f"runtime_state_unavailable:{error}",
+        }
+    if binding is None:
+        return {
+            **unavailable,
+            "certification_v2_blocker": "runtime_state_unavailable",
+        }
+    operational = binding.current_state is CertificationState.CERTIFIED
+    return {
+        "all_market_operational_certified": operational,
+        "certification_v2_enabled": True,
+        "certification_v2_id": binding.certification_id,
+        "certification_v2_state": binding.current_state.value,
+        "certification_v2_cutoff": binding.cutoff.isoformat(),
+        "certification_v2_evidence_generation_id": binding.evidence_generation_id,
+        "certification_v2_snapshot_id": binding.snapshot_id,
+        "certification_v2_global_discovery_snapshot_id": (
+            binding.global_discovery_snapshot_id or None
+        ),
+        "certification_v2_us_equity_discovery_snapshot_id": (
+            binding.us_equity_discovery_snapshot_id or None
+        ),
+        "certification_v2_paper_evidence_snapshot_id": (
+            binding.paper_evidence_snapshot_id or None
+        ),
+        "certification_v2_policy_compatibility_hash": (
+            binding.policy_compatibility_hash or None
+        ),
+        "certification_v2_blocker": (
+            None
+            if operational
+            else f"state:{binding.current_state.value}"
+        ),
+    }
+
+
 def public_all_market_certification(
     values: Mapping[str, str],
 ) -> dict[str, object]:
-    """Return a redacted integrity check for the current release's lane aggregate."""
+    """Return redacted evidence integrity plus durable operational certification state."""
 
     release = _release(values)
+    v2 = _runtime_v2_audit(values)
     unavailable = {
         "all_market_runtime_certified": False,
         "all_market_certification_integrity_valid": False,
@@ -62,6 +132,7 @@ def public_all_market_certification(
         "all_market_certification_epoch": None,
         "all_market_certification_aggregate_sha256": None,
         "all_market_certification_discovery_manifest_fingerprint": None,
+        **v2,
     }
     latest = _load_object(_root(values) / "latest.json")
     if latest is None:
@@ -124,6 +195,7 @@ def public_all_market_certification(
         "all_market_certification_discovery_manifest_fingerprint": (
             discovery_fingerprint or None
         ),
+        **v2,
     }
 
 
