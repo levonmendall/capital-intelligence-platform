@@ -180,10 +180,11 @@ def test_production_discovery_barrier_is_provider_free_and_publishes_input_id(
         observed["freeze"] = kwargs
         return record
 
-    monkeypatch.setattr(discovery, "ensure_point_in_time_snapshot", ensure)
-    monkeypatch.setattr(discovery, "freeze_certification_input", freeze)
-
-    result = discovery._point_in_time_snapshot_barrier(cutoff)
+    result = discovery._point_in_time_snapshot_barrier(
+        cutoff,
+        snapshot_loader=ensure,
+        input_freezer=freeze,
+    )
 
     assert result is snapshot
     assert observed["ensure"]["allow_refresh"] is False
