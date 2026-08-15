@@ -45,6 +45,8 @@ _RECOVERY_PROGRESS_METRICS = frozenset(
         "recovered_exchanges",
     }
 )
+_PROVIDER_FREE_CONSUMER_ENV = "CAPITAL_INTELLIGENCE_CIO_PROVIDER_FREE_CONSUMER"
+_PUBLIC_COLLECTION_ENABLED_ENV = "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED"
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -87,6 +89,23 @@ def _production_plane_enabled(values: Mapping[str, str]) -> bool:
     return (bool(explicit) or production) and evidence_plane_enabled(values)
 
 
+def _configure_provider_free_consumer(values: MutableMapping[str, str]) -> bool:
+    """Keep the production CIO child from initiating public/provider acquisition.
+
+    Release evidence qualification happens in a separate bounded evidence-owner process
+    before this watchdog is invoked.  The historical manual diagnostic still contains a
+    forced public-collection call; disabling collection in the child environment makes
+    that call a local no-op rather than an external provider transaction.  The evidence
+    owner does not inherit this child-only environment mutation.
+    """
+
+    if not _production_plane_enabled(values):
+        return False
+    values[_PROVIDER_FREE_CONSUMER_ENV] = "true"
+    values[_PUBLIC_COLLECTION_ENABLED_ENV] = "false"
+    return True
+
+
 def _prepare_with_rate_budget(
     values: Mapping[str, str],
     **kwargs: object,
@@ -120,6 +139,7 @@ _core._prime_forced_replacement = _prime_forced_replacement
 
 
 if __name__ == "__main__":
+    _configure_provider_free_consumer(os.environ)
     if "--force" in sys.argv[1:]:
         _prime_forced_replacement(os.environ)
     raise SystemExit(_core.main())
