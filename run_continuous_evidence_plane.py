@@ -20,6 +20,15 @@ from operations.comprehensive_discovery_snapshot import (
     publish_comprehensive_discovery_snapshot,
 )
 from operations.evidence_state_scope import load_evidence_state_scope
+from operations.equity_discovery_snapshot import (
+    EquityDiscoverySnapshotError,
+    load_equity_discovery_snapshot,
+    publish_equity_discovery_snapshot,
+)
+from operations.free_paper_pilot import (
+    DEFAULT_UNIVERSE_PATH,
+    load_free_paper_pilot_universe,
+)
 from operations.heartbeat import WorkerHeartbeatStore
 from operations.qualified_comprehensive_discovery_snapshot import (
     ComprehensiveDiscoverySnapshotError,
@@ -42,7 +51,12 @@ def _seconds(values: Mapping[str, str], name: str, default: float) -> float:
     return value
 
 
-def _snapshot_matches_current_scope(
+def _base_universe_symbols() -> tuple[str, ...]:
+    universe = load_free_paper_pilot_universe(DEFAULT_UNIVERSE_PATH)
+    return tuple(sorted(universe.symbol_map))
+
+
+def _snapshots_match_current_scope(
     generation,
     *,
     values: Mapping[str, str],
@@ -51,16 +65,30 @@ def _snapshot_matches_current_scope(
     if generation is None:
         return False
     try:
-        snapshot = load_qualified_comprehensive_discovery_snapshot(
+        global_snapshot = load_qualified_comprehensive_discovery_snapshot(
+            evidence_as_of=generation.as_of,
+            values=values,
+        )
+        equity_snapshot = load_equity_discovery_snapshot(
             evidence_as_of=generation.as_of,
             values=values,
         )
         scope = load_evidence_state_scope(as_of=cutoff, values=values)
-    except (ComprehensiveDiscoverySnapshotError, OSError, TypeError, ValueError):
+        base_symbols = _base_universe_symbols()
+    except (
+        ComprehensiveDiscoverySnapshotError,
+        EquityDiscoverySnapshotError,
+        OSError,
+        TypeError,
+        ValueError,
+    ):
         return False
     return bool(
-        snapshot.held_symbols == scope.held_symbols
-        and snapshot.tracked_symbols == scope.tracked_symbols
+        global_snapshot.held_symbols == scope.held_symbols
+        and global_snapshot.tracked_symbols == scope.tracked_symbols
+        and equity_snapshot.held_symbols == scope.held_symbols
+        and equity_snapshot.tracked_symbols == scope.tracked_symbols
+        and equity_snapshot.excluded_symbols == base_symbols
     )
 
 
@@ -68,13 +96,13 @@ def _snapshot_matches_current_scope(
 def _install_global_snapshot_owner(
     values: Mapping[str, str],
 ) -> Iterator[None]:
-    """Make the evidence worker own global discovery snapshot production.
+    """Make the evidence worker the sole broad-discovery acquisition owner.
 
-    The hooks extend the existing qualification predicates rather than adding another
-    scheduler or acquisition path. A generation that predates this component, or whose
-    canonical holdings/learning scope changed, is no longer considered current. The
-    existing evidence maintainer then performs its normal bounded refresh, and only that
-    refresh is allowed to execute comprehensive provider discovery.
+    The hooks extend existing qualification predicates instead of adding another
+    scheduler. A generation is reusable only when both comprehensive global and broad
+    U.S.-equity snapshots exist, restore correctly, and match current canonical
+    holdings/learning/base-universe scope. Otherwise the existing bounded evidence pass
+    refreshes them before any CIO consumer can proceed.
     """
 
     original_discovery = _plane._default_discovery
@@ -83,8 +111,25 @@ def _install_global_snapshot_owner(
 
     def owned_discovery(as_of):
         from operations.comprehensive_market_discovery import discover_comprehensive_markets
+        from operations.equity_discovery import discover_us_equities
 
         scope = load_evidence_state_scope(as_of=as_of, values=values)
+        base_symbols = _base_universe_symbols()
+
+        equity_result = discover_us_equities(
+            as_of=as_of,
+            held_symbols=scope.held_symbols,
+            tracked_symbols=scope.tracked_symbols,
+            excluded_symbols=base_symbols,
+        )
+        publish_equity_discovery_snapshot(
+            equity_result,
+            held_symbols=scope.held_symbols,
+            tracked_symbols=scope.tracked_symbols,
+            excluded_symbols=base_symbols,
+            values=values,
+        )
+
         result = discover_comprehensive_markets(
             as_of=as_of,
             held_symbols=scope.held_symbols,
@@ -112,7 +157,7 @@ def _install_global_snapshot_owner(
                 cutoff=cutoff,
                 reference_manifest_id=reference_manifest_id,
             )
-            and _snapshot_matches_current_scope(
+            and _snapshots_match_current_scope(
                 generation,
                 values=values,
                 cutoff=cutoff,
@@ -131,7 +176,7 @@ def _install_global_snapshot_owner(
                 values=values,
                 cutoff=cutoff,
             )
-            and _snapshot_matches_current_scope(
+            and _snapshots_match_current_scope(
                 generation,
                 values=values,
                 cutoff=cutoff,
@@ -166,10 +211,11 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
         else:
             os.environ[_PREPARING_ENV] = prior
     generation = maintenance.generation
-    # Qualification is incomplete if the generation cannot be paired with the exact
-    # release-independent comprehensive snapshot it claims to have prepared and restored
-    # with the provider-factor/continuity metadata required by the qualified runtime.
     global_snapshot = load_qualified_comprehensive_discovery_snapshot(
+        evidence_as_of=generation.as_of,
+        values=resolved,
+    )
+    equity_snapshot = load_equity_discovery_snapshot(
         evidence_as_of=generation.as_of,
         values=resolved,
     )
@@ -183,9 +229,11 @@ def run_once(values: Mapping[str, str] | None = None) -> dict[str, object]:
         "completed_at": generation.completed_at.isoformat(),
         "reference_manifest_id": generation.reference_manifest_id,
         "global_discovery_snapshot_id": global_snapshot.snapshot_id,
+        "us_equity_discovery_snapshot_id": equity_snapshot.snapshot_id,
         "state_scope": {
             "held_symbols": list(global_snapshot.held_symbols),
             "tracked_symbols": list(global_snapshot.tracked_symbols),
+            "base_universe_symbols": list(equity_snapshot.excluded_symbols),
         },
         "scheduled_lanes": list(generation.scheduled_lanes),
         "historical_scope_count": generation.historical_scope_count,
@@ -247,6 +295,8 @@ def run_loop(values: Mapping[str, str] | None = None) -> int:
                     + str(report["generation_id"])
                     + " global_snapshot="
                     + str(report["global_discovery_snapshot_id"])
+                    + " us_equity_snapshot="
+                    + str(report["us_equity_discovery_snapshot_id"])
                     + " maintenance_state="
                     + str(report["maintenance_state"])
                 )[:1000],
