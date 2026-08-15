@@ -44,6 +44,10 @@ class CertificationRuntimeBinding:
     cutoff: datetime
     evidence_generation_id: str
     snapshot_id: str
+    global_discovery_snapshot_id: str
+    us_equity_discovery_snapshot_id: str
+    paper_evidence_snapshot_id: str
+    policy_compatibility_hash: str
     current_state: CertificationState
     current_source_id: str
 
@@ -171,16 +175,13 @@ def _input_pointer_for_cutoff(
     return latest
 
 
-def resolve_certification_for_cutoff(
-    cutoff: datetime,
+def _binding_from_ledger(
     *,
-    values: Mapping[str, str] | None = None,
+    requested: datetime,
+    release: str,
+    ledger: Mapping[str, object],
+    values: Mapping[str, str],
 ) -> CertificationRuntimeBinding:
-    resolved = dict(os.environ if values is None else values)
-    requested = _aware(cutoff, field_name="certification_cutoff")
-    release = _release(resolved)
-    ledger = _input_pointer_for_cutoff(cutoff=requested, values=resolved)
-
     if ledger.get("schema_version") != _SCHEMA:
         raise CertificationRuntimeStateError("certification input schema mismatch")
     if str(ledger.get("release") or "") != release:
@@ -206,13 +207,23 @@ def resolve_certification_for_cutoff(
     certification_id = str(ledger.get("record_id") or "").strip()
     generation_id = str(ledger.get("evidence_generation_id") or "").strip()
     snapshot_id = str(ledger.get("snapshot_id") or "").strip()
+    global_snapshot_id = str(
+        ledger.get("global_discovery_snapshot_id") or ""
+    ).strip()
+    equity_snapshot_id = str(
+        ledger.get("us_equity_discovery_snapshot_id") or ""
+    ).strip()
+    paper_snapshot_id = str(
+        ledger.get("paper_evidence_snapshot_id") or ""
+    ).strip()
+    policy_hash = str(ledger.get("policy_compatibility_hash") or "").strip()
     if not certification_id or not generation_id or not snapshot_id:
         raise CertificationRuntimeStateError(
             "certification input identity is incomplete"
         )
 
     state = _read_integrity_json(
-        _root(resolved) / "state" / certification_id / "latest.json",
+        _root(values) / "state" / certification_id / "latest.json",
         label="certification state pointer",
     )
     if str(state.get("certification_id") or "") != certification_id:
@@ -233,9 +244,61 @@ def resolve_certification_for_cutoff(
         cutoff=requested,
         evidence_generation_id=generation_id,
         snapshot_id=snapshot_id,
+        global_discovery_snapshot_id=global_snapshot_id,
+        us_equity_discovery_snapshot_id=equity_snapshot_id,
+        paper_evidence_snapshot_id=paper_snapshot_id,
+        policy_compatibility_hash=policy_hash,
         current_state=current,
         current_source_id=source,
     )
+
+
+def resolve_certification_for_cutoff(
+    cutoff: datetime,
+    *,
+    values: Mapping[str, str] | None = None,
+) -> CertificationRuntimeBinding:
+    resolved = dict(os.environ if values is None else values)
+    requested = _aware(cutoff, field_name="certification_cutoff")
+    release = _release(resolved)
+    ledger = _input_pointer_for_cutoff(cutoff=requested, values=resolved)
+    return _binding_from_ledger(
+        requested=requested,
+        release=release,
+        ledger=ledger,
+        values=resolved,
+    )
+
+
+def resolve_latest_certification(
+    *,
+    values: Mapping[str, str] | None = None,
+) -> CertificationRuntimeBinding | None:
+    """Resolve the latest immutable input and its current durable certification state."""
+
+    resolved = dict(os.environ if values is None else values)
+    if not certification_runtime_enabled(resolved):
+        return None
+    release = _release(resolved)
+    latest = _read_integrity_json(
+        _root(resolved) / "ledger" / _safe(release) / "latest-input.json",
+        label="certification input ledger",
+    )
+    raw_cutoff = latest.get("snapshot_cutoff")
+    if not isinstance(raw_cutoff, str):
+        raise CertificationRuntimeStateError("certification input cutoff is missing")
+    try:
+        requested = _aware(
+            datetime.fromisoformat(raw_cutoff.replace("Z", "+00:00")),
+            field_name="recorded_certification_cutoff",
+        )
+    except ValueError as error:
+        raise CertificationRuntimeStateError(
+            "certification input cutoff is invalid"
+        ) from error
+    # Re-resolve through the exact-cutoff index so a corrupt exact ledger cannot be
+    # hidden by the mutable latest pointer.
+    return resolve_certification_for_cutoff(requested, values=resolved)
 
 
 _LINEAR_ORDER = (
@@ -376,4 +439,5 @@ __all__ = [
     "certification_runtime_enabled",
     "complete_certification_for_cutoff",
     "resolve_certification_for_cutoff",
+    "resolve_latest_certification",
 ]
