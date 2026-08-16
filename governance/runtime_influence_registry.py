@@ -120,14 +120,18 @@ CAPABILITY_CONTRACTS: tuple[CapabilityContract, ...] = (
     ),
     CapabilityContract(
         name="reactive_monitoring_plan",
-        lifecycle=ComponentLifecycle.SHADOW,
+        lifecycle=ComponentLifecycle.GOVERNED_ADVISORY,
         producers=("portfolio.active_investor",),
-        consumers=(),
-        runtime_entrypoints=("run_scheduler", "run_autonomous_paper_operator"),
-        notes=(
-            "Until a governed runtime evaluator consumes the stored plan, the plan is explicitly shadow rather than silently implied to be live.",
+        consumers=(
+            "operations.reactive_monitoring_runtime",
+            "operations.reactive_investor_material_reassessment",
         ),
-        require_import_path=False,
+        runtime_entrypoints=("run_autonomous_paper_operator",),
+        influence_targets=("canonical_cio_reassessment_request",),
+        counterfactual_tests=("tests/test_reactive_monitoring_runtime.py",),
+        notes=(
+            "The hash-chain-verified plan can now request a canonical CIO reassessment when qualified evidence matches a declared dependency; it has no portfolio or execution authority.",
+        ),
     ),
     CapabilityContract(
         name="investor_material_reassessment",
