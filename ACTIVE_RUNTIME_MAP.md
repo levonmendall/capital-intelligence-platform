@@ -19,6 +19,46 @@ Historical backfill and encrypted backup are restarted after bounded delay. Rend
 external health probe targets the Streamlit `/_stcore/health` endpoint; the supervisor
 also owns child-process health and restart behavior.
 
+### Layered readiness control plane
+
+Readiness is explicitly separated into four dependency-closed observational layers:
+
+```text
+SERVING_READY
+  -> EVIDENCE_READY
+       -> DECISION_READY
+            -> EXECUTION_READY
+```
+
+`SERVING_READY` is the watchdog/restart boundary. It requires the canonical
+portfolio and CIO journal to remain readable, required identity state to be ready,
+and an exact production Git SHA. Provider degradation, stale evidence, an
+incomplete universe, stale operator evidence, reconciliation blockers, backup
+freshness, alert delivery, or execution conditions cannot by themselves take the
+read-only product offline.
+
+`EVIDENCE_READY` reports whether the currently required evidence/universe inputs are
+available and fresh. `DECISION_READY` additionally requires the CIO/operator decision
+boundary to be available against that certified evidence and canonical state.
+`EXECUTION_READY` retains reconciliation, backup, dependency, and the prior strict
+composite production-operational gates. Dependency closure is fail-closed: a blocked
+upstream layer forces all dependent downstream layers blocked. The report grants no
+authority and always records `paper_only=true`, `real_money_authorized=false`, and
+`downstream_repair_authorized=false`.
+
+The API contracts are:
+
+- `/ready` — credential-safe `SERVING_READY`, used by the production watchdog.
+- `/ready/composite` — the previous strict readiness semantics, retained for
+  operational/investment diagnostics.
+- `/ready/layers` — credential-safe four-layer state; only `SERVING_READY=false`
+  returns HTTP 503.
+- `/v1/readiness/status` — administrator detail including strict and layered state.
+
+No downstream consumer may make itself ready by synchronously repairing an upstream
+state. The evidence owner refreshes evidence; the CIO consumes certified state;
+construction consumes a CIO action; execution consumes approved construction.
+
 ## Active Streamlit composition
 
 ```text
