@@ -381,6 +381,9 @@ def test_production_context_progress_stages_are_registered(tmp_path) -> None:
         "production_context_preliminary_evidence_built",
         "production_context_portfolio_marked",
         "production_context_evidence_built",
+        "production_context_transient_evidence_released",
+        "production_context_eligible_universe_persisted",
+        "production_context_active_universe_persisted",
         "production_context_persisted",
     )
     for stage in stages:

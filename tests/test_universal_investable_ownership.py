@@ -21,6 +21,7 @@ from operations.comprehensive_market_discovery import (
 from operations.free_paper_pilot import (
     FreePaperPilotInstrument,
     FreePaperPilotUniverse,
+    free_paper_pilot_universe_payload,
     load_execution_paper_universe,
     load_free_paper_pilot_universe,
     write_active_paper_universe,
@@ -416,6 +417,24 @@ def test_execution_universe_never_falls_back_to_static_shortlist(tmp_path) -> No
             {"eligible_universe_publication_identifier": "publication:old"},
             active_path=active,
         )
+
+
+def test_streamed_active_universe_preserves_complete_payload(tmp_path) -> None:
+    universe = load_free_paper_pilot_universe()
+    active = tmp_path / "active.json"
+
+    write_active_paper_universe(
+        universe,
+        eligible_universe_publication_identifier="publication:streamed",
+        destination=active,
+    )
+
+    payload = json.loads(active.read_text(encoding="utf-8"))
+    assert payload == {
+        "eligible_universe_publication_identifier": "publication:streamed",
+        "universe": free_paper_pilot_universe_payload(universe),
+    }
+    assert not active.with_suffix(".json.tmp").exists()
 
 
 def test_construction_search_width_expands_with_approved_opportunity_count() -> None:

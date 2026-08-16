@@ -774,46 +774,56 @@ def free_paper_pilot_universe_payload(
         "maximum_quote_age_minutes": universe.maximum_quote_age_minutes,
         "required_exposure_classes": list(universe.required_exposure_classes),
         "instruments": [
-            {
-                "symbol": item.symbol,
-                "instrument_identifier": item.instrument_identifier,
-                "name": item.name,
-                "execution_asset_class": item.execution_asset_class.value,
-                "economic_exposure": item.economic_exposure,
-                "venue": item.venue,
-                "country_code": item.country_code,
-                "currency": item.currency,
-                "settlement_currency": item.settlement_currency,
-                "instrument_type": item.instrument_type,
-                "maximum_weight": item.maximum_weight,
-                "issuer_cik": item.issuer_cik,
-                "provider_symbol": item.provider_symbol,
-                "contract_multiplier": item.contract_multiplier,
-                "trading_session_model": (None if item.trading_session_model is None else item.trading_session_model.value),
-                "quote_spread_bps": item.quote_spread_bps,
-                "provider_kind": item.provider_kind,
-                "provider_dataset": item.provider_dataset,
-                "provider_stype_in": item.provider_stype_in,
-                "expiration_at": item.expiration_at,
-                "underlying_symbol": item.underlying_symbol,
-                "strike": item.strike,
-                "option_right": item.option_right,
-                "approval_identifier": item.approval_identifier,
-                "custody_settlement_identifier": item.custody_settlement_identifier,
-                "execution_model_version": item.execution_model_version,
-                "contract_model_version": item.contract_model_version,
-                "margin_model_version": item.margin_model_version,
-                "lifecycle_model_version": item.lifecycle_model_version,
-                "roll_model_version": item.roll_model_version,
-                "gross_leverage": item.gross_leverage,
-                "unlevered": item.unlevered,
-                "spot_only": item.spot_only,
-                "defined_risk": item.defined_risk,
-                "margin_required": item.margin_required,
-            }
+            _free_paper_pilot_instrument_payload(item)
             for item in universe.instruments
         ],
         "limitations": list(universe.limitations),
+    }
+
+
+def _free_paper_pilot_instrument_payload(
+    item: FreePaperPilotInstrument,
+) -> dict[str, Any]:
+    return {
+        "symbol": item.symbol,
+        "instrument_identifier": item.instrument_identifier,
+        "name": item.name,
+        "execution_asset_class": item.execution_asset_class.value,
+        "economic_exposure": item.economic_exposure,
+        "venue": item.venue,
+        "country_code": item.country_code,
+        "currency": item.currency,
+        "settlement_currency": item.settlement_currency,
+        "instrument_type": item.instrument_type,
+        "maximum_weight": item.maximum_weight,
+        "issuer_cik": item.issuer_cik,
+        "provider_symbol": item.provider_symbol,
+        "contract_multiplier": item.contract_multiplier,
+        "trading_session_model": (
+            None
+            if item.trading_session_model is None
+            else item.trading_session_model.value
+        ),
+        "quote_spread_bps": item.quote_spread_bps,
+        "provider_kind": item.provider_kind,
+        "provider_dataset": item.provider_dataset,
+        "provider_stype_in": item.provider_stype_in,
+        "expiration_at": item.expiration_at,
+        "underlying_symbol": item.underlying_symbol,
+        "strike": item.strike,
+        "option_right": item.option_right,
+        "approval_identifier": item.approval_identifier,
+        "custody_settlement_identifier": item.custody_settlement_identifier,
+        "execution_model_version": item.execution_model_version,
+        "contract_model_version": item.contract_model_version,
+        "margin_model_version": item.margin_model_version,
+        "lifecycle_model_version": item.lifecycle_model_version,
+        "roll_model_version": item.roll_model_version,
+        "gross_leverage": item.gross_leverage,
+        "unlevered": item.unlevered,
+        "spot_only": item.spot_only,
+        "defined_risk": item.defined_risk,
+        "margin_required": item.margin_required,
     }
 
 
@@ -833,18 +843,54 @@ def write_active_paper_universe(
 ) -> Path:
     path = Path(destination).expanduser() if destination is not None else active_paper_universe_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "eligible_universe_publication_identifier": _text(
-            eligible_universe_publication_identifier,
-            field_name="eligible_universe_publication_identifier",
-        ),
-        "universe": free_paper_pilot_universe_payload(universe),
-    }
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    if not isinstance(universe, FreePaperPilotUniverse):
+        raise TypeError("universe must be FreePaperPilotUniverse")
+    publication_identifier = _text(
+        eligible_universe_publication_identifier,
+        field_name="eligible_universe_publication_identifier",
     )
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    universe_fields = {
+        "schema_version": universe.schema_version,
+        "identifier": universe.identifier,
+        "objective": universe.objective,
+        "portfolio_code": universe.portfolio_code,
+        "reporting_currency": universe.reporting_currency,
+        "quote_provider": universe.quote_provider,
+        "execution_mode": universe.execution_mode,
+        "minimum_cash_weight": universe.minimum_cash_weight,
+        "maximum_batch_turnover": universe.maximum_batch_turnover,
+        "maximum_single_instrument_weight": universe.maximum_single_instrument_weight,
+        "maximum_crypto_proxy_weight": universe.maximum_crypto_proxy_weight,
+        "maximum_volatility_proxy_weight": universe.maximum_volatility_proxy_weight,
+        "maximum_quote_age_minutes": universe.maximum_quote_age_minutes,
+        "required_exposure_classes": list(universe.required_exposure_classes),
+    }
+    with temporary.open("w", encoding="utf-8") as handle:
+        handle.write("{\n  \"eligible_universe_publication_identifier\": ")
+        json.dump(publication_identifier, handle)
+        handle.write(",\n  \"universe\": {\n")
+        for field_name, value in universe_fields.items():
+            handle.write(f"    {json.dumps(field_name)}: ")
+            json.dump(value, handle, sort_keys=True)
+            handle.write(",\n")
+        handle.write('    "instruments": [\n')
+        for index, item in enumerate(universe.instruments):
+            if index:
+                handle.write(",\n")
+            handle.write("      ")
+            json.dump(
+                _free_paper_pilot_instrument_payload(item),
+                handle,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        handle.write("\n    ],\n    \"limitations\": ")
+        json.dump(list(universe.limitations), handle, sort_keys=True, allow_nan=False)
+        handle.write("\n  }\n}\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     temporary.replace(path)
     return path
 
