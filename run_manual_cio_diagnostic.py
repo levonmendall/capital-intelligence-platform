@@ -11,21 +11,21 @@ from __future__ import annotations
 import sys
 
 import _manual_cio_diagnostic_core as _core
-from portfolio.initialization import (
-    ensure_canonical_portfolio_store as _governed_canonical_initializer,
-)
 
 
 def _load_canonical_dependency() -> None:
-    """Bind only the governed ABSENT / VALID / INVALID initializer."""
+    """Lazily bind only the governed ABSENT / VALID / INVALID initializer."""
 
     if _core.ensure_canonical_portfolio_store is None:
-        _core.ensure_canonical_portfolio_store = _governed_canonical_initializer
+        from portfolio.initialization import (
+            ensure_canonical_portfolio_store as governed_initializer,
+        )
+
+        _core.ensure_canonical_portfolio_store = governed_initializer
 
 
-# Bind eagerly for ordinary execution and replace the core loader so tests or controlled
-# dependency resets cannot reintroduce portfolio.state's legacy reset-capable initializer.
-_core.ensure_canonical_portfolio_store = _governed_canonical_initializer
+# Replace the core loader before execution so the canonical phase stays memory-bounded while
+# controlled dependency resets can never fall back to portfolio.state's legacy initializer.
 _core._load_canonical_dependency = _load_canonical_dependency
 
 if __name__ == "__main__":
