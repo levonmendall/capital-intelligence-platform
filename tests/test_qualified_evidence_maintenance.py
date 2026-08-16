@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from cio import CandidateAssetClass
 from operations import qualified_evidence_maintenance as maintenance
 
@@ -98,6 +100,64 @@ def test_default_public_maintenance_honors_collection_cadence(
 
     assert result.refreshed is True
     assert observed["force"] is False
+
+
+def test_default_public_maintenance_forces_unqualified_cached_collection(
+    monkeypatch,
+) -> None:
+    import public_live_collection_runtime
+
+    timestamp = datetime.now(timezone.utc)
+    calls: list[bool] = []
+
+    def collect(*, now, force):
+        assert now == timestamp
+        calls.append(force)
+        if not force:
+            return SimpleNamespace(state="not_due", required_sources_ready=False)
+        return SimpleNamespace(state="available", required_sources_ready=True)
+
+    monkeypatch.setattr(
+        public_live_collection_runtime,
+        "collect_public_live_information_if_due",
+        collect,
+    )
+
+    result = maintenance._default_public_collector(timestamp)
+
+    assert result.state == "available"
+    assert result.required_sources_ready is True
+    assert calls == [False, True]
+
+
+def test_default_public_maintenance_forced_retry_remains_fail_closed(
+    monkeypatch,
+) -> None:
+    import public_live_collection_runtime
+
+    timestamp = datetime.now(timezone.utc)
+    calls: list[bool] = []
+
+    def collect(*, now, force):
+        assert now == timestamp
+        calls.append(force)
+        if not force:
+            return SimpleNamespace(state="not_due", required_sources_ready=None)
+        return SimpleNamespace(state="degraded", required_sources_ready=False)
+
+    monkeypatch.setattr(
+        public_live_collection_runtime,
+        "collect_public_live_information_if_due",
+        collect,
+    )
+
+    with pytest.raises(
+        maintenance._plane.ContinuousEvidencePlaneError,
+        match="required public live information is not qualified",
+    ):
+        maintenance._default_public_collector(timestamp)
+
+    assert calls == [False, True]
 
 
 def test_prequalified_reference_loader_is_disk_only_and_binds_snapshot_manifest(
