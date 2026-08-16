@@ -147,6 +147,51 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     temporary.replace(path)
 
 
+def _prior_completed_checkpoint(previous: Mapping[str, Any]) -> dict[str, object]:
+    """Retain only credential-safe proof from the last completed collection.
+
+    The collection lock is the writer fence. Replacing the durable state with a bare
+    ``collecting`` record used to erase the last completed readiness proof before the
+    network refresh had committed. A deployment or concurrent reader could therefore
+    see no previously qualified collection even when one existed. Preserve the bounded
+    completed checkpoint while the new attempt is in flight; the new result still
+    replaces it atomically on success, degradation, or a handled collector failure.
+    """
+
+    completed_at = _parse_time(previous.get("completed_at"))
+    if completed_at is None:
+        return {}
+
+    checkpoint: dict[str, object] = {"completed_at": completed_at.isoformat()}
+    next_due_at = _parse_time(previous.get("next_due_at"))
+    if next_due_at is not None:
+        checkpoint["next_due_at"] = next_due_at.isoformat()
+
+    exit_code = previous.get("exit_code")
+    if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+        checkpoint["exit_code"] = exit_code
+    required_ready = previous.get("required_sources_ready")
+    if isinstance(required_ready, bool):
+        checkpoint["required_sources_ready"] = required_ready
+
+    for name in (
+        "source_count",
+        "failed_source_count",
+        "record_count",
+        "provider_configured_count",
+        "provider_validated_count",
+    ):
+        value = previous.get(name)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            checkpoint[name] = value
+
+    for name in ("catalog_identifier", "provider_validation_state"):
+        value = previous.get(name)
+        if isinstance(value, str) and value.strip():
+            checkpoint[name] = value.strip()
+    return checkpoint
+
+
 def _acquire_lock(path: Path, *, now: datetime) -> bool:
     """Acquire an atomic cross-process lease, removing only clearly stale leases."""
 
@@ -284,6 +329,7 @@ def collect_public_live_information_if_due(
 
     try:
         attempted_payload: dict[str, object] = {
+            **_prior_completed_checkpoint(previous),
             "schema_version": "public-live-information-runtime-state.v2",
             "state": "collecting",
             "attempted_at": evaluated_at.isoformat(),
