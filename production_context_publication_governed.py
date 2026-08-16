@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -367,6 +368,64 @@ def _mark_portfolio(snapshot, build_result, *, decision_as_of: datetime):
             for position in snapshot.positions
         ),
     )
+
+
+def _build_marked_paper_evidence(
+    *,
+    universe,
+    decision_as_of: datetime,
+    cash_expected_return: float,
+    tentative,
+    evidence_payload: Mapping[str, object],
+    progress_probe: ProgressProbe | None,
+):
+    """Build once for cash-only state and never overlap two full candidate graphs."""
+
+    if not tentative.positions:
+        result = build_paper_evidence(
+            universe=universe,
+            decision_as_of=decision_as_of,
+            cash_expected_return=cash_expected_return,
+            portfolio=tentative,
+            payload=evidence_payload,
+        )
+        if progress_probe is not None:
+            progress_probe("production_context_evidence_built")
+        return tentative, result
+
+    preliminary = build_paper_evidence(
+        universe=universe,
+        decision_as_of=decision_as_of,
+        cash_expected_return=cash_expected_return,
+        portfolio=tentative,
+        payload=evidence_payload,
+    )
+    if progress_probe is not None:
+        progress_probe("production_context_preliminary_evidence_built")
+    marked = _mark_portfolio(
+        tentative,
+        preliminary,
+        decision_as_of=decision_as_of,
+    )
+    if progress_probe is not None:
+        progress_probe("production_context_portfolio_marked")
+    if marked == tentative:
+        result = preliminary
+    else:
+        # The final exact-weight build must not overlap the preliminary candidate and
+        # specialist object graph. The service memory ceiling remains unchanged.
+        del preliminary
+        gc.collect()
+        result = build_paper_evidence(
+            universe=universe,
+            decision_as_of=decision_as_of,
+            cash_expected_return=cash_expected_return,
+            portfolio=marked,
+            payload=evidence_payload,
+        )
+    if progress_probe is not None:
+        progress_probe("production_context_evidence_built")
+    return marked, result
 
 
 def _reconcile_canonical_holding_evidence_scope(
@@ -845,7 +904,7 @@ def prepare_governed_production_context_for_cycle(
             instrument_count=len(universe.instruments),
         )
     if progress_probe is not None:
-        progress_probe("production_context_evidence_built")
+        progress_probe("production_context_portfolio_finalized")
 
     outcome_resolution_count = 0
     if discovery is not None:
@@ -868,24 +927,13 @@ def prepare_governed_production_context_for_cycle(
     )
 
     try:
-        preliminary = build_paper_evidence(
+        marked, build_result = _build_marked_paper_evidence(
             universe=universe,
             decision_as_of=decision_as_of,
             cash_expected_return=cash_expected_return,
-            portfolio=tentative,
-            payload=evidence_payload,
-        )
-        marked = _mark_portfolio(
-            tentative,
-            preliminary,
-            decision_as_of=decision_as_of,
-        )
-        build_result = build_paper_evidence(
-            universe=universe,
-            decision_as_of=decision_as_of,
-            cash_expected_return=cash_expected_return,
-            portfolio=marked,
-            payload=evidence_payload,
+            tentative=tentative,
+            evidence_payload=evidence_payload,
+            progress_probe=progress_probe,
         )
         if already_persisted:
             if marked != tentative:
