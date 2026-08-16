@@ -27,6 +27,17 @@ def _steps(*, include_container: bool) -> tuple[ReleaseValidationStep, ...]:
             300,
         ),
         ReleaseValidationStep(
+            "audit_runtime_connectivity_and_influence",
+            (
+                python,
+                "scripts/audit_runtime_connectivity.py",
+                "--require-valid",
+                "--output",
+                "reports/runtime-connectivity-audit.json",
+            ),
+            120,
+        ),
+        ReleaseValidationStep(
             "initialize_platform",
             (python, "initialize.py"),
             300,

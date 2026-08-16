@@ -42,6 +42,7 @@ def test_release_plan_is_one_ordered_bounded_command_surface() -> None:
 
     assert tuple(item.name for item in host) == (
         "compile_python",
+        "audit_runtime_connectivity_and_influence",
         "initialize_platform",
         "validate_daily_plan",
         "golden_end_to_end_and_chaos",
@@ -54,6 +55,13 @@ def test_release_plan_is_one_ordered_bounded_command_surface() -> None:
         "rehearse_all_markets_paper_execution",
         "full_test_suite",
     )
+    connectivity_audit = next(
+        item for item in host
+        if item.name == "audit_runtime_connectivity_and_influence"
+    )
+    assert "scripts/audit_runtime_connectivity.py" in connectivity_audit.command
+    assert "--require-valid" in connectivity_audit.command
+    assert "reports/runtime-connectivity-audit.json" in connectivity_audit.command
     information_audit = next(
         item for item in host
         if item.name == "audit_decision_information_gaps"
