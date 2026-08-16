@@ -116,15 +116,19 @@ def test_streamlit_proxy_replaces_only_the_dense_lower_section() -> None:
 
 def test_entrypoints_delegate_environment_presentation_to_final_clarity_runtime() -> None:
     clarity_source = Path("environment_mobile_clarity_runtime.py").read_text(encoding="utf-8")
+    shared_source = Path("ui_runtime_composition.py").read_text(encoding="utf-8")
     assert "import environment_actionable_learning_refinement as learning" in clarity_source
     assert "import environment_driver_education_runtime as driver_runtime" in clarity_source
 
+    clarity = shared_source.index("environment_mobile_clarity_runtime.install(")
+    route_boundary = shared_source.index("surface_route_isolation_runtime.install(")
+    assert "import environment_mobile_clarity_runtime" in shared_source
+    assert clarity < route_boundary
+    assert "environment_driver_education_runtime.install(" not in shared_source
+    assert "environment_actionable_learning_refinement.install(" not in shared_source
+
     for relative in ("app.py", "render_app.py"):
         source = Path(relative).read_text(encoding="utf-8")
-        clarity = source.index("environment_mobile_clarity_runtime.install(")
-        route_boundary = source.index("surface_route_isolation_runtime.install(")
-
-        assert "import environment_mobile_clarity_runtime" in source
-        assert clarity < route_boundary
+        assert "install_canonical_surface_composition(" in source
         assert "environment_driver_education_runtime.install(" not in source
         assert "environment_actionable_learning_refinement.install(" not in source
