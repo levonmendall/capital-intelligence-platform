@@ -27,12 +27,14 @@ def test_explicit_render_target_takes_precedence_over_fragment_unwrap() -> None:
 
 def test_render_runtime_preserves_canonical_portfolio_renderer_without_bridge() -> None:
     source = Path("render_app.py").read_text(encoding="utf-8")
+    shared_source = Path("ui_runtime_composition.py").read_text(encoding="utf-8")
     main_source = source[source.index("def main() -> None:") :]
-    install_call = "portfolio_ui_refinement.install(app_impl)"
+    install_call = "install_canonical_surface_composition("
     prepare_call = "prepare_render_surface_runtime()"
 
     assert install_call in main_source
     assert main_source.index(install_call) < main_source.index(prepare_call)
+    assert "portfolio_ui_refinement.install(app_impl)" in shared_source
     assert "_portfolio_first_sync_renderer" not in source
     assert "portfolio_first_ui_refinement" not in source
 
