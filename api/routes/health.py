@@ -407,38 +407,34 @@ def _layered_report(
         for name in evidence_names
         if name in strict_dependencies
     }
-    if composite is not None:
-        composite_components = dict(composite.get("components") or {})
-        for name in ("cio-paper-operator", "data_freshness"):
-            raw = composite_components.get(name)
-            if isinstance(raw, dict):
-                evidence_payload[f"production_{name}"] = _raw_component_payload(
-                    raw,
-                    public=public,
-                )
+    composite_components = (
+        dict(composite.get("components") or {}) if composite is not None else {}
+    )
+    raw_data_freshness = composite_components.get("data_freshness")
+    if isinstance(raw_data_freshness, dict):
+        evidence_payload["production_data_freshness"] = _raw_component_payload(
+            raw_data_freshness,
+            public=public,
+        )
 
     decision_payload = dict(evidence_payload)
-    if composite is not None:
-        raw_reconciliation = dict(composite.get("components") or {}).get(
-            "reconciliation"
+    raw_operator = composite_components.get("cio-paper-operator")
+    if isinstance(raw_operator, dict):
+        decision_payload["production_cio-paper-operator"] = _raw_component_payload(
+            raw_operator,
+            public=public,
         )
-        if isinstance(raw_reconciliation, dict):
-            decision_payload["production_reconciliation"] = _raw_component_payload(
-                raw_reconciliation,
-                public=public,
-            )
 
     execution_payload = {
         name: _payload(component, public=public)
         for name, component in strict_dependencies.items()
     }
-    if composite is not None:
-        for name, raw in dict(composite.get("components") or {}).items():
-            if isinstance(raw, dict):
-                execution_payload[f"production_{name}"] = _raw_component_payload(
-                    raw,
-                    public=public,
-                )
+    for name, raw in composite_components.items():
+        if isinstance(raw, dict):
+            execution_payload[f"production_{name}"] = _raw_component_payload(
+                raw,
+                public=public,
+            )
 
     serving_ready = _required_ready(serving)
     evidence_ready = all(
