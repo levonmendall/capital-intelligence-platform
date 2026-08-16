@@ -127,14 +127,18 @@ def test_federal_register_events_receive_specific_explanations() -> None:
 
 
 def test_active_entrypoints_keep_alignment_separate_from_final_today_presentation() -> None:
+    shared_source = Path("ui_runtime_composition.py").read_text(encoding="utf-8")
+    assert "import today_trust_ui_runtime" in shared_source
+    assert "today_trust_ui_runtime.install" in shared_source
+    assert "today_development_card_format_runtime" not in shared_source
+
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
         assert "import today_event_alignment_runtime" in source
         assert "today_event_alignment_runtime.install" in source
-        assert "import today_trust_ui_runtime" in source
-        assert "today_trust_ui_runtime.install" in source
+        assert "install_canonical_surface_composition(" in source
         assert "today_development_card_format_runtime" not in source
 
         alignment_install = source.index("today_event_alignment_runtime.install")
-        trust_install = source.index("today_trust_ui_runtime.install")
-        assert alignment_install < trust_install
+        shared_install = source.index("install_canonical_surface_composition(")
+        assert alignment_install < shared_install
