@@ -1,7 +1,7 @@
 """Govern the manual CIO diagnostic's canonical-portfolio initialization authority.
 
-The implementation remains in ``run_manual_cio_diagnostic_core`` so its mature lazy-import,
-resource, CIO, construction, and paper-only behavior stays byte-for-byte unchanged.  This
+The implementation remains in ``_manual_cio_diagnostic_core`` so its mature lazy-import,
+resource, CIO, construction, and paper-only behavior stays byte-for-byte unchanged. This
 adapter owns the one production dependency that must never fall back to the legacy
 reset/archive-capable compatibility initializer: canonical portfolio initialization.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 
-import run_manual_cio_diagnostic_core as _core
+import _manual_cio_diagnostic_core as _core
 from portfolio.initialization import (
     ensure_canonical_portfolio_store as _governed_canonical_initializer,
 )

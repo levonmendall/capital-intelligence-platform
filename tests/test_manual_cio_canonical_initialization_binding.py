@@ -11,7 +11,7 @@ from portfolio.initialization import (
 from portfolio.state import SQLiteCanonicalPortfolioStore
 
 
-_PRIVATE_DIAGNOSTIC_CORE = Path("run_manual_cio_diagnostic_core.py")
+_PRIVATE_DIAGNOSTIC_CORE = Path("_manual_cio_diagnostic_core.py")
 
 
 def test_manual_cio_diagnostic_binds_governed_initializer(monkeypatch) -> None:
@@ -81,6 +81,8 @@ def test_private_diagnostic_core_cannot_be_the_public_entrypoint() -> None:
     adapter = (root / "run_manual_cio_diagnostic.py").read_text(encoding="utf-8")
     core = (root / _PRIVATE_DIAGNOSTIC_CORE).read_text(encoding="utf-8")
 
+    assert not _PRIVATE_DIAGNOSTIC_CORE.name.startswith("run_")
+    assert "import _manual_cio_diagnostic_core as _core" in adapter
     assert "from portfolio.initialization import" in adapter
     assert "_core._load_canonical_dependency = _load_canonical_dependency" in adapter
     assert "from portfolio.state import ensure_canonical_portfolio_store" in core
