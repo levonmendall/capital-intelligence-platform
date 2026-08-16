@@ -130,13 +130,28 @@ def _default_public_collector(timestamp: datetime):
     result = collect_public_live_information_if_due(now=timestamp, force=False)
     state = str(getattr(result, "state", "")).strip().lower()
     required_ready = getattr(result, "required_sources_ready", None)
+
+    # The hourly cadence is an acquisition optimization, not a retry veto. A previous
+    # failed/degraded/legacy runtime state can return ``not_due`` without qualified
+    # required-source proof. In that case, force one real refresh so the outer bounded
+    # release-prequalification retry budget can actually recover transient provider
+    # failures instead of replaying the same unusable cached state for an hour.
+    if state == "not_due" and required_ready is not True:
+        result = collect_public_live_information_if_due(now=timestamp, force=True)
+        state = str(getattr(result, "state", "")).strip().lower()
+        required_ready = getattr(result, "required_sources_ready", None)
+
     if state in {"failed", "disabled"} or required_ready is False:
         raise _plane.ContinuousEvidencePlaneError(
             "required public live information is not qualified"
         )
-    if state in {"not_due", "in_progress"} and required_ready is not True:
+    if required_ready is not True:
+        if state in {"not_due", "in_progress"}:
+            raise _plane.ContinuousEvidencePlaneError(
+                "required public live information has no previously qualified collection"
+            )
         raise _plane.ContinuousEvidencePlaneError(
-            "required public live information has no previously qualified collection"
+            "required public live information is not qualified"
         )
     return result
 

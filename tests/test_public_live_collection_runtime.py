@@ -66,6 +66,14 @@ def _configure(monkeypatch, tmp_path) -> None:
     )
 
 
+def _validation(**_kwargs):
+    return {
+        "state": "validated",
+        "configured_provider_count": 0,
+        "validated_provider_count": 0,
+    }
+
+
 def test_runtime_collector_runs_immediately_then_observes_hourly_window(
     monkeypatch,
     tmp_path,
@@ -202,3 +210,112 @@ def test_existing_collection_lease_prevents_duplicate_session_collection(
     assert result.state == "in_progress"
     assert calls == []
     assert lock_path.exists()
+
+
+def test_in_progress_refresh_retains_last_completed_qualification(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    initial_at = datetime(2026, 8, 16, 12, 0, tzinfo=timezone.utc)
+    refresh_at = initial_at + timedelta(hours=1, seconds=1)
+
+    first = collect_public_live_information_if_due(
+        now=initial_at,
+        provider_factory=lambda _catalog: _Provider(
+            _Report(evaluated_at=initial_at),
+            [],
+        ),
+        provider_validation_builder=_validation,
+    )
+    assert first.state == "available"
+    assert first.required_sources_ready is True
+
+    observed: dict[str, object] = {}
+
+    class RefreshProvider:
+        def collect(self, *, include_optional: bool):
+            assert include_optional is True
+            state = json.loads(
+                (tmp_path / "public-live-information-runtime-state.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            assert state["state"] == "collecting"
+            assert state["completed_at"] == initial_at.isoformat()
+            assert state["required_sources_ready"] is True
+            assert state["source_count"] == 2
+
+            contender = collect_public_live_information_if_due(
+                now=refresh_at,
+                provider_factory=lambda _catalog: (_ for _ in ()).throw(
+                    AssertionError("contending reader must not collect")
+                ),
+                provider_validation_builder=_validation,
+            )
+            observed["contender"] = contender
+            return _Report(evaluated_at=refresh_at)
+
+    refreshed = collect_public_live_information_if_due(
+        now=refresh_at,
+        provider_factory=lambda _catalog: RefreshProvider(),
+        provider_validation_builder=_validation,
+    )
+
+    assert refreshed.state == "available"
+    contender = observed["contender"]
+    assert contender.state == "in_progress"
+    assert contender.required_sources_ready is True
+    assert contender.source_count == 2
+    assert contender.failed_source_count == 0
+
+
+def test_in_progress_refresh_does_not_promote_prior_degraded_qualification(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    initial_at = datetime(2026, 8, 16, 12, 0, tzinfo=timezone.utc)
+    refresh_at = initial_at + timedelta(hours=1, seconds=1)
+
+    first = collect_public_live_information_if_due(
+        now=initial_at,
+        provider_factory=lambda _catalog: _Provider(
+            _Report(
+                evaluated_at=initial_at,
+                required_sources_ready=False,
+                source_states=(True, False),
+            ),
+            [],
+        ),
+        provider_validation_builder=_validation,
+    )
+    assert first.state == "degraded"
+    assert first.required_sources_ready is False
+
+    observed: dict[str, object] = {}
+
+    class RefreshProvider:
+        def collect(self, *, include_optional: bool):
+            assert include_optional is True
+            contender = collect_public_live_information_if_due(
+                now=refresh_at,
+                provider_factory=lambda _catalog: (_ for _ in ()).throw(
+                    AssertionError("contending reader must not collect")
+                ),
+                provider_validation_builder=_validation,
+            )
+            observed["contender"] = contender
+            return _Report(evaluated_at=refresh_at)
+
+    refreshed = collect_public_live_information_if_due(
+        now=refresh_at,
+        provider_factory=lambda _catalog: RefreshProvider(),
+        provider_validation_builder=_validation,
+    )
+
+    assert refreshed.state == "available"
+    contender = observed["contender"]
+    assert contender.state == "in_progress"
+    assert contender.required_sources_ready is False
+    assert contender.failed_source_count == 1
