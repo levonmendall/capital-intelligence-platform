@@ -43,7 +43,7 @@ The registry deliberately makes architectural boundaries visible rather than opt
 - The canonical CIO decision chain is **AUTHORITATIVE**.
 - Forward intelligence is a **DECISION_INPUT** through the existing specialists.
 - Active-investor expression/lifecycle output is **GOVERNED_ADVISORY**.
-- The generated reactive monitoring plan is currently **SHADOW** until a runtime evaluator consumes it.
+- The reactive monitoring plan is **GOVERNED_ADVISORY**: the live reassessment runtime reads the latest hash-chain-verified plan, evaluates only qualified point-in-time evidence against declared dependencies, and may request a canonical CIO reassessment. It has no portfolio, construction, execution, policy-change, or real-money authority.
 - Investor-material reassessment is **OPERATIONAL** and may request CIO reassessment only.
 - Causal-intelligence sidecar output is **SHADOW**.
 - Forecast calibration is **SHADOW** until a governed feedback consumer changes future confidence/reliability.
@@ -55,7 +55,7 @@ These statuses are expected to change only through reviewed code that also updat
 
 ## Counterfactual standard
 
-For a capability declared as a production decision input, a future validation should be able to change that input while holding the rest of the decision context constant and observe the declared downstream consequence. Examples:
+For a capability declared as a production decision input or governed advisory input, validation should be able to change that input while holding the rest of the decision context constant and observe the declared downstream consequence. Examples:
 
 - a materially worse forecast calibration lowers future confidence,
 - a capital-flow reversal alters the relevant expression or requests reassessment,
@@ -63,7 +63,9 @@ For a capability declared as a production decision input, a future validation sh
 - a thesis invalidation requests prompt CIO review,
 - a superior replacement changes opportunity-cost/ranking evaluation.
 
-If a declared decision input can change materially without changing any permitted downstream target, the feature is functionally disconnected and should fail its counterfactual test or be reclassified as shadow/advisory.
+The reactive-monitoring contract now includes this proof: changing a declared thesis-specific evidence dependency changes whether the same qualified public evidence produces a reassessment match.
+
+If a declared decision or advisory input can change materially without changing any permitted downstream target, the feature is functionally disconnected and should fail its counterfactual test or be reclassified as shadow.
 
 ## Governance invariants
 
