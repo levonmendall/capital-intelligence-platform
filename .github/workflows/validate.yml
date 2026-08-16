@@ -77,6 +77,7 @@ jobs:
           name: release-validation-results
           path: |
             reports/release-validation.json
+            reports/runtime-connectivity-audit.json
             reports/golden-end-to-end-gate.json
             reports/event-quality-benchmark.json
             reports/information-gap-audit.json
