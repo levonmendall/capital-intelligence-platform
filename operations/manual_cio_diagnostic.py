@@ -32,6 +32,7 @@ _PROGRESS_STAGE_ALIASES = {
 _PROGRESS_STAGES = frozenset(
     {
         "canonical_portfolio_initialization",
+        "qualified_evidence_consumption",
         "public_information_collection",
         "production_context_preparation",
         "six_specialist_committee_cio_cycle",
