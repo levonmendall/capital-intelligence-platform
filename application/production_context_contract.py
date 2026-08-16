@@ -91,6 +91,8 @@ class ProductionCanonicalCIOContext(_BaseProductionCanonicalCIOContext):
 class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
     """Run the CIO only when persisted screening rankings remain unchanged."""
 
+    cycle_factory = CanonicalCIOCycle
+
     def run(self, *, as_of: datetime):
         decision_time = _aware(as_of, field_name="as_of")
         if not self.screening_store.verify_integrity():
@@ -209,7 +211,7 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                 ),
                 template=existing_engine,
             )
-            cycle = CanonicalCIOCycle(
+            cycle = self.cycle_factory(
                 opportunity_engine=runtime_engine,
                 specialist_service=self.cycle.specialist_service,
                 cio=self.cycle.cio,
