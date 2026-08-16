@@ -16,24 +16,14 @@ import streamlit as st
 
 import app_impl
 import educational_market_briefing_ui
-import environment_mobile_clarity_runtime
 import environment_story_placement_refinement
-import history_ui_refinement
 import live_operating_console
 import operating_intelligence_ui
 import operating_status
-import opportunity_funnel_ui_refinement
 import opportunity_scan_resilience
-import portfolio_ui_refinement
 import public_event_recency_runtime
 import secure_app
-import surface_content_refinement
-import surface_route_isolation_runtime
 import today_event_alignment_runtime
-import today_story_retention_runtime
-import today_trust_ui_runtime
-import ui_experience_refinement
-import ui_refinement
 from render_nonblocking_data import (
     get_mandate_details_nonblocking,
     get_portfolio_totals_nonblocking,
@@ -51,6 +41,7 @@ from render_nonblocking_data import (
     prewarm_render_data,
 )
 from secure_app import DeploymentContext, create_streamlit_application
+from ui_runtime_composition import install_canonical_surface_composition
 
 
 _LOGGER = logging.getLogger("capital_intelligence.render_surfaces")
@@ -191,30 +182,11 @@ def main() -> None:
         environment_story_placement_refinement,
     )
     opportunity_scan_resilience.install()
-    ui_refinement.install(app_impl, secure_app)
-    ui_experience_refinement.install(app_impl)
-    opportunity_funnel_ui_refinement.install(app_impl)
-    surface_content_refinement.install(app_impl)
-    environment_story_placement_refinement.install(app_impl)
-    environment_mobile_clarity_runtime.install(environment_story_placement_refinement)
-    today_story_retention_runtime.install(
-        app_impl,
-        educational_market_briefing_ui,
-        operating_intelligence_ui,
-        environment_story_placement_refinement,
+    install_canonical_surface_composition(
+        include_decision_pulse=False,
+        include_history_refinement=True,
+        replace_story_fragments=False,
     )
-    today_trust_ui_runtime.install(
-        app_impl,
-        educational_market_briefing_ui,
-        operating_intelligence_ui,
-        environment_story_placement_refinement,
-    )
-    surface_route_isolation_runtime.install(
-        app_impl,
-        environment_story_placement_refinement,
-    )
-    portfolio_ui_refinement.install(app_impl)
-    history_ui_refinement.install(app_impl)
     prepare_render_surface_runtime()
     create_streamlit_application(deployment=deployment_context_from_environment())
 

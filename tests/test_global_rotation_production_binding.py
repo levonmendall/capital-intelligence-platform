@@ -8,17 +8,10 @@ from application.global_rotation_cycle import GlobalOpportunityRotationCanonical
 
 def test_production_compounding_executor_binds_global_rotation_cycle() -> None:
     assert (
-        compounding_executor.GlobalOpportunityRotationCanonicalCIOCycle
+        compounding_executor.CompoundingProductionCanonicalCIOExecutor.cycle_factory
         is GlobalOpportunityRotationCanonicalCIOCycle
     )
-    source = inspect.getsource(
-        compounding_executor.CompoundingProductionCanonicalCIOExecutor.run
-    )
-    assert (
-        "_contract.CanonicalCIOCycle = GlobalOpportunityRotationCanonicalCIOCycle"
-        in source
-    )
-    assert "_contract.CanonicalCIOCycle = original_cycle" in source
-    assert "MispricedChangeCanonicalCIOCycle" not in inspect.getsource(
-        compounding_executor
-    )
+    source = inspect.getsource(compounding_executor)
+    assert "cycle_factory = GlobalOpportunityRotationCanonicalCIOCycle" in source
+    assert "_contract.CanonicalCIOCycle" not in source
+    assert "MispricedChangeCanonicalCIOCycle" not in source

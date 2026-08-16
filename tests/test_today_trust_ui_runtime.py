@@ -86,10 +86,14 @@ def test_funnel_flags_impossible_downstream_count_instead_of_clamping() -> None:
 
 
 def test_entrypoints_install_trust_layer_after_retention_before_route_guard() -> None:
+    shared_source = Path("ui_runtime_composition.py").read_text(encoding="utf-8")
+    assert "import today_trust_ui_runtime" in shared_source
+    retention_install = shared_source.index("today_story_retention_runtime.install(")
+    trust_install = shared_source.index("today_trust_ui_runtime.install(")
+    route_install = shared_source.index("surface_route_isolation_runtime.install(")
+    assert retention_install < trust_install < route_install
+
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
-        assert "import today_trust_ui_runtime" in source
-        retention_install = source.index("today_story_retention_runtime.install(")
-        trust_install = source.index("today_trust_ui_runtime.install(")
-        route_install = source.index("surface_route_isolation_runtime.install(")
-        assert retention_install < trust_install < route_install
+        assert "install_canonical_surface_composition(" in source
+        assert "today_trust_ui_runtime.install(" not in source

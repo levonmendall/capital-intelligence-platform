@@ -219,7 +219,6 @@ def test_install_rebinds_adapters_without_owning_today_renderer() -> None:
 
     assert story._render_today is renderer
 
-    # Simulate the assignments performed earlier in the next Streamlit run.
     events.build_today_items = builder
     operating.build_today_items = builder
     events.load_public_event_snapshot = event_loader
@@ -238,12 +237,16 @@ def test_install_rebinds_adapters_without_owning_today_renderer() -> None:
 
 
 def test_entrypoints_install_retention_before_canonical_today_renderer() -> None:
+    shared_source = Path("ui_runtime_composition.py").read_text(encoding="utf-8")
+    assert "import today_story_retention_runtime" in shared_source
+    retention_install = shared_source.index("today_story_retention_runtime.install(")
+    trust_install = shared_source.index("today_trust_ui_runtime.install(")
+    assert retention_install < trust_install
+
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
-        assert "import today_story_retention_runtime" in source
-        retention_install = source.index("today_story_retention_runtime.install(")
-        trust_install = source.index("today_trust_ui_runtime.install(")
-        assert retention_install < trust_install
+        assert "install_canonical_surface_composition(" in source
+        assert "today_story_retention_runtime.install(" not in source
 
 
 def test_retention_runtime_contains_no_streamlit_presentation() -> None:

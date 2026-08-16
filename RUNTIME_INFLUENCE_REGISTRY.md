@@ -48,8 +48,8 @@ The registry deliberately makes architectural boundaries visible rather than opt
 - Causal-intelligence sidecar output is **SHADOW**.
 - Forecast calibration is **SHADOW** until a governed feedback consumer changes future confidence/reliability.
 - Decision Intelligence v3 is **PRESENTATION_ONLY** / downstream measurement.
-- Universal Capability Graph, automatic eligibility factory, and universal paper contract remain **SHADOW** until production eligibility/execution consumes them authoritatively.
-- Canonical paper execution remains **AUTHORITATIVE** and paper-only.
+- Universal Capability Graph, automatic eligibility factory, and universal paper contract remain **SHADOW** until a production evidence owner can supply complete per-instrument point-in-time capability proofs. Provider visibility or configuration defaults are not certification evidence.
+- Canonical paper execution remains **AUTHORITATIVE** and paper-only. Provider readiness is evaluated against the exact construction: Alpaca credentials are mandatory when an Alpaca-backed instrument is present, while direct-only constructions proceed to their own provider/session/quote/liquidity controls without a false global Alpaca dependency.
 
 These statuses are expected to change only through reviewed code that also updates the contract and tests.
 

@@ -131,14 +131,23 @@ def test_environment_runtime_is_presentation_only_and_renders_html_explicitly() 
 
 def test_entrypoints_install_environment_clarity_before_surface_guard() -> None:
     route_source = Path("surface_route_isolation_runtime.py").read_text(encoding="utf-8")
+    shared_source = Path("ui_runtime_composition.py").read_text(encoding="utf-8")
     assert "import environment_mobile_clarity_runtime" not in route_source
     assert "environment_mobile_clarity_runtime.install(" not in route_source
 
+    install = shared_source.index(
+        "environment_mobile_clarity_runtime.install(environment_story_placement_refinement)"
+    )
+    route = shared_source.index("surface_route_isolation_runtime.install(")
+    assert "import environment_mobile_clarity_runtime" in shared_source
+    assert install < route
+
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
-        install = source.index(
-            "environment_mobile_clarity_runtime.install(environment_story_placement_refinement)"
-        )
-        guard = source.index("surface_route_isolation_runtime.install(")
-        assert "import environment_mobile_clarity_runtime" in source
-        assert install < guard
+        assert "install_canonical_surface_composition(" in source
+        assert "environment_mobile_clarity_runtime.install(" not in source
+
+    render_source = Path("render_app.py").read_text(encoding="utf-8")
+    composition = render_source.index("install_canonical_surface_composition(")
+    guard = render_source.index("prepare_render_surface_runtime()", composition)
+    assert composition < guard

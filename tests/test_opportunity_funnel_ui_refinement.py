@@ -109,7 +109,11 @@ def test_opportunity_scan_uses_actual_current_cycle_counts(monkeypatch) -> None:
 
 
 def test_local_and_render_entrypoints_install_refinement() -> None:
+    shared_source = Path("ui_runtime_composition.py").read_text(encoding="utf-8")
+    assert "import opportunity_funnel_ui_refinement" in shared_source
+    assert "opportunity_funnel_ui_refinement.install(app_impl)" in shared_source
+
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
-        assert "import opportunity_funnel_ui_refinement" in source
-        assert "opportunity_funnel_ui_refinement.install(app_impl)" in source
+        assert "install_canonical_surface_composition(" in source
+        assert "opportunity_funnel_ui_refinement.install(app_impl)" not in source
