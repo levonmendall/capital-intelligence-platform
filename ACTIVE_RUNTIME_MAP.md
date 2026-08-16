@@ -38,12 +38,13 @@ freshness, alert delivery, or execution conditions cannot by themselves take the
 read-only product offline.
 
 `EVIDENCE_READY` reports whether the currently required evidence/universe inputs are
-available and fresh. `DECISION_READY` additionally requires the decision boundary's
-canonical/reconciliation prerequisites. `EXECUTION_READY` retains the prior strict
-composite dependency and production-operational gates. Dependency closure is
-fail-closed: a blocked upstream layer forces all dependent downstream layers blocked.
-The report grants no authority and always records `paper_only=true`,
-`real_money_authorized=false`, and `downstream_repair_authorized=false`.
+available and fresh. `DECISION_READY` additionally requires the CIO/operator decision
+boundary to be available against that certified evidence and canonical state.
+`EXECUTION_READY` retains reconciliation, backup, dependency, and the prior strict
+composite production-operational gates. Dependency closure is fail-closed: a blocked
+upstream layer forces all dependent downstream layers blocked. The report grants no
+authority and always records `paper_only=true`, `real_money_authorized=false`, and
+`downstream_repair_authorized=false`.
 
 The API contracts are:
 
