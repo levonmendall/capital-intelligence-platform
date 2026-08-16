@@ -21,6 +21,7 @@ from operations.all_market_lane_certification import (
     AllMarketLaneCertificationError,
     install_checkpointed_market_probe,
     publish_compositional_certification,
+    validate_published_compositional_certification,
 )
 from operations.certification_input_manifest import (
     CertificationInputError,
@@ -156,6 +157,9 @@ def _provider_free_global_discovery(
         evidence_as_of=point_snapshot.plane_as_of,
         values=os.environ,
     )
+    # Prove the immutable producer snapshot before deriving a local consumer view.
+    # Missing, mismatched, or corrupted exact-release evidence remains fail-closed.
+    validate_published_compositional_certification(global_snapshot.result)
     result = view_qualified_comprehensive_discovery_snapshot(
         global_snapshot,
         held_symbols=held_symbols,
@@ -163,9 +167,9 @@ def _provider_free_global_discovery(
         excluded_symbols=excluded_symbols,
     )
     os.environ[_GLOBAL_DISCOVERY_SNAPSHOT_ENV] = global_snapshot.snapshot_id
-    # Preserve the current release-bound public certification contract without provider
-    # work. The aggregate and lane artifacts are derived solely from the immutable
-    # restored result and remain non-authorizing operational proof.
+    # Local exclusions change terminal membership and therefore require their own
+    # context-matching proof. The publisher fingerprints unbounded selected/excluded
+    # sequences incrementally, so this does not recreate the former serialization peak.
     publish_compositional_certification(result)
     return result
 

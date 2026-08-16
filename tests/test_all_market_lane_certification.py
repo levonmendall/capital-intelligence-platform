@@ -12,10 +12,12 @@ from cio import CandidateAssetClass
 from operations.all_market_lane_certification import (
     AllMarketLaneCertificationError,
     _lane_evidence_fingerprint,
+    _lane_universe_fingerprint,
     _serialize,
     checkpointed_market_probe,
     evaluate_lane_artifacts,
     publish_compositional_certification,
+    validate_published_compositional_certification,
 )
 
 
@@ -129,6 +131,32 @@ def test_common_epoch_lane_artifacts_certify_complete_universe(tmp_path: Path) -
     assert artifact["evidence_effective_at"] == EPOCH.isoformat()
     assert artifact["completed_at"] != artifact["evidence_effective_at"]
 
+    replayed = validate_published_compositional_certification(
+        result,
+        values=_values(tmp_path),
+    )
+    assert replayed == aggregate
+
+
+def test_consumer_validation_fails_closed_for_a_different_release(tmp_path: Path) -> None:
+    result = _result(
+        _lane(
+            CandidateAssetClass.FX,
+            catalog_count=1,
+            selected=(_selected("EURUSD"),),
+        )
+    )
+    publish_compositional_certification(result, values=_values(tmp_path))
+
+    with pytest.raises(
+        AllMarketLaneCertificationError,
+        match="published manifest is unavailable",
+    ):
+        validate_published_compositional_certification(
+            result,
+            values=_values(tmp_path, release="release-b"),
+        )
+
 
 def test_disk_backed_evidence_fingerprint_streams_without_relaxing_serializer(
     tmp_path: Path,
@@ -159,6 +187,39 @@ def test_disk_backed_evidence_fingerprint_streams_without_relaxing_serializer(
     )
     assert aggregate is not None
     assert aggregate["all_market_runtime_certified"] is True
+
+
+def test_streamed_universe_fingerprint_preserves_canonical_identity() -> None:
+    lane = _lane(
+        CandidateAssetClass.FX,
+        catalog_count=3,
+        selected=(_selected("EURUSD"),),
+        exclusions=(
+            ("GBPUSD", "screening_rejection"),
+            ("USDJPY", "screening_rejection"),
+        ),
+    )
+    expected = {
+        "asset_class": "fx",
+        "catalog_count": 3,
+        "selected_symbols": ["EURUSD"],
+        "exclusions": [
+            ["GBPUSD", "screening_rejection"],
+            ["USDJPY", "screening_rejection"],
+        ],
+        "source_identifiers": ["source:fx"],
+    }
+
+    import hashlib
+
+    assert _lane_universe_fingerprint("fx", lane) == hashlib.sha256(
+        json.dumps(
+            expected,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def test_incomplete_terminal_accounting_fails_closed(tmp_path: Path) -> None:

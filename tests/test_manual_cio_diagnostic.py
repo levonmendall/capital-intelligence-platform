@@ -225,6 +225,46 @@ def test_terminal_screening_metrics_survive_terminal_finalization(tmp_path, monk
     assert dict(reloaded.progress_metrics)["governed_headroom_kib"] == 41792
 
 
+def test_explicit_render_environment_records_resources_at_each_phase(
+    tmp_path, monkeypatch
+) -> None:
+    values = {
+        **_values(tmp_path),
+        "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED": "true",
+        "CAPITAL_INTELLIGENCE_ENVIRONMENT": "production",
+        "RENDER": "true",
+    }
+    monkeypatch.setattr(
+        manual_diagnostic,
+        "_terminal_screening_resource_metrics",
+        lambda _values: {
+            "rss_kib": 111000,
+            "container_current_kib": 1300000,
+            "container_limit_kib": 2097152,
+            "governed_boundary_kib": 1441792,
+            "governed_headroom_kib": 141792,
+        },
+    )
+    request_manual_cio_diagnostic(
+        requested_by="render-release:production-mapping", now=NOW, values=values
+    )
+    claimed = claim_manual_cio_diagnostic(now=NOW, values=values)
+    assert claimed is not None
+
+    progressed = record_manual_cio_diagnostic_progress(
+        "production_context_preparation", values=values
+    )
+
+    assert progressed is not None
+    assert dict(progressed.progress_metrics) == {
+        "container_current_kib": 1300000,
+        "container_limit_kib": 2097152,
+        "governed_boundary_kib": 1441792,
+        "governed_headroom_kib": 141792,
+        "rss_kib": 111000,
+    }
+
+
 def test_context_cycle_and_last_stage_survive_watchdog_style_finalization(tmp_path) -> None:
     values = {
         **_values(tmp_path),
@@ -318,3 +358,29 @@ def test_resumable_option_progress_stages_are_registered(tmp_path) -> None:
         assert updated is not None
         assert updated.progress_stage == stage
         assert dict(updated.progress_metrics) == metrics
+
+
+def test_production_context_progress_stages_are_registered(tmp_path) -> None:
+    values = {
+        **_values(tmp_path),
+        "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED": "true",
+    }
+    request_manual_cio_diagnostic(
+        requested_by="render-release:context-progress", now=NOW, values=values
+    )
+    assert claim_manual_cio_diagnostic(now=NOW, values=values) is not None
+
+    stages = (
+        "production_context_base_universe_ready",
+        "production_context_portfolio_ready",
+        "production_context_equity_discovery_ready",
+        "production_context_comprehensive_discovery_ready",
+        "production_context_universe_ready",
+        "production_context_evidence_payload_ready",
+        "production_context_evidence_built",
+        "production_context_persisted",
+    )
+    for stage in stages:
+        updated = record_manual_cio_diagnostic_progress(stage, values=values)
+        assert updated is not None
+        assert updated.progress_stage == stage

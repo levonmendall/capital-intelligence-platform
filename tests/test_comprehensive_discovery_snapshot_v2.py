@@ -9,6 +9,7 @@ from cio import CandidateAssetClass
 from operations import _comprehensive_market_discovery_v4_serial as qualified
 from operations import comprehensive_discovery_snapshot as persisted
 from operations import comprehensive_market_discovery_legacy as legacy
+from operations import qualified_comprehensive_discovery_snapshot as qualified_snapshot
 from operations.qualified_comprehensive_discovery_snapshot import (
     ComprehensiveDiscoverySnapshotError,
     load_qualified_comprehensive_discovery_snapshot,
@@ -115,6 +116,16 @@ def test_snapshot_round_trip_preserves_continuity_and_provider_factor_lineage(
     )
     assert lane.selected[0].catalog.instrument_identifier == "crypto:btc-usd"
     assert lane.selected[0].features.evidence_identifiers == ("market:btc",)
+
+
+def test_lane_restoration_releases_consumed_json_graph() -> None:
+    as_of = datetime(2026, 8, 15, 2, 0, tzinfo=timezone.utc)
+    payload = persisted._lane_payload(_result(as_of).lanes[0])
+
+    lane = qualified_snapshot._restore_lane(payload)
+
+    assert lane.selected[0].catalog.symbol == "BTCUSD"
+    assert payload == {}
 
 
 def test_consumer_view_requires_exact_portfolio_learning_scope(tmp_path: Path) -> None:

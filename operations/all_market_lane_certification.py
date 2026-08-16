@@ -368,16 +368,6 @@ def _update_serialized_sequence_digest(digest, values) -> None:
 
 
 def _lane_evidence_fingerprint(lane: object) -> str:
-    selected_evidence = []
-    for item in getattr(lane, "selected", ()):
-        selected_evidence.append(
-            {
-                "symbol": item.catalog.symbol,
-                "observed_at": _aware(item.features.observed_at).isoformat(),
-                "evidence_identifiers": list(item.features.evidence_identifiers),
-            }
-        )
-
     # Keep the canonical bytes identical to _digest({...}) for ordinary list/tuple
     # evidence while permitting replayable disk-backed iterables. The strict generic
     # serializer remains fail-closed for unsupported checkpoint values.
@@ -388,7 +378,44 @@ def _lane_evidence_fingerprint(lane: object) -> str:
         getattr(lane, "preselection_evidence", ()),
     )
     digest.update(b',"selected_evidence":')
-    _update_serialized_sequence_digest(digest, selected_evidence)
+    _update_serialized_sequence_digest(
+        digest,
+        (
+            {
+                "symbol": item.catalog.symbol,
+                "observed_at": _aware(item.features.observed_at).isoformat(),
+                "evidence_identifiers": list(item.features.evidence_identifiers),
+            }
+            for item in getattr(lane, "selected", ())
+        ),
+    )
+    digest.update(b',"source_identifiers":')
+    _update_serialized_sequence_digest(
+        digest,
+        getattr(lane, "source_identifiers", ()),
+    )
+    digest.update(b"}")
+    return digest.hexdigest()
+
+
+def _lane_universe_fingerprint(lane_name: str, lane: object) -> str:
+    """Hash terminal membership without constructing its full serialization graph."""
+
+    # json.dumps(sort_keys=True, separators=(",", ":")) emits these keys in this exact
+    # lexical order. Stream the unbounded sequences while retaining byte-for-byte
+    # compatibility with the established artifact identity.
+    digest = hashlib.sha256()
+    digest.update(b'{"asset_class":')
+    digest.update(_canonical(lane_name))
+    digest.update(b',"catalog_count":')
+    digest.update(_canonical(int(getattr(lane, "catalog_count"))))
+    digest.update(b',"exclusions":')
+    _update_serialized_sequence_digest(digest, getattr(lane, "exclusions", ()))
+    digest.update(b',"selected_symbols":')
+    _update_serialized_sequence_digest(
+        digest,
+        (item.catalog.symbol for item in getattr(lane, "selected", ())),
+    )
     digest.update(b',"source_identifiers":')
     _update_serialized_sequence_digest(
         digest,
@@ -569,10 +596,9 @@ def publish_compositional_certification(
         selected_count = len(lane.selected)
         excluded_count = len(lane.exclusions)
         terminal_count = selected_count + excluded_count
-        observations = tuple(
-            _aware(item.features.observed_at) for item in lane.selected
+        point_in_time_valid = all(
+            _aware(item.features.observed_at) <= epoch for item in lane.selected
         )
-        point_in_time_valid = all(item <= epoch for item in observations)
         stable_fields = {
             "schema_version": _SCHEMA_VERSION,
             "certification_id": certification_id,
@@ -589,17 +615,7 @@ def publish_compositional_certification(
             "terminal_accounting_complete": terminal_count == lane.catalog_count,
             "point_in_time_valid": point_in_time_valid,
             "freshness_valid": point_in_time_valid,
-            "universe_fingerprint": _digest(
-                {
-                    "asset_class": lane_name,
-                    "catalog_count": lane.catalog_count,
-                    "selected_symbols": [
-                        item.catalog.symbol for item in lane.selected
-                    ],
-                    "exclusions": _serialize(lane.exclusions),
-                    "source_identifiers": list(lane.source_identifiers),
-                }
-            ),
+            "universe_fingerprint": _lane_universe_fingerprint(lane_name, lane),
             "provider_evidence_fingerprint": _lane_evidence_fingerprint(lane),
             "discovery_manifest_fingerprint": result_fingerprint,
             "candidate_count_limit_applied": False,
@@ -661,10 +677,141 @@ def publish_compositional_certification(
     return aggregate
 
 
+def validate_published_compositional_certification(
+    result: object,
+    *,
+    values: Mapping[str, str] | None = None,
+) -> Mapping[str, object] | None:
+    """Validate the producer-owned exact-release proof without rebuilding it.
+
+    Qualified CIO consumers are deliberately read-only.  Re-serializing every selected
+    instrument and terminal exclusion in that consumer duplicates the evidence owner's
+    largest in-memory structures and can cross the service memory boundary even though
+    the exact release/epoch proof is already durable.  This path replays every immutable
+    manifest, lane-artifact, aggregate, and latest-pointer integrity check while leaving
+    the producer's evidence payload on disk.
+    """
+
+    resolved = os.environ if values is None else values
+    if not _enabled(resolved):
+        return None
+
+    release_sha = _release(resolved)
+    epoch = _aware(getattr(result, "as_of"))
+    policy_version = str(getattr(result, "policy_version"))
+    result_fingerprint = str(getattr(result, "manifest_fingerprint"))
+    lanes = tuple(getattr(result, "lanes"))
+    required_lanes = tuple(
+        lane.asset_class.value for lane in lanes if bool(lane.scheduled)
+    )
+    if not required_lanes or len(set(required_lanes)) != len(required_lanes):
+        raise AllMarketLaneCertificationError(
+            "required lane manifest must be unique and non-empty"
+        )
+
+    manifest_body = {
+        "schema_version": _SCHEMA_VERSION,
+        "release_sha": release_sha,
+        "decision_epoch": epoch.isoformat(),
+        "policy_version": policy_version,
+        "required_lanes": list(required_lanes),
+        "discovery_manifest_fingerprint": result_fingerprint,
+        "candidate_count_limit_applied": False,
+        "paper_only": True,
+        "investment_authority": False,
+        "real_money_authorized": False,
+    }
+    certification_id = _digest(manifest_body)
+    certification_dir = _root(resolved) / "certifications" / certification_id
+
+    def read_mapping(path: Path, *, label: str) -> Mapping[str, object]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise AllMarketLaneCertificationError(
+                f"published {label} is unavailable"
+            ) from error
+        if not isinstance(payload, Mapping):
+            raise AllMarketLaneCertificationError(
+                f"published {label} is malformed"
+            )
+        return payload
+
+    manifest = read_mapping(certification_dir / "manifest.json", label="manifest")
+    expected_manifest = {
+        **manifest_body,
+        "certification_id": certification_id,
+        "sha256": _digest(manifest_body),
+    }
+    if dict(manifest) != expected_manifest:
+        raise AllMarketLaneCertificationError(
+            "published compositional certification manifest mismatch"
+        )
+
+    artifacts: dict[str, Mapping[str, object]] = {}
+    for lane_name in required_lanes:
+        lane_dir = certification_dir / "lanes" / lane_name
+        pointer = read_mapping(lane_dir / "current.json", label=f"{lane_name} pointer")
+        artifact_name = pointer.get("artifact_path")
+        if (
+            not isinstance(artifact_name, str)
+            or not artifact_name
+            or "/" in artifact_name
+            or "\\" in artifact_name
+        ):
+            raise AllMarketLaneCertificationError(
+                f"published {lane_name} pointer is invalid"
+            )
+        artifact = read_mapping(
+            lane_dir / artifact_name,
+            label=f"{lane_name} artifact",
+        )
+        expected_pointer = {
+            "artifact_sha256": artifact.get("artifact_sha256"),
+            "artifact_path": artifact_name,
+            "decision_epoch": epoch.isoformat(),
+            "release_sha": release_sha,
+        }
+        if dict(pointer) != expected_pointer:
+            raise AllMarketLaneCertificationError(
+                f"published {lane_name} pointer mismatch"
+            )
+        artifacts[lane_name] = artifact
+
+    evaluated_body = evaluate_lane_artifacts(manifest, artifacts)
+    expected_aggregate = {**evaluated_body, "sha256": _digest(evaluated_body)}
+    aggregate = read_mapping(
+        certification_dir / "aggregate.json",
+        label="aggregate",
+    )
+    if dict(aggregate) != expected_aggregate:
+        raise AllMarketLaneCertificationError(
+            "published compositional certification aggregate mismatch"
+        )
+    latest = read_mapping(_root(resolved) / "latest.json", label="latest pointer")
+    expected_latest = {
+        "certification_id": certification_id,
+        "release_sha": release_sha,
+        "decision_epoch": epoch.isoformat(),
+        "all_market_runtime_certified": aggregate["all_market_runtime_certified"],
+        "aggregate_sha256": aggregate["sha256"],
+    }
+    if dict(latest) != expected_latest:
+        raise AllMarketLaneCertificationError(
+            "published compositional certification latest pointer mismatch"
+        )
+    if aggregate.get("all_market_runtime_certified") is not True:
+        raise AllMarketLaneCertificationError(
+            "published all-market lane barrier is not certified"
+        )
+    return aggregate
+
+
 __all__ = (
     "AllMarketLaneCertificationError",
     "checkpointed_market_probe",
     "evaluate_lane_artifacts",
     "install_checkpointed_market_probe",
     "publish_compositional_certification",
+    "validate_published_compositional_certification",
 )

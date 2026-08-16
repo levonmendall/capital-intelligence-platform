@@ -35,6 +35,14 @@ _PROGRESS_STAGES = frozenset(
         "qualified_evidence_consumption",
         "public_information_collection",
         "production_context_preparation",
+        "production_context_base_universe_ready",
+        "production_context_portfolio_ready",
+        "production_context_equity_discovery_ready",
+        "production_context_comprehensive_discovery_ready",
+        "production_context_universe_ready",
+        "production_context_evidence_payload_ready",
+        "production_context_evidence_built",
+        "production_context_persisted",
         "six_specialist_committee_cio_cycle",
         "paper_implementation_boundary",
         "comprehensive_catalog_discovery",
@@ -566,12 +574,20 @@ def record_manual_cio_diagnostic_progress(
 
     explicit_metrics = _normalize_progress_metrics(metrics)
     combined_metrics: dict[str, object] = dict(metrics or {})
-    # Production uses the process environment (values=None). Capture the same safe
-    # resource attribution at every production phase, including catalog/options and
-    # provider preparation. Explicit test/config mappings retain the legacy behavior
-    # except for terminal/finalization stages, which remain directly testable.
-    collect_resources = values is None or lane_stage[0].startswith(
-        "terminal_screening"
+    # Production callers may pass a resolved copy of the process environment so child
+    # processes share one exact configuration.  Treat that explicit production mapping
+    # the same as values=None; otherwise the durable diagnostic loses the very memory
+    # attribution needed to explain a watchdog termination.  Non-production test/config
+    # mappings retain the legacy behavior except for directly testable terminal stages.
+    production_runtime = (
+        str(resolved.get("CAPITAL_INTELLIGENCE_ENVIRONMENT", "")).strip().lower()
+        == "production"
+        or str(resolved.get("RENDER", "")).strip().lower() == "true"
+    )
+    collect_resources = (
+        values is None
+        or production_runtime
+        or lane_stage[0].startswith("terminal_screening")
     )
     if collect_resources:
         for name, value in _terminal_screening_resource_metrics(resolved).items():
