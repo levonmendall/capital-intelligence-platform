@@ -15,13 +15,16 @@ def test_final_storytelling_layer_owns_both_surfaces() -> None:
         encoding="utf-8"
     )
     render_source = (ROOT / "render_app.py").read_text(encoding="utf-8")
+    shared_source = (ROOT / "ui_runtime_composition.py").read_text(encoding="utf-8")
 
     assert "app_impl._render_today = render_today" in source
     assert "app_impl._render_environment = render_environment" in source
     assert "today_story_placement_refinement" not in render_source
+    assert "today_story_placement_refinement" not in shared_source
+    assert "install_canonical_surface_composition(" in render_source
     assert (
-        render_source.index("surface_content_refinement.install(app_impl)")
-        < render_source.index("environment_story_placement_refinement.install(app_impl)")
+        shared_source.index("surface_content_refinement.install(app_impl)")
+        < shared_source.index("environment_story_placement_refinement.install(app_impl)")
     )
 
 
