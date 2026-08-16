@@ -20,10 +20,8 @@ from portfolio.construction_api import (
     TradeProposal,
     TradeSide,
 )
-from portfolio.state import (
-    SQLiteCanonicalPortfolioStore,
-    ensure_canonical_portfolio_store,
-)
+from portfolio.initialization import ensure_canonical_portfolio_store
+from portfolio.state import SQLiteCanonicalPortfolioStore
 from portfolio.execution import (
     PaperExecutionOrchestrator,
     PaperExecutionPolicy,
