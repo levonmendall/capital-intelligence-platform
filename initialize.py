@@ -17,7 +17,10 @@ from portfolio.constants import (
     CANONICAL_PORTFOLIO_CODE,
     INITIAL_PAPER_CAPITAL,
 )
-from portfolio.state import ensure_canonical_portfolio_store
+from portfolio.initialization import (
+    CanonicalPortfolioInitializationError,
+    ensure_canonical_portfolio_store,
+)
 
 _PROVIDER_SECRET_ENV_VARS = (
     "CAPITAL_INTELLIGENCE_EODHD_API_TOKEN",
@@ -89,13 +92,23 @@ def main() -> None:
     settings = ApiSettings.from_env()
     scope = load_global_market_scope()
     scope.require_complete_analysis_scope()
-    result = ensure_canonical_portfolio_store(settings.portfolio_database)
+    try:
+        result = ensure_canonical_portfolio_store(settings.portfolio_database)
+    except CanonicalPortfolioInitializationError as error:
+        print(
+            "Canonical portfolio initialization failure: "
+            + json.dumps(error.as_dict(), sort_keys=True)
+        )
+        raise
     print(
-        f"Canonical portfolio {CANONICAL_PORTFOLIO_CODE} initialized at "
-        f"{settings.portfolio_database} with ${INITIAL_PAPER_CAPITAL:,.2f}."
+        "Canonical portfolio initialization: "
+        + json.dumps(result.as_dict(), sort_keys=True)
     )
-    if result.archive_path is not None:
-        print(f"Legacy paper history archived at {result.archive_path}.")
+    print(
+        f"Canonical portfolio {CANONICAL_PORTFOLIO_CODE} {result.state} at "
+        f"{settings.portfolio_database}; original capital invariant "
+        f"${INITIAL_PAPER_CAPITAL:,.2f}."
+    )
     print(
         f"Global market analysis scope validated across "
         f"{len(scope.markets)} governed market families."
