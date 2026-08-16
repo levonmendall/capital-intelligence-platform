@@ -84,6 +84,8 @@ def _truthy(value: str | None) -> bool:
 
 
 def _credentials_available() -> bool:
+    """Return whether the Alpaca-backed execution lane has paper credentials."""
+
     key_names = ("APCA_API_KEY_ID", "ALPACA_API_KEY_ID", "ALPACA_API_KEY")
     secret_names = (
         "APCA_API_SECRET_KEY",
@@ -97,11 +99,14 @@ def _credentials_available() -> bool:
 
 
 def paper_execution_mode() -> PaperExecutionMode:
-    """Resolve the paper execution mode.
+    """Resolve the paper execution mode independently of any single provider lane.
 
-    Credentials imply automatic paper operation unless the operator explicitly chooses
-    manual or disabled mode. The old Streamlit enable flag remains a compatibility
-    switch; an explicit false value disables execution.
+    The old implementation treated Alpaca credentials as a global paper-execution
+    switch. That incorrectly disabled direct FX, crypto, futures, and other installed
+    provider lanes before the exact construction could be inspected. Automatic paper
+    operation is therefore the default unless the operator explicitly selects manual
+    or disabled mode. Provider-specific readiness is validated against the exact
+    construction before any authorization event is created.
     """
 
     configured = os.getenv("CAPITAL_INTELLIGENCE_PAPER_EXECUTION_MODE")
@@ -116,11 +121,7 @@ def paper_execution_mode() -> PaperExecutionMode:
     legacy = os.getenv("CAPITAL_INTELLIGENCE_STREAMLIT_PAPER_EXECUTION_ENABLED")
     if legacy is not None and not _truthy(legacy):
         return PaperExecutionMode.DISABLED
-    return (
-        PaperExecutionMode.AUTOMATIC
-        if _credentials_available()
-        else PaperExecutionMode.DISABLED
-    )
+    return PaperExecutionMode.AUTOMATIC
 
 
 def paper_execution_enabled() -> bool:
@@ -430,13 +431,7 @@ def attempt_paper_execution(
     if resolved_mode is PaperExecutionMode.DISABLED:
         return PaperExecutionAttempt(
             state="disabled",
-            detail="Paper execution is disabled or paper credentials are unavailable.",
-            mode=resolved_mode,
-        )
-    if not _credentials_available():
-        return PaperExecutionAttempt(
-            state="disabled",
-            detail="Alpaca paper credentials are unavailable in this runtime.",
+            detail="Paper execution is explicitly disabled.",
             mode=resolved_mode,
         )
     if not isinstance(construction, Mapping) or not isinstance(briefing, Mapping):
@@ -500,16 +495,36 @@ def attempt_paper_execution(
             mode=resolved_mode,
         )
 
-    # Validate the exact implementation before creating any authorization event.
+    # Validate the exact implementation and its provider lane before creating any
+    # authorization event. An Alpaca-backed construction still fails closed without
+    # Alpaca paper credentials, while a direct-only construction proceeds to its own
+    # session, quote, liquidity, execution, and reconciliation controls.
     try:
-        validate_pilot_construction(
-            construction,
-            universe=load_execution_paper_universe(construction),
+        universe = load_execution_paper_universe(construction)
+        validate_pilot_construction(construction, universe=universe)
+        symbols = _trade_symbols(construction)
+        instrument_by_symbol = {item.symbol: item for item in universe.instruments}
+        missing = sorted(set(symbols) - set(instrument_by_symbol))
+        if missing:
+            raise ValueError(f"paper execution instruments are unavailable for {missing}")
+        requires_alpaca_credentials = any(
+            not instrument_by_symbol[symbol].uses_direct_market_provider
+            for symbol in symbols
         )
     except (OSError, TypeError, ValueError) as error:
         return PaperExecutionAttempt(
             state="blocked",
             detail=str(error),
+            attempted_at=timestamp,
+            mode=resolved_mode,
+        )
+    if requires_alpaca_credentials and not _credentials_available():
+        return PaperExecutionAttempt(
+            state="disabled",
+            detail=(
+                "Alpaca paper credentials are unavailable for an Alpaca-backed "
+                "instrument in this exact construction."
+            ),
             attempted_at=timestamp,
             mode=resolved_mode,
         )
