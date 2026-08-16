@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 
 from portfolio.constants import CANONICAL_PORTFOLIO_CODE
+from portfolio.initialization import ensure_canonical_portfolio_store
 from portfolio.state import (
     SQLiteCanonicalPortfolioStore,
-    ensure_canonical_portfolio_store,
     snapshot_details,
     snapshot_summary,
 )
@@ -30,7 +30,7 @@ def _store() -> SQLiteCanonicalPortfolioStore:
 
 
 def initialize_portfolios() -> None:
-    """Create or safely reset the sole $250,000 canonical paper portfolio."""
+    """Initialize or recover the sole $250,000 canonical paper portfolio."""
 
     ensure_canonical_portfolio_store(_portfolio_path())
 
