@@ -10,12 +10,12 @@ from operations.cio_after_close import (
     AfterCloseOpportunityReviewer,
 )
 from operations.cio_material_reassessment import ReassessmentResult
-from operations.investor_material_reassessment import (
-    InvestorMaterialCIOReassessmentEngine,
+from operations.reactive_investor_material_reassessment import (
+    ReactiveInvestorMaterialCIOReassessmentEngine,
 )
 
 
-MaterialCIOReassessmentEngine = InvestorMaterialCIOReassessmentEngine
+MaterialCIOReassessmentEngine = ReactiveInvestorMaterialCIOReassessmentEngine
 
 
 def build_default_reassessment_engine(
@@ -34,6 +34,7 @@ def build_default_reassessment_engine(
         instrument_move_threshold=settings.scheduler_instrument_move_threshold,
         company_move_threshold=settings.scheduler_company_move_threshold,
         active_universe_path=root / "active-paper-universe.json",
+        active_investor_database=settings.journal_database,
     )
 
 
