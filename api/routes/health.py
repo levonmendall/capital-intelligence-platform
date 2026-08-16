@@ -488,23 +488,36 @@ def health(settings: ApiSettings = Depends(get_settings)) -> HealthResponse:
     responses={503: {"model": ReadinessResponse}},
 )
 def ready(
+    request: Request,
     response: Response,
     resources: ApiResources = Depends(get_resources),
     authentication: AuthenticationService = Depends(get_authentication),
+    alert_store: SQLiteAlertStore = Depends(get_alert_store),
+    settings: ApiSettings = Depends(get_settings),
     operations: OperationalSettings = Depends(get_operational_settings),
 ) -> ReadinessResponse:
-    """Serving readiness used by the production restart watchdog.
+    """Production serving readiness with one-release non-production compatibility.
 
-    Investment/evidence degradation must not make the read-only product
-    unavailable. Stricter readiness remains available at /ready/composite and
-    /ready/layers.
+    In production this is the narrow watchdog/restart boundary. Outside production
+    the former dependency contract is retained temporarily so local and CI consumers
+    can migrate to `/ready/composite` without changing Render semantics.
     """
 
-    components = _serving_components(
-        resources=resources,
-        authentication=authentication,
-        operations=operations,
-    )
+    if operations.environment == "production":
+        components = _serving_components(
+            resources=resources,
+            authentication=authentication,
+            operations=operations,
+        )
+    else:
+        components = _dependency_components(
+            request=request,
+            resources=resources,
+            authentication=authentication,
+            alert_store=alert_store,
+            settings=settings,
+            operations=operations,
+        )
     ready_state = _required_ready(components)
     if not ready_state:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
