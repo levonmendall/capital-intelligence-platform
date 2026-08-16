@@ -8,6 +8,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Sequence
 
+from governance.runtime_convergence_contracts import (
+    CONVERGENCE_CONTRACTS,
+    validate_convergence_contracts,
+)
 from governance.runtime_influence_registry import ComponentLifecycle, audit_repository
 from governance.runtime_module_dispositions import MODULE_DISPOSITION_BY_NAME
 
@@ -32,14 +36,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Return non-zero when a declared capability contract is invalid, an "
-            "unreachable decision-capable module lacks an explicit disposition, or "
-            "an intentionally non-live module becomes runtime-reachable."
+            "unreachable decision-capable module lacks an explicit disposition, a "
+            "non-live module becomes runtime-reachable, or a convergence influence "
+            "contract loses its producer/consumer/runtime/test path."
         ),
     )
     return parser
 
 
-def _converged_payload(audit) -> tuple[dict[str, object], tuple[str, ...]]:
+def _converged_payload(audit, *, root: str | Path | None = None) -> tuple[dict[str, object], tuple[str, ...]]:
     """Apply explicit non-live dispositions and reject any remaining ambiguity."""
 
     payload = audit.to_dict()
@@ -66,9 +71,6 @@ def _converged_payload(audit) -> tuple[dict[str, object], tuple[str, ...]]:
             else:
                 effective = disposition.lifecycle
         elif disposition is not None:
-            # A shadow/experimental/superseded module becoming reachable is a real
-            # architecture change and must be promoted deliberately rather than
-            # silently inheriting its old non-live disposition.
             if record.reachable and disposition.lifecycle in {
                 ComponentLifecycle.SHADOW,
                 ComponentLifecycle.EXPERIMENTAL,
@@ -97,6 +99,9 @@ def _converged_payload(audit) -> tuple[dict[str, object], tuple[str, ...]]:
                 }
             )
 
+    if root is not None:
+        issues.extend(validate_convergence_contracts(root))
+
     payload["lifecycle_counts"] = dict(sorted(effective_counts.items()))
     payload["explicit_module_dispositions"] = explicit_payload
     payload["ambiguous_orphan_count"] = sum(
@@ -105,6 +110,19 @@ def _converged_payload(audit) -> tuple[dict[str, object], tuple[str, ...]]:
         if record.lifecycle is ComponentLifecycle.ORPHANED
         and record.module not in MODULE_DISPOSITION_BY_NAME
     )
+    payload["convergence_contracts"] = [
+        {
+            "name": item.name,
+            "lifecycle": item.lifecycle.value,
+            "producer": item.producer,
+            "consumers": list(item.consumers),
+            "entrypoints": list(item.entrypoints),
+            "influence_targets": list(item.influence_targets),
+            "feedback_path": list(item.feedback_path),
+            "counterfactual_tests": list(item.counterfactual_tests),
+        }
+        for item in CONVERGENCE_CONTRACTS
+    ]
     payload["base_registry_passed"] = audit.passed
     payload["convergence_issues"] = issues
     payload["passed"] = audit.passed and not issues
@@ -114,7 +132,7 @@ def _converged_payload(audit) -> tuple[dict[str, object], tuple[str, ...]]:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     audit = audit_repository(args.root)
-    payload, convergence_issues = _converged_payload(audit)
+    payload, convergence_issues = _converged_payload(audit, root=args.root)
     destination = Path(args.output)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
@@ -128,6 +146,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "unreachable_module_count": audit.unreachable_module_count,
         "ambiguous_orphan_count": payload["ambiguous_orphan_count"],
         "explicit_module_disposition_count": len(MODULE_DISPOSITION_BY_NAME),
+        "convergence_contract_count": len(CONVERGENCE_CONTRACTS),
         "lifecycle_counts": payload["lifecycle_counts"],
         "runtime_roots": list(audit.runtime_roots),
         "invalid_capabilities": [
