@@ -1,0 +1,51 @@
+name: Inspect credential-safe production diagnostic
+
+on:
+  push:
+    branches:
+      - agent/inspect-portfolio-init-detail
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read guarded public diagnostic detail
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+
+          url = "https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json"
+          request = urllib.request.Request(
+              url,
+              headers={
+                  "Accept": "application/json",
+                  "User-Agent": "capital-intelligence-safe-diagnostic-inspector/1.0",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=20) as response:
+              payload = json.loads(response.read().decode("utf-8"))
+          if not isinstance(payload, dict):
+              raise SystemExit("public diagnostic is not an object")
+          if payload.get("credential_safe") is not True:
+              raise SystemExit("refusing to print a diagnostic not marked credential_safe")
+          if payload.get("paper_only") is not True or payload.get("real_money_authorized") is not False:
+              raise SystemExit("public diagnostic governance flags are invalid")
+          allowed = {
+              "active_release": payload.get("active_release"),
+              "request_id": payload.get("request_id"),
+              "requested_at": payload.get("requested_at"),
+              "completed_at": payload.get("completed_at"),
+              "state": payload.get("state"),
+              "stage": payload.get("stage"),
+              "detail": str(payload.get("detail") or "")[:2000],
+              "credential_safe": True,
+              "paper_only": True,
+              "real_money_authorized": False,
+          }
+          print(json.dumps(allowed, sort_keys=True))
+          PY
