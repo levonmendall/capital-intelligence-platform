@@ -134,14 +134,18 @@ def test_driver_helpers_are_consumed_by_canonical_environment_owner() -> None:
     clarity_source = Path("environment_mobile_clarity_runtime.py").read_text(
         encoding="utf-8"
     )
+    shared_source = Path("ui_runtime_composition.py").read_text(encoding="utf-8")
     assert "import environment_driver_education_runtime as driver_runtime" in clarity_source
     assert "driver_runtime._driver_rows" in clarity_source
     assert "driver_runtime._cross_asset_rows" in clarity_source
 
+    assert "import environment_mobile_clarity_runtime" in shared_source
+    assert "environment_mobile_clarity_runtime.install(" in shared_source
+    assert "environment_driver_education_runtime.install(" not in shared_source
+
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
-        assert "import environment_mobile_clarity_runtime" in source
-        assert "environment_mobile_clarity_runtime.install(" in source
+        assert "install_canonical_surface_composition(" in source
         assert "environment_driver_education_runtime.install(" not in source
 
 
