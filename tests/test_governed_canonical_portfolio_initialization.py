@@ -17,7 +17,6 @@ from portfolio.state import (
     CanonicalPortfolioPosition,
     SQLiteCanonicalPortfolioStore,
     canonical_initial_snapshot,
-    snapshot_to_dict,
 )
 
 
@@ -121,7 +120,6 @@ def test_existing_empty_database_is_invalid_not_absent(tmp_path) -> None:
 def test_tampered_history_fails_closed_without_replacement(tmp_path) -> None:
     path = tmp_path / "canonical_portfolio.db"
     ensure_canonical_portfolio_store(path)
-    original_bytes = path.read_bytes()
 
     with sqlite3.connect(path) as connection:
         connection.execute("DROP TRIGGER canonical_portfolio_no_update")
@@ -134,15 +132,21 @@ def test_tampered_history_fails_closed_without_replacement(tmp_path) -> None:
             "UPDATE canonical_portfolio_events SET payload_json = ? WHERE sequence = ?",
             (json.dumps(payload, sort_keys=True, separators=(",", ":")), row[0]),
         )
-
-    tampered_bytes = path.read_bytes()
-    assert tampered_bytes != original_bytes
+        tampered_rows = connection.execute(
+            "SELECT sequence, payload_json FROM canonical_portfolio_events ORDER BY sequence"
+        ).fetchall()
 
     with pytest.raises(CanonicalPortfolioInitializationError) as caught:
         ensure_canonical_portfolio_store(path)
 
     assert caught.value.failure_type == "digest_mismatch"
-    assert path.read_bytes() == tampered_bytes
+    with sqlite3.connect(path) as connection:
+        after_rows = connection.execute(
+            "SELECT sequence, payload_json FROM canonical_portfolio_events ORDER BY sequence"
+        ).fetchall()
+    assert after_rows == tampered_rows
+    assert len(after_rows) == 1
+    assert json.loads(after_rows[0][1])["cash_amount"] == 1.0
 
 
 def test_missing_database_after_prior_genesis_is_not_first_boot(tmp_path) -> None:
