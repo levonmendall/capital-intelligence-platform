@@ -15,6 +15,7 @@ from portfolio.state import (
     CanonicalPortfolioSnapshot,
     SQLiteCanonicalPortfolioStore,
 )
+import production_context_publication_governed as governed
 from production_context_publication_runtime import prepare_production_context_for_cycle
 from screening import SQLiteFullUniverseScreeningStore
 
@@ -218,9 +219,38 @@ def test_publisher_reports_ordered_context_progress(tmp_path) -> None:
         "production_context_comprehensive_discovery_ready",
         "production_context_universe_ready",
         "production_context_evidence_payload_ready",
+        "production_context_portfolio_finalized",
         "production_context_evidence_built",
         "production_context_persisted",
     ]
+
+
+def test_cash_only_context_builds_candidate_evidence_once(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    result = object()
+    tentative = SimpleNamespace(positions=())
+    progress: list[str] = []
+
+    monkeypatch.setattr(
+        governed,
+        "build_paper_evidence",
+        lambda **kwargs: calls.append(kwargs) or result,
+    )
+
+    marked, actual = governed._build_marked_paper_evidence(
+        universe=object(),
+        decision_as_of=datetime(2026, 8, 16, 22, 0, tzinfo=timezone.utc),
+        cash_expected_return=0.04,
+        tentative=tentative,
+        evidence_payload={},
+        progress_probe=progress.append,
+    )
+
+    assert marked is tentative
+    assert actual is result
+    assert len(calls) == 1
+    assert calls[0]["portfolio"] is tentative
+    assert progress == ["production_context_evidence_built"]
 
 
 def test_next_day_cycle_certifies_every_holding_and_routes_holding_review(tmp_path) -> None:
