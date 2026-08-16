@@ -15,6 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
+from operations.evidence_prequalification_attribution import (
+    failed_prequalification_attribution,
+)
+
 _SCHEMA = "release-evidence-prequalification.v1"
 _ALLOWED_STATES = frozenset({"pending", "in_progress", "completed", "failed"})
 _ALLOWED_STAGES = frozenset(
@@ -83,6 +87,14 @@ def write_release_evidence_prequalification(
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError("prequalification metrics must be nonnegative integers")
         normalized_metrics[name.strip()] = value
+
+    failure_context: Mapping[str, object] | None = None
+    if normalized_state == "failed":
+        failure_context = failed_prequalification_attribution(
+            detail=detail,
+            metrics=normalized_metrics,
+        ).as_dict()
+
     material: dict[str, object] = {
         "schema_version": _SCHEMA,
         "prequalification_id": prequalification_id or uuid.uuid4().hex,
@@ -95,6 +107,7 @@ def write_release_evidence_prequalification(
         "detail": str(detail)[:1000],
         "metrics": normalized_metrics,
         "generation_id": str(generation_id or ""),
+        "failure_context": failure_context,
         "credential_safe": True,
         "paper_only": True,
         "real_money_authorized": False,
