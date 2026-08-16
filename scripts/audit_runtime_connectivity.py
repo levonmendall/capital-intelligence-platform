@@ -14,9 +14,16 @@ from governance.runtime_convergence_contracts import (
 )
 from governance.runtime_influence_registry import ComponentLifecycle, audit_repository
 from governance.runtime_module_dispositions import MODULE_DISPOSITION_BY_NAME
+from operations.runtime_connectivity_dispositions import (
+    CONNECTIVITY_CONTROL_DISPOSITION_BY_NAME,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
+ALL_MODULE_DISPOSITIONS = {
+    **MODULE_DISPOSITION_BY_NAME,
+    **CONNECTIVITY_CONTROL_DISPOSITION_BY_NAME,
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,13 +61,13 @@ def _converged_payload(audit, *, root: str | Path | None = None) -> tuple[dict[s
 
     actual_modules = {item.module for item in audit.modules}
     issues: list[str] = []
-    stale = sorted(set(MODULE_DISPOSITION_BY_NAME) - actual_modules)
+    stale = sorted(set(ALL_MODULE_DISPOSITIONS) - actual_modules)
     issues.extend(f"stale explicit module disposition: {name}" for name in stale)
 
     effective_counts: Counter[str] = Counter()
     explicit_payload: list[dict[str, object]] = []
     for record, item in zip(audit.modules, modules, strict=True):
-        disposition = MODULE_DISPOSITION_BY_NAME.get(record.module)
+        disposition = ALL_MODULE_DISPOSITIONS.get(record.module)
         effective = record.lifecycle
         if record.lifecycle is ComponentLifecycle.ORPHANED:
             if disposition is None:
@@ -108,7 +115,7 @@ def _converged_payload(audit, *, root: str | Path | None = None) -> tuple[dict[s
         1
         for record in audit.modules
         if record.lifecycle is ComponentLifecycle.ORPHANED
-        and record.module not in MODULE_DISPOSITION_BY_NAME
+        and record.module not in ALL_MODULE_DISPOSITIONS
     )
     payload["convergence_contracts"] = [
         {
@@ -145,7 +152,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "reachable_module_count": audit.reachable_module_count,
         "unreachable_module_count": audit.unreachable_module_count,
         "ambiguous_orphan_count": payload["ambiguous_orphan_count"],
-        "explicit_module_disposition_count": len(MODULE_DISPOSITION_BY_NAME),
+        "explicit_module_disposition_count": len(ALL_MODULE_DISPOSITIONS),
         "convergence_contract_count": len(CONVERGENCE_CONTRACTS),
         "lifecycle_counts": payload["lifecycle_counts"],
         "runtime_roots": list(audit.runtime_roots),
