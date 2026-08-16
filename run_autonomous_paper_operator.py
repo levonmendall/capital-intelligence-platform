@@ -43,7 +43,7 @@ from paper_execution_runtime import (
     attempt_paper_execution,
     paper_execution_mode,
 )
-from portfolio.state import ensure_canonical_portfolio_store
+from portfolio.initialization import ensure_canonical_portfolio_store
 from production_context_publication_runtime import prepare_production_context_for_cycle
 from production_context_state_resilience import (
     invalidate_reuse_preserving_success,

@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIAGNOSTIC = ROOT / "run_manual_cio_diagnostic.py"
+DIAGNOSTIC_CORE = ROOT / "_manual_cio_diagnostic_core.py"
 
 
 def _top_level_import_roots(path: Path) -> set[str]:
@@ -20,6 +21,7 @@ def _top_level_import_roots(path: Path) -> set[str]:
 
 
 def test_manual_diagnostic_keeps_heavy_application_imports_out_of_process_startup() -> None:
+    # The public run_* adapter is the process entrypoint and must remain lightweight.
     roots = _top_level_import_roots(DIAGNOSTIC)
     forbidden = {
         "api",
@@ -37,7 +39,9 @@ def test_manual_diagnostic_keeps_heavy_application_imports_out_of_process_startu
 
 
 def test_manual_diagnostic_exposes_memory_telemetry_across_provider_free_phases() -> None:
-    source = DIAGNOSTIC.read_text(encoding="utf-8")
+    # Memory telemetry belongs to the private implementation core; the public adapter only
+    # selects the governed initializer and then delegates to this unchanged implementation.
+    source = DIAGNOSTIC_CORE.read_text(encoding="utf-8")
     required_phases = {
         '"process_start"',
         '"before_canonical_portfolio_initialization"',
@@ -57,7 +61,8 @@ def test_manual_diagnostic_exposes_memory_telemetry_across_provider_free_phases(
 
 
 def test_worker_is_built_only_after_production_context_is_ready() -> None:
-    source = DIAGNOSTIC.read_text(encoding="utf-8")
+    # Ordering is an implementation invariant, so inspect the private implementation core.
+    source = DIAGNOSTIC_CORE.read_text(encoding="utf-8")
     context_call = source.index("context = context_preparer")
     readiness_gate = source.index("if not context.ready", context_call)
     worker_load = source.index("_load_worker_dependency()", readiness_gate)
