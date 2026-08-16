@@ -130,6 +130,16 @@ def _with_release_prequalification(
                     and value >= 0
                 }
 
+    raw_failure_context = status.get("failure_context")
+    failure_context: dict[str, object] | None = None
+    if isinstance(raw_failure_context, Mapping):
+        failure_context = dict(raw_failure_context)
+        # Reference-readiness progress is separately integrity-bound and may identify a
+        # narrower component than the child exception. Keep both rather than replacing
+        # the child failure stage.
+        failure_context["component_stage"] = component_stage
+        failure_context["component_metrics"] = component_metrics
+
     # "prequalifying" is intentionally not a CIO active state. It keeps the verifier
     # polling while ensuring the core verifier does not adopt this identity as the later
     # manual CIO request identity.
@@ -151,6 +161,22 @@ def _with_release_prequalification(
             "prequalification_generation_id": status.get("generation_id"),
             "prequalification_state": state,
             "prequalification_active": state in {"pending", "in_progress", "completed"},
+            "prequalification_failure_context": failure_context,
+            "prequalification_failure_reason": (
+                None if failure_context is None else failure_context.get("reason")
+            ),
+            "prequalification_failure_capability": (
+                None if failure_context is None else failure_context.get("capability")
+            ),
+            "prequalification_failure_stage": (
+                None if failure_context is None else failure_context.get("failure_stage")
+            ),
+            "prequalification_failure_provider": (
+                None if failure_context is None else failure_context.get("provider")
+            ),
+            "prequalification_failure_error_type": (
+                None if failure_context is None else failure_context.get("error_type")
+            ),
             "ready": False,
             "context_cycle_matches": False,
             "context_attempt_cycle_matches": False,
