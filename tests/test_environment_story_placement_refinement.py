@@ -67,10 +67,15 @@ def test_module_replaces_repetitive_process_grid_with_distinct_storytelling() ->
 
 
 def test_local_and_render_entrypoints_use_only_final_storytelling_layer() -> None:
+    shared_source = Path("ui_runtime_composition.py").read_text(encoding="utf-8")
+    assert "import environment_story_placement_refinement" in shared_source
+    assert "today_story_placement_refinement" not in shared_source
+    assert shared_source.index("surface_content_refinement.install(app_impl)") < shared_source.index(
+        "environment_story_placement_refinement.install(app_impl)"
+    )
+
     for path in (Path("app.py"), Path("render_app.py")):
         source = path.read_text(encoding="utf-8")
-        assert "import environment_story_placement_refinement" in source
+        assert "install_canonical_surface_composition(" in source
         assert "today_story_placement_refinement" not in source
-        assert source.index("surface_content_refinement.install(app_impl)") < source.index(
-            "environment_story_placement_refinement.install(app_impl)"
-        )
+        assert "environment_story_placement_refinement.install(app_impl)" not in source
