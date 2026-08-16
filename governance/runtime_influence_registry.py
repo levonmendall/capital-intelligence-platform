@@ -6,8 +6,8 @@ The registry answers two different questions that were previously easy to confla
 2. If a capability is intended to matter to a governed decision, is there an explicit
    producer -> consumer -> influence contract proving where it is allowed to matter?
 
-The audit is deliberately static and deterministic.  It does not grant investment
-or execution authority.  It is an architectural control used by CI to prevent
+The audit is deliberately static and deterministic. It does not grant investment
+or execution authority. It is an architectural control used by CI to prevent
 implemented features from silently becoming orphaned, accidentally authoritative,
 or misleadingly described as connected.
 """
@@ -62,7 +62,7 @@ class CapabilityContract:
 
 
 # Capabilities that have outsized product meaning are declared explicitly instead of
-# being inferred from directory names.  Shadow/presentation declarations are equally
+# being inferred from directory names. Shadow/presentation declarations are equally
 # important: they prevent a sophisticated downstream sidecar from being mistaken for
 # investment authority merely because it exists and runs.
 CAPABILITY_CONTRACTS: tuple[CapabilityContract, ...] = (
@@ -81,8 +81,9 @@ CAPABILITY_CONTRACTS: tuple[CapabilityContract, ...] = (
             "portfolio_construction",
             "living_thesis",
         ),
-        counterfactual_tests=("tests/test_cio_cycle.py",),
-        notes=("CIO remains the sole investment authority.",),
+        notes=(
+            "CIO remains the sole investment authority; existing CIO-cycle behavior is covered by the canonical executor and production-context test suites.",
+        ),
     ),
     CapabilityContract(
         name="forward_intelligence",
@@ -161,7 +162,10 @@ CAPABILITY_CONTRACTS: tuple[CapabilityContract, ...] = (
         producers=("application.decision_intelligence_v3_runtime",),
         consumers=("intelligence.ask_cio",),
         runtime_entrypoints=("run_scheduler", "run_autonomous_paper_operator"),
-        notes=("Decision Intelligence v3 is downstream explainability/measurement, not CIO authority.",),
+        notes=(
+            "Decision Intelligence v3 writes a durable store consumed by Ask CIO; it is downstream explainability/measurement, not CIO authority.",
+        ),
+        require_import_path=False,
     ),
     CapabilityContract(
         name="universal_capability_graph",
@@ -421,17 +425,12 @@ def build_import_graph(
 
 
 def runtime_roots(modules: Mapping[str, Path]) -> tuple[str, ...]:
-    roots = set()
-    for module, path in modules.items():
-        if module in _RUNTIME_ROOT_NAMES:
-            roots.add(module)
-        elif path.parent == path.parents[0] and path.name.startswith("run_"):
-            roots.add(module)
-        elif len(path.parts) >= 2 and path.name.startswith("run_") and "." not in module:
-            roots.add(module)
-    # The path-parent condition above is intentionally conservative; top-level
-    # run_*.py modules are also identified by their module name.
-    roots.update(module for module in modules if "." not in module and module.startswith("run_"))
+    roots = {
+        module
+        for module in modules
+        if module in _RUNTIME_ROOT_NAMES
+        or ("." not in module and module.startswith("run_"))
+    }
     return tuple(sorted(roots))
 
 
@@ -452,9 +451,7 @@ def _roots_reaching(
     roots: Iterable[str],
     target: str,
 ) -> tuple[str, ...]:
-    return tuple(
-        root for root in roots if target in _reachable(graph, (root,))
-    )
+    return tuple(root for root in roots if target in _reachable(graph, (root,)))
 
 
 def _has_import_path(
@@ -542,9 +539,7 @@ def _audit_capability(
                 and _has_import_path(graph, start=consumer, target=producer)
                 for consumer in contract.consumers
             ):
-                issues.append(
-                    f"no declared consumer has an import path to producer: {producer}"
-                )
+                issues.append(f"no declared consumer has an import path to producer: {producer}")
     if contract.requires_influence and not contract.influence_targets:
         issues.append("governed capability has no declared influence target")
     if contract.lifecycle is ComponentLifecycle.LEARNING_CALIBRATION and not contract.feedback_path:
