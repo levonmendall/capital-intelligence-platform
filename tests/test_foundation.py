@@ -7,7 +7,11 @@ from intelligence.pipeline import build_allocation, run_intelligence
 from intelligence.provider import load_sample_snapshot
 from intelligence.regime import determine_regime
 from portfolio.constants import CANONICAL_CONSTRAINT_PROFILE, CANONICAL_PORTFOLIO_NAME
-from portfolio.state import CanonicalPortfolioSnapshot, SQLiteCanonicalPortfolioStore
+from portfolio.state import (
+    CanonicalImplementationEvent,
+    CanonicalPortfolioSnapshot,
+    SQLiteCanonicalPortfolioStore,
+)
 
 
 def test_platform_seeds_only_the_canonical_portfolio(tmp_path, monkeypatch) -> None:
@@ -22,13 +26,28 @@ def test_platform_seeds_only_the_canonical_portfolio(tmp_path, monkeypatch) -> N
 
 def test_total_virtual_capital_comes_from_canonical_state(tmp_path, monkeypatch) -> None:
     path = tmp_path / "canonical.db"
+    as_of = datetime(2026, 7, 27, tzinfo=timezone.utc)
     SQLiteCanonicalPortfolioStore(path).append(
         CanonicalPortfolioSnapshot(
             identifier="portfolio:COMPOUNDING:1", portfolio_code="COMPOUNDING",
             display_name=CANONICAL_PORTFOLIO_NAME,
             constraint_profile=CANONICAL_CONSTRAINT_PROFILE,
-            as_of=datetime(2026, 7, 27, tzinfo=timezone.utc),
+            as_of=as_of,
             starting_capital=250000, cash_amount=200000, positions=(),
+            implementation_events=(
+                CanonicalImplementationEvent(
+                    identifier="test:non-trade-loss",
+                    occurred_at=as_of,
+                    action="NON_TRADE_PNL",
+                    symbol=None,
+                    quantity=0,
+                    price=0,
+                    gross_amount=0,
+                    non_trade_pnl_base=-50000,
+                    rationale="Reconciled fixture loss",
+                    source_identifier="test",
+                ),
+            ),
             source_identifiers=("test",),
         )
     )
@@ -37,6 +56,7 @@ def test_total_virtual_capital_comes_from_canonical_state(tmp_path, monkeypatch)
     assert totals["starting_capital"] == 250000
     assert totals["cash"] == 200000
     assert totals["nav"] == 200000
+    assert totals["accounting_residual"] == 0
 
 
 def test_sample_snapshot_loads() -> None:
