@@ -28,17 +28,25 @@ def test_render_entrypoint_preserves_portfolio_refinement_contract() -> None:
     """Keep Render on the same final Portfolio renderer as the canonical UI."""
 
     source = (ROOT / "render_app.py").read_text(encoding="utf-8")
-    assert "import portfolio_ui_refinement" in source
+    shared_source = (ROOT / "ui_runtime_composition.py").read_text(encoding="utf-8")
+    assert "from ui_runtime_composition import install_canonical_surface_composition" in source
     assert "portfolio_first_ui_refinement" not in source
     assert "_portfolio_first_sync_renderer" not in source
 
     main_source = source[source.index("def main() -> None:") :]
-    install_call = "portfolio_ui_refinement.install(app_impl)"
+    install_call = "install_canonical_surface_composition("
     prepare_call = "prepare_render_surface_runtime()"
     create_call = "create_streamlit_application("
     assert install_call in main_source
+    assert "include_history_refinement=True" in main_source
     assert main_source.index(install_call) < main_source.index(prepare_call)
     assert main_source.index(prepare_call) < main_source.index(create_call)
+
+    assert "portfolio_ui_refinement.install(app_impl)" in shared_source
+    assert "history_ui_refinement.install(app_impl)" in shared_source
+    assert shared_source.index("portfolio_ui_refinement.install(app_impl)") < shared_source.index(
+        "history_ui_refinement.install(app_impl)"
+    )
 
     runtime_source = source[
         source.index("def prepare_render_surface_runtime() -> None:") :
