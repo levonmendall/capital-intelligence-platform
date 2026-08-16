@@ -221,6 +221,9 @@ def test_publisher_reports_ordered_context_progress(tmp_path) -> None:
         "production_context_evidence_payload_ready",
         "production_context_portfolio_finalized",
         "production_context_evidence_built",
+        "production_context_transient_evidence_released",
+        "production_context_eligible_universe_persisted",
+        "production_context_active_universe_persisted",
         "production_context_persisted",
     ]
 

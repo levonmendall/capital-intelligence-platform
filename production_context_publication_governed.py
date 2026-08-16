@@ -935,6 +935,14 @@ def prepare_governed_production_context_for_cycle(
             evidence_payload=evidence_payload,
             progress_probe=progress_probe,
         )
+        # Raw bars, quotes, company facts, and provider payloads are transient build
+        # inputs. Keeping that complete graph alive while serializing the active
+        # universe can multiply the all-market peak without adding any evidence to the
+        # durable publication.
+        del evidence_payload
+        gc.collect()
+        if progress_probe is not None:
+            progress_probe("production_context_transient_evidence_released")
         if already_persisted:
             if marked != tentative:
                 raise ProductionPaperEvidenceError(
@@ -1010,6 +1018,10 @@ def prepare_governed_production_context_for_cycle(
         ),
     )
     eligible_store.append(eligible)
+    if progress_probe is not None:
+        progress_probe("production_context_eligible_universe_persisted")
+    del eligible
+    gc.collect()
     try:
         write_active_paper_universe(
             universe,
@@ -1024,6 +1036,8 @@ def prepare_governed_production_context_for_cycle(
             detail=f"Active paper execution universe could not be persisted: {error}",
             instrument_count=len(universe.instruments),
         )
+    if progress_probe is not None:
+        progress_probe("production_context_active_universe_persisted")
 
     cash_weight = round(marked.cash_amount / marked.nav, 8)
     holding_by_symbol = {
