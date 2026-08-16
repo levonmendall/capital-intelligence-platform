@@ -33,7 +33,7 @@ def _restore_preselection_evidence(
         )
     restored: list[tuple[str, tuple[str, ...]]] = []
     seen: set[str] = set()
-    for item in raw:
+    for index, item in enumerate(raw):
         if not isinstance(item, list) or len(item) != 2:
             raise ComprehensiveDiscoverySnapshotError(
                 "snapshot preselection evidence entry is invalid"
@@ -53,6 +53,10 @@ def _restore_preselection_evidence(
         restored.append(
             (symbol, tuple(str(identifier) for identifier in identifiers))
         )
+        # Snapshot integrity is established before restoration. Drop each raw row after
+        # conversion so the qualified domain view does not overlap the entire JSON object
+        # graph in a memory-bounded CIO consumer.
+        raw[index] = None
     return tuple(restored)
 
 
@@ -68,7 +72,7 @@ def _restore_lane(payload: Mapping[str, object]) -> _qualified.DiscoveryLaneResu
         raise ComprehensiveDiscoverySnapshotError("snapshot lane collections are invalid")
 
     selected = []
-    for item in raw_selected:
+    for index, item in enumerate(raw_selected):
         if (
             not isinstance(item, Mapping)
             or not isinstance(item.get("catalog"), Mapping)
@@ -84,21 +88,26 @@ def _restore_lane(payload: Mapping[str, object]) -> _qualified.DiscoveryLaneResu
                 retained_for_state=bool(item.get("retained_for_state", False)),
             )
         )
+        raw_selected[index] = None
 
     exclusions: list[tuple[str, str]] = []
-    for item in raw_exclusions:
+    for index, item in enumerate(raw_exclusions):
         if not isinstance(item, list) or len(item) != 2:
             raise ComprehensiveDiscoverySnapshotError("snapshot exclusion is invalid")
         exclusions.append((str(item[0]), str(item[1])))
+        raw_exclusions[index] = None
+
+    sources = tuple(str(item) for item in raw_sources)
+    raw_sources.clear()
 
     try:
-        return _qualified.DiscoveryLaneResult(
+        restored = _qualified.DiscoveryLaneResult(
             asset_class=CandidateAssetClass(str(payload["asset_class"])),
             catalog_count=int(payload["catalog_count"]),
             deep_analyzed_count=int(payload["deep_analyzed_count"]),
             selected=tuple(selected),
             exclusions=tuple(exclusions),
-            source_identifiers=tuple(str(item) for item in raw_sources),
+            source_identifiers=sources,
             scheduled=bool(payload.get("scheduled", True)),
             schedule_reason=(
                 None
@@ -111,6 +120,9 @@ def _restore_lane(payload: Mapping[str, object]) -> _qualified.DiscoveryLaneResu
             cutoff_observations=(),
             cutoff_outcomes=(),
         )
+        if isinstance(payload, dict):
+            payload.clear()
+        return restored
     except (KeyError, TypeError, ValueError) as error:
         raise ComprehensiveDiscoverySnapshotError("snapshot lane is invalid") from error
 

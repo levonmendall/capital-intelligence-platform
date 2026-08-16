@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -68,3 +70,22 @@ def test_worker_is_built_only_after_production_context_is_ready() -> None:
     worker_load = source.index("_load_worker_dependency()", readiness_gate)
     worker_build = source.index("worker = build_worker(settings)", worker_load)
     assert context_call < readiness_gate < worker_load < worker_build
+
+
+def test_importing_api_config_does_not_load_full_api_route_graph() -> None:
+    completed = subprocess.run(
+        (
+            sys.executable,
+            "-c",
+            (
+                "import sys; from api.config import ApiSettings; "
+                "assert ApiSettings.__name__ == 'ApiSettings'; "
+                "assert 'api.app' not in sys.modules; "
+                "assert not any(name.startswith('api.routes.') for name in sys.modules)"
+            ),
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr

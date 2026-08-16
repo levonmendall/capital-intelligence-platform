@@ -87,6 +87,7 @@ STATE_SCHEMA = "production-context-publication-state.v5-comprehensive-markets"
 
 EquityDiscoveryProbe = Callable[..., EquityDiscoveryResult]
 ComprehensiveDiscoveryProbe = Callable[..., ComprehensiveMarketDiscoveryResult]
+ProgressProbe = Callable[[str], None]
 
 
 def _blocked(
@@ -443,6 +444,7 @@ def prepare_governed_production_context_for_cycle(
     comprehensive_discovery_probe: ComprehensiveDiscoveryProbe | None = None,
     comprehensive_discovery_required: bool | None = None,
     clock: Clock | None = None,
+    progress_probe: ProgressProbe | None = None,
 ) -> ProductionContextPublicationResult:
     """Publish cross-asset wrappers plus dynamically discovered company equities."""
 
@@ -453,6 +455,8 @@ def prepare_governed_production_context_for_cycle(
     )
     base_universe = load_free_paper_pilot_universe(universe_path)
     universe = base_universe
+    if progress_probe is not None:
+        progress_probe("production_context_base_universe_ready")
     reused = _reuse(
         settings=settings,
         cycle_key=cycle_key,
@@ -627,6 +631,8 @@ def prepare_governed_production_context_for_cycle(
         tracked_symbols = outcome_store.unresolved_symbols(as_of=decision_as_of)
     except (OSError, TypeError, ValueError):
         tracked_symbols = ()
+    if progress_probe is not None:
+        progress_probe("production_context_portfolio_ready")
 
     discovery: EquityDiscoveryResult | None = None
     base_symbols = set(base_universe.symbol_map)
@@ -652,6 +658,8 @@ def prepare_governed_production_context_for_cycle(
             ),
             instrument_count=len(base_universe.instruments),
         )
+    if progress_probe is not None:
+        progress_probe("production_context_equity_discovery_ready")
 
     fully_injected_publication = all(
         item is not None
@@ -707,6 +715,8 @@ def prepare_governed_production_context_for_cycle(
             ),
             instrument_count=len(base_universe.instruments) + len(discovered),
         )
+    if progress_probe is not None:
+        progress_probe("production_context_comprehensive_discovery_ready")
 
     comprehensive_instruments = comprehensive.instruments_for_holdings(held_symbols)
     comprehensive_scope_state = str(
@@ -766,6 +776,8 @@ def prepare_governed_production_context_for_cycle(
             ),
             instrument_count=len(universe.instruments),
         )
+    if progress_probe is not None:
+        progress_probe("production_context_universe_ready")
 
     cash_expected_return = round(max(-1.0, min(1.0, cash_value / 100.0)), 8)
     try:
@@ -784,6 +796,8 @@ def prepare_governed_production_context_for_cycle(
             detail=f"Cross-market evidence collection failed: {type(error).__name__}: {error}",
             instrument_count=len(universe.instruments),
         )
+    if progress_probe is not None:
+        progress_probe("production_context_evidence_payload_ready")
 
     completed_at = _aware(
         (clock or (lambda: datetime.now(tz=scheduled.tzinfo)))(),
@@ -830,6 +844,8 @@ def prepare_governed_production_context_for_cycle(
             detail=f"Canonical portfolio finalization failed: {type(error).__name__}: {error}",
             instrument_count=len(universe.instruments),
         )
+    if progress_probe is not None:
+        progress_probe("production_context_evidence_built")
 
     outcome_resolution_count = 0
     if discovery is not None:
@@ -1244,6 +1260,8 @@ def prepare_governed_production_context_for_cycle(
         "real_money_authorized": False,
     }
     _atomic_json(_state_path(settings), state_payload)
+    if progress_probe is not None:
+        progress_probe("production_context_persisted")
 
     return ProductionContextPublicationResult(
         state="ready",

@@ -191,6 +191,7 @@ def prepare_production_context_for_cycle(
     evidence_probe=None,
     equity_discovery_probe=None,
     clock: Clock | None = None,
+    progress_probe: Callable[[str], None] | None = None,
 ) -> ProductionContextPublicationResult:
     """Publish one governed context using already-qualified evidence in production."""
 
@@ -228,6 +229,7 @@ def prepare_production_context_for_cycle(
         evidence_probe=evidence_probe,
         equity_discovery_probe=equity_discovery_probe,
         clock=clock,
+        progress_probe=progress_probe,
     )
     _advance_screening_if_ready(result)
     return result

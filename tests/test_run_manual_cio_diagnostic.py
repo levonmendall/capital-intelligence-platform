@@ -14,6 +14,7 @@ def test_disabled_diagnostic_does_not_touch_runtime(monkeypatch, tmp_path: Path)
         "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_ON_RELEASE": "false",
     }
 
+    diagnostic._load_coordination_dependencies()
     monkeypatch.setattr(
         diagnostic.ApiSettings,
         "from_env",

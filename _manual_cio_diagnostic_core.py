@@ -527,7 +527,14 @@ def run_diagnostic_once(
         context_preparer = recording_context_preparer(
             prepare_production_context_for_cycle
         )
-        context = context_preparer(settings=settings, scheduled_for=now)
+        context = context_preparer(
+            settings=settings,
+            scheduled_for=now,
+            progress_probe=lambda stage: record_manual_cio_diagnostic_progress(
+                stage,
+                values=resolved,
+            ),
+        )
         cycle_key = context.cycle_key
         _record_memory_phase("after_production_context_preparation")
         if not context.ready:

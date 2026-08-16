@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from cio import CandidateAssetClass
+from operations import comprehensive_market_discovery as comprehensive
 from operations.comprehensive_market_discovery import (
     ComprehensiveMarketDiscoveryError,
     ComprehensiveMarketDiscoveryConfig,
@@ -216,3 +217,71 @@ def test_complete_discovery_still_fails_closed_for_empty_required_lane():
             catalog_probe=catalog,
             market_probe=_market,
         )
+
+
+def test_production_consumer_validates_existing_compositional_proof(
+    monkeypatch, tmp_path
+) -> None:
+    observed: dict[str, object] = {}
+    point_snapshot = SimpleNamespace(plane_as_of=AS_OF)
+    producer_result = SimpleNamespace(identifier="producer-global-discovery:test")
+    qualified_snapshot = SimpleNamespace(
+        snapshot_id="global-snapshot:test",
+        result=producer_result,
+    )
+    result = SimpleNamespace(identifier="global-discovery:test")
+    active_globals = comprehensive.discover_comprehensive_markets.__globals__
+
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_ENVIRONMENT", "production")
+    monkeypatch.setenv(
+        "CAPITAL_INTELLIGENCE_CONTINUOUS_EVIDENCE_PLANE_ENABLED", "true"
+    )
+    monkeypatch.setitem(
+        active_globals,
+        "_point_in_time_snapshot_barrier",
+        lambda _as_of: point_snapshot,
+    )
+    monkeypatch.setitem(
+        active_globals,
+        "load_qualified_comprehensive_discovery_snapshot",
+        lambda **kwargs: observed.setdefault("load", kwargs) and qualified_snapshot,
+    )
+    monkeypatch.setitem(
+        active_globals,
+        "view_qualified_comprehensive_discovery_snapshot",
+        lambda snapshot, **kwargs: (
+            observed.update({"snapshot": snapshot, "view": kwargs}) or result
+        ),
+    )
+    monkeypatch.setitem(
+        active_globals,
+        "validate_published_compositional_certification",
+        lambda value: observed.setdefault("validated", value),
+    )
+    monkeypatch.setitem(
+        active_globals,
+        "publish_compositional_certification",
+        lambda value: observed.setdefault("published", value),
+    )
+
+    actual = comprehensive.discover_comprehensive_markets(
+        as_of=AS_OF,
+        held_symbols=("HELD",),
+        tracked_symbols=("TRACKED",),
+        excluded_symbols=("BASE",),
+    )
+
+    assert actual is result
+    assert observed["load"] == {
+        "evidence_as_of": AS_OF,
+        "values": comprehensive.os.environ,
+    }
+    assert observed["snapshot"] is qualified_snapshot
+    assert observed["view"] == {
+        "held_symbols": ("HELD",),
+        "tracked_symbols": ("TRACKED",),
+        "excluded_symbols": ("BASE",),
+    }
+    assert observed["validated"] is producer_result
+    assert observed["published"] is result

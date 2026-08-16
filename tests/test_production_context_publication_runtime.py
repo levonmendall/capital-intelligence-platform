@@ -189,6 +189,40 @@ def test_publisher_creates_candidates_and_executable_cio_construction(tmp_path) 
     assert cycle.briefing.decision_identifier
 
 
+def test_publisher_reports_ordered_context_progress(tmp_path) -> None:
+    settings = _settings(tmp_path)
+    scheduled_for = datetime(2026, 7, 29, 11, 0, tzinfo=timezone.utc)
+    decision_time = datetime(2026, 7, 29, 20, 45, tzinfo=timezone.utc)
+    _bootstrap_cash_portfolio(
+        settings,
+        as_of=datetime(2026, 7, 29, 20, 0, tzinfo=timezone.utc),
+    )
+    progress: list[str] = []
+
+    result = prepare_production_context_for_cycle(
+        settings=settings,
+        scheduled_for=scheduled_for,
+        readiness_probe=lambda _universe: _readiness(decision_time),
+        cash_probe=lambda: SimpleNamespace(date="2026-07-28", value=4.25),
+        evidence_probe=lambda _universe, _as_of: _evidence(decision_time),
+        equity_discovery_probe=_equity_discovery_probe,
+        clock=lambda: decision_time,
+        progress_probe=progress.append,
+    )
+
+    assert result.ready
+    assert progress == [
+        "production_context_base_universe_ready",
+        "production_context_portfolio_ready",
+        "production_context_equity_discovery_ready",
+        "production_context_comprehensive_discovery_ready",
+        "production_context_universe_ready",
+        "production_context_evidence_payload_ready",
+        "production_context_evidence_built",
+        "production_context_persisted",
+    ]
+
+
 def test_next_day_cycle_certifies_every_holding_and_routes_holding_review(tmp_path) -> None:
     settings = _settings(tmp_path)
     first_schedule = datetime(2026, 7, 29, 11, 0, tzinfo=timezone.utc)
