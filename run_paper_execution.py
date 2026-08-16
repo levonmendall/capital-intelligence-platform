@@ -1,4 +1,9 @@
-"""Run paper-only implementation of a canonical portfolio construction result."""
+"""Run legacy paper-execution rehearsal without canonical portfolio mutation.
+
+Canonical portfolio writes belong to the governed multi-asset execution path. This
+compatibility CLI may still produce append-only paper execution and journal evidence,
+but it cannot publish detached simulation state into canonical portfolio history.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +26,6 @@ from portfolio.construction_api import (
     TradeSide,
 )
 from portfolio.initialization import ensure_canonical_portfolio_store
-from portfolio.state import SQLiteCanonicalPortfolioStore
 from portfolio.execution import (
     PaperExecutionOrchestrator,
     PaperExecutionPolicy,
@@ -106,7 +110,7 @@ def _construction(value: Mapping[str, Any]) -> PortfolioConstructionResult:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--construction", required=True, help="Serialized canonical construction JSON")
-    parser.add_argument("--portfolio", required=True, help="Paper portfolio state JSON")
+    parser.add_argument("--portfolio", required=True, help="Detached paper rehearsal state JSON")
     parser.add_argument("--decision-identifier", required=True)
     parser.add_argument("--session-provider", required=True, help="module:factory returning a MarketSessionProvider")
     parser.add_argument("--quote-provider", required=True, help="module:factory returning a PaperQuoteProvider")
@@ -144,6 +148,9 @@ def main(argv: list[str] | None = None) -> int:
         journal = (
             None if args.without_journal else SQLiteCIOJournal(args.journal_db)
         )
+        # Validate the canonical state boundary before any rehearsal, but deliberately
+        # withhold canonical-write authority. The authoritative multi-asset executor is
+        # the only paper execution runtime permitted to append canonical snapshots.
         ensure_canonical_portfolio_store(args.portfolio_db, as_of=as_of)
         orchestrator = PaperExecutionOrchestrator(
             session_provider=_factory(args.session_provider),
@@ -153,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.eligible_universe_db
             ),
             journal=journal,
-            portfolio_store=SQLiteCanonicalPortfolioStore(args.portfolio_db),
+            portfolio_store=None,
             portfolio_code=args.portfolio_code,
             policy=PaperExecutionPolicy(
                 maximum_quote_age_minutes=args.maximum_quote_age_minutes,
@@ -173,7 +180,10 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, TypeError, RuntimeError) as error:
         print(json.dumps({"status": "error", "error": str(error)}, sort_keys=True))
         return 4
-    print(json.dumps(batch_to_dict(batch), sort_keys=True))
+    payload = batch_to_dict(batch)
+    payload["canonical_portfolio_mutated"] = False
+    payload["canonical_execution_authority"] = "run_multi_asset_paper_execution"
+    print(json.dumps(payload, sort_keys=True))
     if args.require_complete and batch.status not in {PaperExecutionStatus.COMPLETED, PaperExecutionStatus.NO_ACTION}:
         return 3
     return 0
