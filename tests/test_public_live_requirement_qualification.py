@@ -184,6 +184,70 @@ def test_maintainer_reuses_qualified_group_and_acquires_only_missing_group(
     )
 
 
+def test_maintainer_checkpoints_later_groups_before_aggregate_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    now = datetime.now(timezone.utc)
+    catalog = SimpleNamespace(
+        identifier="catalog",
+        sources=(
+            _source("alpha", "macro-rates"),
+            _source("beta", "policy-events"),
+        ),
+    )
+    attempted: list[str] = []
+
+    monkeypatch.setattr(qualification, "_catalog", lambda _values: catalog)
+    monkeypatch.setattr(
+        qualification,
+        "required_public_live_requirement_groups",
+        lambda _values: ("macro-rates", "policy-events"),
+    )
+    monkeypatch.setattr(
+        qualification,
+        "_component_compatibility",
+        lambda _catalog, group: f"compatibility:{group}",
+    )
+    monkeypatch.setattr(
+        qualification._ledger,
+        "load_qualified_component",
+        lambda **_kwargs: None,
+    )
+
+    def acquire(*, requirement_group: str, **_kwargs):
+        attempted.append(requirement_group)
+        if requirement_group == "macro-rates":
+            raise qualification._plane.ContinuousEvidencePlaneError(
+                "required public live information is not qualified; "
+                "required_information=macro-rates; provider=fred; "
+                "fallback_providers_attempted=oecd"
+            )
+        return {
+            "qualified": True,
+            "component_id": "component-policy",
+            "provider": "beta",
+            "fallback_providers_attempted": [],
+        }
+
+    monkeypatch.setattr(
+        qualification,
+        "_qualify_and_checkpoint_requirement",
+        acquire,
+    )
+
+    with pytest.raises(
+        qualification._plane.ContinuousEvidencePlaneError,
+        match="failed_required_information=macro-rates",
+    ):
+        qualification.maintain_required_public_live_requirements(
+            as_of=now,
+            values={"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)},
+        )
+
+    assert attempted == ["macro-rates", "policy-events"]
+
+
 def test_stale_checkpoint_is_not_reused(
     tmp_path,
 ) -> None:
