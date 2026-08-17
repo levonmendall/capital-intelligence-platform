@@ -64,18 +64,45 @@ def test_supervised_component_hard_timeout_returns_control() -> None:
     assert elapsed < 2.0
 
 
-def test_reference_binding_prepares_only_missing_components(
+def test_reference_binding_reuses_original_cutoff_without_acquisition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cutoff = datetime.now(timezone.utc)
+    cutoff = datetime(2026, 1, 1, tzinfo=timezone.utc)
     manifest = SimpleNamespace(manifest_id="manifest-qualified")
-    calls = {"bind": 0, "prepare": 0, "supervise": 0}
+    calls = {"bind": 0}
 
     def bind(_values, *, now):
         assert now == cutoff
         calls["bind"] += 1
+        return manifest
+
+    monkeypatch.setattr(maintenance, "bind_reference_manifest_from_components", bind)
+
+    result, effective_cutoff = maintenance._bound_or_prepare_reference_manifest(
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test"},
+        preparation_cutoff=cutoff,
+    )
+
+    assert result is manifest
+    assert effective_cutoff == cutoff
+    assert calls == {"bind": 1}
+
+
+def test_reference_binding_advances_epoch_after_missing_component_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cutoff = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    manifest = SimpleNamespace(manifest_id="manifest-qualified")
+    calls = {"bind": 0, "prepare": 0, "supervise": 0}
+    bind_timestamps: list[datetime] = []
+
+    def bind(_values, *, now):
+        bind_timestamps.append(now)
+        calls["bind"] += 1
         if calls["bind"] == 1:
+            assert now == cutoff
             raise maintenance.ReferenceReadinessError("missing")
+        assert now > cutoff
         return manifest
 
     def prepare(_values):
@@ -103,13 +130,54 @@ def test_reference_binding_prepares_only_missing_components(
     monkeypatch.setattr(maintenance._plane, "_default_reference_preparer", prepare)
     monkeypatch.setattr(maintenance, "_run_supervised", supervise)
 
-    result = maintenance._bound_or_prepare_reference_manifest(
+    result, effective_cutoff = maintenance._bound_or_prepare_reference_manifest(
         {"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test"},
         preparation_cutoff=cutoff,
     )
 
     assert result is manifest
+    assert effective_cutoff == bind_timestamps[1]
+    assert effective_cutoff > cutoff
     assert calls == {"bind": 2, "prepare": 1, "supervise": 1}
+
+
+def test_maintenance_uses_advanced_reference_cutoff_for_remaining_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    requested = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    resumed = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+    advanced = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+    values = {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    manifest = SimpleNamespace(manifest_id="manifest-qualified")
+    expected = object()
+
+    monkeypatch.setattr(maintenance._plane, "evidence_plane_enabled", lambda _values: True)
+    monkeypatch.setattr(maintenance._plane, "load_latest_evidence_plane", lambda _values: None)
+    monkeypatch.setattr(maintenance, "_latest_payload", lambda _values: None)
+    monkeypatch.setattr(
+        maintenance,
+        "_resumable_evidence_cutoff",
+        lambda _values, *, requested: resumed,
+    )
+
+    def bind(_values, *, preparation_cutoff):
+        assert preparation_cutoff == resumed
+        return manifest, advanced
+
+    def refresh(*, requested, values, reference_manifest):
+        assert requested == advanced
+        assert values == {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+        assert reference_manifest is manifest
+        return expected
+
+    monkeypatch.setattr(maintenance, "_bound_or_prepare_reference_manifest", bind)
+    monkeypatch.setattr(maintenance, "_legacy_refresh", refresh)
+
+    assert maintenance.maintain_component_qualified_evidence_plane(
+        as_of=requested,
+        values=values,
+    ) is expected
 
 
 def test_legacy_refresh_uses_supervised_provider_boundaries(

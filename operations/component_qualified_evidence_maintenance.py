@@ -603,12 +603,21 @@ def _bound_or_prepare_reference_manifest(
     *,
     preparation_cutoff: datetime,
 ):
+    """Bind reference components and return their truthful effective evidence cutoff.
+
+    Reused reference components can remain bound to the caller's resumable cutoff. If
+    acquisition is required, the child writes components at its real capture time. The
+    remaining evidence plane must therefore advance to a post-acquisition cutoff rather
+    than backdating those newly captured components into the older epoch.
+    """
+
     mutable = dict(values)
     try:
-        return bind_reference_manifest_from_components(
+        manifest = bind_reference_manifest_from_components(
             mutable,
             now=preparation_cutoff,
         )
+        return manifest, preparation_cutoff
     except ReferenceReadinessError:
         pass
 
@@ -620,15 +629,19 @@ def _bound_or_prepare_reference_manifest(
         default_timeout=_DEFAULT_REFERENCE_TIMEOUT_SECONDS,
         return_value=False,
     )
+
+    rebound_cutoff = max(preparation_cutoff, datetime.now(timezone.utc))
     try:
-        return bind_reference_manifest_from_components(
+        manifest = bind_reference_manifest_from_components(
             mutable,
-            now=preparation_cutoff,
+            now=rebound_cutoff,
         )
     except ReferenceReadinessError as error:
         raise _plane.ContinuousEvidencePlaneError(
-            "reference readiness acquisition completed without bindable qualified components"
+            "reference readiness acquisition completed without bindable qualified components "
+            f"at advanced cutoff: {error}"
         ) from error
+    return manifest, rebound_cutoff
 
 
 def maintain_component_qualified_evidence_plane(
@@ -705,7 +718,7 @@ def maintain_component_qualified_evidence_plane(
             )
 
     preparation_cutoff = _resumable_evidence_cutoff(resolved, requested=requested)
-    manifest = _bound_or_prepare_reference_manifest(
+    manifest, preparation_cutoff = _bound_or_prepare_reference_manifest(
         resolved,
         preparation_cutoff=preparation_cutoff,
     )
