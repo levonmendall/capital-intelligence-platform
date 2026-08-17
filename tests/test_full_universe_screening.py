@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import screening.orchestration as screening_orchestration
+
 from cio import CandidateDecisionRecord, EvidenceQuality
 from cio.persistence import CIOJournalEventType, SQLiteCIOJournal
 from data import (
@@ -420,6 +422,35 @@ def test_integrity_hashes_large_payloads_in_byte_identical_chunks(
 
     assert event.content_hash == legacy_hash
     assert store.verify_integrity() is True
+
+
+def test_integrity_releases_sqlite_file_cache_during_payload_scan(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(SQLiteFullUniverseScreeningStore, "_HASH_CHUNK_BYTES", 32)
+    monkeypatch.setattr(
+        SQLiteFullUniverseScreeningStore,
+        "_FILE_CACHE_RELEASE_BYTES",
+        64,
+    )
+    store = SQLiteFullUniverseScreeningStore(tmp_path / "screening.db")
+    store.append(
+        event_identifier="screening:file-cache:start",
+        cycle_identifier="screening-cycle:file-cache",
+        event_type=ScreeningEventType.CYCLE_STARTED,
+        occurred_at=AS_OF,
+        payload={"large": "x" * 257},
+    )
+    advised_paths = []
+    monkeypatch.setattr(
+        screening_orchestration,
+        "_advise_file_cache_dontneed",
+        lambda path: advised_paths.append(path),
+    )
+
+    assert store.verify_integrity() is True
+    assert len(advised_paths) >= 4
+    assert set(advised_paths) == {store.path}
 
 
 def test_complete_cycle_publishes_only_after_every_constituent(tmp_path) -> None:

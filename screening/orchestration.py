@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -100,6 +101,29 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
         )
     except (TypeError, ValueError) as error:
         raise ValueError("screening payload must be finite JSON") from error
+
+
+def _advise_file_cache_dontneed(path: Path) -> None:
+    """Release clean SQLite pages after a bounded sequential integrity pass."""
+
+    posix_fadvise = getattr(os, "posix_fadvise", None)
+    advice = getattr(os, "POSIX_FADV_DONTNEED", None)
+    if posix_fadvise is None or advice is None or not path.exists():
+        return
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        try:
+            posix_fadvise(descriptor, 0, 0, advice)
+        except OSError:
+            pass
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -411,6 +435,8 @@ class SQLiteFullUniverseScreeningStore:
     _TABLE = "full_universe_screening_events"
     _GENESIS_HASH = "0" * 64
     _HASH_CHUNK_BYTES = 1024 * 1024
+    _FILE_CACHE_RELEASE_BYTES = 16 * 1024 * 1024
+    _SQLITE_CACHE_KIB = 2048
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -420,6 +446,9 @@ class SQLiteFullUniverseScreeningStore:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA temp_store = FILE")
+        connection.execute(f"PRAGMA cache_size = -{self._SQLITE_CACHE_KIB}")
+        connection.execute("PRAGMA mmap_size = 0")
         return connection
 
     def _initialize(self) -> None:
@@ -789,25 +818,33 @@ class SQLiteFullUniverseScreeningStore:
         *,
         sequence: int,
     ) -> Iterator[bytes]:
-        with connection.blobopen(
-            self._TABLE,
-            "payload_json",
-            sequence,
-            readonly=True,
-        ) as payload:
-            payload_size = len(payload)
-            read_size = 0
-            while True:
-                chunk = payload.read(self._HASH_CHUNK_BYTES)
-                if not chunk:
-                    break
-                value = bytes(chunk)
-                read_size += len(value)
-                yield value
-            if read_size != payload_size:
-                raise FullUniverseScreeningError(
-                    "screening event payload size changed during integrity verification"
-                )
+        try:
+            with connection.blobopen(
+                self._TABLE,
+                "payload_json",
+                sequence,
+                readonly=True,
+            ) as payload:
+                payload_size = len(payload)
+                read_size = 0
+                bytes_since_cache_release = 0
+                while True:
+                    chunk = payload.read(self._HASH_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    value = bytes(chunk)
+                    read_size += len(value)
+                    bytes_since_cache_release += len(value)
+                    yield value
+                    if bytes_since_cache_release >= self._FILE_CACHE_RELEASE_BYTES:
+                        _advise_file_cache_dontneed(self.path)
+                        bytes_since_cache_release = 0
+                if read_size != payload_size:
+                    raise FullUniverseScreeningError(
+                        "screening event payload size changed during integrity verification"
+                    )
+        finally:
+            _advise_file_cache_dontneed(self.path)
 
     @staticmethod
     def _event(row: sqlite3.Row) -> ScreeningEvent:
