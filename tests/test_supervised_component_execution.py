@@ -93,7 +93,7 @@ def test_reference_binding_advances_epoch_after_missing_component_acquisition(
 ) -> None:
     cutoff = datetime(2026, 1, 1, tzinfo=timezone.utc)
     manifest = SimpleNamespace(manifest_id="manifest-qualified")
-    calls = {"bind": 0, "prepare": 0, "supervise": 0}
+    calls = {"bind": 0, "prepare": 0}
     bind_timestamps: list[datetime] = []
 
     def bind(_values, *, now):
@@ -109,26 +109,15 @@ def test_reference_binding_advances_epoch_after_missing_component_acquisition(
         calls["prepare"] += 1
         return SimpleNamespace(manifest_id="prepared")
 
-    def supervise(
-        _values,
-        *,
-        component,
-        operation,
-        timeout_env,
-        default_timeout,
-        return_value,
-    ):
-        assert component == "reference-readiness"
-        assert timeout_env == maintenance._REFERENCE_TIMEOUT_ENV
-        assert default_timeout == maintenance._DEFAULT_REFERENCE_TIMEOUT_SECONDS
-        assert return_value is False
-        calls["supervise"] += 1
-        operation()
-        return None
-
     monkeypatch.setattr(maintenance, "bind_reference_manifest_from_components", bind)
-    monkeypatch.setattr(maintenance._plane, "_default_reference_preparer", prepare)
-    monkeypatch.setattr(maintenance, "_run_supervised", supervise)
+    monkeypatch.setattr(maintenance, "prepare_supervised_reference_prequalification", prepare)
+    monkeypatch.setattr(
+        maintenance,
+        "_run_supervised",
+        lambda *_args, **_kwargs: pytest.fail(
+            "aggregate reference supervisor must not wrap component supervisors"
+        ),
+    )
 
     result, effective_cutoff = maintenance._bound_or_prepare_reference_manifest(
         {"CAPITAL_INTELLIGENCE_DATA_DIR": "/tmp/test"},
@@ -138,7 +127,7 @@ def test_reference_binding_advances_epoch_after_missing_component_acquisition(
     assert result is manifest
     assert effective_cutoff == bind_timestamps[1]
     assert effective_cutoff > cutoff
-    assert calls == {"bind": 2, "prepare": 1, "supervise": 1}
+    assert calls == {"bind": 2, "prepare": 1}
 
 
 def test_maintenance_uses_advanced_reference_cutoff_for_remaining_evidence(
