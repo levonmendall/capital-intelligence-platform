@@ -1108,13 +1108,13 @@ def prepare_governed_production_context_for_cycle(
         outcome_summary = outcome_store.summary()
     except (OSError, TypeError, ValueError):
         outcome_summary = None
-    candidate_by_instrument = {
-        item.instrument.instrument_id: item for item in build_result.candidates
-    }
-    exclusion_by_instrument = dict(build_result.exclusions)
-    instrument_count = len(universe.instruments)
-    candidate_count = len(build_result.candidates)
-    exclusion_count = len(build_result.exclusions)
+    screening_instruments = universe.instruments
+    screening_candidates = build_result.candidates
+    screening_exclusions = build_result.exclusions
+    universe_schema_version = universe.schema_version
+    instrument_count = len(screening_instruments)
+    candidate_count = len(screening_candidates)
+    exclusion_count = len(screening_exclusions)
     if candidate_count + exclusion_count != instrument_count:
         raise ProductionPaperEvidenceError(
             "candidate and exclusion evidence do not reconcile the active universe"
@@ -1129,6 +1129,80 @@ def prepare_governed_production_context_for_cycle(
         ),
         "opportunity_context_snapshot": opportunity_context_snapshot,
     }
+    all_candidate_evidence = build_result.candidate_evidence_by_identifier
+    qualified_identifiers = tuple(
+        item.candidate.identifier for item in queue.ranked
+    )
+    qualified_candidate_evidence = tuple(
+        all_candidate_evidence[identifier]
+        for identifier in qualified_identifiers
+    )
+    holding_evidence = build_result.holding_evidence
+    holding_evidence_count = len(holding_evidence)
+    capability_policy_payload = capability_authority.coverage_payload()
+    baseline_opportunity_cost = competitive.baseline_opportunity_cost
+    candidate_alternative_count = len(
+        competitive.candidate_alternative_identifiers
+    )
+    comprehensive_identifier = comprehensive.identifier
+    comprehensive_manifest_fingerprint = comprehensive.manifest_fingerprint
+    comprehensive_lane_counts = {
+        lane.asset_class.value: {
+            "scheduled": lane.scheduled,
+            "schedule_reason": lane.schedule_reason,
+            "catalog": lane.catalog_count,
+            "deep": lane.deep_analyzed_count,
+            "selected": len(lane.selected),
+        }
+        for lane in comprehensive.lanes
+    }
+    equity_discovery_payload = (
+        {"state": "unavailable", "selected_count": 0}
+        if discovery is None
+        else {
+            "state": "available",
+            "identifier": discovery.identifier,
+            "screened_asset_count": discovery.screened_asset_count,
+            "snapshot_covered_count": discovery.snapshot_covered_count,
+            "selected_count": len(discovery.selected),
+        }
+    )
+
+    # Only the compact terminal-screening inputs remain live while the append-only
+    # stream is written. Releasing the completed discovery, candidate, and policy
+    # graphs here prevents their all-market footprint from overlapping SQLite event
+    # serialization.
+    del (
+        all_candidate_evidence,
+        alternatives,
+        base_universe,
+        baseline_opportunity_context,
+        build_result,
+        capability_authority,
+        comprehensive,
+        comprehensive_instruments,
+        competitive,
+        discovered,
+        discovery,
+        holding_by_symbol,
+        marked,
+        opportunity_context,
+        opportunity_context_snapshot,
+        opportunity_engine,
+        queue,
+        tentative,
+        universe,
+    )
+    gc.collect()
+    if progress_probe is not None:
+        progress_probe("production_context_screening_graph_released")
+
+    candidate_by_instrument = {
+        item.instrument.instrument_id: item for item in screening_candidates
+    }
+    exclusion_by_instrument = dict(screening_exclusions)
+    del screening_candidates, screening_exclusions
+
     start_payload = {
         "cycle_identifier": screening_cycle_identifier,
         "scheduled_for": scheduled.isoformat(),
@@ -1140,7 +1214,7 @@ def prepare_governed_production_context_for_cycle(
         "catalog_identifier": catalog_identifier,
         "security_master_snapshot_identifier": master_snapshot_identifier,
         "universe_snapshot_identifier": eligible_identifier,
-        "policy_version": universe.schema_version,
+        "policy_version": universe_schema_version,
         "opportunity_context_identifier": opportunity_identifier,
         "eligible_instrument_count": instrument_count,
         "structural_exclusion_count": exclusion_count,
@@ -1156,7 +1230,7 @@ def prepare_governed_production_context_for_cycle(
     )
 
     def screening_result_events():
-        for instrument in universe.instruments:
+        for instrument in screening_instruments:
             candidate = candidate_by_instrument.get(
                 instrument.instrument_identifier
             )
@@ -1200,6 +1274,8 @@ def prepare_governed_production_context_for_cycle(
         )
     if progress_probe is not None:
         progress_probe("production_context_screening_results_persisted")
+    del candidate_by_instrument, exclusion_by_instrument, screening_instruments
+    gc.collect()
 
     cash_lineage = GovernedEvidenceLineage(
         certification_identifier=f"certification:fred:dgs10:{cash_date}",
@@ -1210,73 +1286,6 @@ def prepare_governed_production_context_for_cycle(
         source_versions=(("FRED:DGS10", cash_date),),
         model_versions=(("cash_expected_return", "dgs10-yield.v1"),),
     )
-    all_candidate_evidence = build_result.candidate_evidence_by_identifier
-    qualified_identifiers = tuple(
-        item.candidate.identifier for item in queue.ranked
-    )
-    qualified_candidate_evidence = tuple(
-        all_candidate_evidence[identifier]
-        for identifier in qualified_identifiers
-    )
-    holding_evidence = build_result.holding_evidence
-    holding_evidence_count = len(holding_evidence)
-    capability_policy_payload = capability_authority.coverage_payload()
-    baseline_opportunity_cost = competitive.baseline_opportunity_cost
-    candidate_alternative_count = len(
-        competitive.candidate_alternative_identifiers
-    )
-    comprehensive_identifier = comprehensive.identifier
-    comprehensive_manifest_fingerprint = comprehensive.manifest_fingerprint
-    comprehensive_lane_counts = {
-        lane.asset_class.value: {
-            "scheduled": lane.scheduled,
-            "schedule_reason": lane.schedule_reason,
-            "catalog": lane.catalog_count,
-            "deep": lane.deep_analyzed_count,
-            "selected": len(lane.selected),
-        }
-        for lane in comprehensive.lanes
-    }
-    equity_discovery_payload = (
-        {"state": "unavailable", "selected_count": 0}
-        if discovery is None
-        else {
-            "state": "available",
-            "identifier": discovery.identifier,
-            "screened_asset_count": discovery.screened_asset_count,
-            "snapshot_covered_count": discovery.snapshot_covered_count,
-            "selected_count": len(discovery.selected),
-        }
-    )
-
-    # Individual terminal results are now durable. Release the complete discovery,
-    # universe, raw exclusion, candidate, and policy graphs before reconstructing the
-    # single immutable publication payload from the append-only event stream.
-    del (
-        all_candidate_evidence,
-        alternatives,
-        base_universe,
-        baseline_opportunity_context,
-        build_result,
-        candidate_by_instrument,
-        capability_authority,
-        comprehensive,
-        comprehensive_instruments,
-        competitive,
-        discovered,
-        discovery,
-        exclusion_by_instrument,
-        marked,
-        opportunity_context,
-        opportunity_engine,
-        queue,
-        tentative,
-        universe,
-    )
-    gc.collect()
-    if progress_probe is not None:
-        progress_probe("production_context_screening_graph_released")
-
     candidate_payloads: list[Mapping[str, object]] = []
     exclusion_payloads: list[Mapping[str, object]] = []
     for result in screening_store.iter_instrument_results(
