@@ -10,6 +10,7 @@
       "independence_group": "gdelt-news-discovery",
       "enabled": true,
       "required": true,
+      "requirement_group": "gdelt-global-news-discovery",
       "credential_environment_variables": [],
       "parameters": {
         "query": "(economy OR markets OR stocks OR bonds OR oil OR inflation OR central bank OR earnings OR commodities OR sanctions OR conflict OR ceasefire OR trade OR cyber OR weather)",
@@ -55,6 +56,65 @@
       "usage_rights_identifier": "metadata-and-links-only.no-article-body-storage",
       "limitations": [
         "Discovery metadata only; article text is not copied or stored.",
+        "Must be corroborated by an original or independently licensed source before CIO reliance."
+      ]
+    },
+    {
+      "identifier": "gdelt-global-context-discovery",
+      "source_name": "GDELT Context 2.0 news discovery metadata",
+      "parser": "gdelt_doc",
+      "endpoint": "https://api.gdeltproject.org/api/v2/context/context",
+      "source_type": "alternative",
+      "independence_group": "gdelt-news-discovery",
+      "enabled": true,
+      "required": true,
+      "requirement_group": "gdelt-global-news-discovery",
+      "credential_environment_variables": [],
+      "parameters": {
+        "query": "(economy OR markets OR stocks OR bonds OR oil OR inflation OR central bank OR earnings OR commodities OR sanctions OR conflict OR ceasefire OR trade OR cyber OR weather)",
+        "mode": "artlist",
+        "format": "json",
+        "maxrecords": 200,
+        "sort": "HybridRel",
+        "timespan": "24h"
+      },
+      "headers": {},
+      "maximum_records": 200,
+      "domains": [
+        "current_events_news",
+        "geopolitical_security",
+        "government_policy_regulation",
+        "public_health",
+        "cybersecurity_incidents",
+        "supply_chain_shipping_inventories",
+        "weather_climate_disasters",
+        "social_search_sentiment"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "earnings",
+        "credit",
+        "supply",
+        "demand",
+        "commodity",
+        "currency",
+        "volatility",
+        "regulation",
+        "geopolitical",
+        "cyber",
+        "climate_weather",
+        "sentiment"
+      ],
+      "reliability": 0.55,
+      "relevance": 0.7,
+      "materiality": 0.45,
+      "license_identifier": "GDELT-public-api-metadata",
+      "usage_rights_identifier": "metadata-and-links-only.no-article-body-storage",
+      "limitations": [
+        "Bounded same-provider alternative when the GDELT DOC API is rate limited.",
+        "Only title, URL, domain, language, and observation time metadata are normalized; response context is not stored.",
         "Must be corroborated by an original or independently licensed source before CIO reliance."
       ]
     },
@@ -505,6 +565,7 @@
       "independence_group": "cisa-kev",
       "enabled": true,
       "required": true,
+      "requirement_group": "cisa-known-exploited-vulnerabilities",
       "credential_environment_variables": [],
       "parameters": {},
       "headers": {
@@ -527,6 +588,42 @@
       "license_identifier": "CISA-KEV-public-data",
       "usage_rights_identifier": "official-public-catalog.internal-analysis",
       "limitations": [
+        "Vulnerability presence is not proof that a portfolio company has been compromised."
+      ]
+    },
+    {
+      "identifier": "cisa-kev-github-mirror",
+      "source_name": "CISA GitHub Known Exploited Vulnerabilities mirror",
+      "parser": "cisa_kev",
+      "endpoint": "https://raw.githubusercontent.com/cisagov/kev-data/develop/known_exploited_vulnerabilities.json",
+      "source_type": "official",
+      "independence_group": "cisa-kev",
+      "enabled": true,
+      "required": true,
+      "requirement_group": "cisa-known-exploited-vulnerabilities",
+      "credential_environment_variables": [],
+      "parameters": {},
+      "headers": {
+        "Accept": "application/json"
+      },
+      "maximum_records": 500,
+      "domains": [
+        "cybersecurity_incidents",
+        "current_events_news"
+      ],
+      "impact_channels": [
+        "operational",
+        "cyber",
+        "counterparty",
+        "volatility"
+      ],
+      "reliability": 0.99,
+      "relevance": 0.7,
+      "materiality": 0.65,
+      "license_identifier": "CISA-KEV-CC0-public-data",
+      "usage_rights_identifier": "official-cisagov-mirror.internal-analysis",
+      "limitations": [
+        "CISA states that this official-organization mirror is synchronized shortly after the canonical cisa.gov catalog, typically within minutes.",
         "Vulnerability presence is not proof that a portfolio company has been compromised."
       ]
     },

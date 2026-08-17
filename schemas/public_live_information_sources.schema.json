@@ -88,6 +88,7 @@
         "independence_group": {"type": "string", "minLength": 1},
         "enabled": {"type": "boolean"},
         "required": {"type": "boolean"},
+        "requirement_group": {"type": "string", "minLength": 1},
         "credential_environment_variables": {
           "type": "array",
           "uniqueItems": true,

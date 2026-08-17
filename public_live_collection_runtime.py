@@ -40,6 +40,8 @@ class PublicLiveCollectionResult:
     next_due_at: datetime | None = None
     provider_validation_path: Path | None = None
     provider_validation_state: str | None = None
+    failed_required_source_identifiers: tuple[str, ...] = ()
+    collection_scope: str = "full"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -62,6 +64,10 @@ class PublicLiveCollectionResult:
                 else str(self.provider_validation_path)
             ),
             "provider_validation_state": self.provider_validation_state,
+            "failed_required_source_identifiers": list(
+                self.failed_required_source_identifiers
+            ),
+            "collection_scope": self.collection_scope,
             "decision_evidence_authority": False,
             "candidate_authority": False,
             "ranking_authority": False,
@@ -189,7 +195,33 @@ def _prior_completed_checkpoint(previous: Mapping[str, Any]) -> dict[str, object
         value = previous.get(name)
         if isinstance(value, str) and value.strip():
             checkpoint[name] = value.strip()
+    scope = previous.get("collection_scope")
+    if scope in {"full", "required"}:
+        checkpoint["collection_scope"] = scope
+    failures = previous.get("failed_required_source_identifiers")
+    if isinstance(failures, list) and all(isinstance(item, str) for item in failures):
+        checkpoint["failed_required_source_identifiers"] = list(failures)
     return checkpoint
+
+
+def _failed_required_source_identifiers(report: object) -> tuple[str, ...]:
+    """Return members only for required groups with no successful alternative."""
+
+    groups: dict[str, list[object]] = {}
+    for item in tuple(getattr(report, "sources", ()) or ()):
+        group = getattr(item, "requirement_group", None)
+        if isinstance(group, str) and group.strip():
+            groups.setdefault(group.strip(), []).append(item)
+    failed: list[str] = []
+    for members in groups.values():
+        if any(bool(getattr(item, "succeeded", False)) for item in members):
+            continue
+        failed.extend(
+            identifier
+            for item in members
+            if (identifier := str(getattr(item, "source_identifier", "")).strip())
+        )
+    return tuple(dict.fromkeys(failed))
 
 
 def _acquire_lock(path: Path, *, now: datetime) -> bool:
@@ -233,10 +265,14 @@ def collect_public_live_information_if_due(
     force: bool = False,
     provider_factory: Callable[[object], object] | None = None,
     provider_validation_builder: Callable[..., Mapping[str, object]] | None = None,
+    include_optional: bool = True,
 ) -> PublicLiveCollectionResult:
     """Collect once immediately when no state exists, then at most once per interval."""
 
+    if not isinstance(include_optional, bool):
+        raise TypeError("include_optional must be bool")
     evaluated_at = _aware_utc(now or datetime.now(timezone.utc))
+    collection_scope = "full" if include_optional else "required"
     report_path = _data_path(
         "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_REPORT",
         "public-live-information-report.json",
@@ -270,6 +306,7 @@ def collect_public_live_information_if_due(
             detail="Runtime public live-information collection is disabled.",
             evaluated_at=evaluated_at,
             exit_code=None,
+            collection_scope=collection_scope,
             **common_result,
         )
 
@@ -284,7 +321,21 @@ def collect_public_live_information_if_due(
         if isinstance(previous.get("provider_validation_state"), str)
         else None
     )
-    if not force and last_completed_at is not None and evaluated_at < next_due_at:
+    prior_scope = str(previous.get("collection_scope") or "full").strip().lower()
+    prior_scope_satisfies_request = (
+        collection_scope == "required" or prior_scope == "full"
+    )
+    prior_required_failures = tuple(
+        str(item)
+        for item in previous.get("failed_required_source_identifiers", ())
+        if isinstance(item, str) and item.strip()
+    )
+    if (
+        not force
+        and last_completed_at is not None
+        and evaluated_at < next_due_at
+        and prior_scope_satisfies_request
+    ):
         return PublicLiveCollectionResult(
             state="not_due",
             detail="The latest runtime public collection is still inside the hourly window.",
@@ -303,6 +354,8 @@ def collect_public_live_information_if_due(
             failed_source_count=int(previous.get("failed_source_count", 0) or 0),
             next_due_at=next_due_at,
             provider_validation_state=prior_validation_state,
+            failed_required_source_identifiers=prior_required_failures,
+            collection_scope=prior_scope,
             **common_result,
         )
 
@@ -324,6 +377,8 @@ def collect_public_live_information_if_due(
             failed_source_count=int(previous.get("failed_source_count", 0) or 0),
             next_due_at=next_due_at,
             provider_validation_state=prior_validation_state,
+            failed_required_source_identifiers=prior_required_failures,
+            collection_scope=prior_scope,
             **common_result,
         )
 
@@ -337,6 +392,7 @@ def collect_public_live_information_if_due(
             "records_path": str(records_path),
             "provider_validation_path": str(provider_validation_path),
             "interval_seconds": int(interval.total_seconds()),
+            "collection_scope": collection_scope,
             "decision_evidence_authority": False,
             "real_money_authorized": False,
         }
@@ -349,12 +405,15 @@ def collect_public_live_information_if_due(
             )
             catalog = load_operating_public_live_source_catalog(catalog_path)
             factory = provider_factory or ImpactfulPublicLiveInformationProvider
-            report = factory(catalog).collect(include_optional=True)
+            report = factory(catalog).collect(include_optional=include_optional)
             failed_source_count = sum(
                 1 for item in report.sources if not item.succeeded
             )
             successful_source_count = sum(
                 1 for item in report.sources if item.succeeded
+            )
+            failed_required_source_identifiers = (
+                _failed_required_source_identifiers(report)
             )
             current_records = [item.to_dict() for item in report.records]
             rolling_records = merge_public_event_records(
@@ -364,6 +423,7 @@ def collect_public_live_information_if_due(
             )
             report_payload = {
                 **report.to_dict(include_records=False),
+                "collection_scope": collection_scope,
                 "decision_evidence_authority": False,
             }
             records_payload = {
@@ -378,29 +438,39 @@ def collect_public_live_information_if_due(
                     "failed_source_count": failed_source_count,
                     "current_record_count": len(current_records),
                     "rolling_record_count": len(rolling_records),
+                    "collection_scope": collection_scope,
                 },
                 "decision_evidence_authority": False,
                 "full_article_text_stored": False,
                 "secret_values_disclosed": False,
                 "real_money_authorized": False,
             }
-            validation_builder = (
-                provider_validation_builder
-                or build_render_public_provider_validation
-            )
-            provider_validation = dict(
-                validation_builder(
-                    catalog=catalog,
-                    coverage_report=report,
-                    evaluated_at=report.evaluated_at,
+            if include_optional:
+                validation_builder = (
+                    provider_validation_builder
+                    or build_render_public_provider_validation
                 )
-            )
-            provider_validation_state = str(
-                provider_validation.get("state", "degraded")
-            )
+                provider_validation = dict(
+                    validation_builder(
+                        catalog=catalog,
+                        coverage_report=report,
+                        evaluated_at=report.evaluated_at,
+                    )
+                )
+                provider_validation_state = str(
+                    provider_validation.get("state", "degraded")
+                )
+            else:
+                provider_validation = dict(_read_state(provider_validation_path))
+                provider_validation_state = str(
+                    provider_validation.get("state")
+                    or prior_validation_state
+                    or "not_evaluated"
+                )
             _write_json(report_path, report_payload)
             _write_json(records_path, records_payload)
-            _write_json(provider_validation_path, provider_validation)
+            if include_optional:
+                _write_json(provider_validation_path, provider_validation)
 
             if not report.required_sources_ready:
                 exit_code = 3
@@ -415,8 +485,9 @@ def collect_public_live_information_if_due(
                 exit_code = 2
                 state = "degraded"
                 detail = (
-                    "Educational coverage is available, but one or more optional "
-                    "public sources were unavailable."
+                    "Required educational coverage is qualified through the governed "
+                    "source groups, but one or more individual or optional public "
+                    "sources were unavailable."
                 )
             else:
                 exit_code = 0
@@ -438,6 +509,9 @@ def collect_public_live_information_if_due(
                 "required_sources_ready": bool(report.required_sources_ready),
                 "source_count": len(report.sources),
                 "failed_source_count": failed_source_count,
+                "failed_required_source_identifiers": list(
+                    failed_required_source_identifiers
+                ),
                 "record_count": len(report.records),
                 "catalog_identifier": report.catalog_identifier,
                 "report_path": str(report_path),
@@ -451,6 +525,7 @@ def collect_public_live_information_if_due(
                     "validated_provider_count", 0
                 ),
                 "interval_seconds": int(interval.total_seconds()),
+                "collection_scope": collection_scope,
                 "decision_evidence_authority": False,
                 "full_article_text_stored": False,
                 "secret_values_disclosed": False,
@@ -467,6 +542,10 @@ def collect_public_live_information_if_due(
                 failed_source_count=failed_source_count,
                 next_due_at=next_due_at,
                 provider_validation_state=provider_validation_state,
+                failed_required_source_identifiers=(
+                    failed_required_source_identifiers
+                ),
+                collection_scope=collection_scope,
                 **common_result,
             )
         except (KeyError, OSError, TypeError, ValueError, RuntimeError) as error:
@@ -484,6 +563,7 @@ def collect_public_live_information_if_due(
                     "records_path": str(records_path),
                     "provider_validation_path": str(provider_validation_path),
                     "interval_seconds": int(interval.total_seconds()),
+                    "collection_scope": collection_scope,
                     "decision_evidence_authority": False,
                     "secret_values_disclosed": False,
                     "real_money_authorized": False,
@@ -494,6 +574,7 @@ def collect_public_live_information_if_due(
                 detail=detail,
                 evaluated_at=evaluated_at,
                 exit_code=4,
+                collection_scope=collection_scope,
                 **common_result,
             )
     finally:

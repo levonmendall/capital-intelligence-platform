@@ -189,6 +189,45 @@ def test_force_collection_bypasses_hourly_window(monkeypatch, tmp_path) -> None:
     assert calls == [True, True]
 
 
+def test_required_scope_skips_optional_validation_and_does_not_block_full_refresh(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    now = datetime(2026, 8, 17, 5, 0, tzinfo=timezone.utc)
+    calls: list[bool] = []
+
+    def factory(evaluated_at):
+        return lambda _catalog: _Provider(_Report(evaluated_at=evaluated_at), calls)
+
+    required = collect_public_live_information_if_due(
+        now=now,
+        include_optional=False,
+        provider_factory=factory(now),
+        provider_validation_builder=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("required-only qualification must not probe optional providers")
+        ),
+    )
+    full = collect_public_live_information_if_due(
+        now=now + timedelta(minutes=5),
+        include_optional=True,
+        provider_factory=factory(now + timedelta(minutes=5)),
+        provider_validation_builder=_validation,
+    )
+
+    assert required.state == "available"
+    assert required.collection_scope == "required"
+    assert full.state == "available"
+    assert full.collection_scope == "full"
+    assert calls == [False, True]
+    state = json.loads(
+        (tmp_path / "public-live-information-runtime-state.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert state["collection_scope"] == "full"
+
+
 def test_existing_collection_lease_prevents_duplicate_session_collection(
     monkeypatch,
     tmp_path,
