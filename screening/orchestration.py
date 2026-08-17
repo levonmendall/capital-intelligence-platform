@@ -14,9 +14,10 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from itertools import chain
 from math import isfinite
 from pathlib import Path
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Iterable, Iterator, Mapping, Protocol, runtime_checkable
 
 from cio import (
     CandidateAssetClass,
@@ -305,7 +306,7 @@ class FullUniverseScreeningPublication:
             raise ValueError("candidate_payloads do not match candidate_count")
         if len(self.exclusions) != self.excluded_count:
             raise ValueError("exclusions do not match excluded_count")
-        for payload in (*self.candidate_payloads, *self.exclusions):
+        for payload in chain(self.candidate_payloads, self.exclusions):
             _canonical_json(payload)
         _canonical_json(self.opportunity_queue_payload)
 
@@ -501,9 +502,36 @@ class SQLiteFullUniverseScreeningStore:
     ) -> tuple[ScreeningEvent, ...]:
         if not isinstance(values, tuple) or not values:
             raise ValueError("values must be a non-empty tuple")
+        result = self._append_values(values, retain_events=True)
+        if not isinstance(result, tuple):  # pragma: no cover - internal invariant
+            raise AssertionError("retained screening append did not return events")
+        return result
+
+    def append_stream(
+        self,
+        values: Iterable[
+            tuple[str, str, ScreeningEventType, datetime, Mapping[str, Any]]
+        ],
+    ) -> int:
+        """Append one iterable transaction without retaining every event in memory."""
+
+        result = self._append_values(values, retain_events=False)
+        if isinstance(result, tuple):  # pragma: no cover - internal invariant
+            raise AssertionError("streaming screening append retained events")
+        return result
+
+    def _append_values(
+        self,
+        values: Iterable[
+            tuple[str, str, ScreeningEventType, datetime, Mapping[str, Any]]
+        ],
+        *,
+        retain_events: bool,
+    ) -> tuple[ScreeningEvent, ...] | int:
         self.verify_integrity()
         connection = self._connect()
         events: list[ScreeningEvent] = []
+        appended_count = 0
         try:
             connection.execute("BEGIN IMMEDIATE")
             previous_row = connection.execute(
@@ -517,6 +545,7 @@ class SQLiteFullUniverseScreeningStore:
                 else self._GENESIS_HASH
             )
             for raw_identifier, raw_cycle, event_type, raw_time, payload in values:
+                appended_count += 1
                 identifier = _required_text(raw_identifier, field_name="event_identifier")
                 cycle = _required_text(raw_cycle, field_name="cycle_identifier")
                 if not isinstance(event_type, ScreeningEventType):
@@ -538,7 +567,8 @@ class SQLiteFullUniverseScreeningStore:
                         raise ValueError(
                             "screening event identifier cannot be reused for different content"
                         )
-                    events.append(event)
+                    if retain_events:
+                        events.append(event)
                     continue
                 sequence += 1
                 content_hash = self._hash(
@@ -578,15 +608,18 @@ class SQLiteFullUniverseScreeningStore:
                     previous_hash=previous_hash,
                     content_hash=content_hash,
                 )
-                events.append(event)
+                if retain_events:
+                    events.append(event)
                 previous_hash = content_hash
+            if appended_count == 0:
+                raise ValueError("values must contain at least one screening event")
             connection.commit()
         except Exception:
             connection.rollback()
             raise
         finally:
             connection.close()
-        return tuple(events)
+        return tuple(events) if retain_events else appended_count
 
     def events(
         self,
@@ -613,13 +646,30 @@ class SQLiteFullUniverseScreeningStore:
         self,
         cycle_identifier: str,
     ) -> tuple[InstrumentScreeningResult, ...]:
-        return tuple(
-            InstrumentScreeningResult.from_dict(event.payload)
-            for event in self.events(
-                cycle_identifier,
-                event_type=ScreeningEventType.INSTRUMENT_RESULT,
-            )
+        return tuple(self.iter_instrument_results(cycle_identifier))
+
+    def iter_instrument_results(
+        self,
+        cycle_identifier: str,
+    ) -> Iterator[InstrumentScreeningResult]:
+        """Yield terminal results from SQLite without materializing event rows."""
+
+        cycle = _required_text(cycle_identifier, field_name="cycle_identifier")
+        if not self.path.exists():
+            return
+        query = (
+            f"SELECT payload_json FROM {self._TABLE} "
+            "WHERE cycle_identifier = ? AND event_type = ? ORDER BY sequence"
         )
+        with self._connect() as connection:
+            cursor = connection.execute(
+                query,
+                (cycle, ScreeningEventType.INSTRUMENT_RESULT.value),
+            )
+            for row in cursor:
+                yield InstrumentScreeningResult.from_dict(
+                    json.loads(str(row["payload_json"]))
+                )
 
     def partition_attempt_count(
         self,
@@ -655,34 +705,34 @@ class SQLiteFullUniverseScreeningStore:
         with self._connect() as connection:
             rows = connection.execute(
                 f"SELECT * FROM {self._TABLE} ORDER BY sequence"
-            ).fetchall()
-        expected_sequence = 1
-        previous_hash = self._GENESIS_HASH
-        for row in rows:
-            event = self._event(row)
-            if event.sequence != expected_sequence:
-                raise FullUniverseScreeningError(
-                    "screening event sequence is not contiguous"
-                )
-            if event.previous_hash != previous_hash:
-                raise FullUniverseScreeningError(
-                    "screening event previous hash is invalid"
-                )
-            expected_hash = self._hash(
-                sequence=event.sequence,
-                event_identifier=event.event_identifier,
-                cycle_identifier=event.cycle_identifier,
-                event_type=event.event_type,
-                occurred_at=event.occurred_at,
-                payload_json=event.payload_json,
-                previous_hash=event.previous_hash,
             )
-            if event.content_hash != expected_hash:
-                raise FullUniverseScreeningError(
-                    "screening event content hash is invalid"
+            expected_sequence = 1
+            previous_hash = self._GENESIS_HASH
+            for row in rows:
+                event = self._event(row)
+                if event.sequence != expected_sequence:
+                    raise FullUniverseScreeningError(
+                        "screening event sequence is not contiguous"
+                    )
+                if event.previous_hash != previous_hash:
+                    raise FullUniverseScreeningError(
+                        "screening event previous hash is invalid"
+                    )
+                expected_hash = self._hash(
+                    sequence=event.sequence,
+                    event_identifier=event.event_identifier,
+                    cycle_identifier=event.cycle_identifier,
+                    event_type=event.event_type,
+                    occurred_at=event.occurred_at,
+                    payload_json=event.payload_json,
+                    previous_hash=event.previous_hash,
                 )
-            previous_hash = event.content_hash
-            expected_sequence += 1
+                if event.content_hash != expected_hash:
+                    raise FullUniverseScreeningError(
+                        "screening event content hash is invalid"
+                    )
+                previous_hash = event.content_hash
+                expected_sequence += 1
         return True
 
     @staticmethod

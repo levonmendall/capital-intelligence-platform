@@ -1077,6 +1077,8 @@ def prepare_governed_production_context_for_cycle(
     capability_authority = opportunity_engine.universe_policy.asset_class_authority
     if capability_authority is None:  # pragma: no cover - factory invariant
         raise RuntimeError("active opportunity engine lacks capability authority")
+    if progress_probe is not None:
+        progress_probe("production_context_opportunity_engine_ready")
     competitive = prepare_competitive_opportunity_set(
         opportunity_engine,
         build_result.candidates,
@@ -1095,6 +1097,8 @@ def prepare_governed_production_context_for_cycle(
             screening_publication_identifier
         ),
     )
+    if progress_probe is not None:
+        progress_probe("production_context_opportunity_set_ready")
     try:
         outcome_store.append_screening_decisions(
             queue=queue,
@@ -1108,47 +1112,13 @@ def prepare_governed_production_context_for_cycle(
         item.instrument.instrument_id: item for item in build_result.candidates
     }
     exclusion_by_instrument = dict(build_result.exclusions)
-    instrument_results: list[InstrumentScreeningResult] = []
-    for instrument in universe.instruments:
-        candidate = candidate_by_instrument.get(instrument.instrument_identifier)
-        if candidate is not None:
-            instrument_results.append(
-                InstrumentScreeningResult(
-                    cycle_identifier=screening_cycle_identifier,
-                    partition_index=0,
-                    instrument_identifier=instrument.instrument_identifier,
-                    symbol=instrument.symbol,
-                    disposition=ScreeningDisposition.CANDIDATE,
-                    completed_at=decision_as_of,
-                    candidate_payload=serialize_candidate_decision(candidate),
-                )
-            )
-        else:
-            reasons = exclusion_by_instrument.get(
-                instrument.instrument_identifier,
-                ("Certified listed-wrapper evidence is unavailable.",),
-            )
-            instrument_results.append(
-                InstrumentScreeningResult(
-                    cycle_identifier=screening_cycle_identifier,
-                    partition_index=0,
-                    instrument_identifier=instrument.instrument_identifier,
-                    symbol=instrument.symbol,
-                    disposition=ScreeningDisposition.EXCLUDED,
-                    completed_at=decision_as_of,
-                    reasons=reasons,
-                )
-            )
-    candidate_results = tuple(
-        item
-        for item in instrument_results
-        if item.disposition is ScreeningDisposition.CANDIDATE
-    )
-    exclusion_results = tuple(
-        item
-        for item in instrument_results
-        if item.disposition is ScreeningDisposition.EXCLUDED
-    )
+    instrument_count = len(universe.instruments)
+    candidate_count = len(build_result.candidates)
+    exclusion_count = len(build_result.exclusions)
+    if candidate_count + exclusion_count != instrument_count:
+        raise ProductionPaperEvidenceError(
+            "candidate and exclusion evidence do not reconcile the active universe"
+        )
     opportunity_queue_payload = {
         **serialize_opportunity_queue(
             queue,
@@ -1159,24 +1129,6 @@ def prepare_governed_production_context_for_cycle(
         ),
         "opportunity_context_snapshot": opportunity_context_snapshot,
     }
-    screening_publication = FullUniverseScreeningPublication(
-        identifier=screening_publication_identifier,
-        cycle_identifier=screening_cycle_identifier,
-        published_at=decision_as_of,
-        security_master_catalog_identifier=catalog_identifier,
-        security_master_snapshot_identifier=master_snapshot_identifier,
-        universe_snapshot_identifier=eligible_identifier,
-        opportunity_context_identifier=opportunity_identifier,
-        eligible_instrument_count=len(universe.instruments),
-        screened_instrument_count=len(universe.instruments),
-        candidate_count=len(candidate_results),
-        excluded_count=len(exclusion_results),
-        candidate_payloads=tuple(
-            dict(item.candidate_payload or {}) for item in candidate_results
-        ),
-        exclusions=tuple(item.to_dict() for item in exclusion_results),
-        opportunity_queue_payload=opportunity_queue_payload,
-    )
     start_payload = {
         "cycle_identifier": screening_cycle_identifier,
         "scheduled_for": scheduled.isoformat(),
@@ -1190,39 +1142,64 @@ def prepare_governed_production_context_for_cycle(
         "universe_snapshot_identifier": eligible_identifier,
         "policy_version": universe.schema_version,
         "opportunity_context_identifier": opportunity_identifier,
-        "eligible_instrument_count": len(universe.instruments),
-        "structural_exclusion_count": len(exclusion_results),
-        "partition_size": len(universe.instruments),
+        "eligible_instrument_count": instrument_count,
+        "structural_exclusion_count": exclusion_count,
+        "partition_size": instrument_count,
         "maximum_partition_attempts": 1,
     }
-    screening_store.append_many(
-        (
-            (
-                f"{screening_cycle_identifier}:start",
-                screening_cycle_identifier,
-                ScreeningEventType.CYCLE_STARTED,
-                decision_as_of,
-                start_payload,
-            ),
-            *tuple(
-                (
-                    item.event_identifier,
-                    screening_cycle_identifier,
-                    ScreeningEventType.INSTRUMENT_RESULT,
-                    decision_as_of,
-                    item.to_dict(),
-                )
-                for item in instrument_results
-            ),
-            (
-                f"{screening_cycle_identifier}:publication",
-                screening_cycle_identifier,
-                ScreeningEventType.PUBLICATION,
-                decision_as_of,
-                screening_publication.to_dict(),
-            ),
-        )
+    screening_store.append(
+        event_identifier=f"{screening_cycle_identifier}:start",
+        cycle_identifier=screening_cycle_identifier,
+        event_type=ScreeningEventType.CYCLE_STARTED,
+        occurred_at=decision_as_of,
+        payload=start_payload,
     )
+
+    def screening_result_events():
+        for instrument in universe.instruments:
+            candidate = candidate_by_instrument.get(
+                instrument.instrument_identifier
+            )
+            if candidate is not None:
+                result = InstrumentScreeningResult(
+                    cycle_identifier=screening_cycle_identifier,
+                    partition_index=0,
+                    instrument_identifier=instrument.instrument_identifier,
+                    symbol=instrument.symbol,
+                    disposition=ScreeningDisposition.CANDIDATE,
+                    completed_at=decision_as_of,
+                    candidate_payload=serialize_candidate_decision(candidate),
+                )
+            else:
+                result = InstrumentScreeningResult(
+                    cycle_identifier=screening_cycle_identifier,
+                    partition_index=0,
+                    instrument_identifier=instrument.instrument_identifier,
+                    symbol=instrument.symbol,
+                    disposition=ScreeningDisposition.EXCLUDED,
+                    completed_at=decision_as_of,
+                    reasons=exclusion_by_instrument.get(
+                        instrument.instrument_identifier,
+                        ("Certified listed-wrapper evidence is unavailable.",),
+                    ),
+                )
+            yield (
+                result.event_identifier,
+                screening_cycle_identifier,
+                ScreeningEventType.INSTRUMENT_RESULT,
+                decision_as_of,
+                result.to_dict(),
+            )
+
+    persisted_result_count = screening_store.append_stream(
+        screening_result_events()
+    )
+    if persisted_result_count != instrument_count:
+        raise ProductionPaperEvidenceError(
+            "persisted terminal screening count does not reconcile the active universe"
+        )
+    if progress_probe is not None:
+        progress_probe("production_context_screening_results_persisted")
 
     cash_lineage = GovernedEvidenceLineage(
         certification_identifier=f"certification:fred:dgs10:{cash_date}",
@@ -1237,6 +1214,106 @@ def prepare_governed_production_context_for_cycle(
     qualified_identifiers = tuple(
         item.candidate.identifier for item in queue.ranked
     )
+    qualified_candidate_evidence = tuple(
+        all_candidate_evidence[identifier]
+        for identifier in qualified_identifiers
+    )
+    holding_evidence = build_result.holding_evidence
+    holding_evidence_count = len(holding_evidence)
+    capability_policy_payload = capability_authority.coverage_payload()
+    baseline_opportunity_cost = competitive.baseline_opportunity_cost
+    candidate_alternative_count = len(
+        competitive.candidate_alternative_identifiers
+    )
+    comprehensive_identifier = comprehensive.identifier
+    comprehensive_manifest_fingerprint = comprehensive.manifest_fingerprint
+    comprehensive_lane_counts = {
+        lane.asset_class.value: {
+            "scheduled": lane.scheduled,
+            "schedule_reason": lane.schedule_reason,
+            "catalog": lane.catalog_count,
+            "deep": lane.deep_analyzed_count,
+            "selected": len(lane.selected),
+        }
+        for lane in comprehensive.lanes
+    }
+    equity_discovery_payload = (
+        {"state": "unavailable", "selected_count": 0}
+        if discovery is None
+        else {
+            "state": "available",
+            "identifier": discovery.identifier,
+            "screened_asset_count": discovery.screened_asset_count,
+            "snapshot_covered_count": discovery.snapshot_covered_count,
+            "selected_count": len(discovery.selected),
+        }
+    )
+
+    # Individual terminal results are now durable. Release the complete discovery,
+    # universe, raw exclusion, candidate, and policy graphs before reconstructing the
+    # single immutable publication payload from the append-only event stream.
+    del (
+        all_candidate_evidence,
+        alternatives,
+        base_universe,
+        baseline_opportunity_context,
+        build_result,
+        candidate_by_instrument,
+        capability_authority,
+        comprehensive,
+        comprehensive_instruments,
+        competitive,
+        discovered,
+        discovery,
+        exclusion_by_instrument,
+        marked,
+        opportunity_context,
+        opportunity_engine,
+        queue,
+        tentative,
+        universe,
+    )
+    gc.collect()
+    if progress_probe is not None:
+        progress_probe("production_context_screening_graph_released")
+
+    candidate_payloads: list[Mapping[str, object]] = []
+    exclusion_payloads: list[Mapping[str, object]] = []
+    for result in screening_store.iter_instrument_results(
+        screening_cycle_identifier
+    ):
+        if result.disposition is ScreeningDisposition.CANDIDATE:
+            candidate_payloads.append(dict(result.candidate_payload or {}))
+        else:
+            exclusion_payloads.append(result.to_dict())
+    screening_publication = FullUniverseScreeningPublication(
+        identifier=screening_publication_identifier,
+        cycle_identifier=screening_cycle_identifier,
+        published_at=decision_as_of,
+        security_master_catalog_identifier=catalog_identifier,
+        security_master_snapshot_identifier=master_snapshot_identifier,
+        universe_snapshot_identifier=eligible_identifier,
+        opportunity_context_identifier=opportunity_identifier,
+        eligible_instrument_count=instrument_count,
+        screened_instrument_count=instrument_count,
+        candidate_count=candidate_count,
+        excluded_count=exclusion_count,
+        candidate_payloads=tuple(candidate_payloads),
+        exclusions=tuple(exclusion_payloads),
+        opportunity_queue_payload=opportunity_queue_payload,
+    )
+    screening_store.append(
+        event_identifier=f"{screening_cycle_identifier}:publication",
+        cycle_identifier=screening_cycle_identifier,
+        event_type=ScreeningEventType.PUBLICATION,
+        occurred_at=decision_as_of,
+        payload=screening_publication.to_dict(),
+    )
+    del candidate_payloads, exclusion_payloads, screening_publication
+    gc.collect()
+    if progress_probe is not None:
+        progress_probe("production_context_screening_publication_persisted")
+
     context_store.append(
         ProductionContextEvidenceSnapshot(
             identifier=context_identifier,
@@ -1248,11 +1325,8 @@ def prepare_governed_production_context_for_cycle(
             cash_evidence_quality=0.95,
             cash_liquidity_score=1.0,
             cash_lineage=cash_lineage,
-            candidate_evidence=tuple(
-                all_candidate_evidence[identifier]
-                for identifier in qualified_identifiers
-            ),
-            holding_evidence=build_result.holding_evidence,
+            candidate_evidence=qualified_candidate_evidence,
+            holding_evidence=holding_evidence,
         )
     )
 
@@ -1265,31 +1339,22 @@ def prepare_governed_production_context_for_cycle(
         "screening_cycle_identifier": screening_cycle_identifier,
         "screening_publication_identifier": screening_publication_identifier,
         "context_identifier": context_identifier,
-        "candidate_count": len(candidate_results),
-        "exclusion_count": len(exclusion_results),
+        "candidate_count": candidate_count,
+        "exclusion_count": exclusion_count,
         "qualified_candidate_count": len(qualified_identifiers),
-        "capability_policy": capability_authority.coverage_payload(),
-        "baseline_opportunity_cost": competitive.baseline_opportunity_cost,
-        "qualified_candidate_alternative_count": len(
-            competitive.candidate_alternative_identifiers
+        "capability_policy": capability_policy_payload,
+        "baseline_opportunity_cost": baseline_opportunity_cost,
+        "qualified_candidate_alternative_count": candidate_alternative_count,
+        "holding_evidence_count": holding_evidence_count,
+        "instrument_count": instrument_count,
+        "comprehensive_discovery_identifier": comprehensive_identifier,
+        "comprehensive_discovery_manifest_fingerprint": (
+            comprehensive_manifest_fingerprint
         ),
-        "holding_evidence_count": len(build_result.holding_evidence),
-        "instrument_count": len(universe.instruments),
-        "comprehensive_discovery_identifier": comprehensive.identifier,
-        "comprehensive_discovery_manifest_fingerprint": comprehensive.manifest_fingerprint,
         "comprehensive_discovery_scope_state": comprehensive_scope_state,
         "comprehensive_discovery_required": comprehensive_required,
         "comprehensive_discovery_limitations": list(comprehensive_limitations),
-        "comprehensive_discovery_lane_counts": {
-            lane.asset_class.value: {
-                "scheduled": lane.scheduled,
-                "schedule_reason": lane.schedule_reason,
-                "catalog": lane.catalog_count,
-                "deep": lane.deep_analyzed_count,
-                "selected": len(lane.selected),
-            }
-            for lane in comprehensive.lanes
-        },
+        "comprehensive_discovery_lane_counts": comprehensive_lane_counts,
         "opportunity_outcomes": (
             {"state": "unavailable", "resolved_this_cycle": outcome_resolution_count}
             if outcome_summary is None
@@ -1302,17 +1367,7 @@ def prepare_governed_production_context_for_cycle(
                 "resolved_this_cycle": outcome_resolution_count,
             }
         ),
-        "equity_discovery": (
-            {"state": "unavailable", "selected_count": 0}
-            if discovery is None
-            else {
-                "state": "available",
-                "identifier": discovery.identifier,
-                "screened_asset_count": discovery.screened_asset_count,
-                "snapshot_covered_count": discovery.snapshot_covered_count,
-                "selected_count": len(discovery.selected),
-            }
-        ),
+        "equity_discovery": equity_discovery_payload,
         "market_evaluation_schedule": (
             "weekday_full"
             if weekday_market_evaluation_scheduled(decision_as_of)
@@ -1356,10 +1411,10 @@ def prepare_governed_production_context_for_cycle(
         eligible_universe_identifier=eligible_identifier,
         screening_publication_identifier=screening_publication_identifier,
         context_identifier=context_identifier,
-        instrument_count=len(universe.instruments),
-        candidate_count=len(candidate_results),
+        instrument_count=instrument_count,
+        candidate_count=candidate_count,
         qualified_candidate_count=len(qualified_identifiers),
-        exclusion_count=len(exclusion_results),
+        exclusion_count=exclusion_count,
     )
 
 
