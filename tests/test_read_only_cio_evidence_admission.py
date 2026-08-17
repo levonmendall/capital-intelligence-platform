@@ -77,16 +77,12 @@ def test_qualified_admission_reads_readiness_and_cash_without_acquisition(monkey
             "macro": {"DGS10": dgs10},
         }
     )
-    monkeypatch.setattr(
-        qualified,
-        "_qualified_snapshot_for_cutoff",
-        lambda _cutoff: snapshot,
-    )
+    monkeypatch.setattr(qualified, "_qualified_snapshot_for_cutoff", lambda _cutoff: snapshot)
 
     actual_readiness = qualified.qualified_paper_readiness_probe(
-        SimpleNamespace(identifier="free-paper-pilot:v1")
+        SimpleNamespace(identifier="free-paper-pilot:v1"), cutoff=NOW
     )
-    actual_cash = qualified.qualified_cash_probe()
+    actual_cash = qualified.qualified_cash_probe(cutoff=NOW)
 
     assert actual_readiness == readiness
     assert actual_cash is dgs10
@@ -101,21 +97,25 @@ def test_qualified_admission_fails_closed_on_incomplete_snapshot(monkeypatch) ->
 
     with pytest.raises(RuntimeError, match="readiness metadata is unavailable"):
         qualified.qualified_paper_readiness_probe(
-            SimpleNamespace(identifier="free-paper-pilot:v1")
+            SimpleNamespace(identifier="free-paper-pilot:v1"), cutoff=NOW
         )
     with pytest.raises(RuntimeError, match="DGS10"):
-        qualified.qualified_cash_probe()
+        qualified.qualified_cash_probe(cutoff=NOW)
 
 
 def test_production_context_defaults_all_admission_probes_to_qualified_snapshots(
     monkeypatch,
 ) -> None:
     captured: dict[str, object] = {}
+    readiness_cutoffs: list[datetime] = []
+    cash_cutoffs: list[datetime] = []
 
-    def readiness(_universe):
+    def readiness(_universe, *, cutoff):
+        readiness_cutoffs.append(cutoff)
         return object()
 
-    def cash():
+    def cash(*, cutoff):
+        cash_cutoffs.append(cutoff)
         return object()
 
     def evidence(_universe, _as_of):
@@ -142,6 +142,8 @@ def test_production_context_defaults_all_admission_probes_to_qualified_snapshots
 
     def prepare(**kwargs):
         captured.update(kwargs)
+        kwargs["readiness_probe"](SimpleNamespace(identifier="free-paper-pilot:v1"))
+        kwargs["cash_probe"]()
         return runtime.ProductionContextPublicationResult(
             state="blocked",
             cycle_key="canonical-cio:test",
@@ -157,7 +159,8 @@ def test_production_context_defaults_all_admission_probes_to_qualified_snapshots
         scheduled_for=NOW,
     )
 
-    assert captured["readiness_probe"] is readiness
-    assert captured["cash_probe"] is cash
     assert captured["evidence_probe"] is evidence
     assert callable(captured["clock"])
+    assert len(readiness_cutoffs) == 1
+    assert cash_cutoffs == readiness_cutoffs
+    assert captured["clock"]() == readiness_cutoffs[0]
