@@ -105,6 +105,43 @@ def test_failed_group_preserves_requirement_and_fallback_attribution(
     assert attribution["fallback_providers_attempted"] == ["oecd"]
 
 
+def test_missing_requirement_uses_its_own_supervised_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(timezone.utc)
+    catalog = SimpleNamespace(
+        identifier="catalog",
+        sources=(_source("fred", "macro-rates"),),
+    )
+    observed: list[tuple[str, float]] = []
+    monkeypatch.setattr(
+        qualification,
+        "_qualify_and_checkpoint_requirement",
+        lambda **_kwargs: {
+            "component_id": "component-macro",
+            "provider": "fred",
+            "fallback_providers_attempted": [],
+        },
+    )
+
+    def supervise(*, component, operation, timeout_seconds, return_value):
+        observed.append((component, timeout_seconds))
+        assert return_value is True
+        return operation()
+
+    monkeypatch.setattr(qualification, "run_supervised_component", supervise)
+    result = qualification._supervised_qualify_and_checkpoint_requirement(
+        requirement_group="macro-rates",
+        as_of=now,
+        values={"CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_REQUIREMENT_TIMEOUT_SECONDS": "33"},
+        compatibility="compatibility",
+        catalog=catalog,
+    )
+
+    assert result["component_id"] == "component-macro"
+    assert observed == [("required-public-live-group::macro-rates", 33.0)]
+
+
 def test_maintainer_reuses_qualified_group_and_acquires_only_missing_group(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -121,10 +158,7 @@ def test_maintainer_reuses_qualified_group_and_acquires_only_missing_group(
     )
     cached = SimpleNamespace(
         component_id="component-macro",
-        payload={
-            "provider": "alpha",
-            "fallback_providers_attempted": [],
-        },
+        payload={"provider": "alpha", "fallback_providers_attempted": []},
     )
     acquired: list[str] = []
     finalized: list[tuple[str, ...]] = []
@@ -143,9 +177,7 @@ def test_maintainer_reuses_qualified_group_and_acquires_only_missing_group(
     )
 
     def load_component(*, component_name: str, **_kwargs):
-        if component_name.endswith("macro-rates"):
-            return cached
-        return None
+        return cached if component_name.endswith("macro-rates") else None
 
     monkeypatch.setattr(qualification._ledger, "load_qualified_component", load_component)
 
@@ -160,7 +192,7 @@ def test_maintainer_reuses_qualified_group_and_acquires_only_missing_group(
 
     monkeypatch.setattr(
         qualification,
-        "_qualify_and_checkpoint_requirement",
+        "_supervised_qualify_and_checkpoint_requirement",
         acquire,
     )
     monkeypatch.setattr(
@@ -178,13 +210,24 @@ def test_maintainer_reuses_qualified_group_and_acquires_only_missing_group(
     assert finalized == [("macro-rates", "policy-events")]
     assert result.required_sources_ready is True
     assert result.qualified_requirement_reused_count == 1
+    assert result.qualified_requirement_new_count == 1
     assert result.qualified_requirement_component_ids == (
         "component-macro",
         "component-policy",
     )
+    progress = qualification.load_public_live_requirement_progress(
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    )
+    assert progress is not None
+    assert progress["state"] == "qualified"
+    assert progress["required_count"] == 2
+    assert progress["qualified_count"] == 2
+    assert progress["reused_count"] == 1
+    assert progress["newly_qualified_count"] == 1
+    assert progress["failed_count"] == 0
 
 
-def test_maintainer_checkpoints_later_groups_before_aggregate_failure(
+def test_timeout_does_not_prevent_later_group_checkpoint_and_is_published(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -192,7 +235,8 @@ def test_maintainer_checkpoints_later_groups_before_aggregate_failure(
     catalog = SimpleNamespace(
         identifier="catalog",
         sources=(
-            _source("alpha", "macro-rates"),
+            _source("fred", "macro-rates"),
+            _source("oecd", "macro-rates"),
             _source("beta", "policy-events"),
         ),
     )
@@ -219,9 +263,9 @@ def test_maintainer_checkpoints_later_groups_before_aggregate_failure(
         attempted.append(requirement_group)
         if requirement_group == "macro-rates":
             raise qualification._plane.ContinuousEvidencePlaneError(
-                "required public live information is not qualified; "
-                "required_information=macro-rates; provider=fred; "
-                "fallback_providers_attempted=oecd"
+                "required public live requirement acquisition timed out; "
+                "failure_type=timeout; required_information=macro-rates; "
+                "provider=fred; fallback_providers_attempted=oecd"
             )
         return {
             "qualified": True,
@@ -232,7 +276,7 @@ def test_maintainer_checkpoints_later_groups_before_aggregate_failure(
 
     monkeypatch.setattr(
         qualification,
-        "_qualify_and_checkpoint_requirement",
+        "_supervised_qualify_and_checkpoint_requirement",
         acquire,
     )
 
@@ -246,11 +290,27 @@ def test_maintainer_checkpoints_later_groups_before_aggregate_failure(
         )
 
     assert attempted == ["macro-rates", "policy-events"]
+    progress = qualification.load_public_live_requirement_progress(
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    )
+    assert progress is not None
+    assert progress["state"] == "incomplete"
+    assert progress["required_count"] == 2
+    assert progress["qualified_count"] == 1
+    assert progress["failed_count"] == 1
+    assert progress["pending_count"] == 0
+    assert progress["failed_required_information"] == ["macro-rates"]
+    assert progress["failures"] == [
+        {
+            "required_information": "macro-rates",
+            "provider": "fred",
+            "fallback_providers_attempted": ["oecd"],
+            "failure_type": "timeout",
+        }
+    ]
 
 
-def test_stale_checkpoint_is_not_reused(
-    tmp_path,
-) -> None:
+def test_stale_checkpoint_is_not_reused(tmp_path) -> None:
     now = datetime.now(timezone.utc)
     values = {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
     component_name = qualification._component_name("macro-rates")
