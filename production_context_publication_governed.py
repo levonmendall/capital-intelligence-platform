@@ -1228,6 +1228,8 @@ def prepare_governed_production_context_for_cycle(
         occurred_at=decision_as_of,
         payload=start_payload,
     )
+    if progress_probe is not None:
+        progress_probe("production_context_screening_start_persisted")
 
     def screening_result_events():
         for instrument in screening_instruments:

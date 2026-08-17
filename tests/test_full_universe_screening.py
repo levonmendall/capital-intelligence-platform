@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -378,6 +380,45 @@ def test_streaming_append_rolls_back_an_empty_or_invalid_stream(tmp_path) -> Non
         store.append_stream(invalid_events())
 
     assert store.events("screening-cycle:streaming") == ()
+    assert store.verify_integrity() is True
+
+
+def test_integrity_hashes_large_payloads_in_byte_identical_chunks(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(SQLiteFullUniverseScreeningStore, "_HASH_CHUNK_BYTES", 32)
+    store = SQLiteFullUniverseScreeningStore(tmp_path / "screening.db")
+    payload = {"large": "x" * 257, "unicode": "evidence-\u2713"}
+
+    event = store.append(
+        event_identifier="screening:chunked-hash:start",
+        cycle_identifier="screening-cycle:chunked-hash",
+        event_type=ScreeningEventType.CYCLE_STARTED,
+        occurred_at=AS_OF,
+        payload=payload,
+    )
+
+    payload_json = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    legacy_hash = hashlib.sha256(
+        "|".join(
+            (
+                "1",
+                event.event_identifier,
+                event.cycle_identifier,
+                event.event_type.value,
+                event.occurred_at.isoformat(),
+                payload_json,
+                event.previous_hash,
+            )
+        ).encode("utf-8")
+    ).hexdigest()
+
+    assert event.content_hash == legacy_hash
     assert store.verify_integrity() is True
 
 
