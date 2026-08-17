@@ -410,7 +410,7 @@ def maintain_required_public_live_requirements(
     as_of: datetime,
     values: Mapping[str, str],
 ):
-    """Reuse qualified groups, acquire only missing groups, then expose one aggregate result."""
+    """Converge all independent requirements, then expose one fail-closed aggregate."""
 
     cutoff = _aware(as_of, field_name="public_requirements_as_of")
     catalog = _catalog(values)
@@ -420,6 +420,7 @@ def maintain_required_public_live_requirements(
     providers: list[str] = []
     fallback_attempted = False
     reused_count = 0
+    failures: list[tuple[str, str]] = []
 
     for group in groups:
         compatibility = _component_compatibility(catalog, group)
@@ -433,17 +434,25 @@ def maintain_required_public_live_requirements(
                     cutoff=datetime.now(timezone.utc),
                 )
             except _ledger.QualifiedEvidenceLedgerError as error:
-                raise _plane.ContinuousEvidencePlaneError(
-                    "required public live checkpoint is invalid; "
-                    f"required_information={_safe(group)}: {error}"
-                ) from error
+                failures.append(
+                    (
+                        group,
+                        "required public live checkpoint is invalid; "
+                        f"required_information={_safe(group)}: {error}",
+                    )
+                )
+                continue
         if component is None:
-            result = _qualify_and_checkpoint_requirement(
-                requirement_group=group,
-                as_of=cutoff,
-                values=values,
-                compatibility=compatibility,
-            )
+            try:
+                result = _qualify_and_checkpoint_requirement(
+                    requirement_group=group,
+                    as_of=cutoff,
+                    values=values,
+                    compatibility=compatibility,
+                )
+            except _plane.ContinuousEvidencePlaneError as error:
+                failures.append((group, str(error)))
+                continue
             component_id = str(result.get("component_id") or "").strip()
             provider = str(result.get("provider") or "").strip()
             fallbacks = tuple(result.get("fallback_providers_attempted") or ())
@@ -453,14 +462,28 @@ def maintain_required_public_live_requirements(
             provider = str(component.payload.get("provider") or "").strip()
             fallbacks = tuple(component.payload.get("fallback_providers_attempted") or ())
         if not component_id:
-            raise _plane.ContinuousEvidencePlaneError(
-                "required public live checkpoint lost its identifier; "
-                f"required_information={_safe(group)}"
+            failures.append(
+                (
+                    group,
+                    "required public live checkpoint lost its identifier; "
+                    f"required_information={_safe(group)}",
+                )
             )
+            continue
         component_ids.append(component_id)
         if provider:
             providers.append(provider)
         fallback_attempted = fallback_attempted or bool(fallbacks)
+
+    if failures:
+        failed_groups = ",".join(_safe(group) for group, _detail in failures)
+        first_group, first_detail = failures[0]
+        raise _plane.ContinuousEvidencePlaneError(
+            "required public live requirements remain incomplete after independent qualification; "
+            f"failed_requirement_count={len(failures)}; "
+            f"failed_required_information={failed_groups}; "
+            f"required_information={_safe(first_group)}; {first_detail}"
+        )
 
     finalize_required_public_live_requirements(
         requirement_groups=groups,
