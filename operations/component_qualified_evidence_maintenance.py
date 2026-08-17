@@ -32,7 +32,7 @@ _PUBLIC_COMPONENT = "required-public-live"
 _PUBLIC_COMPONENT_CONTRACT = "required-public-live.v1"
 _PUBLIC_COMPATIBILITY_FILES = (
     "config/public_live_information_sources.json",
-    "public_live_information.py",
+    "providers/public_live_information.py",
     "public_live_collection_runtime.py",
 )
 
