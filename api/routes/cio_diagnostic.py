@@ -14,6 +14,9 @@ from fastapi import APIRouter, Request, Response, status
 
 from operations.all_market_certification_audit import public_all_market_certification
 from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
+from operations.public_live_requirement_qualification import (
+    load_public_live_requirement_progress,
+)
 from production_context_publication_runtime import _load_json, _state_path
 from production_context_state_resilience import latest_attempt
 
@@ -108,6 +111,51 @@ def _market_lanes(
     return tuple(lanes)
 
 
+def _safe_public_requirement_progress(
+    values: Mapping[str, str],
+) -> dict[str, object] | None:
+    """Expose only the credential-safe operational subset of public qualification state."""
+
+    payload = load_public_live_requirement_progress(values)
+    if not isinstance(payload, Mapping):
+        return None
+    failures: list[dict[str, object]] = []
+    for item in payload.get("failures", []):
+        if not isinstance(item, Mapping):
+            continue
+        failures.append(
+            {
+                "required_information": _safe(str(item.get("required_information") or "unknown")),
+                "provider": _safe(str(item.get("provider") or "unknown")),
+                "fallback_providers_attempted": [
+                    _safe(str(value))
+                    for value in item.get("fallback_providers_attempted", [])
+                    if str(value).strip()
+                ],
+                "failure_type": _safe(str(item.get("failure_type") or "unknown")),
+            }
+        )
+    return {
+        "state": str(payload.get("state") or "unknown")[:32],
+        "updated_at": str(payload.get("updated_at") or "") or None,
+        "required_count": _count(payload, "required_count"),
+        "qualified_count": _count(payload, "qualified_count"),
+        "reused_count": _count(payload, "reused_count"),
+        "newly_qualified_count": _count(payload, "newly_qualified_count"),
+        "failed_count": _count(payload, "failed_count"),
+        "pending_count": _count(payload, "pending_count"),
+        "active_required_information": None
+        if payload.get("active_required_information") in (None, "")
+        else _safe(str(payload.get("active_required_information"))),
+        "failed_required_information": [
+            _safe(str(value))
+            for value in payload.get("failed_required_information", [])
+            if str(value).strip()
+        ],
+        "failures": failures,
+    }
+
+
 def _v2_evidence_as_of(
     certification: Mapping[str, object],
     *,
@@ -117,9 +165,7 @@ def _v2_evidence_as_of(
 
     if certification.get("all_market_certification_v2_input_integrity_valid") is not True:
         return None
-    certification_id = str(
-        certification.get("all_market_certification_v2_id") or ""
-    ).strip()
+    certification_id = str(certification.get("all_market_certification_v2_id") or "").strip()
     data_root = str(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "").strip()
     release = _release(values)
     if not certification_id or not data_root or release == "unknown":
@@ -155,12 +201,7 @@ def _certification_context_matches(
     values: Mapping[str, str],
     context_decision_as_of: datetime | None,
 ) -> tuple[bool, bool]:
-    """Prove the two intentionally different point-in-time bindings.
-
-    The legacy compositional lane certificate is tied to the qualified evidence/global-
-    discovery epoch. Certification v2 may reuse that still-fresh evidence at a later CIO
-    cutoff, so its own cutoff must equal the production-context decision timestamp.
-    """
+    """Prove the two intentionally different point-in-time bindings."""
 
     if context_decision_as_of is None:
         return False, False
@@ -180,16 +221,12 @@ def build_cio_diagnostic_audit(
     settings: Any,
     values: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """Return release, lifecycle, coverage, and integrity-proven certification state.
+    """Return release, lifecycle, coverage, and integrity-proven certification state."""
 
-    Persisted production context is cycle-scoped evidence. It may be included only when
-    its cycle key exactly matches the current diagnostic request. The compositional lane
-    certificate and certification-v2 ledger are read-only operational proof: neither can
-    authorize a portfolio action or paper execution.
-    """
     resolved = os.environ if values is None else values
     release = _release(resolved)
     certification = public_all_market_certification(resolved)
+    public_requirement_progress = _safe_public_requirement_progress(resolved)
     diagnostic = latest_manual_cio_diagnostic(values=resolved)
     if diagnostic is None:
         return {
@@ -206,6 +243,7 @@ def build_cio_diagnostic_audit(
             "all_market_certification_context_matches": False,
             "all_market_certification_v2_context_matches": False,
             "market_lanes": [],
+            "public_live_requirement_progress": public_requirement_progress,
             **certification,
         }
 
@@ -221,19 +259,14 @@ def build_cio_diagnostic_audit(
     configured_scope_required = str(
         resolved.get("CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY", "")
     ).strip().lower() in {"1", "true", "yes", "on"}
-    scope_required = (
-        context.get("comprehensive_discovery_required") is True
-        or configured_scope_required
-    )
+    scope_required = context.get("comprehensive_discovery_required") is True or configured_scope_required
     scope_state = str(context.get("comprehensive_discovery_scope_state") or "missing")
     scope_complete = scope_state == "complete"
     instrument_count = _count(context, "instrument_count")
     candidate_count = _count(context, "candidate_count")
     exclusion_count = _count(context, "exclusion_count")
     qualified_candidate_count = _count(context, "qualified_candidate_count")
-    terminal_screening_complete = (
-        instrument_count > 0 and candidate_count + exclusion_count == instrument_count
-    )
+    terminal_screening_complete = instrument_count > 0 and candidate_count + exclusion_count == instrument_count
     lanes = _market_lanes(
         context.get("comprehensive_discovery_lane_counts"),
         comprehensive_discovery_complete=scope_complete,
@@ -290,9 +323,7 @@ def build_cio_diagnostic_audit(
         and attempt_started is not None
         and attempt_started >= diagnostic.started_at.astimezone(timezone.utc)
     )
-    attempt_cycle = (
-        str(attempt.get("cycle_key") or "").strip() if current_attempt else ""
-    )
+    attempt_cycle = str(attempt.get("cycle_key") or "").strip() if current_attempt else ""
     progress_metrics = getattr(diagnostic, "progress_metrics", ())
     progress_recorded_at = getattr(diagnostic, "progress_recorded_at", None)
 
@@ -307,29 +338,19 @@ def build_cio_diagnostic_audit(
         "request_id": diagnostic.request_id,
         "diagnostic_id": diagnostic.request_id,
         "requested_at": diagnostic.requested_at.isoformat(),
-        "started_at": None
-        if diagnostic.started_at is None
-        else diagnostic.started_at.isoformat(),
-        "completed_at": None
-        if diagnostic.completed_at is None
-        else diagnostic.completed_at.isoformat(),
+        "started_at": None if diagnostic.started_at is None else diagnostic.started_at.isoformat(),
+        "completed_at": None if diagnostic.completed_at is None else diagnostic.completed_at.isoformat(),
         "diagnostic_age_seconds": _age_seconds(diagnostic.requested_at, now=now),
         "terminal_age_seconds": _age_seconds(diagnostic.completed_at, now=now),
         "stage": diagnostic.progress_stage,
         "progress_metrics": dict(progress_metrics),
-        "progress_recorded_at": None
-        if progress_recorded_at is None
-        else progress_recorded_at.isoformat(),
+        "progress_recorded_at": None if progress_recorded_at is None else progress_recorded_at.isoformat(),
         "cycle_key": diagnostic.cycle_key,
         "snapshot_identifier": diagnostic.snapshot_identifier,
         "context_cycle_matches": cycle_matches,
-        "context_attempt_state": (
-            str(attempt.get("state") or "unknown") if current_attempt else "not_current"
-        ),
+        "context_attempt_state": str(attempt.get("state") or "unknown") if current_attempt else "not_current",
         "context_attempt_cycle_matches": bool(
-            attempt_cycle
-            and diagnostic.cycle_key
-            and attempt_cycle == diagnostic.cycle_key
+            attempt_cycle and diagnostic.cycle_key and attempt_cycle == diagnostic.cycle_key
         ),
         "comprehensive_discovery_required": scope_required,
         "comprehensive_discovery_scope_state": scope_state,
@@ -349,6 +370,7 @@ def build_cio_diagnostic_audit(
         "all_market_certification_context_matches": legacy_context_matches,
         "all_market_certification_v2_context_matches": v2_context_matches,
         "market_lanes": list(lanes),
+        "public_live_requirement_progress": public_requirement_progress,
         "paper_only": True,
         "real_money_authorized": False,
         **certification,
