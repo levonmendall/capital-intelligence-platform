@@ -6,6 +6,11 @@ each group is collected independently, successful normalized records are merged 
 existing rolling public record set immediately, and each qualified group is committed to
 the generic evidence ledger before the next group is attempted.
 
+The caller owns the single process-group timeout boundary. This module deliberately does
+not create nested supervisors: a nested ``setsid`` worker could outlive the caller's process
+group if the outer public-evidence budget expires. Provider HTTP calls retain their normal
+bounded request/retry behavior, while completed groups survive any later outer timeout.
+
 Nothing here has investment, specialist, construction, execution, or real-money authority.
 A requirement group is qualified only when at least one configured source in that exact
 group succeeds. Missing groups, stale checkpoints, and exhausted fallbacks remain
@@ -15,7 +20,6 @@ fail-closed.
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 from datetime import datetime, timezone
@@ -25,11 +29,6 @@ from typing import Mapping
 
 from operations import continuous_evidence_plane as _plane
 from operations import qualified_evidence_ledger as _ledger
-from operations.supervised_component_execution import (
-    SupervisedComponentExecutionError,
-    SupervisedComponentTimeout,
-    run_supervised_component,
-)
 from providers.public_live_information import PublicLiveSourceCatalog
 from providers.public_live_information_extended import ImpactfulPublicLiveInformationProvider
 from providers.public_live_source_catalogs import load_operating_public_live_source_catalog
@@ -38,8 +37,6 @@ from public_live_record_history import merge_public_event_records
 
 _COMPONENT_PREFIX = "required-public-live-group"
 _COMPONENT_CONTRACT = "required-public-live-group.v1"
-_GROUP_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_REQUIREMENT_TIMEOUT_SECONDS"
-_DEFAULT_GROUP_TIMEOUT_SECONDS = 90.0
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -170,19 +167,6 @@ def _component_compatibility(catalog: object, requirement_group: str) -> str:
     )
 
 
-def _group_timeout_seconds(values: Mapping[str, str]) -> float:
-    raw = str(values.get(_GROUP_TIMEOUT_ENV) or os.getenv(_GROUP_TIMEOUT_ENV, "")).strip()
-    if not raw:
-        return _DEFAULT_GROUP_TIMEOUT_SECONDS
-    try:
-        timeout = float(raw)
-    except ValueError as error:
-        raise ValueError(f"{_GROUP_TIMEOUT_ENV} must be numeric") from error
-    if not math.isfinite(timeout) or timeout <= 0.0:
-        raise ValueError(f"{_GROUP_TIMEOUT_ENV} must be positive")
-    return timeout
-
-
 def _write_rolling_records(
     *,
     values: Mapping[str, str],
@@ -269,7 +253,9 @@ def collect_required_public_live_requirement(
         None,
     )
     if successful is None or getattr(report, "required_sources_ready", None) is not True:
-        configured_order = tuple(_safe(getattr(source, "identifier", "")) for source in selected)
+        configured_order = tuple(
+            _safe(getattr(source, "identifier", "")) for source in selected
+        )
         failures = attempted or configured_order
         primary = failures[0] if failures else "unknown"
         fallbacks = failures[1:]
@@ -349,50 +335,14 @@ def _qualify_and_checkpoint_requirement(
         )
     except _ledger.QualifiedEvidenceLedgerError as error:
         raise _plane.ContinuousEvidencePlaneError(
-            f"required public live checkpoint cannot be committed; required_information={_safe(requirement_group)}: {error}"
+            "required public live checkpoint cannot be committed; "
+            f"required_information={_safe(requirement_group)}: {error}"
         ) from error
     return {
         **dict(payload),
         "component_id": component.component_id,
         "valid_through": component.valid_through.isoformat(),
     }
-
-
-def _run_requirement(
-    *,
-    requirement_group: str,
-    as_of: datetime,
-    values: Mapping[str, str],
-    compatibility: str,
-) -> Mapping[str, object]:
-    try:
-        result = run_supervised_component(
-            component=f"required-public-live:{_safe(requirement_group)}",
-            operation=lambda: _qualify_and_checkpoint_requirement(
-                requirement_group=requirement_group,
-                as_of=as_of,
-                values=values,
-                compatibility=compatibility,
-            ),
-            timeout_seconds=_group_timeout_seconds(values),
-            return_value=True,
-        )
-    except SupervisedComponentTimeout as error:
-        raise _plane.ContinuousEvidencePlaneError(
-            "required public live information timed out; "
-            f"required_information={_safe(requirement_group)}; {error}"
-        ) from error
-    except SupervisedComponentExecutionError as error:
-        raise _plane.ContinuousEvidencePlaneError(
-            "required public live information failed; "
-            f"required_information={_safe(requirement_group)}; {error}"
-        ) from error
-    if not isinstance(result, Mapping) or result.get("qualified") is not True:
-        raise _plane.ContinuousEvidencePlaneError(
-            "required public live information lost qualification across process boundary; "
-            f"required_information={_safe(requirement_group)}"
-        )
-    return dict(result)
 
 
 def finalize_required_public_live_requirements(
@@ -484,10 +434,11 @@ def maintain_required_public_live_requirements(
                 )
             except _ledger.QualifiedEvidenceLedgerError as error:
                 raise _plane.ContinuousEvidencePlaneError(
-                    f"required public live checkpoint is invalid; required_information={_safe(group)}: {error}"
+                    "required public live checkpoint is invalid; "
+                    f"required_information={_safe(group)}: {error}"
                 ) from error
         if component is None:
-            result = _run_requirement(
+            result = _qualify_and_checkpoint_requirement(
                 requirement_group=group,
                 as_of=cutoff,
                 values=values,
@@ -503,7 +454,8 @@ def maintain_required_public_live_requirements(
             fallbacks = tuple(component.payload.get("fallback_providers_attempted") or ())
         if not component_id:
             raise _plane.ContinuousEvidencePlaneError(
-                f"required public live checkpoint lost its identifier; required_information={_safe(group)}"
+                "required public live checkpoint lost its identifier; "
+                f"required_information={_safe(group)}"
             )
         component_ids.append(component_id)
         if provider:
