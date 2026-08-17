@@ -11,8 +11,9 @@ comprehensive-discovery, and historical-coverage evidence use the generic qualif
 component ledger. Successful components are committed immediately and a later failure
 resumes the same still-fresh evidence epoch instead of restarting the whole plane.
 Missing, stale, corrupt, configuration-mismatched, or incomplete components remain
-fail-closed and are selectively reacquired. Provider-facing acquisition is supervised by
-killable process boundaries so a hung provider cannot hold the entire plane indefinitely.
+fail-closed. Reference and discovery acquisition retain killable process boundaries;
+public-live acquisition is supervised at the individual requirement boundary so one slow
+provider cannot kill the aggregate qualification controller.
 """
 
 from __future__ import annotations
@@ -64,10 +65,8 @@ _HISTORY_COMPATIBILITY_FILES = (
     "operations/continuous_evidence_plane.py",
 )
 _REFERENCE_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_REFERENCE_TIMEOUT_SECONDS"
-_PUBLIC_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_TIMEOUT_SECONDS"
 _DISCOVERY_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_DISCOVERY_TIMEOUT_SECONDS"
 _DEFAULT_REFERENCE_TIMEOUT_SECONDS = 120.0
-_DEFAULT_PUBLIC_TIMEOUT_SECONDS = 180.0
 _DEFAULT_DISCOVERY_TIMEOUT_SECONDS = 540.0
 
 
@@ -93,12 +92,7 @@ def _latest_payload(values: Mapping[str, str]) -> Mapping[str, object] | None:
     )
 
 
-def _compatibility_fingerprint(
-    *,
-    contract: str,
-    files: tuple[str, ...],
-    label: str,
-) -> str:
+def _compatibility_fingerprint(*, contract: str, files: tuple[str, ...], label: str) -> str:
     repository_root = Path(__file__).resolve().parents[1]
     material: list[object] = [contract]
     for relative in files:
@@ -157,11 +151,7 @@ def _load_component(
         ) from error
 
 
-def _load_public_component(
-    values: Mapping[str, str],
-    *,
-    cutoff: datetime,
-):
+def _load_public_component(values: Mapping[str, str], *, cutoff: datetime):
     return _load_component(
         values,
         component_name=_PUBLIC_COMPONENT,
@@ -187,18 +177,14 @@ def _load_exact_component(
         label=label,
     )
     if component is None or component.as_of != _aware(
-        evidence_as_of,
-        field_name=f"{label}_evidence_as_of",
+        evidence_as_of, field_name=f"{label}_evidence_as_of"
     ):
         return None
     return component
 
 
 def _component_timeout_seconds(
-    values: Mapping[str, str],
-    *,
-    env_name: str,
-    default: float,
+    values: Mapping[str, str], *, env_name: str, default: float
 ) -> float:
     raw = str(values.get(env_name) or "").strip()
     if not raw:
@@ -221,11 +207,7 @@ def _run_supervised(
     default_timeout: float,
     return_value: bool,
 ):
-    timeout = _component_timeout_seconds(
-        values,
-        env_name=timeout_env,
-        default=default_timeout,
-    )
+    timeout = _component_timeout_seconds(values, env_name=timeout_env, default=default_timeout)
     try:
         return run_supervised_component(
             component=component,
@@ -243,9 +225,7 @@ def _run_supervised(
         ) from error
 
 
-def _component_public_collector(
-    values: Mapping[str, str],
-) -> Callable[[datetime], object]:
+def _component_public_collector(values: Mapping[str, str]) -> Callable[[datetime], object]:
     """Reuse a public qualification for the same epoch or across a release rebind."""
 
     compatibility = _public_component_compatibility()
@@ -260,8 +240,7 @@ def _component_public_collector(
             label="public",
         )
         if cached is not None and (
-            cached.as_of == evidence_as_of
-            or cached.observed_release != _release(values)
+            cached.as_of == evidence_as_of or cached.observed_release != _release(values)
         ):
             state = str(cached.payload.get("state") or "available")
             return SimpleNamespace(
@@ -307,55 +286,30 @@ def _component_public_collector(
     return collect
 
 
-def _supervised_public_collector(
-    values: Mapping[str, str],
-) -> Callable[[datetime], object]:
+def _supervised_public_collector(values: Mapping[str, str]) -> Callable[[datetime], object]:
+    """Validate aggregate readiness; acquisition supervision lives at requirement level.
+
+    The old implementation put every public requirement inside one 180-second process.
+    Requirement workers now own their individual kill boundaries, so wrapping this parent
+    controller again would recreate the all-or-nothing timeout and could orphan a nested
+    process group when the outer worker is killed.
+    """
+
     collector = _component_public_collector(values)
 
     def collect(timestamp: datetime):
-        def acquire() -> Mapping[str, object]:
-            result = collector(timestamp)
-            return {
-                "state": str(getattr(result, "state", "available") or "available"),
-                "required_sources_ready": getattr(result, "required_sources_ready", None) is True,
-                "failed_required_source_identifiers": tuple(
-                    str(item)
-                    for item in getattr(result, "failed_required_source_identifiers", ())
-                ),
-                "collection_scope": str(
-                    getattr(result, "collection_scope", "required") or "required"
-                ),
-                "qualified_component_id": str(
-                    getattr(result, "qualified_component_id", "") or ""
-                ),
-                "qualified_component_reused": bool(
-                    getattr(result, "qualified_component_reused", False)
-                ),
-            }
-
-        payload = _run_supervised(
-            values,
-            component=_PUBLIC_COMPONENT,
-            operation=acquire,
-            timeout_env=_PUBLIC_TIMEOUT_ENV,
-            default_timeout=_DEFAULT_PUBLIC_TIMEOUT_SECONDS,
-            return_value=True,
-        )
-        if not isinstance(payload, Mapping) or payload.get("required_sources_ready") is not True:
+        result = collector(timestamp)
+        if getattr(result, "required_sources_ready", None) is not True:
             raise _plane.ContinuousEvidencePlaneError(
-                "required public live information lost qualification across process boundary"
+                "required public live information lost qualification across requirement boundary"
             )
-        return SimpleNamespace(**dict(payload))
+        return result
 
     return collect
 
 
 def _publish_history_component(
-    values: Mapping[str, str],
-    *,
-    evidence_as_of: datetime,
-    scope_count: int,
-    coverage_digest: str,
+    values: Mapping[str, str], *, evidence_as_of: datetime, scope_count: int, coverage_digest: str
 ):
     try:
         return _ledger.publish_qualified_component(
@@ -374,9 +328,7 @@ def _publish_history_component(
         ) from error
 
 
-def _component_discovery_runner(
-    values: Mapping[str, str],
-) -> Callable[[datetime], object]:
+def _component_discovery_runner(values: Mapping[str, str]) -> Callable[[datetime], object]:
     """Reuse an exact discovery/history checkpoint or commit both after one success."""
 
     discovery_compatibility = _discovery_component_compatibility()
@@ -394,8 +346,7 @@ def _component_discovery_runner(
         if cached_discovery is not None:
             try:
                 snapshot = load_qualified_comprehensive_discovery_snapshot(
-                    evidence_as_of=evidence_as_of,
-                    values=values,
+                    evidence_as_of=evidence_as_of, values=values
                 )
             except ComprehensiveDiscoverySnapshotError as error:
                 raise _plane.ContinuousEvidencePlaneError(
@@ -406,8 +357,7 @@ def _component_discovery_runner(
                     "qualified discovery component snapshot identifier changed"
                 )
             scope_count, coverage_digest = _plane._historical_coverage_summary(
-                values,
-                as_of=evidence_as_of,
+                values, as_of=evidence_as_of
             )
             cached_history = _load_exact_component(
                 values,
@@ -433,16 +383,13 @@ def _component_discovery_runner(
         _plane._default_discovery(evidence_as_of)
         try:
             snapshot = load_qualified_comprehensive_discovery_snapshot(
-                evidence_as_of=evidence_as_of,
-                values=values,
+                evidence_as_of=evidence_as_of, values=values
             )
         except ComprehensiveDiscoverySnapshotError as error:
             raise _plane.ContinuousEvidencePlaneError(
                 f"comprehensive discovery did not publish its immutable snapshot: {error}"
             ) from error
 
-        # Commit discovery immediately after its immutable snapshot qualifies. Historical
-        # coverage is a dependent checkpoint and must not force rediscovery if it fails.
         try:
             _ledger.publish_qualified_component(
                 values=values,
@@ -459,10 +406,7 @@ def _component_discovery_runner(
                 f"qualified discovery evidence component cannot be committed: {error}"
             ) from error
 
-        scope_count, coverage_digest = _plane._historical_coverage_summary(
-            values,
-            as_of=evidence_as_of,
-        )
+        scope_count, coverage_digest = _plane._historical_coverage_summary(values, as_of=evidence_as_of)
         _publish_history_component(
             values,
             evidence_as_of=evidence_as_of,
@@ -474,9 +418,7 @@ def _component_discovery_runner(
     return run
 
 
-def _supervised_discovery_runner(
-    values: Mapping[str, str],
-) -> Callable[[datetime], object]:
+def _supervised_discovery_runner(values: Mapping[str, str]) -> Callable[[datetime], object]:
     runner = _component_discovery_runner(values)
 
     def run(timestamp: datetime):
@@ -491,8 +433,7 @@ def _supervised_discovery_runner(
         )
         try:
             snapshot = load_qualified_comprehensive_discovery_snapshot(
-                evidence_as_of=evidence_as_of,
-                values=values,
+                evidence_as_of=evidence_as_of, values=values
             )
         except ComprehensiveDiscoverySnapshotError as error:
             raise _plane.ContinuousEvidencePlaneError(
@@ -505,9 +446,7 @@ def _supervised_discovery_runner(
 
 def _generation_base_qualified(
     generation: _plane.EvidencePlaneGeneration | None,
-    *,
-    values: Mapping[str, str],
-    cutoff: datetime,
+    *, values: Mapping[str, str], cutoff: datetime
 ) -> bool:
     if generation is None:
         return False
@@ -523,10 +462,7 @@ def _generation_base_qualified(
 
 
 def _publish_release_rebind(
-    *,
-    values: Mapping[str, str],
-    source: _plane.EvidencePlaneGeneration,
-    reference_manifest_id: str,
+    *, values: Mapping[str, str], source: _plane.EvidencePlaneGeneration, reference_manifest_id: str
 ) -> _plane.EvidencePlaneGeneration:
     """Bind fresh reusable evidence to a new release without claiming newer evidence."""
 
@@ -550,10 +486,7 @@ def _publish_release_rebind(
         "real_money_authorized": False,
     }
     generation_id = _plane._digest(material)
-    _plane._atomic_json(
-        _plane._root(values) / "latest-qualified.json",
-        {**material, "generation_id": generation_id},
-    )
+    _plane._atomic_json(_plane._root(values) / "latest-qualified.json", {**material, "generation_id": generation_id})
     return _plane.EvidencePlaneGeneration(
         generation_id=generation_id,
         as_of=source.as_of,
@@ -567,10 +500,7 @@ def _publish_release_rebind(
 
 
 def _legacy_refresh(
-    *,
-    requested: datetime,
-    values: Mapping[str, str],
-    reference_manifest: object | None = None,
+    *, requested: datetime, values: Mapping[str, str], reference_manifest: object | None = None
 ) -> EvidenceMaintenanceResult:
     kwargs: dict[str, object] = {
         "as_of": requested,
@@ -579,17 +509,11 @@ def _legacy_refresh(
         "discovery": _supervised_discovery_runner(values),
     }
     if reference_manifest is not None:
-        kwargs["reference_preparer"] = (
-            lambda _values, prepared=reference_manifest: prepared
-        )
+        kwargs["reference_preparer"] = lambda _values, prepared=reference_manifest: prepared
     return _legacy_maintenance.maintain_continuous_evidence_plane(**kwargs)
 
 
-def _resumable_evidence_cutoff(
-    values: Mapping[str, str],
-    *,
-    requested: datetime,
-) -> datetime:
+def _resumable_evidence_cutoff(values: Mapping[str, str], *, requested: datetime) -> datetime:
     """Resume a still-fresh incomplete epoch instead of discarding qualified work."""
 
     public = _load_public_component(values, cutoff=requested)
@@ -598,25 +522,12 @@ def _resumable_evidence_cutoff(
     return public.as_of
 
 
-def _bound_or_prepare_reference_manifest(
-    values: Mapping[str, str],
-    *,
-    preparation_cutoff: datetime,
-):
-    """Bind reference components and return their truthful effective evidence cutoff.
-
-    Reused reference components can remain bound to the caller's resumable cutoff. If
-    acquisition is required, the child writes components at its real capture time. The
-    remaining evidence plane must therefore advance to a post-acquisition cutoff rather
-    than backdating those newly captured components into the older epoch.
-    """
+def _bound_or_prepare_reference_manifest(values: Mapping[str, str], *, preparation_cutoff: datetime):
+    """Bind reference components and return their truthful effective evidence cutoff."""
 
     mutable = dict(values)
     try:
-        manifest = bind_reference_manifest_from_components(
-            mutable,
-            now=preparation_cutoff,
-        )
+        manifest = bind_reference_manifest_from_components(mutable, now=preparation_cutoff)
         return manifest, preparation_cutoff
     except ReferenceReadinessError:
         pass
@@ -632,10 +543,7 @@ def _bound_or_prepare_reference_manifest(
 
     rebound_cutoff = max(preparation_cutoff, datetime.now(timezone.utc))
     try:
-        manifest = bind_reference_manifest_from_components(
-            mutable,
-            now=rebound_cutoff,
-        )
+        manifest = bind_reference_manifest_from_components(mutable, now=rebound_cutoff)
     except ReferenceReadinessError as error:
         raise _plane.ContinuousEvidencePlaneError(
             "reference readiness acquisition completed without bindable qualified components "
@@ -645,9 +553,7 @@ def _bound_or_prepare_reference_manifest(
 
 
 def maintain_component_qualified_evidence_plane(
-    *,
-    as_of: datetime | None = None,
-    values: Mapping[str, str] | None = None,
+    *, as_of: datetime | None = None, values: Mapping[str, str] | None = None
 ) -> EvidenceMaintenanceResult:
     """Prefer qualified component reuse; acquire only components that actually need it."""
 
@@ -661,11 +567,7 @@ def maintain_component_qualified_evidence_plane(
 
     current = _plane.load_latest_evidence_plane(resolved)
     payload = _latest_payload(resolved)
-    current_release = (
-        str(payload.get("release") or "").strip()
-        if isinstance(payload, Mapping)
-        else ""
-    )
+    current_release = str(payload.get("release") or "").strip() if isinstance(payload, Mapping) else ""
 
     if (
         current is not None
@@ -696,17 +598,12 @@ def maintain_component_qualified_evidence_plane(
     ):
         mutable = dict(resolved)
         try:
-            manifest = bind_reference_manifest_from_components(
-                mutable,
-                now=current.as_of,
-            )
+            manifest = bind_reference_manifest_from_components(mutable, now=current.as_of)
         except ReferenceReadinessError:
             manifest = None
         if manifest is not None:
             rebound = _publish_release_rebind(
-                values=resolved,
-                source=current,
-                reference_manifest_id=manifest.manifest_id,
+                values=resolved, source=current, reference_manifest_id=manifest.manifest_id
             )
             archive = _legacy_maintenance._archive_generation(resolved, rebound)
             return EvidenceMaintenanceResult(
@@ -719,13 +616,10 @@ def maintain_component_qualified_evidence_plane(
 
     preparation_cutoff = _resumable_evidence_cutoff(resolved, requested=requested)
     manifest, preparation_cutoff = _bound_or_prepare_reference_manifest(
-        resolved,
-        preparation_cutoff=preparation_cutoff,
+        resolved, preparation_cutoff=preparation_cutoff
     )
     return _legacy_refresh(
-        requested=preparation_cutoff,
-        values=resolved,
-        reference_manifest=manifest,
+        requested=preparation_cutoff, values=resolved, reference_manifest=manifest
     )
 
 

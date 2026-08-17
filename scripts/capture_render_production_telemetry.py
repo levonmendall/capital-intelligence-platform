@@ -88,6 +88,14 @@ _PROGRESS_METRIC_KEYS = (
     "governed_boundary_kib",
     "governed_headroom_kib",
 )
+_REQUIREMENT_COUNT_KEYS = (
+    "required_count",
+    "qualified_count",
+    "reused_count",
+    "newly_qualified_count",
+    "failed_count",
+    "pending_count",
+)
 
 
 class UnsafeTelemetryPayload(RuntimeError):
@@ -130,27 +138,20 @@ def _walk_keys(value: object) -> tuple[str, ...]:
 def _assert_credential_safe_source(payload: Mapping[str, Any]) -> None:
     forbidden = sorted(_FORBIDDEN_KEYS.intersection(_walk_keys(payload)))
     if forbidden:
-        raise UnsafeTelemetryPayload(
-            "public audit contains forbidden operational fields"
-        )
+        raise UnsafeTelemetryPayload("public audit contains forbidden operational fields")
     if payload.get("credential_safe") is not True:
         raise UnsafeTelemetryPayload("public audit is not marked credential-safe")
     if payload.get("paper_only") is not True:
         raise UnsafeTelemetryPayload("public audit is not marked paper-only")
     if payload.get("real_money_authorized") is not False:
-        raise UnsafeTelemetryPayload(
-            "public audit does not explicitly deny real-money authority"
-        )
+        raise UnsafeTelemetryPayload("public audit does not explicitly deny real-money authority")
 
 
 def _safe_stage(value: object) -> str | None:
     stage = str(value or "").strip().lower()
     if not stage or len(stage) > 100:
         return None
-    if not all(
-        character.isalnum() or character in {"_", "-", ":"}
-        for character in stage
-    ):
+    if not all(character.isalnum() or character in {"_", "-", ":"} for character in stage):
         return None
     return stage
 
@@ -167,7 +168,7 @@ def _safe_identifier(value: object) -> str | None:
     identifier = str(value or "").strip()
     if not identifier or len(identifier) > 128:
         return None
-    if not all(character.isalnum() or character in {"_", "-", ":"} for character in identifier):
+    if not all(character.isalnum() or character in {"_", "-", ":", "."} for character in identifier):
         return None
     return identifier
 
@@ -211,9 +212,51 @@ def _safe_market_lanes(value: object) -> list[dict[str, object]]:
     return safe
 
 
-def _elapsed_seconds(
-    payload: Mapping[str, Any], *, captured_at: datetime
-) -> float | None:
+def _safe_requirement_progress(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    progress: dict[str, object] = {
+        "state": _safe_identifier(value.get("state")),
+        "updated_at": str(value.get("updated_at") or "") or None,
+        "active_required_information": _safe_identifier(value.get("active_required_information")),
+    }
+    for key in _REQUIREMENT_COUNT_KEYS:
+        parsed = _safe_nonnegative_number(value.get(key))
+        progress[key] = int(parsed) if parsed is not None else 0
+    failed_groups = value.get("failed_required_information")
+    progress["failed_required_information"] = (
+        [identifier for item in failed_groups if (identifier := _safe_identifier(item)) is not None]
+        if isinstance(failed_groups, list)
+        else []
+    )
+    failures: list[dict[str, object]] = []
+    raw_failures = value.get("failures")
+    if isinstance(raw_failures, list):
+        for item in raw_failures:
+            if not isinstance(item, Mapping):
+                continue
+            fallbacks = item.get("fallback_providers_attempted")
+            failures.append(
+                {
+                    "required_information": _safe_identifier(item.get("required_information")),
+                    "provider": _safe_identifier(item.get("provider")),
+                    "fallback_providers_attempted": (
+                        [
+                            identifier
+                            for candidate in fallbacks
+                            if (identifier := _safe_identifier(candidate)) is not None
+                        ]
+                        if isinstance(fallbacks, list)
+                        else []
+                    ),
+                    "failure_type": _safe_identifier(item.get("failure_type")),
+                }
+            )
+    progress["failures"] = failures
+    return progress
+
+
+def _elapsed_seconds(payload: Mapping[str, Any], *, captured_at: datetime) -> float | None:
     requested_at = _parse_datetime(payload.get("requested_at"))
     if requested_at is None:
         return None
@@ -240,21 +283,15 @@ def build_snapshot(
     )
     direct_stage = _safe_stage(payload.get("stage"))
     diagnostic: dict[str, object] = {
-        "diagnostic_id": _safe_identifier(
-            payload.get("diagnostic_id") or payload.get("request_id")
-        ),
+        "diagnostic_id": _safe_identifier(payload.get("diagnostic_id") or payload.get("request_id")),
         "state": str(payload.get("state") or "unknown"),
         "active_release": active_release,
         "release_matches_expected": release_matches_expected,
         "requested_at": str(payload.get("requested_at") or "") or None,
         "completed_at": str(payload.get("completed_at") or "") or None,
         "elapsed_seconds": _elapsed_seconds(payload, captured_at=now),
-        "diagnostic_age_seconds": _safe_nonnegative_number(
-            payload.get("diagnostic_age_seconds")
-        ),
-        "terminal_age_seconds": _safe_nonnegative_number(
-            payload.get("terminal_age_seconds")
-        ),
+        "diagnostic_age_seconds": _safe_nonnegative_number(payload.get("diagnostic_age_seconds")),
+        "terminal_age_seconds": _safe_nonnegative_number(payload.get("terminal_age_seconds")),
         "stage": direct_stage or _parse_progress_stage(payload.get("detail")),
         "context_attempt_state": _safe_identifier(payload.get("context_attempt_state")),
         "limitation_count": (
@@ -264,6 +301,9 @@ def build_snapshot(
         ),
         "market_lanes": _safe_market_lanes(payload.get("market_lanes")),
         "progress_metrics": _safe_progress_metrics(payload.get("progress_metrics")),
+        "public_live_requirement_progress": _safe_requirement_progress(
+            payload.get("public_live_requirement_progress")
+        ),
     }
     for key in _DIAGNOSTIC_BOOLEAN_KEYS:
         value = payload.get(key)
@@ -311,9 +351,7 @@ def unavailable_snapshot(
     }
 
 
-def unsafe_snapshot(
-    *, expected_release: str, captured_at: datetime | None = None
-) -> dict[str, object]:
+def unsafe_snapshot(*, expected_release: str, captured_at: datetime | None = None) -> dict[str, object]:
     now = (captured_at or _utc_now()).astimezone(timezone.utc)
     return {
         "schema_version": _SCHEMA_VERSION,
@@ -366,9 +404,7 @@ def capture_once(
             latency_ms=latency_ms,
         )
     except UnsafeTelemetryPayload:
-        return unsafe_snapshot(
-            expected_release=expected_release, captured_at=captured_at
-        ), True
+        return unsafe_snapshot(expected_release=expected_release, captured_at=captured_at), True
     except (
         OSError,
         TypeError,
@@ -407,6 +443,9 @@ def _progress_started(snapshot: Mapping[str, object]) -> bool:
         return False
     if diagnostic.get("stage") is not None:
         return True
+    requirement_progress = diagnostic.get("public_live_requirement_progress")
+    if isinstance(requirement_progress, Mapping) and requirement_progress.get("required_count", 0):
+        return True
     lanes = diagnostic.get("market_lanes")
     if isinstance(lanes, list) and lanes:
         return True
@@ -434,9 +473,7 @@ def _terminal_failure(snapshot: Mapping[str, object]) -> bool:
     )
 
 
-def _failure_class(
-    snapshot: Mapping[str, object], *, timed_out: bool = False
-) -> str:
+def _failure_class(snapshot: Mapping[str, object], *, timed_out: bool = False) -> str:
     diagnostic = _diagnostic(snapshot)
     if (
         snapshot.get("capture_state") == "ok"
@@ -462,9 +499,7 @@ def _annotate_observation(
     annotated["progress_started"] = _progress_started(snapshot)
     annotated["failure_class"] = _failure_class(snapshot, timed_out=timed_out)
     annotated["observation_count"] = max(1, int(observation_count))
-    annotated["observed_duration_seconds"] = round(
-        max(0.0, float(observed_duration_seconds)), 3
-    )
+    annotated["observed_duration_seconds"] = round(max(0.0, float(observed_duration_seconds)), 3)
     return annotated
 
 
@@ -493,9 +528,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.url.strip() or not args.expected_release.strip():
         raise SystemExit("url and expected-release are required")
     if args.watch_seconds < 0 or args.interval_seconds <= 0:
-        raise SystemExit(
-            "watch-seconds cannot be negative and interval-seconds must be positive"
-        )
+        raise SystemExit("watch-seconds cannot be negative and interval-seconds must be positive")
 
     started = time.monotonic()
     deadline = started + args.watch_seconds
@@ -503,9 +536,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     unsafe = False
     final_snapshot: dict[str, object] | None = None
     while True:
-        snapshot, unsafe = capture_once(
-            url=args.url, expected_release=args.expected_release
-        )
+        snapshot, unsafe = capture_once(url=args.url, expected_release=args.expected_release)
         now = time.monotonic()
         terminal_failure = _terminal_failure(snapshot)
         success = _current_success(snapshot)
