@@ -31,8 +31,15 @@ from operations.reference_readiness import (
 
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
+_PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
 _DEFAULT_MAX_AGE_SECONDS = 900.0
 _MAX_PREPARATION_PASSES = 2
+_FINRA_CONTEXT_CREDENTIAL_ENVIRONMENTS = (
+    "FINRA_CLIENT_ID",
+    "CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID",
+    "FINRA_CLIENT_SECRET",
+    "CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +132,34 @@ def _generation_qualified(
 
 
 def _default_public_collector(timestamp: datetime):
+    # Only the governed component-qualified preparation path uses the new durable
+    # requirement-group collector. The generic maintenance API retains its established
+    # cadence-aware runtime contract for tests, fixtures, and non-component callers.
+    if os.getenv(_PREPARING_ENV, "").strip().lower() == "true":
+        from operations.public_live_requirement_qualification import (
+            maintain_required_public_live_requirements,
+        )
+
+        # PublicLiveInformationProvider opportunistically adds FINRA TRACE context after
+        # each collect(). Requirement-group preparation performs several small required-
+        # only collects, so hide FINRA credentials inside this isolated evidence worker to
+        # avoid repeating optional OAuth/network work once per requirement. The parent
+        # service environment is restored immediately afterward.
+        preserved_finra = {
+            name: os.environ[name]
+            for name in _FINRA_CONTEXT_CREDENTIAL_ENVIRONMENTS
+            if name in os.environ
+        }
+        try:
+            for name in _FINRA_CONTEXT_CREDENTIAL_ENVIRONMENTS:
+                os.environ.pop(name, None)
+            return maintain_required_public_live_requirements(
+                as_of=timestamp,
+                values=os.environ,
+            )
+        finally:
+            os.environ.update(preserved_finra)
+
     from public_live_collection_runtime import collect_public_live_information_if_due
 
     result = collect_public_live_information_if_due(

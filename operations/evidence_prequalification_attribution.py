@@ -74,6 +74,7 @@ class EvidencePrequalificationAttribution:
     state: EvidencePrequalificationState
     reason: EvidencePrequalificationReason
     capability: str
+    required_information: str | None = None
     failure_stage: str | None = None
     error_type: str | None = None
     root_error_type: str | None = None
@@ -91,6 +92,7 @@ class EvidencePrequalificationAttribution:
             "state": self.state.value,
             "reason": self.reason.value,
             "capability": self.capability,
+            "required_information": self.required_information,
             "failure_stage": self.failure_stage,
             "error_type": self.error_type,
             "root_error_type": self.root_error_type,
@@ -118,6 +120,17 @@ _CHILD_PATTERN = re.compile(
 
 def _text(value: object, *, limit: int = 1600) -> str:
     return str(value or "").strip()[:limit]
+
+
+def _extract_named_token(text: str, name: str, *, limit: int = 240) -> str | None:
+    match = re.search(
+        rf"(?i)(?:^|[;\s,]){re.escape(name)}\s*[=:]\s*([A-Za-z0-9_.:-]+)",
+        text,
+    )
+    if match is None:
+        return None
+    value = match.group(1).strip().lower()
+    return value[:limit] or None
 
 
 def _extract_number(text: str, names: Sequence[str]) -> float | None:
@@ -314,7 +327,7 @@ def failed_prequalification_attribution(
     """Attribute an already fail-closed terminal qualifier failure.
 
     The input detail is produced by the credential-safe child failure transport added to
-    the evidence worker.  Unknown fields remain unknown rather than being fabricated.
+    the evidence worker. Unknown fields remain unknown rather than being fabricated.
     """
 
     raw_detail = _text(detail)
@@ -370,6 +383,10 @@ def failed_prequalification_attribution(
         state=EvidencePrequalificationState.FAILED,
         reason=reason,
         capability=_capability(stage, child_detail or raw_detail),
+        required_information=_extract_named_token(
+            child_detail or raw_detail,
+            "required_information",
+        ),
         failure_stage=stage,
         error_type=error_type or None,
         root_error_type=root_error_type,
