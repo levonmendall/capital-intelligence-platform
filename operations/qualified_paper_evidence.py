@@ -66,10 +66,10 @@ def _qualified_snapshot_for_cutoff(cutoff: datetime):
     return snapshot
 
 
-def qualified_paper_readiness_probe(universe):
+def qualified_paper_readiness_probe(universe, *, cutoff: datetime | None = None):
     """Read broker/account/asset readiness acquired by the evidence owner."""
 
-    snapshot = _qualified_snapshot_for_cutoff(datetime.now(timezone.utc))
+    snapshot = _qualified_snapshot_for_cutoff(cutoff or datetime.now(timezone.utc))
     provider_clock = snapshot.payload.get("provider_clock")
     if not isinstance(provider_clock, Mapping):
         raise RuntimeError("qualified paper readiness metadata is unavailable")
@@ -81,10 +81,10 @@ def qualified_paper_readiness_probe(universe):
     return dict(readiness)
 
 
-def qualified_cash_probe():
+def qualified_cash_probe(*, cutoff: datetime | None = None):
     """Read the qualified DGS10 cash-return observation without FRED acquisition."""
 
-    snapshot = _qualified_snapshot_for_cutoff(datetime.now(timezone.utc))
+    snapshot = _qualified_snapshot_for_cutoff(cutoff or datetime.now(timezone.utc))
     macro = snapshot.payload.get("macro")
     if not isinstance(macro, Mapping) or "DGS10" not in macro:
         raise RuntimeError("qualified DGS10 cash-return evidence is unavailable")
