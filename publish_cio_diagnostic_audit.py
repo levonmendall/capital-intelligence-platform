@@ -14,6 +14,9 @@ from operations.reference_readiness import load_reference_readiness_progress
 from operations.release_evidence_prequalification import (
     load_release_evidence_prequalification,
 )
+from operations.supervised_reference_prequalification import (
+    load_reference_prequalification_progress,
+)
 
 
 def audit_output_path(values: Mapping[str, str] | None = None) -> Path:
@@ -70,6 +73,76 @@ def _parse_timestamp(value: object) -> datetime | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return None
     return parsed.astimezone(timezone.utc)
+
+
+def _safe_identifier(value: object) -> str | None:
+    text = str(value or "").strip()
+    if not text or len(text) > 128:
+        return None
+    if not all(character.isalnum() or character in {"_", "-", ".", ":"} for character in text):
+        return None
+    return text
+
+
+def _safe_reference_prequalification_progress(
+    values: Mapping[str, str],
+) -> dict[str, object] | None:
+    progress = load_reference_prequalification_progress(values)
+    if not isinstance(progress, Mapping):
+        return None
+    release_status = load_release_evidence_prequalification(values)
+    if isinstance(release_status, Mapping):
+        started_at = _parse_timestamp(release_status.get("started_at"))
+        updated_at = _parse_timestamp(progress.get("updated_at"))
+        if started_at is not None and (updated_at is None or updated_at < started_at):
+            return None
+
+    safe: dict[str, object] = {
+        "state": _safe_identifier(progress.get("state")),
+        "updated_at": str(progress.get("updated_at") or "") or None,
+        "active_component": _safe_identifier(progress.get("active_component")),
+    }
+    for key in (
+        "required_count",
+        "qualified_count",
+        "reused_count",
+        "newly_qualified_count",
+        "failed_count",
+        "pending_count",
+    ):
+        value = progress.get(key)
+        safe[key] = (
+            int(value)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            else 0
+        )
+
+    components: list[dict[str, object]] = []
+    raw_components = progress.get("components")
+    if isinstance(raw_components, list):
+        for item in raw_components:
+            if not isinstance(item, Mapping):
+                continue
+            components.append(
+                {
+                    "component": _safe_identifier(item.get("component")),
+                    "provider": _safe_identifier(item.get("provider")),
+                    "state": _safe_identifier(item.get("state")),
+                    "required": item.get("required") is True,
+                    "failure_type": _safe_identifier(item.get("failure_type")),
+                }
+            )
+    safe["components"] = components
+    safe["failures"] = [
+        {
+            "component": item["component"],
+            "provider": item["provider"],
+            "failure_type": item["failure_type"],
+        }
+        for item in components
+        if item.get("state") in {"failed", "timed-out", "invalid"}
+    ]
+    return safe
 
 
 def _with_release_prequalification(
@@ -134,15 +207,9 @@ def _with_release_prequalification(
     failure_context: dict[str, object] | None = None
     if isinstance(raw_failure_context, Mapping):
         failure_context = dict(raw_failure_context)
-        # Reference-readiness progress is separately integrity-bound and may identify a
-        # narrower component than the child exception. Keep both rather than replacing
-        # the child failure stage.
         failure_context["component_stage"] = component_stage
         failure_context["component_metrics"] = component_metrics
 
-    # "prequalifying" is intentionally not a CIO active state. It keeps the verifier
-    # polling while ensuring the core verifier does not adopt this identity as the later
-    # manual CIO request identity.
     public_state = "failed" if state == "failed" else "prequalifying"
     published.update(
         {
@@ -230,10 +297,34 @@ def publish_cio_diagnostic_audit(
         values=resolved,
     )
     payload = _with_release_prequalification(payload, values=resolved)
+    reference_prequalification = _safe_reference_prequalification_progress(resolved)
+    public_prequalification = payload.get("public_live_requirement_progress")
+    active_phase = "unknown"
+    if isinstance(reference_prequalification, Mapping):
+        reference_state = str(reference_prequalification.get("state") or "")
+        if reference_state != "qualified":
+            active_phase = "reference"
+        elif isinstance(public_prequalification, Mapping):
+            active_phase = (
+                "complete"
+                if str(public_prequalification.get("state") or "") == "qualified"
+                else "public_live"
+            )
+        else:
+            active_phase = "public_live"
+    elif isinstance(public_prequalification, Mapping):
+        active_phase = "public_live"
+
     paper_implementation_complete = _paper_implementation_complete(payload)
     analytical_complete = payload.get("all_market_evaluation_complete") is True
     published = {
         **payload,
+        "reference_prequalification_progress": reference_prequalification,
+        "prequalification_progress": {
+            "active_phase": active_phase,
+            "reference": reference_prequalification,
+            "public_live": public_prequalification,
+        },
         "paper_implementation_complete": paper_implementation_complete,
         "all_market_evaluation_complete": analytical_complete,
         "ready": analytical_complete,
