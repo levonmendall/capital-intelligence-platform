@@ -33,6 +33,12 @@ _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _DEFAULT_MAX_AGE_SECONDS = 900.0
 _MAX_PREPARATION_PASSES = 2
+_FINRA_CONTEXT_CREDENTIAL_ENVIRONMENTS = (
+    "FINRA_CLIENT_ID",
+    "CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID",
+    "FINRA_CLIENT_SECRET",
+    "CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,10 +137,28 @@ def _default_public_collector(timestamp: datetime):
         maintain_required_public_live_requirements,
     )
 
-    return maintain_required_public_live_requirements(
-        as_of=timestamp,
-        values=os.environ,
-    )
+    # The base public-information provider opportunistically adds FINRA TRACE aggregate
+    # context after every collection. Requirement-level qualification intentionally runs
+    # many small scoped collections, so allowing that optional side channel here would
+    # repeat OAuth + network work once per requirement and consume the bounded public
+    # evidence budget without improving required-source readiness. This function runs
+    # inside the existing isolated public-evidence worker; temporarily hiding only the
+    # FINRA-context credentials keeps that optional enrichment out of this required-only
+    # path without altering provider configuration in the parent service.
+    preserved_finra = {
+        name: os.environ[name]
+        for name in _FINRA_CONTEXT_CREDENTIAL_ENVIRONMENTS
+        if name in os.environ
+    }
+    try:
+        for name in _FINRA_CONTEXT_CREDENTIAL_ENVIRONMENTS:
+            os.environ.pop(name, None)
+        return maintain_required_public_live_requirements(
+            as_of=timestamp,
+            values=os.environ,
+        )
+    finally:
+        os.environ.update(preserved_finra)
 
 
 @contextmanager
