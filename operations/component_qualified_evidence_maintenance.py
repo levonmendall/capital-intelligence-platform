@@ -6,11 +6,12 @@ release-specific. Fresh prior-release evidence can therefore be rebound to a new
 without provider calls only when every reusable component still satisfies its own
 freshness and compatibility contract.
 
-Reference readiness uses the existing lane-component store. Required public-live
-information uses the generic qualified component ledger so a successful collection is
-committed immediately and survives a later discovery failure or outer qualification
-retry. Missing, stale, corrupt, configuration-mismatched, or incomplete components
-remain fail-closed and are selectively reacquired.
+Reference readiness uses the existing lane-component store. Required public-live,
+comprehensive-discovery, and historical-coverage evidence use the generic qualified
+component ledger. Successful components are committed immediately and a later failure
+resumes the same still-fresh evidence epoch instead of restarting the whole plane.
+Missing, stale, corrupt, configuration-mismatched, or incomplete components remain
+fail-closed and are selectively reacquired.
 """
 
 from __future__ import annotations
@@ -23,17 +24,36 @@ from typing import Callable, Mapping
 from operations import continuous_evidence_plane as _plane
 from operations import qualified_evidence_ledger as _ledger
 from operations import qualified_evidence_maintenance as _legacy_maintenance
+from operations.qualified_comprehensive_discovery_snapshot import (
+    ComprehensiveDiscoverySnapshotError,
+    load_qualified_comprehensive_discovery_snapshot,
+)
 from operations.qualified_evidence_maintenance import EvidenceMaintenanceResult
 from operations.reference_readiness import ReferenceReadinessError
 from operations.release_reference_binding import bind_reference_manifest_from_components
 
 
 _PUBLIC_COMPONENT = "required-public-live"
-_PUBLIC_COMPONENT_CONTRACT = "required-public-live.v1"
+_PUBLIC_COMPONENT_CONTRACT = "required-public-live.v2"
 _PUBLIC_COMPATIBILITY_FILES = (
     "config/public_live_information_sources.json",
     "providers/public_live_information.py",
     "public_live_collection_runtime.py",
+)
+_DISCOVERY_COMPONENT = "comprehensive-discovery"
+_DISCOVERY_COMPONENT_CONTRACT = "comprehensive-discovery.v1"
+_DISCOVERY_COMPATIBILITY_FILES = (
+    "config/comprehensive_market_discovery.json",
+    "operations/comprehensive_market_discovery.py",
+    "operations/_comprehensive_market_discovery_v6.py",
+    "operations/comprehensive_discovery_snapshot.py",
+    "operations/qualified_comprehensive_discovery_snapshot.py",
+)
+_HISTORY_COMPONENT = "historical-coverage"
+_HISTORY_COMPONENT_CONTRACT = "historical-coverage.v1"
+_HISTORY_COMPATIBILITY_FILES = (
+    "operations/persistent_historical_evidence.py",
+    "operations/continuous_evidence_plane.py",
 )
 
 
@@ -59,20 +79,68 @@ def _latest_payload(values: Mapping[str, str]) -> Mapping[str, object] | None:
     )
 
 
-def _public_component_compatibility() -> str:
-    """Fingerprint the governed public-source contract without binding it to a release."""
-
+def _compatibility_fingerprint(
+    *,
+    contract: str,
+    files: tuple[str, ...],
+    label: str,
+) -> str:
     repository_root = Path(__file__).resolve().parents[1]
-    material: list[object] = [_PUBLIC_COMPONENT_CONTRACT]
-    for relative in _PUBLIC_COMPATIBILITY_FILES:
+    material: list[object] = [contract]
+    for relative in files:
         path = repository_root / relative
         try:
             material.append((relative, path.read_text(encoding="utf-8")))
         except OSError as error:
             raise _plane.ContinuousEvidencePlaneError(
-                f"public evidence compatibility input is unavailable: {relative}"
+                f"{label} evidence compatibility input is unavailable: {relative}"
             ) from error
     return _ledger.compatibility_fingerprint(*material)
+
+
+def _public_component_compatibility() -> str:
+    return _compatibility_fingerprint(
+        contract=_PUBLIC_COMPONENT_CONTRACT,
+        files=_PUBLIC_COMPATIBILITY_FILES,
+        label="public",
+    )
+
+
+def _discovery_component_compatibility() -> str:
+    return _compatibility_fingerprint(
+        contract=_DISCOVERY_COMPONENT_CONTRACT,
+        files=_DISCOVERY_COMPATIBILITY_FILES,
+        label="discovery",
+    )
+
+
+def _history_component_compatibility() -> str:
+    return _compatibility_fingerprint(
+        contract=_HISTORY_COMPONENT_CONTRACT,
+        files=_HISTORY_COMPATIBILITY_FILES,
+        label="historical",
+    )
+
+
+def _load_component(
+    values: Mapping[str, str],
+    *,
+    component_name: str,
+    compatibility: str,
+    cutoff: datetime,
+    label: str,
+):
+    try:
+        return _ledger.load_qualified_component(
+            values=values,
+            component_name=component_name,
+            compatibility=compatibility,
+            cutoff=cutoff,
+        )
+    except _ledger.QualifiedEvidenceLedgerError as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            f"qualified {label} evidence component is invalid: {error}"
+        ) from error
 
 
 def _load_public_component(
@@ -80,39 +148,58 @@ def _load_public_component(
     *,
     cutoff: datetime,
 ):
-    try:
-        return _ledger.load_qualified_component(
-            values=values,
-            component_name=_PUBLIC_COMPONENT,
-            compatibility=_public_component_compatibility(),
-            cutoff=cutoff,
-        )
-    except _ledger.QualifiedEvidenceLedgerError as error:
-        raise _plane.ContinuousEvidencePlaneError(
-            f"qualified public evidence component is invalid: {error}"
-        ) from error
+    return _load_component(
+        values,
+        component_name=_PUBLIC_COMPONENT,
+        compatibility=_public_component_compatibility(),
+        cutoff=cutoff,
+        label="public",
+    )
+
+
+def _load_exact_component(
+    values: Mapping[str, str],
+    *,
+    component_name: str,
+    compatibility: str,
+    evidence_as_of: datetime,
+    label: str,
+):
+    component = _load_component(
+        values,
+        component_name=component_name,
+        compatibility=compatibility,
+        cutoff=datetime.now(timezone.utc),
+        label=label,
+    )
+    if component is None or component.as_of != _aware(
+        evidence_as_of,
+        field_name=f"{label}_evidence_as_of",
+    ):
+        return None
+    return component
 
 
 def _component_public_collector(
     values: Mapping[str, str],
 ) -> Callable[[datetime], object]:
-    """Reuse a compatible public component or acquire and commit exactly one new one."""
+    """Reuse a public qualification for the same epoch or across a release rebind."""
 
     compatibility = _public_component_compatibility()
 
     def collect(timestamp: datetime):
-        try:
-            cached = _ledger.load_qualified_component(
-                values=values,
-                component_name=_PUBLIC_COMPONENT,
-                compatibility=compatibility,
-                cutoff=timestamp,
-            )
-        except _ledger.QualifiedEvidenceLedgerError as error:
-            raise _plane.ContinuousEvidencePlaneError(
-                f"qualified public evidence component is invalid: {error}"
-            ) from error
-        if cached is not None:
+        evidence_as_of = _aware(timestamp, field_name="public_evidence_as_of")
+        cached = _load_component(
+            values,
+            component_name=_PUBLIC_COMPONENT,
+            compatibility=compatibility,
+            cutoff=datetime.now(timezone.utc),
+            label="public",
+        )
+        if cached is not None and (
+            cached.as_of == evidence_as_of
+            or cached.observed_release != _release(values)
+        ):
             state = str(cached.payload.get("state") or "available")
             return SimpleNamespace(
                 state=state,
@@ -123,7 +210,7 @@ def _component_public_collector(
                 qualified_component_reused=True,
             )
 
-        result = _legacy_maintenance._default_public_collector(timestamp)
+        result = _legacy_maintenance._default_public_collector(evidence_as_of)
         state = str(getattr(result, "state", "available")).strip().lower() or "available"
         if getattr(result, "required_sources_ready", None) is not True:
             raise _plane.ContinuousEvidencePlaneError(
@@ -134,6 +221,7 @@ def _component_public_collector(
                 values=values,
                 component_name=_PUBLIC_COMPONENT,
                 compatibility=compatibility,
+                as_of=evidence_as_of,
                 payload={
                     "state": state,
                     "required_sources_ready": True,
@@ -154,6 +242,126 @@ def _component_public_collector(
         return result
 
     return collect
+
+
+def _publish_history_component(
+    values: Mapping[str, str],
+    *,
+    evidence_as_of: datetime,
+    scope_count: int,
+    coverage_digest: str,
+):
+    try:
+        return _ledger.publish_qualified_component(
+            values=values,
+            component_name=_HISTORY_COMPONENT,
+            compatibility=_history_component_compatibility(),
+            as_of=evidence_as_of,
+            payload={
+                "historical_scope_count": int(scope_count),
+                "historical_coverage_digest": str(coverage_digest),
+            },
+        )
+    except _ledger.QualifiedEvidenceLedgerError as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            f"qualified historical evidence component cannot be committed: {error}"
+        ) from error
+
+
+def _component_discovery_runner(
+    values: Mapping[str, str],
+) -> Callable[[datetime], object]:
+    """Reuse an exact discovery/history checkpoint or commit both after one success."""
+
+    discovery_compatibility = _discovery_component_compatibility()
+    history_compatibility = _history_component_compatibility()
+
+    def run(timestamp: datetime):
+        evidence_as_of = _aware(timestamp, field_name="discovery_evidence_as_of")
+        cached_discovery = _load_exact_component(
+            values,
+            component_name=_DISCOVERY_COMPONENT,
+            compatibility=discovery_compatibility,
+            evidence_as_of=evidence_as_of,
+            label="discovery",
+        )
+        if cached_discovery is not None:
+            try:
+                snapshot = load_qualified_comprehensive_discovery_snapshot(
+                    evidence_as_of=evidence_as_of,
+                    values=values,
+                )
+            except ComprehensiveDiscoverySnapshotError as error:
+                raise _plane.ContinuousEvidencePlaneError(
+                    f"qualified discovery component lost its immutable snapshot: {error}"
+                ) from error
+            if str(cached_discovery.payload.get("snapshot_id") or "") != snapshot.snapshot_id:
+                raise _plane.ContinuousEvidencePlaneError(
+                    "qualified discovery component snapshot identifier changed"
+                )
+            scope_count, coverage_digest = _plane._historical_coverage_summary(
+                values,
+                as_of=evidence_as_of,
+            )
+            cached_history = _load_exact_component(
+                values,
+                component_name=_HISTORY_COMPONENT,
+                compatibility=history_compatibility,
+                evidence_as_of=evidence_as_of,
+                label="historical",
+            )
+            if (
+                cached_history is None
+                or int(cached_history.payload.get("historical_scope_count", -1)) != scope_count
+                or str(cached_history.payload.get("historical_coverage_digest") or "")
+                != coverage_digest
+            ):
+                _publish_history_component(
+                    values,
+                    evidence_as_of=evidence_as_of,
+                    scope_count=scope_count,
+                    coverage_digest=coverage_digest,
+                )
+            return snapshot.result
+
+        result = _plane._default_discovery(evidence_as_of)
+        try:
+            snapshot = load_qualified_comprehensive_discovery_snapshot(
+                evidence_as_of=evidence_as_of,
+                values=values,
+            )
+        except ComprehensiveDiscoverySnapshotError as error:
+            raise _plane.ContinuousEvidencePlaneError(
+                f"comprehensive discovery did not publish its immutable snapshot: {error}"
+            ) from error
+        scope_count, coverage_digest = _plane._historical_coverage_summary(
+            values,
+            as_of=evidence_as_of,
+        )
+        try:
+            _ledger.publish_qualified_component(
+                values=values,
+                component_name=_DISCOVERY_COMPONENT,
+                compatibility=discovery_compatibility,
+                as_of=evidence_as_of,
+                payload={
+                    "snapshot_id": snapshot.snapshot_id,
+                    "scheduled_lanes": list(_plane._scheduled_lanes(evidence_as_of)),
+                },
+            )
+        except _ledger.QualifiedEvidenceLedgerError as error:
+            raise _plane.ContinuousEvidencePlaneError(
+                f"qualified discovery evidence component cannot be committed: {error}"
+            ) from error
+        _publish_history_component(
+            values,
+            evidence_as_of=evidence_as_of,
+            scope_count=scope_count,
+            coverage_digest=coverage_digest,
+        )
+        return result
+
+    return run
 
 
 def _generation_base_qualified(
@@ -187,8 +395,6 @@ def _publish_release_rebind(
     material: dict[str, object] = {
         "schema_version": _plane._PLANE_SCHEMA,
         "release": _release(values),
-        # Preserve the source evidence cutoff. Exact-release rebinding changes code
-        # lineage, not the point in time at which the reusable evidence was observed.
         "as_of": source.as_of.isoformat(),
         "completed_at": completed.isoformat(),
         "reference_manifest_id": reference_manifest_id,
@@ -231,12 +437,26 @@ def _legacy_refresh(
         "as_of": requested,
         "values": values,
         "public_collector": _component_public_collector(values),
+        "discovery": _component_discovery_runner(values),
     }
     if reference_manifest is not None:
         kwargs["reference_preparer"] = (
             lambda _values, prepared=reference_manifest: prepared
         )
     return _legacy_maintenance.maintain_continuous_evidence_plane(**kwargs)
+
+
+def _resumable_evidence_cutoff(
+    values: Mapping[str, str],
+    *,
+    requested: datetime,
+) -> datetime:
+    """Resume a still-fresh incomplete epoch instead of discarding qualified work."""
+
+    public = _load_public_component(values, cutoff=requested)
+    if public is None or public.as_of > requested:
+        return requested
+    return public.as_of
 
 
 def maintain_component_qualified_evidence_plane(
@@ -262,8 +482,6 @@ def maintain_component_qualified_evidence_plane(
         else ""
     )
 
-    # Fast path 1: the current release already owns a complete fresh generation. The
-    # disk-only loader revalidates the exact manifest and snapshot with no provider work.
     if (
         current is not None
         and current_release == _release(resolved)
@@ -284,8 +502,6 @@ def maintain_component_qualified_evidence_plane(
             archived_generation_path=archive,
         )
 
-    # Fast path 2: previous-release evidence may be rebound only when both the reference
-    # components and the public-live component still satisfy their current contracts.
     if (
         current is not None
         and current_release
@@ -316,17 +532,18 @@ def maintain_component_qualified_evidence_plane(
                 archived_generation_path=archive,
             )
 
-    # The composite generation needs refresh. Bind release-independent references from
-    # disk first. Public evidence is independently reused/committed by _legacy_refresh,
-    # so a later discovery failure no longer forces another public provider sweep.
+    preparation_cutoff = _resumable_evidence_cutoff(resolved, requested=requested)
     mutable = dict(resolved)
     try:
-        manifest = bind_reference_manifest_from_components(mutable, now=requested)
+        manifest = bind_reference_manifest_from_components(
+            mutable,
+            now=preparation_cutoff,
+        )
     except ReferenceReadinessError:
-        return _legacy_refresh(requested=requested, values=resolved)
+        return _legacy_refresh(requested=preparation_cutoff, values=resolved)
 
     return _legacy_refresh(
-        requested=requested,
+        requested=preparation_cutoff,
         values=resolved,
         reference_manifest=manifest,
     )
