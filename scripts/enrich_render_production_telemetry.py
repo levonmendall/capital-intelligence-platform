@@ -2,8 +2,8 @@
 
 This helper is intentionally read-only. It re-reads the public redacted CIO diagnostic
 surface after the primary telemetry watcher stops, validates the safety envelope, and
-copies only explicitly allowlisted reference-readiness metrics plus the sanitized
-Massive futures root telemetry emitted by the governed reference adapter.
+copies only explicitly allowlisted prequalification state plus the sanitized Massive
+futures root telemetry emitted by the governed reference adapter.
 """
 
 from __future__ import annotations
@@ -85,6 +85,15 @@ def _nonnegative_int(value: object) -> int | None:
     return parsed if parsed >= 0 else None
 
 
+def _safe_identifier(value: object) -> str | None:
+    text = str(value or "").strip()
+    if not text or len(text) > 128:
+        return None
+    if not all(character.isalnum() or character in {"_", "-", ".", ":"} for character in text):
+        return None
+    return text
+
+
 def _safe_reference_metrics(value: object) -> dict[str, int]:
     if not isinstance(value, Mapping):
         return {}
@@ -93,6 +102,53 @@ def _safe_reference_metrics(value: object) -> dict[str, int]:
         parsed = _nonnegative_int(value.get(key))
         if parsed is not None:
             safe[key] = parsed
+    return safe
+
+
+def _safe_reference_prequalification(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    safe: dict[str, object] = {
+        "state": _safe_identifier(value.get("state")),
+        "updated_at": str(value.get("updated_at") or "") or None,
+        "active_component": _safe_identifier(value.get("active_component")),
+    }
+    for key in (
+        "required_count",
+        "qualified_count",
+        "reused_count",
+        "newly_qualified_count",
+        "failed_count",
+        "pending_count",
+    ):
+        parsed = _nonnegative_int(value.get(key))
+        safe[key] = parsed if parsed is not None else 0
+
+    components: list[dict[str, object]] = []
+    raw_components = value.get("components")
+    if isinstance(raw_components, list):
+        for item in raw_components:
+            if not isinstance(item, Mapping):
+                continue
+            components.append(
+                {
+                    "component": _safe_identifier(item.get("component")),
+                    "provider": _safe_identifier(item.get("provider")),
+                    "state": _safe_identifier(item.get("state")),
+                    "required": item.get("required") is True,
+                    "failure_type": _safe_identifier(item.get("failure_type")),
+                }
+            )
+    safe["components"] = components
+    safe["failures"] = [
+        {
+            "component": item.get("component"),
+            "provider": item.get("provider"),
+            "failure_type": item.get("failure_type"),
+        }
+        for item in components
+        if item.get("state") in {"failed", "timed-out", "invalid"}
+    ]
     return safe
 
 
@@ -182,6 +238,31 @@ def enrich_snapshot(
     metrics = dict(enriched_diagnostic.get("progress_metrics") or {})
     metrics.update(_safe_reference_metrics(public_payload.get("progress_metrics")))
     enriched_diagnostic["progress_metrics"] = metrics
+
+    reference_progress = _safe_reference_prequalification(
+        public_payload.get("reference_prequalification_progress")
+    )
+    if reference_progress is not None:
+        enriched_diagnostic["reference_prequalification_progress"] = reference_progress
+
+    for key in (
+        "prequalification_failure_reason",
+        "prequalification_failure_capability",
+        "prequalification_failure_stage",
+        "prequalification_failure_provider",
+        "prequalification_failure_error_type",
+    ):
+        value = _safe_identifier(public_payload.get(key))
+        if value is not None:
+            enriched_diagnostic[key] = value
+
+    prequalification = public_payload.get("prequalification_progress")
+    if isinstance(prequalification, Mapping):
+        active_phase = _safe_identifier(prequalification.get("active_phase"))
+        enriched_diagnostic["prequalification_progress"] = {
+            "active_phase": active_phase,
+            "reference": reference_progress,
+        }
 
     futures_rows = _safe_futures_rows(public_payload.get("detail"))
     if futures_rows:
