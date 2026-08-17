@@ -24,6 +24,20 @@ def _generation(*, as_of: datetime, manifest_id: str = "manifest-old") -> Eviden
     )
 
 
+def test_public_compatibility_inputs_resolve_from_repository() -> None:
+    repository_root = Path(maintenance.__file__).resolve().parents[1]
+    missing = [
+        relative
+        for relative in maintenance._PUBLIC_COMPATIBILITY_FILES
+        if not (repository_root / relative).is_file()
+    ]
+
+    assert missing == []
+    fingerprint = maintenance._public_component_compatibility()
+    assert len(fingerprint) == 64
+    assert all(character in "0123456789abcdef" for character in fingerprint)
+
+
 def test_prior_release_generation_rebinds_without_legacy_refresh(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
