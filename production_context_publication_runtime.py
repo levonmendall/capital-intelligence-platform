@@ -23,6 +23,7 @@ from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     FreePaperPilotUniverse,
     assess_free_paper_pilot_readiness,
+    weekday_market_evaluation_scheduled,
 )
 from providers.alpaca_paper import create_alpaca_paper_client
 from providers.fred import FREDProvider
@@ -112,9 +113,7 @@ class ProductionContextPublicationResult:
             "state": self.state,
             "cycle_key": self.cycle_key,
             "scheduled_for": self.scheduled_for.isoformat(),
-            "decision_as_of": (
-                None if self.decision_as_of is None else self.decision_as_of.isoformat()
-            ),
+            "decision_as_of": None if self.decision_as_of is None else self.decision_as_of.isoformat(),
             "detail": self.detail,
             "eligible_universe_identifier": self.eligible_universe_identifier,
             "screening_publication_identifier": self.screening_publication_identifier,
@@ -134,17 +133,13 @@ def _cycle_key(*, scheduled_for: datetime, timezone_name: str) -> str:
 
 
 def _advance_screening_if_ready(result: ProductionContextPublicationResult) -> None:
-    """Bind a persisted full-universe screening publication to its exact input cutoff."""
-
     if not result.ready:
         return
     if result.decision_as_of is None:
         raise RuntimeError("ready production context is missing decision_as_of")
     source = str(result.screening_publication_identifier or "").strip()
     if not source:
-        raise RuntimeError(
-            "ready production context is missing screening publication identity"
-        )
+        raise RuntimeError("ready production context is missing screening publication identity")
     advance_linear_state_for_cutoff(
         cutoff=result.decision_as_of,
         target=CertificationState.SCREENING_COMPLETE,
@@ -162,14 +157,6 @@ def _advance_screening_if_ready(result: ProductionContextPublicationResult) -> N
 
 
 def _stable_production_snapshot_clock() -> Clock:
-    """Freeze the governed cutoff on first use after current readiness observations.
-
-    The governed publisher reads its clock first after bounded readiness/cash checks and
-    again after evidence loading. A provider-free evidence snapshot must keep those reads
-    on one cutoff so the immutable certification input, screening publication, committee,
-    CIO decision, and construction all share the same point-in-time identity.
-    """
-
     frozen: datetime | None = None
 
     def clock() -> datetime:
@@ -195,14 +182,10 @@ def prepare_production_context_for_cycle(
 ) -> ProductionContextPublicationResult:
     """Publish one governed context using already-qualified evidence in production."""
 
-    from production_context_publication_governed import (
-        prepare_governed_production_context_for_cycle,
-    )
+    from production_context_publication_governed import prepare_governed_production_context_for_cycle
 
     if equity_discovery_probe is None:
-        from operations.qualified_equity_discovery import (
-            discover_us_equities as qualified_equity_discovery_probe,
-        )
+        from operations.qualified_equity_discovery import discover_us_equities as qualified_equity_discovery_probe
         equity_discovery_probe = qualified_equity_discovery_probe
 
     snapshot_probe_active = False
@@ -218,10 +201,8 @@ def prepare_production_context_for_cycle(
             if clock is None:
                 clock = _stable_production_snapshot_clock()
             evidence_probe = qualified_paper_evidence_probe
-            if readiness_probe is None:
-                readiness_probe = lambda universe: qualified_paper_readiness_probe(
-                    universe, cutoff=clock()
-                )
+            if readiness_probe is None and weekday_market_evaluation_scheduled(scheduled_for):
+                readiness_probe = lambda universe: qualified_paper_readiness_probe(universe, cutoff=clock())
             if cash_probe is None:
                 cash_probe = lambda: qualified_cash_probe(cutoff=clock())
 
