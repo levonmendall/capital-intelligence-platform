@@ -11,9 +11,8 @@ comprehensive-discovery, and historical-coverage evidence use the generic qualif
 component ledger. Successful components are committed immediately and a later failure
 resumes the same still-fresh evidence epoch instead of restarting the whole plane.
 Missing, stale, corrupt, configuration-mismatched, or incomplete components remain
-fail-closed. Reference and discovery acquisition retain killable process boundaries;
-public-live acquisition is supervised at the individual requirement boundary so one slow
-provider cannot kill the aggregate qualification controller.
+fail-closed. Reference and public-live acquisition are supervised at their individual
+component boundaries; comprehensive discovery retains its bounded aggregate supervisor.
 """
 
 from __future__ import annotations
@@ -39,6 +38,9 @@ from operations.supervised_component_execution import (
     SupervisedComponentExecutionError,
     SupervisedComponentTimeout,
     run_supervised_component,
+)
+from operations.supervised_reference_prequalification import (
+    prepare_supervised_reference_prequalification,
 )
 
 
@@ -532,14 +534,10 @@ def _bound_or_prepare_reference_manifest(values: Mapping[str, str], *, preparati
     except ReferenceReadinessError:
         pass
 
-    _run_supervised(
-        values,
-        component="reference-readiness",
-        operation=lambda: _plane._default_reference_preparer(mutable),
-        timeout_env=_REFERENCE_TIMEOUT_ENV,
-        default_timeout=_DEFAULT_REFERENCE_TIMEOUT_SECONDS,
-        return_value=False,
-    )
+    # The reference controller must remain alive while its independent provider workers
+    # time out or qualify. Wrapping it in the former aggregate 120-second process would
+    # recreate the all-or-nothing boundary and could orphan nested process groups.
+    prepare_supervised_reference_prequalification(mutable)
 
     rebound_cutoff = max(preparation_cutoff, datetime.now(timezone.utc))
     try:
