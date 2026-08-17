@@ -1,30 +1,45 @@
 """Qualify required public-live information one governed requirement group at a time.
 
 Required public-live sources already express provider fallback semantics through
-``requirement_group``.  This module turns those groups into durable operational units:
+``requirement_group``. This module turns those groups into durable operational units:
 each group is collected independently, successful normalized records are merged into the
-existing rolling public record set immediately, and callers can checkpoint each qualified
-group before attempting the next one.
+existing rolling public record set immediately, and each qualified group is committed to
+the generic evidence ledger before the next group is attempted.
 
 Nothing here has investment, specialist, construction, execution, or real-money authority.
 A requirement group is qualified only when at least one configured source in that exact
-group succeeds.  Missing groups and exhausted fallbacks remain fail-closed.
+group succeeds. Missing groups, stale checkpoints, and exhausted fallbacks remain
+fail-closed.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Mapping
 
 from operations import continuous_evidence_plane as _plane
+from operations import qualified_evidence_ledger as _ledger
+from operations.supervised_component_execution import (
+    SupervisedComponentExecutionError,
+    SupervisedComponentTimeout,
+    run_supervised_component,
+)
 from providers.public_live_information import PublicLiveSourceCatalog
 from providers.public_live_information_extended import ImpactfulPublicLiveInformationProvider
 from providers.public_live_source_catalogs import load_operating_public_live_source_catalog
 from public_live_record_history import merge_public_event_records
+
+
+_COMPONENT_PREFIX = "required-public-live-group"
+_COMPONENT_CONTRACT = "required-public-live-group.v1"
+_GROUP_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_REQUIREMENT_TIMEOUT_SECONDS"
+_DEFAULT_GROUP_TIMEOUT_SECONDS = 90.0
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -43,7 +58,10 @@ def _data_path(values: Mapping[str, str], environment_name: str, default_name: s
     if configured:
         return Path(configured).expanduser()
     data_dir = Path(
-        str(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database"))
+        str(
+            values.get("CAPITAL_INTELLIGENCE_DATA_DIR")
+            or os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")
+        )
     ).expanduser()
     return data_dir / default_name
 
@@ -79,7 +97,7 @@ def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
 
 
 def required_public_live_requirement_groups(values: Mapping[str, str]) -> tuple[str, ...]:
-    """Return every configured required-information group in deterministic catalog order."""
+    """Return every required-information group in deterministic catalog order."""
 
     groups: list[str] = []
     for source in _catalog(values).sources:
@@ -103,9 +121,66 @@ def _records_path(values: Mapping[str, str]) -> Path:
 
 def _requirement_report_path(values: Mapping[str, str], requirement_group: str) -> Path:
     data_dir = Path(
-        str(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database"))
+        str(
+            values.get("CAPITAL_INTELLIGENCE_DATA_DIR")
+            or os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "database")
+        )
     ).expanduser()
     return data_dir / "public_live_requirements" / f"{_safe(requirement_group)}.json"
+
+
+def _group_sources(catalog: object, requirement_group: str) -> tuple[object, ...]:
+    group = str(requirement_group).strip()
+    return tuple(
+        source
+        for source in tuple(getattr(catalog, "sources", ()) or ())
+        if bool(getattr(source, "required", False))
+        and str(getattr(source, "requirement_group", "") or "").strip() == group
+    )
+
+
+def _component_name(requirement_group: str) -> str:
+    return f"{_COMPONENT_PREFIX}::{_safe(requirement_group)}"
+
+
+def _component_compatibility(catalog: object, requirement_group: str) -> str:
+    sources = _group_sources(catalog, requirement_group)
+    contract = [
+        {
+            "identifier": str(getattr(source, "identifier", "")),
+            "parser": str(getattr(source, "parser", "")),
+            "endpoint": str(getattr(source, "endpoint", "")),
+            "enabled": bool(getattr(source, "enabled", False)),
+            "required": bool(getattr(source, "required", False)),
+            "requirement_group": str(getattr(source, "requirement_group", "") or ""),
+            "credential_environment_variables": list(
+                getattr(source, "credential_environment_variables", ()) or ()
+            ),
+            "parameters": dict(getattr(source, "parameters", {}) or {}),
+            "headers": dict(getattr(source, "headers", {}) or {}),
+            "maximum_records": int(getattr(source, "maximum_records", 0) or 0),
+        }
+        for source in sources
+    ]
+    return _ledger.compatibility_fingerprint(
+        _COMPONENT_CONTRACT,
+        str(getattr(catalog, "identifier", "")),
+        requirement_group,
+        contract,
+    )
+
+
+def _group_timeout_seconds(values: Mapping[str, str]) -> float:
+    raw = str(values.get(_GROUP_TIMEOUT_ENV) or os.getenv(_GROUP_TIMEOUT_ENV, "")).strip()
+    if not raw:
+        return _DEFAULT_GROUP_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw)
+    except ValueError as error:
+        raise ValueError(f"{_GROUP_TIMEOUT_ENV} must be numeric") from error
+    if not math.isfinite(timeout) or timeout <= 0.0:
+        raise ValueError(f"{_GROUP_TIMEOUT_ENV} must be positive")
+    return timeout
 
 
 def _write_rolling_records(
@@ -119,7 +194,9 @@ def _write_rolling_records(
         getattr(report, "evaluated_at"),
         field_name="public_requirement_evaluated_at",
     )
-    current_records = [item.to_dict() for item in tuple(getattr(report, "records", ()) or ())]
+    current_records = [
+        item.to_dict() for item in tuple(getattr(report, "records", ()) or ())
+    ]
     rolling_records = merge_public_event_records(
         records_path,
         current_records,
@@ -161,18 +238,14 @@ def collect_required_public_live_requirement(
         raise ValueError("requirement_group must be non-empty")
     _aware(as_of, field_name="public_requirement_cutoff")
     catalog = _catalog(values)
-    selected = tuple(
-        source
-        for source in catalog.sources
-        if source.required and str(source.requirement_group or "").strip() == group
-    )
+    selected = _group_sources(catalog, group)
     if not selected:
         raise _plane.ContinuousEvidencePlaneError(
             f"required public live information group is absent; required_information={_safe(group)}"
         )
 
     scoped_catalog = PublicLiveSourceCatalog(
-        identifier=catalog.identifier,
+        identifier=str(getattr(catalog, "identifier", "")),
         sources=selected,
     )
     report = ImpactfulPublicLiveInformationProvider(scoped_catalog).collect(
@@ -187,7 +260,8 @@ def collect_required_public_live_requirement(
         dict.fromkeys(
             identifier
             for item in members
-            if (identifier := _safe(getattr(item, "source_identifier", ""))) != "unknown"
+            if (identifier := _safe(getattr(item, "source_identifier", "")))
+            != "unknown"
         )
     )
     successful = next(
@@ -195,7 +269,7 @@ def collect_required_public_live_requirement(
         None,
     )
     if successful is None or getattr(report, "required_sources_ready", None) is not True:
-        configured_order = tuple(_safe(source.identifier) for source in selected)
+        configured_order = tuple(_safe(getattr(source, "identifier", "")) for source in selected)
         failures = attempted or configured_order
         primary = failures[0] if failures else "unknown"
         fallbacks = failures[1:]
@@ -208,7 +282,7 @@ def collect_required_public_live_requirement(
 
     provider = _safe(getattr(successful, "source_identifier", ""))
     provider_index = attempted.index(provider) if provider in attempted else 0
-    fallbacks_attempted = attempted[1 : provider_index + 1] if provider_index > 0 else ()
+    prior_attempts = attempted[:provider_index] if provider_index > 0 else ()
     current_record_count = _write_rolling_records(
         values=values,
         report=report,
@@ -223,11 +297,13 @@ def collect_required_public_live_requirement(
         "required_information": group,
         "qualified": True,
         "provider": provider,
-        "fallback_providers_attempted": list(fallbacks_attempted),
-        "source_identifiers": [_safe(source.identifier) for source in selected],
+        "fallback_providers_attempted": list(prior_attempts),
+        "source_identifiers": [
+            _safe(getattr(source, "identifier", "")) for source in selected
+        ],
         "evaluated_at": evaluated_at.isoformat(),
         "record_count": current_record_count,
-        "catalog_identifier": catalog.identifier,
+        "catalog_identifier": str(getattr(catalog, "identifier", "")),
         "credential_safe": True,
         "decision_evidence_authority": False,
         "paper_only": True,
@@ -239,16 +315,98 @@ def collect_required_public_live_requirement(
     return payload
 
 
+def _qualify_and_checkpoint_requirement(
+    *,
+    requirement_group: str,
+    as_of: datetime,
+    values: Mapping[str, str],
+    compatibility: str,
+) -> Mapping[str, object]:
+    payload = collect_required_public_live_requirement(
+        requirement_group=requirement_group,
+        as_of=as_of,
+        values=values,
+    )
+    try:
+        evaluated_at = datetime.fromisoformat(
+            str(payload.get("evaluated_at") or "").replace("Z", "+00:00")
+        )
+    except ValueError as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            "qualified public requirement returned an invalid evaluation timestamp"
+        ) from error
+    evaluated_at = _aware(
+        evaluated_at,
+        field_name="public_requirement_component_as_of",
+    )
+    try:
+        component = _ledger.publish_qualified_component(
+            values=values,
+            component_name=_component_name(requirement_group),
+            compatibility=compatibility,
+            as_of=evaluated_at,
+            payload=payload,
+        )
+    except _ledger.QualifiedEvidenceLedgerError as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            f"required public live checkpoint cannot be committed; required_information={_safe(requirement_group)}: {error}"
+        ) from error
+    return {
+        **dict(payload),
+        "component_id": component.component_id,
+        "valid_through": component.valid_through.isoformat(),
+    }
+
+
+def _run_requirement(
+    *,
+    requirement_group: str,
+    as_of: datetime,
+    values: Mapping[str, str],
+    compatibility: str,
+) -> Mapping[str, object]:
+    try:
+        result = run_supervised_component(
+            component=f"required-public-live:{_safe(requirement_group)}",
+            operation=lambda: _qualify_and_checkpoint_requirement(
+                requirement_group=requirement_group,
+                as_of=as_of,
+                values=values,
+                compatibility=compatibility,
+            ),
+            timeout_seconds=_group_timeout_seconds(values),
+            return_value=True,
+        )
+    except SupervisedComponentTimeout as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            "required public live information timed out; "
+            f"required_information={_safe(requirement_group)}; {error}"
+        ) from error
+    except SupervisedComponentExecutionError as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            "required public live information failed; "
+            f"required_information={_safe(requirement_group)}; {error}"
+        ) from error
+    if not isinstance(result, Mapping) or result.get("qualified") is not True:
+        raise _plane.ContinuousEvidencePlaneError(
+            "required public live information lost qualification across process boundary; "
+            f"required_information={_safe(requirement_group)}"
+        )
+    return dict(result)
+
+
 def finalize_required_public_live_requirements(
     *,
     requirement_groups: tuple[str, ...],
     as_of: datetime,
     values: Mapping[str, str],
 ) -> None:
-    """Mark the shared rolling record set ready only after every required group qualified."""
+    """Mark the rolling record set ready only after every required group qualified."""
 
     cutoff = _aware(as_of, field_name="public_requirements_cutoff")
-    groups = tuple(dict.fromkeys(str(item).strip() for item in requirement_groups if str(item).strip()))
+    groups = tuple(
+        dict.fromkeys(str(item).strip() for item in requirement_groups if str(item).strip())
+    )
     if not groups:
         raise _plane.ContinuousEvidencePlaneError(
             "required public live aggregate cannot qualify without requirement groups"
@@ -269,7 +427,11 @@ def finalize_required_public_live_requirements(
         raise _plane.ContinuousEvidencePlaneError(
             "required public live aggregate record set has invalid records"
         )
-    coverage = dict(payload.get("coverage") or {}) if isinstance(payload.get("coverage"), Mapping) else {}
+    coverage = (
+        dict(payload.get("coverage") or {})
+        if isinstance(payload.get("coverage"), Mapping)
+        else {}
+    )
     coverage.update(
         {
             "required_sources_ready": True,
@@ -293,8 +455,81 @@ def finalize_required_public_live_requirements(
     )
 
 
+def maintain_required_public_live_requirements(
+    *,
+    as_of: datetime,
+    values: Mapping[str, str],
+):
+    """Reuse qualified groups, acquire only missing groups, then expose one aggregate result."""
+
+    cutoff = _aware(as_of, field_name="public_requirements_as_of")
+    catalog = _catalog(values)
+    groups = required_public_live_requirement_groups(values)
+    records_exist = _records_path(values).exists()
+    component_ids: list[str] = []
+    providers: list[str] = []
+    fallback_attempted = False
+    reused_count = 0
+
+    for group in groups:
+        compatibility = _component_compatibility(catalog, group)
+        component = None
+        if records_exist:
+            try:
+                component = _ledger.load_qualified_component(
+                    values=values,
+                    component_name=_component_name(group),
+                    compatibility=compatibility,
+                    cutoff=datetime.now(timezone.utc),
+                )
+            except _ledger.QualifiedEvidenceLedgerError as error:
+                raise _plane.ContinuousEvidencePlaneError(
+                    f"required public live checkpoint is invalid; required_information={_safe(group)}: {error}"
+                ) from error
+        if component is None:
+            result = _run_requirement(
+                requirement_group=group,
+                as_of=cutoff,
+                values=values,
+                compatibility=compatibility,
+            )
+            component_id = str(result.get("component_id") or "").strip()
+            provider = str(result.get("provider") or "").strip()
+            fallbacks = tuple(result.get("fallback_providers_attempted") or ())
+        else:
+            reused_count += 1
+            component_id = component.component_id
+            provider = str(component.payload.get("provider") or "").strip()
+            fallbacks = tuple(component.payload.get("fallback_providers_attempted") or ())
+        if not component_id:
+            raise _plane.ContinuousEvidencePlaneError(
+                f"required public live checkpoint lost its identifier; required_information={_safe(group)}"
+            )
+        component_ids.append(component_id)
+        if provider:
+            providers.append(provider)
+        fallback_attempted = fallback_attempted or bool(fallbacks)
+
+    finalize_required_public_live_requirements(
+        requirement_groups=groups,
+        as_of=cutoff,
+        values=values,
+    )
+    return SimpleNamespace(
+        state="degraded" if fallback_attempted else "available",
+        required_sources_ready=True,
+        failed_required_source_identifiers=(),
+        collection_scope="required",
+        qualified_requirement_groups=groups,
+        qualified_requirement_component_ids=tuple(component_ids),
+        qualified_requirement_reused_count=reused_count,
+        qualified_requirement_provider_identifiers=tuple(providers),
+    )
+
+
 __all__ = [
     "collect_required_public_live_requirement",
     "finalize_required_public_live_requirements",
+    "maintain_required_public_live_requirements",
     "required_public_live_requirement_groups",
 ]
