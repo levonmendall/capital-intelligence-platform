@@ -11,12 +11,15 @@ comprehensive-discovery, and historical-coverage evidence use the generic qualif
 component ledger. Successful components are committed immediately and a later failure
 resumes the same still-fresh evidence epoch instead of restarting the whole plane.
 Missing, stale, corrupt, configuration-mismatched, or incomplete components remain
-fail-closed and are selectively reacquired.
+fail-closed and are selectively reacquired. Provider-facing acquisition is supervised by
+killable process boundaries so a hung provider cannot hold the entire plane indefinitely.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import math
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Mapping
@@ -31,6 +34,11 @@ from operations.qualified_comprehensive_discovery_snapshot import (
 from operations.qualified_evidence_maintenance import EvidenceMaintenanceResult
 from operations.reference_readiness import ReferenceReadinessError
 from operations.release_reference_binding import bind_reference_manifest_from_components
+from operations.supervised_component_execution import (
+    SupervisedComponentExecutionError,
+    SupervisedComponentTimeout,
+    run_supervised_component,
+)
 
 
 _PUBLIC_COMPONENT = "required-public-live"
@@ -55,6 +63,12 @@ _HISTORY_COMPATIBILITY_FILES = (
     "operations/persistent_historical_evidence.py",
     "operations/continuous_evidence_plane.py",
 )
+_REFERENCE_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_REFERENCE_TIMEOUT_SECONDS"
+_PUBLIC_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_TIMEOUT_SECONDS"
+_DISCOVERY_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_DISCOVERY_TIMEOUT_SECONDS"
+_DEFAULT_REFERENCE_TIMEOUT_SECONDS = 120.0
+_DEFAULT_PUBLIC_TIMEOUT_SECONDS = 180.0
+_DEFAULT_DISCOVERY_TIMEOUT_SECONDS = 540.0
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -180,6 +194,55 @@ def _load_exact_component(
     return component
 
 
+def _component_timeout_seconds(
+    values: Mapping[str, str],
+    *,
+    env_name: str,
+    default: float,
+) -> float:
+    raw = str(values.get(env_name) or "").strip()
+    if not raw:
+        return default
+    try:
+        timeout = float(raw)
+    except ValueError as error:
+        raise ValueError(f"{env_name} must be numeric") from error
+    if not math.isfinite(timeout) or timeout <= 0.0:
+        raise ValueError(f"{env_name} must be positive")
+    return timeout
+
+
+def _run_supervised(
+    values: Mapping[str, str],
+    *,
+    component: str,
+    operation: Callable[[], object],
+    timeout_env: str,
+    default_timeout: float,
+    return_value: bool,
+):
+    timeout = _component_timeout_seconds(
+        values,
+        env_name=timeout_env,
+        default=default_timeout,
+    )
+    try:
+        return run_supervised_component(
+            component=component,
+            operation=operation,
+            timeout_seconds=timeout,
+            return_value=return_value,
+        )
+    except SupervisedComponentTimeout as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            f"{component} evidence acquisition timed out: {error}"
+        ) from error
+    except SupervisedComponentExecutionError as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            f"{component} evidence acquisition failed: {error}"
+        ) from error
+
+
 def _component_public_collector(
     values: Mapping[str, str],
 ) -> Callable[[datetime], object]:
@@ -240,6 +303,49 @@ def _component_public_collector(
         except (AttributeError, TypeError):
             pass
         return result
+
+    return collect
+
+
+def _supervised_public_collector(
+    values: Mapping[str, str],
+) -> Callable[[datetime], object]:
+    collector = _component_public_collector(values)
+
+    def collect(timestamp: datetime):
+        def acquire() -> Mapping[str, object]:
+            result = collector(timestamp)
+            return {
+                "state": str(getattr(result, "state", "available") or "available"),
+                "required_sources_ready": getattr(result, "required_sources_ready", None) is True,
+                "failed_required_source_identifiers": tuple(
+                    str(item)
+                    for item in getattr(result, "failed_required_source_identifiers", ())
+                ),
+                "collection_scope": str(
+                    getattr(result, "collection_scope", "required") or "required"
+                ),
+                "qualified_component_id": str(
+                    getattr(result, "qualified_component_id", "") or ""
+                ),
+                "qualified_component_reused": bool(
+                    getattr(result, "qualified_component_reused", False)
+                ),
+            }
+
+        payload = _run_supervised(
+            values,
+            component=_PUBLIC_COMPONENT,
+            operation=acquire,
+            timeout_env=_PUBLIC_TIMEOUT_ENV,
+            default_timeout=_DEFAULT_PUBLIC_TIMEOUT_SECONDS,
+            return_value=True,
+        )
+        if not isinstance(payload, Mapping) or payload.get("required_sources_ready") is not True:
+            raise _plane.ContinuousEvidencePlaneError(
+                "required public live information lost qualification across process boundary"
+            )
+        return SimpleNamespace(**dict(payload))
 
     return collect
 
@@ -324,7 +430,7 @@ def _component_discovery_runner(
                 )
             return snapshot.result
 
-        result = _plane._default_discovery(evidence_as_of)
+        _plane._default_discovery(evidence_as_of)
         try:
             snapshot = load_qualified_comprehensive_discovery_snapshot(
                 evidence_as_of=evidence_as_of,
@@ -334,10 +440,9 @@ def _component_discovery_runner(
             raise _plane.ContinuousEvidencePlaneError(
                 f"comprehensive discovery did not publish its immutable snapshot: {error}"
             ) from error
-        scope_count, coverage_digest = _plane._historical_coverage_summary(
-            values,
-            as_of=evidence_as_of,
-        )
+
+        # Commit discovery immediately after its immutable snapshot qualifies. Historical
+        # coverage is a dependent checkpoint and must not force rediscovery if it fails.
         try:
             _ledger.publish_qualified_component(
                 values=values,
@@ -353,13 +458,47 @@ def _component_discovery_runner(
             raise _plane.ContinuousEvidencePlaneError(
                 f"qualified discovery evidence component cannot be committed: {error}"
             ) from error
+
+        scope_count, coverage_digest = _plane._historical_coverage_summary(
+            values,
+            as_of=evidence_as_of,
+        )
         _publish_history_component(
             values,
             evidence_as_of=evidence_as_of,
             scope_count=scope_count,
             coverage_digest=coverage_digest,
         )
-        return result
+        return snapshot.result
+
+    return run
+
+
+def _supervised_discovery_runner(
+    values: Mapping[str, str],
+) -> Callable[[datetime], object]:
+    runner = _component_discovery_runner(values)
+
+    def run(timestamp: datetime):
+        evidence_as_of = _aware(timestamp, field_name="supervised_discovery_evidence_as_of")
+        _run_supervised(
+            values,
+            component=_DISCOVERY_COMPONENT,
+            operation=lambda: runner(evidence_as_of),
+            timeout_env=_DISCOVERY_TIMEOUT_ENV,
+            default_timeout=_DEFAULT_DISCOVERY_TIMEOUT_SECONDS,
+            return_value=False,
+        )
+        try:
+            snapshot = load_qualified_comprehensive_discovery_snapshot(
+                evidence_as_of=evidence_as_of,
+                values=values,
+            )
+        except ComprehensiveDiscoverySnapshotError as error:
+            raise _plane.ContinuousEvidencePlaneError(
+                f"supervised discovery completed without a qualified snapshot: {error}"
+            ) from error
+        return snapshot.result
 
     return run
 
@@ -436,8 +575,8 @@ def _legacy_refresh(
     kwargs: dict[str, object] = {
         "as_of": requested,
         "values": values,
-        "public_collector": _component_public_collector(values),
-        "discovery": _component_discovery_runner(values),
+        "public_collector": _supervised_public_collector(values),
+        "discovery": _supervised_discovery_runner(values),
     }
     if reference_manifest is not None:
         kwargs["reference_preparer"] = (
@@ -459,6 +598,39 @@ def _resumable_evidence_cutoff(
     return public.as_of
 
 
+def _bound_or_prepare_reference_manifest(
+    values: Mapping[str, str],
+    *,
+    preparation_cutoff: datetime,
+):
+    mutable = dict(values)
+    try:
+        return bind_reference_manifest_from_components(
+            mutable,
+            now=preparation_cutoff,
+        )
+    except ReferenceReadinessError:
+        pass
+
+    _run_supervised(
+        values,
+        component="reference-readiness",
+        operation=lambda: _plane._default_reference_preparer(mutable),
+        timeout_env=_REFERENCE_TIMEOUT_ENV,
+        default_timeout=_DEFAULT_REFERENCE_TIMEOUT_SECONDS,
+        return_value=False,
+    )
+    try:
+        return bind_reference_manifest_from_components(
+            mutable,
+            now=preparation_cutoff,
+        )
+    except ReferenceReadinessError as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            "reference readiness acquisition completed without bindable qualified components"
+        ) from error
+
+
 def maintain_component_qualified_evidence_plane(
     *,
     as_of: datetime | None = None,
@@ -466,7 +638,7 @@ def maintain_component_qualified_evidence_plane(
 ) -> EvidenceMaintenanceResult:
     """Prefer qualified component reuse; acquire only components that actually need it."""
 
-    resolved = dict(__import__("os").environ if values is None else values)
+    resolved = dict(os.environ if values is None else values)
     requested = _aware(
         datetime.now(timezone.utc) if as_of is None else as_of,
         field_name="component_qualified_evidence_as_of",
@@ -533,15 +705,10 @@ def maintain_component_qualified_evidence_plane(
             )
 
     preparation_cutoff = _resumable_evidence_cutoff(resolved, requested=requested)
-    mutable = dict(resolved)
-    try:
-        manifest = bind_reference_manifest_from_components(
-            mutable,
-            now=preparation_cutoff,
-        )
-    except ReferenceReadinessError:
-        return _legacy_refresh(requested=preparation_cutoff, values=resolved)
-
+    manifest = _bound_or_prepare_reference_manifest(
+        resolved,
+        preparation_cutoff=preparation_cutoff,
+    )
     return _legacy_refresh(
         requested=preparation_cutoff,
         values=resolved,
