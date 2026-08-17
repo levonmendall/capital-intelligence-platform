@@ -82,9 +82,10 @@ def test_default_public_maintenance_honors_collection_cadence(
     values = _values(tmp_path)
     observed: dict[str, object] = {}
 
-    def collect(*, now, force):
+    def collect(*, now, force, include_optional):
         observed["now"] = now
         observed["force"] = force
+        observed["include_optional"] = include_optional
         return SimpleNamespace(state="available", required_sources_ready=True)
 
     monkeypatch.setattr(
@@ -100,6 +101,7 @@ def test_default_public_maintenance_honors_collection_cadence(
 
     assert result.refreshed is True
     assert observed["force"] is False
+    assert observed["include_optional"] is False
 
 
 def test_default_public_maintenance_forces_unqualified_cached_collection(
@@ -110,8 +112,9 @@ def test_default_public_maintenance_forces_unqualified_cached_collection(
     timestamp = datetime.now(timezone.utc)
     calls: list[bool] = []
 
-    def collect(*, now, force):
+    def collect(*, now, force, include_optional):
         assert now == timestamp
+        assert include_optional is False
         calls.append(force)
         if not force:
             return SimpleNamespace(state="not_due", required_sources_ready=False)
@@ -138,8 +141,9 @@ def test_default_public_maintenance_forced_retry_remains_fail_closed(
     timestamp = datetime.now(timezone.utc)
     calls: list[bool] = []
 
-    def collect(*, now, force):
+    def collect(*, now, force, include_optional):
         assert now == timestamp
+        assert include_optional is False
         calls.append(force)
         if not force:
             return SimpleNamespace(state="not_due", required_sources_ready=None)
@@ -158,6 +162,42 @@ def test_default_public_maintenance_forced_retry_remains_fail_closed(
         maintenance._default_public_collector(timestamp)
 
     assert calls == [False, True]
+
+
+def test_default_public_maintenance_attributes_failed_required_group(
+    monkeypatch,
+) -> None:
+    import public_live_collection_runtime
+
+    timestamp = datetime.now(timezone.utc)
+
+    def collect(*, now, force, include_optional):
+        assert now == timestamp
+        assert force is False
+        assert include_optional is False
+        return SimpleNamespace(
+            state="degraded",
+            required_sources_ready=False,
+            failed_required_source_identifiers=(
+                "gdelt-global-news-discovery",
+                "gdelt-global-context-discovery",
+            ),
+        )
+
+    monkeypatch.setattr(
+        public_live_collection_runtime,
+        "collect_public_live_information_if_due",
+        collect,
+    )
+
+    with pytest.raises(
+        maintenance._plane.ContinuousEvidencePlaneError,
+        match=(
+            "provider=gdelt-global-news-discovery; "
+            "fallback_providers_attempted=gdelt-global-context-discovery"
+        ),
+    ):
+        maintenance._default_public_collector(timestamp)
 
 
 def test_prequalified_reference_loader_is_disk_only_and_binds_snapshot_manifest(

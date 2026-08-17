@@ -127,7 +127,11 @@ def _generation_qualified(
 def _default_public_collector(timestamp: datetime):
     from public_live_collection_runtime import collect_public_live_information_if_due
 
-    result = collect_public_live_information_if_due(now=timestamp, force=False)
+    result = collect_public_live_information_if_due(
+        now=timestamp,
+        force=False,
+        include_optional=False,
+    )
     state = str(getattr(result, "state", "")).strip().lower()
     required_ready = getattr(result, "required_sources_ready", None)
 
@@ -137,13 +141,34 @@ def _default_public_collector(timestamp: datetime):
     # release-prequalification retry budget can actually recover transient provider
     # failures instead of replaying the same unusable cached state for an hour.
     if state == "not_due" and required_ready is not True:
-        result = collect_public_live_information_if_due(now=timestamp, force=True)
+        result = collect_public_live_information_if_due(
+            now=timestamp,
+            force=True,
+            include_optional=False,
+        )
         state = str(getattr(result, "state", "")).strip().lower()
         required_ready = getattr(result, "required_sources_ready", None)
 
     if state in {"failed", "disabled"} or required_ready is False:
+        failed = tuple(
+            str(item).strip()
+            for item in getattr(
+                result,
+                "failed_required_source_identifiers",
+                (),
+            )
+            if str(item).strip()
+        )
+        provider_detail = f"; provider={failed[0]}" if failed else ""
+        fallback_detail = (
+            "; fallback_providers_attempted=" + ",".join(failed[1:])
+            if len(failed) > 1
+            else ""
+        )
         raise _plane.ContinuousEvidencePlaneError(
             "required public live information is not qualified"
+            + provider_detail
+            + fallback_detail
         )
     if required_ready is not True:
         if state in {"not_due", "in_progress"}:

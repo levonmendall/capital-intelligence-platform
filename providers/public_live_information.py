@@ -115,6 +115,7 @@ class PublicLiveSourceDefinition:
     license_identifier: str
     usage_rights_identifier: str
     limitations: tuple[str, ...]
+    requirement_group: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -136,6 +137,21 @@ class PublicLiveSourceDefinition:
             raise ValueError("public live endpoints must use absolute HTTPS URLs")
         if not isinstance(self.enabled, bool) or not isinstance(self.required, bool):
             raise TypeError("enabled and required must be bool values")
+        requirement_group = (
+            self.identifier
+            if self.required and self.requirement_group is None
+            else self.requirement_group
+        )
+        if requirement_group is not None:
+            requirement_group = _text(
+                requirement_group,
+                field_name="requirement_group",
+            )
+        if not self.required and requirement_group is not None:
+            raise ValueError(
+                "only required public live sources may join a requirement group"
+            )
+        object.__setattr__(self, "requirement_group", requirement_group)
         if isinstance(self.maximum_records, bool) or not isinstance(
             self.maximum_records, int
         ) or self.maximum_records < 1:
@@ -165,6 +181,7 @@ class PublicLiveSourceResult:
     content_hash: str | None
     error: str | None
     limitations: tuple[str, ...]
+    requirement_group: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -177,6 +194,7 @@ class PublicLiveSourceResult:
             "content_hash": self.content_hash,
             "error": self.error,
             "limitations": list(self.limitations),
+            "requirement_group": self.requirement_group,
         }
 
 
@@ -189,8 +207,14 @@ class PublicLiveCoverageReport:
 
     @property
     def required_sources_ready(self) -> bool:
-        required = tuple(item for item in self.sources if "required" in item.limitations)
-        return bool(required) and all(item.succeeded for item in required)
+        required_groups: dict[str, list[PublicLiveSourceResult]] = {}
+        for item in self.sources:
+            if item.requirement_group is not None:
+                required_groups.setdefault(item.requirement_group, []).append(item)
+        return bool(required_groups) and all(
+            any(item.succeeded for item in members)
+            for members in required_groups.values()
+        )
 
     @property
     def successful_source_count(self) -> int:
@@ -208,6 +232,7 @@ class PublicLiveCoverageReport:
             "successful_source_count": self.successful_source_count,
             "source_count": len(self.sources),
             "live_record_count": self.live_record_count,
+            "required_sources_ready": self.required_sources_ready,
             "sources": [item.to_dict() for item in self.sources],
             "secret_values_disclosed": False,
             "full_article_text_stored": False,
@@ -260,6 +285,11 @@ def source_from_payload(payload: Mapping[str, Any]) -> PublicLiveSourceDefinitio
             ("required",) if bool(payload.get("required", False)) else ()
         )
         + tuple(str(item) for item in payload.get("limitations", ())),
+        requirement_group=(
+            None
+            if payload.get("requirement_group") is None
+            else str(payload["requirement_group"])
+        ),
     )
 
 
@@ -299,8 +329,28 @@ class PublicLiveInformationProvider:
         evaluated_at = self._clock()
         results: list[PublicLiveSourceResult] = []
         records: list[DecisionInformationRecord] = []
+        satisfied_requirement_groups: set[str] = set()
         for source in self.catalog.sources:
-            if not source.enabled or (not include_optional and not source.required):
+            if not include_optional and not source.required:
+                continue
+            if source.requirement_group in satisfied_requirement_groups:
+                continue
+            if not source.enabled:
+                if source.required:
+                    results.append(
+                        PublicLiveSourceResult(
+                            source_identifier=source.identifier,
+                            source_name=source.source_name,
+                            retrieved_at=evaluated_at,
+                            configured=False,
+                            succeeded=False,
+                            record_count=0,
+                            content_hash=None,
+                            error="required public live source is disabled",
+                            limitations=source.limitations,
+                            requirement_group=source.requirement_group,
+                        )
+                    )
                 continue
             if not source.configured:
                 results.append(
@@ -315,6 +365,7 @@ class PublicLiveInformationProvider:
                         error="missing required configuration: "
                         + ", ".join(source.credential_environment_variables),
                         limitations=source.limitations,
+                        requirement_group=source.requirement_group,
                     )
                 )
                 continue
@@ -332,10 +383,13 @@ class PublicLiveInformationProvider:
                         content_hash=None,
                         error=str(error),
                         limitations=source.limitations,
+                        requirement_group=source.requirement_group,
                     )
                 )
                 continue
             records.extend(source_records)
+            if source.requirement_group is not None:
+                satisfied_requirement_groups.add(source.requirement_group)
             results.append(
                 PublicLiveSourceResult(
                     source_identifier=source.identifier,
@@ -347,6 +401,7 @@ class PublicLiveInformationProvider:
                     content_hash=raw_hash,
                     error=None,
                     limitations=source.limitations,
+                    requirement_group=source.requirement_group,
                 )
             )
         try:

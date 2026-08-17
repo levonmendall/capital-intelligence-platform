@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pytest
+import requests
 
 from data.decision_information import InformationSourceType, PortfolioImpactChannel
 from providers.public_live_information import (
@@ -75,6 +77,7 @@ def test_catalog_matches_schema_and_declares_broad_public_sources() -> None:
     identifiers = {item.identifier for item in catalog.sources}
     assert {
         "gdelt-global-news-discovery",
+        "gdelt-global-context-discovery",
         "federal-reserve-live",
         "ecb-live",
         "sec-press-live",
@@ -82,6 +85,7 @@ def test_catalog_matches_schema_and_declares_broad_public_sources() -> None:
         "nws-weather-alerts-live",
         "usgs-earthquakes-live",
         "cisa-kev-live",
+        "cisa-kev-github-mirror",
         "treasury-fiscal-live",
         "world-bank-global-growth-live",
         "eia-energy-live",
@@ -89,6 +93,22 @@ def test_catalog_matches_schema_and_declares_broad_public_sources() -> None:
     assert all(item.endpoint.startswith("https://") for item in catalog.sources)
     assert all(item.license_identifier for item in catalog.sources)
     assert all(item.usage_rights_identifier for item in catalog.sources)
+    gdelt = tuple(
+        item
+        for item in catalog.sources
+        if item.identifier.startswith("gdelt-global-")
+    )
+    assert len(gdelt) == 2
+    assert {item.requirement_group for item in gdelt} == {
+        "gdelt-global-news-discovery"
+    }
+    cisa = tuple(
+        item for item in catalog.sources if item.identifier.startswith("cisa-kev-")
+    )
+    assert len(cisa) == 2
+    assert {item.requirement_group for item in cisa} == {
+        "cisa-known-exploited-vulnerabilities"
+    }
 
 
 def test_gdelt_collection_preserves_metadata_without_article_body() -> None:
@@ -199,6 +219,139 @@ def test_optional_unconfigured_source_does_not_prevent_required_only_collection(
     assert len(report.sources) == 1
     assert report.sources[0].source_identifier == required.identifier
     assert report.sources[0].succeeded is True
+
+
+def test_required_group_accepts_governed_same_provider_alternative() -> None:
+    primary = replace(
+        _source(),
+        identifier="gdelt-primary",
+        endpoint="https://api.gdeltproject.org/api/v2/doc/doc",
+        requirement_group="gdelt-global-discovery",
+    )
+    fallback = replace(
+        _source(),
+        identifier="gdelt-context",
+        endpoint="https://api.gdeltproject.org/api/v2/context/context",
+        requirement_group="gdelt-global-discovery",
+    )
+    payload = {
+        "articles": [
+            {
+                "title": "Global market development",
+                "url": "https://publisher.example/global-market-development",
+                "domain": "publisher.example",
+                "seendate": "20260728T005500Z",
+            }
+        ]
+    }
+
+    def get(endpoint, **_kwargs):
+        if endpoint == primary.endpoint:
+            raise requests.HTTPError("429 Too Many Requests")
+        return FakeResponse(payload)
+
+    provider = PublicLiveInformationProvider(
+        PublicLiveSourceCatalog("catalog:redundant", (primary, fallback)),
+        http_get=get,
+        clock=lambda: NOW,
+        sleeper=lambda _: None,
+    )
+
+    report = provider.collect(include_optional=False)
+
+    assert [item.succeeded for item in report.sources] == [False, True]
+    assert report.required_sources_ready is True
+    assert report.live_record_count == 1
+
+
+def test_required_group_fails_closed_when_all_alternatives_fail() -> None:
+    primary = replace(
+        _source(),
+        identifier="gdelt-primary",
+        requirement_group="gdelt-global-discovery",
+    )
+    fallback = replace(
+        _source(),
+        identifier="gdelt-context",
+        endpoint="https://fallback.example.test/feed",
+        requirement_group="gdelt-global-discovery",
+    )
+    provider = PublicLiveInformationProvider(
+        PublicLiveSourceCatalog("catalog:redundant", (primary, fallback)),
+        http_get=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            requests.HTTPError("provider unavailable")
+        ),
+        clock=lambda: NOW,
+        sleeper=lambda _: None,
+    )
+
+    report = provider.collect(include_optional=False)
+
+    assert [item.succeeded for item in report.sources] == [False, False]
+    assert report.required_sources_ready is False
+
+
+def test_required_group_fails_closed_when_all_alternatives_are_disabled() -> None:
+    primary = replace(
+        _source(),
+        identifier="gdelt-primary",
+        enabled=False,
+        requirement_group="gdelt-global-discovery",
+    )
+    fallback = replace(
+        _source(),
+        identifier="gdelt-context",
+        endpoint="https://fallback.example.test/feed",
+        enabled=False,
+        requirement_group="gdelt-global-discovery",
+    )
+    provider = PublicLiveInformationProvider(
+        PublicLiveSourceCatalog("catalog:redundant", (primary, fallback)),
+        http_get=lambda *_args, **_kwargs: pytest.fail("network must not be called"),
+        clock=lambda: NOW,
+        sleeper=lambda _: None,
+    )
+
+    report = provider.collect(include_optional=False)
+
+    assert [item.succeeded for item in report.sources] == [False, False]
+    assert report.required_sources_ready is False
+    assert all(
+        item.error == "required public live source is disabled"
+        for item in report.sources
+    )
+
+
+def test_required_group_does_not_call_alternative_after_primary_success() -> None:
+    primary = replace(
+        _source(),
+        identifier="gdelt-primary",
+        requirement_group="gdelt-global-discovery",
+    )
+    fallback = replace(
+        _source(),
+        identifier="gdelt-context",
+        endpoint="https://fallback.example.test/feed",
+        requirement_group="gdelt-global-discovery",
+    )
+    calls: list[str] = []
+
+    def get(endpoint, **_kwargs):
+        calls.append(endpoint)
+        return FakeResponse({"articles": []})
+
+    provider = PublicLiveInformationProvider(
+        PublicLiveSourceCatalog("catalog:redundant", (primary, fallback)),
+        http_get=get,
+        clock=lambda: NOW,
+        sleeper=lambda _: None,
+    )
+
+    report = provider.collect(include_optional=False)
+
+    assert report.required_sources_ready is True
+    assert [item.source_identifier for item in report.sources] == ["gdelt-primary"]
+    assert calls == [primary.endpoint]
 
 
 def test_catalog_rejects_insecure_endpoint() -> None:
