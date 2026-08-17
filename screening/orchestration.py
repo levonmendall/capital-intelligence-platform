@@ -96,6 +96,7 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
+            ensure_ascii=True,
         )
     except (TypeError, ValueError) as error:
         raise ValueError("screening payload must be finite JSON") from error
@@ -409,6 +410,7 @@ class SQLiteFullUniverseScreeningStore:
 
     _TABLE = "full_universe_screening_events"
     _GENESIS_HASH = "0" * 64
+    _HASH_CHUNK_BYTES = 1024 * 1024
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -449,8 +451,9 @@ class SQLiteFullUniverseScreeningStore:
                 """
             )
 
-    @staticmethod
+    @classmethod
     def _hash(
+        cls,
         *,
         sequence: int,
         event_identifier: str,
@@ -460,18 +463,47 @@ class SQLiteFullUniverseScreeningStore:
         payload_json: str,
         previous_hash: str,
     ) -> str:
-        raw = "|".join(
+        return cls._hash_payload_chunks(
+            sequence=sequence,
+            event_identifier=event_identifier,
+            cycle_identifier=cycle_identifier,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            payload_chunks=(
+                payload_json[offset : offset + cls._HASH_CHUNK_BYTES]
+                for offset in range(0, len(payload_json), cls._HASH_CHUNK_BYTES)
+            ),
+            previous_hash=previous_hash,
+        )
+
+    @staticmethod
+    def _hash_payload_chunks(
+        *,
+        sequence: int,
+        event_identifier: str,
+        cycle_identifier: str,
+        event_type: ScreeningEventType,
+        occurred_at: datetime,
+        payload_chunks: Iterable[str | bytes],
+        previous_hash: str,
+    ) -> str:
+        digest = hashlib.sha256()
+        prefix = "|".join(
             (
                 str(sequence),
                 event_identifier,
                 cycle_identifier,
                 event_type.value,
                 occurred_at.isoformat(),
-                payload_json,
-                previous_hash,
             )
         )
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        digest.update(prefix.encode("utf-8"))
+        digest.update(b"|")
+        for chunk in payload_chunks:
+            digest.update(chunk.encode("utf-8") if isinstance(chunk, str) else chunk)
+        digest.update(b"|")
+        digest.update(previous_hash.encode("utf-8"))
+        return digest.hexdigest()
 
     def append(
         self,
@@ -704,36 +736,78 @@ class SQLiteFullUniverseScreeningStore:
             return True
         with self._connect() as connection:
             rows = connection.execute(
-                f"SELECT * FROM {self._TABLE} ORDER BY sequence"
+                f"""
+                SELECT
+                    sequence,
+                    event_identifier,
+                    cycle_identifier,
+                    event_type,
+                    occurred_at,
+                    previous_hash,
+                    content_hash
+                FROM {self._TABLE}
+                ORDER BY sequence
+                """
             )
             expected_sequence = 1
             previous_hash = self._GENESIS_HASH
             for row in rows:
-                event = self._event(row)
-                if event.sequence != expected_sequence:
+                sequence = int(row["sequence"])
+                if sequence != expected_sequence:
                     raise FullUniverseScreeningError(
                         "screening event sequence is not contiguous"
                     )
-                if event.previous_hash != previous_hash:
+                stored_previous_hash = str(row["previous_hash"])
+                if stored_previous_hash != previous_hash:
                     raise FullUniverseScreeningError(
                         "screening event previous hash is invalid"
                     )
-                expected_hash = self._hash(
-                    sequence=event.sequence,
-                    event_identifier=event.event_identifier,
-                    cycle_identifier=event.cycle_identifier,
-                    event_type=event.event_type,
-                    occurred_at=event.occurred_at,
-                    payload_json=event.payload_json,
-                    previous_hash=event.previous_hash,
+                expected_hash = self._hash_payload_chunks(
+                    sequence=sequence,
+                    event_identifier=str(row["event_identifier"]),
+                    cycle_identifier=str(row["cycle_identifier"]),
+                    event_type=ScreeningEventType(str(row["event_type"])),
+                    occurred_at=datetime.fromisoformat(str(row["occurred_at"])),
+                    payload_chunks=self._stored_payload_chunks(
+                        connection,
+                        sequence=sequence,
+                    ),
+                    previous_hash=stored_previous_hash,
                 )
-                if event.content_hash != expected_hash:
+                content_hash = str(row["content_hash"])
+                if content_hash != expected_hash:
                     raise FullUniverseScreeningError(
                         "screening event content hash is invalid"
                     )
-                previous_hash = event.content_hash
+                previous_hash = content_hash
                 expected_sequence += 1
         return True
+
+    def _stored_payload_chunks(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        sequence: int,
+    ) -> Iterator[bytes]:
+        with connection.blobopen(
+            self._TABLE,
+            "payload_json",
+            sequence,
+            readonly=True,
+        ) as payload:
+            payload_size = len(payload)
+            read_size = 0
+            while True:
+                chunk = payload.read(self._HASH_CHUNK_BYTES)
+                if not chunk:
+                    break
+                value = bytes(chunk)
+                read_size += len(value)
+                yield value
+            if read_size != payload_size:
+                raise FullUniverseScreeningError(
+                    "screening event payload size changed during integrity verification"
+                )
 
     @staticmethod
     def _event(row: sqlite3.Row) -> ScreeningEvent:
