@@ -33,6 +33,8 @@ from screening import (
     FullUniverseScreeningError,
     FullUniverseScreeningOrchestrator,
     FullUniverseScreeningRequest,
+    InstrumentScreeningResult,
+    ScreeningDisposition,
     SQLiteFullUniverseScreeningStore,
     ScreeningEventType,
 )
@@ -307,6 +309,76 @@ def _orchestrator(tmp_path, *, metrics=None, provider=None, service=None, clock=
         clock=clock or Clock(),
     )
     return orchestrator, screening_store, slo_store, journal
+
+
+def test_streaming_append_persists_and_iterates_terminal_results(tmp_path) -> None:
+    store = SQLiteFullUniverseScreeningStore(tmp_path / "screening.db")
+    cycle_identifier = "screening-cycle:streaming"
+    results = (
+        InstrumentScreeningResult(
+            cycle_identifier=cycle_identifier,
+            partition_index=0,
+            instrument_identifier="instrument:aaa",
+            symbol="AAA",
+            disposition=ScreeningDisposition.CANDIDATE,
+            completed_at=AS_OF,
+            candidate_payload={"identifier": "candidate:aaa"},
+        ),
+        InstrumentScreeningResult(
+            cycle_identifier=cycle_identifier,
+            partition_index=0,
+            instrument_identifier="instrument:bbb",
+            symbol="BBB",
+            disposition=ScreeningDisposition.EXCLUDED,
+            completed_at=AS_OF,
+            reasons=("Evidence is unavailable.",),
+        ),
+    )
+
+    def events():
+        for result in results:
+            yield (
+                result.event_identifier,
+                cycle_identifier,
+                ScreeningEventType.INSTRUMENT_RESULT,
+                AS_OF,
+                result.to_dict(),
+            )
+
+    assert store.append_stream(events()) == 2
+    assert tuple(store.iter_instrument_results(cycle_identifier)) == results
+    assert store.instrument_results(cycle_identifier) == results
+    assert store.append_stream(events()) == 2
+    assert store.verify_integrity() is True
+
+
+def test_streaming_append_rolls_back_an_empty_or_invalid_stream(tmp_path) -> None:
+    store = SQLiteFullUniverseScreeningStore(tmp_path / "screening.db")
+
+    with pytest.raises(ValueError, match="at least one screening event"):
+        store.append_stream(iter(()))
+
+    def invalid_events():
+        yield (
+            "screening:streaming:valid",
+            "screening-cycle:streaming",
+            ScreeningEventType.CYCLE_STARTED,
+            AS_OF,
+            {"state": "started"},
+        )
+        yield (
+            "screening:streaming:invalid",
+            "screening-cycle:streaming",
+            "not-an-event-type",
+            AS_OF,
+            {"state": "invalid"},
+        )
+
+    with pytest.raises(TypeError, match="ScreeningEventType"):
+        store.append_stream(invalid_events())
+
+    assert store.events("screening-cycle:streaming") == ()
+    assert store.verify_integrity() is True
 
 
 def test_complete_cycle_publishes_only_after_every_constituent(tmp_path) -> None:
