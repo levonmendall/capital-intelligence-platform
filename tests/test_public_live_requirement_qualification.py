@@ -158,7 +158,11 @@ def test_maintainer_reuses_qualified_group_and_acquires_only_missing_group(
             "fallback_providers_attempted": [],
         }
 
-    monkeypatch.setattr(qualification, "_run_requirement", acquire)
+    monkeypatch.setattr(
+        qualification,
+        "_qualify_and_checkpoint_requirement",
+        acquire,
+    )
     monkeypatch.setattr(
         qualification,
         "finalize_required_public_live_requirements",
@@ -181,7 +185,6 @@ def test_maintainer_reuses_qualified_group_and_acquires_only_missing_group(
 
 
 def test_stale_checkpoint_is_not_reused(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
     now = datetime.now(timezone.utc)
