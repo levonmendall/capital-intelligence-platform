@@ -2,9 +2,9 @@
 
 The governed publisher owns production-context construction. This module retains the
 shared compatibility helpers consumed by that publisher and provides the single public
-entrypoint used by production callers. Broad discovery and heavy paper evidence default
-to provider-free qualified snapshot consumers in production; explicit probes remain
-available for tests and rehearsals.
+entrypoint used by production callers. Broad discovery, broker readiness, cash evidence,
+and heavy paper evidence default to provider-free qualified snapshot consumers in
+production; explicit probes remain available for tests and rehearsals.
 """
 
 from __future__ import annotations
@@ -210,12 +210,18 @@ def prepare_production_context_for_cycle(
     if evidence_probe is None:
         from operations.qualified_paper_evidence import (
             production_snapshot_probe_enabled,
+            qualified_cash_probe,
             qualified_paper_evidence_probe,
+            qualified_paper_readiness_probe,
         )
 
         snapshot_probe_active = production_snapshot_probe_enabled()
         if snapshot_probe_active:
             evidence_probe = qualified_paper_evidence_probe
+            if readiness_probe is None:
+                readiness_probe = qualified_paper_readiness_probe
+            if cash_probe is None:
+                cash_probe = qualified_cash_probe
 
     if snapshot_probe_active and clock is None:
         clock = _stable_production_snapshot_clock()
