@@ -1,26 +1,40 @@
 """Maintain evidence from release-independent components before provider acquisition.
 
 The continuous evidence plane is the reusable market-information boundary. Application
-releases bind to already-qualified components; they do not make those slow-changing
-components release-specific. A fresh prior-release generation can therefore be rebound
-to the new release with zero external provider calls when its scheduled cohort is
-unchanged and every underlying freshness rule still holds.
+releases bind to already-qualified components; they do not make those components
+release-specific. Fresh prior-release evidence can therefore be rebound to a new release
+without provider calls only when every reusable component still satisfies its own
+freshness and compatibility contract.
 
-If the composite generation itself needs refresh, a provider-free reference binding is
-attempted first. External reference acquisition is used only when the relevant persistent
-component is actually missing, stale, corrupt, configuration-mismatched, or incomplete.
+Reference readiness uses the existing lane-component store. Required public-live
+information uses the generic qualified component ledger so a successful collection is
+committed immediately and survives a later discovery failure or outer qualification
+retry. Missing, stale, corrupt, configuration-mismatched, or incomplete components
+remain fail-closed and are selectively reacquired.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Mapping
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Callable, Mapping
 
 from operations import continuous_evidence_plane as _plane
+from operations import qualified_evidence_ledger as _ledger
 from operations import qualified_evidence_maintenance as _legacy_maintenance
 from operations.qualified_evidence_maintenance import EvidenceMaintenanceResult
 from operations.reference_readiness import ReferenceReadinessError
 from operations.release_reference_binding import bind_reference_manifest_from_components
+
+
+_PUBLIC_COMPONENT = "required-public-live"
+_PUBLIC_COMPONENT_CONTRACT = "required-public-live.v1"
+_PUBLIC_COMPATIBILITY_FILES = (
+    "config/public_live_information_sources.json",
+    "providers/public_live_information.py",
+    "public_live_collection_runtime.py",
+)
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -43,6 +57,103 @@ def _latest_payload(values: Mapping[str, str]) -> Mapping[str, object] | None:
         _plane._root(values) / "latest-qualified.json",
         schema=_plane._PLANE_SCHEMA,
     )
+
+
+def _public_component_compatibility() -> str:
+    """Fingerprint the governed public-source contract without binding it to a release."""
+
+    repository_root = Path(__file__).resolve().parents[1]
+    material: list[object] = [_PUBLIC_COMPONENT_CONTRACT]
+    for relative in _PUBLIC_COMPATIBILITY_FILES:
+        path = repository_root / relative
+        try:
+            material.append((relative, path.read_text(encoding="utf-8")))
+        except OSError as error:
+            raise _plane.ContinuousEvidencePlaneError(
+                f"public evidence compatibility input is unavailable: {relative}"
+            ) from error
+    return _ledger.compatibility_fingerprint(*material)
+
+
+def _load_public_component(
+    values: Mapping[str, str],
+    *,
+    cutoff: datetime,
+):
+    try:
+        return _ledger.load_qualified_component(
+            values=values,
+            component_name=_PUBLIC_COMPONENT,
+            compatibility=_public_component_compatibility(),
+            cutoff=cutoff,
+        )
+    except _ledger.QualifiedEvidenceLedgerError as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            f"qualified public evidence component is invalid: {error}"
+        ) from error
+
+
+def _component_public_collector(
+    values: Mapping[str, str],
+) -> Callable[[datetime], object]:
+    """Reuse a compatible public component or acquire and commit exactly one new one."""
+
+    compatibility = _public_component_compatibility()
+
+    def collect(timestamp: datetime):
+        try:
+            cached = _ledger.load_qualified_component(
+                values=values,
+                component_name=_PUBLIC_COMPONENT,
+                compatibility=compatibility,
+                cutoff=timestamp,
+            )
+        except _ledger.QualifiedEvidenceLedgerError as error:
+            raise _plane.ContinuousEvidencePlaneError(
+                f"qualified public evidence component is invalid: {error}"
+            ) from error
+        if cached is not None:
+            state = str(cached.payload.get("state") or "available")
+            return SimpleNamespace(
+                state=state,
+                required_sources_ready=True,
+                failed_required_source_identifiers=(),
+                collection_scope=str(cached.payload.get("collection_scope") or "required"),
+                qualified_component_id=cached.component_id,
+                qualified_component_reused=True,
+            )
+
+        result = _legacy_maintenance._default_public_collector(timestamp)
+        state = str(getattr(result, "state", "available")).strip().lower() or "available"
+        if getattr(result, "required_sources_ready", None) is not True:
+            raise _plane.ContinuousEvidencePlaneError(
+                "required public live information did not qualify before component commit"
+            )
+        try:
+            component = _ledger.publish_qualified_component(
+                values=values,
+                component_name=_PUBLIC_COMPONENT,
+                compatibility=compatibility,
+                payload={
+                    "state": state,
+                    "required_sources_ready": True,
+                    "collection_scope": str(
+                        getattr(result, "collection_scope", "required") or "required"
+                    ),
+                },
+            )
+        except _ledger.QualifiedEvidenceLedgerError as error:
+            raise _plane.ContinuousEvidencePlaneError(
+                f"qualified public evidence component cannot be committed: {error}"
+            ) from error
+        try:
+            setattr(result, "qualified_component_id", component.component_id)
+            setattr(result, "qualified_component_reused", False)
+        except (AttributeError, TypeError):
+            pass
+        return result
+
+    return collect
 
 
 def _generation_base_qualified(
@@ -110,6 +221,24 @@ def _publish_release_rebind(
     )
 
 
+def _legacy_refresh(
+    *,
+    requested: datetime,
+    values: Mapping[str, str],
+    reference_manifest: object | None = None,
+) -> EvidenceMaintenanceResult:
+    kwargs: dict[str, object] = {
+        "as_of": requested,
+        "values": values,
+        "public_collector": _component_public_collector(values),
+    }
+    if reference_manifest is not None:
+        kwargs["reference_preparer"] = (
+            lambda _values, prepared=reference_manifest: prepared
+        )
+    return _legacy_maintenance.maintain_continuous_evidence_plane(**kwargs)
+
+
 def maintain_component_qualified_evidence_plane(
     *,
     as_of: datetime | None = None,
@@ -155,14 +284,14 @@ def maintain_component_qualified_evidence_plane(
             archived_generation_path=archive,
         )
 
-    # Fast path 2: a previous release's evidence is still within the exact same governed
-    # point-in-time window. Rebind the release-independent reference components at that
-    # original evidence cutoff and publish a new exact-release generation. No network I/O.
+    # Fast path 2: previous-release evidence may be rebound only when both the reference
+    # components and the public-live component still satisfy their current contracts.
     if (
         current is not None
         and current_release
         and current_release != _release(resolved)
         and _generation_base_qualified(current, values=resolved, cutoff=requested)
+        and _load_public_component(resolved, cutoff=requested) is not None
     ):
         mutable = dict(resolved)
         try:
@@ -187,22 +316,19 @@ def maintain_component_qualified_evidence_plane(
                 archived_generation_path=archive,
             )
 
-    # The composite generation needs refresh. First bind the release-independent
-    # reference components from disk. Only if that fails do we delegate to the existing
-    # generalized reference preparer, which selectively acquires stale/missing lanes.
+    # The composite generation needs refresh. Bind release-independent references from
+    # disk first. Public evidence is independently reused/committed by _legacy_refresh,
+    # so a later discovery failure no longer forces another public provider sweep.
     mutable = dict(resolved)
     try:
         manifest = bind_reference_manifest_from_components(mutable, now=requested)
     except ReferenceReadinessError:
-        return _legacy_maintenance.maintain_continuous_evidence_plane(
-            as_of=requested,
-            values=resolved,
-        )
+        return _legacy_refresh(requested=requested, values=resolved)
 
-    return _legacy_maintenance.maintain_continuous_evidence_plane(
-        as_of=requested,
+    return _legacy_refresh(
+        requested=requested,
         values=resolved,
-        reference_preparer=lambda _values, prepared=manifest: prepared,
+        reference_manifest=manifest,
     )
 
 
