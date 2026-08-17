@@ -33,12 +33,6 @@ _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _DEFAULT_MAX_AGE_SECONDS = 900.0
 _MAX_PREPARATION_PASSES = 2
-_FINRA_CONTEXT_CREDENTIAL_ENVIRONMENTS = (
-    "FINRA_CLIENT_ID",
-    "CAPITAL_INTELLIGENCE_FINRA_CLIENT_ID",
-    "FINRA_CLIENT_SECRET",
-    "CAPITAL_INTELLIGENCE_FINRA_CLIENT_SECRET",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,34 +125,60 @@ def _generation_qualified(
 
 
 def _default_public_collector(timestamp: datetime):
-    """Qualify required public information through durable requirement-group checkpoints."""
+    from public_live_collection_runtime import collect_public_live_information_if_due
 
-    from operations.public_live_requirement_qualification import (
-        maintain_required_public_live_requirements,
+    result = collect_public_live_information_if_due(
+        now=timestamp,
+        force=False,
+        include_optional=False,
     )
+    state = str(getattr(result, "state", "")).strip().lower()
+    required_ready = getattr(result, "required_sources_ready", None)
 
-    # The base public-information provider opportunistically adds FINRA TRACE aggregate
-    # context after every collection. Requirement-level qualification intentionally runs
-    # many small scoped collections, so allowing that optional side channel here would
-    # repeat OAuth + network work once per requirement and consume the bounded public
-    # evidence budget without improving required-source readiness. This function runs
-    # inside the existing isolated public-evidence worker; temporarily hiding only the
-    # FINRA-context credentials keeps that optional enrichment out of this required-only
-    # path without altering provider configuration in the parent service.
-    preserved_finra = {
-        name: os.environ[name]
-        for name in _FINRA_CONTEXT_CREDENTIAL_ENVIRONMENTS
-        if name in os.environ
-    }
-    try:
-        for name in _FINRA_CONTEXT_CREDENTIAL_ENVIRONMENTS:
-            os.environ.pop(name, None)
-        return maintain_required_public_live_requirements(
-            as_of=timestamp,
-            values=os.environ,
+    # The hourly cadence is an acquisition optimization, not a retry veto. A previous
+    # failed/degraded/legacy runtime state can return ``not_due`` without qualified
+    # required-source proof. In that case, force one real refresh so the outer bounded
+    # release-prequalification retry budget can actually recover transient provider
+    # failures instead of replaying the same unusable cached state for an hour.
+    if state == "not_due" and required_ready is not True:
+        result = collect_public_live_information_if_due(
+            now=timestamp,
+            force=True,
+            include_optional=False,
         )
-    finally:
-        os.environ.update(preserved_finra)
+        state = str(getattr(result, "state", "")).strip().lower()
+        required_ready = getattr(result, "required_sources_ready", None)
+
+    if state in {"failed", "disabled"} or required_ready is False:
+        failed = tuple(
+            str(item).strip()
+            for item in getattr(
+                result,
+                "failed_required_source_identifiers",
+                (),
+            )
+            if str(item).strip()
+        )
+        provider_detail = f"; provider={failed[0]}" if failed else ""
+        fallback_detail = (
+            "; fallback_providers_attempted=" + ",".join(failed[1:])
+            if len(failed) > 1
+            else ""
+        )
+        raise _plane.ContinuousEvidencePlaneError(
+            "required public live information is not qualified"
+            + provider_detail
+            + fallback_detail
+        )
+    if required_ready is not True:
+        if state in {"not_due", "in_progress"}:
+            raise _plane.ContinuousEvidencePlaneError(
+                "required public live information has no previously qualified collection"
+            )
+        raise _plane.ContinuousEvidencePlaneError(
+            "required public live information is not qualified"
+        )
+    return result
 
 
 @contextmanager
