@@ -190,10 +190,18 @@ def publish_qualified_component(
     values: Mapping[str, str],
     component_name: str,
     compatibility: str,
+    as_of: datetime | None = None,
     completed_at: datetime | None = None,
     max_age_seconds: float | None = None,
     payload: Mapping[str, object] | None = None,
 ) -> QualifiedEvidenceComponent:
+    """Publish one immutable qualification while preserving source and completion time.
+
+    ``as_of`` is the evidence observation cutoff. ``completed_at`` is when qualification
+    finished. Freshness is measured from the evidence cutoff, never from how long the
+    worker happened to take to validate it.
+    """
+
     name = str(component_name).strip()
     fingerprint = str(compatibility).strip()
     if not name or not fingerprint:
@@ -202,6 +210,12 @@ def publish_qualified_component(
         datetime.now(timezone.utc) if completed_at is None else completed_at,
         field_name="component_completed_at",
     )
+    evidence_as_of = _aware(
+        completed if as_of is None else as_of,
+        field_name="component_as_of",
+    )
+    if completed < evidence_as_of:
+        raise ValueError("component completed_at cannot precede as_of")
     maximum_age = (
         component_max_age_seconds(values, name)
         if max_age_seconds is None
@@ -209,12 +223,12 @@ def publish_qualified_component(
     )
     if not math.isfinite(maximum_age) or maximum_age <= 0.0:
         raise ValueError("component max_age_seconds must be positive")
-    valid_through = completed + timedelta(seconds=maximum_age)
+    valid_through = evidence_as_of + timedelta(seconds=maximum_age)
     component_payload = dict(payload or {})
     material = {
         "schema_version": _COMPONENT_SCHEMA,
         "component_name": name,
-        "as_of": completed.isoformat(),
+        "as_of": evidence_as_of.isoformat(),
         "completed_at": completed.isoformat(),
         "valid_through": valid_through.isoformat(),
         "compatibility_fingerprint": fingerprint,
@@ -244,7 +258,7 @@ def publish_qualified_component(
     return QualifiedEvidenceComponent(
         component_name=name,
         component_id=component_id,
-        as_of=completed,
+        as_of=evidence_as_of,
         completed_at=completed,
         valid_through=valid_through,
         compatibility_fingerprint=fingerprint,
@@ -289,7 +303,7 @@ def load_qualified_component(
     valid_through = _parse_timestamp(
         raw.get("valid_through"), field_name="component_valid_through"
     )
-    if completed != as_of or not (as_of <= requested <= valid_through):
+    if completed < as_of or not (completed <= requested <= valid_through):
         return None
     immutable = latest.with_name(f"{component_id}.json")
     immutable_payload = _read(immutable)
