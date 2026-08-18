@@ -58,9 +58,6 @@ def test_lane_timeout_does_not_discard_independent_success(tmp_path) -> None:
         first.run((fast, slow), first_runner)
     assert time.monotonic() - started < 1.5
 
-    latest = dag_native.scheduler_payload_for_test if False else None
-    del latest
-
     second_calls: list[str] = []
 
     def second_runner(node: scheduler.CertificationNode) -> int:
