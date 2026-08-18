@@ -67,6 +67,12 @@ def _node(as_of: datetime) -> scheduler.CertificationNode:
     )
 
 
+def _raise_synthetic_provider_timeout(_node: scheduler.CertificationNode) -> int:
+    """Top-level so the production spawn contract can preserve child failure type."""
+
+    raise TimeoutError("synthetic provider timeout")
+
+
 def test_compatible_lane_checkpoint_rebinds_without_provider_call(tmp_path) -> None:
     as_of = datetime(2026, 8, 18, 15, 30, tzinfo=timezone.utc)
     policy = SimpleNamespace(version="policy-v1")
@@ -176,11 +182,8 @@ def test_scheduler_failure_detail_promotes_exact_lane(tmp_path) -> None:
         policy_version="policy-v1",
     )
 
-    def fail(_node):
-        raise TimeoutError("synthetic provider timeout")
-
     with pytest.raises(scheduler.CertificationSchedulerError) as captured:
-        runner.run((node,), fail)
+        runner.run((node,), _raise_synthetic_provider_timeout)
 
     detail = authoritative._failure_detail(
         values,
