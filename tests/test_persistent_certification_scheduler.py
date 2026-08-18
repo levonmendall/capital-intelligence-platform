@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -42,18 +43,28 @@ def _node(
     )
 
 
+def _latest_manifest(values, *, epoch: datetime) -> dict[str, object]:
+    path = (
+        scheduler_module._root(values)
+        / scheduler_module._SCHEMA_VERSION
+        / "release-test"
+        / scheduler_module._epoch_key(epoch)
+        / "latest.json"
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["sha256"] == scheduler_module._digest(payload["body"])
+    return payload["body"]
+
+
 def test_successful_node_is_reused_after_other_node_failure(tmp_path) -> None:
     epoch = datetime(2026, 8, 18, 0, 45, tzinfo=timezone.utc)
     values = _values(tmp_path)
-    nodes = (
-        _node("deep-market-evidence:equity", provider="eodhd", epoch=epoch),
-        _node("deep-market-evidence:crypto", provider="coinbase", epoch=epoch),
-    )
-    first_calls: list[str] = []
+    equity = _node("deep-market-evidence:equity", provider="eodhd", epoch=epoch)
+    crypto = _node("deep-market-evidence:crypto", provider="coinbase", epoch=epoch)
+    nodes = (equity, crypto)
 
     def first_runner(node: CertificationNode) -> int:
-        first_calls.append(node.node_id)
-        if node.node_id.endswith("crypto"):
+        if node.node_id == crypto.node_id:
             raise RuntimeError("simulated crypto provider failure")
         return 3
 
@@ -65,13 +76,19 @@ def test_successful_node_is_reused_after_other_node_failure(tmp_path) -> None:
     )
     with pytest.raises(CertificationSchedulerError, match="crypto:RuntimeError"):
         first.run(nodes, first_runner)
-    assert set(first_calls) == {node.node_id for node in nodes}
 
-    second_calls: list[str] = []
-
-    def second_runner(node: CertificationNode) -> int:
-        second_calls.append(node.node_id)
-        return 2
+    first_manifest = _latest_manifest(values, epoch=epoch)
+    assert first_manifest["completed_nodes"] == [equity.node_id]
+    assert first_manifest["failed_nodes"] == [crypto.node_id]
+    assert first_manifest["node_results"][equity.node_id] == {
+        "status": "qualified",
+        "reused": False,
+        "evidence_complete_count": 3,
+        "failure_type": None,
+        "retry_after": None,
+    }
+    assert first_manifest["node_results"][crypto.node_id]["status"] == "failed"
+    assert first_manifest["node_results"][crypto.node_id]["failure_type"] == "RuntimeError"
 
     second = PersistentCertificationScheduler(
         values=values,
@@ -79,13 +96,18 @@ def test_successful_node_is_reused_after_other_node_failure(tmp_path) -> None:
         epoch=epoch,
         policy_version="policy-v1",
     )
-    result = second.run(nodes, second_runner)
+    result = second.run(nodes, lambda _node: 2)
 
-    assert second_calls == ["deep-market-evidence:crypto"]
     assert result.failed_nodes == ()
-    assert result.reused_nodes == ("deep-market-evidence:equity",)
+    assert result.reused_nodes == (equity.node_id,)
     assert set(result.completed_nodes) == {node.node_id for node in nodes}
     assert result.path.exists()
+
+    second_manifest = _latest_manifest(values, epoch=epoch)
+    assert second_manifest["node_results"][equity.node_id]["reused"] is True
+    assert second_manifest["node_results"][equity.node_id]["evidence_complete_count"] == 3
+    assert second_manifest["node_results"][crypto.node_id]["reused"] is False
+    assert second_manifest["node_results"][crypto.node_id]["evidence_complete_count"] == 2
 
 
 def test_provider_budget_is_shared_without_blocking_unrelated_provider(tmp_path) -> None:
@@ -119,10 +141,8 @@ def test_failed_dependency_does_not_prevent_independent_work_from_persisting(tmp
         dependencies=(root.node_id,),
     )
     independent = _node("independent:crypto", provider="coinbase", epoch=epoch)
-    calls: list[str] = []
 
     def runner(node: CertificationNode) -> int:
-        calls.append(node.node_id)
         if node.node_id == root.node_id:
             raise RuntimeError("root unavailable")
         return 1
@@ -136,15 +156,15 @@ def test_failed_dependency_does_not_prevent_independent_work_from_persisting(tmp
     with pytest.raises(CertificationSchedulerError):
         first.run((root, dependent, independent), runner)
 
-    assert root.node_id in calls
-    assert independent.node_id in calls
-    assert dependent.node_id not in calls
-
-    second_calls: list[str] = []
-
-    def second_runner(node: CertificationNode) -> int:
-        second_calls.append(node.node_id)
-        return 1
+    first_manifest = _latest_manifest(values, epoch=epoch)
+    assert first_manifest["node_results"][root.node_id]["failure_type"] == "RuntimeError"
+    assert first_manifest["node_results"][independent.node_id]["status"] == "qualified"
+    assert first_manifest["node_results"][independent.node_id]["evidence_complete_count"] == 1
+    assert first_manifest["node_results"][dependent.node_id]["status"] == "failed"
+    assert (
+        first_manifest["node_results"][dependent.node_id]["failure_type"]
+        == "CertificationSchedulerError"
+    )
 
     second = PersistentCertificationScheduler(
         values=values,
@@ -152,10 +172,14 @@ def test_failed_dependency_does_not_prevent_independent_work_from_persisting(tmp
         epoch=epoch,
         policy_version="policy-v1",
     )
-    result = second.run((root, dependent, independent), second_runner)
-    assert independent.node_id not in second_calls
+    result = second.run((root, dependent, independent), lambda _node: 1)
     assert result.reused_nodes == (independent.node_id,)
     assert set(result.completed_nodes) == {root.node_id, dependent.node_id, independent.node_id}
+
+    second_manifest = _latest_manifest(values, epoch=epoch)
+    assert second_manifest["node_results"][independent.node_id]["reused"] is True
+    assert second_manifest["node_results"][root.node_id]["reused"] is False
+    assert second_manifest["node_results"][dependent.node_id]["reused"] is False
 
 
 def test_install_scheduler_only_prewarms_canonical_enabled_path(monkeypatch, tmp_path) -> None:
