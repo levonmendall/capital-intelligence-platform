@@ -86,6 +86,17 @@ def _assert_public_terminal_screening_bound(*, chunk_size: int) -> None:
 
 def _sync_core_seams() -> None:
     referenced = set(_core.discover_comprehensive_markets.__code__.co_names)
+    referenced.update(
+        {
+            "record_manual_cio_diagnostic_progress",
+            "default_redundant_market_probe",
+            "ensure_provider_preselection_publication",
+            "build_bounded_terminal_preselection",
+            "build_bounded_cutoff_observations",
+            "default_provider_preselection_market_probe",
+            "begin_redundancy_cycle",
+        }
+    )
     current = globals()
     for name in referenced:
         if name in current and hasattr(_core, name):
