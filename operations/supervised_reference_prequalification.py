@@ -25,6 +25,7 @@ from cio import CandidateAssetClass
 from operations import continuous_evidence_plane as _plane
 from operations import generalized_reference_readiness as _generalized
 from operations import reference_readiness as _legacy
+from operations import release_reference_binding as _release_binding
 from operations.supervised_component_execution import (
     SupervisedComponentExecutionError,
     SupervisedComponentTimeout,
@@ -238,6 +239,49 @@ def _providers(values: Mapping[str, str]):
     )
 
 
+def _missing_required_directory_lanes(
+    component: Mapping[str, object],
+    *,
+    active_lanes: frozenset[CandidateAssetClass],
+) -> tuple[str, ...]:
+    """Return scheduled release lanes that cannot be bound from this aggregate component."""
+
+    required = tuple(
+        sorted(
+            active_lanes & _generalized._EODHD_REFERENCE_LANES,
+            key=lambda item: item.value,
+        )
+    )
+    try:
+        catalogs = _legacy._component_catalogs(component)
+    except _legacy.ReferenceReadinessError:
+        return tuple(item.value for item in required)
+    return tuple(item.value for item in required if not catalogs.get(item.value))
+
+
+def _strict_release_binding(
+    values: MutableMapping[str, str],
+    *,
+    minimum_cutoff: datetime,
+) -> _legacy.ReferenceReadinessManifest:
+    """Require the exact release binder to consume the components before qualification."""
+
+    binding_cutoff = max(
+        _aware(minimum_cutoff, field_name="reference_binding_minimum_cutoff"),
+        datetime.now(timezone.utc),
+    )
+    try:
+        return _release_binding.bind_reference_manifest_from_components(
+            values,
+            now=binding_cutoff,
+        )
+    except _legacy.ReferenceReadinessError as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            "reference prequalification components are not release-bindable; "
+            f"failure_type=release_binding_failure; {error}"
+        ) from error
+
+
 def prepare_supervised_reference_prequalification(
     values: MutableMapping[str, str],
     *,
@@ -341,6 +385,13 @@ def prepare_supervised_reference_prequalification(
         active_lanes=active_lane_names,
         coverage=tuple(config.eodhd_exchange_codes),
     )
+    if directory_component is not None and _missing_required_directory_lanes(
+        directory_component,
+        active_lanes=active_lanes,
+    ):
+        # A fresh/config-compatible aggregate can still be unusable by the exact-release
+        # binder when one scheduled lane has no persisted records. Never call that reused.
+        directory_component = None
     if directory_component is not None:
         components[_DIRECTORY] = _component_row(
             _DIRECTORY, provider="eodhd", state="reused", required=True
@@ -385,6 +436,16 @@ def prepare_supervised_reference_prequalification(
             if directory_component is None:
                 raise _plane.ContinuousEvidencePlaneError(
                     "reference directory worker completed without a qualified checkpoint"
+                )
+            missing_directory_lanes = _missing_required_directory_lanes(
+                directory_component,
+                active_lanes=active_lanes,
+            )
+            if missing_directory_lanes:
+                raise _plane.ContinuousEvidencePlaneError(
+                    "reference directory component is incomplete for scheduled release lanes; "
+                    "failure_type=incomplete_lane_catalog; missing_lanes="
+                    + ",".join(missing_directory_lanes)
                 )
             components[_DIRECTORY] = _component_row(
                 _DIRECTORY, provider="eodhd", state="qualified", required=True
@@ -545,9 +606,21 @@ def prepare_supervised_reference_prequalification(
         discovery=discovery,
         config=config,
     )
+    try:
+        manifest = _strict_release_binding(values, minimum_cutoff=timestamp)
+    except _plane.ContinuousEvidencePlaneError:
+        _write_progress(
+            values=values,
+            cutoff=timestamp,
+            required_components=required_components,
+            components=components,
+            active_component=None,
+            state="incomplete",
+        )
+        raise
     _generalized._write_asset_registry(
         values=values,
-        timestamp=timestamp,
+        timestamp=datetime.now(timezone.utc),
         discovery=discovery,
         config=config,
         option_ready_underlyings=option_ready_underlyings,
