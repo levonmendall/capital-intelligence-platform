@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
@@ -14,6 +15,26 @@ from operations.persistent_certification_scheduler import (
     ProviderBudgetRegistry,
     install_certification_scheduler,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _FailOneNodeRunner:
+    failed_node_id: str
+    evidence_count: int = 1
+    message: str = "simulated provider failure"
+
+    def __call__(self, node: CertificationNode) -> int:
+        if node.node_id == self.failed_node_id:
+            raise RuntimeError(self.message)
+        return self.evidence_count
+
+
+@dataclass(frozen=True, slots=True)
+class _ConstantRunner:
+    evidence_count: int = 1
+
+    def __call__(self, _node: CertificationNode) -> int:
+        return self.evidence_count
 
 
 def _values(tmp_path):
@@ -63,11 +84,6 @@ def test_successful_node_is_reused_after_other_node_failure(tmp_path) -> None:
     crypto = _node("deep-market-evidence:crypto", provider="coinbase", epoch=epoch)
     nodes = (equity, crypto)
 
-    def first_runner(node: CertificationNode) -> int:
-        if node.node_id == crypto.node_id:
-            raise RuntimeError("simulated crypto provider failure")
-        return 3
-
     first = PersistentCertificationScheduler(
         values=values,
         release_sha="release-test",
@@ -75,7 +91,14 @@ def test_successful_node_is_reused_after_other_node_failure(tmp_path) -> None:
         policy_version="policy-v1",
     )
     with pytest.raises(CertificationSchedulerError, match="crypto:RuntimeError"):
-        first.run(nodes, first_runner)
+        first.run(
+            nodes,
+            _FailOneNodeRunner(
+                failed_node_id=crypto.node_id,
+                evidence_count=3,
+                message="simulated crypto provider failure",
+            ),
+        )
 
     first_manifest = _latest_manifest(values, epoch=epoch)
     assert first_manifest["completed_nodes"] == [equity.node_id]
@@ -96,7 +119,7 @@ def test_successful_node_is_reused_after_other_node_failure(tmp_path) -> None:
         epoch=epoch,
         policy_version="policy-v1",
     )
-    result = second.run(nodes, lambda _node: 2)
+    result = second.run(nodes, _ConstantRunner(evidence_count=2))
 
     assert result.failed_nodes == ()
     assert result.reused_nodes == (equity.node_id,)
@@ -142,11 +165,6 @@ def test_failed_dependency_does_not_prevent_independent_work_from_persisting(tmp
     )
     independent = _node("independent:crypto", provider="coinbase", epoch=epoch)
 
-    def runner(node: CertificationNode) -> int:
-        if node.node_id == root.node_id:
-            raise RuntimeError("root unavailable")
-        return 1
-
     first = PersistentCertificationScheduler(
         values=values,
         release_sha="release-test",
@@ -154,7 +172,14 @@ def test_failed_dependency_does_not_prevent_independent_work_from_persisting(tmp
         policy_version="policy-v1",
     )
     with pytest.raises(CertificationSchedulerError):
-        first.run((root, dependent, independent), runner)
+        first.run(
+            (root, dependent, independent),
+            _FailOneNodeRunner(
+                failed_node_id=root.node_id,
+                evidence_count=1,
+                message="root unavailable",
+            ),
+        )
 
     first_manifest = _latest_manifest(values, epoch=epoch)
     assert first_manifest["node_results"][root.node_id]["failure_type"] == "RuntimeError"
@@ -172,7 +197,7 @@ def test_failed_dependency_does_not_prevent_independent_work_from_persisting(tmp
         epoch=epoch,
         policy_version="policy-v1",
     )
-    result = second.run((root, dependent, independent), lambda _node: 1)
+    result = second.run((root, dependent, independent), _ConstantRunner(evidence_count=1))
     assert result.reused_nodes == (independent.node_id,)
     assert set(result.completed_nodes) == {root.node_id, dependent.node_id, independent.node_id}
 
