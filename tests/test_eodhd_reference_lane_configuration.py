@@ -7,6 +7,7 @@ from pathlib import Path
 from cio import CandidateAssetClass
 from operations import _comprehensive_market_discovery_v4 as discovery
 from operations import generalized_reference_readiness as generalized
+from operations.certified_investable_catalog import load_certified_investable_catalog
 
 
 CONFIG_PATH = Path("config/comprehensive_market_discovery.json")
@@ -26,22 +27,22 @@ def _missing_scheduled_eodhd_lanes(exchange_codes: tuple[str, ...]) -> tuple[str
     )
 
 
-def test_production_eodhd_configuration_covers_every_scheduled_reference_lane() -> None:
+def test_eodhd_reference_partition_covers_only_free_configured_directory_lanes() -> None:
     payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     exchange_codes = tuple(str(item).strip().upper() for item in payload["eodhd_exchange_codes"])
 
-    assert "CC" in exchange_codes
+    assert "CC" not in exchange_codes
+    assert CandidateAssetClass.CRYPTO not in generalized._EODHD_REFERENCE_LANES
+    assert CandidateAssetClass.FX in generalized._EODHD_REFERENCE_LANES
     assert _missing_scheduled_eodhd_lanes(exchange_codes) == ()
 
 
-def test_crypto_lane_contract_fails_when_cc_directory_is_removed() -> None:
-    payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    exchange_codes = tuple(
-        str(item).strip().upper()
-        for item in payload["eodhd_exchange_codes"]
-        if str(item).strip().upper() != "CC"
-    )
+def test_crypto_remains_scheduled_through_certified_provider_neutral_catalog() -> None:
+    active_lanes = discovery._base.scheduled_discovery_lanes(WEEKDAY_CUTOFF)
+    records = load_certified_investable_catalog(as_of=WEEKDAY_CUTOFF)
+    crypto = tuple(item for item in records if item["asset_class"] == CandidateAssetClass.CRYPTO.value)
 
-    assert _missing_scheduled_eodhd_lanes(exchange_codes) == (
-        CandidateAssetClass.CRYPTO.value,
-    )
+    assert CandidateAssetClass.CRYPTO in active_lanes
+    assert crypto
+    assert all(item["provider_kind"] == "yahoo" for item in crypto)
+    assert all(item["instrument_identifier"] for item in crypto)
