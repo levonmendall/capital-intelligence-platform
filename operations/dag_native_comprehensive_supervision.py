@@ -1,13 +1,13 @@
 """Make comprehensive-discovery supervision match the persistent certification DAG.
 
 The comprehensive-discovery coordinator is resumable state-machine orchestration, not one
-provider call.  Killing that whole coordinator on one wall-clock timeout discards the
-scheduler's opportunity to persist independent lane success and to report the exact lane
-that failed.  This module removes that legacy aggregate kill boundary and gives every
-provider-facing certification node its own killable process-group budget.
+provider call. The parent process owns scheduling, provider leases, durable state, and
+credential-safe progress. Provider-facing lanes run in fresh ``spawn`` interpreters so
+they cannot inherit service thread locks, HTTP pools, logging locks, or other unsafe
+state from the long-running Render process.
 
 The canonical catalog, preselection, market-evidence, terminal-accounting, global
-certification, CIO, construction, execution, and paper-only rules are untouched.  A global
+certification, CIO, construction, execution, and paper-only rules are untouched. A global
 discovery result still exists only after every required DAG node qualifies and the
 provider-free finalizer succeeds.
 """
@@ -17,10 +17,11 @@ from __future__ import annotations
 import math
 import multiprocessing
 import os
+import pickle
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from multiprocessing.connection import Connection
 from typing import Callable, Mapping, Sequence
 
@@ -31,7 +32,12 @@ _NODE_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_NODE_TIMEOUT_SECONDS
 _DEFAULT_NODE_TIMEOUT_SECONDS = 540.0
 _MAX_NODE_TIMEOUT_SECONDS = 3600.0
 _POLL_INTERVAL_SECONDS = 0.02
+_RUNTIME_JOURNAL_SCHEMA = "persistent-certification-runtime.v1"
 _SAFE_FAILURE_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,119}$")
+
+
+class SpawnSerializationError(RuntimeError):
+    """Raised when a governed lane input cannot cross the clean spawn boundary."""
 
 
 @dataclass(slots=True)
@@ -67,9 +73,10 @@ def _node_timeout_seconds(values: Mapping[str, str]) -> float:
 
 def _node_worker(
     connection: Connection,
-    operation: Callable[[], int],
+    runner: Callable[[object], int],
+    node: object,
 ) -> None:
-    """Run one lane in an isolated process group and return only bounded metadata."""
+    """Run one lane in a fresh interpreter and return only bounded metadata."""
 
     process_group_ready = False
     try:
@@ -78,7 +85,7 @@ def _node_worker(
             process_group_ready = True
         connection.send(("ready", process_group_ready))
         try:
-            result = int(operation())
+            result = int(runner(node))
         except BaseException as error:  # noqa: BLE001 - child reports provider failure.
             retry_after = getattr(error, "retry_after_seconds", None)
             try:
@@ -130,6 +137,11 @@ def _remote_error(
     return error
 
 
+def _runner_for_node(runner: Callable[[object], int], node: object):
+    factory = getattr(runner, "for_node", None)
+    return factory(node) if callable(factory) else runner
+
+
 def _launch_node(
     context,
     *,
@@ -137,11 +149,21 @@ def _launch_node(
     lease: tuple[str, ...],
     runner: Callable[[object], int],
 ) -> _RunningNode:
+    child_runner = _runner_for_node(runner, node)
+    try:
+        # Fail in the parent with exact attribution rather than waiting for a spawn
+        # bootstrap failure if a future lane input introduces an unpicklable object.
+        pickle.dumps((child_runner, node), protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception as error:
+        raise SpawnSerializationError(
+            f"{getattr(node, 'node_id', 'certification-node')} cannot cross spawn boundary: "
+            f"{type(error).__name__}"
+        ) from error
+
     parent_connection, child_connection = context.Pipe(duplex=False)
-    operation = lambda current=node: runner(current)
     process = context.Process(
         target=_node_worker,
-        args=(child_connection, operation),
+        args=(child_connection, child_runner, node),
         name=f"certification-{getattr(node, 'asset_class', 'lane')}",
     )
     try:
@@ -268,8 +290,113 @@ def _poll_running(
     return None
 
 
+def _runtime_counts(results, pending, running) -> dict[str, int]:
+    completed = sum(1 for item in results.values() if item.status == "qualified")
+    reused = sum(
+        1 for item in results.values() if item.status == "qualified" and item.reused
+    )
+    failed = sum(1 for item in results.values() if item.status != "qualified")
+    return {
+        "completed_nodes": completed,
+        "reused_nodes": reused,
+        "failed_nodes": failed,
+        "running_nodes": len(running),
+        "pending_nodes": len(pending),
+    }
+
+
+def _record_parent_progress(
+    self,
+    *,
+    stage: str,
+    node: object,
+    required_count: int,
+    results,
+    pending,
+    running,
+) -> None:
+    from operations.manual_cio_diagnostic import record_manual_cio_diagnostic_progress
+
+    metrics = _runtime_counts(results, pending, running)
+    metrics.update(
+        {
+            "required_nodes": required_count,
+            "decision_eligible_records": int(
+                getattr(node, "decision_eligible_count", 0)
+            ),
+            "provider_budget_count": len(getattr(node, "provider_groups", ()) or ()),
+        }
+    )
+    record_manual_cio_diagnostic_progress(
+        f"{stage}:{getattr(node, 'asset_class', 'other')}",
+        metrics=metrics,
+        values=self.values,
+    )
+
+
+def _publish_runtime_journal(self, *, nodes, results, pending, running) -> None:
+    """Persist parent-owned lane state even if a child later hangs or is killed."""
+
+    from operations import persistent_certification_scheduler as scheduler
+
+    node_states: dict[str, object] = {}
+    running_ids = set(running)
+    pending_ids = set(pending)
+    for node in nodes:
+        result = results.get(node.node_id)
+        if result is not None:
+            state = result.status
+            failure_type = result.failure_type
+            reused = bool(result.reused)
+        elif node.node_id in running_ids:
+            state = "running"
+            failure_type = None
+            reused = False
+        elif node.node_id in pending_ids:
+            state = "pending"
+            failure_type = None
+            reused = False
+        else:
+            state = "blocked"
+            failure_type = None
+            reused = False
+        node_states[node.node_id] = {
+            "state": state,
+            "asset_class": node.asset_class,
+            "provider_groups": list(node.provider_groups),
+            "decision_eligible_count": int(node.decision_eligible_count),
+            "reused": reused,
+            "failure_type": failure_type,
+        }
+
+    body: dict[str, object] = {
+        "schema_version": _RUNTIME_JOURNAL_SCHEMA,
+        "release_sha": self.release_sha,
+        "decision_epoch": self.epoch.isoformat(),
+        "policy_version": self.policy_version,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "required_nodes": [node.node_id for node in nodes],
+        "counts": _runtime_counts(results, pending, running),
+        "node_states": node_states,
+        "decision_authority": False,
+        "candidate_authority": False,
+        "sizing_authority": False,
+        "execution_authority": False,
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+    path = (
+        scheduler._root(self.values)
+        / scheduler._SCHEMA_VERSION
+        / self.release_sha
+        / scheduler._epoch_key(self.epoch)
+        / "runtime-latest.json"
+    )
+    scheduler._atomic_json(path, body)
+
+
 def _dag_native_run(self, nodes: Sequence[object], runner: Callable[[object], int]):
-    """Run durable DAG nodes in independently killable, provider-budgeted processes."""
+    """Run durable DAG nodes in independently killable, spawn-safe processes."""
 
     from operations import persistent_certification_scheduler as scheduler
 
@@ -303,14 +430,22 @@ def _dag_native_run(self, nodes: Sequence[object], runner: Callable[[object], in
     worker_limit = scheduler._worker_count(self.values, len(pending) or 1)
     timeout_seconds = _node_timeout_seconds(self.values)
     try:
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
     except ValueError as error:
         raise scheduler.CertificationSchedulerError(
-            "certification DAG requires POSIX fork process isolation"
+            "certification DAG requires multiprocessing spawn isolation"
         ) from error
 
     running: dict[str, _RunningNode] = {}
     failures: set[str] = set()
+    required_count = len(ordered_nodes)
+    _publish_runtime_journal(
+        self,
+        nodes=ordered_nodes,
+        results=results,
+        pending=pending,
+        running=running,
+    )
 
     def submit_ready() -> bool:
         submitted = False
@@ -341,10 +476,42 @@ def _dag_native_run(self, nodes: Sequence[object], runner: Callable[[object], in
                     lease=lease,
                     runner=runner,
                 )
+                _publish_runtime_journal(
+                    self,
+                    nodes=ordered_nodes,
+                    results=results,
+                    pending=pending,
+                    running=running,
+                )
+                _record_parent_progress(
+                    self,
+                    stage="certification_dag",
+                    node=node,
+                    required_count=required_count,
+                    results=results,
+                    pending=pending,
+                    running=running,
+                )
             except BaseException as error:  # noqa: BLE001 - persist launch failure.
                 budgets.release(lease)
                 results[node.node_id] = self._write_failure(node, error=error)
                 failures.add(node.node_id)
+                _publish_runtime_journal(
+                    self,
+                    nodes=ordered_nodes,
+                    results=results,
+                    pending=pending,
+                    running=running,
+                )
+                _record_parent_progress(
+                    self,
+                    stage="certification_dag_failed",
+                    node=node,
+                    required_count=required_count,
+                    results=results,
+                    pending=pending,
+                    running=running,
+                )
             submitted = True
         return submitted
 
@@ -363,12 +530,30 @@ def _dag_native_run(self, nodes: Sequence[object], runner: Callable[[object], in
                 if isinstance(outcome, BaseException):
                     results[node_id] = self._write_failure(item.node, error=outcome)
                     failures.add(node_id)
+                    stage = "certification_dag_failed"
                 else:
                     results[node_id] = self._write_success(
                         item.node,
                         evidence_complete_count=outcome,
                     )
                     qualified.add(node_id)
+                    stage = "certification_dag_complete"
+                _publish_runtime_journal(
+                    self,
+                    nodes=ordered_nodes,
+                    results=results,
+                    pending=pending,
+                    running=running,
+                )
+                _record_parent_progress(
+                    self,
+                    stage=stage,
+                    node=item.node,
+                    required_count=required_count,
+                    results=results,
+                    pending=pending,
+                    running=running,
+                )
 
             if not running and pending and not submitted and not completed_any:
                 blocked = tuple(sorted(pending))
@@ -379,6 +564,22 @@ def _dag_native_run(self, nodes: Sequence[object], runner: Callable[[object], in
                     )
                     results[node_id] = self._write_failure(node, error=error)
                     failures.add(node_id)
+                    _record_parent_progress(
+                        self,
+                        stage="certification_dag_failed",
+                        node=node,
+                        required_count=required_count,
+                        results=results,
+                        pending=pending,
+                        running=running,
+                    )
+                _publish_runtime_journal(
+                    self,
+                    nodes=ordered_nodes,
+                    results=results,
+                    pending=pending,
+                    running=running,
+                )
                 break
             if running and not completed_any:
                 time.sleep(_POLL_INTERVAL_SECONDS)
@@ -392,6 +593,13 @@ def _dag_native_run(self, nodes: Sequence[object], runner: Callable[[object], in
             _close_running(item)
 
     manifest = self._publish_manifest(nodes=ordered_nodes, results=results)
+    _publish_runtime_journal(
+        self,
+        nodes=ordered_nodes,
+        results=results,
+        pending={},
+        running={},
+    )
     if manifest.failed_nodes:
         details = []
         for node_id in manifest.failed_nodes:
@@ -459,12 +667,13 @@ def _install_discovery_coordinator() -> None:
 
 
 def install_dag_native_comprehensive_supervision() -> None:
-    """Install granular node supervision and remove only the obsolete parent kill wall."""
+    """Install granular spawn supervision and remove only the obsolete parent kill wall."""
 
     _install_scheduler_supervision()
     _install_discovery_coordinator()
 
 
 __all__ = [
+    "SpawnSerializationError",
     "install_dag_native_comprehensive_supervision",
 ]
