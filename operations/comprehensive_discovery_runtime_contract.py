@@ -4,9 +4,9 @@ PR #687 introduced explicit certification-DAG and provider-free-finalizer progre
 boundaries. The manual CIO diagnostic intentionally rejects unknown stages and metrics,
 so those operational names must be registered before the authoritative scheduler emits
 them. This module also preserves a credential-safe finalizer boundary when an exception
-escapes the deterministic second phase.
+escapes the deterministic second phase and installs DAG-native provider supervision.
 
-This is operational observability only. It cannot relax market coverage, evidence
+This is operational orchestration only. It cannot relax market coverage, evidence
 freshness/completeness, screening, CIO authority, construction, execution, or paper-only
 controls.
 """
@@ -86,11 +86,22 @@ def _install_finalizer_failure_boundary() -> None:
     authoritative._provider_free_finalize = provider_free_finalize
 
 
+def _install_dag_native_supervision() -> None:
+    """Move the hard kill boundary from the aggregate coordinator to each DAG node."""
+
+    from operations.dag_native_comprehensive_supervision import (
+        install_dag_native_comprehensive_supervision,
+    )
+
+    install_dag_native_comprehensive_supervision()
+
+
 def install_comprehensive_discovery_runtime_contract() -> None:
-    """Install the diagnostic schema and safe finalizer boundary exactly once."""
+    """Install the strict progress, failure, and DAG-native runtime contracts."""
 
     _register_manual_diagnostic_contract()
     _install_finalizer_failure_boundary()
+    _install_dag_native_supervision()
 
 
 __all__ = ["install_comprehensive_discovery_runtime_contract"]
