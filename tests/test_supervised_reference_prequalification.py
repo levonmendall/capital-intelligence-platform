@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cio import CandidateAssetClass
 from operations import component_qualified_evidence_maintenance as maintenance
 from operations import supervised_reference_prequalification as reference
 from operations.reference_readiness import ReferenceReadinessError
@@ -81,6 +82,83 @@ def test_reference_component_timeout_is_precisely_attributed(monkeypatch) -> Non
             operation=lambda: None,
             return_value=False,
         )
+
+
+def test_directory_component_reuse_requires_every_scheduled_release_lane() -> None:
+    component = {
+        "catalogs": {
+            CandidateAssetClass.INTERNATIONAL_EQUITY.value: [{"symbol": "7203.T"}],
+            CandidateAssetClass.FX.value: [],
+            CandidateAssetClass.FUTURE.value: [{"symbol": "ESZ6"}],
+        }
+    }
+    active_lanes = frozenset(
+        {
+            CandidateAssetClass.INTERNATIONAL_EQUITY,
+            CandidateAssetClass.FX,
+            CandidateAssetClass.FUTURE,
+        }
+    )
+
+    assert reference._missing_required_directory_lanes(
+        component,
+        active_lanes=active_lanes,
+    ) == (CandidateAssetClass.FX.value,)
+
+    component["catalogs"][CandidateAssetClass.FX.value] = [{"symbol": "EURUSD.FOREX"}]
+    assert reference._missing_required_directory_lanes(
+        component,
+        active_lanes=active_lanes,
+    ) == ()
+
+
+def test_strict_release_binding_failure_cannot_be_called_qualified(monkeypatch) -> None:
+    def fail(_values, *, now):
+        assert now >= AS_OF
+        raise ReferenceReadinessError(
+            "release-independent reference components are missing or stale: crypto"
+        )
+
+    monkeypatch.setattr(
+        reference._release_binding,
+        "bind_reference_manifest_from_components",
+        fail,
+    )
+
+    with pytest.raises(
+        maintenance._plane.ContinuousEvidencePlaneError,
+        match=(
+            r"reference prequalification components are not release-bindable; "
+            r"failure_type=release_binding_failure; .*crypto"
+        ),
+    ):
+        reference._strict_release_binding(
+            {"CAPITAL_INTELLIGENCE_RELEASE": "release-test"},
+            minimum_cutoff=AS_OF,
+        )
+
+
+def test_strict_release_binding_returns_exact_release_manifest(monkeypatch) -> None:
+    manifest = SimpleNamespace(manifest_id="strict-manifest")
+    observed: dict[str, datetime] = {}
+
+    def bind(_values, *, now):
+        observed["cutoff"] = now
+        return manifest
+
+    monkeypatch.setattr(
+        reference._release_binding,
+        "bind_reference_manifest_from_components",
+        bind,
+    )
+
+    result = reference._strict_release_binding(
+        {"CAPITAL_INTELLIGENCE_RELEASE": "release-test"},
+        minimum_cutoff=AS_OF,
+    )
+
+    assert result is manifest
+    assert observed["cutoff"] >= AS_OF
 
 
 def test_component_maintenance_does_not_wrap_reference_controller_in_aggregate_supervisor(
