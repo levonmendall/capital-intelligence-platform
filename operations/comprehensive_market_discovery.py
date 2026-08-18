@@ -2,9 +2,9 @@
 
 The complete terminal-accounting implementation is preserved byte-for-byte in
 ``operations._comprehensive_market_discovery_v6``. This facade adds durable,
-exact-release/epoch evidence checkpoints, an immutable provider-free point-in-time
-certification-input barrier, immutable lane certification artifacts, and provider-free
-reuse of a qualified global discovery snapshot.
+exact-release/epoch evidence checkpoints, a provider-aware persistent certification DAG,
+an immutable provider-free point-in-time certification-input barrier, immutable lane
+certification artifacts, and provider-free reuse of a qualified global discovery snapshot.
 
 No catalog membership, screening rule, factor requirement, ranking, threshold, CIO
 authority, portfolio construction, execution behavior, or paper-only control changes.
@@ -32,6 +32,7 @@ from operations.continuous_evidence_plane import (
     ensure_point_in_time_snapshot,
     evidence_plane_enabled,
 )
+from operations.persistent_certification_scheduler import install_certification_scheduler
 from operations.persistent_historical_evidence import install_persistent_historical_evidence
 from operations.persistent_option_reference import install_persistent_option_reference
 from operations.qualified_comprehensive_discovery_snapshot import (
@@ -44,6 +45,7 @@ from storage_governance import install_persistent_history_storage_governance
 
 
 install_checkpointed_market_probe(_core)
+install_certification_scheduler(_core)
 install_resumable_options_catalog(_core)
 install_persistent_option_reference(_core)
 install_persistent_historical_evidence()
@@ -84,6 +86,17 @@ def _assert_public_terminal_screening_bound(*, chunk_size: int) -> None:
 
 def _sync_core_seams() -> None:
     referenced = set(_core.discover_comprehensive_markets.__code__.co_names)
+    referenced.update(
+        {
+            "record_manual_cio_diagnostic_progress",
+            "default_redundant_market_probe",
+            "ensure_provider_preselection_publication",
+            "build_bounded_terminal_preselection",
+            "build_bounded_cutoff_observations",
+            "default_provider_preselection_market_probe",
+            "begin_redundancy_cycle",
+        }
+    )
     current = globals()
     for name in referenced:
         if name in current and hasattr(_core, name):
