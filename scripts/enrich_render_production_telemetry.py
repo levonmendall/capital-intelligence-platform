@@ -2,14 +2,15 @@
 
 This helper is intentionally read-only. It re-reads the public redacted CIO diagnostic
 surface after the primary telemetry watcher stops, validates the safety envelope, and
-copies only explicitly allowlisted prequalification state plus the sanitized Massive
-futures root telemetry emitted by the governed reference adapter.
+copies only explicitly allowlisted prequalification state plus the sanitized futures
+reference certification DAG emitted by the governed reference adapter.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import urllib.request
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -94,6 +95,15 @@ def _safe_identifier(value: object) -> str | None:
     return text
 
 
+def _safe_root(value: object) -> str | None:
+    root = str(value or "").strip().upper()
+    if not root or len(root) > 16:
+        return None
+    if not all(character.isalnum() or character in {"-", "_"} for character in root):
+        return None
+    return root
+
+
 def _safe_reference_metrics(value: object) -> dict[str, int]:
     if not isinstance(value, Mapping):
         return {}
@@ -150,6 +160,108 @@ def _safe_reference_prequalification(value: object) -> dict[str, object] | None:
         if item.get("state") in {"failed", "timed-out", "invalid"}
     ]
     return safe
+
+
+def _safe_futures_reference_progress(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+
+    required_roots = [
+        root
+        for item in value.get("required_roots", [])
+        if (root := _safe_root(item)) is not None
+    ] if isinstance(value.get("required_roots"), list) else []
+    qualified_roots = [
+        root
+        for item in value.get("qualified_roots", [])
+        if (root := _safe_root(item)) is not None
+    ] if isinstance(value.get("qualified_roots"), list) else []
+    unresolved_roots = [
+        root
+        for item in value.get("unresolved_roots", [])
+        if (root := _safe_root(item)) is not None
+    ] if isinstance(value.get("unresolved_roots"), list) else []
+
+    nodes: list[dict[str, object]] = []
+    raw_nodes = value.get("nodes")
+    if isinstance(raw_nodes, list):
+        for item in raw_nodes:
+            if not isinstance(item, Mapping):
+                continue
+            root = _safe_root(item.get("root"))
+            if root is None:
+                continue
+            duration_ms = _nonnegative_int(item.get("duration_ms"))
+            nodes.append(
+                {
+                    "root": root,
+                    "state": _safe_identifier(item.get("state")),
+                    "unit": _safe_identifier(item.get("unit")),
+                    "provider": _safe_identifier(item.get("provider")),
+                    "venue": _safe_identifier(item.get("venue")),
+                    "failure_type": _safe_identifier(item.get("failure_type")),
+                    "duration_ms": duration_ms if duration_ms is not None else 0,
+                    "fallback": item.get("fallback") is True,
+                }
+            )
+
+    units: list[dict[str, object]] = []
+    raw_units = value.get("units")
+    if isinstance(raw_units, list):
+        for item in raw_units:
+            if not isinstance(item, Mapping):
+                continue
+            roots = [
+                root
+                for raw_root in item.get("roots", [])
+                if (root := _safe_root(raw_root)) is not None
+            ] if isinstance(item.get("roots"), list) else []
+            duration_ms = _nonnegative_int(item.get("duration_ms"))
+            units.append(
+                {
+                    "unit": _safe_identifier(item.get("unit")),
+                    "provider": _safe_identifier(item.get("provider")),
+                    "state": _safe_identifier(item.get("state")),
+                    "venue": _safe_identifier(item.get("venue")),
+                    "root": _safe_root(item.get("root")),
+                    "roots": roots,
+                    "duration_ms": duration_ms if duration_ms is not None else 0,
+                    "failure_type": _safe_identifier(item.get("failure_type")),
+                    "fallback": item.get("fallback") is True,
+                }
+            )
+
+    try:
+        timeout_seconds = float(value.get("unit_timeout_seconds", 0.0))
+    except (TypeError, ValueError):
+        timeout_seconds = 0.0
+    if not math.isfinite(timeout_seconds) or timeout_seconds < 0.0:
+        timeout_seconds = 0.0
+
+    return {
+        "state": _safe_identifier(value.get("state")),
+        "updated_at": str(value.get("updated_at") or "") or None,
+        "cutoff": str(value.get("cutoff") or "") or None,
+        "required_root_count": len(required_roots),
+        "qualified_root_count": len(qualified_roots),
+        "unresolved_root_count": len(unresolved_roots),
+        "required_roots": required_roots,
+        "qualified_roots": qualified_roots,
+        "unresolved_roots": unresolved_roots,
+        "active_unit": _safe_identifier(value.get("active_unit")),
+        "unit_timeout_seconds": timeout_seconds,
+        "blocking_unit": _safe_identifier(value.get("blocking_unit")),
+        "blocking_provider": _safe_identifier(value.get("blocking_provider")),
+        "blocking_venue": _safe_identifier(value.get("blocking_venue")),
+        "blocking_root": _safe_root(value.get("blocking_root")),
+        "blocking_failure_type": _safe_identifier(value.get("blocking_failure_type")),
+        "nodes": nodes,
+        "units": units,
+        "credential_safe": True,
+        "decision_evidence_authority": False,
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
 
 
 def _safe_futures_rows(detail: object) -> list[dict[str, object]]:
@@ -245,16 +357,39 @@ def enrich_snapshot(
     if reference_progress is not None:
         enriched_diagnostic["reference_prequalification_progress"] = reference_progress
 
+    futures_progress = _safe_futures_reference_progress(
+        public_payload.get("futures_reference_progress")
+    )
+    if futures_progress is not None:
+        enriched_diagnostic["futures_reference_progress"] = futures_progress
+        enriched_diagnostic["futures_reference_qualified_roots"] = futures_progress.get(
+            "qualified_root_count", 0
+        )
+        enriched_diagnostic["futures_reference_unresolved_roots"] = futures_progress.get(
+            "unresolved_root_count", 0
+        )
+
     for key in (
         "prequalification_failure_reason",
         "prequalification_failure_capability",
         "prequalification_failure_stage",
         "prequalification_failure_provider",
         "prequalification_failure_error_type",
+        "prequalification_failure_unit",
+        "prequalification_failure_venue",
+        "prequalification_failure_root",
     ):
         value = _safe_identifier(public_payload.get(key))
         if value is not None:
             enriched_diagnostic[key] = value
+
+    unresolved = public_payload.get("prequalification_unresolved_futures_roots")
+    if isinstance(unresolved, list):
+        enriched_diagnostic["prequalification_unresolved_futures_roots"] = [
+            root
+            for item in unresolved
+            if (root := _safe_root(item)) is not None
+        ]
 
     prequalification = public_payload.get("prequalification_progress")
     if isinstance(prequalification, Mapping):
@@ -262,6 +397,7 @@ def enrich_snapshot(
         enriched_diagnostic["prequalification_progress"] = {
             "active_phase": active_phase,
             "reference": reference_progress,
+            "futures_reference": futures_progress,
         }
 
     futures_rows = _safe_futures_rows(public_payload.get("detail"))
