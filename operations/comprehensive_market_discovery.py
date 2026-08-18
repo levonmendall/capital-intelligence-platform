@@ -30,6 +30,9 @@ from operations.certification_input_manifest import (
     CertificationInputError,
     freeze_certification_input,
 )
+from operations.comprehensive_discovery_runtime_contract import (
+    install_comprehensive_discovery_runtime_contract,
+)
 from operations.continuous_evidence_plane import (
     ContinuousEvidencePlaneError,
     ensure_point_in_time_snapshot,
@@ -47,6 +50,7 @@ from storage_governance import install_persistent_history_storage_governance
 
 
 install_checkpointed_market_probe(_core)
+install_comprehensive_discovery_runtime_contract()
 install_authoritative_certification_scheduler(_core)
 install_resumable_options_catalog(_core)
 install_persistent_option_reference(_core)
