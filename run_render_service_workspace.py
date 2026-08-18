@@ -151,12 +151,13 @@ def prepare_runtime_workspace(values: dict[str, str] | None = None) -> Path:
 def main() -> int:
     prepare_runtime_workspace()
     import run_render_service_memory_safe as memory_safe
+    from run_render_service_memory_safe import main as run_service
     from operations.release_prequalification_parent_watchdog import (
         install_release_prequalification_parent_watchdog,
     )
 
     install_release_prequalification_parent_watchdog(memory_safe)
-    return memory_safe.main()
+    return run_service()
 
 
 if __name__ == "__main__":
