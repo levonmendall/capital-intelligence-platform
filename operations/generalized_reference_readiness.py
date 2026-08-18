@@ -35,7 +35,6 @@ _EODHD_REFERENCE_LANES = frozenset(
         CandidateAssetClass.ALTERNATIVE,
         CandidateAssetClass.COMMODITY,
         CandidateAssetClass.FX,
-        CandidateAssetClass.CRYPTO,
     }
 )
 
