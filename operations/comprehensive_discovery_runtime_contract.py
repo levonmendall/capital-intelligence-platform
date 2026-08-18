@@ -3,8 +3,9 @@
 PR #687 introduced explicit certification-DAG and provider-free-finalizer progress
 boundaries. The manual CIO diagnostic intentionally rejects unknown stages and metrics,
 so those operational names must be registered before the authoritative scheduler emits
-them. This module also preserves a credential-safe finalizer boundary when an exception
-escapes the deterministic second phase and installs DAG-native provider supervision.
+them. This module also preserves a credential-safe finalizer boundary, installs
+DAG-native provider supervision, and refines large provider-facing lanes into durable
+hierarchical shards.
 
 This is operational orchestration only. It cannot relax market coverage, evidence
 freshness/completeness, screening, CIO authority, construction, execution, or paper-only
@@ -49,7 +50,7 @@ _PROGRESS_METRICS = frozenset(
 
 
 def _register_manual_diagnostic_contract() -> None:
-    """Make every #687 progress emission valid under the strict diagnostic schema."""
+    """Make every authoritative progress emission valid under the strict schema."""
 
     _diagnostic._PROGRESS_STAGES = frozenset(
         (*_diagnostic._PROGRESS_STAGES, *_EXACT_PROGRESS_STAGES)
@@ -96,12 +97,23 @@ def _install_dag_native_supervision() -> None:
     install_dag_native_comprehensive_supervision()
 
 
+def _install_hierarchical_sharding() -> None:
+    """Persist successful provider work below the asset-class lane boundary."""
+
+    from operations.hierarchical_certification_sharding import (
+        install_hierarchical_certification_sharding,
+    )
+
+    install_hierarchical_certification_sharding()
+
+
 def install_comprehensive_discovery_runtime_contract() -> None:
-    """Install the strict progress, failure, and DAG-native runtime contracts."""
+    """Install strict progress, failure, DAG-native, and sharding runtime contracts."""
 
     _register_manual_diagnostic_contract()
     _install_finalizer_failure_boundary()
     _install_dag_native_supervision()
+    _install_hierarchical_sharding()
 
 
 __all__ = ["install_comprehensive_discovery_runtime_contract"]
