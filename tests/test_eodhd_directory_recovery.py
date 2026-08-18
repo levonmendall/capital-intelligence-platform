@@ -84,13 +84,13 @@ def test_directory_recovery_remains_fail_closed(monkeypatch) -> None:
     assert provider.calls["XETRA"] == 1
 
 
-def test_generalized_reference_includes_all_executable_eodhd_asset_lanes() -> None:
+def test_generalized_reference_includes_only_eodhd_backed_asset_lanes() -> None:
     assert {
         CandidateAssetClass.INTERNATIONAL_EQUITY,
         CandidateAssetClass.REAL_ESTATE,
         CandidateAssetClass.ALTERNATIVE,
         CandidateAssetClass.COMMODITY,
         CandidateAssetClass.FX,
-        CandidateAssetClass.CRYPTO,
     } <= _EODHD_REFERENCE_LANES
+    assert CandidateAssetClass.CRYPTO not in _EODHD_REFERENCE_LANES
     assert CandidateAssetClass.FIXED_INCOME not in _EODHD_REFERENCE_LANES
