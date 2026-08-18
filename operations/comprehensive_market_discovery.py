@@ -2,7 +2,7 @@
 
 The complete terminal-accounting implementation is preserved byte-for-byte in
 ``operations._comprehensive_market_discovery_v6``. This facade adds durable,
-exact-release/epoch evidence checkpoints, a provider-aware persistent certification DAG,
+compatibility-bound evidence checkpoints, a provider-aware persistent certification DAG,
 an immutable provider-free point-in-time certification-input barrier, immutable lane
 certification artifacts, and provider-free reuse of a qualified global discovery snapshot.
 
@@ -23,6 +23,9 @@ from operations.all_market_lane_certification import (
     publish_compositional_certification,
     validate_published_compositional_certification,
 )
+from operations.authoritative_comprehensive_discovery import (
+    install_authoritative_certification_scheduler,
+)
 from operations.certification_input_manifest import (
     CertificationInputError,
     freeze_certification_input,
@@ -32,7 +35,6 @@ from operations.continuous_evidence_plane import (
     ensure_point_in_time_snapshot,
     evidence_plane_enabled,
 )
-from operations.persistent_certification_scheduler import install_certification_scheduler
 from operations.persistent_historical_evidence import install_persistent_historical_evidence
 from operations.persistent_option_reference import install_persistent_option_reference
 from operations.qualified_comprehensive_discovery_snapshot import (
@@ -45,7 +47,7 @@ from storage_governance import install_persistent_history_storage_governance
 
 
 install_checkpointed_market_probe(_core)
-install_certification_scheduler(_core)
+install_authoritative_certification_scheduler(_core)
 install_resumable_options_catalog(_core)
 install_persistent_option_reference(_core)
 install_persistent_historical_evidence()
