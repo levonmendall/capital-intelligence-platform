@@ -4,6 +4,7 @@ import io
 from datetime import datetime, timezone
 
 import pytest
+import requests
 
 from providers.cme_futures_reference_executable import (
     CmeExecutableFuturesReferenceProvider,
@@ -33,16 +34,31 @@ class _MappedGet:
         return _FakeResponse(self.payloads[url])
 
 
+class _FailingGet(_MappedGet):
+    def __init__(self, payloads: dict[str, str], failing_url: str) -> None:
+        super().__init__(payloads)
+        self.failing_url = failing_url
+
+    def __call__(self, url: str, **kwargs):
+        if url == self.failing_url:
+            self.calls.append(url)
+            raise requests.Timeout("simulated venue timeout")
+        return super().__call__(url, **kwargs)
+
+
 class _Fallback:
     configured = True
 
     def __init__(self, contracts: tuple[MassiveFuturesContract, ...]) -> None:
         self.contracts = contracts
         self.calls = 0
+        self.requested_roots: list[tuple[str, ...]] = []
 
-    def futures_contracts(self, **_kwargs):
+    def futures_contracts(self, **kwargs):
         self.calls += 1
-        return self.contracts
+        roots = tuple(sorted(str(item) for item in kwargs.get("product_codes", ())))
+        self.requested_roots.append(roots)
+        return tuple(item for item in self.contracts if item.product_code in set(roots))
 
 
 def _fprf(*rows: tuple[str, str, str, str]) -> str:
@@ -127,7 +143,45 @@ def test_cme_is_primary_and_daily_snapshot_is_reused(tmp_path) -> None:
     assert all(item.source_identifier.startswith("cme-fprf:") for item in first)
     assert provider.reference_metadata["provider"] == "cme_fprf_cache"
     cache_files = list((tmp_path / "reference_readiness").glob("cme-futures-daily-*.json"))
+    venue_files = list((tmp_path / "reference_readiness").glob("cme-futures-venue-*.json"))
     assert len(cache_files) == 1
+    assert len(venue_files) == 2
+
+
+def test_completed_venue_is_reused_after_later_venue_failure(tmp_path) -> None:
+    urls = (("CME", "https://example/cme.xml"), ("NYMEX", "https://example/nymex.xml"))
+    as_of = datetime(2026, 8, 14, 18, 0, tzinfo=timezone.utc)
+    first_getter = _FailingGet(
+        {"https://example/cme.xml": _fprf(("ES", "CME", "202609", "2026-09-18"))},
+        "https://example/nymex.xml",
+    )
+    first_provider = CmeExecutableFuturesReferenceProvider(
+        http_get=first_getter,
+        file_urls=urls,
+        values={"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)},
+        now=lambda: as_of,
+    )
+
+    with pytest.raises(MassiveMultiAssetError, match="fallback is not configured"):
+        first_provider.futures_contracts(as_of=as_of, product_codes=("ES", "CL"))
+
+    assert first_getter.calls == ["https://example/cme.xml", "https://example/nymex.xml"]
+    assert len(list((tmp_path / "reference_readiness").glob("cme-futures-venue-cme-*.json"))) == 1
+
+    second_getter = _MappedGet(
+        {"https://example/nymex.xml": _fprf(("CL", "NYMEX", "202609", "2026-09-18"))}
+    )
+    second_provider = CmeExecutableFuturesReferenceProvider(
+        http_get=second_getter,
+        file_urls=urls,
+        values={"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)},
+        now=lambda: as_of,
+    )
+
+    contracts = second_provider.futures_contracts(as_of=as_of, product_codes=("ES", "CL"))
+
+    assert {item.product_code for item in contracts} == {"ES", "CL"}
+    assert second_getter.calls == ["https://example/nymex.xml"]
 
 
 def test_explicit_cme_globex_alias_wins_over_derived_symbol(tmp_path) -> None:
@@ -190,16 +244,11 @@ def test_cme_globex_alias_maps_clearing_codes_to_configured_roots(tmp_path) -> N
     assert {item.trading_venue for item in contracts} == {"CBOT", "CME"}
 
 
-def test_incomplete_cme_uses_complete_massive_fallback(tmp_path) -> None:
+def test_incomplete_cme_uses_only_missing_root_fallback(tmp_path) -> None:
     getter = _MappedGet(
         {"https://example/cme.xml": _fprf(("ES", "CME", "202609", "2026-09-18"))}
     )
-    fallback = _Fallback(
-        (
-            _massive_contract("ES", "ESU6", "CME"),
-            _massive_contract("CL", "CLU6", "NYMEX"),
-        )
-    )
+    fallback = _Fallback((_massive_contract("CL", "CLU6", "NYMEX"),))
     provider = CmeExecutableFuturesReferenceProvider(
         fallback_provider=fallback,
         http_get=getter,
@@ -214,7 +263,32 @@ def test_incomplete_cme_uses_complete_massive_fallback(tmp_path) -> None:
 
     assert {item.product_code for item in contracts} == {"ES", "CL"}
     assert fallback.calls == 1
-    assert provider.reference_metadata["provider"] == "massive_fallback"
+    assert fallback.requested_roots == [("CL",)]
+    assert next(item for item in contracts if item.product_code == "ES").source_identifier.startswith(
+        "cme-fprf:"
+    )
+    assert provider.reference_metadata["provider"] == "cme_fprf_composite"
+
+
+def test_incomplete_massive_missing_root_fallback_remains_fail_closed(tmp_path) -> None:
+    getter = _MappedGet(
+        {"https://example/cme.xml": _fprf(("ES", "CME", "202609", "2026-09-18"))}
+    )
+    fallback = _Fallback((_massive_contract("ES", "ESU6", "CME"),))
+    provider = CmeExecutableFuturesReferenceProvider(
+        fallback_provider=fallback,
+        http_get=getter,
+        file_urls=(("CME", "https://example/cme.xml"),),
+        values={"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)},
+    )
+
+    with pytest.raises(MassiveMultiAssetError, match="complete configured-root coverage"):
+        provider.futures_contracts(
+            as_of=datetime(2026, 8, 14, 18, 0, tzinfo=timezone.utc),
+            product_codes=("ES", "CL"),
+        )
+
+    assert fallback.requested_roots == [("CL",)]
 
 
 def test_incomplete_cme_without_fallback_remains_fail_closed(tmp_path) -> None:
