@@ -95,7 +95,7 @@ jobs:
           }
 
           # Preserve the collector's original exit code (including a real diagnostic
-          # failure), but always run the credential-safe enrichment pass before the
+          # failure), but always run the credential-safe enrichment passes before the
           # summary/artifact steps consume the final snapshot.
           set +e
           python scripts/capture_render_production_telemetry.py \
@@ -113,6 +113,7 @@ jobs:
           set -e
 
           enrichment_status=0
+          discovery_enrichment_status=0
           if [[ -f "$TELEMETRY_OUTPUT" ]]; then
             python scripts/enrich_render_production_telemetry.py \
               --url "$TELEMETRY_URL" \
@@ -120,12 +121,21 @@ jobs:
               --output "$TELEMETRY_OUTPUT" \
               --timeline-output "$TELEMETRY_TIMELINE" \
               || enrichment_status=$?
+            python scripts/enrich_comprehensive_discovery_telemetry.py \
+              --url "$TELEMETRY_URL" \
+              --expected-release "$EXPECTED_RELEASE" \
+              --output "$TELEMETRY_OUTPUT" \
+              --timeline-output "$TELEMETRY_TIMELINE" \
+              || discovery_enrichment_status=$?
           fi
 
           if [[ "$capture_status" -ne 0 ]]; then
             exit "$capture_status"
           fi
-          exit "$enrichment_status"
+          if [[ "$enrichment_status" -ne 0 ]]; then
+            exit "$enrichment_status"
+          fi
+          exit "$discovery_enrichment_status"
 
       - name: Publish safe telemetry summary
         if: always()
