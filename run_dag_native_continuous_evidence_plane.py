@@ -1,0 +1,65 @@
+"""Bootstrap continuous evidence with the authoritative DAG runtime installed first.
+
+The bounded evidence worker starts a fresh interpreter for every preparation pass.  That
+fresh process must install comprehensive-discovery runtime contracts before importing the
+continuous-evidence owner; otherwise component-qualified maintenance can capture the legacy
+aggregate 540-second discovery supervisor before the DAG-native installer is imported.
+
+This bootstrap changes only operational supervision and observability.  It does not change
+market scope, evidence freshness/completeness, screening, CIO authority, construction,
+execution, or paper-only controls.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from operations.comprehensive_discovery_runtime_contract import (
+    install_comprehensive_discovery_runtime_contract,
+)
+
+
+def install_and_verify_dag_native_runtime() -> None:
+    """Install the runtime contract and fail closed if any legacy seam remains active."""
+
+    install_comprehensive_discovery_runtime_contract()
+
+    from operations import authoritative_comprehensive_discovery as authoritative
+    from operations import component_qualified_evidence_maintenance as maintenance
+    from operations import persistent_certification_scheduler as scheduler
+
+    missing: list[str] = []
+    if not getattr(
+        maintenance._supervised_discovery_runner,
+        "_dag_native_supervision",
+        False,
+    ):
+        missing.append("discovery_coordinator")
+    if not getattr(
+        scheduler.PersistentCertificationScheduler.run,
+        "_dag_native_supervision",
+        False,
+    ):
+        missing.append("certification_scheduler")
+    if not getattr(
+        authoritative._acquire,
+        "_spawn_safe_authoritative_acquisition",
+        False,
+    ):
+        missing.append("spawn_safe_acquisition")
+    if missing:
+        raise RuntimeError(
+            "continuous evidence refused legacy comprehensive-discovery runtime: "
+            + ",".join(missing)
+        )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    install_and_verify_dag_native_runtime()
+    from run_continuous_evidence_plane import main as evidence_main
+
+    return evidence_main(argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
