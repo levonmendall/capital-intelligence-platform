@@ -53,6 +53,7 @@
       "run_composite_readiness_watchdog.py",
       "run_container_acceptance.py",
       "run_continuous_evidence_plane.py",
+      "run_dag_native_continuous_evidence_plane.py",
       "run_daily_operations.py",
       "run_global_public_evidence.py",
       "run_historical_backfill.py",

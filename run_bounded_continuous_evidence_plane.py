@@ -5,6 +5,10 @@ a short-lived child process, allowing Python/provider working sets to return to 
 between refreshes and sharing the same cross-process memory lane as the other heavyweight
 Render workers. Release startup can invoke one bounded pass before the CIO diagnostic;
 the normal production coordinator continues to use loop mode afterward.
+
+The isolated child enters through a DAG-native bootstrap that installs and verifies the
+comprehensive-discovery runtime contract before the evidence owner is imported. This
+prevents import ordering from silently restoring the obsolete aggregate discovery timeout.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ from run_bounded_render_worker import WorkerSpec, _run_isolated_once, run_loop
 
 _SPEC = WorkerSpec(
     name="continuous-evidence-plane",
-    script="run_continuous_evidence_plane.py",
+    script="run_dag_native_continuous_evidence_plane.py",
     arguments=("--once",),
     interval_env="CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_INTERVAL_SECONDS",
     default_interval_seconds=300.0,
