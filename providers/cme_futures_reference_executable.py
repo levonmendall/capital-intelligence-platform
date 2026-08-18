@@ -33,6 +33,7 @@ from providers.massive_multi_asset import MassiveFuturesContract, MassiveMultiAs
 
 
 _GLOBEX_ALIAS_SOURCES = ("101", "103", "8")
+_DEFAULT_EXECUTABLE_REQUEST_TIMEOUT_SECONDS = 15
 
 
 def _valid_raw_symbol(candidate: object, product: str) -> str | None:
@@ -94,7 +95,7 @@ def _configured_root_for_instrument(
 
     aliases = _instrument_aliases(element)
     for source in _GLOBEX_ALIAS_SOURCES:
-        for candidate in aliases.get(source, ()):  # CME Globex is normally source 101.
+        for candidate in aliases.get(source, ()):
             for root in ordered_roots:
                 if _valid_raw_symbol(candidate, root) is not None:
                     return root
@@ -102,7 +103,22 @@ def _configured_root_for_instrument(
 
 
 class CmeExecutableFuturesReferenceProvider(CmeFuturesReferenceProvider):
-    """CME-primary reference provider that preserves executable Globex symbology."""
+    """CME-primary reference provider that preserves executable Globex symbology.
+
+    The executable adapter uses a shorter per-file request timeout than the generic base
+    provider. Four FPRF files are fetched sequentially, so the previous 30-second default
+    could consume the entire 120-second futures component budget and starve the governed
+    Massive fallback. Fifteen seconds keeps every CME HTTP request bounded while leaving
+    time for the independently durable fallback path.
+    """
+
+    def __init__(
+        self,
+        *args: object,
+        timeout: int = _DEFAULT_EXECUTABLE_REQUEST_TIMEOUT_SECONDS,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(*args, timeout=timeout, **kwargs)
 
     @staticmethod
     def _instrument_symbol(element: ElementTree.Element, product: str, maturity: str) -> str | None:
