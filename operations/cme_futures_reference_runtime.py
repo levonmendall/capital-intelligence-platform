@@ -129,7 +129,17 @@ def _install_reference_supervisor_adapter() -> None:
             # The operation itself is only a coordinator/final manifest publisher.
             # Every provider-facing CME venue and Massive root call beneath it is
             # independently supervised by GranularFuturesReferenceProvider.
-            return operation()
+            try:
+                return operation()
+            except reference._plane.ContinuousEvidencePlaneError:
+                raise
+            except Exception as error:
+                failure_type = reference._failure_type(error)
+                raise reference._plane.ContinuousEvidencePlaneError(
+                    "granular futures reference coordinator incomplete; "
+                    f"failure_type={failure_type}; component={component}; "
+                    f"provider={provider}; {error}"
+                ) from error
         return original(
             values=values,
             component=component,
