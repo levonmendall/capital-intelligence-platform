@@ -1,10 +1,9 @@
 """Runtime contract for authoritative comprehensive-discovery orchestration.
 
-PR #687 introduced explicit certification-DAG and provider-free-finalizer progress
-boundaries. The manual CIO diagnostic intentionally rejects unknown stages and metrics,
-so those operational names must be registered before the authoritative scheduler emits
-them. This module also preserves a credential-safe finalizer boundary when an exception
-escapes the deterministic second phase and installs DAG-native provider supervision.
+The manual CIO diagnostic intentionally rejects unknown stages and metrics, so every
+operational certification-DAG boundary must be registered before the scheduler emits it.
+This module also preserves a credential-safe finalizer boundary, installs the spawn-safe
+authoritative lane runner, and installs parent-owned DAG supervision.
 
 This is operational orchestration only. It cannot relax market coverage, evidence
 freshness/completeness, screening, CIO authority, construction, execution, or paper-only
@@ -34,6 +33,7 @@ _LANE_PROGRESS_STAGES = frozenset(
     {
         "certification_dag",
         "certification_dag_complete",
+        "certification_dag_failed",
     }
 )
 _PROGRESS_METRICS = frozenset(
@@ -42,6 +42,9 @@ _PROGRESS_METRICS = frozenset(
         "required_nodes",
         "completed_nodes",
         "reused_nodes",
+        "failed_nodes",
+        "running_nodes",
+        "pending_nodes",
         "compatibility_rebound_nodes",
         "rebound_nodes",
     }
@@ -49,7 +52,7 @@ _PROGRESS_METRICS = frozenset(
 
 
 def _register_manual_diagnostic_contract() -> None:
-    """Make every #687 progress emission valid under the strict diagnostic schema."""
+    """Make every authoritative DAG progress emission valid under the strict schema."""
 
     _diagnostic._PROGRESS_STAGES = frozenset(
         (*_diagnostic._PROGRESS_STAGES, *_EXACT_PROGRESS_STAGES)
@@ -86,6 +89,16 @@ def _install_finalizer_failure_boundary() -> None:
     authoritative._provider_free_finalize = provider_free_finalize
 
 
+def _install_spawn_safe_acquisition() -> None:
+    """Ensure lane children receive picklable, lane-scoped governed inputs only."""
+
+    from operations.spawn_safe_authoritative_acquisition import (
+        install_spawn_safe_authoritative_acquisition,
+    )
+
+    install_spawn_safe_authoritative_acquisition()
+
+
 def _install_dag_native_supervision() -> None:
     """Move the hard kill boundary from the aggregate coordinator to each DAG node."""
 
@@ -97,10 +110,11 @@ def _install_dag_native_supervision() -> None:
 
 
 def install_comprehensive_discovery_runtime_contract() -> None:
-    """Install the strict progress, failure, and DAG-native runtime contracts."""
+    """Install strict progress, spawn-safe acquisition, and DAG-native supervision."""
 
     _register_manual_diagnostic_contract()
     _install_finalizer_failure_boundary()
+    _install_spawn_safe_acquisition()
     _install_dag_native_supervision()
 
 
