@@ -282,6 +282,70 @@ def _dag_failure_detail(progress: Mapping[str, object]) -> str:
     return "; ".join(parts)
 
 
+def _project_live_dag_progress(
+    raw: Mapping[str, object],
+    *,
+    values: Mapping[str, str],
+) -> Mapping[str, object]:
+    """Overlay validated live DAG progress after the stored integrity check succeeds.
+
+    This projection never rewrites the signed prequalification file. It exists so the
+    already-established public prequalification publisher can expose pre-CIO DAG progress
+    while the evidence child is still running. Terminal state always uses its signed DAG
+    snapshot instead of mutable live state.
+    """
+
+    if str(raw.get("state") or "").strip().lower() not in {"pending", "in_progress"}:
+        return raw
+    started_at = _parse_aware(raw.get("started_at"))
+    if started_at is None:
+        return raw
+    dag_progress = load_release_certification_dag_progress(values, started_at=started_at)
+    if dag_progress is None:
+        return raw
+
+    counts = dag_progress.get("counts")
+    safe_counts = counts if isinstance(counts, Mapping) else {}
+    metrics = dict(raw.get("metrics") or {}) if isinstance(raw.get("metrics"), Mapping) else {}
+    for name in (
+        "required_nodes",
+        "completed_nodes",
+        "reused_nodes",
+        "failed_nodes",
+        "running_nodes",
+        "pending_nodes",
+    ):
+        metrics[name] = _safe_nonnegative_int(safe_counts.get(name))
+
+    blocking_node = _safe_token(dag_progress.get("blocking_node"))
+    focus_node = _safe_token(dag_progress.get("focus_node"))
+    asset_class = _safe_token(dag_progress.get("asset_class"))
+    failure_type = _safe_token(dag_progress.get("failure_type"))
+    if blocking_node:
+        stage = f"certification_dag_failed:{asset_class or 'other'}"
+    elif focus_node:
+        stage = f"certification_dag:{asset_class or 'other'}"
+    else:
+        stage = str(raw.get("stage") or "evidence_refresh")
+
+    projected = dict(raw)
+    projected.update(
+        {
+            "stage": stage,
+            "detail": (
+                "governed_prequalification_dag_progress; "
+                f"node={blocking_node or focus_node or 'unknown'}; "
+                f"asset_class={asset_class or 'unknown'}; "
+                f"failure_type={failure_type or 'none'}"
+            )[:1000],
+            "metrics": metrics,
+            "dag_progress": dag_progress,
+            "runtime_projection": True,
+        }
+    )
+    return projected
+
+
 def write_release_evidence_prequalification(
     values: Mapping[str, str],
     *,
@@ -404,7 +468,7 @@ def load_release_evidence_prequalification(
         return None
     if raw.get("paper_only") is not True or raw.get("real_money_authorized") is not False:
         return None
-    return raw
+    return _project_live_dag_progress(raw, values=values)
 
 
 __all__ = [
