@@ -10,6 +10,9 @@ from typing import Mapping, Sequence
 
 from api.config import ApiSettings
 from api.routes.cio_diagnostic import build_cio_diagnostic_audit
+from operations.granular_futures_reference_prequalification import (
+    load_futures_reference_progress,
+)
 from operations.reference_readiness import load_reference_readiness_progress
 from operations.release_evidence_prequalification import (
     load_release_evidence_prequalification,
@@ -82,6 +85,170 @@ def _safe_identifier(value: object) -> str | None:
     if not all(character.isalnum() or character in {"_", "-", ".", ":"} for character in text):
         return None
     return text
+
+
+def _safe_nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _safe_root(value: object) -> str | None:
+    root = str(value or "").strip().upper()
+    if not root or len(root) > 16:
+        return None
+    if not all(character.isalnum() or character in {"-", "_"} for character in root):
+        return None
+    return root
+
+
+def _safe_futures_reference_progress(
+    values: Mapping[str, str],
+) -> dict[str, object] | None:
+    """Promote granular futures progress into a credential-safe certification DAG.
+
+    The acquisition coordinator already persists successful roots independently. This
+    publisher turns that durable execution record into one root-addressable public state
+    without changing the strict all-roots qualification barrier.
+    """
+
+    progress = load_futures_reference_progress(values)
+    if not isinstance(progress, Mapping):
+        return None
+
+    release_status = load_release_evidence_prequalification(values)
+    if isinstance(release_status, Mapping):
+        started_at = _parse_timestamp(release_status.get("started_at"))
+        updated_at = _parse_timestamp(progress.get("updated_at"))
+        if started_at is not None and (updated_at is None or updated_at < started_at):
+            return None
+
+    required_roots = [
+        root
+        for item in progress.get("required_roots", [])
+        if (root := _safe_root(item)) is not None
+    ] if isinstance(progress.get("required_roots"), list) else []
+    qualified_roots = [
+        root
+        for item in progress.get("qualified_roots", [])
+        if (root := _safe_root(item)) is not None
+    ] if isinstance(progress.get("qualified_roots"), list) else []
+    unresolved_roots = [
+        root
+        for item in progress.get("unresolved_roots", [])
+        if (root := _safe_root(item)) is not None
+    ] if isinstance(progress.get("unresolved_roots"), list) else []
+
+    units: list[dict[str, object]] = []
+    raw_units = progress.get("units")
+    if isinstance(raw_units, list):
+        for item in raw_units:
+            if not isinstance(item, Mapping):
+                continue
+            roots = [
+                root
+                for raw_root in item.get("roots", [])
+                if (root := _safe_root(raw_root)) is not None
+            ] if isinstance(item.get("roots"), list) else []
+            duration_ms = _safe_nonnegative_int(item.get("duration_ms"))
+            units.append(
+                {
+                    "unit": _safe_identifier(item.get("unit")),
+                    "provider": _safe_identifier(item.get("provider")),
+                    "state": _safe_identifier(item.get("state")),
+                    "venue": _safe_identifier(item.get("venue")),
+                    "root": _safe_root(item.get("root")),
+                    "roots": roots,
+                    "duration_ms": duration_ms if duration_ms is not None else 0,
+                    "failure_type": _safe_identifier(item.get("failure_type")),
+                    "fallback": item.get("fallback") is True,
+                }
+            )
+
+    qualified_set = set(qualified_roots)
+    unresolved_set = set(unresolved_roots)
+
+    blocking: dict[str, object] | None = None
+    for item in reversed(units):
+        if item.get("state") not in {"failed", "timed-out", "invalid"}:
+            continue
+        root = item.get("root")
+        roots = set(item.get("roots") or [])
+        if root in unresolved_set or bool(roots.intersection(unresolved_set)):
+            blocking = item
+            break
+
+    nodes: list[dict[str, object]] = []
+    for root in required_roots:
+        latest = next(
+            (
+                item
+                for item in reversed(units)
+                if item.get("root") == root or root in set(item.get("roots") or [])
+            ),
+            None,
+        )
+        if root in qualified_set:
+            node_state = "qualified"
+        elif latest is not None and latest.get("state") in {"failed", "timed-out", "invalid"}:
+            node_state = latest.get("state")
+        else:
+            node_state = "pending"
+        nodes.append(
+            {
+                "root": root,
+                "state": node_state,
+                "unit": None if latest is None else latest.get("unit"),
+                "provider": None if latest is None else latest.get("provider"),
+                "venue": None if latest is None else latest.get("venue"),
+                "failure_type": None if latest is None else latest.get("failure_type"),
+                "duration_ms": 0 if latest is None else latest.get("duration_ms", 0),
+                "fallback": False if latest is None else latest.get("fallback") is True,
+            }
+        )
+
+    raw_timeout = str(
+        values.get("CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_UNIT_TIMEOUT_SECONDS")
+        or os.getenv("CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_UNIT_TIMEOUT_SECONDS", "")
+        or "45"
+    ).strip()
+    try:
+        unit_timeout_seconds = float(raw_timeout)
+    except ValueError:
+        unit_timeout_seconds = 45.0
+    if unit_timeout_seconds <= 0:
+        unit_timeout_seconds = 45.0
+
+    return {
+        "state": _safe_identifier(progress.get("state")),
+        "updated_at": str(progress.get("updated_at") or "") or None,
+        "cutoff": str(progress.get("cutoff") or "") or None,
+        "required_root_count": len(required_roots),
+        "qualified_root_count": len(qualified_roots),
+        "unresolved_root_count": len(unresolved_roots),
+        "required_roots": required_roots,
+        "qualified_roots": qualified_roots,
+        "unresolved_roots": unresolved_roots,
+        "active_unit": _safe_identifier(progress.get("active_unit")),
+        "unit_timeout_seconds": unit_timeout_seconds,
+        "blocking_unit": None if blocking is None else blocking.get("unit"),
+        "blocking_provider": None if blocking is None else blocking.get("provider"),
+        "blocking_venue": None if blocking is None else blocking.get("venue"),
+        "blocking_root": None if blocking is None else blocking.get("root"),
+        "blocking_failure_type": (
+            None if blocking is None else blocking.get("failure_type")
+        ),
+        "nodes": nodes,
+        "units": units,
+        "credential_safe": True,
+        "decision_evidence_authority": False,
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
 
 
 def _safe_reference_prequalification_progress(
@@ -203,12 +370,15 @@ def _with_release_prequalification(
                     and value >= 0
                 }
 
+    futures_reference = _safe_futures_reference_progress(values)
     raw_failure_context = status.get("failure_context")
     failure_context: dict[str, object] | None = None
     if isinstance(raw_failure_context, Mapping):
         failure_context = dict(raw_failure_context)
         failure_context["component_stage"] = component_stage
         failure_context["component_metrics"] = component_metrics
+        if futures_reference is not None:
+            failure_context["futures_reference"] = futures_reference
 
     public_state = "failed" if state == "failed" else "prequalifying"
     published.update(
@@ -243,6 +413,18 @@ def _with_release_prequalification(
             ),
             "prequalification_failure_error_type": (
                 None if failure_context is None else failure_context.get("error_type")
+            ),
+            "prequalification_failure_unit": (
+                None if futures_reference is None else futures_reference.get("blocking_unit")
+            ),
+            "prequalification_failure_venue": (
+                None if futures_reference is None else futures_reference.get("blocking_venue")
+            ),
+            "prequalification_failure_root": (
+                None if futures_reference is None else futures_reference.get("blocking_root")
+            ),
+            "prequalification_unresolved_futures_roots": (
+                [] if futures_reference is None else futures_reference.get("unresolved_roots", [])
             ),
             "ready": False,
             "context_cycle_matches": False,
@@ -298,6 +480,7 @@ def publish_cio_diagnostic_audit(
     )
     payload = _with_release_prequalification(payload, values=resolved)
     reference_prequalification = _safe_reference_prequalification_progress(resolved)
+    futures_reference = _safe_futures_reference_progress(resolved)
     public_prequalification = payload.get("public_live_requirement_progress")
     active_phase = "unknown"
     if isinstance(reference_prequalification, Mapping):
@@ -320,9 +503,11 @@ def publish_cio_diagnostic_audit(
     published = {
         **payload,
         "reference_prequalification_progress": reference_prequalification,
+        "futures_reference_progress": futures_reference,
         "prequalification_progress": {
             "active_phase": active_phase,
             "reference": reference_prequalification,
+            "futures_reference": futures_reference,
             "public_live": public_prequalification,
         },
         "paper_implementation_complete": paper_implementation_complete,

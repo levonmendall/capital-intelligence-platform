@@ -209,3 +209,151 @@ def test_public_audit_surfaces_failure_context_and_reference_component(monkeypat
     assert isinstance(context, dict)
     assert context["component_stage"] == "futures_contracts"
     assert context["component_metrics"] == {"configured_futures_roots": 13}
+
+
+def test_public_audit_promotes_granular_futures_root_dag(monkeypatch) -> None:
+    started = "2026-08-18T02:22:00+00:00"
+    failure = {
+        "state": "failed",
+        "reason": "incomplete",
+        "capability": "reference_components",
+        "failure_stage": "component_qualified_evidence_maintenance",
+        "error_type": "ContinuousEvidencePlaneError",
+        "provider": "cme-massive",
+        "terminal": True,
+        "credential_safe": True,
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+    monkeypatch.setattr(
+        audit,
+        "load_release_evidence_prequalification",
+        lambda values: {
+            "prequalification_id": "prequal-futures",
+            "release": "release-futures",
+            "state": "failed",
+            "stage": "evidence_prequalification_failed",
+            "started_at": started,
+            "completed_at": "2026-08-18T02:25:00+00:00",
+            "detail": "credential-safe futures failure",
+            "metrics": {"attempt": 1, "maximum_attempts": 1},
+            "generation_id": "",
+            "failure_context": failure,
+        },
+    )
+    monkeypatch.setattr(audit, "load_reference_readiness_progress", lambda values: None)
+    monkeypatch.setattr(
+        audit,
+        "load_futures_reference_progress",
+        lambda values: {
+            "schema_version": "futures-reference-prequalification-progress.v1",
+            "release": "release-futures",
+            "cutoff": "2026-08-18T02:22:00+00:00",
+            "updated_at": "2026-08-18T02:24:45+00:00",
+            "state": "incomplete",
+            "required_root_count": 2,
+            "qualified_root_count": 1,
+            "unresolved_root_count": 1,
+            "required_roots": ["ES", "CL"],
+            "qualified_roots": ["ES"],
+            "unresolved_roots": ["CL"],
+            "active_unit": None,
+            "units": [
+                {
+                    "unit": "cme-venue-cme",
+                    "provider": "cme_fprf",
+                    "state": "qualified",
+                    "venue": "CME",
+                    "root": None,
+                    "roots": ["ES"],
+                    "duration_ms": 1200,
+                    "failure_type": None,
+                    "fallback": False,
+                },
+                {
+                    "unit": "cme-venue-nymex",
+                    "provider": "cme_fprf",
+                    "state": "timed-out",
+                    "venue": "NYMEX",
+                    "root": None,
+                    "roots": ["CL"],
+                    "duration_ms": 45000,
+                    "failure_type": "timeout",
+                    "fallback": False,
+                },
+                {
+                    "unit": "massive-root-CL",
+                    "provider": "massive",
+                    "state": "timed-out",
+                    "venue": "NYMEX",
+                    "root": "CL",
+                    "roots": ["CL"],
+                    "duration_ms": 45000,
+                    "failure_type": "timeout",
+                    "fallback": True,
+                },
+            ],
+            "credential_safe": True,
+            "paper_only": True,
+            "real_money_authorized": False,
+        },
+    )
+
+    values = {
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-futures",
+        "CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_UNIT_TIMEOUT_SECONDS": "45",
+    }
+    progress = audit._safe_futures_reference_progress(values)
+
+    assert progress is not None
+    assert progress["required_root_count"] == 2
+    assert progress["qualified_root_count"] == 1
+    assert progress["unresolved_roots"] == ["CL"]
+    assert progress["blocking_unit"] == "massive-root-CL"
+    assert progress["blocking_provider"] == "massive"
+    assert progress["blocking_venue"] == "NYMEX"
+    assert progress["blocking_root"] == "CL"
+    assert progress["blocking_failure_type"] == "timeout"
+    assert progress["nodes"] == [
+        {
+            "root": "ES",
+            "state": "qualified",
+            "unit": "cme-venue-cme",
+            "provider": "cme_fprf",
+            "venue": "CME",
+            "failure_type": None,
+            "duration_ms": 1200,
+            "fallback": False,
+        },
+        {
+            "root": "CL",
+            "state": "timed-out",
+            "unit": "massive-root-CL",
+            "provider": "massive",
+            "venue": "NYMEX",
+            "failure_type": "timeout",
+            "duration_ms": 45000,
+            "fallback": True,
+        },
+    ]
+
+    published = audit._with_release_prequalification(
+        {
+            "active_release": "old-release",
+            "release_matches": False,
+            "state": "pending",
+            "stage": "awaiting_progress",
+        },
+        values=values,
+    )
+
+    assert published["prequalification_failure_unit"] == "massive-root-CL"
+    assert published["prequalification_failure_venue"] == "NYMEX"
+    assert published["prequalification_failure_root"] == "CL"
+    assert published["prequalification_unresolved_futures_roots"] == ["CL"]
+    context = published["prequalification_failure_context"]
+    assert isinstance(context, dict)
+    futures_context = context["futures_reference"]
+    assert isinstance(futures_context, dict)
+    assert futures_context["blocking_root"] == "CL"
+    assert futures_context["qualified_roots"] == ["ES"]
