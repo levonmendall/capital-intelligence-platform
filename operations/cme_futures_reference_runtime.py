@@ -30,14 +30,15 @@ from providers.cme_futures_reference_executable import (
 _LINEAGE_INSTALLED_MARKER = "_capital_intelligence_cme_lineage_adapter"
 _PROVIDER_INSTALLED_MARKER = "_capital_intelligence_granular_futures_provider"
 _SUPERVISOR_INSTALLED_MARKER = "_capital_intelligence_granular_futures_supervisor"
-_ORIGINAL_FUTURES_CATALOG = _legacy._futures_catalog
+# Preserve the historical monkeypatch/test seam used by the lineage adapter.
+_ORIGINAL = _legacy._futures_catalog
 _ORIGINAL_EXECUTABLE_FUTURES_CONTRACTS = (
     CmeExecutableFuturesReferenceProvider.futures_contracts
 )
 
 
 def _cme_aware_futures_catalog(*args: Any, **kwargs: Any):
-    records = _ORIGINAL_FUTURES_CATALOG(*args, **kwargs)
+    records = _ORIGINAL(*args, **kwargs)
     result = []
     for record in records:
         source_identifier = str(getattr(record, "source_identifier", ""))
