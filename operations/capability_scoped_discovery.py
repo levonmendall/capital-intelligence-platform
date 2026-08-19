@@ -1,6 +1,6 @@
 """Provider-free candidate views for the capability-scoped CIO runtime.
 
-Comprehensive discovery is an asynchronous coverage expander.  Production candidate
+Comprehensive discovery is an asynchronous coverage expander. Production candidate
 membership instead comes from the latest active paper publication, exact current
 instrument capability authority, and the independent fresh operating-evidence snapshot.
 A missing capability or missing fresh evidence therefore removes only that instrument.
@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from cio import CandidateAssetClass
 from operations.capability_operating_evidence import (
     CapabilityOperatingEvidenceError,
     load_capability_operating_evidence,
@@ -107,7 +108,7 @@ class CapabilityScopedDiscoveryResult:
     source_publication_identifier: str | None
     limitations: tuple[str, ...]
     observed_prices: tuple[tuple[str, float, str], ...] = ()
-    policy_version: str = "capability-scoped-operating-discovery.v4"
+    policy_version: str = "capability-scoped-operating-discovery.v5"
     scope_state: str = "capability_scoped"
 
     @property
@@ -177,10 +178,7 @@ def _current_candidates(
             continue
         if evidence_contracts.get(identifier) != authorized_contracts.get(identifier):
             continue
-        if us_equities_only and not (
-            str(getattr(item, "country_code", "")).strip().upper() == "US"
-            and str(getattr(item, "instrument_type", "")).strip().lower() == "equity"
-        ):
+        if us_equities_only and getattr(item, "execution_asset_class", None) is not CandidateAssetClass.US_EQUITY:
             continue
         selected.append(item)
 
