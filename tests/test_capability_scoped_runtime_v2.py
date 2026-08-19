@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import portfolio_only_runtime
 import production_context_publication_governed
 import production_context_publication_runtime
+from operations import capability_scoped_discovery
+from operations.free_paper_pilot import load_free_paper_pilot_universe
 from portfolio.initialization import ensure_canonical_portfolio_store
 from portfolio.state import SQLiteCanonicalPortfolioStore
 
@@ -83,6 +87,73 @@ def test_local_context_keeps_full_discovery_behavior_unless_opted_in(monkeypatch
 
     assert captured["comprehensive_discovery_probe"] is None
     assert captured["comprehensive_discovery_required"] is None
+
+
+def test_capability_carry_forward_intersects_exact_current_evidence(monkeypatch):
+    universe = load_free_paper_pilot_universe()
+    qualified = replace(
+        universe,
+        identifier="active-publication:test",
+        instruments=universe.instruments[:3],
+    )
+    contracts = capability_scoped_discovery._instrument_contracts(qualified)
+    first, second, third = qualified.instruments
+
+    monkeypatch.setattr(
+        capability_scoped_discovery,
+        "_current_publication_source",
+        lambda: (Path("active-paper-universe.json"), "eligible:test"),
+    )
+    monkeypatch.setattr(
+        capability_scoped_discovery,
+        "load_active_paper_universe_for_publication",
+        lambda *_args, **_kwargs: qualified,
+    )
+    monkeypatch.setattr(
+        capability_scoped_discovery,
+        "_current_evidence_contracts",
+        lambda _as_of: {
+            second.instrument_identifier: contracts[second.instrument_identifier],
+        },
+    )
+
+    result = capability_scoped_discovery.discover_currently_certified_capabilities(
+        as_of=AS_OF,
+        excluded_symbols=(first.symbol,),
+    )
+
+    assert result.instruments == (second,)
+    assert third not in result.instruments
+    assert result.scope_state == "capability_scoped"
+    assert "exact current signed evidence coverage" in result.limitations[0]
+
+
+def test_missing_global_evidence_blocks_only_dynamic_carry_forward(monkeypatch):
+    universe = load_free_paper_pilot_universe()
+    qualified = replace(universe, instruments=universe.instruments[:2])
+
+    monkeypatch.setattr(
+        capability_scoped_discovery,
+        "_current_publication_source",
+        lambda: (Path("active-paper-universe.json"), "eligible:test"),
+    )
+    monkeypatch.setattr(
+        capability_scoped_discovery,
+        "load_active_paper_universe_for_publication",
+        lambda *_args, **_kwargs: qualified,
+    )
+    monkeypatch.setattr(
+        capability_scoped_discovery,
+        "_current_evidence_contracts",
+        lambda _as_of: None,
+    )
+
+    result = capability_scoped_discovery.discover_currently_certified_capabilities(
+        as_of=AS_OF,
+    )
+
+    assert result.instruments == ()
+    assert "without blocking independently qualified bootstrap" in result.limitations[0]
 
 
 def test_render_reset_epoch_archives_once_and_starts_fresh_250k(monkeypatch, tmp_path):
