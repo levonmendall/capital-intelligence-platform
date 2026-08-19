@@ -5,6 +5,10 @@ shared compatibility helpers consumed by that publisher and provides the single 
 entrypoint used by production callers. Broad discovery, broker readiness, cash evidence,
 and heavy paper evidence default to provider-free qualified snapshot consumers in
 production; explicit probes remain available for tests and rehearsals.
+
+After a governed publication is complete, this runtime also reconciles its exact
+active universe through the Universal Capability Graph and append-only instrument
+paper-eligibility authority before the CIO can consume the publication.
 """
 
 from __future__ import annotations
@@ -25,11 +29,15 @@ from operations.free_paper_pilot import (
     assess_free_paper_pilot_readiness,
     weekday_market_evaluation_scheduled,
 )
+from operations.production_capability_authority import (
+    reconcile_production_capability_authority,
+)
 from providers.alpaca_paper import create_alpaca_paper_client
 from providers.fred import FREDProvider
 
 STATE_SCHEMA = "production-context-publication-state.v1"
 STATE_FILENAME = "production-context-publication-state.json"
+CAPABILITY_REPORT_FILENAME = "production-capability-authority.json"
 
 ReadinessProbe = Callable[[FreePaperPilotUniverse], object]
 CashProbe = Callable[[], object]
@@ -156,6 +164,42 @@ def _advance_screening_if_ready(result: ProductionContextPublicationResult) -> N
     )
 
 
+def _reconcile_capability_authority_if_ready(
+    *,
+    settings: ApiSettings,
+    result: ProductionContextPublicationResult,
+) -> None:
+    if not result.ready:
+        return
+    if result.decision_as_of is None:
+        raise RuntimeError("ready production context is missing decision_as_of")
+    eligible_identifier = str(result.eligible_universe_identifier or "").strip()
+    if not eligible_identifier:
+        raise RuntimeError("ready production context is missing eligible-universe identity")
+    state_path = _state_path(settings)
+    state = _load_json(state_path)
+    if not isinstance(state, dict):
+        raise RuntimeError("production publication state is unavailable for capability authority")
+    screening_cycle_identifier = str(
+        state.get("screening_cycle_identifier", "")
+    ).strip()
+    if not screening_cycle_identifier:
+        raise RuntimeError("production publication state lacks screening cycle identity")
+    report = reconcile_production_capability_authority(
+        settings=settings,
+        publication_identifier=eligible_identifier,
+        screening_cycle_identifier=screening_cycle_identifier,
+        evaluated_at=result.decision_as_of,
+    )
+    payload = report.to_dict()
+    _atomic_json(
+        settings.portfolio_database.parent / CAPABILITY_REPORT_FILENAME,
+        payload,
+    )
+    state["production_capability_authority"] = payload
+    _atomic_json(state_path, state)
+
+
 def _stable_production_snapshot_clock() -> Clock:
     frozen: datetime | None = None
 
@@ -218,6 +262,7 @@ def prepare_production_context_for_cycle(
         progress_probe=progress_probe,
     )
     _advance_screening_if_ready(result)
+    _reconcile_capability_authority_if_ready(settings=settings, result=result)
     return result
 
 
