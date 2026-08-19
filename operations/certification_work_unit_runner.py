@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import sys
 import threading
-import time
 from types import FrameType
-from typing import Any, Callable, Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from operations.certification_work_progress import record_certification_work_progress
 
@@ -69,7 +68,7 @@ def run_with_canonical_work_progress(
     timestamp: object,
     policy: object,
     asset_class: str,
-):
+) -> Mapping[str, object]:
     """Run one unchanged lane probe while reporting completed canonical work units."""
 
     governed_records = tuple(records)
