@@ -1,13 +1,13 @@
 """Runtime entrypoint for bounded CIO reference and evidence readiness.
 
-Production release diagnostics consume an already-qualified exact-release evidence
-generation. Expensive reference/public/discovery acquisition is owned by the continuous
-evidence maintainer and never runs from this bounded CIO wrapper. The watchdog remains
-fail-closed: if the immutable point-in-time generation or its current configuration-bound
-reference manifest is unavailable, the CIO child is not started.
+Production release diagnostics consume already-qualified immutable evidence. In
+capability-scoped operation the watchdog validates the independent operating-evidence
+snapshot rather than requiring a comprehensive all-market evidence generation. Legacy
+full-discovery mode retains the historical exact-release reference-manifest gate.
 
-Non-production callers retain the historical reference-readiness fallback so tests and
-local tooling without a persistent production evidence plane preserve their behavior.
+Expensive reference/public/discovery acquisition is never owned by this bounded CIO
+wrapper. Missing or stale authority remains fail-closed and the CIO child remains a
+provider-free consumer in production.
 """
 
 from __future__ import annotations
@@ -18,6 +18,10 @@ from collections.abc import Mapping, MutableMapping
 
 import run_bounded_manual_cio_diagnostic_core as _core
 from operations import manual_cio_diagnostic as _diagnostic_coordination
+from operations.capability_scoped_release_diagnostic import (
+    capability_scoped_operation_enabled,
+    load_capability_operating_reference_manifest,
+)
 from operations.cme_futures_reference_runtime import (
     install_cme_futures_reference_lineage,
 )
@@ -69,7 +73,7 @@ def _install_recovery_progress_contract() -> None:
 
 
 def _prime_forced_replacement(values: Mapping[str, str]) -> None:
-    """Create retry coordination before reference readiness can fail again."""
+    """Create retry coordination before readiness can fail again."""
 
     existing = latest_manual_cio_diagnostic(values=values)
     if existing is None or existing.state not in {"completed", "failed"}:
@@ -81,6 +85,11 @@ def _prime_forced_replacement(values: Mapping[str, str]) -> None:
 
 
 def _production_plane_enabled(values: Mapping[str, str]) -> bool:
+    # Capability-scoped Render is independently qualified by its operating evidence plane;
+    # it must remain provider-free even when the comprehensive evidence plane is absent or
+    # stale. Legacy full-discovery operation retains the original evidence-plane contract.
+    if capability_scoped_operation_enabled(values):
+        return True
     explicit = values.get("CAPITAL_INTELLIGENCE_CONTINUOUS_EVIDENCE_PLANE_ENABLED", "").strip()
     production = (
         values.get("CAPITAL_INTELLIGENCE_ENVIRONMENT", "").strip().lower() == "production"
@@ -92,11 +101,11 @@ def _production_plane_enabled(values: Mapping[str, str]) -> bool:
 def _configure_provider_free_consumer(values: MutableMapping[str, str]) -> bool:
     """Keep the production CIO child from initiating public/provider acquisition.
 
-    Release evidence qualification happens in a separate bounded evidence-owner process
-    before this watchdog is invoked.  The historical manual diagnostic still contains a
-    forced public-collection call; disabling collection in the child environment makes
-    that call a local no-op rather than an external provider transaction.  The evidence
-    owner does not inherit this child-only environment mutation.
+    Evidence qualification happens in a separate bounded evidence-owner process before
+    this watchdog is invoked. The historical manual diagnostic still contains a forced
+    public-collection call; disabling collection in the child environment makes that call
+    a local no-op rather than an external provider transaction. The evidence owner does not
+    inherit this child-only environment mutation.
     """
 
     if not _production_plane_enabled(values):
@@ -111,16 +120,25 @@ def _prepare_with_rate_budget(
     **kwargs: object,
 ):
     _install_recovery_progress_contract()
-    install_cme_futures_reference_lineage()
 
+    if capability_scoped_operation_enabled(values):
+        if not isinstance(values, MutableMapping):
+            raise TypeError(
+                "capability operating evidence requires a mutable watchdog environment"
+            )
+        # Disk-only validation of the fresh immutable operating snapshot. The downstream
+        # qualified-paper-evidence probe independently verifies the exact signed universe
+        # and every requested structural subset before the CIO receives evidence.
+        return load_capability_operating_reference_manifest(values)
+
+    install_cme_futures_reference_lineage()
     if _production_plane_enabled(values):
         if not isinstance(values, MutableMapping):
             raise TypeError(
                 "production prequalified evidence requires a mutable watchdog environment"
             )
-        # Disk/config validation only. This binds the exact manifest path/id into the
-        # child environment after validating the current immutable evidence generation.
-        # No reference/public/discovery provider acquisition is permitted here.
+        # Legacy full-discovery mode: bind the exact comprehensive reference manifest after
+        # validating the current immutable evidence generation. No provider calls here.
         return load_prequalified_reference_manifest(values)
 
     kwargs.setdefault(
