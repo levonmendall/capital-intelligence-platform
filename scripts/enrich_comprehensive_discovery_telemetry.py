@@ -33,6 +33,15 @@ _FIELD_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _SAFE_FAILURE_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,119}$")
+_GOVERNED_DEADLINE_FAILURE_TYPES = frozenset(
+    {
+        "supervisedcomponenttimeout",
+        "parentstalltimeout",
+        "nodestalltimeout",
+        "deadline_exceeded",
+        "deadlineexceeded",
+    }
+)
 
 
 def _nonnegative_int(value: object) -> int | None:
@@ -59,6 +68,22 @@ def _safe_failure_type(value: object) -> str | None:
 
 def _safe_lane(value: object) -> str | None:
     return _base._safe_identifier(value)
+
+
+def _failure_reason(*, unit: str, failure_type: str | None) -> str:
+    """Classify redacted scheduler failures without conflating provider timeouts.
+
+    A provider-level ``TimeoutError`` is evidence that one lane operation failed and stays
+    ``discovery_lane_failure``. Only the certification supervisor's own bounded stall/
+    deadline classes are promoted to ``deadline_exceeded``.
+    """
+
+    if unit == "provider-free-finalizer":
+        return "finalizer_failure"
+    normalized = str(failure_type or "").strip().lower()
+    if normalized in _GOVERNED_DEADLINE_FAILURE_TYPES or normalized.endswith("stalltimeout"):
+        return "deadline_exceeded"
+    return "discovery_lane_failure"
 
 
 def discovery_progress(public_payload: Mapping[str, Any]) -> dict[str, object] | None:
@@ -116,13 +141,18 @@ def enrich_snapshot(
     updated = dict(diagnostic)
     updated["comprehensive_discovery_progress"] = progress
     unit = str(progress.get("blocking_unit") or "")
+    failure_type = _safe_failure_type(progress.get("failure_type"))
+    asset_class = _safe_lane(progress.get("asset_class"))
     if unit:
         updated["prequalification_failure_unit"] = unit
+    if asset_class:
+        updated["prequalification_failure_asset_class"] = asset_class
+    if failure_type:
+        updated["prequalification_failure_type"] = failure_type
     if updated.get("prequalification_failure_reason") in {None, "internal_error"}:
-        updated["prequalification_failure_reason"] = (
-            "finalizer_failure"
-            if unit == "provider-free-finalizer"
-            else "discovery_lane_failure"
+        updated["prequalification_failure_reason"] = _failure_reason(
+            unit=unit,
+            failure_type=failure_type,
         )
     enriched["diagnostic"] = updated
     enriched["enriched_from_comprehensive_discovery"] = True

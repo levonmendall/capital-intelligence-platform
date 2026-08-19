@@ -1,0 +1,76 @@
+name: Validate Certification Runtime Repair
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "operations/certification_work_unit_runner.py"
+      - "operations/certification_work_progress.py"
+      - "operations/progress_aware_release_certification.py"
+      - "operations/dag_native_comprehensive_supervision.py"
+      - "operations/spawn_safe_authoritative_acquisition.py"
+      - "scripts/enrich_comprehensive_discovery_telemetry.py"
+      - "tests/test_certification_work_unit_runner.py"
+      - "tests/test_progress_aware_release_certification.py"
+      - "tests/test_comprehensive_discovery_telemetry_enricher.py"
+      - ".github/workflows/certification-runtime-repair.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certification-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Verify dependency consistency
+        run: python -m pip check
+
+      - name: Run certification runtime repair regressions
+        run: >-
+          pytest -q
+          tests/test_certification_work_unit_runner.py
+          tests/test_progress_aware_release_certification.py
+          tests/test_comprehensive_discovery_telemetry_enricher.py
+
+      - name: Run deterministic release validation
+        run: timeout --signal=TERM 7m python run_release_validation.py --report reports/certification-repair-release-validation.json
+
+      - name: Publish certification repair diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: certification-repair-validation-results
+          path: |
+            reports/certification-repair-release-validation.json
+            reports/runtime-connectivity-audit.json
+            reports/golden-end-to-end-gate.json
+            reports/event-quality-benchmark.json
+            reports/information-gap-audit.json
+            reports/pytest-results.xml
+          if-no-files-found: ignore
+          retention-days: 14
