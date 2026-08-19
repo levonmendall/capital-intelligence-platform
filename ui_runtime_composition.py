@@ -9,6 +9,7 @@ import environment_story_placement_refinement
 import history_ui_refinement
 import operating_intelligence_ui
 import opportunity_funnel_ui_refinement
+import portfolio_only_runtime
 import portfolio_ui_refinement
 import secure_app
 import surface_content_refinement
@@ -55,6 +56,11 @@ def install_canonical_surface_composition(
     portfolio_ui_refinement.install(app_impl)
     if include_history_refinement:
         history_ui_refinement.install(app_impl)
+
+    # Portfolio-only presentation is deliberately installed last so the complete
+    # underlying surfaces stay available to code/tests while Render exposes only the
+    # canonical portfolio during the operating phase.
+    portfolio_only_runtime.install(app_impl, secure_app)
 
 
 __all__ = ["install_canonical_surface_composition"]
