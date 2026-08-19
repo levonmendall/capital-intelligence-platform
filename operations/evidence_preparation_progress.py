@@ -1,13 +1,16 @@
 """Expose genuine provider progress between public qualification and the certification DAG.
 
 Release prequalification has durable journals for reference acquisition, required public-live
-qualification, and the certification DAG.  Broad discovery also performs provider work in
-the evidence-owner process *between* the public-live gate and the first DAG journal.  This
+qualification, and the certification DAG. Broad discovery also performs provider work in
+the evidence-owner process *between* the public-live gate and the first DAG journal. This
 module gives that otherwise invisible interval a credential-safe progress journal.
 
-Only completed HTTP requests can advance the journal.  There is no timer heartbeat and no
-investment, candidate, sizing, construction, execution, or real-money authority.  A silent
-or stuck provider operation therefore remains subject to the unchanged parent stall budget.
+Progress is work-unit native: only a newly completed provider request signature can advance
+the journal. Repeated retries of the same request therefore cannot act as a synthetic
+heartbeat and keep release certification alive indefinitely. Request material is never
+persisted; only an in-memory SHA-256 fingerprint is used for deduplication. A silent, stuck,
+or endlessly replayed provider operation remains subject to the unchanged parent stall
+budget.
 """
 
 from __future__ import annotations
@@ -82,12 +85,33 @@ def _safe_metrics(value: Mapping[str, int] | None) -> dict[str, int]:
     }
 
 
+def _request_fingerprint(args: tuple[object, ...], kwargs: Mapping[str, object]) -> str:
+    """Return an in-memory-only identity for one provider request work unit.
+
+    The fingerprint deliberately includes request targeting/payload material so legitimate
+    pagination or instrument-specific calls remain distinct. The material itself is never
+    written to disk or telemetry; only the digest lives in the disposable evidence-owner
+    process.
+    """
+
+    method = str(args[0] if args else kwargs.get("method") or "").strip().upper()
+    url = str(args[1] if len(args) > 1 else kwargs.get("url") or "").strip()
+    material = {
+        "method": method,
+        "url": url,
+        "params": repr(kwargs.get("params")),
+        "data": repr(kwargs.get("data")),
+        "json": repr(kwargs.get("json")),
+    }
+    return hashlib.sha256(_canonical(material)).hexdigest()
+
+
 def record_evidence_preparation_progress(
     values: Mapping[str, str],
     *,
     completed_provider_calls: int,
 ) -> Mapping[str, object] | None:
-    """Persist one real post-public provider completion without recording request data."""
+    """Persist the count of distinct completed post-public provider work units."""
 
     if (
         isinstance(completed_provider_calls, bool)
@@ -103,6 +127,7 @@ def record_evidence_preparation_progress(
         "release_sha": _release(values),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "stage": _STAGE,
+        "progress_semantics": "distinct-provider-request-work-units",
         "metrics": {"provider_calls_completed": completed_provider_calls},
         "credential_safe": True,
         "decision_authority": False,
@@ -150,6 +175,9 @@ def load_evidence_preparation_progress(
         return None
     if str(payload.get("release_sha") or "").strip() != _release(values):
         return None
+    semantics = str(payload.get("progress_semantics") or "").strip()
+    if semantics and semantics != "distinct-provider-request-work-units":
+        return None
     if payload.get("credential_safe") is not True:
         return None
     if payload.get("paper_only") is not True or payload.get("real_money_authorized") is not False:
@@ -186,10 +214,11 @@ def load_evidence_preparation_progress(
 
 
 def install_post_public_provider_progress(values: Mapping[str, str] | None = None) -> None:
-    """Observe completed requests only after required public-live evidence has qualified.
+    """Observe distinct completed requests only after required public-live qualification.
 
-    The hook is installed only in the disposable evidence-owner process.  Spawned DAG lane
+    The hook is installed only in the disposable evidence-owner process. Spawned DAG lane
     workers start fresh interpreters and retain their existing lane-native progress path.
+    Replaying the same request cannot advance the journal a second time.
     """
 
     import requests
@@ -203,9 +232,11 @@ def install_post_public_provider_progress(values: Mapping[str, str] | None = Non
     if getattr(current, "_post_public_provider_progress", False):
         return
     completed = [0]
+    seen_work_units: set[str] = set()
     count_lock = threading.Lock()
 
     def request_with_progress(session, *args, **kwargs):
+        fingerprint = _request_fingerprint(tuple(args), kwargs)
         try:
             return current(session, *args, **kwargs)
         finally:
@@ -228,15 +259,21 @@ def install_post_public_provider_progress(values: Mapping[str, str] | None = Non
                     else 0
                 )
                 if state == "qualified" and not pending and not failed:
+                    should_record = False
+                    observed = 0
                     with count_lock:
-                        completed[0] += 1
-                        observed = completed[0]
-                    record_evidence_preparation_progress(
-                        resolved,
-                        completed_provider_calls=observed,
-                    )
+                        if fingerprint not in seen_work_units:
+                            seen_work_units.add(fingerprint)
+                            completed[0] += 1
+                            observed = completed[0]
+                            should_record = True
+                    if should_record:
+                        record_evidence_preparation_progress(
+                            resolved,
+                            completed_provider_calls=observed,
+                        )
             except Exception:
-                # The journal is supervision-only.  If it cannot advance, the unchanged
+                # The journal is supervision-only. If it cannot advance, the unchanged
                 # parent watchdog remains fail-closed and will stop a genuinely silent run.
                 pass
 

@@ -28,6 +28,7 @@ def test_progress_round_trip_is_exact_release_and_non_authoritative(tmp_path) ->
     assert loaded is not None
     assert loaded["release_sha"] == "release-test"
     assert loaded["stage"] == "post-public-provider-io"
+    assert loaded["progress_semantics"] == "distinct-provider-request-work-units"
     assert loaded["metrics"] == {"provider_calls_completed": 7}
     assert loaded["credential_safe"] is True
     assert loaded["decision_authority"] is False
@@ -57,7 +58,10 @@ def test_integrity_change_invalidates_progress(tmp_path) -> None:
     assert preparation.load_evidence_preparation_progress(values) is None
 
 
-def test_request_hook_records_only_after_public_qualification(monkeypatch, tmp_path) -> None:
+def test_request_hook_records_only_distinct_work_units_after_public_qualification(
+    monkeypatch,
+    tmp_path,
+) -> None:
     state = {
         "state": "qualifying",
         "pending_count": 1,
@@ -87,20 +91,25 @@ def test_request_hook_records_only_after_public_qualification(monkeypatch, tmp_p
     preparation.install_post_public_provider_progress(values)
     session = requests.Session()
 
-    assert session.request("GET", "https://example.invalid") == "provider-result"
+    assert session.request("GET", "https://example.invalid", params={"page": 1}) == "provider-result"
     assert captured == []
 
     state.update(state="qualified", pending_count=0)
-    assert session.request("GET", "https://example.invalid") == "provider-result"
-    assert session.request("GET", "https://example.invalid") == "provider-result"
+    assert session.request("GET", "https://example.invalid", params={"page": 1}) == "provider-result"
+    assert session.request("GET", "https://example.invalid", params={"page": 1}) == "provider-result"
+    assert session.request("GET", "https://example.invalid", params={"page": 2}) == "provider-result"
     assert captured == [1, 2]
 
 
-def test_request_hook_does_not_swallow_provider_exception(monkeypatch, tmp_path) -> None:
+def test_request_hook_duplicate_failure_does_not_heartbeat_or_swallow_exception(
+    monkeypatch,
+    tmp_path,
+) -> None:
     values = {
         "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
         "CAPITAL_INTELLIGENCE_RELEASE": "release-test",
     }
+    captured: list[int] = []
 
     def failing_request(_session, *_args, **_kwargs):
         raise RuntimeError("provider failed")
@@ -118,18 +127,21 @@ def test_request_hook_does_not_swallow_provider_exception(monkeypatch, tmp_path)
     monkeypatch.setattr(
         preparation,
         "record_evidence_preparation_progress",
-        lambda *_args, **_kwargs: None,
+        lambda _values, *, completed_provider_calls: captured.append(completed_provider_calls),
     )
 
     preparation.install_post_public_provider_progress(values)
     session = requests.Session()
 
-    try:
-        session.request("GET", "https://example.invalid")
-    except RuntimeError as error:
-        assert str(error) == "provider failed"
-    else:  # pragma: no cover - makes swallowed exceptions explicit.
-        raise AssertionError("provider exception was swallowed by progress hook")
+    for _ in range(2):
+        try:
+            session.request("GET", "https://example.invalid", params={"page": 1})
+        except RuntimeError as error:
+            assert str(error) == "provider failed"
+        else:  # pragma: no cover - makes swallowed exceptions explicit.
+            raise AssertionError("provider exception was swallowed by progress hook")
+
+    assert captured == [1]
 
 
 def test_parent_watchdog_prefers_newer_pre_dag_progress(monkeypatch) -> None:
