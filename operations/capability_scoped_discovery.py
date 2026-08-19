@@ -2,13 +2,15 @@
 
 The all-market discovery/certification plane remains responsible for expanding global
 coverage. The canonical CIO operating path must not wait for every market family to
-re-certify simultaneously. This adapter therefore carries forward only instruments
-from the most recent active publication that still have exact paper-allocation
-authority at the current timestamp.
+re-certify simultaneously. This adapter carries forward only instruments that satisfy
+three independent facts at the current decision timestamp:
+
+* they were in the most recent active paper publication;
+* their exact paper-allocation capability authority is still active; and
+* the same exact instrument contract exists in the current immutable evidence snapshot.
 
 It performs no provider discovery, creates no certification, and has no investment or
-execution authority. New instruments can enter only after another governed process has
-discovered, qualified, and certified them.
+execution authority. Missing capability or evidence blocks only the affected instrument.
 """
 
 from __future__ import annotations
@@ -21,7 +23,16 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from operations.active_paper_universe import load_active_paper_universe_for_publication
-from operations.free_paper_pilot import active_paper_universe_path
+from operations.continuous_evidence_plane import (
+    ContinuousEvidencePlaneError,
+    ensure_point_in_time_snapshot,
+)
+from operations.evidence_collection_universe import build_evidence_collection_universe
+from operations.evidence_state_scope import load_evidence_state_scope
+from operations.free_paper_pilot import (
+    active_paper_universe_path,
+    free_paper_pilot_universe_payload,
+)
 
 
 def _aware(value: datetime) -> datetime:
@@ -64,15 +75,56 @@ def _current_publication_source() -> tuple[Path | None, str | None]:
     return None, None
 
 
+def _instrument_contracts(universe) -> dict[str, dict[str, object]]:
+    payload = free_paper_pilot_universe_payload(universe)
+    raw = payload.get("instruments")
+    if not isinstance(raw, list):
+        raise ValueError("paper universe instruments are malformed")
+    contracts: dict[str, dict[str, object]] = {}
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise ValueError("paper universe instrument is malformed")
+        identifier = str(item.get("instrument_identifier") or "").strip()
+        if not identifier or identifier in contracts:
+            raise ValueError("paper universe instrument identities are invalid")
+        contracts[identifier] = dict(item)
+    return contracts
+
+
+def _current_evidence_contracts(evaluated_at: datetime) -> dict[str, dict[str, object]] | None:
+    """Load current signed evidence scope without provider acquisition or refresh."""
+
+    values = os.environ
+    try:
+        point = ensure_point_in_time_snapshot(
+            cutoff=evaluated_at,
+            values=values,
+            allow_refresh=False,
+        )
+        scope = load_evidence_state_scope(
+            as_of=point.plane_as_of,
+            values=values,
+        )
+        universe, _holding_only = build_evidence_collection_universe(
+            evidence_as_of=point.plane_as_of,
+            held_symbols=scope.held_symbols,
+            tracked_symbols=scope.tracked_symbols,
+            values=values,
+        )
+        return _instrument_contracts(universe)
+    except (ContinuousEvidencePlaneError, OSError, TypeError, ValueError):
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class CapabilityScopedDiscoveryResult:
-    """Provider-free view of exact instruments whose authority is still current."""
+    """Provider-free view of exact instruments whose authority and evidence are current."""
 
     as_of: datetime
     instruments: tuple[object, ...]
     source_publication_identifier: str | None
     limitations: tuple[str, ...]
-    policy_version: str = "capability-scoped-operating-discovery.v2"
+    policy_version: str = "capability-scoped-operating-discovery.v3"
     scope_state: str = "capability_scoped"
 
     @property
@@ -100,7 +152,7 @@ def discover_currently_certified_capabilities(
     tracked_symbols: tuple[str, ...] = (),
     excluded_symbols: tuple[str, ...] = (),
 ) -> CapabilityScopedDiscoveryResult:
-    """Return only prior publication members whose exact authority remains active.
+    """Return prior publication members with both current authority and current evidence.
 
     ``held_symbols`` and ``tracked_symbols`` are intentionally non-authoritative here.
     Existing holdings retain their separate evidence/exit-continuity path; tracked names
@@ -134,6 +186,7 @@ def discover_currently_certified_capabilities(
             path=source,
             evaluated_at=evaluated_at,
         )
+        qualified_contracts = _instrument_contracts(qualified)
     except (OSError, TypeError, ValueError) as error:
         return CapabilityScopedDiscoveryResult(
             as_of=evaluated_at,
@@ -146,18 +199,34 @@ def discover_currently_certified_capabilities(
             ),
         )
 
+    evidence_contracts = _current_evidence_contracts(evaluated_at)
+    if evidence_contracts is None:
+        return CapabilityScopedDiscoveryResult(
+            as_of=evaluated_at,
+            instruments=(),
+            source_publication_identifier=publication_identifier,
+            limitations=(
+                "Current signed global evidence is unavailable; dynamic global carry-forward is withheld for this CIO cycle without blocking independently qualified bootstrap or U.S.-discovery instruments.",
+                "No stale or structurally changed instrument receives paper-allocation authority.",
+            ),
+        )
+
     instruments = tuple(
         item
         for item in qualified.instruments
         if str(getattr(item, "symbol", "")).strip().upper() not in exclusions
+        and evidence_contracts.get(str(getattr(item, "instrument_identifier", "")).strip())
+        == qualified_contracts.get(str(getattr(item, "instrument_identifier", "")).strip())
     )
+    withheld = len(qualified.instruments) - len(instruments)
     return CapabilityScopedDiscoveryResult(
         as_of=evaluated_at,
         instruments=instruments,
         source_publication_identifier=publication_identifier,
         limitations=(
-            "Operational global scope is the intersection of the latest published universe and exact capability authority that is still active at this timestamp.",
-            "Missing or expired market capabilities block only the affected instruments; they do not block independently qualified instruments or the canonical portfolio loop.",
+            "Operational global scope is the intersection of the latest published universe, exact current capability authority, and exact current signed evidence coverage.",
+            "Missing, expired, or evidence-uncovered market capabilities block only the affected instruments; they do not block independently qualified instruments or the canonical portfolio loop.",
+            f"{withheld} active-publication instruments were outside this carry-forward set because they were already supplied by fresh discovery or lacked exact current evidence.",
             "All-market discovery/certification continues separately and may expand future operating publications.",
         ),
     )
