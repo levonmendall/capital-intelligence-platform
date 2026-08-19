@@ -1,14 +1,15 @@
 """Governed single-writer initialization for the canonical paper portfolio.
 
-Initialization has exactly three semantic states:
+Normal initialization has exactly three semantic states:
 
 * ABSENT: no canonical store or prior initialization artifacts exist; bootstrap once.
 * VALID: a canonical store exists and passes integrity/governance validation; recover it.
 * INVALID: any prior store/artifact exists but cannot be validated; fail closed.
 
-The SQLite append-only hash chain remains the sole portfolio state authority.  This
-module only governs the transition into that authority and deliberately never
-archives, deletes, resets, or recreates existing canonical history.
+A fourth transition exists only for an explicitly authorized paper-portfolio reset epoch.
+That transition first validates and archives the existing canonical SQLite authority, then
+commits a new $250,000 cash-only genesis and records a durable reset marker.  The marker
+makes the operation one-time across Render restarts.  Corrupt state is never reset over.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
@@ -48,6 +49,10 @@ from portfolio.state import (
 _SUPPORTED_SCHEMA_VERSIONS = frozenset({"canonical-portfolio-state.v2"})
 _INITIALIZATION_THREAD_LOCK = threading.Lock()
 _LOCK_SUFFIX = ".canonical-init.lock"
+_RESET_MARKER_FILENAME = "canonical-portfolio-reset-epoch.json"
+_RESET_MARKER_SCHEMA = "canonical-portfolio-reset-epoch.v1"
+# User-authorized reset accompanying the capability-scoped runtime V2 deployment.
+_RENDER_DEFAULT_RESET_EPOCH = "capability-runtime-v2-2026-08-19"
 
 
 class CanonicalPortfolioInitializationError(CanonicalPortfolioIntegrityError):
@@ -72,7 +77,7 @@ class CanonicalPortfolioInitializationError(CanonicalPortfolioIntegrityError):
 
 @dataclass(frozen=True, slots=True)
 class GovernedCanonicalPortfolioInitialization:
-    """Observable result of a safe bootstrap or exact recovery."""
+    """Observable result of a safe bootstrap, exact recovery, or authorized reset."""
 
     path: Path
     created: bool
@@ -94,6 +99,10 @@ class GovernedCanonicalPortfolioInitialization:
             "portfolio_state_generation_id": self.state_generation_id,
             "portfolio_schema_version": self.schema_version,
             "portfolio_state_hash": self.state_hash,
+            "portfolio_reset": self.reset,
+            "portfolio_archive_path": (
+                None if self.archive_path is None else str(self.archive_path)
+            ),
             "paper_only": self.paper_only,
             "real_money_authorized": self.real_money_authorized,
         }
@@ -126,6 +135,10 @@ def _lock_path(path: Path) -> Path:
     return path.with_name(path.name + _LOCK_SUFFIX)
 
 
+def _reset_marker_path(path: Path) -> Path:
+    return path.with_name(_RESET_MARKER_FILENAME)
+
+
 def _prior_artifacts(path: Path, *, lock_existed_before: bool) -> tuple[Path, ...]:
     artifacts: list[Path] = []
     if lock_existed_before:
@@ -139,12 +152,7 @@ def _prior_artifacts(path: Path, *, lock_existed_before: bool) -> tuple[Path, ..
 
 @contextmanager
 def _initialization_lock(path: Path) -> Iterator[bool]:
-    """Serialize first-boot classification before SQLite can create the DB file.
-
-    The lock file intentionally persists as a genesis marker.  If the canonical
-    database later disappears, that marker prevents its absence from being
-    misclassified as a never-initialized deployment.
-    """
+    """Serialize genesis/recovery/reset classification before mutating SQLite state."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = _lock_path(path)
@@ -246,26 +254,250 @@ def _recover_valid_store(path: Path) -> CanonicalPortfolioSnapshot:
     return latest
 
 
+def _requested_reset_epoch() -> str | None:
+    """Resolve the explicit one-time paper reset request for the deployed runtime."""
+
+    explicit = os.getenv("CAPITAL_INTELLIGENCE_PORTFOLIO_RESET_EPOCH")
+    if explicit is not None:
+        value = explicit.strip()
+        return value or None
+    if os.getenv("RENDER", "").strip().lower() == "true":
+        return _RENDER_DEFAULT_RESET_EPOCH
+    return None
+
+
+def _read_reset_marker(path: Path) -> dict[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, sort_keys=True, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _snapshot_matches_reset_epoch(snapshot: CanonicalPortfolioSnapshot, epoch: str) -> bool:
+    marker = f"explicit-paper-reset:{epoch}"
+    return marker in snapshot.source_identifiers or snapshot.identifier.endswith(f":{epoch}")
+
+
+def _archive_for_explicit_reset(
+    path: Path,
+    *,
+    archived_at: datetime,
+    epoch: str,
+    archive_directory: str | Path | None,
+) -> Path:
+    directory = (
+        Path(archive_directory).expanduser()
+        if archive_directory is not None
+        else path.parent / "portfolio_reset_archives"
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = archived_at.strftime("%Y%m%dT%H%M%SZ")
+    archive_path = directory / f"{path.stem}.pre-reset.{epoch}.{stamp}{path.suffix or '.db'}"
+    counter = 1
+    while archive_path.exists():
+        archive_path = directory / (
+            f"{path.stem}.pre-reset.{epoch}.{stamp}.{counter}{path.suffix or '.db'}"
+        )
+        counter += 1
+
+    try:
+        with sqlite3.connect(path) as source, sqlite3.connect(archive_path) as target:
+            source.backup(target)
+    except (sqlite3.DatabaseError, OSError) as error:
+        raise CanonicalPortfolioInitializationError(
+            failure_type="persistence_error",
+            detail=f"explicit reset archive could not be committed: {error}",
+        ) from error
+
+    manifest = {
+        "schema_version": "canonical-portfolio-explicit-reset-archive.v1",
+        "reset_epoch": epoch,
+        "archived_at": archived_at.isoformat(),
+        "source_path": str(path),
+        "archive_path": str(archive_path),
+        "replacement_initial_capital": INITIAL_PAPER_CAPITAL,
+        "paper_only": True,
+        "real_money_authorized": False,
+        "reason": "explicit user-authorized fresh paper portfolio genesis",
+    }
+    _write_json_atomic(
+        archive_path.with_suffix(archive_path.suffix + ".json"),
+        manifest,
+    )
+
+    path.unlink(missing_ok=True)
+    for suffix in ("-wal", "-shm", "-journal"):
+        Path(f"{path}{suffix}").unlink(missing_ok=True)
+    return archive_path
+
+
+def _commit_reset_genesis(
+    path: Path,
+    *,
+    effective_as_of: datetime,
+    epoch: str,
+) -> CanonicalPortfolioSnapshot:
+    try:
+        store = SQLiteCanonicalPortfolioStore(path)
+        initial = canonical_initial_snapshot(as_of=effective_as_of)
+        initial = replace(
+            initial,
+            identifier=f"portfolio-bootstrap:{CANONICAL_PORTFOLIO_CODE}:{epoch}",
+            source_identifiers=tuple(
+                dict.fromkeys(
+                    (*initial.source_identifiers, f"explicit-paper-reset:{epoch}")
+                )
+            ),
+        )
+        store.append(initial)
+        store.verify_integrity()
+        latest = store.latest(CANONICAL_PORTFOLIO_CODE)
+    except (sqlite3.DatabaseError, OSError, ValueError, TypeError) as error:
+        raise CanonicalPortfolioInitializationError(
+            failure_type="persistence_error",
+            detail=f"explicit reset genesis could not be committed atomically: {error}",
+        ) from error
+    if latest is None:
+        raise CanonicalPortfolioInitializationError(
+            failure_type="missing_snapshot",
+            detail="explicit reset genesis committed without a recoverable snapshot",
+        )
+    _validate_snapshot(latest)
+    return latest
+
+
+def _apply_explicit_reset_if_needed(
+    path: Path,
+    *,
+    effective_as_of: datetime,
+    archive_directory: str | Path | None,
+    database_exists: bool,
+) -> GovernedCanonicalPortfolioInitialization | None:
+    epoch = _requested_reset_epoch()
+    if epoch is None:
+        return None
+
+    marker_path = _reset_marker_path(path)
+    marker = _read_reset_marker(marker_path)
+    if (
+        marker is not None
+        and marker.get("schema_version") == _RESET_MARKER_SCHEMA
+        and str(marker.get("reset_epoch") or "") == epoch
+    ):
+        return None
+
+    archive_path: Path | None = None
+    if database_exists:
+        latest = _recover_valid_store(path)
+        # Crash recovery: if the reset genesis was committed but its marker was not,
+        # recognize the exact epoch rather than archiving/resetting it again.
+        if _snapshot_matches_reset_epoch(latest, epoch):
+            _write_json_atomic(
+                marker_path,
+                {
+                    "schema_version": _RESET_MARKER_SCHEMA,
+                    "reset_epoch": epoch,
+                    "applied_at": latest.as_of.isoformat(),
+                    "archive_path": None,
+                    "state_generation_id": latest.identifier,
+                    "starting_capital": INITIAL_PAPER_CAPITAL,
+                    "paper_only": True,
+                    "real_money_authorized": False,
+                    "recovered_marker_after_genesis": True,
+                },
+            )
+            return GovernedCanonicalPortfolioInitialization(
+                path=path,
+                created=False,
+                state="recovered",
+                reason="explicit reset genesis already existed; reset marker recovered",
+                state_generation_id=latest.identifier,
+                schema_version=latest.schema_version,
+                state_hash=_state_hash(latest),
+                reset=True,
+            )
+        archive_path = _archive_for_explicit_reset(
+            path,
+            archived_at=effective_as_of,
+            epoch=epoch,
+            archive_directory=archive_directory,
+        )
+    else:
+        for suffix in ("-wal", "-shm", "-journal"):
+            Path(f"{path}{suffix}").unlink(missing_ok=True)
+
+    latest = _commit_reset_genesis(
+        path,
+        effective_as_of=effective_as_of,
+        epoch=epoch,
+    )
+    _write_json_atomic(
+        marker_path,
+        {
+            "schema_version": _RESET_MARKER_SCHEMA,
+            "reset_epoch": epoch,
+            "applied_at": effective_as_of.isoformat(),
+            "archive_path": None if archive_path is None else str(archive_path),
+            "state_generation_id": latest.identifier,
+            "starting_capital": INITIAL_PAPER_CAPITAL,
+            "cash": INITIAL_PAPER_CAPITAL,
+            "position_count": 0,
+            "paper_only": True,
+            "real_money_authorized": False,
+        },
+    )
+    return GovernedCanonicalPortfolioInitialization(
+        path=path,
+        created=True,
+        state="bootstrapped",
+        reason=(
+            "explicit user-authorized paper portfolio reset applied; prior canonical state archived"
+            if archive_path is not None
+            else "explicit user-authorized paper portfolio reset applied from absent state"
+        ),
+        state_generation_id=latest.identifier,
+        schema_version=latest.schema_version,
+        state_hash=_state_hash(latest),
+        reset=True,
+        archive_path=archive_path,
+    )
+
+
 def ensure_canonical_portfolio_store(
     path: str | Path,
     *,
     as_of: datetime | None = None,
     archive_directory: str | Path | None = None,
 ) -> GovernedCanonicalPortfolioInitialization:
-    """Bootstrap once, recover exactly, or fail closed.
+    """Bootstrap once, recover exactly, apply one authorized reset epoch, or fail closed."""
 
-    ``archive_directory`` remains in the call signature for compatibility with
-    older callers but is deliberately unused: initialization is never permitted
-    to archive/delete/reset canonical state.
-    """
-
-    del archive_directory
     _require_paper_only_governance()
     effective_as_of = (as_of or datetime.now(timezone.utc)).astimezone(timezone.utc)
     resolved_path = Path(path)
 
     with _initialization_lock(resolved_path) as lock_existed_before:
         database_exists = resolved_path.exists()
+
+        reset_result = _apply_explicit_reset_if_needed(
+            resolved_path,
+            effective_as_of=effective_as_of,
+            archive_directory=archive_directory,
+            database_exists=database_exists,
+        )
+        if reset_result is not None:
+            return reset_result
+
         prior_artifacts = _prior_artifacts(
             resolved_path,
             lock_existed_before=lock_existed_before,
@@ -292,8 +524,6 @@ def ensure_canonical_portfolio_store(
                 ),
             )
 
-        # Genuine ABSENT state.  The cross-process lock is held before the first
-        # SQLite open, so only one initializer can perform this genesis transition.
         try:
             store = SQLiteCanonicalPortfolioStore(resolved_path)
             initial = canonical_initial_snapshot(as_of=effective_as_of)

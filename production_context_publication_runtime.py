@@ -9,11 +9,18 @@ production; explicit probes remain available for tests and rehearsals.
 After a governed publication is complete, this runtime also reconciles its exact
 active universe through the Universal Capability Graph and append-only instrument
 paper-eligibility authority before the CIO can consume the publication.
+
+On Render the canonical operating path is capability-scoped by default. Comprehensive
+all-market discovery remains an independent certification/coverage process; the CIO
+carries forward only exact instruments from the latest active publication whose paper
+capability authority is still current. A failure in an unrelated market family therefore
+cannot prevent independently qualified instruments from reaching the governed CIO.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,6 +100,21 @@ def _report_value(report: object, name: str, default=None):
     if isinstance(report, Mapping):
         return report.get(name, default)
     return getattr(report, name, default)
+
+
+def _capability_scoped_operation_enabled() -> bool:
+    """Return whether the normal production CIO should avoid global atomic discovery.
+
+    An explicit environment setting wins. Render defaults to the capability-scoped
+    runtime because all-market certification has its own diagnostic/background path.
+    Tests and local rehearsals retain the historical full-discovery behavior unless
+    they opt in explicitly.
+    """
+
+    raw = os.getenv("CAPITAL_INTELLIGENCE_CAPABILITY_SCOPED_OPERATION")
+    if raw is not None:
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("RENDER", "").strip().lower() == "true"
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +214,12 @@ def _reconcile_capability_authority_if_ready(
         evaluated_at=result.decision_as_of,
     )
     payload = report.to_dict()
+    payload["operating_scope"] = (
+        "capability_scoped"
+        if _capability_scoped_operation_enabled()
+        else "comprehensive_discovery"
+    )
+    payload["all_market_certification_is_operating_gate"] = False
     _atomic_json(
         settings.portfolio_database.parent / CAPABILITY_REPORT_FILENAME,
         payload,
@@ -224,7 +252,7 @@ def prepare_production_context_for_cycle(
     clock: Clock | None = None,
     progress_probe: Callable[[str], None] | None = None,
 ) -> ProductionContextPublicationResult:
-    """Publish one governed context using already-qualified evidence in production."""
+    """Publish one governed context from the currently legitimate operating scope."""
 
     from production_context_publication_governed import prepare_governed_production_context_for_cycle
 
@@ -250,6 +278,16 @@ def prepare_production_context_for_cycle(
             if cash_probe is None:
                 cash_probe = lambda: qualified_cash_probe(cutoff=clock())
 
+    comprehensive_discovery_probe = None
+    comprehensive_discovery_required = None
+    if _capability_scoped_operation_enabled():
+        from operations.capability_scoped_discovery import (
+            discover_currently_certified_capabilities,
+        )
+
+        comprehensive_discovery_probe = discover_currently_certified_capabilities
+        comprehensive_discovery_required = False
+
     result = prepare_governed_production_context_for_cycle(
         settings=settings,
         scheduled_for=scheduled_for,
@@ -258,6 +296,8 @@ def prepare_production_context_for_cycle(
         cash_probe=cash_probe,
         evidence_probe=evidence_probe,
         equity_discovery_probe=equity_discovery_probe,
+        comprehensive_discovery_probe=comprehensive_discovery_probe,
+        comprehensive_discovery_required=comprehensive_discovery_required,
         clock=clock,
         progress_probe=progress_probe,
     )
@@ -266,4 +306,7 @@ def prepare_production_context_for_cycle(
     return result
 
 
-__all__ = ["ProductionContextPublicationResult", "prepare_production_context_for_cycle"]
+__all__ = [
+    "ProductionContextPublicationResult",
+    "prepare_production_context_for_cycle",
+]
