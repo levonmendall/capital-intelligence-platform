@@ -4,3 +4,4 @@ operating_scope=capability_scoped
 interface=portfolio_only
 paper_only=true
 real_money_authorized=false
+deployment_trigger=final-head
