@@ -57,6 +57,7 @@ def test_later_future_completions_are_visible_before_ordered_map_head_returns(
     """A slow first record must not hide four genuinely completed later records."""
 
     published: list[tuple[str, dict[str, int]]] = []
+    progress_published = threading.Event()
     first_release = threading.Event()
     four_later_completed = threading.Event()
     later_lock = threading.Lock()
@@ -64,11 +65,12 @@ def test_later_future_completions_are_visible_before_ordered_map_head_returns(
     result_holder: dict[str, object] = {}
     error_holder: list[BaseException] = []
 
-    monkeypatch.setattr(
-        work_runner,
-        "record_certification_work_progress",
-        lambda asset_class, **metrics: published.append((asset_class, dict(metrics))),
-    )
+    def capture(asset_class: str, **metrics) -> None:
+        published.append((asset_class, dict(metrics)))
+        if int(metrics.get("processed_records", 0)) >= 4:
+            progress_published.set()
+
+    monkeypatch.setattr(work_runner, "record_certification_work_progress", capture)
 
     def work(value: int) -> int:
         if value == 0:
@@ -106,6 +108,9 @@ def test_later_future_completions_are_visible_before_ordered_map_head_returns(
     thread = threading.Thread(target=run, name="completion-order-progress-test")
     thread.start()
     assert four_later_completed.wait(timeout=2.0)
+    # Worker-body completion precedes Future completion/callback scheduling. Wait for the
+    # actual callback boundary because that is the production heartbeat seam under test.
+    assert progress_published.wait(timeout=2.0)
 
     # The ordered map consumer is still blocked on record zero, yet four later futures
     # have completed and therefore must already have produced one real progress event.
@@ -134,17 +139,19 @@ def test_completion_progress_preserves_ordered_exception_propagation(
     """Completion callbacks must not consume or suppress an out-of-order future error."""
 
     published: list[tuple[str, dict[str, int]]] = []
+    progress_published = threading.Event()
     first_release = threading.Event()
     four_later_completed = threading.Event()
     later_lock = threading.Lock()
     later_count = [0]
     error_holder: list[BaseException] = []
 
-    monkeypatch.setattr(
-        work_runner,
-        "record_certification_work_progress",
-        lambda asset_class, **metrics: published.append((asset_class, dict(metrics))),
-    )
+    def capture(asset_class: str, **metrics) -> None:
+        published.append((asset_class, dict(metrics)))
+        if int(metrics.get("processed_records", 0)) >= 4:
+            progress_published.set()
+
+    monkeypatch.setattr(work_runner, "record_certification_work_progress", capture)
 
     def work(value: int) -> int:
         if value == 0:
@@ -183,6 +190,7 @@ def test_completion_progress_preserves_ordered_exception_propagation(
     thread = threading.Thread(target=run, name="ordered-exception-progress-test")
     thread.start()
     assert four_later_completed.wait(timeout=2.0)
+    assert progress_published.wait(timeout=2.0)
 
     # The error future and three later successes are finished, but the standard ordered
     # map iterator remains blocked on record zero. Their completion is still observable.
