@@ -26,6 +26,7 @@ def record_certification_work_progress(
     processed_records: int,
     total_records: int,
     chunk_records: int = 1,
+    evidence_complete_records: int | None = None,
 ) -> None:
     """Publish completed-work counters without child ownership of diagnostic state."""
 
@@ -35,6 +36,8 @@ def record_certification_work_progress(
         "total_records": max(0, int(total_records)),
         "chunk_records": max(0, int(chunk_records)),
     }
+    if evidence_complete_records is not None:
+        metrics["evidence_complete_records"] = max(0, int(evidence_complete_records))
     try:
         diagnostic.record_manual_cio_diagnostic_progress(
             f"deep_market_evidence:{lane}",
@@ -47,4 +50,45 @@ def record_certification_work_progress(
         return
 
 
-__all__ = ["record_certification_work_progress"]
+def install_spawn_child_transport_only_progress() -> None:
+    """Prevent spawned fallback progress from becoming a second diagnostic file writer."""
+
+    from operations import redundant_market_probe as probe
+
+    current = probe._record_deep_progress
+    if getattr(current, "_spawn_child_transport_only", False):
+        return
+    last_processed: dict[str, int] = {}
+
+    def transport_only(
+        lane: str | None,
+        *,
+        decision_eligible_records: int,
+        processed_records: int,
+        evidence_complete_records: int,
+        callback,
+    ) -> None:
+        del callback
+        if lane is None:
+            return
+        normalized_lane = str(lane).strip().lower()
+        prior = last_processed.get(normalized_lane, 0)
+        current_processed = max(0, int(processed_records))
+        delta = max(1, current_processed - prior)
+        last_processed[normalized_lane] = max(prior, current_processed)
+        record_certification_work_progress(
+            normalized_lane,
+            processed_records=current_processed,
+            total_records=max(0, int(decision_eligible_records)),
+            chunk_records=delta,
+            evidence_complete_records=max(0, int(evidence_complete_records)),
+        )
+
+    transport_only._spawn_child_transport_only = True  # type: ignore[attr-defined]
+    probe._record_deep_progress = transport_only
+
+
+__all__ = [
+    "install_spawn_child_transport_only_progress",
+    "record_certification_work_progress",
+]
