@@ -61,6 +61,17 @@ def _safe_lane(value: object) -> str | None:
     return _base._safe_identifier(value)
 
 
+def _failure_reason(*, unit: str, failure_type: str | None) -> str:
+    """Classify already-redacted scheduler failures without weakening fail-closed state."""
+
+    if unit == "provider-free-finalizer":
+        return "finalizer_failure"
+    normalized = str(failure_type or "").strip().lower()
+    if "timeout" in normalized or "deadline" in normalized:
+        return "deadline_exceeded"
+    return "discovery_lane_failure"
+
+
 def discovery_progress(public_payload: Mapping[str, Any]) -> dict[str, object] | None:
     """Return only bounded operational discovery state from the public redacted detail."""
 
@@ -116,13 +127,18 @@ def enrich_snapshot(
     updated = dict(diagnostic)
     updated["comprehensive_discovery_progress"] = progress
     unit = str(progress.get("blocking_unit") or "")
+    failure_type = _safe_failure_type(progress.get("failure_type"))
+    asset_class = _safe_lane(progress.get("asset_class"))
     if unit:
         updated["prequalification_failure_unit"] = unit
+    if asset_class:
+        updated["prequalification_failure_asset_class"] = asset_class
+    if failure_type:
+        updated["prequalification_failure_type"] = failure_type
     if updated.get("prequalification_failure_reason") in {None, "internal_error"}:
-        updated["prequalification_failure_reason"] = (
-            "finalizer_failure"
-            if unit == "provider-free-finalizer"
-            else "discovery_lane_failure"
+        updated["prequalification_failure_reason"] = _failure_reason(
+            unit=unit,
+            failure_type=failure_type,
         )
     enriched["diagnostic"] = updated
     enriched["enriched_from_comprehensive_discovery"] = True
