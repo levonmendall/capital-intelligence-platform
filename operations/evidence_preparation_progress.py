@@ -259,16 +259,19 @@ def install_post_public_provider_progress(values: Mapping[str, str] | None = Non
                     else 0
                 )
                 if state == "qualified" and not pending and not failed:
+                    should_record = False
+                    observed = 0
                     with count_lock:
-                        if fingerprint in seen_work_units:
-                            return
-                        seen_work_units.add(fingerprint)
-                        completed[0] += 1
-                        observed = completed[0]
-                    record_evidence_preparation_progress(
-                        resolved,
-                        completed_provider_calls=observed,
-                    )
+                        if fingerprint not in seen_work_units:
+                            seen_work_units.add(fingerprint)
+                            completed[0] += 1
+                            observed = completed[0]
+                            should_record = True
+                    if should_record:
+                        record_evidence_preparation_progress(
+                            resolved,
+                            completed_provider_calls=observed,
+                        )
             except Exception:
                 # The journal is supervision-only. If it cannot advance, the unchanged
                 # parent watchdog remains fail-closed and will stop a genuinely silent run.
