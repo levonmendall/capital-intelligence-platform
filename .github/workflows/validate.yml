@@ -60,8 +60,12 @@ jobs:
       - name: Verify runtime lock integrity
         run: python scripts/verify_requirements_lock.py
 
-      - name: Install Chromium for real Streamlit browser tests
-        run: python -m playwright install --with-deps chromium
+      - name: Locate preinstalled Chrome
+        shell: bash
+        run: |
+          CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME_BIN"
+          echo "CAPITAL_INTELLIGENCE_SYSTEM_CHROME=$CHROME_BIN" >> "$GITHUB_ENV"
 
       - name: Run desktop and iPhone Streamlit browser gate
         env:
@@ -74,7 +78,14 @@ jobs:
           tests/browser/test_environment_story_placement.py
           tests/browser/test_distinct_surface_content.py
 
+      - name: Run pull request test suite
+        if: github.event_name == 'pull_request'
+        run: >-
+          pytest -q --maxfail=1
+          --junitxml=reports/pytest-results.xml
+
       - name: Run deterministic release validation
+        if: github.event_name != 'pull_request'
         run: timeout --signal=TERM 40m python run_release_validation.py --report reports/release-validation.json
 
       - name: Publish release diagnostics
