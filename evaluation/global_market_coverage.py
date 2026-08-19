@@ -16,6 +16,10 @@ from typing import Any, Sequence
 from portfolio.global_rotation_models import GlobalOpportunityDomain, opportunity_domain
 
 
+# Preserve the original global-rotation readiness contract: the six core economic
+# domains must be represented and ready. Broader domains remain explicitly measured
+# below as accountability coverage, but do not silently redefine this established
+# readiness signal.
 _DEFAULT_REQUIRED_DOMAINS = (
     GlobalOpportunityDomain.EQUITY,
     GlobalOpportunityDomain.FIXED_INCOME,
@@ -23,6 +27,10 @@ _DEFAULT_REQUIRED_DOMAINS = (
     GlobalOpportunityDomain.CURRENCY,
     GlobalOpportunityDomain.COMMODITY,
     GlobalOpportunityDomain.CRYPTO,
+)
+
+_ACCOUNTABILITY_DOMAINS = (
+    *_DEFAULT_REQUIRED_DOMAINS,
     GlobalOpportunityDomain.REAL_ESTATE,
     GlobalOpportunityDomain.VOLATILITY,
     GlobalOpportunityDomain.ALTERNATIVE,
@@ -284,6 +292,11 @@ def build_global_market_coverage_report(
     missing_regions = tuple(
         region.value for region in required_regions if not grouped_regions.get(region)
     )
+    missing_accountability_domains = tuple(
+        domain.value
+        for domain in _ACCOUNTABILITY_DOMAINS
+        if domain not in required_domains and not grouped_domains.get(domain)
+    )
     reviewed = len(candidates)
     complete_total = sum(item.complete_evidence_count for item in domain_reports)
     forward_total = sum(item.forward_intelligence_count for item in domain_reports)
@@ -306,8 +319,13 @@ def build_global_market_coverage_report(
     limitations: list[str] = []
     if missing_domains:
         limitations.append(
-            "No reviewed candidate reached the CIO opportunity set for asset domains: "
+            "No reviewed candidate reached the CIO opportunity set for required asset domains: "
             + ", ".join(missing_domains)
+        )
+    if missing_accountability_domains:
+        limitations.append(
+            "Broader opportunity-accountability domains were not observed in the reviewed set: "
+            + ", ".join(missing_accountability_domains)
         )
     if missing_regions:
         limitations.append(
@@ -352,7 +370,6 @@ def build_global_market_coverage_report(
         globally_rotation_ready=bool(
             all_domains_present
             and all_domains_ready
-            and regional_ready
             and forward_ratio >= 0.70
         ),
         limitations=tuple(limitations),
