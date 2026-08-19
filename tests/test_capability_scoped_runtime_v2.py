@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import portfolio_only_runtime
 import production_context_publication_governed
 import production_context_publication_runtime
+from cio import CandidateAssetClass
 from operations import capability_scoped_discovery
 from operations.free_paper_pilot import load_free_paper_pilot_universe
 from portfolio.initialization import ensure_canonical_portfolio_store
@@ -157,9 +158,25 @@ def test_missing_operating_evidence_blocks_only_dynamic_candidates(monkeypatch):
     assert "dynamic candidates are withheld" in result.limitations[0]
 
 
-def test_us_equity_view_filters_authorized_operating_candidates(monkeypatch):
+def test_us_equity_view_filters_by_canonical_asset_class(monkeypatch):
     universe = load_free_paper_pilot_universe()
-    authorized = replace(universe, instruments=universe.instruments[:4])
+    stock = replace(
+        universe.instruments[0],
+        symbol="ACME",
+        instrument_identifier="instrument:us-equity:acme",
+        name="Acme Corporation",
+        execution_asset_class=CandidateAssetClass.US_EQUITY,
+        economic_exposure="us_equity",
+        instrument_type="common_stock",
+        maximum_weight=0.01,
+        issuer_cik="0000000001",
+    )
+    non_stock = universe.instruments[0]
+    authorized = replace(
+        universe,
+        identifier="authorized:test",
+        instruments=(stock, non_stock),
+    )
     contracts = capability_scoped_discovery._instrument_contracts(authorized)
 
     monkeypatch.setattr(
@@ -182,8 +199,8 @@ def test_us_equity_view_filters_authorized_operating_candidates(monkeypatch):
         as_of=AS_OF,
     )
 
-    assert all(item.country_code == "US" for item in result.instruments)
-    assert all(item.instrument_type == "equity" for item in result.instruments)
+    assert result.instruments == (stock,)
+    assert result.instruments[0].instrument_type == "common_stock"
 
 
 def test_render_reset_epoch_archives_once_and_starts_fresh_250k(monkeypatch, tmp_path):
