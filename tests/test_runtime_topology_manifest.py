@@ -9,8 +9,8 @@ def test_every_root_command_has_exactly_one_classification() -> None:
     report = validate_manifest(manifest)
     assert report == {
         "ready": True,
-        "root_script_count": 105,
-        "classified_script_count": 105,
+        "root_script_count": 107,
+        "classified_script_count": 107,
         "missing": [],
         "extra": [],
         "duplicate_classifications": 0,
@@ -35,6 +35,8 @@ def test_render_runtime_matches_canonical_manifest_behaviorally() -> None:
     assert "run_render_service_workspace.py" in runtime_active
     assert "run_global_public_evidence.py" in runtime_active
     assert "run_dag_native_continuous_evidence_plane.py" in runtime_active
+    assert "run_bounded_capability_operating_evidence.py" in runtime_active
+    assert "run_capability_operating_evidence.py" in runtime_active
     assert command_tokens("headlines", manifest)[-2:] == (
         "run_public_headline_collector.py",
         "--loop",
