@@ -14,6 +14,17 @@ def _production(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_ENVIRONMENT", "production")
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_CONTINUOUS_EVIDENCE_PLANE_ENABLED", "true")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("CAPITAL_INTELLIGENCE_CAPABILITY_SCOPED_OPERATION", raising=False)
+
+
+def _dynamic(template, *, suffix: str, symbol: str):
+    return replace(
+        template,
+        symbol=symbol,
+        instrument_identifier=f"{template.instrument_identifier}:{suffix}",
+        name=f"Dynamic {suffix}",
+    )
 
 
 def test_production_probe_verifies_source_snapshot_then_projects_exact_subset(
@@ -21,14 +32,21 @@ def test_production_probe_verifies_source_snapshot_then_projects_exact_subset(
 ) -> None:
     as_of = datetime(2026, 8, 15, 4, 30, tzinfo=timezone.utc)
     observed: dict[str, object] = {}
-    source = load_free_paper_pilot_universe()
-    requested = replace(
-        source,
-        identifier="capability-authorized:test",
-        instruments=source.instruments[:2],
-        limitations=(*source.limitations, "capability-scoped test subset"),
+    base = load_free_paper_pilot_universe()
+    dynamic_a = _dynamic(base.instruments[0], suffix="a", symbol="DYNA")
+    dynamic_b = _dynamic(base.instruments[1], suffix="b", symbol="DYNB")
+    source = replace(
+        base,
+        identifier="evidence-source:test",
+        instruments=(*base.instruments, dynamic_a, dynamic_b),
     )
-    source_symbols = tuple(item.symbol for item in source.instruments[:3])
+    requested = replace(
+        base,
+        identifier="capability-authorized:test",
+        instruments=(*base.instruments, dynamic_a),
+        limitations=(*base.limitations, "capability-scoped test subset"),
+    )
+    source_symbols = tuple(item.symbol for item in source.instruments)
     payload = {
         "bars": {symbol: (symbol, "bars") for symbol in source_symbols},
         "quotes": {symbol: (symbol, "quote") for symbol in source_symbols},
@@ -70,6 +88,7 @@ def test_production_probe_verifies_source_snapshot_then_projects_exact_subset(
     assert set(actual["company_facts"]) == expected_symbols
     assert set(actual["_direct_market_errors"]) == expected_symbols
     assert set(actual["_scheduled_closed_symbols"]) == expected_symbols
+    assert dynamic_b.symbol not in actual["bars"]
     assert actual["macro"] is payload["macro"]
     assert observed["ensure"]["allow_refresh"] is False
     assert observed["ensure"]["cutoff"] == as_of
@@ -87,12 +106,11 @@ def test_production_probe_verifies_source_snapshot_then_projects_exact_subset(
 
 
 def test_projection_rejects_instrument_absent_from_signed_snapshot() -> None:
-    universe = load_free_paper_pilot_universe()
-    source = replace(universe, instruments=universe.instruments[:2])
-    requested = replace(
-        universe,
-        instruments=(universe.instruments[0], universe.instruments[2]),
-    )
+    base = load_free_paper_pilot_universe()
+    dynamic_a = _dynamic(base.instruments[0], suffix="a", symbol="DYNA")
+    dynamic_b = _dynamic(base.instruments[1], suffix="b", symbol="DYNB")
+    source = replace(base, instruments=(*base.instruments, dynamic_a))
+    requested = replace(base, instruments=(*base.instruments, dynamic_b))
 
     with pytest.raises(RuntimeError, match="absent from the signed snapshot"):
         qualified._validate_exact_evidence_subset(
@@ -102,10 +120,11 @@ def test_projection_rejects_instrument_absent_from_signed_snapshot() -> None:
 
 
 def test_projection_rejects_changed_instrument_contract() -> None:
-    universe = load_free_paper_pilot_universe()
-    source = replace(universe, instruments=universe.instruments[:2])
-    changed = replace(source.instruments[0], venue="CHANGED")
-    requested = replace(source, instruments=(changed,))
+    base = load_free_paper_pilot_universe()
+    dynamic = _dynamic(base.instruments[0], suffix="a", symbol="DYNA")
+    source = replace(base, instruments=(*base.instruments, dynamic))
+    changed = replace(dynamic, venue="CHANGED")
+    requested = replace(base, instruments=(*base.instruments, changed))
 
     with pytest.raises(RuntimeError, match="changed instrument contracts"):
         qualified._validate_exact_evidence_subset(
@@ -118,7 +137,6 @@ def test_projection_rejects_changed_universe_evidence_contract() -> None:
     source = load_free_paper_pilot_universe()
     requested = replace(
         source,
-        instruments=source.instruments[:1],
         maximum_quote_age_minutes=source.maximum_quote_age_minutes + 1,
     )
 
