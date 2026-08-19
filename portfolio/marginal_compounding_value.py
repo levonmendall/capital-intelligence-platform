@@ -1,21 +1,22 @@
 """Common economic yardstick for cross-asset marginal capital decisions.
 
-Every candidate is converted to annualized expected log growth on its own governed
+Every candidate is converted to annualized expected log growth on its governed
 scenario distribution, net of implementation cost and relative to the same annual
-opportunity-cost return.  Risk, evidence uncertainty, and liquidity are explicit
-penalties.  Asset-class labels, momentum labels, or leadership scores do not receive
-independent utility points here; they are expected to influence the candidate's
-point-in-time return distribution upstream.
+opportunity-cost return. Risk, evidence uncertainty, and liquidity are explicit
+penalties.
+
+Forward intelligence enters only when it already has economic units: the global
+rotation layer's ``forward_impulse`` is the confidence-weighted expected-return impact
+of governed forward signals. It shifts each point in the candidate return distribution
+before log-growth is evaluated. Dimensionless labels such as asset class, momentum,
+leadership score, causal score, or theme score do not receive arbitrary utility points.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from math import exp, isfinite, log1p
-from typing import Mapping, Sequence
-
-
-_EPSILON = 1e-9
+from typing import Sequence
 
 
 def _clip(value: float, low: float, high: float) -> float:
@@ -37,6 +38,7 @@ def _safe_log_return(total_return: float) -> float:
 @dataclass(frozen=True, slots=True)
 class MarginalCompoundingValue:
     candidate_identifier: str
+    forward_return_adjustment: float
     annualized_expected_log_growth: float
     annualized_alternative_log_growth: float
     downside_penalty: float
@@ -44,11 +46,12 @@ class MarginalCompoundingValue:
     liquidity_penalty: float
     utility: float
     normalized_score: float
-    policy_version: str = "marginal-compounding-value.v1"
+    policy_version: str = "marginal-compounding-value.v2"
 
     def to_dict(self) -> dict[str, object]:
         return {
             "candidate_identifier": self.candidate_identifier,
+            "forward_return_adjustment": self.forward_return_adjustment,
             "annualized_expected_log_growth": self.annualized_expected_log_growth,
             "annualized_alternative_log_growth": self.annualized_alternative_log_growth,
             "downside_penalty": self.downside_penalty,
@@ -60,7 +63,11 @@ class MarginalCompoundingValue:
         }
 
 
-def assess_marginal_compounding_value(candidate: object) -> MarginalCompoundingValue:
+def assess_marginal_compounding_value(
+    candidate: object,
+    *,
+    forward_return_adjustment: float = 0.0,
+) -> MarginalCompoundingValue:
     identifier = str(getattr(candidate, "identifier", "")).strip()
     if not identifier:
         raise ValueError("candidate identifier is required")
@@ -69,6 +76,7 @@ def assess_marginal_compounding_value(candidate: object) -> MarginalCompoundingV
     distribution = tuple(getattr(candidate, "scenario_distribution"))
     if not distribution:
         raise ValueError("candidate scenario distribution is required")
+    adjustment = _clip(float(forward_return_adjustment), -0.10, 0.10)
     cost = max(0.0, float(getattr(candidate, "implementation_cost_return", 0.0)))
 
     expected_log = 0.0
@@ -76,7 +84,11 @@ def assess_marginal_compounding_value(candidate: object) -> MarginalCompoundingV
     probability_total = 0.0
     for point in distribution:
         probability = float(getattr(point, "probability"))
-        total_return = float(getattr(point, "total_return")) - cost
+        total_return = (
+            float(getattr(point, "total_return"))
+            + adjustment
+            - cost
+        )
         probability_total += probability
         log_return = _safe_log_return(total_return)
         expected_log += probability * log_return
@@ -96,9 +108,8 @@ def assess_marginal_compounding_value(candidate: object) -> MarginalCompoundingV
     reliability = min(evidence_score, evidence_ceiling)
     liquidity = _clip(float(getattr(candidate, "liquidity_score", 0.0)), 0.0, 1.0)
 
-    # Downside is deliberately penalized less than one-for-one because expected log
-    # growth already captures negative scenarios.  This extra term represents the
-    # portfolio's aversion to paths that can impair future compounding capacity.
+    # Expected log growth already embeds negative scenarios. This smaller additional
+    # penalty represents path damage that can reduce future compounding capacity.
     downside_penalty = 0.20 * annualized_downside
     uncertainty_penalty = (1.0 - reliability) * (
         0.08 + 0.25 * abs(annualized_expected)
@@ -111,11 +122,12 @@ def assess_marginal_compounding_value(candidate: object) -> MarginalCompoundingV
         - uncertainty_penalty
         - liquidity_penalty
     )
-    # A stable monotonic normalization for UI/ranking compatibility.  The utility is
-    # the economic quantity; the score is only a bounded representation of it.
+    # Stable monotonic normalization for rank/presentation compatibility. Utility is
+    # the economic quantity; this score is only a bounded representation of it.
     normalized_score = 1.0 / (1.0 + exp(-4.0 * utility))
     return MarginalCompoundingValue(
         candidate_identifier=identifier,
+        forward_return_adjustment=round(adjustment, 8),
         annualized_expected_log_growth=round(annualized_expected, 8),
         annualized_alternative_log_growth=round(alternative_log, 8),
         downside_penalty=round(downside_penalty, 8),
@@ -131,12 +143,13 @@ def rerank_global_rotation_context(
     *,
     candidates: Sequence[object],
 ):
-    """Replace heuristic cross-asset ordering with comparable economic utility.
+    """Order cross-asset alternatives on comparable economic utility.
 
-    Leadership, mispricing, causal, and theme fields remain attached to each signal as
-    diagnostics and upstream evidence.  The final cross-asset rank and bounded score
-    are determined by marginal compounding value, with the prior signal score used
-    only as a deterministic tie-breaker.
+    Leadership, mispricing, causal, and theme diagnostics remain attached to every
+    signal. Their economically expressed expected-return effect is already summarized
+    in ``forward_impulse`` and therefore shifts the candidate's return distribution.
+    Remaining dimensionless diagnostics are retained for specialist/CIO interpretation
+    and deterministic tie-breaking, not converted into arbitrary utility points.
     """
 
     candidate_by_id = {
@@ -147,7 +160,12 @@ def rerank_global_rotation_context(
         candidate = candidate_by_id.get(str(getattr(signal, "candidate_identifier")))
         if candidate is None:
             continue
-        assessment = assess_marginal_compounding_value(candidate)
+        assessment = assess_marginal_compounding_value(
+            candidate,
+            forward_return_adjustment=float(
+                getattr(signal, "forward_impulse", 0.0)
+            ),
+        )
         values.append((assessment, signal))
     if len(values) != len(tuple(getattr(context, "signals", ()) or ())):
         raise ValueError("global rotation context and candidate set do not reconcile")
@@ -175,7 +193,7 @@ def rerank_global_rotation_context(
     return replace(
         context,
         signals=reranked,
-        policy_version=f"{policy_version}|marginal-compounding-value.v1",
+        policy_version=f"{policy_version}|marginal-compounding-value.v2",
     )
 
 
