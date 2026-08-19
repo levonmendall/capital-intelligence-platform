@@ -8,6 +8,7 @@ import pytest
 
 from operations import certification_work_progress
 from operations import certification_work_unit_runner as work_runner
+from operations import redundant_market_probe
 
 
 def _named_function(module_name: str, function_name: str):
@@ -147,4 +148,63 @@ def test_work_progress_uses_transport_only_diagnostic_call(
                 "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED": "false"
             },
         )
+    ]
+
+
+def test_spawned_fallback_progress_never_invokes_shared_diagnostic_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published: list[tuple[str, dict[str, int]]] = []
+    callback_calls: list[str] = []
+
+    def original_progress(*_args, **_kwargs):
+        callback_calls.append("shared-writer")
+
+    monkeypatch.setattr(
+        redundant_market_probe,
+        "_record_deep_progress",
+        original_progress,
+    )
+    monkeypatch.setattr(
+        certification_work_progress,
+        "record_certification_work_progress",
+        lambda asset_class, **metrics: published.append((asset_class, dict(metrics))),
+    )
+
+    certification_work_progress.install_spawn_child_transport_only_progress()
+    redundant_market_probe._record_deep_progress(
+        "fx",
+        decision_eligible_records=40,
+        processed_records=16,
+        evidence_complete_records=12,
+        callback=lambda *_args, **_kwargs: callback_calls.append("callback"),
+    )
+    redundant_market_probe._record_deep_progress(
+        "fx",
+        decision_eligible_records=40,
+        processed_records=32,
+        evidence_complete_records=25,
+        callback=lambda *_args, **_kwargs: callback_calls.append("callback"),
+    )
+
+    assert callback_calls == []
+    assert published == [
+        (
+            "fx",
+            {
+                "processed_records": 16,
+                "total_records": 40,
+                "chunk_records": 16,
+                "evidence_complete_records": 12,
+            },
+        ),
+        (
+            "fx",
+            {
+                "processed_records": 32,
+                "total_records": 40,
+                "chunk_records": 16,
+                "evidence_complete_records": 25,
+            },
+        ),
     ]
