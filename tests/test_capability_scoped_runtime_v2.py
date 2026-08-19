@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from types import SimpleNamespace
 
 import portfolio_only_runtime
@@ -17,7 +16,7 @@ from portfolio.state import SQLiteCanonicalPortfolioStore
 AS_OF = datetime(2026, 8, 19, 18, 0, tzinfo=timezone.utc)
 
 
-def test_render_context_uses_capability_scoped_discovery_without_global_gate(monkeypatch):
+def test_render_context_uses_capability_scoped_candidates_without_global_gate(monkeypatch):
     captured: dict[str, object] = {}
 
     def fake_prepare(**kwargs):
@@ -44,14 +43,16 @@ def test_render_context_uses_capability_scoped_discovery_without_global_gate(mon
         readiness_probe=lambda _universe: object(),
         cash_probe=lambda: object(),
         evidence_probe=lambda *_args, **_kwargs: {},
-        equity_discovery_probe=lambda *_args, **_kwargs: object(),
         clock=lambda: AS_OF,
     )
 
     assert captured["comprehensive_discovery_required"] is False
-    probe = captured["comprehensive_discovery_probe"]
-    assert callable(probe)
-    assert probe.__name__ == "discover_currently_certified_capabilities"
+    global_probe = captured["comprehensive_discovery_probe"]
+    equity_probe = captured["equity_discovery_probe"]
+    assert callable(global_probe)
+    assert callable(equity_probe)
+    assert global_probe.__name__ == "discover_currently_certified_capabilities"
+    assert equity_probe.__name__ == "discover_currently_certified_us_equities"
 
 
 def test_local_context_keeps_full_discovery_behavior_unless_opted_in(monkeypatch):
@@ -89,25 +90,25 @@ def test_local_context_keeps_full_discovery_behavior_unless_opted_in(monkeypatch
     assert captured["comprehensive_discovery_required"] is None
 
 
-def test_capability_carry_forward_intersects_exact_current_evidence(monkeypatch):
+def test_capability_candidates_intersect_exact_operating_evidence(monkeypatch):
     universe = load_free_paper_pilot_universe()
-    qualified = replace(
+    authorized = replace(
         universe,
         identifier="active-publication:test",
         instruments=universe.instruments[:3],
     )
-    contracts = capability_scoped_discovery._instrument_contracts(qualified)
-    first, second, third = qualified.instruments
+    contracts = capability_scoped_discovery._instrument_contracts(authorized)
+    first, second, third = authorized.instruments
 
     monkeypatch.setattr(
         capability_scoped_discovery,
-        "_current_publication_source",
-        lambda: (Path("active-paper-universe.json"), "eligible:test"),
+        "_current_publication_identifier",
+        lambda: "eligible:test",
     )
     monkeypatch.setattr(
         capability_scoped_discovery,
-        "load_active_paper_universe_for_publication",
-        lambda *_args, **_kwargs: qualified,
+        "load_current_authorized_universe",
+        lambda **_kwargs: authorized,
     )
     monkeypatch.setattr(
         capability_scoped_discovery,
@@ -125,22 +126,22 @@ def test_capability_carry_forward_intersects_exact_current_evidence(monkeypatch)
     assert result.instruments == (second,)
     assert third not in result.instruments
     assert result.scope_state == "capability_scoped"
-    assert "exact current signed evidence coverage" in result.limitations[0]
+    assert "fresh independent operating-evidence snapshot" in result.limitations[0]
 
 
-def test_missing_global_evidence_blocks_only_dynamic_carry_forward(monkeypatch):
+def test_missing_operating_evidence_blocks_only_dynamic_candidates(monkeypatch):
     universe = load_free_paper_pilot_universe()
-    qualified = replace(universe, instruments=universe.instruments[:2])
+    authorized = replace(universe, instruments=universe.instruments[:2])
 
     monkeypatch.setattr(
         capability_scoped_discovery,
-        "_current_publication_source",
-        lambda: (Path("active-paper-universe.json"), "eligible:test"),
+        "_current_publication_identifier",
+        lambda: "eligible:test",
     )
     monkeypatch.setattr(
         capability_scoped_discovery,
-        "load_active_paper_universe_for_publication",
-        lambda *_args, **_kwargs: qualified,
+        "load_current_authorized_universe",
+        lambda **_kwargs: authorized,
     )
     monkeypatch.setattr(
         capability_scoped_discovery,
@@ -153,7 +154,36 @@ def test_missing_global_evidence_blocks_only_dynamic_carry_forward(monkeypatch):
     )
 
     assert result.instruments == ()
-    assert "without blocking independently qualified bootstrap" in result.limitations[0]
+    assert "dynamic candidates are withheld" in result.limitations[0]
+
+
+def test_us_equity_view_filters_authorized_operating_candidates(monkeypatch):
+    universe = load_free_paper_pilot_universe()
+    authorized = replace(universe, instruments=universe.instruments[:4])
+    contracts = capability_scoped_discovery._instrument_contracts(authorized)
+
+    monkeypatch.setattr(
+        capability_scoped_discovery,
+        "_current_publication_identifier",
+        lambda: "eligible:test",
+    )
+    monkeypatch.setattr(
+        capability_scoped_discovery,
+        "load_current_authorized_universe",
+        lambda **_kwargs: authorized,
+    )
+    monkeypatch.setattr(
+        capability_scoped_discovery,
+        "_current_evidence_contracts",
+        lambda _as_of: contracts,
+    )
+
+    result = capability_scoped_discovery.discover_currently_certified_us_equities(
+        as_of=AS_OF,
+    )
+
+    assert all(item.country_code == "US" for item in result.instruments)
+    assert all(item.instrument_type == "equity" for item in result.instruments)
 
 
 def test_render_reset_epoch_archives_once_and_starts_fresh_250k(monkeypatch, tmp_path):
