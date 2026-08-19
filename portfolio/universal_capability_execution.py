@@ -1,12 +1,12 @@
 """Universal Capability Graph enforcement at the canonical paper-fill boundary.
 
 The legacy multi-asset executor already owns sessions, quotes, liquidity, cash,
-positions, fills, accounting, and reconciliation.  Replacing that mature ledger would
-create unnecessary execution risk.  This subclass makes the universal paper contract
+positions, fills, accounting, and reconciliation. Replacing that mature ledger would
+create unnecessary execution risk. This subclass makes the universal paper contract
 an authoritative invariant exactly where all required execution quantities are known.
 
 New/increased exposure requires either the long-standing bootstrap authority or an
-active append-only instrument capability certification.  Reductions/exits retain the
+active append-only instrument capability certification. Reductions/exits retain the
 existing owned-instrument continuity path so loss of a capability can never trap the
 portfolio in a degraded position.
 """
@@ -21,6 +21,7 @@ from governance.instrument_paper_eligibility import (
 )
 from governance.market_participation import CanonicalMarketParticipationAuthority
 from operations.universal_capability_graph import (
+    AssetFamily,
     CapabilityEvaluation,
     family_for_instrument,
 )
@@ -34,7 +35,6 @@ from portfolio.construction_models import TradeSide
 from portfolio.multi_asset_execution import (
     MultiAssetExecutionError,
     MultiAssetPaperExecutionOrchestrator,
-    MultiAssetQuote,
 )
 
 
@@ -129,7 +129,7 @@ class UniversalCapabilityPaperExecutionOrchestrator(
                 f"{profile.symbol} cannot increase exposure without an active Universal Capability Graph paper certification"
             )
         # Exit continuity: the canonical executor independently verifies exact owned
-        # identity and the eligible-universe publication.  A suspended capability is
+        # identity and the eligible-universe publication. A suspended capability is
         # allowed to reduce/exit but cannot create new exposure.
         return None
 
@@ -141,10 +141,11 @@ class UniversalCapabilityPaperExecutionOrchestrator(
         )
         family = family_for_instrument(profile.asset_class, profile.instrument_type)
         resolved_quote = quote
-        # Direct fixed-income quotes are conventionally percentages of par.  The
-        # universal contract expresses quantity in face-value units, so normalize the
-        # price before the legacy ledger performs its otherwise-correct notional math.
-        if family is not None and family.value == "fixed_income":
+        # Direct fixed-income quotes conventionally express percent of par. The legacy
+        # ledger wants currency per face-value unit, while the universal adapter itself
+        # knows the percent-of-par convention. Normalize only the ledger quote here and
+        # retain the original quote for the independent universal-contract check below.
+        if family is AssetFamily.FIXED_INCOME:
             resolved_quote = replace(
                 quote,
                 bid=quote.bid * 0.01,
@@ -161,6 +162,19 @@ class UniversalCapabilityPaperExecutionOrchestrator(
         if fill is None or evaluation is None:
             return fill, result, cash, position
 
+        # The universal adapter receives the market convention, not the ledger's
+        # normalized fixed-income unit price. For all other families these are equal.
+        reference_price = (
+            quote.bid if fill.side is TradeSide.SELL else quote.ask
+            if family is AssetFamily.FIXED_INCOME
+            else fill.fill_price_local
+        )
+        # Parenthesize explicitly because the conditional above spans two quote sides.
+        if family is AssetFamily.FIXED_INCOME:
+            reference_price = quote.bid if fill.side is TradeSide.SELL else quote.ask
+        else:
+            reference_price = fill.fill_price_local
+
         intent = PaperOrderIntent(
             instrument_identifier=profile.instrument_identifier,
             target_notional=fill.gross_amount_local,
@@ -169,7 +183,7 @@ class UniversalCapabilityPaperExecutionOrchestrator(
         view = NormalizedInvestmentView(
             instrument_identifier=profile.instrument_identifier,
             asset_family=evaluation.asset_family,
-            reference_price=fill.fill_price_local,
+            reference_price=reference_price,
             contract_multiplier=profile.contract_multiplier,
             trading_currency=profile.price_currency,
             settlement_currency=profile.settlement_currency,
