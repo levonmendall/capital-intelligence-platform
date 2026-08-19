@@ -6,6 +6,8 @@ from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from cio import CandidateAssetClass
 from evaluation.global_market_coverage import (
     GlobalOpportunityRegion,
@@ -286,5 +288,5 @@ def test_cross_market_leadership_change_requests_reassessment():
     )
 
     assert leader == "crypto"
-    assert scores["crypto"] == 0.10
+    assert scores["crypto"] == pytest.approx(0.10)
     assert any("rotated from equity to crypto" in reason for reason in reasons)
