@@ -21,7 +21,6 @@ from portfolio import (
     MultiAssetExecutionPolicy,
     MultiAssetExecutionStatus,
     MultiAssetInstrumentProfile,
-    MultiAssetPaperExecutionOrchestrator,
     SQLiteCanonicalPortfolioStore,
     SQLiteMultiAssetPaperExecutionStore,
 )
@@ -33,6 +32,9 @@ from portfolio.construction_models import (
     TradeSide,
 )
 from portfolio.multi_asset_execution import batch_to_dict
+from portfolio.universal_capability_execution import (
+    UniversalCapabilityPaperExecutionOrchestrator,
+)
 
 
 def _factory(specification: str):
@@ -290,7 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.eligible_universe_database
         )
         universe_store.verify_integrity()
-        batch = MultiAssetPaperExecutionOrchestrator(
+        batch = UniversalCapabilityPaperExecutionOrchestrator(
             session_provider=_factory(args.session_provider),
             quote_provider=_factory(args.quote_provider),
             store=execution_store,

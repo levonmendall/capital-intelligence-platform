@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping
@@ -31,6 +32,93 @@ def _candidate_paths(path: str | Path | None) -> tuple[Path, ...]:
             Path(portfolio_database).expanduser().with_name("active-paper-universe.json")
         )
     return tuple(dict.fromkeys(values))
+
+
+def _instrument_identifier(item: object) -> str:
+    return str(
+        getattr(item, "instrument_identifier", None)
+        or getattr(item, "instrument_id", "")
+    ).strip()
+
+
+def _certification_matches(item: object, certification: object) -> bool:
+    """Require exact structural identity for a current capability certification.
+
+    Current liquidity is already part of the certification that was produced from the
+    same point-in-time screening publication.  The persisted active-universe object
+    intentionally does not duplicate market metrics, so re-reading an absent ADV here
+    would incorrectly reject every dynamic instrument.  The next production
+    publication re-evaluates liquidity and automatically suspends degraded authority.
+    """
+
+    asset_class = getattr(item, "execution_asset_class", None) or getattr(
+        item, "asset_class", None
+    )
+    return bool(
+        str(getattr(item, "symbol", "")).strip().upper()
+        == str(getattr(certification, "symbol", "")).strip().upper()
+        and asset_class is getattr(certification, "asset_class", None)
+        and str(getattr(item, "venue", "")).strip().upper()
+        == str(getattr(certification, "venue", "")).strip().upper()
+        and str(getattr(item, "country_code", "")).strip().upper()
+        == str(getattr(certification, "country_code", "")).strip().upper()
+        and str(getattr(item, "instrument_type", "")).strip().lower()
+        == str(getattr(certification, "instrument_type", "")).strip().lower()
+    )
+
+
+def _strict_decision_authority_universe(
+    universe: FreePaperPilotUniverse,
+    *,
+    authority: CanonicalMarketParticipationAuthority,
+    evaluated_at: datetime,
+) -> FreePaperPilotUniverse:
+    """Keep bootstrap authority and exact active individual certifications only.
+
+    This is intentionally stricter than the compatibility path in the market registry.
+    A complete-looking execution profile is not enough at a production decision
+    timestamp: additional instruments must have an active append-only individual
+    capability certification produced from qualified point-in-time evidence.
+
+    Execution loads the complete active publication separately, so an owned instrument
+    whose certification is suspended can still be reduced or exited under the
+    execution authority's existing owned-instrument continuity controls.
+    """
+
+    bootstrap = authority.allocatable_instrument_identifiers
+    instrument_authority = authority.instrument_authority
+    selected = []
+    for item in universe.instruments:
+        identifier = _instrument_identifier(item)
+        if identifier in bootstrap:
+            selected.append(item)
+            continue
+        if instrument_authority is None:
+            continue
+        instrument_authority.store.verify_integrity()
+        certification = instrument_authority.store.active(
+            identifier,
+            evaluated_at=evaluated_at,
+        )
+        if certification is not None and _certification_matches(item, certification):
+            selected.append(item)
+    if not selected:
+        raise ValueError(
+            "no instrument has current paper-allocation authority at the decision timestamp"
+        )
+    return replace(
+        universe,
+        instruments=tuple(selected),
+        limitations=tuple(
+            dict.fromkeys(
+                (
+                    *universe.limitations,
+                    "Production CIO membership requires bootstrap authority or an active append-only Universal Capability Graph instrument certification at the exact decision timestamp.",
+                    "Provider visibility and complete-looking profile metadata cannot independently create paper allocation authority.",
+                )
+            )
+        ),
+    )
 
 
 def load_active_paper_universe_for_publication(
@@ -71,9 +159,19 @@ def load_active_paper_universe_for_publication(
             failures.append(f"{source}: universe payload is unavailable")
             continue
         universe = _free_paper_pilot_universe_from_payload(universe_payload)
-        return CanonicalMarketParticipationAuthority.load().decision_authority_universe(
+        capability_database = source.with_name("instrument-paper-eligibility.db")
+        authority = CanonicalMarketParticipationAuthority.load(
+            capability_database_path=capability_database,
+        )
+        if evaluated_at is not None:
+            return _strict_decision_authority_universe(
+                universe,
+                authority=authority,
+                evaluated_at=evaluated_at,
+            )
+        return authority.decision_authority_universe(
             universe,
-            evaluated_at=evaluated_at,
+            evaluated_at=None,
         )
     detail = "; ".join(failures) or "no active-universe path was configured"
     raise ValueError(
