@@ -166,14 +166,22 @@ def main() -> int:
 
     install_release_prequalification_parent_watchdog(memory_safe)
 
-    # Install last so production startup uses the independent operating-evidence gate
-    # rather than the legacy all-market prequalification gate. The operating qualifier
-    # is already process/memory bounded; comprehensive preparation remains background.
+    # Install the capability operating-evidence startup gate first. Comprehensive
+    # all-market preparation remains background/noncritical and cannot block the CIO.
     from operations.capability_scoped_render_bootstrap import (
         install as install_capability_scoped_render_bootstrap,
     )
 
     install_capability_scoped_render_bootstrap(memory_safe)
+
+    # Install the diagnostic seam last so both the capability startup wrapper and the
+    # legacy memory-safe launcher see capability-scoped environment semantics and share a
+    # single durable CIO diagnostic owner rather than starting competing children.
+    from operations.capability_scoped_release_diagnostic import (
+        install as install_capability_scoped_release_diagnostic,
+    )
+
+    install_capability_scoped_release_diagnostic(memory_safe)
     return run_service()
 
 

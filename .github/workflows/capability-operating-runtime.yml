@@ -8,12 +8,15 @@ on:
       - "operations/capability_operating_universe.py"
       - "operations/capability_scoped_discovery.py"
       - "operations/capability_scoped_render_bootstrap.py"
+      - "operations/capability_scoped_release_diagnostic.py"
       - "operations/qualified_paper_evidence.py"
       - "production_context_publication_runtime.py"
       - "run_bounded_capability_operating_evidence.py"
+      - "run_bounded_manual_cio_diagnostic.py"
       - "run_capability_operating_evidence.py"
       - "run_render_service_workspace.py"
       - "tests/test_capability_operating_evidence.py"
+      - "tests/test_capability_scoped_release_diagnostic.py"
       - "tests/test_capability_scoped_runtime_v2.py"
       - "tests/test_qualified_paper_evidence.py"
       - ".github/workflows/capability-operating-runtime.yml"
@@ -24,12 +27,15 @@ on:
       - "operations/capability_operating_universe.py"
       - "operations/capability_scoped_discovery.py"
       - "operations/capability_scoped_render_bootstrap.py"
+      - "operations/capability_scoped_release_diagnostic.py"
       - "operations/qualified_paper_evidence.py"
       - "production_context_publication_runtime.py"
       - "run_bounded_capability_operating_evidence.py"
+      - "run_bounded_manual_cio_diagnostic.py"
       - "run_capability_operating_evidence.py"
       - "run_render_service_workspace.py"
       - "tests/test_capability_operating_evidence.py"
+      - "tests/test_capability_scoped_release_diagnostic.py"
       - "tests/test_capability_scoped_runtime_v2.py"
       - "tests/test_qualified_paper_evidence.py"
       - ".github/workflows/capability-operating-runtime.yml"
@@ -41,9 +47,10 @@ permissions:
 jobs:
   capability-operating-runtime:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     env:
       PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
     steps:
       - name: Check out repository
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -71,3 +78,22 @@ jobs:
           tests/test_qualified_paper_evidence.py
           tests/test_capability_scoped_runtime_v2.py
           tests/test_capability_operating_evidence.py
+          tests/test_capability_scoped_release_diagnostic.py
+
+      - name: Run deterministic release validation
+        run: timeout --signal=TERM 7m python run_release_validation.py --report reports/capability-operating-release-validation.json
+
+      - name: Publish capability operating validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: capability-operating-validation-results
+          path: |
+            reports/capability-operating-release-validation.json
+            reports/runtime-connectivity-audit.json
+            reports/golden-end-to-end-gate.json
+            reports/event-quality-benchmark.json
+            reports/information-gap-audit.json
+            reports/pytest-results.xml
+          if-no-files-found: ignore
+          retention-days: 14
