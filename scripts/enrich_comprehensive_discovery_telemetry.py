@@ -33,6 +33,15 @@ _FIELD_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _SAFE_FAILURE_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,119}$")
+_GOVERNED_DEADLINE_FAILURE_TYPES = frozenset(
+    {
+        "supervisedcomponenttimeout",
+        "parentstalltimeout",
+        "nodestalltimeout",
+        "deadline_exceeded",
+        "deadlineexceeded",
+    }
+)
 
 
 def _nonnegative_int(value: object) -> int | None:
@@ -62,12 +71,17 @@ def _safe_lane(value: object) -> str | None:
 
 
 def _failure_reason(*, unit: str, failure_type: str | None) -> str:
-    """Classify already-redacted scheduler failures without weakening fail-closed state."""
+    """Classify redacted scheduler failures without conflating provider timeouts.
+
+    A provider-level ``TimeoutError`` is evidence that one lane operation failed and stays
+    ``discovery_lane_failure``. Only the certification supervisor's own bounded stall/
+    deadline classes are promoted to ``deadline_exceeded``.
+    """
 
     if unit == "provider-free-finalizer":
         return "finalizer_failure"
     normalized = str(failure_type or "").strip().lower()
-    if "timeout" in normalized or "deadline" in normalized:
+    if normalized in _GOVERNED_DEADLINE_FAILURE_TYPES or normalized.endswith("stalltimeout"):
         return "deadline_exceeded"
     return "discovery_lane_failure"
 
