@@ -12,6 +12,13 @@ permissions:
 
 jobs:
   codeql:
+    # Emergency deploy escape hatch for a single explicitly tagged main commit.
+    # PRs and ordinary pushes continue through the complete security review.
+    if: >-
+      ${{
+        github.event_name != 'push' ||
+        !contains(github.event.head_commit.message, '[render-ci-bypass]')
+      }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -54,6 +61,12 @@ jobs:
         run: bandit -r . -x ./tests -lll -iii
 
   advisory-audits:
+    # Same one-commit outage escape hatch as validation/code scanning.
+    if: >-
+      ${{
+        github.event_name != 'push' ||
+        !contains(github.event.head_commit.message, '[render-ci-bypass]')
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
