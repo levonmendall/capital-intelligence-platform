@@ -138,6 +138,9 @@ def test_capability_candidates_intersect_exact_operating_evidence(monkeypatch):
     )
 
     assert result.instruments == (dynamic_b,)
+    assert result.selected == (dynamic_b,)
+    assert result.screened_asset_count == 2
+    assert result.snapshot_covered_count == 1
     assert dynamic_c not in result.instruments
     assert result.scope_state == "capability_scoped"
     assert "fresh independent operating-evidence snapshot" in result.limitations[0]
@@ -169,6 +172,9 @@ def test_missing_operating_evidence_blocks_only_dynamic_candidates(monkeypatch):
     )
 
     assert result.instruments == ()
+    assert result.selected == ()
+    assert result.screened_asset_count == len(authorized.instruments)
+    assert result.snapshot_covered_count == 0
     assert "dynamic candidates are withheld" in result.limitations[0]
 
 
@@ -214,7 +220,32 @@ def test_us_equity_view_filters_by_canonical_asset_class(monkeypatch):
     )
 
     assert result.instruments == (stock,)
+    assert result.selected == (stock,)
+    assert result.screened_asset_count == 1
+    assert result.snapshot_covered_count == 1
     assert result.instruments[0].instrument_type == "common_stock"
+
+
+def test_capability_discovery_publication_metadata_is_self_consistent():
+    result = capability_scoped_discovery.CapabilityScopedDiscoveryResult(
+        as_of=AS_OF,
+        instruments=(object(),),
+        source_publication_identifier="eligible:test",
+        limitations=(),
+        screened_asset_count=2,
+        snapshot_covered_count=1,
+    )
+
+    assert result.selected == result.instruments
+    with pytest.raises(ValueError, match="snapshot_covered_count"):
+        capability_scoped_discovery.CapabilityScopedDiscoveryResult(
+            as_of=AS_OF,
+            instruments=(object(),),
+            source_publication_identifier="eligible:test",
+            limitations=(),
+            screened_asset_count=1,
+            snapshot_covered_count=0,
+        )
 
 
 def test_render_reset_epoch_archives_once_and_starts_fresh_250k(monkeypatch, tmp_path):
