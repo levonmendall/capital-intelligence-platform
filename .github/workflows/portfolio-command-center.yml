@@ -5,12 +5,14 @@ on:
     paths:
       - "portfolio_only_runtime.py"
       - "tests/test_crypto_style_portfolio_command_center.py"
+      - "tests/browser/test_portfolio_command_center_browser.py"
       - ".github/workflows/portfolio-command-center.yml"
   push:
     branches: [main]
     paths:
       - "portfolio_only_runtime.py"
       - "tests/test_crypto_style_portfolio_command_center.py"
+      - "tests/browser/test_portfolio_command_center_browser.py"
       - ".github/workflows/portfolio-command-center.yml"
 
 permissions:
@@ -38,11 +40,35 @@ jobs:
       - name: Install development dependencies
         run: pip install -r requirements-dev.txt
 
+      - name: Install browser-test dependencies
+        run: pip install -r requirements-browser.txt
+
       - name: Verify dependency consistency
         run: python -m pip check
 
       - name: Compile command center module
-        run: python -m py_compile portfolio_only_runtime.py
+        run: python -m py_compile portfolio_only_runtime.py tests/browser/test_portfolio_command_center_browser.py
+
+      - name: Locate preinstalled Chrome
+        shell: bash
+        run: |
+          CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME_BIN"
+          echo "CAPITAL_INTELLIGENCE_SYSTEM_CHROME=$CHROME_BIN" >> "$GITHUB_ENV"
 
       - name: Run command center regressions
         run: pytest -q tests/test_crypto_style_portfolio_command_center.py tests/test_capability_scoped_runtime_v2.py
+
+      - name: Run desktop and iPhone production command center browser gate
+        env:
+          CAPITAL_INTELLIGENCE_BROWSER_TESTS: "1"
+        run: pytest -q tests/browser/test_portfolio_command_center_browser.py
+
+      - name: Publish command center screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: portfolio-command-center-browser
+          path: reports/browser/portfolio-command-center-*.png
+          if-no-files-found: ignore
+          retention-days: 14
