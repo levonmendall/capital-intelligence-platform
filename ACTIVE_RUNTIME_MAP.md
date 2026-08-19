@@ -128,24 +128,66 @@ mounted and have been removed from the active repository.
 ```text
 run_autonomous_paper_operator.py --loop
   -> collect public information when due
-  -> evaluate material-change triggers
+  -> evaluate material-change and cross-market leadership triggers
   -> prepare certified complete-universe and production context
-  -> run scheduled or triggered CanonicalCIOCycle
-       opportunity qualification
-       exactly six specialist analyses
-       committee synthesis
-       CIO-only decision and initial target
-       independent portfolio construction
-       CIO-to-construction reconciliation
+       -> broad/global discovery and cheap first-pass screening
+       -> persist exact active-paper-universe publication
+       -> persist completed full-universe screening publication
+       -> ProductionCapabilityAuthority
+            -> build exact point-in-time InstrumentCapabilityEvidence
+            -> Universal Capability Graph evaluation
+            -> append certification/suspension through AutomaticInstrumentEligibilityFactory
+            -> persist production-capability-authority.json
+  -> bind production decision authority at the exact CIO timestamp
+       -> bootstrap instruments OR currently active exact capability certifications
+       -> provider visibility/profile completeness alone cannot create ownership authority
+  -> run scheduled or triggered GlobalOpportunityRotationCanonicalCIOCycle
+       -> opportunity qualification
+       -> common annualized marginal-compounding-value comparison across asset families
+       -> cross-market/global opportunity ranking
+       -> exactly six specialist analyses
+       -> committee synthesis
+       -> CIO-only decision and initial target
+       -> joint marginal-capital preview
+       -> independent portfolio construction
+       -> CIO-to-construction reconciliation
   -> publish pending construction
   -> attempt governed internal paper implementation
+       -> preserve complete active publication for safe reduction/exit continuity
+       -> new/increased dynamic exposure requires active exact capability certification
+       -> normalize paper intent by structural asset family
+            equities/funds -> shares
+            fixed income   -> face-value units
+            futures/options -> contracts
+            FX             -> base-currency units
+            crypto         -> asset units
+       -> canonical multi-asset session/quote/liquidity/cash/fill/accounting controls
+       -> universal quantity/lifecycle invariant must reconcile to the actual fill
   -> reconcile fills and publish canonical portfolio state
   -> publish alerts, thesis monitoring, learning evidence, and heartbeat
 ```
 
 This is the only supported process that may implement paper transactions. Streamlit
 and FastAPI project governed state but do not independently authorize or execute a
-portfolio change. Live-money authority remains disabled.
+portfolio change. The Universal Capability Graph and automatic eligibility factory
+may grant or suspend *paper eligibility* only; they cannot issue a CIO action or size
+capital. The universal paper contract constrains paper execution but cannot originate
+a trade. Live-money authority remains disabled.
+
+### Global opportunity reassessment
+
+The live reassessment scanner retains its schedule, deduplication, cooldown, market,
+company, and thesis-dependency controls and additionally measures relative leadership
+across the active opportunity set. A sufficiently large change in cross-market
+leadership may request a fresh canonical CIO cycle. It cannot manufacture a candidate,
+recommendation, target weight, construction, or fill.
+
+Global rotation readiness is audited across both economic domains and geography. The
+domain matrix covers equity, fixed income, credit, currencies, commodities, crypto,
+real estate, volatility/derivatives, and alternatives. The geographic matrix separately
+tracks North America, Europe, Japan, developed Asia-Pacific, and emerging markets,
+with global/non-geographic exposures tracked independently. Coverage reporting has no
+investment authority.
 
 ## Historical, backup, and operational paths
 
@@ -182,6 +224,8 @@ Documented CLI / CI commands
 - Exactly six advisory specialists.
 - CIO-only investment authority.
 - Risk-adjusted CIO initial target followed by independent construction.
+- Universal Capability Graph can grant/suspend dynamic *paper eligibility* only.
+- Universal paper contract constrains structural paper quantity/lifecycle only.
 - Fail-closed, point-in-time, append-only evidence and lineage.
-- Reconciled paper-only execution.
+- Reconciled paper-only execution with safe exit continuity.
 - No live-money authority.
