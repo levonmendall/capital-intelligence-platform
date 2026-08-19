@@ -1,0 +1,73 @@
+name: Validate Capability Operating Runtime
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "operations/capability_operating_evidence.py"
+      - "operations/capability_operating_universe.py"
+      - "operations/capability_scoped_discovery.py"
+      - "operations/capability_scoped_render_bootstrap.py"
+      - "operations/qualified_paper_evidence.py"
+      - "production_context_publication_runtime.py"
+      - "run_bounded_capability_operating_evidence.py"
+      - "run_capability_operating_evidence.py"
+      - "run_render_service_workspace.py"
+      - "tests/test_capability_operating_evidence.py"
+      - "tests/test_capability_scoped_runtime_v2.py"
+      - "tests/test_qualified_paper_evidence.py"
+      - ".github/workflows/capability-operating-runtime.yml"
+  push:
+    branches: [main]
+    paths:
+      - "operations/capability_operating_evidence.py"
+      - "operations/capability_operating_universe.py"
+      - "operations/capability_scoped_discovery.py"
+      - "operations/capability_scoped_render_bootstrap.py"
+      - "operations/qualified_paper_evidence.py"
+      - "production_context_publication_runtime.py"
+      - "run_bounded_capability_operating_evidence.py"
+      - "run_capability_operating_evidence.py"
+      - "run_render_service_workspace.py"
+      - "tests/test_capability_operating_evidence.py"
+      - "tests/test_capability_scoped_runtime_v2.py"
+      - "tests/test_qualified_paper_evidence.py"
+      - ".github/workflows/capability-operating-runtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capability-operating-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Verify dependency consistency
+        run: python -m pip check
+
+      - name: Run capability operating runtime regressions
+        run: >-
+          pytest -q
+          tests/test_qualified_paper_evidence.py
+          tests/test_capability_scoped_runtime_v2.py
+          tests/test_capability_operating_evidence.py

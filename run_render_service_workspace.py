@@ -156,9 +156,8 @@ def main() -> int:
         install_resume_aware_release_dag_projection,
     )
 
-    # The evidence plane may legitimately resume a still-fresh decision epoch. Install
-    # the current-attempt projection before importing the parent watchdog so every
-    # release-prequalification reader uses fresh journal updates rather than epoch age.
+    # The comprehensive research plane may legitimately resume a still-fresh discovery
+    # epoch. Install its progress projection before the legacy parent watchdog.
     install_resume_aware_release_dag_projection()
 
     from operations.release_prequalification_parent_watchdog import (
@@ -166,6 +165,15 @@ def main() -> int:
     )
 
     install_release_prequalification_parent_watchdog(memory_safe)
+
+    # Install last so production startup uses the independent operating-evidence gate
+    # rather than the legacy all-market prequalification gate. The operating qualifier
+    # is already process/memory bounded; comprehensive preparation remains background.
+    from operations.capability_scoped_render_bootstrap import (
+        install as install_capability_scoped_render_bootstrap,
+    )
+
+    install_capability_scoped_render_bootstrap(memory_safe)
     return run_service()
 
 
