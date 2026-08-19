@@ -9,7 +9,7 @@ operational adapters.
 
 Production decisions additionally bind the active-universe loader and market authority
 to the exact CIO timestamp and the capability database adjacent to canonical portfolio
-state.  This makes the Universal Capability Graph certification a real ownership gate
+state. This makes the Universal Capability Graph certification a real ownership gate
 without changing historical/rehearsal behavior.
 """
 
@@ -81,11 +81,32 @@ def _runtime_active_universe_loader(
     evaluated_at=None,
 ):
     timestamp = evaluated_at or getattr(_RUNTIME_AUTHORITY, "as_of", None)
-    return _load_active_paper_universe(
-        publication_identifier,
-        path=path,
-        evaluated_at=timestamp,
+    # Resolve through the facade global rather than a private immutable alias so the
+    # existing module-level monkeypatch contract remains intact for tests and
+    # operational adapters. The production default is the canonical loader imported
+    # by the implementation module.
+    loader = globals().get(
+        "load_active_paper_universe_for_publication",
+        _load_active_paper_universe,
     )
+    if loader is _runtime_active_universe_loader:
+        loader = _load_active_paper_universe
+    try:
+        return loader(
+            publication_identifier,
+            path=path,
+            evaluated_at=timestamp,
+        )
+    except TypeError as error:
+        # Older test doubles intentionally model the pre-evaluated-at loader contract.
+        # Preserve that narrow compatibility path without weakening the production
+        # loader, which accepts and enforces the exact decision timestamp.
+        if loader is _load_active_paper_universe:
+            raise
+        try:
+            return loader(publication_identifier, path=path)
+        except TypeError:
+            raise error
 
 
 class _RuntimeMarketParticipationAuthority:
@@ -95,7 +116,26 @@ class _RuntimeMarketParticipationAuthority:
             database_path = getattr(_RUNTIME_AUTHORITY, "capability_database", None)
             if database_path is not None:
                 kwargs["capability_database_path"] = database_path
-        return _CanonicalMarketParticipationAuthority.load(*args, **kwargs)
+        authority = globals().get(
+            "CanonicalMarketParticipationAuthority",
+            _CanonicalMarketParticipationAuthority,
+        )
+        if authority is _RuntimeMarketParticipationAuthority:
+            authority = _CanonicalMarketParticipationAuthority
+        try:
+            return authority.load(*args, **kwargs)
+        except TypeError as error:
+            # Preserve legacy/fake class loaders that predate the capability DB
+            # parameter. The real production authority accepts it and therefore never
+            # enters this compatibility branch.
+            if authority is _CanonicalMarketParticipationAuthority:
+                raise
+            fallback = dict(kwargs)
+            fallback.pop("capability_database_path", None)
+            try:
+                return authority.load(*args, **fallback)
+            except TypeError:
+                raise error
 
 
 def _synchronize_runtime_bindings() -> None:
