@@ -41,6 +41,32 @@ def _instrument_identifier(item: object) -> str:
     ).strip()
 
 
+def _certification_matches(item: object, certification: object) -> bool:
+    """Require exact structural identity for a current capability certification.
+
+    Current liquidity is already part of the certification that was produced from the
+    same point-in-time screening publication.  The persisted active-universe object
+    intentionally does not duplicate market metrics, so re-reading an absent ADV here
+    would incorrectly reject every dynamic instrument.  The next production
+    publication re-evaluates liquidity and automatically suspends degraded authority.
+    """
+
+    asset_class = getattr(item, "execution_asset_class", None) or getattr(
+        item, "asset_class", None
+    )
+    return bool(
+        str(getattr(item, "symbol", "")).strip().upper()
+        == str(getattr(certification, "symbol", "")).strip().upper()
+        and asset_class is getattr(certification, "asset_class", None)
+        and str(getattr(item, "venue", "")).strip().upper()
+        == str(getattr(certification, "venue", "")).strip().upper()
+        and str(getattr(item, "country_code", "")).strip().upper()
+        == str(getattr(certification, "country_code", "")).strip().upper()
+        and str(getattr(item, "instrument_type", "")).strip().lower()
+        == str(getattr(certification, "instrument_type", "")).strip().lower()
+    )
+
+
 def _strict_decision_authority_universe(
     universe: FreePaperPilotUniverse,
     *,
@@ -69,8 +95,12 @@ def _strict_decision_authority_universe(
             continue
         if instrument_authority is None:
             continue
-        assessment = instrument_authority.assess(item, evaluated_at=evaluated_at)
-        if assessment.paper_allocatable:
+        instrument_authority.store.verify_integrity()
+        certification = instrument_authority.store.active(
+            identifier,
+            evaluated_at=evaluated_at,
+        )
+        if certification is not None and _certification_matches(item, certification):
             selected.append(item)
     if not selected:
         raise ValueError(
