@@ -1,11 +1,11 @@
 """Supervise release evidence prequalification by durable child progress.
 
 The Render release bootstrap starts evidence qualification before a CIO request exists.
-Individual reference, public-live, and certification-DAG work units already have killable
-execution budgets and durable progress journals, but the parent bootstrap historically
-waited on the aggregate evidence subprocess with an unbounded ``subprocess.run``. A
-coordinator stall could therefore leave production in ``evidence_prequalifying`` forever
-while the public audit displayed an unrelated stale child journal.
+Individual reference, public-live, post-public provider preparation, and certification-DAG
+work units have durable progress journals, while the parent bootstrap historically waited
+on the aggregate evidence subprocess with an unbounded ``subprocess.run``. A coordinator
+stall could therefore leave production in ``evidence_prequalifying`` forever while the
+public audit displayed an unrelated stale child journal.
 
 This module installs a narrow subprocess proxy into the memory-safe Render bootstrap. It
 recognizes only the one-shot bounded continuous-evidence command, observes only
@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from types import ModuleType
 from typing import Mapping
 
+from operations.evidence_preparation_progress import load_evidence_preparation_progress
 from operations.public_live_requirement_qualification import load_public_live_requirement_progress
 from operations.release_evidence_prequalification import (
     load_release_certification_dag_progress,
@@ -50,6 +51,7 @@ _PUBLIC_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_REQUIREMENT_TIMEOUT_
 _PUBLIC_LEGACY_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_TIMEOUT_SECONDS"
 _DAG_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_NODE_TIMEOUT_SECONDS"
 _STARTUP_STALL_ENV = "CAPITAL_INTELLIGENCE_RELEASE_EVIDENCE_STARTUP_STALL_SECONDS"
+_PREPARATION_STALL_ENV = "CAPITAL_INTELLIGENCE_RELEASE_EVIDENCE_PREPARATION_STALL_SECONDS"
 _FINALIZER_STALL_ENV = "CAPITAL_INTELLIGENCE_RELEASE_EVIDENCE_FINALIZER_STALL_SECONDS"
 _DEFAULT_POLL_SECONDS = 5.0
 _DEFAULT_REFERENCE_TIMEOUT_SECONDS = 120.0
@@ -148,6 +150,31 @@ def _public_progress(values: Mapping[str, str], *, boundary: datetime) -> Prequa
     return PrequalificationProgress("public_live", active or "public-live-controller", updated_at, state, max(120.0, timeout + _COMPONENT_MARGIN_SECONDS), _count_metrics(progress))
 
 
+def _preparation_progress(values: Mapping[str, str], *, boundary: datetime) -> PrequalificationProgress | None:
+    """Project real post-public provider completions before the first DAG journal exists."""
+
+    progress = load_evidence_preparation_progress(values)
+    if not _current(progress, boundary=boundary):
+        return None
+    assert progress is not None
+    updated_at = _aware(progress.get("updated_at"))
+    assert updated_at is not None
+    component = str(progress.get("stage") or "post-public-provider-io").strip()
+    timeout = _positive_seconds(
+        values,
+        (_PREPARATION_STALL_ENV, _STARTUP_STALL_ENV),
+        _DEFAULT_STARTUP_STALL_SECONDS,
+    )
+    return PrequalificationProgress(
+        "discovery_preparation",
+        component or "post-public-provider-io",
+        updated_at,
+        "running",
+        timeout,
+        _nonnegative_metrics(progress.get("metrics")),
+    )
+
+
 def _dag_progress(values: Mapping[str, str], *, boundary: datetime) -> PrequalificationProgress | None:
     # A retry may reuse the original decision epoch. Require a current-attempt journal
     # update, but do not reject a still-valid resumed epoch merely because it predates this
@@ -175,7 +202,12 @@ def _dag_progress(values: Mapping[str, str], *, boundary: datetime) -> Prequalif
 def observe_current_prequalification_progress(values: Mapping[str, str], *, started_at: datetime) -> PrequalificationProgress:
     """Return the newest credential-safe journal updated by the current child attempt."""
     boundary = started_at.astimezone(timezone.utc)
-    candidates = [item for item in (_reference_progress(values, boundary=boundary), _public_progress(values, boundary=boundary), _dag_progress(values, boundary=boundary)) if item is not None]
+    candidates = [item for item in (
+        _reference_progress(values, boundary=boundary),
+        _public_progress(values, boundary=boundary),
+        _preparation_progress(values, boundary=boundary),
+        _dag_progress(values, boundary=boundary),
+    ) if item is not None]
     if candidates:
         return max(candidates, key=lambda item: item.updated_at)
     return PrequalificationProgress("reference_binding", "release-reference-manifest", boundary, "starting", _positive_seconds(values, (_STARTUP_STALL_ENV,), _DEFAULT_STARTUP_STALL_SECONDS), {})

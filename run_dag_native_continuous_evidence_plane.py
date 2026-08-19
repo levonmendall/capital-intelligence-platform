@@ -5,6 +5,11 @@ fresh process must install comprehensive-discovery runtime contracts before impo
 continuous-evidence owner; otherwise component-qualified maintenance can capture the legacy
 aggregate 540-second discovery supervisor before the DAG-native installer is imported.
 
+The evidence owner also performs provider-facing preparation after public-live qualification
+and before the first certification-DAG journal exists.  Genuine completed requests from that
+interval are persisted as non-authoritative progress so the parent no-progress supervisor
+does not mistake active discovery for a dead bootstrap.
+
 This bootstrap changes only operational supervision and observability.  It does not change
 market scope, evidence freshness/completeness, screening, CIO authority, construction,
 execution, or paper-only controls.
@@ -23,6 +28,15 @@ def install_and_verify_dag_native_runtime() -> None:
     """Install the runtime contract and fail closed if any legacy seam remains active."""
 
     install_comprehensive_discovery_runtime_contract()
+
+    from operations.evidence_preparation_progress import (
+        install_post_public_provider_progress,
+    )
+
+    # Install only after the DAG contract is authoritative.  This hook runs in the
+    # disposable evidence-owner interpreter; spawned lane workers have their own progress
+    # transport and start from fresh interpreters.
+    install_post_public_provider_progress()
 
     from operations import authoritative_comprehensive_discovery as authoritative
     from operations import component_qualified_evidence_maintenance as maintenance
