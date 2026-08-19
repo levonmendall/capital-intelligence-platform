@@ -12,6 +12,7 @@ CIO authority, construction, execution, or paper-only control is changed.
 
 from __future__ import annotations
 
+from collections.abc import Sized
 from typing import Callable, Mapping, Sequence
 
 from operations import comprehensive_market_discovery_legacy as legacy
@@ -41,26 +42,40 @@ def run_with_canonical_work_progress(
             mapped = super().map(fn, *iterables, **kwargs)
             if str(getattr(self, "_thread_name_prefix", "")) != "deep-market-evidence":
                 return mapped
+            first_iterable = iterables[0] if iterables else ()
+            map_total = len(first_iterable) if isinstance(first_iterable, Sized) else None
+            map_completed = 0
+            last_emitted = 0
 
             def completed_results():
+                nonlocal map_completed, last_emitted
                 for result in mapped:
+                    map_completed += 1
                     processed_records[0] += 1
-                    completed = processed_records[0]
-                    if (
-                        completed % _PROGRESS_RECORD_INTERVAL == 0
-                        or completed == total_records
-                    ):
+                    should_emit = (
+                        map_completed % _PROGRESS_RECORD_INTERVAL == 0
+                        or (map_total is not None and map_completed == map_total)
+                    )
+                    if should_emit:
+                        delta = map_completed - last_emitted
+                        last_emitted = map_completed
                         record_certification_work_progress(
                             asset_class,
-                            processed_records=min(completed, total_records),
+                            processed_records=min(processed_records[0], total_records),
                             total_records=total_records,
-                            chunk_records=(
-                                _PROGRESS_RECORD_INTERVAL
-                                if completed % _PROGRESS_RECORD_INTERVAL == 0
-                                else completed % _PROGRESS_RECORD_INTERVAL
-                            ),
+                            chunk_records=delta,
                         )
                     yield result
+                # ``map_total`` is normally known because the canonical probe supplies a
+                # tuple. Preserve a final real-completion event for any future sizedness-
+                # neutral iterable without manufacturing periodic time-based heartbeats.
+                if map_completed > last_emitted:
+                    record_certification_work_progress(
+                        asset_class,
+                        processed_records=min(processed_records[0], total_records),
+                        total_records=total_records,
+                        chunk_records=map_completed - last_emitted,
+                    )
 
             return completed_results()
 
