@@ -16,6 +16,13 @@ permissions:
 
 jobs:
   validate:
+    # Render deploy escape hatch: only an explicitly tagged push to main skips
+    # runner-dependent CI. PRs, workflow dispatches, and ordinary pushes run all gates.
+    if: >-
+      ${{
+        github.event_name != 'push' ||
+        !contains(github.event.head_commit.message, '[render-ci-bypass]')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
