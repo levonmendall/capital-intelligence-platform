@@ -152,7 +152,7 @@ jobs:
 
       - name: Upload credential-safe production telemetry
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: render-production-telemetry-${{ env.EXPECTED_RELEASE }}-${{ github.run_id }}
           path: |
