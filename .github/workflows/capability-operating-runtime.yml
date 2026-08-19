@@ -63,6 +63,31 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Inspect credential-safe production failure detail
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+
+          url = "https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json"
+          request = urllib.request.Request(
+              url,
+              method="GET",
+              headers={"Accept": "application/json", "User-Agent": "capital-intelligence-ci-diagnostic-inspector/1.0"},
+          )
+          with urllib.request.urlopen(request, timeout=10.0) as response:
+              payload = json.loads(response.read().decode("utf-8"))
+          assert payload.get("credential_safe") is True
+          assert payload.get("paper_only") is True
+          assert payload.get("real_money_authorized") is False
+          detail = str(payload.get("detail") or "")[:1000]
+          print("production_state=", payload.get("state"))
+          print("production_stage=", payload.get("stage"))
+          print("production_context_attempt_state=", payload.get("context_attempt_state"))
+          print("production_detail=", detail)
+          PY
+
       - name: Install locked runtime dependencies
         run: pip install --require-hashes -r requirements.lock
 
