@@ -2,19 +2,19 @@
 
 The governed publisher owns production-context construction. This module retains the
 shared compatibility helpers consumed by that publisher and provides the single public
-entrypoint used by production callers. Broad discovery, broker readiness, cash evidence,
-and heavy paper evidence default to provider-free qualified snapshot consumers in
-production; explicit probes remain available for tests and rehearsals.
+entrypoint used by production callers. Broker readiness, cash evidence, market evidence,
+and dynamic candidates default to provider-free qualified consumers in production;
+explicit probes remain available for tests and rehearsals.
 
-After a governed publication is complete, this runtime also reconciles its exact
-active universe through the Universal Capability Graph and append-only instrument
-paper-eligibility authority before the CIO can consume the publication.
+After a governed publication is complete, this runtime also reconciles its exact active
+universe through the Universal Capability Graph and append-only instrument paper-
+eligibility authority before the CIO can consume the publication.
 
 On Render the canonical operating path is capability-scoped by default. Comprehensive
-all-market discovery remains an independent certification/coverage process; the CIO
-carries forward only exact instruments from the latest active publication whose paper
-capability authority is still current. A failure in an unrelated market family therefore
-cannot prevent independently qualified instruments from reaching the governed CIO.
+all-market discovery remains an independent certification/coverage process. The CIO uses
+only exact current capability-authorized instruments that are also present in the fresh
+independent operating-evidence snapshot. A failure in unrelated discovery therefore cannot
+prevent independently qualified instruments from reaching the governed CIO.
 """
 
 from __future__ import annotations
@@ -256,11 +256,21 @@ def prepare_production_context_for_cycle(
 
     from production_context_publication_governed import prepare_governed_production_context_for_cycle
 
+    capability_scoped = _capability_scoped_operation_enabled()
     if equity_discovery_probe is None:
-        from operations.qualified_equity_discovery import discover_us_equities as qualified_equity_discovery_probe
-        equity_discovery_probe = qualified_equity_discovery_probe
+        if capability_scoped:
+            from operations.capability_scoped_discovery import (
+                discover_currently_certified_us_equities,
+            )
 
-    snapshot_probe_active = False
+            equity_discovery_probe = discover_currently_certified_us_equities
+        else:
+            from operations.qualified_equity_discovery import (
+                discover_us_equities as qualified_equity_discovery_probe,
+            )
+
+            equity_discovery_probe = qualified_equity_discovery_probe
+
     if evidence_probe is None:
         from operations.qualified_paper_evidence import (
             production_snapshot_probe_enabled,
@@ -280,7 +290,7 @@ def prepare_production_context_for_cycle(
 
     comprehensive_discovery_probe = None
     comprehensive_discovery_required = None
-    if _capability_scoped_operation_enabled():
+    if capability_scoped:
         from operations.capability_scoped_discovery import (
             discover_currently_certified_capabilities,
         )
