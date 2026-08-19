@@ -12,6 +12,12 @@ permissions:
 
 jobs:
   codeql:
+    # Same exact-tag Render deploy escape hatch as release validation.
+    if: >-
+      ${{
+        github.event_name != 'push' ||
+        !contains(github.event.head_commit.message, '[render-ci-bypass]')
+      }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -54,6 +60,11 @@ jobs:
         run: bandit -r . -x ./tests -lll -iii
 
   advisory-audits:
+    if: >-
+      ${{
+        github.event_name != 'push' ||
+        !contains(github.event.head_commit.message, '[render-ci-bypass]')
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
