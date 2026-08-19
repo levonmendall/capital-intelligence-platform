@@ -4,7 +4,7 @@ Spawned certification lanes can outlive the ordinary stall budget while genuine 
 still completing. This module scopes a lightweight Python profiler to one spawned lane and
 counts only credential-safe completion events from the existing canonical per-record
 feature builder and governed fallback routers. A single reporter thread publishes those
-counts through the existing diagnostic progress transport.
+counts through the existing child progress transport.
 
 No provider call is wrapped or replaced. No market membership, evidence rule, ordering,
 threshold, CIO authority, construction, execution, or paper-only control is changed.
@@ -20,17 +20,18 @@ from typing import Callable, Mapping, Sequence
 from operations.certification_work_progress import record_certification_work_progress
 
 
-_TARGET_RETURNS = frozenset(
-    {
-        ("operations.comprehensive_market_discovery_legacy", "build_record_features"),
-        ("providers.redundant_market_history", "fetch"),
-        ("providers.alpaca_crypto_history", "daily_history_many"),
-        ("providers.redundant_options", "latest_daily_bars"),
-        ("providers.redundant_options", "select_contracts"),
-        ("providers.tradier_market_data", "active_option_chain"),
-        ("operations._redundant_market_probe_core", "_corroborate_options"),
-    }
-)
+# True means the event is also a completed per-record primary evidence evaluation. Other
+# events are bounded provider/router work units that advance the stall clock without
+# claiming another catalog record has reached terminal evidence disposition.
+_TARGET_RETURNS = {
+    ("operations.comprehensive_market_discovery_legacy", "build_record_features"): True,
+    ("providers.redundant_market_history", "fetch"): False,
+    ("providers.alpaca_crypto_history", "daily_history_many"): False,
+    ("providers.redundant_options", "latest_daily_bars"): False,
+    ("providers.redundant_options", "select_contracts"): False,
+    ("providers.tradier_market_data", "active_option_chain"): False,
+    ("operations._redundant_market_probe_core", "_corroborate_options"): False,
+}
 _REPORT_INTERVAL_SECONDS = 0.25
 _REPORTER_JOIN_SECONDS = 2.0
 
@@ -38,15 +39,18 @@ _REPORTER_JOIN_SECONDS = 2.0
 class _CompletedWorkCounter:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._completed = 0
+        self._work_units = 0
+        self._record_units = 0
 
-    def increment(self) -> None:
+    def increment(self, *, record_completed: bool) -> None:
         with self._lock:
-            self._completed += 1
+            self._work_units += 1
+            if record_completed:
+                self._record_units += 1
 
-    def value(self) -> int:
+    def value(self) -> tuple[int, int]:
         with self._lock:
-            return self._completed
+            return self._work_units, self._record_units
 
 
 def _work_profile(counter: _CompletedWorkCounter):
@@ -54,8 +58,9 @@ def _work_profile(counter: _CompletedWorkCounter):
         if event != "return":
             return profile
         module = str(frame.f_globals.get("__name__") or "")
-        if (module, frame.f_code.co_name) in _TARGET_RETURNS:
-            counter.increment()
+        record_completed = _TARGET_RETURNS.get((module, frame.f_code.co_name))
+        if record_completed is not None:
+            counter.increment(record_completed=record_completed)
         return profile
 
     return profile
@@ -82,22 +87,24 @@ def run_with_canonical_work_progress(
         get_thread_profile() if callable(get_thread_profile) else None
     )
 
-    emitted = [0]
+    emitted_work_units = [0]
+    publication_lock = threading.Lock()
 
     def publish_if_advanced() -> None:
-        completed = counter.value()
-        if completed <= emitted[0]:
-            return
-        delta = completed - emitted[0]
-        emitted[0] = completed
-        record_certification_work_progress(
-            asset_class,
-            processed_records=(
-                min(completed, total_records) if total_records else completed
-            ),
-            total_records=total_records,
-            chunk_records=delta,
-        )
+        work_units, record_units = counter.value()
+        with publication_lock:
+            if work_units <= emitted_work_units[0]:
+                return
+            delta = work_units - emitted_work_units[0]
+            emitted_work_units[0] = work_units
+            record_certification_work_progress(
+                asset_class,
+                processed_records=(
+                    min(record_units, total_records) if total_records else record_units
+                ),
+                total_records=total_records,
+                chunk_records=delta,
+            )
 
     def reporter() -> None:
         while not stop.wait(_REPORT_INTERVAL_SECONDS):
@@ -106,7 +113,7 @@ def run_with_canonical_work_progress(
 
     # Install before the probe creates its ThreadPoolExecutor so worker threads inherit
     # the same completion observer. The callback only increments an in-memory counter;
-    # all durable publication is serialized by the reporter thread.
+    # all transport publication is serialized by the reporter thread.
     sys.setprofile(profile)
     threading.setprofile(profile)
     report_thread = threading.Thread(
