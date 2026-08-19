@@ -16,14 +16,6 @@ permissions:
 
 jobs:
   validate:
-    # Emergency deploy escape hatch for a single explicitly tagged main commit.
-    # This is needed only when GitHub fails before allocating a runner (zero steps).
-    # PRs and every ordinary push continue through the complete validation suite.
-    if: >-
-      ${{
-        github.event_name != 'push' ||
-        !contains(github.event.head_commit.message, '[render-ci-bypass]')
-      }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
