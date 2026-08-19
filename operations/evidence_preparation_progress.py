@@ -212,22 +212,33 @@ def install_post_public_provider_progress(values: Mapping[str, str] | None = Non
             # Observability must never alter the provider call's own result or exception.
             try:
                 public = load_public_live_requirement_progress(resolved)
-                state = str(public.get("state") or "").strip().lower() if isinstance(public, Mapping) else ""
-                pending = int(public.get("pending_count") or 0) if isinstance(public, Mapping) else 0
-                failed = int(public.get("failed_count") or 0) if isinstance(public, Mapping) else 0
-                if state != "qualified" or pending or failed:
-                    return
-                with count_lock:
-                    completed[0] += 1
-                    observed = completed[0]
-                record_evidence_preparation_progress(
-                    resolved,
-                    completed_provider_calls=observed,
+                state = (
+                    str(public.get("state") or "").strip().lower()
+                    if isinstance(public, Mapping)
+                    else ""
                 )
+                pending = (
+                    int(public.get("pending_count") or 0)
+                    if isinstance(public, Mapping)
+                    else 0
+                )
+                failed = (
+                    int(public.get("failed_count") or 0)
+                    if isinstance(public, Mapping)
+                    else 0
+                )
+                if state == "qualified" and not pending and not failed:
+                    with count_lock:
+                        completed[0] += 1
+                        observed = completed[0]
+                    record_evidence_preparation_progress(
+                        resolved,
+                        completed_provider_calls=observed,
+                    )
             except Exception:
                 # The journal is supervision-only.  If it cannot advance, the unchanged
                 # parent watchdog remains fail-closed and will stop a genuinely silent run.
-                return
+                pass
 
     request_with_progress._post_public_provider_progress = True  # type: ignore[attr-defined]
     requests.sessions.Session.request = request_with_progress
