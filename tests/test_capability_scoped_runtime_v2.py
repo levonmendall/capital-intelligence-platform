@@ -4,6 +4,8 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
+
 import portfolio_only_runtime
 import production_context_publication_governed
 import production_context_publication_runtime
@@ -15,6 +17,15 @@ from portfolio.state import SQLiteCanonicalPortfolioStore
 
 
 AS_OF = datetime(2026, 8, 19, 18, 0, tzinfo=timezone.utc)
+
+
+def _dynamic(template, *, suffix: str, symbol: str):
+    return replace(
+        template,
+        symbol=symbol,
+        instrument_identifier=f"{template.instrument_identifier}:{suffix}",
+        name=f"Dynamic {suffix}",
+    )
 
 
 def test_render_context_uses_capability_scoped_candidates_without_global_gate(monkeypatch):
@@ -92,14 +103,16 @@ def test_local_context_keeps_full_discovery_behavior_unless_opted_in(monkeypatch
 
 
 def test_capability_candidates_intersect_exact_operating_evidence(monkeypatch):
-    universe = load_free_paper_pilot_universe()
+    base = load_free_paper_pilot_universe()
+    dynamic_a = _dynamic(base.instruments[0], suffix="a", symbol="DYNA")
+    dynamic_b = _dynamic(base.instruments[1], suffix="b", symbol="DYNB")
+    dynamic_c = _dynamic(base.instruments[2], suffix="c", symbol="DYNC")
     authorized = replace(
-        universe,
+        base,
         identifier="active-publication:test",
-        instruments=universe.instruments[:3],
+        instruments=(*base.instruments, dynamic_a, dynamic_b, dynamic_c),
     )
     contracts = capability_scoped_discovery._instrument_contracts(authorized)
-    first, second, third = authorized.instruments
 
     monkeypatch.setattr(
         capability_scoped_discovery,
@@ -115,24 +128,25 @@ def test_capability_candidates_intersect_exact_operating_evidence(monkeypatch):
         capability_scoped_discovery,
         "_current_evidence_contracts",
         lambda _as_of: {
-            second.instrument_identifier: contracts[second.instrument_identifier],
+            dynamic_b.instrument_identifier: contracts[dynamic_b.instrument_identifier],
         },
     )
 
     result = capability_scoped_discovery.discover_currently_certified_capabilities(
         as_of=AS_OF,
-        excluded_symbols=(first.symbol,),
+        excluded_symbols=tuple(item.symbol for item in base.instruments) + (dynamic_a.symbol,),
     )
 
-    assert result.instruments == (second,)
-    assert third not in result.instruments
+    assert result.instruments == (dynamic_b,)
+    assert dynamic_c not in result.instruments
     assert result.scope_state == "capability_scoped"
     assert "fresh independent operating-evidence snapshot" in result.limitations[0]
 
 
 def test_missing_operating_evidence_blocks_only_dynamic_candidates(monkeypatch):
-    universe = load_free_paper_pilot_universe()
-    authorized = replace(universe, instruments=universe.instruments[:2])
+    base = load_free_paper_pilot_universe()
+    dynamic = _dynamic(base.instruments[0], suffix="optional", symbol="DYNX")
+    authorized = replace(base, instruments=(*base.instruments, dynamic))
 
     monkeypatch.setattr(
         capability_scoped_discovery,
@@ -159,9 +173,9 @@ def test_missing_operating_evidence_blocks_only_dynamic_candidates(monkeypatch):
 
 
 def test_us_equity_view_filters_by_canonical_asset_class(monkeypatch):
-    universe = load_free_paper_pilot_universe()
+    base = load_free_paper_pilot_universe()
     stock = replace(
-        universe.instruments[0],
+        base.instruments[0],
         symbol="ACME",
         instrument_identifier="instrument:us-equity:acme",
         name="Acme Corporation",
@@ -171,11 +185,10 @@ def test_us_equity_view_filters_by_canonical_asset_class(monkeypatch):
         maximum_weight=0.01,
         issuer_cik="0000000001",
     )
-    non_stock = universe.instruments[0]
     authorized = replace(
-        universe,
+        base,
         identifier="authorized:test",
-        instruments=(stock, non_stock),
+        instruments=(*base.instruments, stock),
     )
     contracts = capability_scoped_discovery._instrument_contracts(authorized)
 
@@ -197,6 +210,7 @@ def test_us_equity_view_filters_by_canonical_asset_class(monkeypatch):
 
     result = capability_scoped_discovery.discover_currently_certified_us_equities(
         as_of=AS_OF,
+        excluded_symbols=tuple(item.symbol for item in base.instruments),
     )
 
     assert result.instruments == (stock,)
@@ -263,4 +277,4 @@ def test_portfolio_only_presentation_defaults_on_render(monkeypatch):
             {"created_at": "2", "nav": 275000.0},
             {"created_at": "3", "nav": 247500.0},
         ]
-    ) == -0.1
+    ) == pytest.approx(-0.1)
