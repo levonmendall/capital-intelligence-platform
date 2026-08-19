@@ -101,15 +101,38 @@ def _current_evidence_contracts(evaluated_at: datetime) -> dict[str, dict[str, o
 
 @dataclass(frozen=True, slots=True)
 class CapabilityScopedDiscoveryResult:
-    """Provider-free view of exact instruments whose authority and evidence are current."""
+    """Provider-free view of exact instruments whose authority and evidence are current.
+
+    The governed production-context publisher historically consumed broad-discovery
+    metadata (`screened_asset_count`, `snapshot_covered_count`, and `selected`) in addition
+    to the discovered instrument contracts. Capability-scoped discovery supplies the same
+    truthful publication metadata without pretending that asynchronous comprehensive
+    discovery ran: ``screened_asset_count`` counts current authorized instruments that
+    survive the view filters, while ``snapshot_covered_count``/``selected`` count the exact
+    subset also present in the fresh operating-evidence snapshot.
+    """
 
     as_of: datetime
     instruments: tuple[object, ...]
     source_publication_identifier: str | None
     limitations: tuple[str, ...]
     observed_prices: tuple[tuple[str, float, str], ...] = ()
-    policy_version: str = "capability-scoped-operating-discovery.v5"
+    screened_asset_count: int = 0
+    snapshot_covered_count: int = 0
+    policy_version: str = "capability-scoped-operating-discovery.v6-publication-metadata"
     scope_state: str = "capability_scoped"
+
+    def __post_init__(self) -> None:
+        if self.screened_asset_count < 0 or self.snapshot_covered_count < 0:
+            raise ValueError("capability discovery counts cannot be negative")
+        if self.snapshot_covered_count != len(self.instruments):
+            raise ValueError(
+                "snapshot_covered_count must equal the exact selected instrument count"
+            )
+        if self.snapshot_covered_count > self.screened_asset_count:
+            raise ValueError(
+                "snapshot-covered instruments cannot exceed screened authorized instruments"
+            )
 
     @property
     def identifier(self) -> str:
@@ -129,6 +152,12 @@ class CapabilityScopedDiscoveryResult:
     def security_master_snapshot_identifier(self) -> str:
         return f"capability-operating:{self.source_publication_identifier or 'bootstrap-only'}"
 
+    @property
+    def selected(self) -> tuple[object, ...]:
+        """Legacy publication-compatible name for the exact operable selection."""
+
+        return self.instruments
+
     def instruments_for_holdings(self, _held_symbols: Iterable[str]) -> tuple[object, ...]:
         return self.instruments
 
@@ -141,7 +170,6 @@ def _current_candidates(
 ) -> CapabilityScopedDiscoveryResult:
     publication_identifier = _current_publication_identifier()
     authorized = load_current_authorized_universe(as_of=evaluated_at)
-    evidence_contracts = _current_evidence_contracts(evaluated_at)
     exclusions = {
         str(item).strip().upper()
         for item in excluded_symbols
@@ -158,6 +186,19 @@ def _current_candidates(
                 "Bootstrap instruments remain governed separately and comprehensive discovery continues asynchronously.",
             ),
         )
+
+    authorized_contracts = _instrument_contracts(authorized)
+    screened = tuple(
+        item
+        for item in authorized.instruments
+        if str(getattr(item, "symbol", "")).strip().upper() not in exclusions
+        and (
+            not us_equities_only
+            or getattr(item, "execution_asset_class", None)
+            is CandidateAssetClass.US_EQUITY
+        )
+    )
+    evidence_contracts = _current_evidence_contracts(evaluated_at)
     if evidence_contracts is None:
         return CapabilityScopedDiscoveryResult(
             as_of=evaluated_at,
@@ -167,29 +208,31 @@ def _current_candidates(
                 "Fresh capability operating evidence is unavailable; dynamic candidates are withheld for this CIO cycle without changing their certification state.",
                 "No stale or structurally changed instrument receives paper-allocation authority.",
             ),
+            screened_asset_count=len(screened),
+            snapshot_covered_count=0,
         )
 
-    authorized_contracts = _instrument_contracts(authorized)
-    selected = []
-    for item in authorized.instruments:
-        symbol = str(getattr(item, "symbol", "")).strip().upper()
-        identifier = str(getattr(item, "instrument_identifier", "")).strip()
-        if symbol in exclusions:
-            continue
-        if evidence_contracts.get(identifier) != authorized_contracts.get(identifier):
-            continue
-        if us_equities_only and getattr(item, "execution_asset_class", None) is not CandidateAssetClass.US_EQUITY:
-            continue
-        selected.append(item)
+    selected = tuple(
+        item
+        for item in screened
+        if evidence_contracts.get(
+            str(getattr(item, "instrument_identifier", "")).strip()
+        )
+        == authorized_contracts.get(
+            str(getattr(item, "instrument_identifier", "")).strip()
+        )
+    )
 
     return CapabilityScopedDiscoveryResult(
         as_of=evaluated_at,
-        instruments=tuple(selected),
+        instruments=selected,
         source_publication_identifier=publication_identifier,
         limitations=(
             "Candidate membership requires exact current instrument capability authority and exact membership in the fresh independent operating-evidence snapshot.",
             "Comprehensive all-market discovery can expand future active publications but cannot block this current operating set.",
         ),
+        screened_asset_count=len(screened),
+        snapshot_covered_count=len(selected),
     )
 
 
