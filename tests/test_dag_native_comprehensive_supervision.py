@@ -104,11 +104,11 @@ def test_lane_timeout_does_not_discard_independent_success(
             (fast, slow),
             _TimedRunner(
                 slow_node_id=slow.node_id,
-                delay_seconds=2.0,
+                delay_seconds=4.0,
                 evidence_count=2,
             ),
         )
-    assert time.monotonic() - started < 1.5
+    assert time.monotonic() - started < 3.0
 
     runtime = json.loads(_runtime_journal_path(tmp_path, epoch).read_text(encoding="utf-8"))
     assert runtime["node_states"][fast.node_id]["state"] == "qualified"
