@@ -103,6 +103,21 @@ CAPABILITY_CONTRACTS: tuple[CapabilityContract, ...] = (
         ),
     ),
     CapabilityContract(
+        name="global_marginal_compounding_value",
+        lifecycle=ComponentLifecycle.DECISION_INPUT,
+        producers=("portfolio.marginal_compounding_value",),
+        consumers=("portfolio.global_rotation", "portfolio.global_compound_optimizer"),
+        runtime_entrypoints=("run_scheduler", "run_autonomous_paper_operator"),
+        influence_targets=(
+            "global_opportunity_rank",
+            "marginal_capital_utility",
+        ),
+        counterfactual_tests=("tests/test_global_opportunity_goal_certification.py",),
+        notes=(
+            "Cross-asset alternatives compete on annualized expected log growth after costs, downside, uncertainty, liquidity, and the same opportunity-cost hurdle; it cannot bypass CIO or construction authority.",
+        ),
+    ),
+    CapabilityContract(
         name="active_investor_expression_and_lifecycle",
         lifecycle=ComponentLifecycle.GOVERNED_ADVISORY,
         producers=("portfolio.active_investor",),
@@ -143,6 +158,18 @@ CAPABILITY_CONTRACTS: tuple[CapabilityContract, ...] = (
         notes=("Monitoring may request reassessment but cannot authorize a portfolio change.",),
     ),
     CapabilityContract(
+        name="global_opportunity_reassessment",
+        lifecycle=ComponentLifecycle.GOVERNED_ADVISORY,
+        producers=("operations.global_opportunity_reassessment",),
+        consumers=("operations.cio_reassessment",),
+        runtime_entrypoints=("run_autonomous_paper_operator",),
+        influence_targets=("canonical_cio_reassessment_request",),
+        counterfactual_tests=("tests/test_global_opportunity_goal_certification.py",),
+        notes=(
+            "Cross-market leadership changes may request a fresh canonical CIO cycle; they cannot create a recommendation, target, construction, or fill.",
+        ),
+    ),
+    CapabilityContract(
         name="causal_intelligence_sidecar",
         lifecycle=ComponentLifecycle.SHADOW,
         producers=("evaluation.causal_intelligence_runtime",),
@@ -173,29 +200,57 @@ CAPABILITY_CONTRACTS: tuple[CapabilityContract, ...] = (
     ),
     CapabilityContract(
         name="universal_capability_graph",
-        lifecycle=ComponentLifecycle.SHADOW,
+        lifecycle=ComponentLifecycle.DECISION_INPUT,
         producers=("operations.universal_capability_graph",),
-        require_import_path=False,
+        consumers=(
+            "operations.production_capability_authority",
+            "portfolio.universal_capability_execution",
+        ),
+        runtime_entrypoints=(
+            "run_scheduler",
+            "run_autonomous_paper_operator",
+            "run_multi_asset_paper_execution",
+        ),
+        influence_targets=(
+            "instrument_paper_eligibility",
+            "paper_execution_capability_gate",
+        ),
+        counterfactual_tests=(
+            "tests/test_universal_capability_graph.py",
+            "tests/test_global_opportunity_goal_certification.py",
+        ),
         notes=(
-            "The graph is implemented and validated but remains shadow until the production eligibility boundary consumes it authoritatively.",
+            "Qualified point-in-time evidence is evaluated into exact operational capability proof before dynamic instruments may enter production paper authority.",
         ),
     ),
     CapabilityContract(
         name="automatic_instrument_eligibility_factory",
-        lifecycle=ComponentLifecycle.SHADOW,
+        lifecycle=ComponentLifecycle.AUTHORITATIVE,
         producers=("operations.instrument_eligibility_factory",),
-        require_import_path=False,
+        consumers=("operations.production_capability_authority",),
+        runtime_entrypoints=("run_scheduler", "run_autonomous_paper_operator"),
+        influence_targets=("append_only_instrument_paper_eligibility"),
+        counterfactual_tests=(
+            "tests/test_universal_capability_graph.py",
+            "tests/test_global_opportunity_goal_certification.py",
+        ),
         notes=(
-            "Automatic promotion remains shadow until its reconcile path is called by a production evidence owner.",
+            "The production evidence owner calls reconcile after complete screening; certifiable graphs append exact paper authority and degraded or omitted graphs append suspension. CIO authority remains separate.",
         ),
     ),
     CapabilityContract(
         name="universal_paper_contract",
-        lifecycle=ComponentLifecycle.SHADOW,
+        lifecycle=ComponentLifecycle.AUTHORITATIVE,
         producers=("operations.universal_paper_contract",),
-        require_import_path=False,
+        consumers=("portfolio.universal_capability_execution",),
+        runtime_entrypoints=("run_multi_asset_paper_execution",),
+        influence_targets=("paper_order_quantity_and_asset_lifecycle_invariant",),
+        counterfactual_tests=(
+            "tests/test_universal_capability_graph.py",
+            "tests/test_global_opportunity_goal_certification.py",
+        ),
         notes=(
-            "Normalized universal paper intents remain shadow while the legacy multi-asset execution contract is authoritative.",
+            "Every new paper fill is reconciled to a normalized asset-family instruction while the mature multi-asset ledger retains session, liquidity, cash, accounting, and reconciliation authority. Real-money routing remains absent.",
         ),
     ),
     CapabilityContract(
@@ -350,7 +405,7 @@ def discover_modules(root: str | Path) -> dict[str, Path]:
         relative = path.relative_to(base)
         if "tests" in relative.parts or any(part in _EXCLUDED_PARTS for part in relative.parts):
             continue
-        module = _module_name(base, path)
+        module = _module_name(root=base, path=path)
         if module:
             modules[module] = path
     return modules
