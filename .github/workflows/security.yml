@@ -23,13 +23,35 @@ jobs:
         with:
           persist-credentials: false
 
+      # GitHub CodeQL code scanning is free for public repositories. For a private
+      # user-owned repository without GitHub Code Security, keep this required job
+      # meaningful with a local Python SAST fallback instead of failing on an
+      # unavailable platform entitlement. CodeQL resumes automatically if the
+      # repository is public again.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        if: ${{ !github.event.repository.private }}
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           languages: python
 
       - name: Analyze with CodeQL
-        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        if: ${{ !github.event.repository.private }}
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+
+      - name: Set up Python for private-repository SAST
+        if: ${{ github.event.repository.private }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install private-repository SAST
+        if: ${{ github.event.repository.private }}
+        run: python -m pip install --upgrade pip "bandit>=1.8,<2"
+
+      - name: Run private-repository Python SAST
+        if: ${{ github.event.repository.private }}
+        run: bandit -r . -x ./tests -lll -iii
 
   advisory-audits:
     runs-on: ubuntu-latest
