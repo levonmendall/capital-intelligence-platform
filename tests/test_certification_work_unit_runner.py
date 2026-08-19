@@ -128,6 +128,84 @@ def test_later_future_completions_are_visible_before_ordered_map_head_returns(
     )
 
 
+def test_completion_progress_preserves_ordered_exception_propagation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Completion callbacks must not consume or suppress an out-of-order future error."""
+
+    published: list[tuple[str, dict[str, int]]] = []
+    first_release = threading.Event()
+    four_later_completed = threading.Event()
+    later_lock = threading.Lock()
+    later_count = [0]
+    error_holder: list[BaseException] = []
+
+    monkeypatch.setattr(
+        work_runner,
+        "record_certification_work_progress",
+        lambda asset_class, **metrics: published.append((asset_class, dict(metrics))),
+    )
+
+    def work(value: int) -> int:
+        if value == 0:
+            if not first_release.wait(timeout=5.0):
+                raise TimeoutError("test did not release the ordered head future")
+            return value
+        try:
+            if value == 1:
+                raise RuntimeError("provider record failed closed")
+            return value
+        finally:
+            with later_lock:
+                later_count[0] += 1
+                if later_count[0] == 4:
+                    four_later_completed.set()
+
+    def delegate(records, _timestamp, _policy):
+        with legacy.ThreadPoolExecutor(
+            max_workers=5,
+            thread_name_prefix="deep-market-evidence",
+        ) as executor:
+            return tuple(executor.map(work, records))
+
+    def run() -> None:
+        try:
+            work_runner.run_with_canonical_work_progress(
+                delegate,
+                records=(0, 1, 2, 3, 4),
+                timestamp="epoch",
+                policy="policy",
+                asset_class="international_equity",
+            )
+        except BaseException as error:  # expected fail-closed propagation.
+            error_holder.append(error)
+
+    thread = threading.Thread(target=run, name="ordered-exception-progress-test")
+    thread.start()
+    assert four_later_completed.wait(timeout=2.0)
+
+    # The error future and three later successes are finished, but the standard ordered
+    # map iterator remains blocked on record zero. Their completion is still observable.
+    assert thread.is_alive()
+    assert published == [
+        (
+            "international_equity",
+            {"processed_records": 4, "total_records": 5, "chunk_records": 4},
+        )
+    ]
+
+    first_release.set()
+    thread.join(timeout=5.0)
+    assert not thread.is_alive()
+    assert len(error_holder) == 1
+    assert isinstance(error_holder[0], RuntimeError)
+    assert str(error_holder[0]) == "provider record failed closed"
+    assert published[-1] == (
+        "international_equity",
+        {"processed_records": 5, "total_records": 5, "chunk_records": 1},
+    )
+
+
 def test_non_deep_executor_does_not_manufacture_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
