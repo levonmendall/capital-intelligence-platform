@@ -38,7 +38,7 @@ class GlobalCompoundPortfolioProposal:
     expected_log_growth_score: float
     deployable_cash_used: float
     diagnostics: tuple[str, ...]
-    policy_version: str = "global-compound-optimizer.v2-marginal-compounding"
+    policy_version: str = "global-compound-optimizer.v3-forward-adjusted-compounding"
     authorizes_capital: bool = False
     construction_authority: bool = False
 
@@ -99,9 +99,14 @@ def _current_weight(portfolio: object, candidate: object) -> float:
 
 
 def _base_utility(candidate: object, signal: object) -> float:
-    """Return one comparable economic quantity across all asset families."""
+    """Return one comparable, forward-adjusted economic quantity."""
 
-    assessment = assess_marginal_compounding_value(candidate)
+    assessment = assess_marginal_compounding_value(
+        candidate,
+        forward_return_adjustment=_finite(
+            getattr(signal, "forward_impulse", 0.0),
+        ),
+    )
     if str(getattr(signal, "candidate_identifier", "")) != assessment.candidate_identifier:
         raise ValueError("global rotation signal does not match candidate utility")
     return assessment.utility
@@ -227,7 +232,7 @@ def optimize_global_compound_targets(
     )
     diagnostics = (
         f"Deployable cash={deployable:.2%}; optimizer used={used:.2%}; target cash={target_cash:.2%}.",
-        "Every candidate competes on annualized marginal expected log growth after implementation cost, downside, evidence uncertainty, liquidity, and the same opportunity-cost hurdle.",
+        "Every candidate competes on annualized expected log growth after costs, downside, evidence uncertainty, liquidity, the same opportunity-cost hurdle, and economically expressed confidence-weighted forward return impacts.",
         "Candidate caps come from the preliminary six-specialist conviction pass; the optimizer cannot raise them.",
         "Final canonical construction remains authoritative for correlation, downside, liquidity, turnover, cost and implementation constraints.",
     )
