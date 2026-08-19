@@ -35,6 +35,76 @@ def _safe_log_return(total_return: float) -> float:
     return log1p(max(-0.999999, float(total_return)))
 
 
+def _annualized_return_metrics(
+    candidate: object,
+    *,
+    adjustment: float,
+    cost: float,
+    annualizer: float,
+) -> tuple[float, float]:
+    """Return annualized expected-log growth and downside path damage.
+
+    Canonical production candidates expose a governed scenario distribution and use
+    that richer path. Older preview/rehearsal callers intentionally use the compact
+    candidate summary contract instead. For those callers, ``net_expected_return`` is
+    already after implementation cost, so it is not charged a second time; the
+    explicit downside summary remains a separate path-damage input.
+    """
+
+    raw_distribution = getattr(candidate, "scenario_distribution", None)
+    distribution = tuple(raw_distribution or ())
+    if distribution:
+        expected_log = 0.0
+        downside_log = 0.0
+        probability_total = 0.0
+        for point in distribution:
+            probability = float(getattr(point, "probability"))
+            total_return = (
+                float(getattr(point, "total_return"))
+                + adjustment
+                - cost
+            )
+            probability_total += probability
+            log_return = _safe_log_return(total_return)
+            expected_log += probability * log_return
+            if log_return < 0.0:
+                downside_log += probability * abs(log_return)
+        if abs(probability_total - 1.0) > 1e-6:
+            raise ValueError("candidate scenario probabilities must sum to one")
+        return expected_log * annualizer, downside_log * annualizer
+
+    net_expected_return = getattr(candidate, "net_expected_return", None)
+    if isinstance(net_expected_return, bool) or not isinstance(
+        net_expected_return,
+        (int, float),
+    ):
+        raise ValueError(
+            "candidate scenario distribution or net_expected_return is required"
+        )
+    net_expected = float(net_expected_return)
+    if not isfinite(net_expected):
+        raise ValueError("candidate net_expected_return must be finite")
+
+    expected_downside = getattr(candidate, "expected_downside", 0.0)
+    if isinstance(expected_downside, bool) or not isinstance(
+        expected_downside,
+        (int, float),
+    ):
+        raise ValueError("candidate expected_downside must be numeric")
+    downside_return = float(expected_downside)
+    if not isfinite(downside_return):
+        raise ValueError("candidate expected_downside must be finite")
+
+    expected_log = _safe_log_return(net_expected + adjustment)
+    downside_after_cost = min(0.0, downside_return - cost)
+    downside_log = (
+        abs(_safe_log_return(downside_after_cost))
+        if downside_after_cost < 0.0
+        else 0.0
+    )
+    return expected_log * annualizer, downside_log * annualizer
+
+
 @dataclass(frozen=True, slots=True)
 class MarginalCompoundingValue:
     candidate_identifier: str
@@ -73,32 +143,15 @@ def assess_marginal_compounding_value(
         raise ValueError("candidate identifier is required")
     horizon_days = int(getattr(candidate, "decision_horizon_days"))
     annualizer = _annual_factor(horizon_days)
-    distribution = tuple(getattr(candidate, "scenario_distribution"))
-    if not distribution:
-        raise ValueError("candidate scenario distribution is required")
     adjustment = _clip(float(forward_return_adjustment), -0.10, 0.10)
     cost = max(0.0, float(getattr(candidate, "implementation_cost_return", 0.0)))
 
-    expected_log = 0.0
-    downside_log = 0.0
-    probability_total = 0.0
-    for point in distribution:
-        probability = float(getattr(point, "probability"))
-        total_return = (
-            float(getattr(point, "total_return"))
-            + adjustment
-            - cost
-        )
-        probability_total += probability
-        log_return = _safe_log_return(total_return)
-        expected_log += probability * log_return
-        if log_return < 0.0:
-            downside_log += probability * abs(log_return)
-    if abs(probability_total - 1.0) > 1e-6:
-        raise ValueError("candidate scenario probabilities must sum to one")
-
-    annualized_expected = expected_log * annualizer
-    annualized_downside = downside_log * annualizer
+    annualized_expected, annualized_downside = _annualized_return_metrics(
+        candidate,
+        adjustment=adjustment,
+        cost=cost,
+        annualizer=annualizer,
+    )
     annual_alternative = float(getattr(candidate, "opportunity_cost_return", 0.0))
     alternative_log = _safe_log_return(annual_alternative)
 
