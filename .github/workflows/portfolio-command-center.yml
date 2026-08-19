@@ -1,0 +1,48 @@
+name: Validate Portfolio Command Center
+
+on:
+  pull_request:
+    paths:
+      - "portfolio_only_runtime.py"
+      - "tests/test_crypto_style_portfolio_command_center.py"
+      - ".github/workflows/portfolio-command-center.yml"
+  push:
+    branches: [main]
+    paths:
+      - "portfolio_only_runtime.py"
+      - "tests/test_crypto_style_portfolio_command_center.py"
+      - ".github/workflows/portfolio-command-center.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  portfolio-command-center:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Verify dependency consistency
+        run: python -m pip check
+
+      - name: Compile command center module
+        run: python -m py_compile portfolio_only_runtime.py
+
+      - name: Run command center regressions
+        run: pytest -q tests/test_crypto_style_portfolio_command_center.py tests/test_capability_scoped_runtime_v2.py
