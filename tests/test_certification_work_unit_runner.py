@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -48,6 +49,83 @@ def test_primary_deep_executor_completion_publishes_real_record_progress(
             {"processed_records": 5, "total_records": 5, "chunk_records": 1},
         ),
     ]
+
+
+def test_later_future_completions_are_visible_before_ordered_map_head_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow first record must not hide four genuinely completed later records."""
+
+    published: list[tuple[str, dict[str, int]]] = []
+    first_release = threading.Event()
+    four_later_completed = threading.Event()
+    later_lock = threading.Lock()
+    later_count = [0]
+    result_holder: dict[str, object] = {}
+    error_holder: list[BaseException] = []
+
+    monkeypatch.setattr(
+        work_runner,
+        "record_certification_work_progress",
+        lambda asset_class, **metrics: published.append((asset_class, dict(metrics))),
+    )
+
+    def work(value: int) -> int:
+        if value == 0:
+            if not first_release.wait(timeout=5.0):
+                raise TimeoutError("test did not release the ordered head future")
+            return value
+        with later_lock:
+            later_count[0] += 1
+            if later_count[0] == 4:
+                four_later_completed.set()
+        return value
+
+    def delegate(records, _timestamp, _policy):
+        with legacy.ThreadPoolExecutor(
+            max_workers=5,
+            thread_name_prefix="deep-market-evidence",
+        ) as executor:
+            # Standard Executor.map intentionally preserves this input order. The wrapper
+            # must observe completion callbacks without changing that result order.
+            completed = tuple(executor.map(work, records))
+        return {str(item): item for item in completed}
+
+    def run() -> None:
+        try:
+            result_holder["value"] = work_runner.run_with_canonical_work_progress(
+                delegate,
+                records=(0, 1, 2, 3, 4),
+                timestamp="epoch",
+                policy="policy",
+                asset_class="international_equity",
+            )
+        except BaseException as error:  # pragma: no cover - assertion reports below.
+            error_holder.append(error)
+
+    thread = threading.Thread(target=run, name="completion-order-progress-test")
+    thread.start()
+    assert four_later_completed.wait(timeout=2.0)
+
+    # The ordered map consumer is still blocked on record zero, yet four later futures
+    # have completed and therefore must already have produced one real progress event.
+    assert thread.is_alive()
+    assert published == [
+        (
+            "international_equity",
+            {"processed_records": 4, "total_records": 5, "chunk_records": 4},
+        )
+    ]
+
+    first_release.set()
+    thread.join(timeout=5.0)
+    assert not thread.is_alive()
+    assert error_holder == []
+    assert result_holder["value"] == {"0": 0, "1": 1, "2": 2, "3": 3, "4": 4}
+    assert published[-1] == (
+        "international_equity",
+        {"processed_records": 5, "total_records": 5, "chunk_records": 1},
+    )
 
 
 def test_non_deep_executor_does_not_manufacture_progress(
