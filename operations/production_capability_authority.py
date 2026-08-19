@@ -234,7 +234,7 @@ def _family_capabilities(
         return values
 
     if family is AssetFamily.OPTION:
-        if _positive(getattr(instrument, "strike_price", 0.0)) > 0.0:
+        if _positive(getattr(instrument, "strike", 0.0)) > 0.0:
             values.add("strike_terms")
         if getattr(instrument, "expiration_at", None) is not None:
             values.add("option_expiry")
@@ -525,9 +525,11 @@ def reconcile_production_capability_authority(
         )
 
     # A still-active certification from an older publication must not survive removal
-    # from the exact current universe.  Append a suspension rather than deleting or
+    # from the exact current universe. Append a suspension rather than deleting or
     # mutating history.
-    for identifier in sorted(store.active_identifiers(evaluated_at=timestamp) - current_identifiers):
+    for identifier in sorted(
+        store.active_identifiers(evaluated_at=timestamp) - current_identifiers
+    ):
         active = store.active(identifier, evaluated_at=timestamp)
         if active is None:
             continue
