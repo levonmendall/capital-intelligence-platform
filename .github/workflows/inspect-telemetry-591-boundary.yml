@@ -1,0 +1,42 @@
+name: Inspect telemetry 591 boundary
+
+on:
+  push:
+    branches:
+      - repair/telemetry-591-post-context-handoff
+    paths:
+      - .github/workflows/inspect-telemetry-591-boundary.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Read credential-safe production diagnostic
+        shell: python
+        run: |
+          import json
+          import urllib.request
+
+          url = "https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              payload = json.load(response)
+
+          allowed = (
+              "active_release",
+              "diagnostic_id",
+              "request_id",
+              "state",
+              "stage",
+              "detail",
+              "context_attempt_state",
+              "context_attempt_error_type",
+              "context_cycle_matches",
+              "context_attempt_cycle_matches",
+              "comprehensive_discovery_required",
+          )
+          safe = {key: payload.get(key) for key in allowed if key in payload}
+          print(json.dumps(safe, sort_keys=True, indent=2))
