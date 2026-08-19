@@ -105,8 +105,14 @@ def _install_dag_native_supervision() -> None:
     from operations.dag_native_comprehensive_supervision import (
         install_dag_native_comprehensive_supervision,
     )
+    from operations.progress_aware_release_certification import (
+        install_progress_aware_dag_node_supervision,
+        install_resume_aware_release_dag_projection,
+    )
 
     install_dag_native_comprehensive_supervision()
+    install_progress_aware_dag_node_supervision()
+    install_resume_aware_release_dag_projection()
 
 
 def install_comprehensive_discovery_runtime_contract() -> None:
