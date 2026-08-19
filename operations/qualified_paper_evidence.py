@@ -1,11 +1,12 @@
-"""Provider-free production probes for qualified paper evidence snapshots.
+"""Provider-free production probes for immutable paper evidence snapshots.
 
-The evidence owner captures and integrity-signs the complete discovery-derived evidence
-universe.  A production CIO may intentionally operate on a smaller capability-authorized
-subset.  This module preserves the owner's exact snapshot verification, then permits only
-an exact structural subset projection for the CIO.  Projection never creates evidence,
-never refreshes providers, and cannot add an instrument that was absent from the signed
-source universe.
+Capability-scoped production consumes the independent operating evidence plane rather than
+the comprehensive discovery generation.  Full-discovery mode retains the legacy qualified
+plane.  In either mode the source snapshot is verified against the exact universe that the
+evidence owner signed before a CIO subset can be projected from it.
+
+Projection never creates evidence, never refreshes providers, and cannot add an instrument
+that was absent from the signed source universe.
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ from collections.abc import Mapping as MappingABC
 from datetime import datetime, timezone
 from typing import Iterator, Mapping
 
+from operations.capability_operating_evidence import (
+    CapabilityOperatingEvidenceError,
+    load_capability_operating_evidence,
+)
 from operations.continuous_evidence_plane import (
     ContinuousEvidencePlaneError,
     ensure_point_in_time_snapshot,
@@ -54,22 +59,51 @@ class _SubsetMapping(MappingABC[str, object]):
         return sum(1 for key in self._source if key in self._allowed)
 
 
+def _enabled(raw: object) -> bool:
+    return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _capability_scoped_operation_enabled(values: Mapping[str, str]) -> bool:
+    explicit = values.get("CAPITAL_INTELLIGENCE_CAPABILITY_SCOPED_OPERATION")
+    if explicit is not None and str(explicit).strip():
+        return _enabled(explicit)
+    return _enabled(values.get("RENDER"))
+
+
 def production_snapshot_probe_enabled(values=None) -> bool:
     resolved = os.environ if values is None else values
     production = (
         str(resolved.get("CAPITAL_INTELLIGENCE_ENVIRONMENT", "")).strip().lower()
         == "production"
-        or str(resolved.get("RENDER", "")).strip().lower() == "true"
+        or _enabled(resolved.get("RENDER"))
     )
-    return production and evidence_plane_enabled(resolved)
+    if not production:
+        return False
+    if _capability_scoped_operation_enabled(resolved):
+        return True
+    return evidence_plane_enabled(resolved)
 
 
 def _qualified_snapshot_and_universe_for_cutoff(cutoff: datetime):
-    """Load the evidence owner's exact immutable snapshot and its signed universe."""
+    """Load the active evidence owner's exact immutable snapshot and signed universe."""
 
     values = os.environ
     if not production_snapshot_probe_enabled(values):
         raise RuntimeError("qualified paper evidence probe is production-only")
+
+    if _capability_scoped_operation_enabled(values):
+        try:
+            operating = load_capability_operating_evidence(
+                cutoff=cutoff,
+                values=values,
+            )
+        except CapabilityOperatingEvidenceError as error:
+            raise RuntimeError(
+                f"capability operating evidence snapshot is not ready: {error}"
+            ) from error
+        values[_SNAPSHOT_ENV] = operating.snapshot_id
+        return operating.snapshot, operating.universe
+
     try:
         point_snapshot = ensure_point_in_time_snapshot(
             cutoff=cutoff,
