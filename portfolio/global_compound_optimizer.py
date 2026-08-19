@@ -107,7 +107,13 @@ def _base_utility(candidate: object, signal: object) -> float:
             getattr(signal, "forward_impulse", 0.0),
         ),
     )
-    if str(getattr(signal, "candidate_identifier", "")) != assessment.candidate_identifier:
+    signal_candidate_identifier = str(
+        getattr(signal, "candidate_identifier", "")
+    ).strip()
+    if (
+        signal_candidate_identifier
+        and signal_candidate_identifier != assessment.candidate_identifier
+    ):
         raise ValueError("global rotation signal does not match candidate utility")
     return assessment.utility
 
