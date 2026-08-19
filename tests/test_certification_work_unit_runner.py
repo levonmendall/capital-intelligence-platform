@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from operations import certification_work_progress
 from operations import certification_work_unit_runner as work_runner
 
 
@@ -77,7 +78,7 @@ def test_silent_delegate_does_not_manufacture_heartbeat(
     assert published == []
 
 
-def test_fallback_router_completion_advances_progress(
+def test_fallback_router_completion_advances_without_claiming_record_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     published: list[tuple[str, dict[str, int]]] = []
@@ -107,5 +108,43 @@ def test_fallback_router_completion_advances_progress(
 
     assert published
     assert published[-1][0] == "fx"
-    assert published[-1][1]["processed_records"] == 2
+    assert published[-1][1]["processed_records"] == 0
     assert published[-1][1]["total_records"] == 2
+    assert sum(item[1]["chunk_records"] for item in published) == 2
+
+
+def test_work_progress_uses_transport_only_diagnostic_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, int], dict[str, str]]] = []
+
+    def capture(stage, *, metrics=None, values=None):
+        calls.append((stage, dict(metrics or {}), dict(values or {})))
+        return None
+
+    monkeypatch.setattr(
+        certification_work_progress.diagnostic,
+        "record_manual_cio_diagnostic_progress",
+        capture,
+    )
+
+    certification_work_progress.record_certification_work_progress(
+        "crypto",
+        processed_records=4,
+        total_records=10,
+        chunk_records=2,
+    )
+
+    assert calls == [
+        (
+            "deep_market_evidence:crypto",
+            {
+                "processed_records": 4,
+                "total_records": 10,
+                "chunk_records": 2,
+            },
+            {
+                "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED": "false"
+            },
+        )
+    ]
