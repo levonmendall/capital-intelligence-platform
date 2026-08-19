@@ -23,10 +23,11 @@ permissions:
 jobs:
   certification-runtime:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
 
     env:
       PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
 
     steps:
       - name: Check out repository
@@ -55,3 +56,21 @@ jobs:
           tests/test_certification_work_unit_runner.py
           tests/test_progress_aware_release_certification.py
           tests/test_comprehensive_discovery_telemetry_enricher.py
+
+      - name: Run deterministic release validation
+        run: timeout --signal=TERM 7m python run_release_validation.py --report reports/certification-repair-release-validation.json
+
+      - name: Publish certification repair diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: certification-repair-validation-results
+          path: |
+            reports/certification-repair-release-validation.json
+            reports/runtime-connectivity-audit.json
+            reports/golden-end-to-end-gate.json
+            reports/event-quality-benchmark.json
+            reports/information-gap-audit.json
+            reports/pytest-results.xml
+          if-no-files-found: ignore
+          retention-days: 14
