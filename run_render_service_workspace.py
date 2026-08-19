@@ -152,6 +152,15 @@ def main() -> int:
     prepare_runtime_workspace()
     import run_render_service_memory_safe as memory_safe
     from run_render_service_memory_safe import main as run_service
+    from operations.progress_aware_release_certification import (
+        install_resume_aware_release_dag_projection,
+    )
+
+    # The evidence plane may legitimately resume a still-fresh decision epoch. Install
+    # the current-attempt projection before importing the parent watchdog so every
+    # release-prequalification reader uses fresh journal updates rather than epoch age.
+    install_resume_aware_release_dag_projection()
+
     from operations.release_prequalification_parent_watchdog import (
         install_release_prequalification_parent_watchdog,
     )
