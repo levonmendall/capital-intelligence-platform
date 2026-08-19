@@ -19,12 +19,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         evidence = refresh_capability_operating_evidence()
     except (CapabilityOperatingEvidenceError, OSError, TypeError, ValueError, RuntimeError) as error:
+        # Provider exceptions can contain request URLs or credential-adjacent material.
+        # The bounded parent needs only a stable failure type; detailed provider evidence
+        # remains in provider-owned diagnostics rather than the Render bootstrap log.
         print(
             json.dumps(
                 {
                     "event": "capability_operating_evidence_failed",
                     "error_type": type(error).__name__,
-                    "error_detail": str(error)[:1200],
+                    "credential_safe": True,
                     "comprehensive_discovery_required": False,
                     "paper_only": True,
                     "real_money_authorized": False,
