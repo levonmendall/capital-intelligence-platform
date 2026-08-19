@@ -1,19 +1,20 @@
 """Operational discovery boundary for the capability-scoped CIO runtime.
 
 The all-market discovery/certification plane remains responsible for expanding global
-coverage.  The canonical CIO operating path must not wait for every market family to
-re-certify simultaneously.  This adapter therefore carries forward only instruments
+coverage. The canonical CIO operating path must not wait for every market family to
+re-certify simultaneously. This adapter therefore carries forward only instruments
 from the most recent active publication that still have exact paper-allocation
 authority at the current timestamp.
 
 It performs no provider discovery, creates no certification, and has no investment or
-execution authority.  New instruments can enter only after another governed process
-has discovered, qualified, and certified them.
+execution authority. New instruments can enter only after another governed process has
+discovered, qualified, and certified them.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,29 @@ def _publication_identifier(path: Path) -> str | None:
         return None
     value = str(payload.get("eligible_universe_publication_identifier") or "").strip()
     return value or None
+
+
+def _candidate_paths() -> tuple[Path, ...]:
+    values = [active_paper_universe_path()]
+    data_dir = os.getenv("CAPITAL_INTELLIGENCE_DATA_DIR", "").strip()
+    if data_dir:
+        values.append(Path(data_dir).expanduser() / "active-paper-universe.json")
+    portfolio_database = os.getenv(
+        "CAPITAL_INTELLIGENCE_CANONICAL_PORTFOLIO_DATABASE", ""
+    ).strip()
+    if portfolio_database:
+        values.append(
+            Path(portfolio_database).expanduser().with_name("active-paper-universe.json")
+        )
+    return tuple(dict.fromkeys(values))
+
+
+def _current_publication_source() -> tuple[Path | None, str | None]:
+    for path in _candidate_paths():
+        identifier = _publication_identifier(path)
+        if identifier is not None:
+            return path, identifier
+    return None, None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,17 +104,20 @@ def discover_currently_certified_capabilities(
 
     ``held_symbols`` and ``tracked_symbols`` are intentionally non-authoritative here.
     Existing holdings retain their separate evidence/exit-continuity path; tracked names
-    cannot gain ownership authority merely by being tracked.  ``excluded_symbols`` keeps
+    cannot gain ownership authority merely by being tracked. ``excluded_symbols`` keeps
     the fresh bootstrap/U.S.-discovery set from being duplicated.
     """
 
     del held_symbols, tracked_symbols
     evaluated_at = _aware(as_of)
-    source = active_paper_universe_path()
-    publication_identifier = _publication_identifier(source)
-    exclusions = {str(item).strip().upper() for item in excluded_symbols if str(item).strip()}
+    source, publication_identifier = _current_publication_source()
+    exclusions = {
+        str(item).strip().upper()
+        for item in excluded_symbols
+        if str(item).strip()
+    }
 
-    if publication_identifier is None:
+    if source is None or publication_identifier is None:
         return CapabilityScopedDiscoveryResult(
             as_of=evaluated_at,
             instruments=(),
