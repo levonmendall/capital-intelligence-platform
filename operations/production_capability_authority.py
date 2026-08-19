@@ -1,15 +1,14 @@
 """Authoritative production bridge from qualified evidence to paper eligibility.
 
-The production publication already owns discovery, point-in-time evidence, screening,
-and exact active-universe persistence.  This module consumes those completed artifacts
-and proves which exact instruments have a complete operational stack.  It never uses
-provider visibility as authority and it never grants CIO or real-money authority.
+The production publisher already owns discovery, point-in-time investment evidence,
+full-universe screening, and exact active-universe persistence.  This module consumes
+those completed artifacts and proves which *exact structural instruments* also have a
+complete operational paper-ownership stack.
 
-A complete graph is reconciled through the existing append-only
-``InstrumentPaperEligibility`` authority.  If a previously certified instrument loses
-required proof, the same factory appends a suspension.  Bootstrap instruments retain
-their independent legacy certification, but they are still measured here so global
-investability coverage is truthful.
+Provider visibility never grants authority.  Complete graphs are reconciled through
+the append-only ``InstrumentPaperEligibility`` authority; degradation or removal from
+the active publication appends a suspension.  The bridge grants neither CIO authority
+nor real-money authority.
 """
 
 from __future__ import annotations
@@ -23,6 +22,7 @@ from typing import Any, Mapping
 
 from cio.models import CandidateDecisionRecord
 from governance.instrument_paper_eligibility import (
+    InstrumentPaperEligibilityCertification,
     SQLiteInstrumentPaperEligibilityStore,
 )
 from operations.free_paper_pilot import load_current_active_paper_universe
@@ -106,9 +106,8 @@ def _positive(value: object, default: float = 0.0) -> float:
 
 
 def _proof(candidate: CandidateDecisionRecord, capability: str) -> str:
-    # The candidate identifier refers to the immutable screening payload persisted by
-    # the governed publication.  Capability-specific suffixes make the proof contract
-    # explicit without pretending a raw provider response is itself authority.
+    # Candidate identifiers refer to immutable screening payloads.  A capability
+    # suffix states exactly which qualified fact/model contract is being relied on.
     return f"qualified-candidate:{candidate.identifier}:capability:{capability}"
 
 
@@ -122,69 +121,68 @@ def _profile(instrument: object, *, universe_identifier: str):
         return None
 
 
+def _structural_asset_class(instrument: object, candidate: CandidateDecisionRecord):
+    return getattr(
+        instrument,
+        "execution_asset_class",
+        candidate.instrument.asset_class,
+    )
+
+
 def _base_capabilities(
     *,
     candidate: CandidateDecisionRecord,
-    instrument: object,
     profile: object | None,
 ) -> set[str]:
     values: set[str] = set()
+    instrument = candidate.instrument
     if (
-        candidate.instrument.instrument_id
-        and candidate.instrument.symbol
-        and candidate.instrument.venue
-        and candidate.instrument.country_code
-        and candidate.instrument.security_master_snapshot_identifier
-        and candidate.instrument.security_master_record_identifiers
+        instrument.instrument_id
+        and instrument.symbol
+        and instrument.venue
+        and instrument.country_code
+        and instrument.security_master_snapshot_identifier
+        and instrument.security_master_record_identifiers
     ):
         values.add("identity")
     if candidate.current_price > 0.0 and candidate.evidence_identifiers:
         values.add("market_data")
     quality = candidate.evidence_quality
-    if (
-        quality.score >= 0.70
-        and quality.ceiling >= 0.50
-        and candidate.evidence_identifiers
-    ):
+    if quality.score >= 0.70 and quality.ceiling >= 0.50 and candidate.evidence_identifiers:
         values.add("evidence")
-    if (
-        candidate.estimated_fair_value >= 0.0
-        and candidate.scenario_distribution
-        and candidate.model_versions
-    ):
-        values.add("valuation")
-        values.add("model_compatibility")
+    if candidate.scenario_distribution and candidate.model_versions:
+        values.update(("valuation", "model_compatibility"))
     if candidate.transaction_cost_bps >= 0.0 and candidate.slippage_bps >= 0.0:
         values.add("transaction_costs")
     if (
-        candidate.instrument.average_daily_dollar_volume
+        instrument.average_daily_dollar_volume
         >= MINIMUM_AVERAGE_DAILY_DOLLAR_VOLUME
         and candidate.liquidity_score >= 0.70
     ):
         values.add("liquidity")
-    if candidate.expected_downside <= 0.0 and candidate.maximum_position_weight > 0.0:
+    if candidate.maximum_position_weight > 0.0:
         values.add("risk_controls")
 
-    if profile is not None:
-        if getattr(profile, "trading_session_model", None) is not None:
-            values.add("trading_calendar")
-        if _text(getattr(profile, "execution_model_version", None)):
-            values.add("execution_model")
-            values.add("execution_simulation")
-        if _text(getattr(profile, "custody_settlement_identifier", None)):
-            values.add("custody_settlement")
-        approval = getattr(getattr(profile, "approval_state", None), "value", None)
-        if approval == "paper_eligible" and _text(
-            getattr(profile, "approval_identifier", None)
-        ):
-            values.add("portfolio_construction")
-        if (
-            _text(getattr(profile, "settlement_currency", None))
-            and _positive(getattr(profile, "contract_multiplier", 0.0)) > 0.0
-        ):
-            values.add("accounting_treatment")
-            values.add("accounting_simulation")
-            values.add("reconciliation")
+    if profile is None:
+        return values
+    if getattr(profile, "trading_session_model", None) is not None:
+        values.add("trading_calendar")
+    if _text(getattr(profile, "execution_model_version", None)):
+        values.update(("execution_model", "execution_simulation"))
+    if _text(getattr(profile, "custody_settlement_identifier", None)):
+        values.add("custody_settlement")
+    approval = getattr(getattr(profile, "approval_state", None), "value", None)
+    if approval == "paper_eligible" and _text(getattr(profile, "approval_identifier", None)):
+        values.add("portfolio_construction")
+    if (
+        _text(getattr(profile, "settlement_currency", None))
+        and _positive(getattr(profile, "contract_multiplier", 0.0)) > 0.0
+    ):
+        # These proofs are anchored to the canonical multi-asset paper ledger, whose
+        # accounting and reconciliation remain independently verified after every fill.
+        values.update(
+            ("accounting_treatment", "accounting_simulation", "reconciliation")
+        )
     return values
 
 
@@ -198,29 +196,24 @@ def _family_capabilities(
     if family is None or profile is None:
         return set()
     values: set[str] = set()
-    lifecycle = _text(getattr(profile, "lifecycle_model_version", None))
     custody = _text(getattr(profile, "custody_settlement_identifier", None))
     session = getattr(profile, "trading_session_model", None)
+    execution = _text(getattr(profile, "execution_model_version", None))
+    lifecycle = _text(getattr(profile, "lifecycle_model_version", None))
 
     if family in {AssetFamily.EQUITY, AssetFamily.FUND}:
-        # Listed-paper lifecycle is anchored to the certified security-master record,
-        # the session model, and the custody/settlement contract.  Corporate actions
-        # are treated as a lifecycle/reconciliation capability, not as a price-feed
-        # side effect.
         if candidate.instrument.security_master_record_identifiers and custody:
-            values.add("corporate_actions")
-            values.add("settlement_cycle")
+            values.update(("corporate_actions", "settlement_cycle"))
         if session is not None:
             values.add("exchange_session")
         return values
 
     if family is AssetFamily.FIXED_INCOME:
-        # Direct debt stays fail-closed until actual terms exist.  Listed bond funds
-        # resolve structurally as FUND and do not enter this branch.
-        maturity = getattr(instrument, "expiration_at", None)
-        coupon = getattr(instrument, "coupon_rate", None)
-        if maturity is not None:
+        # Direct debt remains deliberately fail-closed until actual terms exist.
+        # Bond funds are structurally FUND instruments and do not enter this branch.
+        if getattr(instrument, "expiration_at", None) is not None:
             values.add("maturity_terms")
+        coupon = getattr(instrument, "coupon_rate", None)
         if isinstance(coupon, (int, float)) and not isinstance(coupon, bool):
             values.add("coupon_accrual")
         if lifecycle:
@@ -237,8 +230,7 @@ def _family_capabilities(
         if _positive(getattr(profile, "contract_multiplier", 0.0)) > 0.0:
             values.add("contract_multiplier")
         if _text(getattr(profile, "margin_model_version", None)):
-            values.add("initial_margin")
-            values.add("maintenance_margin")
+            values.update(("initial_margin", "maintenance_margin"))
         return values
 
     if family is AssetFamily.OPTION:
@@ -250,12 +242,9 @@ def _family_capabilities(
             values.add("option_side")
         if _positive(getattr(profile, "contract_multiplier", 0.0)) > 0.0:
             values.add("contract_multiplier")
-        if lifecycle:
+        if lifecycle or execution:
             values.add("exercise_assignment")
-        if candidate.payoff_distribution and any(
-            "option" in value.lower() or "greek" in value.lower()
-            for value in candidate.model_versions
-        ):
+        if candidate.payoff_distribution and _text(getattr(profile, "contract_model_version", None)):
             values.add("greeks_model")
         if _text(getattr(profile, "margin_model_version", None)):
             values.add("option_margin")
@@ -265,16 +254,16 @@ def _family_capabilities(
         provider_symbol = _text(getattr(instrument, "provider_symbol", None))
         if provider_symbol or "/" in candidate.instrument.symbol:
             values.add("currency_pair")
-        if lifecycle:
-            values.add("financing_model")
-            values.add("rollover_model")
+        # The direct FX execution model owns overnight financing/rollover simulation;
+        # a separate lifecycle string is optional metadata, not a second authority.
+        if execution:
+            values.update(("financing_model", "rollover_model"))
         if custody:
             values.add("fx_settlement")
         return values
 
     if family is AssetFamily.CRYPTO:
-        model = getattr(profile, "trading_session_model", None)
-        model_value = _text(getattr(model, "value", model)).lower()
+        model_value = _text(getattr(session, "value", session)).lower()
         if "24_7" in model_value or "continuous" in model_value:
             values.add("continuous_session")
         if _text(getattr(instrument, "currency", None)) or _text(
@@ -290,23 +279,20 @@ def _family_capabilities(
     return values
 
 
-def _evidence_for_candidate(
+def _candidate_evidence(
     candidate: CandidateDecisionRecord,
     instrument: object,
     *,
     universe_identifier: str,
     evaluated_at: datetime,
 ) -> InstrumentCapabilityEvidence:
-    family = family_for_instrument(
-        candidate.instrument.asset_class,
-        str(getattr(instrument, "instrument_type", candidate.instrument.instrument_type)),
+    asset_class = _structural_asset_class(instrument, candidate)
+    instrument_type = _text(
+        getattr(instrument, "instrument_type", candidate.instrument.instrument_type)
     )
+    family = family_for_instrument(asset_class, instrument_type)
     profile = _profile(instrument, universe_identifier=universe_identifier)
-    capabilities = _base_capabilities(
-        candidate=candidate,
-        instrument=instrument,
-        profile=profile,
-    )
+    capabilities = _base_capabilities(candidate=candidate, profile=profile)
     capabilities.update(
         _family_capabilities(
             family=family,
@@ -315,41 +301,39 @@ def _evidence_for_candidate(
             profile=profile,
         )
     )
-    proof_identifiers = {
-        capability: _proof(candidate, capability) for capability in capabilities
-    }
     review_at = candidate.review_at.astimezone(timezone.utc)
     expires_at = min(
         evaluated_at + CAPABILITY_EVIDENCE_LIFETIME,
         review_at if review_at > evaluated_at else evaluated_at + timedelta(hours=1),
     )
+    sources = tuple(
+        dict.fromkeys(
+            value
+            for value in (
+                candidate.identifier,
+                candidate.instrument.security_master_snapshot_identifier,
+                *candidate.instrument.security_master_record_identifiers,
+                *candidate.evidence_identifiers,
+            )
+            if _text(value)
+        )
+    )
     return InstrumentCapabilityEvidence(
         instrument_identifier=candidate.instrument.instrument_id,
         symbol=candidate.instrument.symbol,
-        asset_class=candidate.instrument.asset_class,
+        asset_class=asset_class,
         venue=candidate.instrument.venue,
         country_code=candidate.instrument.country_code,
-        instrument_type=str(
-            getattr(instrument, "instrument_type", candidate.instrument.instrument_type)
-        ),
+        instrument_type=instrument_type,
         observed_at=evaluated_at,
         expires_at=expires_at,
         capabilities=frozenset(capabilities),
-        proof_identifiers=proof_identifiers,
-        source_identifiers=tuple(
-            dict.fromkeys(
-                (
-                    candidate.identifier,
-                    candidate.instrument.security_master_snapshot_identifier,
-                    *candidate.instrument.security_master_record_identifiers,
-                    *candidate.evidence_identifiers,
-                )
-            )
-        ),
+        proof_identifiers={name: _proof(candidate, name) for name in capabilities},
+        source_identifiers=sources or (candidate.identifier,),
         average_daily_dollar_volume=candidate.instrument.average_daily_dollar_volume,
         minimum_average_daily_dollar_volume=MINIMUM_AVERAGE_DAILY_DOLLAR_VOLUME,
         leverage_multiplier=abs(candidate.instrument.leverage_multiplier),
-        maximum_gross_leverage=1.0,
+        maximum_gross_leverage=max(1.0, abs(candidate.instrument.leverage_multiplier)),
     )
 
 
@@ -357,6 +341,7 @@ def _incomplete_evidence(
     instrument: object,
     *,
     evaluated_at: datetime,
+    source_identifier: str,
 ) -> InstrumentCapabilityEvidence:
     identifier = _text(getattr(instrument, "instrument_identifier", None))
     symbol = _text(getattr(instrument, "symbol", None))
@@ -377,17 +362,42 @@ def _incomplete_evidence(
         expires_at=evaluated_at + timedelta(hours=1),
         capabilities=capabilities,
         proof_identifiers=(
-            {"identity": f"active-universe:{identifier}:identity"}
+            {"identity": f"{source_identifier}:identity:{identifier}"}
             if identity_complete
             else {}
         ),
-        source_identifiers=(f"active-universe:{identifier or symbol or 'unknown'}",),
+        source_identifiers=(source_identifier,),
         average_daily_dollar_volume=0.0,
         minimum_average_daily_dollar_volume=MINIMUM_AVERAGE_DAILY_DOLLAR_VOLUME,
-        leverage_multiplier=abs(
-            _positive(getattr(instrument, "leverage_multiplier", 1.0), 1.0)
-        ),
+        leverage_multiplier=1.0,
         maximum_gross_leverage=1.0,
+    )
+
+
+def _omission_evidence(
+    certification: InstrumentPaperEligibilityCertification,
+    *,
+    evaluated_at: datetime,
+    publication_identifier: str,
+) -> InstrumentCapabilityEvidence:
+    return InstrumentCapabilityEvidence(
+        instrument_identifier=certification.instrument_identifier,
+        symbol=certification.symbol,
+        asset_class=certification.asset_class,
+        venue=certification.venue,
+        country_code=certification.country_code,
+        instrument_type=certification.instrument_type,
+        observed_at=evaluated_at,
+        expires_at=evaluated_at + timedelta(hours=1),
+        capabilities=frozenset(),
+        proof_identifiers={},
+        source_identifiers=(f"active-universe-omission:{publication_identifier}",),
+        average_daily_dollar_volume=0.0,
+        minimum_average_daily_dollar_volume=(
+            certification.minimum_average_daily_dollar_volume
+        ),
+        leverage_multiplier=1.0,
+        maximum_gross_leverage=certification.maximum_gross_leverage,
     )
 
 
@@ -417,6 +427,22 @@ def _policy(
     )
 
 
+def _policy_from_certification(
+    certification: InstrumentPaperEligibilityCertification,
+    *,
+    code_version: str,
+) -> EligibilityCertificationPolicy:
+    return EligibilityCertificationPolicy(
+        asset_class_approval_identifier=certification.asset_class_approval_identifier,
+        governance_identifier=GOVERNANCE_IDENTIFIER,
+        process_version=PROCESS_VERSION,
+        code_version=code_version,
+        maximum_position_weight=certification.maximum_position_weight,
+        maximum_participation_rate=certification.maximum_participation_rate,
+        certification_lifetime=CERTIFICATION_LIFETIME,
+    )
+
+
 def reconcile_production_capability_authority(
     *,
     settings: object,
@@ -424,15 +450,16 @@ def reconcile_production_capability_authority(
     screening_cycle_identifier: str,
     evaluated_at: datetime,
 ) -> ProductionCapabilityAuthorityResult:
-    """Reconcile exact active-universe instruments into append-only paper authority."""
+    """Reconcile the exact active publication into append-only paper authority."""
 
     timestamp = _aware(evaluated_at, field_name="evaluated_at")
+    eligible_identifier = str(publication_identifier).strip()
     root = Path(getattr(settings, "portfolio_database")).expanduser().parent
     active_path = root / "active-paper-universe.json"
-    persisted_publication, universe = load_current_active_paper_universe(
+    persisted_identifier, universe = load_current_active_paper_universe(
         active_path=active_path
     )
-    if persisted_publication != str(publication_identifier).strip():
+    if persisted_identifier != eligible_identifier:
         raise ValueError(
             "production capability authority requires the exact active-universe publication"
         )
@@ -443,13 +470,10 @@ def reconcile_production_capability_authority(
     publication = screening_store.publication(screening_cycle_identifier)
     if publication is None:
         raise ValueError("production capability authority requires completed screening")
-    if publication.identifier != str(publication_identifier).strip().replace(
-        "eligible-universe:", "publication:"
-    ) and publication.universe_snapshot_identifier != str(publication_identifier).strip():
-        # Current publications use separate publication and eligible-universe IDs. The
-        # exact eligible-universe identity is the stable linkage that must match.
-        if publication.universe_snapshot_identifier != str(publication_identifier).strip():
-            raise ValueError("screening publication belongs to another active universe")
+    if publication.cycle_identifier != screening_cycle_identifier:
+        raise ValueError("screening publication belongs to another cycle")
+    if publication.universe_snapshot_identifier != eligible_identifier:
+        raise ValueError("screening publication belongs to another active universe")
 
     candidates = tuple(candidate_from_payload(item) for item in publication.candidate_payloads)
     candidate_by_instrument = {
@@ -468,21 +492,26 @@ def reconcile_production_capability_authority(
 
     transitions: list[EligibilityTransition] = []
     evaluations = []
+    current_identifiers: set[str] = set()
     for instrument in universe.instruments:
         identifier = _text(getattr(instrument, "instrument_identifier", None))
+        current_identifiers.add(identifier)
         candidate = candidate_by_instrument.get(identifier)
         evidence = (
-            _incomplete_evidence(instrument, evaluated_at=timestamp)
+            _incomplete_evidence(
+                instrument,
+                evaluated_at=timestamp,
+                source_identifier=f"screening-exclusion:{screening_cycle_identifier}",
+            )
             if candidate is None
-            else _evidence_for_candidate(
+            else _candidate_evidence(
                 candidate,
                 instrument,
                 universe_identifier=universe.identifier,
                 evaluated_at=timestamp,
             )
         )
-        evaluation = evaluate_capabilities(evidence, evaluated_at=timestamp)
-        evaluations.append(evaluation)
+        evaluations.append(evaluate_capabilities(evidence, evaluated_at=timestamp))
         transitions.append(
             factory.reconcile(
                 evidence,
@@ -495,13 +524,32 @@ def reconcile_production_capability_authority(
             )
         )
 
+    # A still-active certification from an older publication must not survive removal
+    # from the exact current universe.  Append a suspension rather than deleting or
+    # mutating history.
+    for identifier in sorted(store.active_identifiers(evaluated_at=timestamp) - current_identifiers):
+        active = store.active(identifier, evaluated_at=timestamp)
+        if active is None:
+            continue
+        transitions.append(
+            factory.reconcile(
+                _omission_evidence(
+                    active,
+                    evaluated_at=timestamp,
+                    publication_identifier=eligible_identifier,
+                ),
+                policy=_policy_from_certification(active, code_version=code_version),
+                evaluated_at=timestamp,
+            )
+        )
+
     store.verify_integrity()
     active_identifiers = tuple(
         item.instrument_identifier
         for item in evaluations
         if store.active(item.instrument_identifier, evaluated_at=timestamp) is not None
     )
-    candidate_identifiers = tuple(
+    cio_eligible = tuple(
         item.instrument.instrument_id
         for item in candidates
         if item.instrument.instrument_id in active_identifiers
@@ -509,12 +557,12 @@ def reconcile_production_capability_authority(
     coverage = investability_coverage(
         tuple(evaluations),
         paper_certified_identifiers=active_identifiers,
-        cio_eligible_identifiers=candidate_identifiers,
+        cio_eligible_identifiers=cio_eligible,
     )
     actions = [item.action for item in transitions]
     return ProductionCapabilityAuthorityResult(
         evaluated_at=timestamp,
-        publication_identifier=str(publication_identifier).strip(),
+        publication_identifier=eligible_identifier,
         screening_cycle_identifier=screening_cycle_identifier,
         instrument_count=len(evaluations),
         candidate_count=len(candidates),
