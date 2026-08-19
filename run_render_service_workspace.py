@@ -174,8 +174,18 @@ def main() -> int:
 
     install_capability_scoped_render_bootstrap(memory_safe)
 
+    # Revalidate capability evidence immediately before every diagnostic attempt. This
+    # closes the retry-age gap where startup-qualified evidence could cross its freshness
+    # boundary during a long first CIO attempt or bounded retry delay. The refresh itself
+    # still runs through the independent resource-bounded evidence owner.
+    from operations.capability_operating_retry_refresh import (
+        install as install_capability_operating_retry_refresh,
+    )
+
+    install_capability_operating_retry_refresh(memory_safe)
+
     # Install the diagnostic seam last so both the capability startup wrapper and the
-    # legacy memory-safe launcher see capability-scoped environment semantics and share a
+    # retry-freshness wrapper see capability-scoped environment semantics and share a
     # single durable CIO diagnostic owner rather than starting competing children.
     from operations.capability_scoped_release_diagnostic import (
         install as install_capability_scoped_release_diagnostic,

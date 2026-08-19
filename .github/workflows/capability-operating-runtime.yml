@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "operations/capability_operating_evidence.py"
+      - "operations/capability_operating_retry_refresh.py"
       - "operations/capability_operating_universe.py"
       - "operations/capability_scoped_discovery.py"
       - "operations/capability_scoped_render_bootstrap.py"
@@ -16,6 +17,7 @@ on:
       - "run_capability_operating_evidence.py"
       - "run_render_service_workspace.py"
       - "tests/test_capability_operating_evidence.py"
+      - "tests/test_capability_operating_retry_refresh.py"
       - "tests/test_capability_scoped_release_diagnostic.py"
       - "tests/test_capability_scoped_runtime_v2.py"
       - "tests/test_qualified_paper_evidence.py"
@@ -24,6 +26,7 @@ on:
     branches: [main]
     paths:
       - "operations/capability_operating_evidence.py"
+      - "operations/capability_operating_retry_refresh.py"
       - "operations/capability_operating_universe.py"
       - "operations/capability_scoped_discovery.py"
       - "operations/capability_scoped_render_bootstrap.py"
@@ -35,6 +38,7 @@ on:
       - "run_capability_operating_evidence.py"
       - "run_render_service_workspace.py"
       - "tests/test_capability_operating_evidence.py"
+      - "tests/test_capability_operating_retry_refresh.py"
       - "tests/test_capability_scoped_release_diagnostic.py"
       - "tests/test_capability_scoped_runtime_v2.py"
       - "tests/test_qualified_paper_evidence.py"
@@ -78,6 +82,7 @@ jobs:
           tests/test_qualified_paper_evidence.py
           tests/test_capability_scoped_runtime_v2.py
           tests/test_capability_operating_evidence.py
+          tests/test_capability_operating_retry_refresh.py
           tests/test_capability_scoped_release_diagnostic.py
 
       - name: Run deterministic release validation
