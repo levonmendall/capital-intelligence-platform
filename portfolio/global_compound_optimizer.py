@@ -1,16 +1,18 @@
 """Deterministic global marginal-capital optimizer for the non-authoritative preview.
 
 The optimizer does not authorize a trade and cannot bypass final construction. It
-chooses among already-reviewed, positive-conviction candidate caps using a geometric
-return proxy, downside, concentration and factor-overlap penalties. Its output is fed
-through the canonical construction engine before the CIO sees any joint feasibility
-context.
+chooses among already-reviewed, positive-conviction candidate caps using the same
+annualized marginal-compounding-value yardstick used by global rotation, then applies
+portfolio concentration and factor-overlap penalties. Its output is fed through the
+canonical construction engine before the CIO sees any joint feasibility context.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite, log1p, sqrt
+from math import isfinite, sqrt
 from typing import Any, Mapping, Sequence
+
+from portfolio.marginal_compounding_value import assess_marginal_compounding_value
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +38,7 @@ class GlobalCompoundPortfolioProposal:
     expected_log_growth_score: float
     deployable_cash_used: float
     diagnostics: tuple[str, ...]
-    policy_version: str = "global-compound-optimizer.v1"
+    policy_version: str = "global-compound-optimizer.v2-marginal-compounding"
     authorizes_capital: bool = False
     construction_authority: bool = False
 
@@ -97,23 +99,12 @@ def _current_weight(portfolio: object, candidate: object) -> float:
 
 
 def _base_utility(candidate: object, signal: object) -> float:
-    expected = max(-0.99, _finite(getattr(candidate, "net_expected_return", 0.0)))
-    edge = max(0.0, _finite(getattr(signal, "expected_return_edge", 0.0)))
-    score = max(0.0, min(1.0, _finite(getattr(signal, "score", 0.0))))
-    hierarchy = max(0.0, min(1.0, _finite(getattr(signal, "hierarchy_strength", score))))
-    causal = max(0.0, min(1.0, _finite(getattr(signal, "causal_score", 0.0))))
-    downside = abs(min(0.0, _finite(getattr(candidate, "expected_downside", 0.0))))
-    cost = max(0.0, _finite(getattr(candidate, "implementation_cost_return", 0.0)))
-    log_growth = log1p(expected)
-    return (
-        0.34 * log_growth
-        + 0.28 * edge
-        + 0.16 * score
-        + 0.10 * hierarchy
-        + 0.07 * causal
-        - 0.18 * downside
-        - 0.20 * cost
-    )
+    """Return one comparable economic quantity across all asset families."""
+
+    assessment = assess_marginal_compounding_value(candidate)
+    if str(getattr(signal, "candidate_identifier", "")) != assessment.candidate_identifier:
+        raise ValueError("global rotation signal does not match candidate utility")
+    return assessment.utility
 
 
 def optimize_global_compound_targets(
@@ -163,9 +154,9 @@ def optimize_global_compound_targets(
             signal = by_signal.get(identifier)
             if signal is None or targets[identifier] + 1e-12 >= caps[identifier]:
                 continue
-            if _finite(getattr(signal, "expected_return_edge", -1.0), -1.0) <= 0.0:
-                continue
             utility = _base_utility(candidate, signal)
+            if utility <= 0.0:
+                continue
             profile = _profile(portfolio, identifier)
             concentration_penalty = 0.0
             for other_identifier, other_weight in targets.items():
@@ -236,6 +227,7 @@ def optimize_global_compound_targets(
     )
     diagnostics = (
         f"Deployable cash={deployable:.2%}; optimizer used={used:.2%}; target cash={target_cash:.2%}.",
+        "Every candidate competes on annualized marginal expected log growth after implementation cost, downside, evidence uncertainty, liquidity, and the same opportunity-cost hurdle.",
         "Candidate caps come from the preliminary six-specialist conviction pass; the optimizer cannot raise them.",
         "Final canonical construction remains authoritative for correlation, downside, liquidity, turnover, cost and implementation constraints.",
     )
