@@ -1,0 +1,6 @@
+release=capability-runtime-v2
+portfolio_reset_epoch=capability-runtime-v2-2026-08-19
+operating_scope=capability_scoped
+interface=portfolio_only
+paper_only=true
+real_money_authorized=false
