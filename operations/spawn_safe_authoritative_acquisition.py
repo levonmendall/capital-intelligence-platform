@@ -33,12 +33,21 @@ class SpawnSafeSingleLaneRunner:
         # seam in this fresh interpreter.  Do not import the service orchestration stack.
         from operations import _comprehensive_market_discovery_v6 as core
         from operations.all_market_lane_certification import install_checkpointed_market_probe
+        from operations.certification_work_progress import (
+            install_spawn_child_transport_only_progress,
+        )
+        from operations.certification_work_unit_runner import (
+            run_with_canonical_work_progress,
+        )
 
         install_checkpointed_market_probe(core)
-        features = core.default_redundant_market_probe(
-            self.records,
-            self.timestamp,
-            self.policy,
+        install_spawn_child_transport_only_progress()
+        features = run_with_canonical_work_progress(
+            core.default_redundant_market_probe,
+            records=self.records,
+            timestamp=self.timestamp,
+            policy=self.policy,
+            asset_class=node.asset_class,
         )
         if not isinstance(features, Mapping):
             raise _scheduler.CertificationSchedulerError(
