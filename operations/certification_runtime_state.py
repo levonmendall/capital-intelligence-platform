@@ -52,16 +52,44 @@ class CertificationRuntimeBinding:
     current_source_id: str
 
 
+def _capability_scoped_operation_enabled(values: Mapping[str, str]) -> bool:
+    """Return whether this process is the independently governed operating CIO path.
+
+    Capability-scoped operation and exhaustive all-market certification intentionally have
+    separate readiness boundaries.  An explicit setting wins; Render defaults to the
+    capability-scoped operating path in the same way as production-context publication.
+    Setting the flag explicitly false preserves the strict all-market certification path
+    for a comprehensive certification process running in production.
+    """
+
+    explicit = values.get("CAPITAL_INTELLIGENCE_CAPABILITY_SCOPED_OPERATION")
+    if explicit is not None and str(explicit).strip():
+        return str(explicit).strip().lower() in {"1", "true", "yes", "on"}
+    return str(values.get("RENDER", "")).strip().lower() == "true"
+
+
 def certification_runtime_enabled(
     values: Mapping[str, str] | None = None,
 ) -> bool:
+    """Return whether this process owns the exhaustive all-market lineage state machine.
+
+    The capability-scoped CIO consumes a separately qualified immutable operating-evidence
+    snapshot and must not advance or wait on all-market certification stages.  Full-market
+    certification remains fail-closed and unchanged when capability-scoped operation is
+    explicitly disabled.
+    """
+
     resolved = os.environ if values is None else values
     production = (
         str(resolved.get("CAPITAL_INTELLIGENCE_ENVIRONMENT", "")).strip().lower()
         == "production"
         or str(resolved.get("RENDER", "")).strip().lower() == "true"
     )
-    return production and evidence_plane_enabled(resolved)
+    return (
+        production
+        and evidence_plane_enabled(resolved)
+        and not _capability_scoped_operation_enabled(resolved)
+    )
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
