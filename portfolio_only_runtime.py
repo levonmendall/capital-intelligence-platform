@@ -21,6 +21,7 @@ import pandas as pd
 import streamlit as st
 
 from operating_status import load_cio_operating_status
+from operations.asset_class_evaluation_status import load_asset_class_evaluation_status
 from portfolio.constants import CANONICAL_PORTFOLIO_CODE
 from premium_ui import apply_global_style, format_currency, format_percent
 
@@ -314,7 +315,7 @@ def _status_class(label: object) -> str:
     normalized = str(label or "").strip().lower().replace(" ", "_")
     if any(token in normalized for token in ("failed", "blocked", "unavailable", "error", "stale")):
         return "bad-state"
-    if any(token in normalized for token in ("degraded", "await", "cash", "no_change", "pending", "partial", "idle")):
+    if any(token in normalized for token in ("degraded", "await", "cash", "no_change", "pending", "partial", "idle", "progress")):
         return "warn-state"
     return "good-state"
 
@@ -418,6 +419,37 @@ def _attention_html(rows: list[tuple[str, str, str]]) -> str:
     return "".join(result)
 
 
+def _asset_class_evaluation_html(
+    summary: Mapping[str, Any] | None,
+) -> tuple[str, str]:
+    raw_rows = summary.get("rows", ()) if isinstance(summary, Mapping) else ()
+    if not isinstance(raw_rows, (list, tuple)) or not raw_rows:
+        empty = "No comprehensive asset-class evaluation has been recorded yet."
+        return f'<tr><td colspan="3" class="muted">{_esc(empty)}</td></tr>', f'<div class="muted">{_esc(empty)}</div>'
+
+    table: list[str] = []
+    mobile: list[str] = []
+    for raw in raw_rows:
+        if not isinstance(raw, Mapping):
+            continue
+        asset_class = str(raw.get("asset_class") or raw.get("key") or "Unknown")
+        status = str(raw.get("status") or "In progress")
+        detail = str(raw.get("detail") or "No additional evaluation detail is available.")
+        badge = f'<span class="state {_status_class(status)}">{_esc(status)}</span>'
+        table.append(
+            f"<tr><td><strong>{_esc(asset_class)}</strong></td><td>{badge}</td><td>{_esc(detail)}</td></tr>"
+        )
+        mobile.append(
+            '<div class="item"><div class="item-top">'
+            f'<div class="item-title">{_esc(asset_class)}</div>{badge}</div>'
+            f'<div class="item-sub">{_esc(detail)}</div></div>'
+        )
+    if not table:
+        empty = "No comprehensive asset-class evaluation has been recorded yet."
+        return f'<tr><td colspan="3" class="muted">{_esc(empty)}</td></tr>', f'<div class="muted">{_esc(empty)}</div>'
+    return "".join(table), "".join(mobile)
+
+
 def _command_center_html(
     *,
     totals: Mapping[str, Any],
@@ -425,6 +457,7 @@ def _command_center_html(
     briefing: Mapping[str, Any] | None,
     construction: Mapping[str, Any] | None,
     operating_status: Any,
+    asset_class_evaluation: Mapping[str, Any] | None = None,
 ) -> str:
     nav = _number(totals.get("nav", mandate.get("nav", 0.0)))
     cash = _number(totals.get("cash", mandate.get("cash", 0.0)))
@@ -450,6 +483,24 @@ def _command_center_html(
         if isinstance(briefing, Mapping)
         else str(getattr(operating_status, "label", "Awaiting"))
     )
+
+    evaluation = asset_class_evaluation if isinstance(asset_class_evaluation, Mapping) else {}
+    attempted = max(0, int(_number(evaluation.get("attempted"), 0.0)))
+    successful = max(0, min(attempted, int(_number(evaluation.get("successful"), 0.0))))
+    evaluation_rows = evaluation.get("rows", ())
+    has_failed_evaluation = isinstance(evaluation_rows, (list, tuple)) and any(
+        isinstance(row, Mapping) and str(row.get("status") or "").strip().lower() == "failed"
+        for row in evaluation_rows
+    )
+    evaluation_count_class = (
+        "bad" if has_failed_evaluation else "good" if attempted > 0 and successful == attempted else "muted"
+    )
+    evaluation_source = str(evaluation.get("source") or "No comprehensive evaluation recorded")
+    evaluation_as_of = evaluation.get("as_of")
+    evaluation_note = f"{successful} / {attempted} successful · {evaluation_source}"
+    if evaluation_as_of not in (None, ""):
+        evaluation_note += f" · {_when(evaluation_as_of)}"
+    evaluation_table, evaluation_mobile = _asset_class_evaluation_html(evaluation)
 
     attribution = _attribution_html(_attribution_rows(holdings, trades))
     position_table, position_mobile = _positions_html(holdings)
@@ -508,7 +559,7 @@ def _command_center_html(
 
   <section class="hero">
     <div class="card hero-main"><div class="label">Current portfolio NAV</div><div class="nav">{_format_money(nav)}</div><div class="return {_pnl_class(total_return)}">{'+' if total_return > 0 else ''}{_format_pct(total_return)} since $250,000 genesis</div><div class="muted" style="margin-top:9px">Portfolio snapshot {_esc(_when(as_of))} · {_esc(decision)}</div></div>
-    <div class="card hero-side"><div class="status-row"><span class="muted">Portfolio</span><span class="status-val">Canonical / persistent</span></div><div class="status-row"><span class="muted">Paper execution</span><span class="status-val good">Automatic</span></div><div class="status-row"><span class="muted">Live execution</span><span class="status-val bad">No authority</span></div><div class="status-row"><span class="muted">CIO state</span><span class="status-val">{_esc(cio_status.replace('_', ' ').title())}</span></div></div>
+    <div class="card hero-side"><div class="status-row"><span class="muted">Portfolio</span><span class="status-val">Canonical / persistent</span></div><div class="status-row"><span class="muted">Paper execution</span><span class="status-val good">Automatic</span></div><div class="status-row"><span class="muted">Live execution</span><span class="status-val bad">No authority</span></div><div class="status-row"><span class="muted">CIO state</span><span class="status-val">{_esc(cio_status.replace('_', ' ').title())}</span></div><div class="status-row"><span class="muted">Asset classes evaluated</span><span class="status-val {evaluation_count_class}">{successful} / {attempted}</span></div></div>
   </section>
 
   <section class="metrics">
@@ -521,11 +572,13 @@ def _command_center_html(
 
   <section class="grid2"><div class="card section"><div class="section-head"><div class="section-title">Recent paper trades</div><div class="section-note">Implementation history</div></div><div>{trade_items}</div></div><div class="card section"><div class="section-head"><div class="section-title">Skipped / rejected allocations</div><div class="section-note">Fail-closed reasons</div></div><div>{rejection_items}</div></div></section>
 
+  <section class="card section full"><div class="section-head"><div class="section-title">Asset class evaluation status</div><div class="section-note">{_esc(evaluation_note)}</div></div><div class="table-wrap"><table><thead><tr><th>Asset class</th><th>Status</th><th>Current result</th></tr></thead><tbody>{evaluation_table}</tbody></table></div><div class="mobile-list">{evaluation_mobile}</div></section>
+
   <section class="card section full"><div class="section-head"><div class="section-title">Decision pipeline status</div><div class="section-note">Evidence → specialists → CIO → construction → paper implementation</div></div><div class="table-wrap"><table><thead><tr><th>Stage</th><th>Status</th><th>Current reason</th></tr></thead><tbody>{pipeline_table}</tbody></table></div><div class="mobile-list">{pipeline_mobile}</div></section>
 
   <section class="card section full"><div class="section-head"><div class="section-title">What needs attention next</div><div class="section-note">Current operating, evidence, and construction blockers</div></div><div class="queue">{attention}</div></section>
 
-  <footer class="footer"><div>Auto-refresh: 30 seconds · Source: canonical portfolio and governed CIO journal</div><div>Paper-only system · CIO-only authority · no live-money execution</div></footer>
+  <footer class="footer"><div>Auto-refresh: 30 seconds · Source: canonical portfolio, governed CIO journal, and durable asset-class evaluation artifacts</div><div>Paper-only system · CIO-only authority · no live-money execution</div></footer>
 </div></div>
 '''
 
@@ -548,6 +601,16 @@ def _render_portfolio_command_center(dependencies, app_impl_module=None) -> None
             briefing = None
             construction = None
     operating_status = load_cio_operating_status()
+    try:
+        asset_class_evaluation = load_asset_class_evaluation_status()
+    except (OSError, TypeError, ValueError):
+        asset_class_evaluation = {
+            "successful": 0,
+            "attempted": 0,
+            "as_of": None,
+            "source": "Asset-class evaluation status unavailable",
+            "rows": [],
+        }
     st.markdown(
         _command_center_html(
             totals=totals,
@@ -555,6 +618,7 @@ def _render_portfolio_command_center(dependencies, app_impl_module=None) -> None
             briefing=briefing if isinstance(briefing, Mapping) else None,
             construction=construction if isinstance(construction, Mapping) else None,
             operating_status=operating_status,
+            asset_class_evaluation=asset_class_evaluation,
         ),
         unsafe_allow_html=True,
     )
@@ -588,6 +652,7 @@ def install(app_impl_module, secure_app_module) -> None:
 
 
 __all__ = [
+    "_asset_class_evaluation_html",
     "_attention_items",
     "_command_center_html",
     "_deployed",
