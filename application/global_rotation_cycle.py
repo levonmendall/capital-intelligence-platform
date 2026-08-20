@@ -12,11 +12,9 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
+from application.bounded_cio_cycle import BoundedCompoundingCanonicalCIOCycle
 from application.bounded_specialist_packets import RecomputingSpecialistPacketSource
-from application.compounding_cycle import (
-    CompoundingCanonicalCIOCycle,
-    CompoundingCanonicalCIOCycleResult,
-)
+from application.compounding_cycle import CompoundingCanonicalCIOCycleResult
 from application.global_rotation_preliminary import (
     MemoizedCandidateRiskIntelligenceEngine,
     MemoizedJointCandidateIntelligenceEngine,
@@ -139,7 +137,7 @@ class GlobalOpportunityRotationCanonicalCIOCycleResult(CompoundingCanonicalCIOCy
         object.__setattr__(self, "global_market_coverage", global_market_coverage)
 
 
-class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
+class GlobalOpportunityRotationCanonicalCIOCycle(BoundedCompoundingCanonicalCIOCycle):
     """Run the six-specialist/CIO process with global marginal-capital context."""
 
     def __init__(
