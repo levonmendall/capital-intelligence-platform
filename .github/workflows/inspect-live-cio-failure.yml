@@ -46,10 +46,16 @@ jobs:
               "stage": payload.get("stage"),
               "detail": safe_text(payload.get("detail")),
               "context_attempt_state": payload.get("context_attempt_state"),
-              "context_attempt_detail": safe_text(payload.get("context_attempt_detail")),
+              "context_attempt_cycle_matches": payload.get("context_attempt_cycle_matches"),
+              "context_cycle_matches": payload.get("context_cycle_matches"),
+              "instrument_count": payload.get("instrument_count"),
+              "candidate_count": payload.get("candidate_count"),
+              "qualified_candidate_count": payload.get("qualified_candidate_count"),
+              "exclusion_count": payload.get("exclusion_count"),
+              "terminal_screening_complete": payload.get("terminal_screening_complete"),
               "comprehensive_discovery_required": payload.get("comprehensive_discovery_required"),
               "comprehensive_discovery_limitations": [safe_text(item) for item in (payload.get("comprehensive_discovery_limitations") or [])][:10],
-              "top_level_keys": sorted(str(key) for key in payload.keys()),
+              "progress_metrics": payload.get("progress_metrics"),
           }
           print(json.dumps(result, indent=2, sort_keys=True))
           PY
