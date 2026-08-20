@@ -30,6 +30,9 @@ from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     load_free_paper_pilot_universe,
 )
+from operations.streaming_cio_journal_integrity import (
+    install_streaming_cio_journal_integrity,
+)
 from portfolio.construction_api import PortfolioConstructionPolicy
 from screening import SQLiteFullUniverseScreeningStore
 from security import SQLiteIdentityStore
@@ -81,8 +84,10 @@ def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
     """Build the only active scheduled investment-decision authority."""
 
     # The append-only journal may grow without bound on disk, but the production CIO
-    # must never materialize that complete history in RAM. Install the streaming read
-    # model before the first integrity scan or historical-state reconstruction.
+    # must never materialize either the complete history or one complete nested event
+    # object graph merely to verify integrity. Install the streaming payload verifier
+    # before the bounded read model and before the first integrity scan.
+    install_streaming_cio_journal_integrity()
     install_bounded_cio_journal_reads()
     journal = SQLiteCIOJournal(settings.journal_database)
     journal.verify_integrity()
