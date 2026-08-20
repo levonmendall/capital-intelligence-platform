@@ -28,11 +28,11 @@ def _load_worker_dependency() -> None:
     """Install bounded replay access only when the specialist/CIO worker is needed."""
 
     if _core.build_worker is None:
-        from operations.bounded_historical_learning import (
-            install_bounded_historical_learning,
+        from operations.bounded_governed_historical_learning import (
+            install_bounded_governed_historical_learning,
         )
 
-        install_bounded_historical_learning()
+        install_bounded_governed_historical_learning()
         from run_scheduler import build_worker as implementation
 
         _core.build_worker = implementation
