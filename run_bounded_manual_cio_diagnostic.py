@@ -51,6 +51,7 @@ _RECOVERY_PROGRESS_METRICS = frozenset(
 )
 _PROVIDER_FREE_CONSUMER_ENV = "CAPITAL_INTELLIGENCE_CIO_PROVIDER_FREE_CONSUMER"
 _PUBLIC_COLLECTION_ENABLED_ENV = "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED"
+_ORIGINAL_CONTAINER_MEMORY_KIB = _core._container_memory_kib
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -60,6 +61,27 @@ def _release(values: Mapping[str, str]) -> str:
         or values.get("GITHUB_SHA")
         or "unknown"
     ).strip()
+
+
+def _container_memory_with_configured_ceiling(
+    values: Mapping[str, str],
+) -> tuple[int | None, int | None, str]:
+    """Never let a loose host cgroup override the governed service-memory quota."""
+
+    current_kib, observed_limit_kib, source = _ORIGINAL_CONTAINER_MEMORY_KIB(values)
+    configured_limit_kib = _core._configured_memory_limit_kib(values)
+    if (
+        current_kib is not None
+        and observed_limit_kib is not None
+        and configured_limit_kib is not None
+        and configured_limit_kib < observed_limit_kib
+    ):
+        return (
+            current_kib,
+            configured_limit_kib,
+            f"{source}_configured_ceiling",
+        )
+    return current_kib, observed_limit_kib, source
 
 
 def _install_recovery_progress_contract() -> None:
@@ -154,6 +176,7 @@ def _prepare_with_rate_budget(
 _install_recovery_progress_contract()
 _core.prepare_reference_readiness = _prepare_with_rate_budget
 _core._prime_forced_replacement = _prime_forced_replacement
+_core._container_memory_kib = _container_memory_with_configured_ceiling
 
 
 if __name__ == "__main__":
