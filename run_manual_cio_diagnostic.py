@@ -1,21 +1,14 @@
-"""Govern the manual CIO diagnostic's canonical-portfolio initialization authority.
+"""Govern the manual CIO diagnostic's production dependency boundaries.
 
 The implementation remains in ``_manual_cio_diagnostic_core`` so its mature lazy-import,
-resource, CIO, construction, and paper-only behavior stays byte-for-byte unchanged. This
-adapter owns the production dependencies that must remain governed and memory-bounded:
-canonical portfolio initialization and historical replay consumption.
+resource, CIO, construction, and paper-only behavior stays unchanged. This adapter owns the
+production dependencies that must remain governed and memory-bounded: canonical portfolio
+initialization and historical replay consumption during worker initialization.
 """
 
 from __future__ import annotations
 
 import sys
-
-from operations.bounded_historical_learning import install_bounded_historical_learning
-
-# The bounded diagnostic runs one canonical cycle in an isolated child process. Install the
-# streaming historical-replay reader before the core prepares specialist/CIO dependencies so
-# a large replay manifest can never be expanded repeatedly into the child heap.
-install_bounded_historical_learning()
 
 import _manual_cio_diagnostic_core as _core
 
@@ -31,9 +24,24 @@ def _load_canonical_dependency() -> None:
         _core.ensure_canonical_portfolio_store = governed_initializer
 
 
-# Replace the core loader before execution so the canonical phase stays memory-bounded while
-# controlled dependency resets can never fall back to portfolio.state's legacy initializer.
+def _load_worker_dependency() -> None:
+    """Install bounded replay access only when the specialist/CIO worker is needed."""
+
+    if _core.build_worker is None:
+        from operations.bounded_historical_learning import (
+            install_bounded_historical_learning,
+        )
+
+        install_bounded_historical_learning()
+        from run_scheduler import build_worker as implementation
+
+        _core.build_worker = implementation
+
+
+# Replace core lazy loaders before execution. The adapter itself remains lightweight; neither
+# portfolio, operations, nor scheduler/application graphs are imported at process startup.
 _core._load_canonical_dependency = _load_canonical_dependency
+_core._load_worker_dependency = _load_worker_dependency
 
 if __name__ == "__main__":
     raise SystemExit(_core.main())
