@@ -2,19 +2,19 @@
 
 The cycle enriches already-governed candidates with mispriced-change and corroborated
 leadership economics, builds causal and hierarchical global opportunity context,
-freezes the authoritative opportunity queue, performs one all-candidate six-specialist
-preliminary pass, optimizes specialist-bounded marginal capital jointly, and then
-reuses immutable packets/risk analyses in the unchanged final CIO/construction path.
+freezes the authoritative opportunity queue, performs a specialist-informed
+preliminary pass through a bounded one-candidate packet source, optimizes marginal
+capital jointly, and recomputes the same deterministic packet on demand for the final
+CIO path. Full candidate scope and decision authority remain unchanged.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import replace
 
-from application.compounding_cycle import (
-    CompoundingCanonicalCIOCycle,
-    CompoundingCanonicalCIOCycleResult,
-)
+from application.bounded_cio_cycle import BoundedCompoundingCanonicalCIOCycle
+from application.bounded_specialist_packets import RecomputingSpecialistPacketSource
+from application.compounding_cycle import CompoundingCanonicalCIOCycleResult
 from application.global_rotation_preliminary import (
     MemoizedCandidateRiskIntelligenceEngine,
     MemoizedJointCandidateIntelligenceEngine,
@@ -137,7 +137,7 @@ class GlobalOpportunityRotationCanonicalCIOCycleResult(CompoundingCanonicalCIOCy
         object.__setattr__(self, "global_market_coverage", global_market_coverage)
 
 
-class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
+class GlobalOpportunityRotationCanonicalCIOCycle(BoundedCompoundingCanonicalCIOCycle):
     """Run the six-specialist/CIO process with global marginal-capital context."""
 
     def __init__(
@@ -231,8 +231,8 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         specialist_contexts,
         portfolio,
         opportunity_context,
-    ) -> dict[str, object]:
-        """Build every six-specialist packet before any final CIO synthesis."""
+    ):
+        """Expose deterministic six-specialist packets one candidate at a time."""
 
         if queue is None or not tuple(getattr(queue, "ranked", ()) or ()):
             return {}
@@ -240,6 +240,9 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
         if len(context_map) != len(specialist_contexts):
             raise ValueError("specialist candidate contexts must be unique")
         ranked_values = tuple(queue.ranked)
+        ranked_by_candidate = {
+            item.candidate.identifier: item for item in ranked_values
+        }
 
         def invalidation_clarity(ranked) -> float:
             if opportunity_context is None:
@@ -281,8 +284,10 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
             joint_by_candidate.setdefault(item.first_candidate_identifier, []).append(item)
             joint_by_candidate.setdefault(item.second_candidate_identifier, []).append(item)
 
-        packets: dict[str, object] = {}
-        for ranked in ranked_values:
+        def load_packet(candidate_identifier: str):
+            ranked = ranked_by_candidate.get(candidate_identifier)
+            if ranked is None:
+                raise KeyError(f"missing ranked candidate for {candidate_identifier}")
             candidate = ranked.candidate
             base_context = context_map.get(candidate.identifier)
             if base_context is None:
@@ -351,10 +356,12 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
                 forward_intelligence=base_context.forward_intelligence,
                 historical_learning=historical_learning,
             )
-            packets[candidate.identifier] = self.specialist_service.analyze(
-                candidate, specialist_context
-            )
-        return packets
+            return self.specialist_service.analyze_fresh(candidate, specialist_context)
+
+        return RecomputingSpecialistPacketSource(
+            tuple(ranked_by_candidate),
+            load_packet,
+        )
 
     def _preliminary_conviction_targets(self, *, queue, packets) -> dict[str, float | None]:
         if queue is None:
@@ -423,7 +430,7 @@ class GlobalOpportunityRotationCanonicalCIOCycle(CompoundingCanonicalCIOCycle):
 
         risk_cache_token = self.risk_intelligence_engine.begin_cycle_cache()
         joint_cache_token = self.joint_candidate_engine.begin_cycle_cache()
-        preliminary_packets: dict[str, object] = {}
+        preliminary_packets: object = {}
         conviction_targets: dict[str, float | None] | None = None
         optimizer_proposal: GlobalCompoundPortfolioProposal | None = None
         try:

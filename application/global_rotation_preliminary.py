@@ -1,10 +1,10 @@
 """Pre-final-CIO global conviction assessment for simultaneous portfolio preview.
 
-The global cycle computes all six-specialist packets before final CIO synthesis so the
-joint portfolio preview is specialist-informed. Immutable specialist, candidate-risk,
-and joint-candidate results are reused by the canonical final pass through context-local
-memoization, avoiding duplicate all-market analysis and its memory cost. Nothing here
-has action, construction, execution, or canonical persistence authority.
+The global cycle remains specialist-informed without retaining every six-specialist
+packet at once. Candidate-risk and joint-candidate results are memoized because they
+are compact deterministic summaries; full specialist packets are supplied through a
+context-local source that may recompute one candidate at a time. Nothing here has
+action, construction, execution, or canonical persistence authority.
 """
 from __future__ import annotations
 
@@ -130,29 +130,41 @@ class MemoizedJointCandidateIntelligenceEngine:
 
 
 class PrecomputedSpecialistService:
-    """Context-local packet reuse around an existing specialist service."""
+    """Context-local packet source around an existing specialist service.
+
+    The source is intentionally not copied. A normal dict preserves the historical
+    exact-packet reuse behavior used by tests and non-production callers. A bounded
+    source may instead recompute a packet on every ``get`` so the final CIO pass does
+    not require an all-candidate packet cache.
+    """
 
     def __init__(self, delegate) -> None:
         self.delegate = delegate
-        self._active_packets: ContextVar[dict[str, object]] = ContextVar(
+        self._active_packets: ContextVar[object] = ContextVar(
             f"global_rotation_specialist_packets_{id(self)}", default={}
         )
 
     def __getattr__(self, name: str):
         return getattr(self.delegate, name)
 
+    def analyze_fresh(self, candidate, context):
+        """Bypass any bound packet source and run the underlying specialist service."""
+
+        return self.delegate.analyze(candidate, context)
+
     @contextmanager
-    def bind_packets(self, packets: dict[str, object]) -> Iterator[None]:
-        if not isinstance(packets, dict):
-            raise TypeError("packets must be a dict")
-        token = self._active_packets.set(dict(packets))
+    def bind_packets(self, packets) -> Iterator[None]:
+        if not callable(getattr(packets, "get", None)):
+            raise TypeError("packets must provide a callable get method")
+        token = self._active_packets.set(packets)
         try:
             yield
         finally:
             self._active_packets.reset(token)
 
     def analyze(self, candidate, context):
-        packet = self._active_packets.get().get(candidate.identifier)
+        source = self._active_packets.get()
+        packet = source.get(candidate.identifier)
         if packet is None:
             return self.delegate.analyze(candidate, context)
         validate = getattr(packet, "validate_against", None)
