@@ -2,13 +2,20 @@
 
 The implementation remains in ``_manual_cio_diagnostic_core`` so its mature lazy-import,
 resource, CIO, construction, and paper-only behavior stays byte-for-byte unchanged. This
-adapter owns the one production dependency that must never fall back to the legacy
-reset/archive-capable compatibility initializer: canonical portfolio initialization.
+adapter owns the production dependencies that must remain governed and memory-bounded:
+canonical portfolio initialization and historical replay consumption.
 """
 
 from __future__ import annotations
 
 import sys
+
+from operations.bounded_historical_learning import install_bounded_historical_learning
+
+# The bounded diagnostic runs one canonical cycle in an isolated child process. Install the
+# streaming historical-replay reader before the core prepares specialist/CIO dependencies so
+# a large replay manifest can never be expanded repeatedly into the child heap.
+install_bounded_historical_learning()
 
 import _manual_cio_diagnostic_core as _core
 
