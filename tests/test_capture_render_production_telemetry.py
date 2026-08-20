@@ -240,3 +240,119 @@ def test_cli_watch_writes_safe_timeline_and_stops_on_success(
     assert result == 0
     assert json.loads(output.read_text(encoding="utf-8"))["diagnostic"]["state"] == "completed"
     assert len(json.loads(timeline.read_text(encoding="utf-8"))) == 2
+
+
+def test_active_attempt_suppresses_inherited_limitations() -> None:
+    snapshot = telemetry.build_snapshot(
+        {
+            **_payload(),
+            "request_id": "fresh-request",
+            "comprehensive_discovery_limitations": [
+                {"type": "historical_failure"},
+                {"type": "historical_provider_gap"},
+            ],
+        },
+        expected_release="release-current",
+    )
+
+    diagnostic = snapshot["diagnostic"]
+    assert isinstance(diagnostic, dict)
+    assert diagnostic["state"] == "in_progress"
+    assert diagnostic["limitation_count"] == 0
+    assert diagnostic["limitation_scope"] == "suppressed_while_active"
+
+
+def test_terminal_attempt_exposes_its_limitation_count() -> None:
+    snapshot = telemetry.build_snapshot(
+        {
+            **_payload(),
+            "state": "failed",
+            "completed_at": "2026-08-10T17:20:00+00:00",
+            "comprehensive_discovery_limitations": [
+                {"type": "provider_failure"},
+                {"type": "coverage_failure"},
+            ],
+        },
+        expected_release="release-current",
+    )
+
+    diagnostic = snapshot["diagnostic"]
+    assert isinstance(diagnostic, dict)
+    assert diagnostic["limitation_count"] == 2
+    assert diagnostic["limitation_scope"] == "current_terminal_attempt"
+
+
+def test_zero_second_one_shot_treats_exact_release_active_attempt_as_pending(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    snapshot = telemetry.build_snapshot(
+        {
+            **_payload(),
+            "request_id": "active-request",
+            "comprehensive_discovery_limitations": [{"type": "old_failure"}],
+        },
+        expected_release="release-current",
+    )
+    monkeypatch.setattr(
+        telemetry,
+        "capture_once",
+        lambda **_kwargs: (snapshot, False),
+    )
+    monotonic_values = iter((0.0, 0.0))
+    monkeypatch.setattr(telemetry.time, "monotonic", lambda: next(monotonic_values))
+    output = tmp_path / "snapshot.json"
+
+    result = telemetry.main(
+        (
+            "--url",
+            "https://example.test/cio-diagnostic.json",
+            "--expected-release",
+            "release-current",
+            "--output",
+            str(output),
+            "--watch-seconds",
+            "0",
+        )
+    )
+
+    written = json.loads(output.read_text(encoding="utf-8"))
+    assert result == 0
+    assert written["failure_class"] == "none"
+    assert written["diagnostic"]["state"] == "in_progress"
+    assert written["diagnostic"]["limitation_count"] == 0
+
+
+def test_positive_watch_still_fails_when_active_attempt_reaches_observation_timeout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    snapshot = telemetry.build_snapshot(
+        _payload(),
+        expected_release="release-current",
+    )
+    monkeypatch.setattr(
+        telemetry,
+        "capture_once",
+        lambda **_kwargs: (snapshot, False),
+    )
+    monotonic_values = iter((0.0, 1.0))
+    monkeypatch.setattr(telemetry.time, "monotonic", lambda: next(monotonic_values))
+    output = tmp_path / "snapshot.json"
+
+    result = telemetry.main(
+        (
+            "--url",
+            "https://example.test/cio-diagnostic.json",
+            "--expected-release",
+            "release-current",
+            "--output",
+            str(output),
+            "--watch-seconds",
+            "1",
+        )
+    )
+
+    written = json.loads(output.read_text(encoding="utf-8"))
+    assert result == telemetry._EXIT_TIMEOUT
+    assert written["failure_class"] == "timeout"
