@@ -55,6 +55,9 @@ _RECOVERY_PROGRESS_METRICS = frozenset(
 _PROVIDER_FREE_CONSUMER_ENV = "CAPITAL_INTELLIGENCE_CIO_PROVIDER_FREE_CONSUMER"
 _PUBLIC_COLLECTION_ENABLED_ENV = "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED"
 _ORIGINAL_CONTAINER_MEMORY_KIB = _core._container_memory_kib
+_ORIGINAL_CGROUP_MEMORY_KIB = _core._cgroup_memory_kib
+_ORIGINAL_PROCESS_MEMORY_KIB = _core._process_memory_kib
+_ORIGINAL_WAIT_WITH_RESOURCE_BOUNDS = _core._wait_with_resource_bounds
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -85,6 +88,24 @@ def _container_memory_with_configured_ceiling(
             f"{source}_configured_ceiling",
         )
     return current_kib, observed_limit_kib, source
+
+
+def _wait_with_reclaimable_bounds(process, **kwargs):
+    """Use the production dual guard while preserving explicit accounting injection.
+
+    The historical watchdog exposes cgroup/process readers as a deliberate test and
+    integration seam. If a caller replaces either reader, honor that injected accounting
+    with the original conservative watchdog instead of mixing synthetic raw counters with
+    live ``memory.stat`` from another cgroup. Normal production keeps the original readers
+    and therefore always uses the reclaimable-aware dual guard.
+    """
+
+    if (
+        _core._cgroup_memory_kib is not _ORIGINAL_CGROUP_MEMORY_KIB
+        or _core._process_memory_kib is not _ORIGINAL_PROCESS_MEMORY_KIB
+    ):
+        return _ORIGINAL_WAIT_WITH_RESOURCE_BOUNDS(process, **kwargs)
+    return wait_with_reclaimable_resource_bounds(process, **kwargs)
 
 
 def _install_recovery_progress_contract() -> None:
@@ -182,8 +203,8 @@ _core._prime_forced_replacement = _prime_forced_replacement
 _core._container_memory_kib = _container_memory_with_configured_ceiling
 # All bounded Render jobs import this wrapper before invoking the shared watchdog. Replace
 # the legacy raw-memory kill test with the dual reclaimable-aware guard while preserving the
-# watchdog's exact return contract and the hard service-OOM boundary.
-_core._wait_with_resource_bounds = wait_with_reclaimable_resource_bounds
+# watchdog's exact return contract, hard service-OOM boundary, and explicit injection seam.
+_core._wait_with_resource_bounds = _wait_with_reclaimable_bounds
 
 
 if __name__ == "__main__":
