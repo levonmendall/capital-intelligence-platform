@@ -21,6 +21,7 @@ from typing import Any
 _SCHEMA_VERSION = "render-production-telemetry.v1"
 _FINAL_SUCCESS_STATE = "completed"
 _FINAL_FAILURE_STATE = "failed"
+_ACTIVE_STATES = frozenset({"pending", "in_progress"})
 _EXIT_UNSAFE = 4
 _EXIT_RELEASE_MISMATCH = 5
 _EXIT_DIAGNOSTIC_FAILED = 6
@@ -266,6 +267,25 @@ def _elapsed_seconds(payload: Mapping[str, Any], *, captured_at: datetime) -> fl
     return round(max(0.0, elapsed), 3)
 
 
+def _limitation_summary(payload: Mapping[str, Any], *, state: str) -> tuple[int, str]:
+    """Expose limitations only after the active attempt has reached a terminal state.
+
+    The public audit can retain discovery limitations from an earlier terminal attempt while
+    the next exact-release request is still pending or in progress. Those historical records
+    remain valuable at the source, but flattening them into the active telemetry snapshot
+    incorrectly makes a fresh attempt look already failed. Until this request terminates,
+    telemetry therefore reports zero active limitations and explicitly marks the suppression.
+    """
+
+    limitations = payload.get("comprehensive_discovery_limitations")
+    if state in {_FINAL_SUCCESS_STATE, _FINAL_FAILURE_STATE}:
+        return (
+            len(limitations) if isinstance(limitations, list) else 0,
+            "current_terminal_attempt",
+        )
+    return 0, "suppressed_while_active"
+
+
 def build_snapshot(
     payload: Mapping[str, Any],
     *,
@@ -282,9 +302,11 @@ def build_snapshot(
         active_release == expected_release and payload.get("release_matches") is True
     )
     direct_stage = _safe_stage(payload.get("stage"))
+    state = str(payload.get("state") or "unknown")
+    limitation_count, limitation_scope = _limitation_summary(payload, state=state)
     diagnostic: dict[str, object] = {
         "diagnostic_id": _safe_identifier(payload.get("diagnostic_id") or payload.get("request_id")),
-        "state": str(payload.get("state") or "unknown"),
+        "state": state,
         "active_release": active_release,
         "release_matches_expected": release_matches_expected,
         "requested_at": str(payload.get("requested_at") or "") or None,
@@ -294,11 +316,8 @@ def build_snapshot(
         "terminal_age_seconds": _safe_nonnegative_number(payload.get("terminal_age_seconds")),
         "stage": direct_stage or _parse_progress_stage(payload.get("detail")),
         "context_attempt_state": _safe_identifier(payload.get("context_attempt_state")),
-        "limitation_count": (
-            len(payload.get("comprehensive_discovery_limitations"))
-            if isinstance(payload.get("comprehensive_discovery_limitations"), list)
-            else 0
-        ),
+        "limitation_count": limitation_count,
+        "limitation_scope": limitation_scope,
         "market_lanes": _safe_market_lanes(payload.get("market_lanes")),
         "progress_metrics": _safe_progress_metrics(payload.get("progress_metrics")),
         "public_live_requirement_progress": _safe_requirement_progress(
@@ -463,6 +482,16 @@ def _current_success(snapshot: Mapping[str, object]) -> bool:
     )
 
 
+def _current_pending(snapshot: Mapping[str, object]) -> bool:
+    diagnostic = _diagnostic(snapshot)
+    return bool(
+        snapshot.get("capture_state") == "ok"
+        and diagnostic is not None
+        and diagnostic.get("release_matches_expected") is True
+        and diagnostic.get("state") in _ACTIVE_STATES
+    )
+
+
 def _terminal_failure(snapshot: Mapping[str, object]) -> bool:
     diagnostic = _diagnostic(snapshot)
     return bool(
@@ -503,7 +532,12 @@ def _annotate_observation(
     return annotated
 
 
-def _exit_code(snapshot: Mapping[str, object], *, unsafe: bool) -> int:
+def _exit_code(
+    snapshot: Mapping[str, object],
+    *,
+    unsafe: bool,
+    allow_pending: bool = False,
+) -> int:
     if unsafe:
         return _EXIT_UNSAFE
     if _current_success(snapshot):
@@ -513,6 +547,8 @@ def _exit_code(snapshot: Mapping[str, object], *, unsafe: bool) -> int:
         return _EXIT_RELEASE_MISMATCH
     if failure_class in {"startup_failure", "terminal_failure"}:
         return _EXIT_DIAGNOSTIC_FAILED
+    if allow_pending and _current_pending(snapshot):
+        return 0
     return _EXIT_TIMEOUT
 
 
@@ -532,6 +568,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     started = time.monotonic()
     deadline = started + args.watch_seconds
+    one_shot = args.watch_seconds == 0
     timeline: list[dict[str, object]] = []
     unsafe = False
     final_snapshot: dict[str, object] | None = None
@@ -540,7 +577,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         now = time.monotonic()
         terminal_failure = _terminal_failure(snapshot)
         success = _current_success(snapshot)
-        timed_out = not (unsafe or terminal_failure or success) and now >= deadline
+        timed_out = (
+            not one_shot
+            and not (unsafe or terminal_failure or success)
+            and now >= deadline
+        )
         final_snapshot = _annotate_observation(
             snapshot,
             observation_count=len(timeline) + 1,
@@ -552,7 +593,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.timeline_output is not None:
             _write_json(args.timeline_output, timeline)
         print(json.dumps(final_snapshot, sort_keys=True, allow_nan=False), flush=True)
-        if unsafe or terminal_failure or success or timed_out:
+        if one_shot or unsafe or terminal_failure or success or timed_out:
             break
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -561,7 +602,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if final_snapshot is None:
         return _EXIT_TIMEOUT
-    return _exit_code(final_snapshot, unsafe=unsafe)
+    return _exit_code(final_snapshot, unsafe=unsafe, allow_pending=one_shot)
 
 
 if __name__ == "__main__":
