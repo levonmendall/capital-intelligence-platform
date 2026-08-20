@@ -1,17 +1,19 @@
 """Read-only asset-class evaluation status for the portfolio command center.
 
-The dashboard needs a compact answer to two operational questions: how many asset
-classes did comprehensive research try to evaluate, and which of those classes actually
-completed terminal all-market evaluation. This module projects that answer from existing
-durable artifacts only. It does not run discovery, contact providers, certify anything,
-nominate candidates, or grant investment/execution authority.
+The dashboard answers two separate questions without changing investment authority:
+how many governed asset classes exist in the comprehensive opportunity scope, and what
+is the current evaluation state of each class. The denominator is therefore the complete
+governed asset-class universe rather than only the subset reached by one runtime cycle.
 
 Source precedence is intentionally fail-closed:
-1. the newest exact-release certification-DAG attempt establishes the attempted lanes;
-2. a matching all-market aggregate and its immutable lane artifacts establish per-lane
-   terminal success, including partial success when the global barrier fails;
-3. if there is no current exact-release attempt yet, the latest release-independent
+1. the newest exact-release certification-DAG attempt establishes lanes reached now;
+2. a matching all-market aggregate and immutable lane artifacts establish terminal
+   success/failure, including partial success when the global barrier fails;
+3. if there is no current exact-release attempt, the latest release-independent
    comprehensive snapshot supplies the most recent completed global evaluation view.
+
+This module is presentation-only. It never runs discovery, contacts providers, certifies
+an asset, nominates a candidate, or grants investment/execution authority.
 """
 
 from __future__ import annotations
@@ -21,6 +23,8 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Mapping
+
+from cio.models import CandidateAssetClass
 
 
 _DAG_SCHEMA = "persistent-certification-manifest.v1"
@@ -44,6 +48,15 @@ _LABELS = {
     "alternative": "Alternatives",
     "other": "Other",
 }
+
+# OTHER is a catch-all classification, not one of the governed investment families the
+# all-market dashboard is expected to evaluate independently. CandidateAssetClass has
+# thirteen concrete governed families plus that catch-all.
+_GOVERNED_ASSET_CLASSES = tuple(
+    item.value for item in CandidateAssetClass if item is not CandidateAssetClass.OTHER
+)
+_AWAITING_STATUS = "Awaiting evaluation"
+_AWAITING_DETAIL = "No current-cycle terminal evaluation is recorded for this asset class."
 
 
 def _canonical(value: object) -> bytes:
@@ -94,18 +107,59 @@ def _lane_from_node(node_id: object) -> str | None:
     return lane or None
 
 
+def _complete_governed_rows(
+    rows: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], int]:
+    """Return all governed classes while preserving only current-source evidence."""
+
+    by_lane: dict[str, dict[str, object]] = {}
+    for raw in rows:
+        lane = str(raw.get("key") or "").strip().lower()
+        if lane not in _GOVERNED_ASSET_CLASSES:
+            continue
+        by_lane[lane] = {
+            "key": lane,
+            "asset_class": str(raw.get("asset_class") or _label(lane)),
+            "status": str(raw.get("status") or "In progress"),
+            "detail": str(raw.get("detail") or "No additional evaluation detail is available."),
+        }
+
+    reached = len(by_lane)
+    complete: list[dict[str, object]] = []
+    for lane in _GOVERNED_ASSET_CLASSES:
+        row = by_lane.get(lane)
+        if row is None:
+            row = {
+                "key": lane,
+                "asset_class": _label(lane),
+                "status": _AWAITING_STATUS,
+                "detail": _AWAITING_DETAIL,
+            }
+        complete.append(row)
+    return complete, reached
+
+
 def _summary(
     rows: list[dict[str, object]],
     *,
     as_of: object = None,
     source: str,
 ) -> dict[str, object]:
+    complete_rows, reached = _complete_governed_rows(rows)
+    successful = sum(
+        1 for row in complete_rows if row.get("status") == "Evaluated"
+    )
+    total = len(_GOVERNED_ASSET_CLASSES)
     return {
-        "successful": sum(1 for row in rows if row.get("status") == "Evaluated"),
-        "attempted": len(rows),
+        "successful": successful,
+        # Backward-compatible denominator consumed by the current command-center UI.
+        # It now means the complete governed scope rather than only reached lanes.
+        "attempted": total,
+        "total": total,
+        "reached": reached,
         "as_of": as_of,
         "source": source,
-        "rows": rows,
+        "rows": complete_rows,
     }
 
 
