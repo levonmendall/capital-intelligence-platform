@@ -9,6 +9,7 @@ import environment_story_placement_refinement
 import history_ui_refinement
 import operating_intelligence_ui
 import opportunity_funnel_ui_refinement
+import portfolio_evidence_accumulation_ui
 import portfolio_only_runtime
 import portfolio_ui_refinement
 import secure_app
@@ -59,8 +60,10 @@ def install_canonical_surface_composition(
 
     # Portfolio-only presentation is deliberately installed last so the complete
     # underlying surfaces stay available to code/tests while Render exposes only the
-    # canonical portfolio during the operating phase.
+    # canonical portfolio during the operating phase. The evidence refinement then
+    # changes only that command center's read-only asset-class presentation.
     portfolio_only_runtime.install(app_impl, secure_app)
+    portfolio_evidence_accumulation_ui.install(portfolio_only_runtime)
 
 
 __all__ = ["install_canonical_surface_composition"]

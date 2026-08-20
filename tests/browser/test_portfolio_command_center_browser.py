@@ -97,7 +97,7 @@ def portfolio_command_center(tmp_path_factory):
         process.wait(timeout=5)
 
 
-def _assert_command_center(page) -> None:
+def _assert_command_center(page) -> dict[str, object]:
     page.get_by_text("Portfolio Command Center", exact=True).wait_for(
         state="visible", timeout=15_000
     )
@@ -106,6 +106,10 @@ def _assert_command_center(page) -> None:
         "AUTO PAPER EXECUTION · ON",
         "LIVE MONEY · DISABLED",
         "Current portfolio NAV",
+        "Evidence accumulation",
+        "Read-only progress · thresholds unchanged",
+        "Governed classes",
+        "Reached now",
         "Equity curve",
         "P&L attribution",
         "Open paper positions",
@@ -116,7 +120,26 @@ def _assert_command_center(page) -> None:
     ):
         page.get_by_text(label, exact=True).first.wait_for(state="visible", timeout=15_000)
 
+    for asset_class in (
+        "U.S. equities",
+        "U.S. ETFs",
+        "Cash equivalents",
+        "Fixed income",
+        "International equities",
+        "Commodities",
+        "FX",
+        "Crypto",
+        "Real estate",
+        "Futures",
+        "Options",
+        "Volatility",
+        "Alternatives",
+    ):
+        page.get_by_text(asset_class, exact=True).first.wait_for(state="visible", timeout=15_000)
+
     assert page.locator(".cie-command-center .metrics .metric").count() == 8
+    assert page.locator(".cie-command-center .asset-evidence-card").count() == 13
+    assert page.get_by_text("Asset class evaluation status", exact=True).count() == 0
     assert page.get_by_text("Today", exact=True).count() == 0
     assert page.get_by_text("Environment", exact=True).count() == 0
     assert page.get_by_text("History", exact=True).count() == 0
@@ -133,6 +156,8 @@ def _assert_command_center(page) -> None:
             return Boolean(el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().height > 1);
           })(),
           metricColumns: getComputedStyle(document.querySelector('.cie-command-center .metrics')).gridTemplateColumns.split(' ').length,
+          evidenceSummaryColumns: getComputedStyle(document.querySelector('.cie-command-center .evidence-summary-grid')).gridTemplateColumns.split(' ').length,
+          evidenceMetricColumns: getComputedStyle(document.querySelector('.cie-command-center .asset-evidence-metrics')).gridTemplateColumns.split(' ').length,
           visibleMobileLists: [...document.querySelectorAll('.cie-command-center .mobile-list')].filter(el => getComputedStyle(el).display !== 'none').length,
           visibleTables: [...document.querySelectorAll('.cie-command-center .table-wrap')].filter(el => getComputedStyle(el).display !== 'none').length,
         })"""
@@ -172,10 +197,14 @@ def test_production_portfolio_command_center_real_browser(
 
         if name == "iphone":
             assert layout["metricColumns"] == 2
+            assert layout["evidenceSummaryColumns"] == 2
+            assert layout["evidenceMetricColumns"] == 2
             assert layout["visibleMobileLists"] >= 2
             assert layout["visibleTables"] == 0
         else:
             assert layout["metricColumns"] == 8
+            assert layout["evidenceSummaryColumns"] == 3
+            assert layout["evidenceMetricColumns"] == 6
             assert layout["visibleTables"] >= 2
 
         page.screenshot(
