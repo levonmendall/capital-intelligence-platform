@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from operations import capability_operating_retry_refresh as runtime
-from operations import capability_scoped_render_bootstrap as capability_bootstrap
 
 
 def test_fresh_evidence_does_not_run_bounded_owner(monkeypatch):
@@ -92,7 +91,10 @@ def test_installed_runner_refreshes_only_operating_evidence_before_cio_child(mon
         _run_release_diagnostic_with_live_audit=original_runner,
         _log=lambda event, **kwargs: logs.append((event, kwargs)),
     )
-    memory_safe = SimpleNamespace(render_bootstrap=bootstrap)
+    memory_safe = SimpleNamespace(
+        render_bootstrap=bootstrap,
+        _prequalify_capability_operating_evidence=lambda _values: events.append("refresh") or True,
+    )
     loads = {"count": 0}
 
     def load(_values):
@@ -103,11 +105,6 @@ def test_installed_runner_refreshes_only_operating_evidence_before_cio_child(mon
         return object()
 
     monkeypatch.setattr(runtime, "load_capability_operating_reference_manifest", load)
-    monkeypatch.setattr(
-        capability_bootstrap,
-        "prequalify_capability_operating_evidence",
-        lambda _memory_safe, _values: events.append("refresh") or True,
-    )
     runtime.install(memory_safe)
 
     result = bootstrap._run_release_diagnostic_with_live_audit(
@@ -132,16 +129,14 @@ def test_installed_runner_does_not_start_child_when_operating_refresh_fails(monk
         _run_release_diagnostic_with_live_audit=original_runner,
         _log=lambda event, **kwargs: logs.append((event, kwargs)),
     )
-    memory_safe = SimpleNamespace(render_bootstrap=bootstrap)
+    memory_safe = SimpleNamespace(
+        render_bootstrap=bootstrap,
+        _prequalify_capability_operating_evidence=lambda _values: False,
+    )
     monkeypatch.setattr(
         runtime,
         "load_capability_operating_reference_manifest",
         lambda _values: (_ for _ in ()).throw(RuntimeError("stale")),
-    )
-    monkeypatch.setattr(
-        capability_bootstrap,
-        "prequalify_capability_operating_evidence",
-        lambda _memory_safe, _values: False,
     )
     runtime.install(memory_safe)
 
