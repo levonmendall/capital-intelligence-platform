@@ -71,12 +71,39 @@ def _fixture_html() -> str:
         headline="Portfolio operating normally",
         detail="Operating evidence current",
     )
+    asset_class_evaluation = {
+        "successful": 2,
+        "attempted": 3,
+        "as_of": "2026-08-19T20:15:00+00:00",
+        "source": "Current comprehensive evaluation attempt",
+        "rows": [
+            {
+                "key": "us_equity",
+                "asset_class": "U.S. equities",
+                "status": "Evaluated",
+                "detail": "500 cataloged · 80 deep analyzed · 12 selected",
+            },
+            {
+                "key": "crypto",
+                "asset_class": "Crypto",
+                "status": "Evaluated",
+                "detail": "120 cataloged · 30 deep analyzed · 5 selected",
+            },
+            {
+                "key": "fixed_income",
+                "asset_class": "Fixed income",
+                "status": "Failed",
+                "detail": "Evaluation evidence failed · ProviderEvidenceError",
+            },
+        ],
+    }
     return portfolio_only_runtime._command_center_html(
         totals=totals,
         mandate=mandate,
         briefing=briefing,
         construction=construction,
         operating_status=operating,
+        asset_class_evaluation=asset_class_evaluation,
     )
 
 
@@ -101,10 +128,26 @@ def test_command_center_mirrors_crypto_information_hierarchy() -> None:
         "Open paper positions",
         "Recent paper trades",
         "Skipped / rejected allocations",
+        "Asset class evaluation status",
         "Decision pipeline status",
         "What needs attention next",
     ):
         assert expected in html
+
+
+def test_command_center_surfaces_asset_class_evaluation_coverage_and_statuses() -> None:
+    html = _fixture_html()
+
+    assert "Asset classes evaluated" in html
+    assert "2 / 3" in html
+    assert "2 / 3 successful" in html
+    assert "U.S. equities" in html
+    assert "Crypto" in html
+    assert "Fixed income" in html
+    assert "Evaluated" in html
+    assert "Failed" in html
+    assert "ProviderEvidenceError" in html
+    assert "Current comprehensive evaluation attempt" in html
 
 
 def test_command_center_surfaces_current_blockers_and_watch_conditions() -> None:
