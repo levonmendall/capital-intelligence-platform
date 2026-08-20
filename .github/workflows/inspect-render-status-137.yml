@@ -1,0 +1,56 @@
+name: Inspect Render status 137
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read credential-safe production diagnostic
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import urllib.request
+          import urllib.error
+
+          url = "https://capital-intelligence-platform.onrender.com/app/static/cio-diagnostic.json"
+          req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "render-137-inspector/1.0"})
+          try:
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+          except Exception as error:
+              print(json.dumps({"fetch_error_type": type(error).__name__, "fetch_error": str(error)[:500]}, sort_keys=True))
+              raise
+
+          if payload.get("credential_safe") is not True:
+              raise SystemExit("diagnostic is not credential-safe")
+          if payload.get("paper_only") is not True or payload.get("real_money_authorized") is not False:
+              raise SystemExit("diagnostic authority markers are unsafe")
+
+          def safe(value):
+              text = str(value or "")[:4000]
+              text = re.sub(r"(?i)([?&](?:api[_-]?key|apikey|api_token|access_token|token)=)[^&\\s]+", r"\\1[REDACTED]", text)
+              text = re.sub(r"(?i)(\\bBearer\\s+)[A-Za-z0-9._~+/=-]{8,}", r"\\1[REDACTED]", text)
+              text = re.sub(r"(?i)(password|secret|api[_-]?key|api[_-]?token|access[_-]?token)\\s*[:=]\\s*[^; ,]+", r"\\1=[REDACTED]", text)
+              return text
+
+          fields = {key: payload.get(key) for key in (
+              "active_release", "expected_release", "release_matches_expected",
+              "request_id", "diagnostic_id", "state", "stage", "updated_at",
+              "context_attempt_state", "context_cycle_matches", "context_attempt_cycle_matches",
+              "terminal_screening_complete", "instrument_count", "candidate_count",
+              "qualified_candidate_count", "exclusion_count", "progress_metrics",
+              "memory", "memory_phases", "prequalification_progress",
+              "public_live_requirements", "reference_components", "market_lanes"
+          )}
+          fields["detail"] = safe(payload.get("detail"))
+          fields["context_attempt_detail"] = safe(payload.get("context_attempt_detail"))
+          print(json.dumps(fields, indent=2, sort_keys=True, default=str))
+          PY
