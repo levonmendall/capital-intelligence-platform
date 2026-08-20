@@ -1,36 +1,74 @@
-"""Spawn-safe authoritative comprehensive-discovery acquisition.
+"""Spawn-safe, spool-backed authoritative comprehensive-discovery acquisition.
 
-The parent process owns catalog/preselection orchestration, provider leases, durable node
-state, and diagnostic progress.  Each provider-facing lane child receives only its lane
-records, exact decision epoch, and immutable policy object.  The child imports the
-canonical market probe in a fresh interpreter so it never inherits Render thread locks,
-HTTP pools, or other process state from the long-running service.
+The comprehensive-discovery coordinator retains only compact certification-node metadata.
+Catalog assembly and provider preselection run in a disposable builder interpreter that
+freezes immutable inputs to an integrity-protected local spool and exits before any lane
+worker starts. Each provider-facing lane then loads only its own records in a fresh spawn
+interpreter. Frozen catalog/publication inputs are loaded only after every required lane
+qualifies, immediately before the existing provider-free canonical finalizer.
 
-This module does not change market membership, evidence standards, screening, CIO
-authority, construction, execution, or paper-only governance.
+This module changes only memory lifetime and operational transport. It does not change
+market membership, evidence standards, screening, CIO authority, construction, execution,
+or paper-only governance.
 """
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from operations import authoritative_comprehensive_discovery as _authoritative
 from operations import persistent_certification_scheduler as _scheduler
+from operations.comprehensive_discovery_input_spool import (
+    ComprehensiveDiscoverySpoolError,
+    SpoolReference,
+    load_failure,
+    load_finalizer_inputs,
+    load_lane_inputs,
+    load_manifest_for_request,
+    manifest_available,
+    nodes_from_manifest,
+    prepare_request,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class SpawnSafeSingleLaneRunner:
-    """Picklable callable containing exactly one lane's governed inputs."""
+    """Picklable child callable that carries no lane records in the parent."""
 
-    records: tuple[object, ...]
+    manifest_path: str
+    node_id: str
     timestamp: datetime
-    policy: object
+    policy_version: str
 
     def __call__(self, node: _scheduler.CertificationNode) -> int:
+        if node.node_id != self.node_id:
+            raise _scheduler.CertificationSchedulerError(
+                "spool-backed lane runner node identity changed across spawn boundary"
+            )
+
+        # The complete byte stream is size/SHA verified before deserialization. Only this
+        # selected lane and the small immutable policy are materialized in the child.
+        records, policy, descriptor = load_lane_inputs(
+            self.manifest_path,
+            node_id=node.node_id,
+        )
+        if str(descriptor.get("input_fingerprint") or "") != node.input_fingerprint:
+            raise _scheduler.CertificationSchedulerError(
+                f"spooled certification input fingerprint changed for {node.node_id}"
+            )
+        if int(descriptor.get("decision_eligible_count", -1)) != node.decision_eligible_count:
+            raise _scheduler.CertificationSchedulerError(
+                f"spooled certification record count changed for {node.node_id}"
+            )
+
         # Import only the canonical preserved core and install the exact-epoch checkpoint
-        # seam in this fresh interpreter.  Do not import the service orchestration stack.
+        # seam in this fresh interpreter. Do not import the service orchestration stack.
         from operations import _comprehensive_market_discovery_v6 as core
         from operations.all_market_lane_certification import install_checkpointed_market_probe
         from operations.certification_work_progress import (
@@ -42,43 +80,89 @@ class SpawnSafeSingleLaneRunner:
 
         install_checkpointed_market_probe(core)
         install_spawn_child_transport_only_progress()
-        features = run_with_canonical_work_progress(
-            core.default_redundant_market_probe,
-            records=self.records,
-            timestamp=self.timestamp,
-            policy=self.policy,
-            asset_class=node.asset_class,
-        )
-        if not isinstance(features, Mapping):
-            raise _scheduler.CertificationSchedulerError(
-                f"{node.node_id} market evidence probe returned a non-mapping"
+        values = os.environ
+        release_sha = _scheduler._release(values)
+        try:
+            features = run_with_canonical_work_progress(
+                core.default_redundant_market_probe,
+                records=records,
+                timestamp=self.timestamp,
+                policy=policy,
+                asset_class=node.asset_class,
             )
-        return len(features)
+            if not isinstance(features, Mapping):
+                raise _scheduler.CertificationSchedulerError(
+                    f"{node.node_id} market evidence probe returned a non-mapping"
+                )
+            return len(features)
+        finally:
+            # Publish compatibility only after a canonical exact-epoch checkpoint exists;
+            # the helper is a no-op when the lane failed before producing one.
+            _authoritative._publish_compatible_checkpoint(
+                values,
+                release_sha=release_sha,
+                node=node,
+                records=records,
+                epoch=self.timestamp,
+                policy_version=self.policy_version,
+            )
 
 
 @dataclass(frozen=True, slots=True)
 class SpawnSafeLaneRunner:
-    """Parent-side runner factory that serializes only the selected lane to a child."""
+    """Compact parent-side factory; no deep-record mapping is retained here."""
 
-    deep_records: Mapping[str, Sequence[object]]
+    manifest_path: str
     timestamp: datetime
-    policy: object
+    policy_version: str
 
     def for_node(self, node: _scheduler.CertificationNode) -> SpawnSafeSingleLaneRunner:
-        records = self.deep_records.get(node.node_id)
-        if records is None:
-            raise _scheduler.CertificationSchedulerError(
-                f"spawn-safe certification runner has no records for {node.node_id}"
-            )
         return SpawnSafeSingleLaneRunner(
-            records=tuple(records),
+            manifest_path=self.manifest_path,
+            node_id=node.node_id,
             timestamp=self.timestamp,
-            policy=self.policy,
+            policy_version=self.policy_version,
         )
 
     def __call__(self, node: _scheduler.CertificationNode) -> int:
         # Retained for compatibility with the unpatched scheduler in deterministic tests.
         return self.for_node(node)(node)
+
+
+def _prepare_spool_process(request_path: Path, values: Mapping[str, str]) -> None:
+    if manifest_available(request_path):
+        return
+    repository_root = Path(__file__).resolve().parents[1]
+    process = subprocess.Popen(
+        (
+            sys.executable,
+            "-m",
+            "operations.comprehensive_discovery_input_spool",
+            "build",
+            "--request",
+            str(request_path),
+        ),
+        cwd=str(repository_root),
+        env=dict(values),
+        # Keep the disposable builder in the comprehensive stage process group so the
+        # existing reclaimable-aware outer guard remains the authoritative hard boundary.
+        start_new_session=False,
+    )
+    return_code = int(process.wait())
+    if return_code == 0:
+        return
+    failure = load_failure(request_path)
+    if failure is None:
+        raise _scheduler.CertificationSchedulerError(
+            "comprehensive discovery input spool builder exited without durable failure attribution; "
+            f"return_code={return_code}"
+        )
+    raise _scheduler.CertificationSchedulerError(
+        "comprehensive discovery input spool preparation failed; "
+        f"stage={failure.get('failure_stage')}; "
+        f"failure_type={failure.get('error_type')}; "
+        f"detail={failure.get('error_detail')}"
+    )
 
 
 def spawn_safe_acquire(
@@ -91,7 +175,7 @@ def spawn_safe_acquire(
     policy: object | None,
     values: Mapping[str, str],
 ):
-    """Mirror authoritative acquisition while providing a spawn-safe lane runner."""
+    """Acquire every required lane without retaining global deep inputs in the parent."""
 
     timestamp = core._base._legacy._aware(
         as_of,
@@ -100,69 +184,27 @@ def spawn_safe_acquire(
     resolved = policy or core.ComprehensiveMarketDiscoveryPolicy()
     release_sha = _scheduler._release(values)
 
-    core.record_manual_cio_diagnostic_progress("certification_dag_catalog_dependency")
-    raw_catalogs = core._base.default_catalog_probe(timestamp, policy=resolved)
-    catalogs = core._base._merge_certified_catalog(raw_catalogs, as_of=timestamp)
-    if not isinstance(raw_catalogs, Mapping) or not isinstance(catalogs, Mapping):
-        raise _scheduler.CertificationSchedulerError(
-            "certification DAG catalog dependency is not a mapping"
-        )
-    core.record_manual_cio_diagnostic_progress(
-        "certification_dag_catalog_dependency_complete",
-        metrics={
-            "catalog_records": sum(
-                len(items) for items in catalogs.values() if isinstance(items, Sequence)
-            )
-        },
-    )
-
-    core.record_manual_cio_diagnostic_progress(
-        "certification_dag_provider_factor_dependency"
-    )
-    try:
-        publication = core.ensure_provider_preselection_publication(
-            catalogs,
-            as_of=timestamp,
-            policy=resolved,
-            market_probe=core.default_provider_preselection_market_probe,
-        )
-    except core.ProviderPreselectionPublicationError as error:
-        raise _scheduler.CertificationSchedulerError(str(error)) from error
-    core.record_manual_cio_diagnostic_progress(
-        "certification_dag_provider_factor_dependency_complete"
-    )
-
-    nodes, deep_records = _scheduler._build_lane_nodes(
-        core,
-        catalogs=catalogs,
-        timestamp=timestamp,
-        resolved=resolved,
+    request = prepare_request(
+        values=values,
+        decision_epoch=timestamp,
         held_symbols=held_symbols,
         tracked_symbols=tracked_symbols,
         excluded_symbols=excluded_symbols,
-        values=values,
+        policy=resolved,
     )
-    if not nodes:
+    try:
+        _prepare_spool_process(request.path, values)
+        manifest_path, spool = load_manifest_for_request(request.path)
+        nodes = nodes_from_manifest(spool)
+    except (ComprehensiveDiscoverySpoolError, OSError, ValueError) as error:
         raise _scheduler.CertificationSchedulerError(
-            "certification DAG found no scheduled comprehensive-discovery lanes"
-        )
+            f"comprehensive discovery input spool is not ready: {type(error).__name__}: {error}"
+        ) from error
 
-    policy_version = str(getattr(resolved, "version", ""))
-    rebound_count = 0
-    for node in nodes:
-        if _authoritative._rebind_compatible_checkpoint(
-            values,
-            release_sha=release_sha,
-            node=node,
-            records=deep_records[node.node_id],
-            epoch=timestamp,
-            policy_version=policy_version,
-        ):
-            rebound_count += 1
-    if rebound_count:
-        core.record_manual_cio_diagnostic_progress(
-            "certification_dag_compatibility_rebind",
-            metrics={"rebound_nodes": rebound_count},
+    policy_version = str(spool.get("policy_version") or "")
+    if policy_version != str(getattr(resolved, "version", "")):
+        raise _scheduler.CertificationSchedulerError(
+            "comprehensive discovery input spool policy version mismatch"
         )
 
     scheduler = _scheduler.PersistentCertificationScheduler(
@@ -172,12 +214,11 @@ def spawn_safe_acquire(
         policy_version=policy_version,
     )
     lane_runner = SpawnSafeLaneRunner(
-        deep_records=deep_records,
+        manifest_path=str(manifest_path),
         timestamp=timestamp,
-        policy=resolved,
+        policy_version=policy_version,
     )
 
-    manifest: _scheduler.CertificationRunResult | None = None
     try:
         manifest = scheduler.run(nodes, lane_runner)
     except _scheduler.CertificationSchedulerError as error:
@@ -190,18 +231,8 @@ def spawn_safe_acquire(
                 error=error,
             )
         ) from error
-    finally:
-        for node in nodes:
-            _authoritative._publish_compatible_checkpoint(
-                values,
-                release_sha=release_sha,
-                node=node,
-                records=deep_records[node.node_id],
-                epoch=timestamp,
-                policy_version=policy_version,
-            )
 
-    assert manifest is not None
+    rebound_count = int(spool.get("compatibility_rebound_count", 0))
     core.record_manual_cio_diagnostic_progress(
         "certification_dag_ready",
         metrics={
@@ -211,23 +242,63 @@ def spawn_safe_acquire(
             "compatibility_rebound_nodes": rebound_count,
         },
     )
+
+    # The historical acquisition result is intentionally reused as the integration seam,
+    # but the two heavyweight finalizer fields now contain only tiny spool references.
     return _authoritative._AcquisitionResult(
         timestamp=timestamp,
         policy=resolved,
-        raw_catalogs=raw_catalogs,
-        publication=publication,
+        raw_catalogs=SpoolReference(str(manifest_path), "raw_catalogs"),
+        publication=SpoolReference(str(manifest_path), "publication"),
         manifest=manifest,
     )
 
 
+def _install_spool_aware_finalizer() -> None:
+    current = _authoritative._provider_free_finalize
+    if getattr(current, "_spool_aware_comprehensive_finalizer", False):
+        return
+
+    def provider_free_finalize(core, delegate, acquisition, **kwargs):
+        raw_reference = acquisition.raw_catalogs
+        publication_reference = acquisition.publication
+        if not (
+            isinstance(raw_reference, SpoolReference)
+            and isinstance(publication_reference, SpoolReference)
+            and raw_reference.manifest_path == publication_reference.manifest_path
+        ):
+            return current(core, delegate, acquisition, **kwargs)
+        try:
+            raw_catalogs, publication = load_finalizer_inputs(raw_reference.manifest_path)
+        except ComprehensiveDiscoverySpoolError as error:
+            raise _scheduler.CertificationSchedulerError(
+                f"provider-free finalizer inputs are not ready: {error}"
+            ) from error
+        hydrated = _authoritative._AcquisitionResult(
+            timestamp=acquisition.timestamp,
+            policy=acquisition.policy,
+            raw_catalogs=raw_catalogs,
+            publication=publication,
+            manifest=acquisition.manifest,
+        )
+        # This is deliberately the first point at which frozen global finalizer payloads
+        # coexist in memory. Every provider-facing lane child has already exited.
+        return current(core, delegate, hydrated, **kwargs)
+
+    provider_free_finalize._spool_aware_comprehensive_finalizer = True  # type: ignore[attr-defined]
+    if getattr(current, "_comprehensive_discovery_failure_boundary", False):
+        provider_free_finalize._comprehensive_discovery_failure_boundary = True  # type: ignore[attr-defined]
+    _authoritative._provider_free_finalize = provider_free_finalize
+
+
 def install_spawn_safe_authoritative_acquisition() -> None:
-    """Replace only the provider-facing acquisition function with spawn-safe orchestration."""
+    """Install spool-backed acquisition and delayed provider-free finalizer hydration."""
 
     current = _authoritative._acquire
-    if getattr(current, "_spawn_safe_authoritative_acquisition", False):
-        return
-    spawn_safe_acquire._spawn_safe_authoritative_acquisition = True  # type: ignore[attr-defined]
-    _authoritative._acquire = spawn_safe_acquire
+    if not getattr(current, "_spawn_safe_authoritative_acquisition", False):
+        spawn_safe_acquire._spawn_safe_authoritative_acquisition = True  # type: ignore[attr-defined]
+        _authoritative._acquire = spawn_safe_acquire
+    _install_spool_aware_finalizer()
 
 
 __all__ = [
