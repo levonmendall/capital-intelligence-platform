@@ -4,14 +4,20 @@ on:
   pull_request:
     paths:
       - "portfolio_only_runtime.py"
+      - "portfolio_evidence_accumulation_ui.py"
+      - "ui_runtime_composition.py"
       - "tests/test_crypto_style_portfolio_command_center.py"
+      - "tests/test_portfolio_evidence_accumulation_ui.py"
       - "tests/browser/test_portfolio_command_center_browser.py"
       - ".github/workflows/portfolio-command-center.yml"
   push:
     branches: [main]
     paths:
       - "portfolio_only_runtime.py"
+      - "portfolio_evidence_accumulation_ui.py"
+      - "ui_runtime_composition.py"
       - "tests/test_crypto_style_portfolio_command_center.py"
+      - "tests/test_portfolio_evidence_accumulation_ui.py"
       - "tests/browser/test_portfolio_command_center_browser.py"
       - ".github/workflows/portfolio-command-center.yml"
 
@@ -46,8 +52,13 @@ jobs:
       - name: Verify dependency consistency
         run: python -m pip check
 
-      - name: Compile command center module
-        run: python -m py_compile portfolio_only_runtime.py tests/browser/test_portfolio_command_center_browser.py
+      - name: Compile command center modules
+        run: >-
+          python -m py_compile
+          portfolio_only_runtime.py
+          portfolio_evidence_accumulation_ui.py
+          tests/test_portfolio_evidence_accumulation_ui.py
+          tests/browser/test_portfolio_command_center_browser.py
 
       - name: Locate preinstalled Chrome
         shell: bash
@@ -57,7 +68,11 @@ jobs:
           echo "CAPITAL_INTELLIGENCE_SYSTEM_CHROME=$CHROME_BIN" >> "$GITHUB_ENV"
 
       - name: Run command center regressions
-        run: pytest -q tests/test_crypto_style_portfolio_command_center.py tests/test_capability_scoped_runtime_v2.py
+        run: >-
+          pytest -q
+          tests/test_crypto_style_portfolio_command_center.py
+          tests/test_portfolio_evidence_accumulation_ui.py
+          tests/test_capability_scoped_runtime_v2.py
 
       - name: Run desktop and iPhone production command center browser gate
         env:
