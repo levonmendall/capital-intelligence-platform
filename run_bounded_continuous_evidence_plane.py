@@ -9,6 +9,9 @@ the normal production coordinator continues to use loop mode afterward.
 The isolated child enters through a DAG-native bootstrap that installs and verifies the
 comprehensive-discovery runtime contract before the evidence owner is imported. This
 prevents import ordering from silently restoring the obsolete aggregate discovery timeout.
+On Render's fixed-memory service, the nested certification DAG is serialized so fresh lane
+interpreters cannot defeat the outer exclusive-memory-lane guarantee by running in parallel.
+This changes scheduling only: every required DAG node and market lane remains mandatory.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ _SPEC = WorkerSpec(
     default_timeout_seconds=3600.0,
     default_initial_delay_seconds=30.0,
 )
+_DAG_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
 
 
 def _lane_wait_seconds(values: Mapping[str, str]) -> float:
@@ -51,8 +55,22 @@ def _lane_wait_seconds(values: Mapping[str, str]) -> float:
     return value
 
 
+def _bounded_evidence_values(values: Mapping[str, str]) -> dict[str, str]:
+    """Serialize nested DAG workers on Render while preserving complete certification."""
+
+    resolved = dict(values)
+    if str(resolved.get("RENDER") or "").strip().lower() == "true":
+        # The outer evidence owner already has one exclusive heavy-memory lease. Allowing
+        # the inner DAG scheduler to start its default three fresh Python interpreters at
+        # once can cross the same 2 GiB service's governed high-water boundary before any
+        # node commits. Serial nodes are durable/resumable, so this bounds peak RAM without
+        # dropping a node, market, provider requirement, freshness rule, or fail-closed gate.
+        resolved[_DAG_WORKERS_ENV] = "1"
+    return resolved
+
+
 def run_continuous_once(values: Mapping[str, str] | None = None) -> int:
-    resolved = dict(os.environ if values is None else values)
+    resolved = _bounded_evidence_values(os.environ if values is None else values)
     return _run_isolated_once(
         _SPEC,
         values=resolved,
@@ -65,9 +83,10 @@ def run_continuous_loop(
     values: Mapping[str, str] | None = None,
     initial_delay_seconds: float | None = None,
 ) -> int:
+    resolved = _bounded_evidence_values(os.environ if values is None else values)
     return run_loop(
         _SPEC,
-        values=os.environ if values is None else values,
+        values=resolved,
         initial_delay_seconds=initial_delay_seconds,
     )
 
