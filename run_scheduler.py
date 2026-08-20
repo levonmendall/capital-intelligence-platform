@@ -25,6 +25,7 @@ from delivery import (
     ScheduledCanonicalCIOWorker,
 )
 from operations import OperationalSettings, WorkerHeartbeatStore, configure_logging
+from operations.bounded_cio_journal import install_bounded_cio_journal_reads
 from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     load_free_paper_pilot_universe,
@@ -79,6 +80,10 @@ def _paper_pilot_construction_policy() -> PortfolioConstructionPolicy:
 def build_worker(settings: ApiSettings) -> ScheduledCanonicalCIOWorker:
     """Build the only active scheduled investment-decision authority."""
 
+    # The append-only journal may grow without bound on disk, but the production CIO
+    # must never materialize that complete history in RAM. Install the streaming read
+    # model before the first integrity scan or historical-state reconstruction.
+    install_bounded_cio_journal_reads()
     journal = SQLiteCIOJournal(settings.journal_database)
     journal.verify_integrity()
     screening_store = SQLiteFullUniverseScreeningStore(
