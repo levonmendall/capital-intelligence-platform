@@ -12,9 +12,9 @@ import run_bounded_continuous_evidence_plane as bounded
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_bounded_continuous_evidence_uses_guarded_dag_native_entrypoint() -> None:
-    assert bounded._SPEC.script == "run_dag_native_continuous_evidence_plane.py"
-    assert bounded._SPEC.arguments == ("--once",)
+def test_bounded_continuous_evidence_uses_stage_isolated_entrypoint() -> None:
+    assert bounded._SPEC.script == "run_stage_isolated_evidence_pipeline.py"
+    assert bounded._SPEC.arguments == ()
     assert bounded._SPEC.default_timeout_seconds == 3600.0
 
 
