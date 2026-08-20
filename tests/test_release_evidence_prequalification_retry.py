@@ -83,6 +83,7 @@ def test_release_evidence_prequalification_recovers_from_transient_worker_failur
     assert completed["generation_id"] == "generation:test"
     assert completed["metrics"]["attempt"] == 2
     assert completed["metrics"]["maximum_attempts"] == 3
+    assert completed["metrics"]["complete_all_market_coverage_required"] == 1
     assert any(event == "release_evidence_prequalification_retrying" for event, _ in logs)
     assert any(event == "release_evidence_prequalification_finished" for event, _ in logs)
 
@@ -123,6 +124,7 @@ def test_release_evidence_prequalification_fails_only_after_retry_budget(
         "maximum_attempts": 3,
         "qualifier_return_code": 2,
         "qualifier_return_code_negative": 0,
+        "complete_all_market_coverage_required": 1,
     }
     retries = [event for event, _ in logs if event == "release_evidence_prequalification_retrying"]
     assert len(retries) == 2
@@ -164,6 +166,7 @@ def test_release_evidence_prequalification_recovers_when_child_cannot_start_once
     assert sleeps == []
     assert any(
         item.get("metrics", {}).get("qualifier_start_failed") == 1
+        and item.get("metrics", {}).get("complete_all_market_coverage_required") == 1
         for item in writes
     )
     assert writes[-1]["generation_id"] == "generation:spawn-recovered"
