@@ -10,7 +10,24 @@ began. Public imports from ``application`` remain compatible through module ``__
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+
+# The repository connectivity audit is deliberately static and follows AST import edges.
+# Keep the canonical application graph visible to that governance control without executing
+# the expensive imports at runtime. TYPE_CHECKING is always false in normal Python execution.
+if TYPE_CHECKING:
+    import application.daily_intelligence
+    import application.eligible_universe
+    import application.environment_evidence
+    import application.forecast_support
+    import application.multi_asset_evidence
+    import application.production_cio
+    import application.production_context
+    import application.production_context_adapter
+    import application.production_context_contract
+    import application.production_context_executor
+    import application.production_context_runtime
 
 
 _EXPORTS: Final[dict[str, tuple[str, str]]] = {
