@@ -60,8 +60,27 @@ def install(memory_safe) -> None:
 
     original_run_with_audit = render_bootstrap._run_release_diagnostic_with_live_audit
 
+    # Production uses the dedicated operating-evidence owner. Lightweight integration
+    # harnesses that intentionally expose only the legacy prequalification seam keep a
+    # compatible injection point without changing production behavior.
+    injected_prequalify = getattr(
+        memory_safe,
+        "_prequalify_capability_operating_evidence",
+        None,
+    )
+    legacy_prequalify = getattr(memory_safe, "_prequalify_release_evidence", None)
+    production_helpers_available = all(
+        hasattr(memory_safe, name) for name in ("_positive_int", "_nonnegative_seconds")
+    )
+
     def prequalify(values: MutableMapping[str, str]) -> bool:
-        return prequalify_capability_operating_evidence(memory_safe, values)
+        if callable(injected_prequalify):
+            return bool(injected_prequalify(values))
+        if production_helpers_available:
+            return prequalify_capability_operating_evidence(memory_safe, values)
+        if callable(legacy_prequalify):
+            return bool(legacy_prequalify(values))
+        return False
 
     def run_with_live_audit(
         command: Sequence[str],
