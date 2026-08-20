@@ -1,115 +1,79 @@
-"""Application orchestration for canonical Capital Intelligence experiences."""
+"""Application orchestration for canonical Capital Intelligence experiences.
 
-from application.eligible_universe import (
-    CertifiedEligibleUniversePublication,
-    EligibleUniverseCertificationState,
-    EligibleUniverseError,
-    SQLiteCertifiedEligibleUniverseStore,
-)
-from application.environment_evidence import (
-    CertifiedDecisionEnvironmentSnapshot,
-    EnvironmentEvidenceError,
-    EnvironmentEvidenceIntegrityError,
-    SQLiteEnvironmentEvidenceStore,
-    SubsequentEnvironmentObservation,
-)
-from application.multi_asset_evidence import (
-    AssetMetricDefinition,
-    AssetSpecificEvidencePacket,
-    MetricDirection,
-    MultiAssetEvidenceError,
-    MultiAssetEvidenceIntegrityError,
-    OriginatingFactObservation,
-    SQLiteAssetSpecificEvidenceStore,
-    TypedAssetMetric,
-    metric_definition,
-)
-from application.production_cio import (
-    ProductionCanonicalCIOContextProvider,
-    ProductionContextManifest,
-)
-from application.production_context_contract import ProductionCanonicalCIOContext
-from application.production_context_executor import ProductionCanonicalCIOExecutor
-from application.production_context import (
-    EvidenceCertificationState,
-    GovernedEvidenceLineage,
-    ProductionCandidateEvidence,
-    ProductionContextError,
-    ProductionContextEvidenceSnapshot,
-    ProductionHoldingEvidence,
-    SQLiteProductionContextStore,
-)
-from application.production_context_runtime import (
-    RepositoryProductionCanonicalCIOContextProvider,
-)
-from application.production_context_adapter import (
-    RepositoryProductionCanonicalCIOContextProvider as CanonicalProductionContextAdapter,
-)
-from application.forecast_support import (
-    CandidateForecastScenarioImpact,
-    CandidateForecastSupport,
-    ForecastSupportError,
-    ForecastSupportIntegrityError,
-    ForecastSupportingProductionContextProvider,
-    SQLiteCandidateForecastSupportStore,
-    build_production_context_provider,
-)
-from application.daily_intelligence import (
-    DailyCapitalIntelligenceService,
-    DailyCapitalIntelligenceSnapshot,
-    DailyIntelligenceCycle,
-    DailyIntelligenceStatus,
-    DailySnapshotRecord,
-    SQLiteDailySnapshotStore,
-    build_daily_capital_intelligence_snapshot,
-    daily_snapshot_to_dict,
-)
+The package root is intentionally lazy. Production CIO workers import specific
+``application.*`` modules while operating inside a bounded service container; eagerly
+loading every daily-intelligence, evidence, context, and reporting dependency at package
+initialization needlessly retained a second application graph before specialist analysis
+began. Public imports from ``application`` remain compatible through module ``__getattr__``.
+"""
 
-__all__ = [
-    "AssetMetricDefinition",
-    "AssetSpecificEvidencePacket",
-    "CandidateForecastScenarioImpact",
-    "CandidateForecastSupport",
-    "CanonicalProductionContextAdapter",
-    "CertifiedDecisionEnvironmentSnapshot",
-    "CertifiedEligibleUniversePublication",
-    "DailyCapitalIntelligenceService",
-    "DailyCapitalIntelligenceSnapshot",
-    "DailyIntelligenceCycle",
-    "DailyIntelligenceStatus",
-    "DailySnapshotRecord",
-    "EligibleUniverseCertificationState",
-    "EligibleUniverseError",
-    "EnvironmentEvidenceError",
-    "EnvironmentEvidenceIntegrityError",
-    "EvidenceCertificationState",
-    "ForecastSupportError",
-    "ForecastSupportIntegrityError",
-    "ForecastSupportingProductionContextProvider",
-    "GovernedEvidenceLineage",
-    "MetricDirection",
-    "MultiAssetEvidenceError",
-    "MultiAssetEvidenceIntegrityError",
-    "OriginatingFactObservation",
-    "ProductionCandidateEvidence",
-    "ProductionCanonicalCIOContext",
-    "ProductionCanonicalCIOContextProvider",
-    "ProductionCanonicalCIOExecutor",
-    "ProductionContextError",
-    "ProductionContextEvidenceSnapshot",
-    "ProductionContextManifest",
-    "ProductionHoldingEvidence",
-    "RepositoryProductionCanonicalCIOContextProvider",
-    "SQLiteAssetSpecificEvidenceStore",
-    "TypedAssetMetric",
-    "SQLiteCandidateForecastSupportStore",
-    "SQLiteCertifiedEligibleUniverseStore",
-    "SQLiteDailySnapshotStore",
-    "SQLiteEnvironmentEvidenceStore",
-    "SQLiteProductionContextStore",
-    "SubsequentEnvironmentObservation",
-    "build_daily_capital_intelligence_snapshot",
-    "build_production_context_provider",
-    "daily_snapshot_to_dict",
-    "metric_definition",
-]
+from __future__ import annotations
+
+from importlib import import_module
+from typing import Final
+
+
+_EXPORTS: Final[dict[str, tuple[str, str]]] = {
+    "CertifiedEligibleUniversePublication": ("application.eligible_universe", "CertifiedEligibleUniversePublication"),
+    "EligibleUniverseCertificationState": ("application.eligible_universe", "EligibleUniverseCertificationState"),
+    "EligibleUniverseError": ("application.eligible_universe", "EligibleUniverseError"),
+    "SQLiteCertifiedEligibleUniverseStore": ("application.eligible_universe", "SQLiteCertifiedEligibleUniverseStore"),
+    "CertifiedDecisionEnvironmentSnapshot": ("application.environment_evidence", "CertifiedDecisionEnvironmentSnapshot"),
+    "EnvironmentEvidenceError": ("application.environment_evidence", "EnvironmentEvidenceError"),
+    "EnvironmentEvidenceIntegrityError": ("application.environment_evidence", "EnvironmentEvidenceIntegrityError"),
+    "SQLiteEnvironmentEvidenceStore": ("application.environment_evidence", "SQLiteEnvironmentEvidenceStore"),
+    "SubsequentEnvironmentObservation": ("application.environment_evidence", "SubsequentEnvironmentObservation"),
+    "AssetMetricDefinition": ("application.multi_asset_evidence", "AssetMetricDefinition"),
+    "AssetSpecificEvidencePacket": ("application.multi_asset_evidence", "AssetSpecificEvidencePacket"),
+    "MetricDirection": ("application.multi_asset_evidence", "MetricDirection"),
+    "MultiAssetEvidenceError": ("application.multi_asset_evidence", "MultiAssetEvidenceError"),
+    "MultiAssetEvidenceIntegrityError": ("application.multi_asset_evidence", "MultiAssetEvidenceIntegrityError"),
+    "OriginatingFactObservation": ("application.multi_asset_evidence", "OriginatingFactObservation"),
+    "SQLiteAssetSpecificEvidenceStore": ("application.multi_asset_evidence", "SQLiteAssetSpecificEvidenceStore"),
+    "TypedAssetMetric": ("application.multi_asset_evidence", "TypedAssetMetric"),
+    "metric_definition": ("application.multi_asset_evidence", "metric_definition"),
+    "ProductionCanonicalCIOContextProvider": ("application.production_cio", "ProductionCanonicalCIOContextProvider"),
+    "ProductionContextManifest": ("application.production_cio", "ProductionContextManifest"),
+    "ProductionCanonicalCIOContext": ("application.production_context_contract", "ProductionCanonicalCIOContext"),
+    "ProductionCanonicalCIOExecutor": ("application.production_context_executor", "ProductionCanonicalCIOExecutor"),
+    "EvidenceCertificationState": ("application.production_context", "EvidenceCertificationState"),
+    "GovernedEvidenceLineage": ("application.production_context", "GovernedEvidenceLineage"),
+    "ProductionCandidateEvidence": ("application.production_context", "ProductionCandidateEvidence"),
+    "ProductionContextError": ("application.production_context", "ProductionContextError"),
+    "ProductionContextEvidenceSnapshot": ("application.production_context", "ProductionContextEvidenceSnapshot"),
+    "ProductionHoldingEvidence": ("application.production_context", "ProductionHoldingEvidence"),
+    "SQLiteProductionContextStore": ("application.production_context", "SQLiteProductionContextStore"),
+    "RepositoryProductionCanonicalCIOContextProvider": ("application.production_context_runtime", "RepositoryProductionCanonicalCIOContextProvider"),
+    "CanonicalProductionContextAdapter": ("application.production_context_adapter", "RepositoryProductionCanonicalCIOContextProvider"),
+    "CandidateForecastScenarioImpact": ("application.forecast_support", "CandidateForecastScenarioImpact"),
+    "CandidateForecastSupport": ("application.forecast_support", "CandidateForecastSupport"),
+    "ForecastSupportError": ("application.forecast_support", "ForecastSupportError"),
+    "ForecastSupportIntegrityError": ("application.forecast_support", "ForecastSupportIntegrityError"),
+    "ForecastSupportingProductionContextProvider": ("application.forecast_support", "ForecastSupportingProductionContextProvider"),
+    "SQLiteCandidateForecastSupportStore": ("application.forecast_support", "SQLiteCandidateForecastSupportStore"),
+    "build_production_context_provider": ("application.forecast_support", "build_production_context_provider"),
+    "DailyCapitalIntelligenceService": ("application.daily_intelligence", "DailyCapitalIntelligenceService"),
+    "DailyCapitalIntelligenceSnapshot": ("application.daily_intelligence", "DailyCapitalIntelligenceSnapshot"),
+    "DailyIntelligenceCycle": ("application.daily_intelligence", "DailyIntelligenceCycle"),
+    "DailyIntelligenceStatus": ("application.daily_intelligence", "DailyIntelligenceStatus"),
+    "DailySnapshotRecord": ("application.daily_intelligence", "DailySnapshotRecord"),
+    "SQLiteDailySnapshotStore": ("application.daily_intelligence", "SQLiteDailySnapshotStore"),
+    "build_daily_capital_intelligence_snapshot": ("application.daily_intelligence", "build_daily_capital_intelligence_snapshot"),
+    "daily_snapshot_to_dict": ("application.daily_intelligence", "daily_snapshot_to_dict"),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute_name = target
+    value = getattr(import_module(module_name), attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})
