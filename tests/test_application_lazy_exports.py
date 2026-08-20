@@ -52,3 +52,20 @@ def test_lazy_root_exports_preserve_public_imports_without_loading_daily_stack()
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_canonical_scheduler_import_does_not_load_daily_intelligence_graph() -> None:
+    result = _run_isolated(
+        """
+        import sys
+        import run_scheduler
+
+        assert callable(run_scheduler.build_worker)
+        assert "application.compounding_cycle" in sys.modules
+        assert "application.production_context_executor" in sys.modules
+        assert "application.forecast_support" in sys.modules
+        assert "application.daily_intelligence" not in sys.modules
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
