@@ -65,7 +65,7 @@ def test_capability_scope_is_default_on_render_but_explicit_false_wins():
     )
 
 
-def test_installed_release_environment_removes_legacy_all_market_gate():
+def test_installed_release_environment_preserves_all_market_gate():
     bootstrap = SimpleNamespace()
     bootstrap._release_diagnostic_environment = lambda _values: {
         "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY": "true",
@@ -81,15 +81,17 @@ def test_installed_release_environment_removes_legacy_all_market_gate():
     diagnostic = bootstrap._release_diagnostic_environment({"RENDER": "true"})
 
     assert diagnostic["CAPITAL_INTELLIGENCE_CAPABILITY_SCOPED_OPERATION"] == "true"
-    assert diagnostic["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY"] == "false"
+    assert diagnostic["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY"] == "true"
     assert (
         diagnostic["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_MARKET_DISCOVERY"]
-        == "false"
+        == "true"
     )
     assert (
         diagnostic["CAPITAL_INTELLIGENCE_DISCOVERY_REQUIRE_COMPLETE_MARKET_COVERAGE"]
-        == "false"
+        == "true"
     )
+    assert diagnostic["CAPITAL_INTELLIGENCE_RUN_COMPREHENSIVE_DISCOVERY"] == "true"
+    assert diagnostic["CAPITAL_INTELLIGENCE_DIAGNOSTIC_ALLOW_COMPREHENSIVE_DISCOVERY"] == "true"
 
 
 def test_singleflight_observes_owned_same_release_instead_of_starting_second_child(
@@ -211,4 +213,4 @@ def test_installed_singleflight_does_not_invoke_original_runner_when_coalesced(
     assert calls["original"] == 0
     assert logs[-1][0] == "manual_cio_release_diagnostic_singleflight_observed"
     assert logs[-1][1]["competing_child_started"] is False
-    assert logs[-1][1]["complete_all_market_coverage_required"] is False
+    assert logs[-1][1]["complete_all_market_coverage_required"] is True

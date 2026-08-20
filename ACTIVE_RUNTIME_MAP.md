@@ -4,20 +4,37 @@
 
 ```text
 Render branch main / Docker build context .
-  -> dockerCommand: python run_render_service.py
+  -> dockerCommand: python run_render_service_workspace.py
+  -> disposable-workspace/storage preflight
+  -> run_render_service_memory_safe.py
   -> initialize.py (must succeed)
-  -> supervisor children sharing /app/database
-       api                  uvicorn api.app:create_app --factory :8000
-       cio-paper-operator   python run_autonomous_paper_operator.py --loop
-       historical-backfill python run_historical_backfill.py --loop
-       encrypted-backup    python run_backup.py --loop
-       streamlit            python -m streamlit run render_app.py :$PORT
+  -> supervisor children sharing durable /app/database state
+       api                         uvicorn api.app:create_app --factory :8000
+       streamlit                   python -m streamlit run render_app.py :$PORT
+       cio-paper-operator          bounded coordinator -> finite --once child
+       global-public-evidence      bounded coordinator -> finite maintenance child
+       continuous-evidence-plane   bounded coordinator -> finite all-market child
+       capability-operating-evidence bounded coordinator -> finite capability child
+       historical-backfill         bounded coordinator -> finite replay child
+       encrypted-backup            bounded coordinator -> finite backup child
 ```
 
-API, autonomous paper operator, and Streamlit are critical supervisor children.
-Historical backfill and encrypted backup are restarted after bounded delay. Render's
-external health probe targets the Streamlit `/_stcore/health` endpoint; the supervisor
-also owns child-process health and restart behavior.
+API and Streamlit are the serving-critical supervisor children. Investment, evidence,
+historical, and backup coordinators are independently restartable and fail closed for
+their own authority without taking the read-only product offline. Heavy passes share one
+exclusive memory lane and execute in short-lived subprocesses so imported analytical
+working sets and allocator arenas return to the OS after every pass.
+
+Release certification requires both a complete comprehensive all-market evidence
+generation and fresh capability-operating evidence. Capability scope constrains paper
+execution eligibility only; it cannot reduce discovery breadth, required market coverage,
+or certification requirements. A bond/provider transition may disclose degraded scope
+but cannot silently set comprehensive discovery to optional.
+
+Render's external health probe targets the Streamlit `/_stcore/health` endpoint; the
+supervisor also owns child-process health and bounded restart behavior. Release diagnostics
+run through the same production CIO engine used by scheduled operation rather than through
+a separate investment implementation.
 
 ### Layered readiness control plane
 
@@ -126,45 +143,49 @@ mounted and have been removed from the active repository.
 ## Headless investment and paper-operating graph
 
 ```text
-run_autonomous_paper_operator.py --loop
-  -> collect public information when due
-  -> evaluate material-change and cross-market leadership triggers
-  -> prepare certified complete-universe and production context
-       -> broad/global discovery and cheap first-pass screening
-       -> persist exact active-paper-universe publication
-       -> persist completed full-universe screening publication
-       -> ProductionCapabilityAuthority
-            -> build exact point-in-time InstrumentCapabilityEvidence
-            -> Universal Capability Graph evaluation
-            -> append certification/suspension through AutomaticInstrumentEligibilityFactory
-            -> persist production-capability-authority.json
-  -> bind production decision authority at the exact CIO timestamp
-       -> bootstrap instruments OR currently active exact capability certifications
-       -> provider visibility/profile completeness alone cannot create ownership authority
-  -> run scheduled or triggered GlobalOpportunityRotationCanonicalCIOCycle
-       -> opportunity qualification
-       -> common annualized marginal-compounding-value comparison across asset families
-       -> cross-market/global opportunity ranking
-       -> exactly six specialist analyses
-       -> committee synthesis
-       -> CIO-only decision and initial target
-       -> joint marginal-capital preview
-       -> independent portfolio construction
-       -> CIO-to-construction reconciliation
-  -> publish pending construction
-  -> attempt governed internal paper implementation
-       -> preserve complete active publication for safe reduction/exit continuity
-       -> new/increased dynamic exposure requires active exact capability certification
-       -> normalize paper intent by structural asset family
-            equities/funds -> shares
-            fixed income   -> face-value units
-            futures/options -> contracts
-            FX             -> base-currency units
-            crypto         -> asset units
-       -> canonical multi-asset session/quote/liquidity/cash/fill/accounting controls
-       -> universal quantity/lifecycle invariant must reconcile to the actual fill
-  -> reconcile fills and publish canonical portfolio state
-  -> publish alerts, thesis monitoring, learning evidence, and heartbeat
+run_bounded_render_worker.py cio-paper-operator --loop
+  -> acquire exclusive heavy-memory lane
+  -> launch short-lived run_autonomous_paper_operator.py --once
+       -> collect public information when due
+       -> evaluate material-change and cross-market leadership triggers
+       -> prepare certified complete-universe and production context
+            -> broad/global discovery and cheap first-pass screening
+            -> persist exact active-paper-universe publication
+            -> persist completed full-universe screening publication
+            -> ProductionCapabilityAuthority
+                 -> build exact point-in-time InstrumentCapabilityEvidence
+                 -> Universal Capability Graph evaluation
+                 -> append certification/suspension through AutomaticInstrumentEligibilityFactory
+                 -> persist production-capability-authority.json
+       -> bind production decision authority at the exact CIO timestamp
+            -> bootstrap instruments OR currently active exact capability certifications
+            -> provider visibility/profile completeness alone cannot create ownership authority
+       -> run scheduled or triggered GlobalOpportunityRotationCanonicalCIOCycle
+            -> opportunity qualification
+            -> common annualized marginal-compounding-value comparison across asset families
+            -> cross-market/global opportunity ranking
+            -> exactly six specialist analyses
+            -> committee synthesis
+            -> CIO-only decision and initial target
+            -> joint marginal-capital preview
+            -> independent portfolio construction
+            -> CIO-to-construction reconciliation
+       -> publish pending construction
+       -> attempt governed internal paper implementation
+            -> preserve complete active publication for safe reduction/exit continuity
+            -> new/increased dynamic exposure requires active exact capability certification
+            -> normalize paper intent by structural asset family
+                 equities/funds -> shares
+                 fixed income   -> face-value units
+                 futures/options -> contracts
+                 FX             -> base-currency units
+                 crypto         -> asset units
+            -> canonical multi-asset session/quote/liquidity/cash/fill/accounting controls
+            -> universal quantity/lifecycle invariant must reconcile to the actual fill
+       -> reconcile fills and publish canonical portfolio state
+       -> publish alerts, thesis monitoring, learning evidence, and heartbeat
+  -> child exits; process memory is returned to the OS
+  -> coordinator waits for next governed trigger/poll
 ```
 
 This is the only supported process that may implement paper transactions. Streamlit
@@ -173,6 +194,11 @@ portfolio change. The Universal Capability Graph and automatic eligibility facto
 may grant or suspend *paper eligibility* only; they cannot issue a CIO action or size
 capital. The universal paper contract constrains paper execution but cannot originate
 a trade. Live-money authority remains disabled.
+
+A CIO-worker failure records a failed/degraded operating boundary and is retried by its
+noncritical coordinator. It does not terminate API/Streamlit, reset the canonical
+portfolio, create a replacement authority path, or convert incomplete certification into
+success. Durable certification/CIO state remains the source for retry and audit lineage.
 
 ### Global opportunity reassessment
 
@@ -192,12 +218,21 @@ investment authority.
 ## Historical, backup, and operational paths
 
 ```text
-run_historical_backfill.py --loop
-  -> point-in-time historical replay and advisory learning
+run_bounded_render_worker.py historical-backfill --loop
+  -> finite point-in-time historical replay child
   -> no automatic threshold or policy promotion
 
-run_backup.py --loop
-  -> encrypted backup of canonical databases and required evidence stores
+run_bounded_render_worker.py encrypted-backup --loop
+  -> finite encrypted-backup child for canonical databases and evidence stores
+
+run_bounded_render_worker.py global-public-evidence --loop
+  -> finite global public evidence maintenance child
+
+run_bounded_continuous_evidence_plane.py
+  -> finite comprehensive all-market preparation children
+
+run_bounded_capability_operating_evidence.py --loop
+  -> finite capability-operating evidence children
 
 Documented CLI / CI commands
   -> provider certification, replay, recovery, smoke, and readiness operations
@@ -227,5 +262,7 @@ Documented CLI / CI commands
 - Universal Capability Graph can grant/suspend dynamic *paper eligibility* only.
 - Universal paper contract constrains structural paper quantity/lifecycle only.
 - Fail-closed, point-in-time, append-only evidence and lineage.
+- Comprehensive all-market discovery and coverage remain required for certification.
+- Capability-operating evidence is an additional execution-readiness gate, not a scope cut.
 - Reconciled paper-only execution with safe exit continuity.
 - No live-money authority.

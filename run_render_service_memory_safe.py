@@ -1,14 +1,15 @@
-"""Run Render with component-qualified evidence ahead of the CIO diagnostic.
+"""Run Render with durable all-market evidence and isolated finite heavy jobs.
 
-Deployment first validates or selectively refreshes the continuous evidence plane in the
-exclusive heavy-memory lane. Only after an immutable exact-release generation exists is a
-CIO diagnostic request created. The diagnostic itself is a disk-only consumer and cannot
-perform provider/reference/public acquisition.
+Deployment validates or selectively refreshes the continuous evidence plane before an
+exact-release CIO diagnostic request is created. Heavy analytical and maintenance work is
+executed through short-lived subprocesses sharing one exclusive memory lane, so allocator
+state is returned to the OS between passes instead of accumulating in the serving process.
 
-Provider validation and the normal heavy operating stack remain deferred behind the same
-startup gate, so evidence qualification cannot race another heavyweight worker on the
-constrained Render instance. No market scope, investment rule, threshold, construction,
-paper-execution authority, or real-money capability changes.
+API and Streamlit remain the serving-critical boundary. A CIO, evidence, historical, or
+backup worker failure is recorded and retried independently and cannot take the read-only
+product offline. Comprehensive all-market coverage remains fail-closed and is never relaxed
+by a transition mode, diagnostic, or operational capability scope. No investment rule,
+threshold, construction, paper-execution authority, or real-money capability changes.
 """
 
 from __future__ import annotations
@@ -128,7 +129,7 @@ def memory_safe_managed_processes(
     port: int,
     python_executable: str | None = None,
 ) -> tuple[render_supervisor.ManagedProcess, ...]:
-    """Replace heavyweight loops and serialize all post-diagnostic heavy workers."""
+    """Return a serving-safe process graph with finite heavyweight work."""
 
     python = python_executable or sys.executable
     resolved: list[render_supervisor.ManagedProcess] = []
@@ -147,8 +148,25 @@ def memory_safe_managed_processes(
                     "--initial-delay-seconds",
                     "90",
                 ),
-                critical=spec.critical,
-                restart_delay_seconds=spec.restart_delay_seconds,
+                # Investment availability is fail-closed independently from serving
+                # availability. A failed CIO coordinator may not take the read-only
+                # dashboard/API offline or erase its durable terminal evidence.
+                critical=False,
+                restart_delay_seconds=60,
+            )
+        elif spec.name == "global-public-evidence":
+            spec = render_supervisor.ManagedProcess(
+                name=spec.name,
+                command=(
+                    python,
+                    "run_bounded_render_worker.py",
+                    "global-public-evidence",
+                    "--loop",
+                    "--initial-delay-seconds",
+                    "300",
+                ),
+                critical=False,
+                restart_delay_seconds=60,
             )
         elif spec.name == "historical-backfill":
             spec = render_supervisor.ManagedProcess(
@@ -161,8 +179,8 @@ def memory_safe_managed_processes(
                     "--initial-delay-seconds",
                     "1800",
                 ),
-                critical=spec.critical,
-                restart_delay_seconds=spec.restart_delay_seconds,
+                critical=False,
+                restart_delay_seconds=300,
             )
         elif spec.name == "encrypted-backup":
             spec = render_supervisor.ManagedProcess(
@@ -175,8 +193,8 @@ def memory_safe_managed_processes(
                     "--initial-delay-seconds",
                     "900",
                 ),
-                critical=spec.critical,
-                restart_delay_seconds=spec.restart_delay_seconds,
+                critical=False,
+                restart_delay_seconds=300,
             )
         resolved.append(spec)
 
@@ -207,7 +225,7 @@ def memory_safe_managed_processes(
 def _prequalify_release_evidence(
     diagnostic_values: MutableMapping[str, str],
 ) -> bool:
-    """Publish one exact-release generation before any CIO request exists.
+    """Publish one exact-release all-market generation before any CIO request exists.
 
     Evidence qualification is intentionally resumable. A transient provider, memory-lane,
     or child-process failure never creates a CIO request and never causes the CIO to repair
@@ -233,8 +251,12 @@ def _prequalify_release_evidence(
         state="in_progress",
         stage="evidence_prequalifying",
         started_at=started_at,
-        detail="validating release-independent evidence components",
-        metrics={"attempt": 1, "maximum_attempts": maximum_attempts},
+        detail="validating release-independent comprehensive all-market evidence",
+        metrics={
+            "attempt": 1,
+            "maximum_attempts": maximum_attempts,
+            "complete_all_market_coverage_required": 1,
+        },
     )
     prequalification_id = str(status["prequalification_id"])
     render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
@@ -254,10 +276,14 @@ def _prequalify_release_evidence(
                 prequalification_id=prequalification_id,
                 started_at=started_at,
                 detail=(
-                    f"retrying release-independent evidence qualification attempt "
+                    f"retrying comprehensive all-market evidence qualification attempt "
                     f"{attempt} of {maximum_attempts}"
                 ),
-                metrics={"attempt": attempt, "maximum_attempts": maximum_attempts},
+                metrics={
+                    "attempt": attempt,
+                    "maximum_attempts": maximum_attempts,
+                    "complete_all_market_coverage_required": 1,
+                },
             )
             render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
 
@@ -270,6 +296,7 @@ def _prequalify_release_evidence(
             maximum_attempts=maximum_attempts,
             diagnostic_request_created=False,
             exact_release_required=True,
+            complete_all_market_coverage_required=True,
             paper_only=True,
         )
 
@@ -302,13 +329,14 @@ def _prequalify_release_evidence(
                 stage="evidence_generation_ready",
                 prequalification_id=prequalification_id,
                 started_at=started_at,
-                detail="immutable exact-release evidence generation ready",
+                detail="immutable exact-release comprehensive all-market generation ready",
                 generation_id=generation.generation_id,
                 metrics={
                     "attempt": attempt,
                     "maximum_attempts": maximum_attempts,
                     "scheduled_lanes": len(generation.scheduled_lanes),
                     "historical_scope_count": generation.historical_scope_count,
+                    "complete_all_market_coverage_required": 1,
                 },
             )
             render_bootstrap._publish_release_diagnostic_audit(diagnostic_values)
@@ -320,6 +348,7 @@ def _prequalify_release_evidence(
                 generation_id=generation.generation_id,
                 attempt=attempt,
                 maximum_attempts=maximum_attempts,
+                complete_all_market_coverage_required=True,
                 diagnostic_request_created=False,
                 paper_only=True,
             )
@@ -336,6 +365,7 @@ def _prequalify_release_evidence(
                 "attempt": attempt,
                 "maximum_attempts": maximum_attempts,
                 "qualifier_start_failed": 1,
+                "complete_all_market_coverage_required": 1,
             }
             error_type = type(start_error).__name__
         elif generation_missing:
@@ -346,6 +376,7 @@ def _prequalify_release_evidence(
                 return_code=0,
                 generation_missing=True,
             )
+            metrics["complete_all_market_coverage_required"] = 1
             error_type = None
         else:
             metrics = _qualifier_metrics(
@@ -353,6 +384,7 @@ def _prequalify_release_evidence(
                 maximum_attempts=maximum_attempts,
                 return_code=return_code,
             )
+            metrics["complete_all_market_coverage_required"] = 1
             if qualifier_context is None:
                 failure_detail = f"bounded evidence qualification returned code {return_code}"
                 error_type = None
@@ -391,6 +423,7 @@ def _prequalify_release_evidence(
                 attempt=attempt,
                 maximum_attempts=maximum_attempts,
                 retry_seconds=retry_seconds,
+                complete_all_market_coverage_required=True,
                 diagnostic_request_created=False,
                 paper_only=True,
             )
@@ -418,6 +451,7 @@ def _prequalify_release_evidence(
             prequalification_id=prequalification_id,
             attempt=attempt,
             maximum_attempts=maximum_attempts,
+            complete_all_market_coverage_required=True,
             diagnostic_request_created=False,
             paper_only=True,
         )
@@ -429,7 +463,7 @@ def _prequalify_release_evidence(
 def _start_release_diagnostic_after_prequalification(
     values: MutableMapping[str, str],
 ) -> threading.Thread | None:
-    """Qualify evidence first, then create and run the governed CIO request."""
+    """Qualify complete evidence first, then create and run the governed CIO request."""
 
     if not render_bootstrap._enabled(
         values,
@@ -469,7 +503,7 @@ def _start_release_diagnostic_after_prequalification(
 def run_memory_safe_render_service(
     environment: MutableMapping[str, str] | None = None,
 ) -> int:
-    """Run the existing supervisor with one serialized heavyweight-memory lane."""
+    """Run serving continuously while finite heavy jobs serialize through one lane."""
 
     global _PROVIDER_VALIDATION_BACKGROUND_ENABLED
 
@@ -495,19 +529,25 @@ def run_memory_safe_render_service(
     if background_enabled:
         values["CAPITAL_INTELLIGENCE_RUN_PROVIDER_VALIDATION_ON_STARTUP"] = "false"
 
-    bond_source_transition = render_bootstrap._enabled(
+    # Comprehensive all-market discovery is a governed requirement from deployment
+    # configuration. Transition modes may describe provider limitations but may never
+    # silently weaken the certification requirement.
+    if render_bootstrap._enabled(
         values,
         "CAPITAL_INTELLIGENCE_BOND_SOURCE_TRANSITION_MODE",
         default=False,
-    )
-    if bond_source_transition:
-        values["CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY"] = "false"
+    ):
         render_bootstrap._log(
             "bond_source_transition_mode_enabled",
-            comprehensive_discovery_required=False,
+            comprehensive_discovery_required=render_bootstrap._enabled(
+                values,
+                "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY",
+                default=True,
+            ),
             direct_bond_discovery_authority=False,
             degraded_scope_disclosed=True,
             listed_bond_wrappers_remain_available=True,
+            certification_requirement_relaxed=False,
         )
 
     previous_managed_processes = render_supervisor.managed_processes
@@ -515,14 +555,24 @@ def run_memory_safe_render_service(
     _PROVIDER_VALIDATION_BACKGROUND_ENABLED = background_enabled
     render_supervisor.managed_processes = memory_safe_managed_processes
     try:
-        diagnostic_thread = _start_release_diagnostic_after_prequalification(values)
-        deferred_start_ready = render_bootstrap._diagnostic_completion_gate(diagnostic_thread)
-        if deferred_start_ready is None:
-            return render_supervisor.run_supervisor(environment=values)
-        return render_supervisor.run_supervisor(
-            environment=values,
-            deferred_start_ready=deferred_start_ready,
+        _start_release_diagnostic_after_prequalification(values)
+        render_bootstrap._log(
+            "production_runtime_v2_started",
+            serving_failure_domain=("api", "streamlit"),
+            finite_heavy_jobs=True,
+            deferred_worker_thundering_herd=False,
+            complete_all_market_coverage_required=render_bootstrap._enabled(
+                values,
+                "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY",
+                default=True,
+            ),
+            paper_only=True,
+            real_money_authorized=False,
         )
+        # Do not hold the whole operating stack behind a diagnostic-completion barrier.
+        # Finite workers independently contend for the exclusive heavy-memory lane and
+        # retry with bounded delays; serving remains available throughout.
+        return render_supervisor.run_supervisor(environment=values)
     finally:
         render_supervisor.managed_processes = previous_managed_processes
         _PROVIDER_VALIDATION_BACKGROUND_ENABLED = previous_background_flag

@@ -79,7 +79,7 @@ def test_successful_refresh_must_still_pass_revalidation(monkeypatch):
     assert calls == {"load": 2, "prequalify": 1}
 
 
-def test_installed_runner_refreshes_before_starting_cio_child(monkeypatch):
+def test_installed_runner_refreshes_only_operating_evidence_before_cio_child(monkeypatch):
     events: list[str] = []
     logs: list[tuple[str, dict[str, object]]] = []
 
@@ -93,7 +93,7 @@ def test_installed_runner_refreshes_before_starting_cio_child(monkeypatch):
     )
     memory_safe = SimpleNamespace(
         render_bootstrap=bootstrap,
-        _prequalify_release_evidence=lambda _values: events.append("refresh") or True,
+        _prequalify_capability_operating_evidence=lambda _values: events.append("refresh") or True,
     )
     loads = {"count": 0}
 
@@ -117,7 +117,7 @@ def test_installed_runner_refreshes_before_starting_cio_child(monkeypatch):
     assert logs == []
 
 
-def test_installed_runner_does_not_start_child_when_refresh_fails(monkeypatch):
+def test_installed_runner_does_not_start_child_when_operating_refresh_fails(monkeypatch):
     child_calls = {"count": 0}
     logs: list[tuple[str, dict[str, object]]] = []
 
@@ -131,7 +131,7 @@ def test_installed_runner_does_not_start_child_when_refresh_fails(monkeypatch):
     )
     memory_safe = SimpleNamespace(
         render_bootstrap=bootstrap,
-        _prequalify_release_evidence=lambda _values: False,
+        _prequalify_capability_operating_evidence=lambda _values: False,
     )
     monkeypatch.setattr(
         runtime,
@@ -149,5 +149,6 @@ def test_installed_runner_does_not_start_child_when_refresh_fails(monkeypatch):
     assert child_calls["count"] == 0
     assert logs[-1][0] == "manual_cio_release_operating_evidence_not_ready"
     assert logs[-1][1]["diagnostic_child_started"] is False
+    assert logs[-1][1]["comprehensive_all_market_gate_required"] is True
     assert logs[-1][1]["paper_only"] is True
     assert logs[-1][1]["real_money_authorized"] is False

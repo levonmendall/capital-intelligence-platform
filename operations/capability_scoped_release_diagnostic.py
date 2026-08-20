@@ -1,14 +1,14 @@
-"""Capability-scoped release diagnostic coordination for production.
+"""Capability-aware release diagnostic coordination for production.
 
-The operating CIO must consume the independently qualified capability evidence plane.  A
-legacy all-market reference generation is neither an authority source nor an ignition key
-for this runtime.  This module also makes the release diagnostic single-flight: if another
-process already owns the durable diagnostic request, a second launcher observes that owner
-instead of starting a competing CIO child.
+The operating CIO consumes independently qualified capability evidence, while release
+certification continues to require complete all-market discovery and coverage. Capability
+scope constrains execution eligibility only; it cannot narrow the research universe or turn
+a partial-market cycle into a certified one.
 
-Nothing here grants investment, specialist, construction, execution, or real-money
-authority.  Missing/stale capability evidence remains fail-closed and every downstream CIO
-subset is still validated against the immutable signed operating snapshot.
+This module also makes the release diagnostic single-flight: if another process already owns
+the durable diagnostic request, a second launcher observes that owner instead of starting a
+competing CIO child. Nothing here grants investment, specialist, construction, execution,
+or real-money authority. Missing/stale evidence remains fail-closed.
 """
 
 from __future__ import annotations
@@ -66,13 +66,11 @@ def _asset_class_name(instrument: object) -> str:
 def load_capability_operating_reference_manifest(
     values: MutableMapping[str, str],
 ) -> ReferenceReadinessManifest:
-    """Validate fresh operating evidence and expose a legacy-compatible readiness record.
+    """Validate fresh operating evidence and expose coordination metadata.
 
-    The bounded watchdog historically required an all-market reference manifest before it
-    would even start the CIO child.  Capability-scoped operation has a stronger relevant
-    boundary: an immutable, freshness-checked evidence snapshot over the exact operating
-    universe.  The returned object is coordination metadata only; it does not certify any
-    instrument that was not already present in that signed operating universe.
+    Complete all-market evidence remains the release-wide certification boundary. This
+    adapter separately proves that the exact operating universe is backed by a fresh,
+    immutable capability snapshot before the CIO child can consume it.
     """
 
     cutoff = datetime.now(timezone.utc)
@@ -95,9 +93,6 @@ def load_capability_operating_reference_manifest(
         name = _asset_class_name(instrument)
         counts[name] = counts.get(name, 0) + 1
 
-    # Bind the exact snapshot identifier into the child environment for auditability.  The
-    # qualified-paper-evidence probe independently reloads and verifies the snapshot and
-    # exact structural subset before returning evidence to the CIO.
     values["CAPITAL_INTELLIGENCE_CIO_PAPER_EVIDENCE_SNAPSHOT_ID"] = operating.snapshot_id
     return ReferenceReadinessManifest(
         manifest_id=f"capability-operating:{operating.snapshot_id}",
@@ -169,13 +164,7 @@ def _coalesce_running_diagnostic(
     publish_audit: Callable[[MutableMapping[str, str]], object],
     refresh_seconds: float,
 ) -> int | None:
-    """Observe an already-owned diagnostic instead of launching a competing child.
-
-    ``None`` means no live owner exists and the caller should start/recover the child in the
-    normal governed path.  A numeric return code represents the observed owner's terminal
-    outcome (or a resource-terminal observation timeout), allowing the legacy retry policy
-    to retain its established behavior without treating contention as a fresh diagnostic.
-    """
+    """Observe an already-owned diagnostic instead of launching a competing child."""
 
     existing = latest_manual_cio_diagnostic(values=values)
     if (
@@ -195,8 +184,6 @@ def _coalesce_running_diagnostic(
         if current is None:
             return None
         if current.request_id != existing.request_id:
-            # A newer pending request can be claimed by this launcher; a newer active owner
-            # will be discovered on the next governed attempt rather than being duplicated.
             return None
         if current.state == "completed":
             return 0 if current.requested_by == expected_requester else _BUSY_RETURN_CODE
@@ -205,14 +192,9 @@ def _coalesce_running_diagnostic(
         if current.state != "in_progress":
             return None
         if not _active_owner_exists(current.request_id, values):
-            # The normal child path owns interrupted-request recovery and will fail the
-            # stale request before creating the exact-release replacement.
             return None
         time.sleep(sleep_seconds)
 
-    # Do not start a second heavy CIO process while a live owner still exists.  Return the
-    # established resource-terminal code so the outer launcher suppresses duplicate retry
-    # pressure; the original owner remains responsible for durable finalization.
     return _RESOURCE_LIMIT_RETURN_CODE
 
 
@@ -226,16 +208,18 @@ def _capability_release_environment(
     diagnostic.update(
         {
             "CAPITAL_INTELLIGENCE_CAPABILITY_SCOPED_OPERATION": "true",
-            "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY": "false",
-            "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_MARKET_DISCOVERY": "false",
-            "CAPITAL_INTELLIGENCE_DISCOVERY_REQUIRE_COMPLETE_MARKET_COVERAGE": "false",
+            "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY": "true",
+            "CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_MARKET_DISCOVERY": "true",
+            "CAPITAL_INTELLIGENCE_DISCOVERY_REQUIRE_COMPLETE_MARKET_COVERAGE": "true",
+            "CAPITAL_INTELLIGENCE_RUN_COMPREHENSIVE_DISCOVERY": "true",
+            "CAPITAL_INTELLIGENCE_DIAGNOSTIC_ALLOW_COMPREHENSIVE_DISCOVERY": "true",
         }
     )
     return diagnostic
 
 
 def install(memory_safe) -> None:
-    """Patch only the release-diagnostic seams used by the capability-scoped Render path."""
+    """Install single-flight diagnostics without weakening all-market certification."""
 
     render_bootstrap = memory_safe.render_bootstrap
     if getattr(render_bootstrap, _INSTALLED_ATTR, False):
@@ -268,9 +252,10 @@ def install(memory_safe) -> None:
                     request_state=None if current is None else current.state,
                     observed_return_code=coalesced,
                     competing_child_started=False,
-                    complete_all_market_coverage_required=False,
+                    complete_all_market_coverage_required=True,
                     capability_operating_evidence_required=True,
                     paper_only=True,
+                    real_money_authorized=False,
                 )
                 return coalesced
         return original_run_with_audit(
