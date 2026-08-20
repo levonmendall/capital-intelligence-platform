@@ -1,17 +1,15 @@
-"""Run continuous evidence preparation in the existing exclusive heavy-memory lane.
+"""Run stage-isolated continuous evidence in the exclusive heavy-memory lane.
 
-The coordinator itself imports no provider or discovery stack. Each preparation pass is
-a short-lived child process, allowing Python/provider working sets to return to the OS
-between refreshes and sharing the same cross-process memory lane as the other heavyweight
-Render workers. Release startup can invoke one bounded pass before the CIO diagnostic;
-the normal production coordinator continues to use loop mode afterward.
+The long-lived coordinator imports no provider or discovery stack. Each evidence pass now
+contains a lightweight stage coordinator which launches reference, public-live, U.S.-equity
+discovery, comprehensive discovery, paper evidence, and finalization in separate fresh
+interpreters. Every successful stage commits durable evidence before exiting, so Python and
+provider working sets return to the operating system between major phases.
 
-The isolated child enters through a DAG-native bootstrap that installs and verifies the
-comprehensive-discovery runtime contract before the evidence owner is imported. This
-prevents import ordering from silently restoring the obsolete aggregate discovery timeout.
-On Render's fixed-memory service, the nested certification DAG is serialized so fresh lane
-interpreters cannot defeat the outer exclusive-memory-lane guarantee by running in parallel.
-This changes scheduling only: every required DAG node and market lane remains mandatory.
+The outer worker retains the reclaimable-aware service memory guard and the single
+cross-process heavy-memory lease. Nested certification DAG nodes remain serialized on
+Render. No required market, provider requirement, evidence rule, specialist, CIO,
+construction, execution, or paper-only control is reduced.
 """
 
 from __future__ import annotations
@@ -19,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from typing import Mapping, Sequence
 
 from run_bounded_render_worker import WorkerSpec, _run_isolated_once, run_loop
@@ -26,7 +25,10 @@ from run_bounded_render_worker import WorkerSpec, _run_isolated_once, run_loop
 
 _SPEC = WorkerSpec(
     name="continuous-evidence-plane",
-    script="run_dag_native_continuous_evidence_plane.py",
+    script="run_stage_isolated_evidence_pipeline.py",
+    # Preserve the historical one-shot command contract used by release-prequalification
+    # and runtime validation. The stage coordinator treats this only as an execution-mode
+    # declaration; every internal required stage still runs exactly once per pass.
     arguments=("--once",),
     interval_env="CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_INTERVAL_SECONDS",
     default_interval_seconds=300.0,
@@ -35,6 +37,7 @@ _SPEC = WorkerSpec(
     default_initial_delay_seconds=30.0,
 )
 _DAG_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
+_FAILURE_EVENT = "continuous_evidence_plane_failure_context"
 
 
 def _lane_wait_seconds(values: Mapping[str, str]) -> float:
@@ -60,22 +63,78 @@ def _bounded_evidence_values(values: Mapping[str, str]) -> dict[str, str]:
 
     resolved = dict(values)
     if str(resolved.get("RENDER") or "").strip().lower() == "true":
-        # The outer evidence owner already has one exclusive heavy-memory lease. Allowing
-        # the inner DAG scheduler to start its default three fresh Python interpreters at
-        # once can cross the same 2 GiB service's governed high-water boundary before any
-        # node commits. Serial nodes are durable/resumable, so this bounds peak RAM without
-        # dropping a node, market, provider requirement, freshness rule, or fail-closed gate.
         resolved[_DAG_WORKERS_ENV] = "1"
     return resolved
 
 
+def _memory_failure_context(values: Mapping[str, str]) -> None:
+    """Transport the exact governed memory trigger and active durable stage upstream."""
+
+    import run_bounded_manual_cio_diagnostic as memory_watchdog
+    from operations.stage_isolated_evidence_pipeline import (
+        load_stage_isolated_evidence_state,
+    )
+
+    report = getattr(memory_watchdog, "_last_reclaimable_memory_report", None)
+    safe_report = report if isinstance(report, Mapping) else {}
+    try:
+        state = load_stage_isolated_evidence_state(values)
+    except Exception:
+        state = None
+    if state is None:
+        stage = "unknown"
+        pipeline_id = None
+    else:
+        stage = state.current_stage or state.next_stage or "finalize"
+        pipeline_id = state.pipeline_id
+
+    trigger = str(safe_report.get("trigger_reason") or "unknown")
+    detail = (
+        f"stage_isolated_evidence_resource_boundary; stage={stage}; "
+        f"trigger_reason={trigger}; "
+        f"working_set_peak_kib={safe_report.get('container_peak_working_set_kib')}; "
+        f"raw_peak_kib={safe_report.get('container_peak_memory_kib')}; "
+        f"inactive_file_peak_kib={safe_report.get('container_peak_inactive_file_kib')}; "
+        f"anon_peak_kib={safe_report.get('container_peak_anon_kib')}; "
+        f"file_peak_kib={safe_report.get('container_peak_file_kib')}; "
+        f"kernel_peak_kib={safe_report.get('container_peak_kernel_kib')}; "
+        f"memory_accounting_source={safe_report.get('memory_accounting_source')}"
+    )[:1600]
+    print(
+        json.dumps(
+            {
+                "event": _FAILURE_EVENT,
+                "error_type": "ResourceBoundaryExceeded",
+                "failure_stage": f"stage_isolated_evidence:{stage}",
+                "error_detail": detail,
+                "pipeline_id": pipeline_id,
+                "memory_trigger_reason": trigger,
+                "credential_safe": True,
+                "decision_authority": False,
+                "candidate_authority": False,
+                "sizing_authority": False,
+                "construction_authority": False,
+                "execution_authority": False,
+                "paper_only": True,
+                "real_money_authorized": False,
+            },
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def run_continuous_once(values: Mapping[str, str] | None = None) -> int:
     resolved = _bounded_evidence_values(os.environ if values is None else values)
-    return _run_isolated_once(
+    return_code = _run_isolated_once(
         _SPEC,
         values=resolved,
         lane_wait_seconds=_lane_wait_seconds(resolved),
     )
+    if return_code == 125:
+        _memory_failure_context(resolved)
+    return return_code
 
 
 def run_continuous_loop(

@@ -11,16 +11,22 @@ on:
       - "operations/capability_scoped_render_bootstrap.py"
       - "operations/capability_scoped_release_diagnostic.py"
       - "operations/qualified_paper_evidence.py"
+      - "operations/stage_isolated_evidence_pipeline.py"
       - "production_context_publication_runtime.py"
       - "run_bounded_capability_operating_evidence.py"
+      - "run_bounded_continuous_evidence_plane.py"
       - "run_bounded_manual_cio_diagnostic.py"
       - "run_capability_operating_evidence.py"
       - "run_render_service_workspace.py"
+      - "run_stage_isolated_evidence_pipeline.py"
+      - "run_stage_isolated_evidence_stage.py"
       - "tests/test_capability_operating_evidence.py"
       - "tests/test_capability_operating_retry_refresh.py"
       - "tests/test_capability_scoped_release_diagnostic.py"
       - "tests/test_capability_scoped_runtime_v2.py"
       - "tests/test_qualified_paper_evidence.py"
+      - "tests/test_reclaimable_memory_guard.py"
+      - "tests/test_stage_isolated_evidence_pipeline.py"
       - ".github/workflows/capability-operating-runtime.yml"
   push:
     branches: [main]
@@ -32,16 +38,22 @@ on:
       - "operations/capability_scoped_render_bootstrap.py"
       - "operations/capability_scoped_release_diagnostic.py"
       - "operations/qualified_paper_evidence.py"
+      - "operations/stage_isolated_evidence_pipeline.py"
       - "production_context_publication_runtime.py"
       - "run_bounded_capability_operating_evidence.py"
+      - "run_bounded_continuous_evidence_plane.py"
       - "run_bounded_manual_cio_diagnostic.py"
       - "run_capability_operating_evidence.py"
       - "run_render_service_workspace.py"
+      - "run_stage_isolated_evidence_pipeline.py"
+      - "run_stage_isolated_evidence_stage.py"
       - "tests/test_capability_operating_evidence.py"
       - "tests/test_capability_operating_retry_refresh.py"
       - "tests/test_capability_scoped_release_diagnostic.py"
       - "tests/test_capability_scoped_runtime_v2.py"
       - "tests/test_qualified_paper_evidence.py"
+      - "tests/test_reclaimable_memory_guard.py"
+      - "tests/test_stage_isolated_evidence_pipeline.py"
       - ".github/workflows/capability-operating-runtime.yml"
   workflow_dispatch:
 
@@ -84,6 +96,8 @@ jobs:
           tests/test_capability_operating_evidence.py
           tests/test_capability_operating_retry_refresh.py
           tests/test_capability_scoped_release_diagnostic.py
+          tests/test_reclaimable_memory_guard.py
+          tests/test_stage_isolated_evidence_pipeline.py
 
       - name: Run deterministic release validation
         run: timeout --signal=TERM 12m python run_release_validation.py --report reports/capability-operating-release-validation.json
