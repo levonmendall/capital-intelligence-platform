@@ -1,12 +1,12 @@
 """Run heavyweight Render background work in a single bounded memory lane.
 
-The coordinator intentionally imports only lightweight operational code.  Each CIO
-operator, historical-backfill, or encrypted-backup pass runs in a short-lived child process
-and is watched with the same container-memory boundary used by the manual CIO diagnostic.
-This returns imported modules and allocator arenas to the OS between passes and prevents
-several heavyweight jobs from running concurrently on Render's 2 GB service.
+The coordinator intentionally imports only lightweight operational code. Each CIO,
+global-evidence, historical-backfill, or encrypted-backup pass runs in a short-lived child
+process and is watched with the same container-memory boundary used by the manual CIO
+diagnostic. This returns imported modules and allocator arenas to the OS between passes and
+prevents several heavyweight jobs from running concurrently on Render's 2 GB service.
 
-This wrapper changes only operational process isolation.  It does not change market scope,
+This wrapper changes only operational process isolation. It does not change market scope,
 CIO authority, portfolio construction, thresholds, paper-execution controls, or permit real
 money.
 """
@@ -51,6 +51,16 @@ _WORKERS = {
         timeout_env="CAPITAL_INTELLIGENCE_PAPER_OPERATOR_PASS_TIMEOUT_SECONDS",
         default_timeout_seconds=1800.0,
         default_initial_delay_seconds=90.0,
+    ),
+    "global-public-evidence": WorkerSpec(
+        name="global-public-evidence",
+        script="run_global_public_evidence.py",
+        arguments=(),
+        interval_env="CAPITAL_INTELLIGENCE_GLOBAL_PUBLIC_EVIDENCE_INTERVAL_SECONDS",
+        default_interval_seconds=900.0,
+        timeout_env="CAPITAL_INTELLIGENCE_GLOBAL_PUBLIC_EVIDENCE_PASS_TIMEOUT_SECONDS",
+        default_timeout_seconds=1800.0,
+        default_initial_delay_seconds=300.0,
     ),
     "historical-backfill": WorkerSpec(
         name="historical-backfill",
