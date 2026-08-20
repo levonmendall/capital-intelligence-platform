@@ -69,7 +69,8 @@ def test_recomputing_source_never_caches_full_packets() -> None:
 
 
 def test_precomputed_service_accepts_non_mapping_packet_source() -> None:
-    packet = _packet()
+    candidate = build_candidate()
+    packet = build_specialist_packet(candidate)
     delegate_calls: list[str] = []
 
     class Delegate:
@@ -83,7 +84,6 @@ def test_precomputed_service_accepts_non_mapping_packet_source() -> None:
             return packet
 
     service = PrecomputedSpecialistService(Delegate())
-    candidate = SimpleNamespace(identifier=packet.candidate_identifier)
     context = SimpleNamespace(historical_learning=packet.historical_learning)
 
     with service.bind_packets(Source()):
