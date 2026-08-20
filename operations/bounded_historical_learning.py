@@ -1,10 +1,10 @@
 """Memory-bounded historical-learning manifest access for governed CIO cycles.
 
 The canonical HistoricalLearningResolver owns all selection, calibration, and authority
-semantics. This module changes only how its replay manifest is read: one top-level cutoff
-is decoded at a time, only candidate-relevant decision fields are retained, and repeated
-resolution of the same candidate in one bounded process reuses the immutable resulting
-HistoricalLearningContext.
+semantics. This module changes only how its replay manifest is read: cutoff and decision
+objects are parsed field-by-field, only candidate-relevant decision fields are retained,
+and repeated resolution of the same candidate in one bounded process reuses the immutable
+resulting HistoricalLearningContext.
 
 This module cannot create a candidate, change a specialist conclusion, increase expected
 return or confidence, size capital, authorize execution, or enable real money.
@@ -29,6 +29,15 @@ _COMPACT_FIELDS = (
     "realized_return_to_next_cutoff",
     "market_regime",
 )
+_ITEM_INPUT_FIELDS = frozenset(
+    {
+        *_COMPACT_FIELDS,
+        "symbol",
+        "candidate_identifier",
+        "asset_class",
+        "macro_regime",
+    }
+)
 _ORIGINAL_RESOLVE = historical.HistoricalLearningResolver.resolve
 
 
@@ -41,7 +50,7 @@ class _ManifestChangedDuringRead(RuntimeError):
 
 
 class _IncrementalJSONReader:
-    """Decode JSON values incrementally without retaining the complete document."""
+    """Decode selected JSON scalars while streaming containers and skipped values."""
 
     def __init__(self, path: Path) -> None:
         self._handle = path.open("r", encoding="utf-8")
@@ -78,10 +87,24 @@ class _IncrementalJSONReader:
 
     def _skip_space(self) -> None:
         while True:
-            while self._position < len(self._buffer) and self._buffer[self._position].isspace():
+            while (
+                self._position < len(self._buffer)
+                and self._buffer[self._position].isspace()
+            ):
                 self._position += 1
             if self._position < len(self._buffer) or not self._fill():
                 return
+
+    def _next_char(self) -> str:
+        if self._position >= len(self._buffer) and not self._fill():
+            raise json.JSONDecodeError(
+                "unexpected end of historical replay JSON",
+                self._buffer,
+                min(self._position, len(self._buffer)),
+            )
+        character = self._buffer[self._position]
+        self._position += 1
+        return character
 
     def peek(self) -> str | None:
         self._skip_space()
@@ -95,7 +118,9 @@ class _IncrementalJSONReader:
         actual = self.peek()
         if actual != expected:
             raise json.JSONDecodeError(
-                f"expected {expected!r}", self._buffer, min(self._position, len(self._buffer))
+                f"expected {expected!r}",
+                self._buffer,
+                min(self._position, len(self._buffer)),
             )
         self._position += 1
 
@@ -104,7 +129,10 @@ class _IncrementalJSONReader:
         start = self._position
         while True:
             try:
-                value, end = self._decoder.raw_decode(self._buffer, self._position)
+                value, end = self._decoder.raw_decode(
+                    self._buffer,
+                    self._position,
+                )
             except json.JSONDecodeError:
                 if self._eof:
                     raise
@@ -114,7 +142,7 @@ class _IncrementalJSONReader:
                     start = 0
                 if len(self._buffer) - start >= _MAX_SINGLE_VALUE_CHARS:
                     raise ValueError(
-                        "historical replay JSON value exceeds the bounded parser limit"
+                        "historical replay JSON scalar exceeds the bounded parser limit"
                     )
                 if not self._fill(preserve_position=True) and self._eof:
                     continue
@@ -122,8 +150,105 @@ class _IncrementalJSONReader:
                 self._position = end
                 return value
 
+    def _skip_string(self) -> None:
+        if self._next_char() != '"':
+            raise json.JSONDecodeError(
+                "expected JSON string",
+                self._buffer,
+                min(self._position, len(self._buffer)),
+            )
+        while True:
+            character = self._next_char()
+            if character == '"':
+                return
+            if ord(character) < 0x20:
+                raise json.JSONDecodeError(
+                    "invalid control character in JSON string",
+                    self._buffer,
+                    min(self._position, len(self._buffer)),
+                )
+            if character != "\\":
+                continue
+            escaped = self._next_char()
+            if escaped == "u":
+                for _ in range(4):
+                    digit = self._next_char()
+                    if digit not in "0123456789abcdefABCDEF":
+                        raise json.JSONDecodeError(
+                            "invalid unicode escape in JSON string",
+                            self._buffer,
+                            min(self._position, len(self._buffer)),
+                        )
+            elif escaped not in '"\\/bfnrt':
+                raise json.JSONDecodeError(
+                    "invalid escape in JSON string",
+                    self._buffer,
+                    min(self._position, len(self._buffer)),
+                )
 
-def _compact_item(raw_item: dict[str, Any], *, cutoff_macro_regime: object) -> dict[str, Any]:
+    def skip_value(self) -> None:
+        """Validate and consume one JSON value without materializing its containers."""
+
+        token = self.peek()
+        if token is None:
+            raise json.JSONDecodeError("expected JSON value", "", 0)
+        if token == '"':
+            self._skip_string()
+            return
+        if token == "{":
+            self.expect("{")
+            if self.peek() == "}":
+                self.expect("}")
+                return
+            while True:
+                key = self.value()
+                if not isinstance(key, str):
+                    raise json.JSONDecodeError(
+                        "JSON object key is not a string",
+                        "",
+                        0,
+                    )
+                self.expect(":")
+                self.skip_value()
+                delimiter = self.peek()
+                if delimiter == ",":
+                    self.expect(",")
+                    continue
+                if delimiter == "}":
+                    self.expect("}")
+                    return
+                raise json.JSONDecodeError(
+                    "expected ',' or '}' while skipping JSON object",
+                    "",
+                    0,
+                )
+        if token == "[":
+            self.expect("[")
+            if self.peek() == "]":
+                self.expect("]")
+                return
+            while True:
+                self.skip_value()
+                delimiter = self.peek()
+                if delimiter == ",":
+                    self.expect(",")
+                    continue
+                if delimiter == "]":
+                    self.expect("]")
+                    return
+                raise json.JSONDecodeError(
+                    "expected ',' or ']' while skipping JSON array",
+                    "",
+                    0,
+                )
+        self.value()
+
+
+def _compact_item(
+    raw_item: dict[str, Any],
+    *,
+    cutoff_macro_regime: object,
+) -> dict[str, Any]:
     """Retain exactly the fields consumed by the canonical resolver."""
 
     symbol = historical._item_symbol(raw_item)
@@ -135,7 +260,6 @@ def _compact_item(raw_item: dict[str, Any], *, cutoff_macro_regime: object) -> d
     for field in _COMPACT_FIELDS:
         if field in raw_item:
             compact[field] = raw_item[field]
-    # Canonical semantics use the cutoff macro regime only when the item lacks the key.
     if "macro_regime" in raw_item:
         compact["macro_regime"] = raw_item["macro_regime"]
     elif cutoff_macro_regime is not None:
@@ -143,45 +267,165 @@ def _compact_item(raw_item: dict[str, Any], *, cutoff_macro_regime: object) -> d
     return compact
 
 
+def _compact_decision_object(
+    reader: _IncrementalJSONReader,
+    *,
+    candidate: historical.CandidateDecisionRecord,
+) -> dict[str, Any] | None:
+    """Stream one decision object and retain only fields relevant to learning."""
+
+    raw_item: dict[str, Any] = {}
+    reader.expect("{")
+    if reader.peek() != "}":
+        while True:
+            key = reader.value()
+            if not isinstance(key, str):
+                raise json.JSONDecodeError(
+                    "historical decision key is not a string",
+                    "",
+                    0,
+                )
+            reader.expect(":")
+            if key in _ITEM_INPUT_FIELDS:
+                raw_item[key] = reader.value()
+            else:
+                reader.skip_value()
+            delimiter = reader.peek()
+            if delimiter == ",":
+                reader.expect(",")
+                continue
+            if delimiter == "}":
+                break
+            raise json.JSONDecodeError(
+                "expected ',' or '}' in historical decision",
+                "",
+                0,
+            )
+    reader.expect("}")
+
+    symbol = historical._item_symbol(raw_item)
+    asset_class = historical._item_asset_class(raw_item)
+    if (
+        symbol != candidate.instrument.symbol.upper()
+        and asset_class is not candidate.instrument.asset_class
+    ):
+        return None
+    return _compact_item(raw_item, cutoff_macro_regime=None)
+
+
+def _compact_cutoff_decisions(
+    reader: _IncrementalJSONReader,
+    *,
+    candidate: historical.CandidateDecisionRecord,
+) -> list[dict[str, Any]]:
+    relevant: list[dict[str, Any]] = []
+    reader.expect("[")
+    if reader.peek() == "]":
+        reader.expect("]")
+        return relevant
+    while True:
+        if reader.peek() == "{":
+            compact = _compact_decision_object(
+                reader,
+                candidate=candidate,
+            )
+            if compact is not None:
+                relevant.append(compact)
+        else:
+            reader.skip_value()
+        delimiter = reader.peek()
+        if delimiter == ",":
+            reader.expect(",")
+            continue
+        if delimiter == "]":
+            reader.expect("]")
+            return relevant
+        raise json.JSONDecodeError(
+            "expected ',' or ']' in historical cutoff decisions",
+            "",
+            0,
+        )
+
+
+def _compact_cutoff(
+    reader: _IncrementalJSONReader,
+    *,
+    candidate: historical.CandidateDecisionRecord,
+) -> dict[str, Any] | None:
+    """Stream one cutoff object without decoding its full nested decision list."""
+
+    state: object = None
+    macro_regime: object = None
+    relevant: list[dict[str, Any]] = []
+    reader.expect("{")
+    if reader.peek() != "}":
+        while True:
+            key = reader.value()
+            if not isinstance(key, str):
+                raise json.JSONDecodeError(
+                    "historical cutoff key is not a string",
+                    "",
+                    0,
+                )
+            reader.expect(":")
+            if key == "state":
+                state = reader.value()
+            elif key == "macro_regime":
+                macro_regime = reader.value()
+            elif key == "decisions" and reader.peek() == "[":
+                relevant = _compact_cutoff_decisions(
+                    reader,
+                    candidate=candidate,
+                )
+            else:
+                reader.skip_value()
+            delimiter = reader.peek()
+            if delimiter == ",":
+                reader.expect(",")
+                continue
+            if delimiter == "}":
+                break
+            raise json.JSONDecodeError(
+                "expected ',' or '}' in historical cutoff",
+                "",
+                0,
+            )
+    reader.expect("}")
+
+    if state != "completed" or not relevant:
+        return None
+    if macro_regime is not None:
+        for item in relevant:
+            item.setdefault("macro_regime", macro_regime)
+    return {
+        "state": "completed",
+        "macro_regime": macro_regime,
+        "decisions": relevant,
+    }
+
+
 def _compact_decisions_array(
     reader: _IncrementalJSONReader,
     *,
     candidate: historical.CandidateDecisionRecord,
 ) -> list[dict[str, Any]]:
-    target_symbol = candidate.instrument.symbol.upper()
-    target_asset_class = candidate.instrument.asset_class
+    """Stream cutoff objects and never materialize an entire cutoff."""
+
     compact_cutoffs: list[dict[str, Any]] = []
     reader.expect("[")
     if reader.peek() == "]":
         reader.expect("]")
         return compact_cutoffs
     while True:
-        cutoff = reader.value()
-        if isinstance(cutoff, dict) and cutoff.get("state") == "completed":
-            raw_items = cutoff.get("decisions", [])
-            if isinstance(raw_items, list):
-                relevant: list[dict[str, Any]] = []
-                for raw_item in raw_items:
-                    if not isinstance(raw_item, dict):
-                        continue
-                    symbol = historical._item_symbol(raw_item)
-                    asset_class = historical._item_asset_class(raw_item)
-                    if symbol != target_symbol and asset_class is not target_asset_class:
-                        continue
-                    relevant.append(
-                        _compact_item(
-                            raw_item,
-                            cutoff_macro_regime=cutoff.get("macro_regime"),
-                        )
-                    )
-                if relevant:
-                    compact_cutoffs.append(
-                        {
-                            "state": "completed",
-                            "macro_regime": cutoff.get("macro_regime"),
-                            "decisions": relevant,
-                        }
-                    )
+        if reader.peek() == "{":
+            cutoff = _compact_cutoff(
+                reader,
+                candidate=candidate,
+            )
+            if cutoff is not None:
+                compact_cutoffs.append(cutoff)
+        else:
+            reader.skip_value()
         delimiter = reader.peek()
         if delimiter == ",":
             reader.expect(",")
@@ -190,7 +434,9 @@ def _compact_decisions_array(
             reader.expect("]")
             return compact_cutoffs
         raise json.JSONDecodeError(
-            "expected ',' or ']' in historical decisions array", "", 0
+            "expected ',' or ']' in historical decisions array",
+            "",
+            0,
         )
 
 
@@ -204,20 +450,29 @@ def _compact_manifest(
     decisions: list[dict[str, Any]] = []
     with _IncrementalJSONReader(path) as reader:
         if reader.peek() != "{":
-            raise _ManifestNotObject("historical replay manifest is not an object")
+            raise _ManifestNotObject(
+                "historical replay manifest is not an object"
+            )
         reader.expect("{")
         if reader.peek() != "}":
             while True:
                 key = reader.value()
                 if not isinstance(key, str):
-                    raise json.JSONDecodeError("historical manifest key is not a string", "", 0)
+                    raise json.JSONDecodeError(
+                        "historical manifest key is not a string",
+                        "",
+                        0,
+                    )
                 reader.expect(":")
                 if key == "decisions" and reader.peek() == "[":
-                    decisions = _compact_decisions_array(reader, candidate=candidate)
+                    decisions = _compact_decisions_array(
+                        reader,
+                        candidate=candidate,
+                    )
+                elif key in {"generated_at", "strict_only"}:
+                    metadata[key] = reader.value()
                 else:
-                    value = reader.value()
-                    if key in {"generated_at", "strict_only"}:
-                        metadata[key] = value
+                    reader.skip_value()
                 delimiter = reader.peek()
                 if delimiter == ",":
                     reader.expect(",")
@@ -225,11 +480,17 @@ def _compact_manifest(
                 if delimiter == "}":
                     break
                 raise json.JSONDecodeError(
-                    "expected ',' or '}' in historical replay manifest", "", 0
+                    "expected ',' or '}' in historical replay manifest",
+                    "",
+                    0,
                 )
         reader.expect("}")
         if reader.peek() is not None:
-            raise json.JSONDecodeError("extra data in historical replay manifest", "", 0)
+            raise json.JSONDecodeError(
+                "extra data in historical replay manifest",
+                "",
+                0,
+            )
     after = path.stat()
     before_signature = (before.st_mtime_ns, before.st_size)
     after_signature = (after.st_mtime_ns, after.st_size)
@@ -247,7 +508,9 @@ class _MemoryManifest:
 
     def read_text(self, *, encoding: str = "utf-8") -> str:
         if encoding.lower().replace("_", "-") != "utf-8":
-            raise ValueError("bounded historical manifest supports UTF-8 only")
+            raise ValueError(
+                "bounded historical manifest supports UTF-8 only"
+            )
         return self.payload
 
 
@@ -282,8 +545,14 @@ def _bounded_resolve(
     if not isinstance(candidate, historical.CandidateDecisionRecord):
         raise TypeError("candidate must be a CandidateDecisionRecord")
     historical._aware(as_of, field_name="as_of")
-    macro_regime = historical._required_text(macro_regime, field_name="macro_regime")
-    market_regime = historical._required_text(market_regime, field_name="market_regime")
+    macro_regime = historical._required_text(
+        macro_regime,
+        field_name="macro_regime",
+    )
+    market_regime = historical._required_text(
+        market_regime,
+        field_name="market_regime",
+    )
     try:
         current = self.manifest_path.stat()
         current_signature = (current.st_mtime_ns, current.st_size)
@@ -291,10 +560,17 @@ def _bounded_resolve(
         return historical.HistoricalLearningContext.unavailable(
             candidate_identifier=candidate.identifier,
             as_of=as_of,
-            reason=f"Governed historical learning is unavailable: {type(error).__name__}.",
+            reason=(
+                f"Governed historical learning is unavailable: "
+                f"{type(error).__name__}."
+            ),
         )
 
-    cache_signature = getattr(self, "_bounded_manifest_signature", None)
+    cache_signature = getattr(
+        self,
+        "_bounded_manifest_signature",
+        None,
+    )
     cache = getattr(self, "_bounded_context_cache", None)
     if cache_signature != current_signature or not isinstance(cache, dict):
         cache = {}
@@ -326,29 +602,40 @@ def _bounded_resolve(
         return historical.HistoricalLearningContext.unavailable(
             candidate_identifier=candidate.identifier,
             as_of=as_of,
-            reason="Governed historical learning changed during the decision read and was excluded.",
+            reason=(
+                "Governed historical learning changed during the decision read "
+                "and was excluded."
+            ),
         )
     except (OSError, json.JSONDecodeError, ValueError) as error:
         return historical.HistoricalLearningContext.unavailable(
             candidate_identifier=candidate.identifier,
             as_of=as_of,
-            reason=f"Governed historical learning is unavailable: {type(error).__name__}.",
+            reason=(
+                f"Governed historical learning is unavailable: "
+                f"{type(error).__name__}."
+            ),
         )
 
     if stable_signature != current_signature:
-        # Do not reuse a point-in-time key if the file changed between the initial stat
-        # and the stable bounded read. The next call may resolve the new immutable file.
         self._bounded_manifest_signature = stable_signature
         self._bounded_context_cache = {}
         return historical.HistoricalLearningContext.unavailable(
             candidate_identifier=candidate.identifier,
             as_of=as_of,
-            reason="Governed historical learning changed before the decision read and was excluded.",
+            reason=(
+                "Governed historical learning changed before the decision read "
+                "and was excluded."
+            ),
         )
 
     proxy = object.__new__(historical.HistoricalLearningResolver)
     proxy.manifest_path = _MemoryManifest(
-        json.dumps(compact_payload, separators=(",", ":"), allow_nan=False)
+        json.dumps(
+            compact_payload,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
     )
     proxy.minimum_sample_size = self.minimum_sample_size
     proxy.decision_stages = self.decision_stages
@@ -359,8 +646,6 @@ def _bounded_resolve(
         macro_regime=macro_regime,
         market_regime=market_regime,
     )
-    # A bounded manual diagnostic executes one canonical cycle. Keep only compact final
-    # contexts, never the replay object graph, and cap defensive growth for test callers.
     if len(cache) >= 64:
         cache.clear()
     cache[key] = context
@@ -374,7 +659,9 @@ def install_bounded_historical_learning() -> None:
     if current is _bounded_resolve:
         return
     if current is not _ORIGINAL_RESOLVE:
-        raise RuntimeError("historical learning resolver has an unexpected implementation")
+        raise RuntimeError(
+            "historical learning resolver has an unexpected implementation"
+        )
     historical.HistoricalLearningResolver.resolve = _bounded_resolve
 
 
