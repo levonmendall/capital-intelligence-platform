@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import operations.capability_scoped_render_bootstrap as capability_bootstrap
+import run_bounded_continuous_evidence_plane as bounded_evidence
 import run_render_service_memory_safe as memory_safe
 from operations.capability_scoped_release_diagnostic import _capability_release_environment
 
@@ -82,6 +83,49 @@ class RuntimeV2ProcessGraphTests(unittest.TestCase):
             "true",
         )
         self.assertEqual(observed["kwargs"], {})
+
+    def test_render_evidence_plane_serializes_nested_certification_workers(self) -> None:
+        observed: dict[str, object] = {}
+
+        def run_isolated(_spec, *, values, lane_wait_seconds):
+            observed["values"] = dict(values)
+            observed["lane_wait_seconds"] = lane_wait_seconds
+            return 0
+
+        with patch.object(bounded_evidence, "_run_isolated_once", side_effect=run_isolated):
+            self.assertEqual(
+                bounded_evidence.run_continuous_once(
+                    {
+                        "RENDER": "true",
+                        "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "6",
+                    }
+                ),
+                0,
+            )
+
+        values = observed["values"]
+        self.assertIsInstance(values, dict)
+        self.assertEqual(values["CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"], "1")
+        self.assertEqual(observed["lane_wait_seconds"], 300.0)
+
+    def test_non_render_evidence_plane_preserves_configured_certification_workers(self) -> None:
+        observed: dict[str, object] = {}
+
+        def run_isolated(_spec, *, values, lane_wait_seconds):
+            observed["values"] = dict(values)
+            return 0
+
+        with patch.object(bounded_evidence, "_run_isolated_once", side_effect=run_isolated):
+            self.assertEqual(
+                bounded_evidence.run_continuous_once(
+                    {"CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "4"}
+                ),
+                0,
+            )
+
+        values = observed["values"]
+        self.assertIsInstance(values, dict)
+        self.assertEqual(values["CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"], "4")
 
 
 class RuntimeV2CertificationScopeTests(unittest.TestCase):
