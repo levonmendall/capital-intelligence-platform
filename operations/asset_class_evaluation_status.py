@@ -2,13 +2,14 @@
 
 The dashboard needs a compact answer to two operational questions: how many asset
 classes did comprehensive research try to evaluate, and which of those classes actually
-completed terminal all-market evaluation.  This module projects that answer from
-existing durable artifacts only.  It does not run discovery, contact providers, certify
-anything, nominate candidates, or grant investment/execution authority.
+completed terminal all-market evaluation. This module projects that answer from existing
+durable artifacts only. It does not run discovery, contact providers, certify anything,
+nominate candidates, or grant investment/execution authority.
 
 Source precedence is intentionally fail-closed:
 1. the newest exact-release certification-DAG attempt establishes the attempted lanes;
-2. only a matching certified all-market aggregate upgrades those lanes to Evaluated;
+2. a matching all-market aggregate and its immutable lane artifacts establish per-lane
+   terminal success, including partial success when the global barrier fails;
 3. if there is no current exact-release attempt yet, the latest release-independent
    comprehensive snapshot supplies the most recent completed global evaluation view.
 """
@@ -181,7 +182,90 @@ def _latest_dag_attempt(values: Mapping[str, str]) -> dict[str, object] | None:
     return None
 
 
-def _certified_attempt(
+def _artifact_row(
+    directory: Path,
+    *,
+    lane: str,
+    certification_id: str,
+    release_sha: str,
+    decision_epoch: object,
+    blocking_reasons: tuple[str, ...],
+) -> dict[str, object]:
+    detail = "Terminal evaluation did not certify"
+    status = "Failed"
+    current = _read_mapping(directory / "lanes" / lane / "current.json")
+    artifact: Mapping[str, Any] | None = None
+    if current is not None:
+        artifact_name = current.get("artifact_path")
+        if (
+            isinstance(artifact_name, str)
+            and artifact_name
+            and Path(artifact_name).name == artifact_name
+        ):
+            artifact = _read_mapping(directory / "lanes" / lane / artifact_name)
+
+    valid = False
+    if artifact is not None:
+        body = {
+            str(key): value
+            for key, value in artifact.items()
+            if key != "artifact_sha256"
+        }
+        exact_fields = {
+            "schema_version": _CERT_SCHEMA,
+            "certification_id": certification_id,
+            "release_sha": release_sha,
+            "lane": lane,
+            "decision_epoch": decision_epoch,
+            "evidence_effective_at": decision_epoch,
+            "completion_status": "complete",
+        }
+        valid = (
+            artifact.get("artifact_sha256") == _digest(body)
+            and all(artifact.get(key) == value for key, value in exact_fields.items())
+            and artifact.get("candidate_count_limit_applied") is False
+            and artifact.get("terminal_accounting_complete") is True
+            and artifact.get("point_in_time_valid") is True
+            and artifact.get("freshness_valid") is True
+            and isinstance(artifact.get("catalog_count"), int)
+            and artifact.get("terminal_count") == artifact.get("catalog_count")
+        )
+        if valid:
+            status = "Evaluated"
+            catalog = artifact.get("catalog_count")
+            deep = artifact.get("deep_analyzed_count")
+            selected = artifact.get("selected_count")
+            if all(
+                isinstance(value, int) and value >= 0
+                for value in (catalog, deep, selected)
+            ):
+                detail = (
+                    f"{catalog} cataloged · {deep} deep analyzed · "
+                    f"{selected} selected"
+                )
+            else:
+                detail = "Terminal evaluation complete"
+
+    if not valid:
+        lane_reasons = [
+            item.split(":", 1)[1].replace("_", " ")
+            for item in blocking_reasons
+            if item.startswith(f"{lane}:") and ":" in item
+        ]
+        if lane_reasons:
+            detail = " · ".join(dict.fromkeys(lane_reasons))
+        elif artifact is None:
+            detail = "Terminal evaluation artifact unavailable"
+
+    return {
+        "key": lane,
+        "asset_class": _label(lane),
+        "status": status,
+        "detail": detail,
+    }
+
+
+def _terminal_evaluation_attempt(
     values: Mapping[str, str],
     *,
     release_sha: str | None = None,
@@ -208,62 +292,58 @@ def _certified_attempt(
     aggregate_body = {
         str(key): value for key, value in aggregate.items() if key != "sha256"
     }
-    if aggregate.get("sha256") != _digest(aggregate_body):
+    if (
+        aggregate.get("sha256") != _digest(aggregate_body)
+        or pointer.get("aggregate_sha256") != aggregate.get("sha256")
+    ):
         return None
+    certified_flag = aggregate.get("all_market_runtime_certified")
     if (
         aggregate.get("schema_version") != _CERT_SCHEMA
         or aggregate.get("certification_id") != certification_id
         or aggregate.get("release_sha") != pointer_release
         or aggregate.get("decision_epoch") != pointer_epoch
-        or aggregate.get("all_market_runtime_certified") is not True
+        or not isinstance(certified_flag, bool)
         or aggregate.get("paper_only") is not True
         or aggregate.get("real_money_authorized") is not False
     ):
         return None
     required = aggregate.get("required_lanes")
+    raw_blocking = aggregate.get("blocking_reasons", ())
     if not isinstance(required, list) or not required:
         return None
+    blocking_reasons = (
+        tuple(str(item) for item in raw_blocking)
+        if isinstance(raw_blocking, list)
+        else ()
+    )
 
     rows: list[dict[str, object]] = []
     for raw_lane in required:
         lane = str(raw_lane).strip().lower()
         if not lane:
             continue
-        detail = "Terminal evaluation complete"
-        current = _read_mapping(directory / "lanes" / lane / "current.json")
-        if current is not None:
-            artifact_name = current.get("artifact_path")
-            if isinstance(artifact_name, str) and artifact_name and Path(artifact_name).name == artifact_name:
-                artifact = _read_mapping(directory / "lanes" / lane / artifact_name)
-                if artifact is not None:
-                    artifact_body = {
-                        str(key): value
-                        for key, value in artifact.items()
-                        if key != "artifact_sha256"
-                    }
-                    if artifact.get("artifact_sha256") == _digest(artifact_body):
-                        catalog = artifact.get("catalog_count")
-                        deep = artifact.get("deep_analyzed_count")
-                        selected = artifact.get("selected_count")
-                        if all(isinstance(value, int) and value >= 0 for value in (catalog, deep, selected)):
-                            detail = (
-                                f"{catalog} cataloged · {deep} deep analyzed · "
-                                f"{selected} selected"
-                            )
         rows.append(
-            {
-                "key": lane,
-                "asset_class": _label(lane),
-                "status": "Evaluated",
-                "detail": detail,
-            }
+            _artifact_row(
+                directory,
+                lane=lane,
+                certification_id=certification_id,
+                release_sha=pointer_release,
+                decision_epoch=pointer_epoch,
+                blocking_reasons=blocking_reasons,
+            )
         )
     if not rows:
         return None
+    all_evaluated = all(row.get("status") == "Evaluated" for row in rows)
     return _summary(
         rows,
         as_of=pointer_epoch,
-        source="Current all-market certification",
+        source=(
+            "Current all-market certification"
+            if certified_flag and all_evaluated
+            else "Current all-market evaluation"
+        ),
     )
 
 
@@ -359,13 +439,13 @@ def load_asset_class_evaluation_status(
     resolved = dict(os.environ if values is None else values)
     attempt = _latest_dag_attempt(resolved)
     if attempt is not None:
-        certified = _certified_attempt(
+        terminal = _terminal_evaluation_attempt(
             resolved,
             release_sha=str(attempt["release_sha"]),
             decision_epoch=attempt.get("decision_epoch"),
         )
-        if certified is not None:
-            return certified
+        if terminal is not None:
+            return terminal
         return _summary(
             list(attempt["rows"]),
             as_of=attempt.get("decision_epoch"),
@@ -374,9 +454,9 @@ def load_asset_class_evaluation_status(
 
     release_sha = _release(resolved)
     if release_sha and release_sha != "unknown":
-        certified = _certified_attempt(resolved, release_sha=release_sha)
-        if certified is not None:
-            return certified
+        terminal = _terminal_evaluation_attempt(resolved, release_sha=release_sha)
+        if terminal is not None:
+            return terminal
 
     completed = _latest_completed_snapshot(resolved)
     if completed is not None:
