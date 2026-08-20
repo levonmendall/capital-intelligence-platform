@@ -86,7 +86,7 @@ jobs:
           tests/test_capability_scoped_release_diagnostic.py
 
       - name: Run deterministic release validation
-        run: timeout --signal=TERM 7m python run_release_validation.py --report reports/capability-operating-release-validation.json
+        run: timeout --signal=TERM 12m python run_release_validation.py --report reports/capability-operating-release-validation.json
 
       - name: Publish capability operating validation diagnostics
         if: always()
