@@ -1,13 +1,16 @@
 """Bound CIO journal payload validation without materializing nested JSON objects.
 
-The append-only journal hash chain remains authoritative and complete.  This module only
-changes how each stored ``payload_json`` value is syntactically validated during integrity
-scans: the raw SQLite string is walked in place instead of being expanded by ``json.loads``.
-Peak validation memory is therefore independent of a single event's nested payload size.
+The append-only journal hash chain remains authoritative and complete. This module changes
+how stored ``payload_json`` values are syntactically validated during integrity scans and
+when immutable journal-event wrappers are created: the existing JSON text is walked in
+place instead of being expanded by ``json.loads`` merely for validation. Peak validation
+memory is therefore independent of a single event's nested payload object graph.
 
-No journal row is skipped.  Sequence, previous-hash, content-hash, event identity, schema,
-and top-level JSON-object requirements remain fail-closed.  Investment logic, evidence,
-CIO authority, construction, paper execution, and real-money denial are unchanged.
+No journal row is skipped. Sequence, previous-hash, content-hash, event identity, schema,
+and top-level JSON-object requirements remain fail-closed. Explicit callers of
+``CIOJournalEvent.payload`` still receive the decoded payload exactly as before. Investment
+logic, evidence, CIO authority, construction, paper execution, and real-money denial are
+unchanged.
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ import operations.bounded_cio_journal as bounded
 
 
 _ORIGINAL_BOUNDED_VERIFY_INTEGRITY = bounded._bounded_verify_integrity
+_ORIGINAL_CIO_JOURNAL_EVENT_POST_INIT = persistence.CIOJournalEvent.__post_init__
 
 
 class _JSONSyntaxError(ValueError):
@@ -198,23 +202,83 @@ class _JSONTextValidator:
                 return
             raise self._error("expected ',' or ']' in array")
 
-    def validate_object_document(self) -> None:
+    def validate_document(self) -> str:
+        """Validate one complete JSON document and return its first non-space token."""
+
         self._skip_space()
-        if self._peek() != "{":
-            raise self._error("top-level value must be an object")
-        self._object()
+        token = self._peek()
+        if token is None:
+            raise self._error("expected value")
+        self._value()
         self._skip_space()
         if self.position != self.length:
-            raise self._error("trailing data after object")
+            raise self._error("trailing data after value")
+        return token
+
+    def validate_object_document(self) -> None:
+        token = self.validate_document()
+        if token != "{":
+            raise self._error("top-level value must be an object")
+
+
+def _validated_json_document_token(payload_json: str) -> str:
+    """Validate one JSON document in-place and identify its top-level value type."""
+
+    try:
+        return _JSONTextValidator(payload_json).validate_document()
+    except RecursionError as error:
+        raise _JSONSyntaxError("payload_json nesting exceeds the validation limit") from error
 
 
 def validate_json_object_text(payload_json: str) -> None:
-    """Validate one canonical payload without allocating its nested object graph."""
+    """Validate one canonical object payload without allocating its nested object graph."""
 
+    token = _validated_json_document_token(payload_json)
+    if token != "{":
+        raise _JSONSyntaxError("payload_json top-level value must be an object")
+
+
+def _streaming_event_post_init(self: persistence.CIOJournalEvent) -> None:
+    """Preserve CIOJournalEvent validation without decoding the payload object graph."""
+
+    if isinstance(self.sequence, bool) or not isinstance(self.sequence, int):
+        raise TypeError("sequence must be an integer")
+    if self.sequence < 1:
+        raise ValueError("sequence must be positive")
+    for field_name in (
+        "event_identifier",
+        "aggregate_identifier",
+        "schema_version",
+        "previous_hash",
+        "content_hash",
+    ):
+        object.__setattr__(
+            self,
+            field_name,
+            persistence._required_text(getattr(self, field_name), field_name=field_name),
+        )
+    if not isinstance(self.event_type, persistence.CIOJournalEventType):
+        raise TypeError("event_type must be a CIOJournalEventType")
+    persistence._aware(self.occurred_at, field_name="occurred_at")
+    persistence._aware(self.recorded_at, field_name="recorded_at")
     try:
-        _JSONTextValidator(payload_json).validate_object_document()
-    except RecursionError as error:
-        raise _JSONSyntaxError("payload_json nesting exceeds the validation limit") from error
+        token = _validated_json_document_token(self.payload_json)
+    except (TypeError, ValueError) as error:
+        raise ValueError("payload_json must be valid JSON") from error
+    if token != "{":
+        raise ValueError("payload_json must encode an object")
+
+
+def install_streaming_cio_journal_event_validation() -> None:
+    """Make journal-event construction memory-bounded while preserving its contract."""
+
+    event_type = persistence.CIOJournalEvent
+    current = event_type.__post_init__
+    if current is _streaming_event_post_init:
+        return
+    if current is not _ORIGINAL_CIO_JOURNAL_EVENT_POST_INIT:
+        raise RuntimeError("CIO journal event validator has an unexpected implementation")
+    event_type.__post_init__ = _streaming_event_post_init
 
 
 def _streaming_verify_integrity(self: persistence.SQLiteCIOJournal) -> bool:
@@ -290,7 +354,11 @@ def _streaming_verify_integrity(self: persistence.SQLiteCIOJournal) -> bool:
 
 
 def install_streaming_cio_journal_integrity() -> None:
-    """Install the bounded verifier before the normal bounded-journal installer runs."""
+    """Install bounded event validation and verifier before bounded journal reads."""
+
+    # The worker can append very large specialist/evidence packets after startup. Their
+    # immutable event wrapper must not decode the just-serialized payload a second time.
+    install_streaming_cio_journal_event_validation()
 
     current_projection = bounded._bounded_verify_integrity
     journal = persistence.SQLiteCIOJournal
@@ -309,6 +377,7 @@ def install_streaming_cio_journal_integrity() -> None:
 
 
 __all__ = [
+    "install_streaming_cio_journal_event_validation",
     "install_streaming_cio_journal_integrity",
     "validate_json_object_text",
 ]
