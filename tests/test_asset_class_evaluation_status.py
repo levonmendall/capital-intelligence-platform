@@ -78,6 +78,100 @@ def _write_dag_attempt(tmp_path: Path) -> str:
     return epoch
 
 
+def _write_lane_artifact(
+    root: Path,
+    *,
+    certification_id: str,
+    epoch: str,
+    lane: str,
+    catalog_count: int,
+    deep_analyzed_count: int,
+    selected_count: int,
+) -> str:
+    excluded_count = catalog_count - selected_count
+    body = {
+        "schema_version": "all-market-lane-certification.v1",
+        "certification_id": certification_id,
+        "release_sha": "release-test",
+        "lane": lane,
+        "decision_epoch": epoch,
+        "evidence_effective_at": epoch,
+        "policy_version": "test-policy",
+        "catalog_count": catalog_count,
+        "deep_analyzed_count": deep_analyzed_count,
+        "selected_count": selected_count,
+        "excluded_count": excluded_count,
+        "terminal_count": catalog_count,
+        "terminal_accounting_complete": True,
+        "point_in_time_valid": True,
+        "freshness_valid": True,
+        "universe_fingerprint": f"universe-{lane}",
+        "provider_evidence_fingerprint": f"evidence-{lane}",
+        "discovery_manifest_fingerprint": "fingerprint",
+        "candidate_count_limit_applied": False,
+        "completion_status": "complete",
+        "paper_only": True,
+        "investment_authority": False,
+        "real_money_authorized": False,
+        "completed_at": "2026-08-19T20:16:00+00:00",
+    }
+    artifact_sha = _digest(body)
+    lane_dir = root / "certifications" / certification_id / "lanes" / lane
+    _write(lane_dir / f"{artifact_sha}.json", {**body, "artifact_sha256": artifact_sha})
+    _write(
+        lane_dir / "current.json",
+        {
+            "artifact_sha256": artifact_sha,
+            "artifact_path": f"{artifact_sha}.json",
+            "decision_epoch": epoch,
+            "release_sha": "release-test",
+        },
+    )
+    return artifact_sha
+
+
+def _write_aggregate(
+    tmp_path: Path,
+    *,
+    epoch: str,
+    lane_hashes: dict[str, str],
+    certified: bool,
+    blocking_reasons: list[str],
+) -> None:
+    certification_id = "certification-test"
+    aggregate_body = {
+        "schema_version": "all-market-lane-certification.v1",
+        "certification_id": certification_id,
+        "release_sha": "release-test",
+        "decision_epoch": epoch,
+        "required_lanes": ["us_equity", "fixed_income"],
+        "lane_artifact_sha256": lane_hashes,
+        "discovery_manifest_fingerprint": "fingerprint",
+        "all_market_runtime_certified": certified,
+        "blocking_reasons": blocking_reasons,
+        "candidate_count_limit_applied": False,
+        "paper_only": True,
+        "investment_authority": False,
+        "real_money_authorized": False,
+    }
+    aggregate_sha = _digest(aggregate_body)
+    root = tmp_path / "all-market-certification"
+    _write(
+        root / "latest.json",
+        {
+            "certification_id": certification_id,
+            "release_sha": "release-test",
+            "decision_epoch": epoch,
+            "all_market_runtime_certified": certified,
+            "aggregate_sha256": aggregate_sha,
+        },
+    )
+    _write(
+        root / "certifications" / certification_id / "aggregate.json",
+        {**aggregate_body, "sha256": aggregate_sha},
+    )
+
+
 def test_current_attempt_reports_attempted_classes_without_overstating_completion(tmp_path: Path) -> None:
     _write_dag_attempt(tmp_path)
 
@@ -93,38 +187,64 @@ def test_current_attempt_reports_attempted_classes_without_overstating_completio
     assert "ProviderEvidenceError" in rows["fixed_income"]["detail"]
 
 
+def test_partial_terminal_evaluation_reports_successful_over_attempted(tmp_path: Path) -> None:
+    epoch = _write_dag_attempt(tmp_path)
+    root = tmp_path / "all-market-certification"
+    us_hash = _write_lane_artifact(
+        root,
+        certification_id="certification-test",
+        epoch=epoch,
+        lane="us_equity",
+        catalog_count=500,
+        deep_analyzed_count=80,
+        selected_count=12,
+    )
+    _write_aggregate(
+        tmp_path,
+        epoch=epoch,
+        lane_hashes={"us_equity": us_hash},
+        certified=False,
+        blocking_reasons=["fixed_income:missing"],
+    )
+
+    status = load_asset_class_evaluation_status(values=_values(tmp_path))
+
+    assert status["attempted"] == 2
+    assert status["successful"] == 1
+    assert status["source"] == "Current all-market evaluation"
+    rows = {row["key"]: row for row in status["rows"]}
+    assert rows["us_equity"]["status"] == "Evaluated"
+    assert rows["fixed_income"]["status"] == "Failed"
+    assert rows["fixed_income"]["detail"] == "missing"
+
+
 def test_matching_terminal_certification_upgrades_attempted_classes_to_evaluated(tmp_path: Path) -> None:
     epoch = _write_dag_attempt(tmp_path)
-    certification_id = "certification-test"
-    aggregate_body = {
-        "schema_version": "all-market-lane-certification.v1",
-        "certification_id": certification_id,
-        "release_sha": "release-test",
-        "decision_epoch": epoch,
-        "required_lanes": ["us_equity", "fixed_income"],
-        "lane_artifact_sha256": {},
-        "discovery_manifest_fingerprint": "fingerprint",
-        "all_market_runtime_certified": True,
-        "blocking_reasons": [],
-        "candidate_count_limit_applied": False,
-        "paper_only": True,
-        "investment_authority": False,
-        "real_money_authorized": False,
-    }
     root = tmp_path / "all-market-certification"
-    _write(
-        root / "latest.json",
-        {
-            "certification_id": certification_id,
-            "release_sha": "release-test",
-            "decision_epoch": epoch,
-            "all_market_runtime_certified": True,
-            "aggregate_sha256": _digest(aggregate_body),
-        },
+    us_hash = _write_lane_artifact(
+        root,
+        certification_id="certification-test",
+        epoch=epoch,
+        lane="us_equity",
+        catalog_count=500,
+        deep_analyzed_count=80,
+        selected_count=12,
     )
-    _write(
-        root / "certifications" / certification_id / "aggregate.json",
-        {**aggregate_body, "sha256": _digest(aggregate_body)},
+    fixed_hash = _write_lane_artifact(
+        root,
+        certification_id="certification-test",
+        epoch=epoch,
+        lane="fixed_income",
+        catalog_count=220,
+        deep_analyzed_count=40,
+        selected_count=8,
+    )
+    _write_aggregate(
+        tmp_path,
+        epoch=epoch,
+        lane_hashes={"us_equity": us_hash, "fixed_income": fixed_hash},
+        certified=True,
+        blocking_reasons=[],
     )
 
     status = load_asset_class_evaluation_status(values=_values(tmp_path))
