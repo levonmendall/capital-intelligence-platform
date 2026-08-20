@@ -16,6 +16,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Mapping, Sequence
 
 from operations.stage_isolated_evidence_pipeline import (
@@ -96,9 +97,16 @@ def _base_universe_symbols() -> tuple[str, ...]:
 def _stage_reference(values: dict[str, str], state) -> dict[str, object]:
     from operations import component_qualified_evidence_maintenance as maintenance
 
+    # Preserve the existing release-independent reuse contract: if a still-fresh public
+    # component already established an evidence epoch, bind reference components to that
+    # epoch rather than silently moving downstream stages to a newer cutoff.
+    preparation_cutoff = maintenance._resumable_evidence_cutoff(
+        values,
+        requested=state.evidence_as_of,
+    )
     manifest, effective_cutoff = maintenance._bound_or_prepare_reference_manifest(
         values,
-        preparation_cutoff=state.evidence_as_of,
+        preparation_cutoff=preparation_cutoff,
     )
     manifest_id = str(getattr(manifest, "manifest_id", "")).strip()
     manifest_path = getattr(manifest, "path", None)
@@ -142,6 +150,7 @@ def _stage_us_equity_discovery(values: dict[str, str], state) -> dict[str, objec
 
     _apply_reference_binding(values, state)
     os.environ[_PREPARING_ENV] = "true"
+    values[_PREPARING_ENV] = "true"
     install_post_public_provider_progress(values)
     scope = load_evidence_state_scope(as_of=state.evidence_as_of, values=values)
     base_symbols = _base_universe_symbols()
@@ -196,6 +205,7 @@ def _stage_comprehensive_discovery(values: dict[str, str], state) -> dict[str, o
 
     _apply_reference_binding(values, state)
     os.environ[_PREPARING_ENV] = "true"
+    values[_PREPARING_ENV] = "true"
     scope = load_evidence_state_scope(as_of=state.evidence_as_of, values=values)
 
     def owned_global_discovery(as_of: datetime):
@@ -263,6 +273,7 @@ def _stage_paper_evidence(values: dict[str, str], state) -> dict[str, object]:
 
     _apply_reference_binding(values, state)
     os.environ[_PREPARING_ENV] = "true"
+    values[_PREPARING_ENV] = "true"
     install_post_public_provider_progress(values)
     scope, universe, holding_only = _paper_universe(values, state)
     try:
@@ -306,6 +317,8 @@ def _stage_paper_evidence(values: dict[str, str], state) -> dict[str, object]:
 
 
 def _stage_finalize(values: dict[str, str], state) -> dict[str, object]:
+    """Publish the generation using only already-qualified durable stage outputs."""
+
     from operations import component_qualified_evidence_maintenance as maintenance
     from operations.equity_discovery_snapshot import load_equity_discovery_snapshot
     from operations.paper_evidence_snapshot import load_paper_evidence_snapshot
@@ -314,13 +327,19 @@ def _stage_finalize(values: dict[str, str], state) -> dict[str, object]:
     )
 
     _apply_reference_binding(values, state)
-    maintenance_result = maintenance.maintain_component_qualified_evidence_plane(
-        as_of=state.evidence_as_of,
-        values=values,
+    if not state.reference_manifest_id or not state.reference_manifest_path:
+        raise RuntimeError("finalization has no durable reference binding")
+
+    # Refuse to repair evidence during finalization. Every provider-facing boundary has
+    # already completed in a separate stage. A missing/corrupt component is a fail-closed
+    # stage failure, never an excuse to re-enter a heavyweight acquisition path here.
+    public = maintenance._load_public_component(
+        values,
+        cutoff=datetime.now(timezone.utc),
     )
-    generation = maintenance_result.generation
-    if generation.as_of != state.evidence_as_of:
-        raise RuntimeError("final evidence generation changed the stage-isolated evidence epoch")
+    if public is None or public.as_of != state.evidence_as_of:
+        raise RuntimeError("finalization has no exact qualified public-live component")
+
     global_snapshot = load_qualified_comprehensive_discovery_snapshot(
         evidence_as_of=state.evidence_as_of,
         values=values,
@@ -336,7 +355,10 @@ def _stage_finalize(values: dict[str, str], state) -> dict[str, object]:
         values=values,
     )
     base_symbols = _base_universe_symbols()
-    if global_snapshot.held_symbols != scope.held_symbols or global_snapshot.tracked_symbols != scope.tracked_symbols:
+    if (
+        global_snapshot.held_symbols != scope.held_symbols
+        or global_snapshot.tracked_symbols != scope.tracked_symbols
+    ):
         raise RuntimeError("global discovery snapshot state scope changed before finalization")
     if (
         equity_snapshot.held_symbols != scope.held_symbols
@@ -346,6 +368,25 @@ def _stage_finalize(values: dict[str, str], state) -> dict[str, object]:
         raise RuntimeError("U.S.-equity snapshot state scope changed before finalization")
     if paper_snapshot.evidence_as_of != state.evidence_as_of:
         raise RuntimeError("paper evidence snapshot changed its evidence epoch")
+
+    # The final generation publisher itself is provider-free. It receives lightweight
+    # adapters for the already-bound reference/public stages and a discovery callback that
+    # merely confirms the exact immutable snapshot already loaded above.
+    generation = maintenance._plane.refresh_continuous_evidence_plane(
+        as_of=state.evidence_as_of,
+        values=values,
+        reference_preparer=lambda _values: SimpleNamespace(
+            manifest_id=state.reference_manifest_id
+        ),
+        public_collector=lambda _timestamp: SimpleNamespace(
+            state=str(public.payload.get("state") or "available"),
+            required_sources_ready=True,
+        ),
+        discovery=lambda _timestamp: global_snapshot.result,
+    )
+    if generation.as_of != state.evidence_as_of:
+        raise RuntimeError("final evidence generation changed the stage-isolated evidence epoch")
+    archive = maintenance._legacy_maintenance._archive_generation(values, generation)
     return {
         "generation_id": generation.generation_id,
         "global_snapshot_id": global_snapshot.snapshot_id,
@@ -353,7 +394,7 @@ def _stage_finalize(values: dict[str, str], state) -> dict[str, object]:
         "paper_snapshot_id": paper_snapshot.snapshot_id,
         "instrument_count": len(universe.instruments),
         "holding_only_count": len(holding_only),
-        "archive": str(maintenance_result.archived_generation_path),
+        "archive": str(archive),
     }
 
 
@@ -386,7 +427,6 @@ def run_stage(
         return 0
     try:
         result = _STAGE_RUNNERS[normalized](resolved, state)
-        latest = _state(resolved, pipeline_id)
         completed = complete_evidence_stage(
             resolved,
             pipeline_id=pipeline_id,
