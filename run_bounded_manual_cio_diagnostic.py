@@ -36,6 +36,9 @@ from operations.manual_cio_diagnostic import (
 from operations.qualified_evidence_maintenance import (
     load_prequalified_reference_manifest,
 )
+from operations.reclaimable_memory_guard import (
+    wait_with_reclaimable_resource_bounds,
+)
 from providers.cme_futures_reference_executable import (
     CmeExecutableFuturesReferenceProvider,
 )
@@ -177,6 +180,10 @@ _install_recovery_progress_contract()
 _core.prepare_reference_readiness = _prepare_with_rate_budget
 _core._prime_forced_replacement = _prime_forced_replacement
 _core._container_memory_kib = _container_memory_with_configured_ceiling
+# All bounded Render jobs import this wrapper before invoking the shared watchdog. Replace
+# the legacy raw-memory kill test with the dual reclaimable-aware guard while preserving the
+# watchdog's exact return contract and the hard service-OOM boundary.
+_core._wait_with_resource_bounds = wait_with_reclaimable_resource_bounds
 
 
 if __name__ == "__main__":
