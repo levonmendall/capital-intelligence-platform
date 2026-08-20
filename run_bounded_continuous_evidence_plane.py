@@ -26,7 +26,10 @@ from run_bounded_render_worker import WorkerSpec, _run_isolated_once, run_loop
 _SPEC = WorkerSpec(
     name="continuous-evidence-plane",
     script="run_stage_isolated_evidence_pipeline.py",
-    arguments=(),
+    # Preserve the historical one-shot command contract used by release-prequalification
+    # and runtime validation. The stage coordinator treats this only as an execution-mode
+    # declaration; every internal required stage still runs exactly once per pass.
+    arguments=("--once",),
     interval_env="CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_INTERVAL_SECONDS",
     default_interval_seconds=300.0,
     timeout_env="CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PASS_TIMEOUT_SECONDS",
