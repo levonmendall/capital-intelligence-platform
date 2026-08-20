@@ -14,7 +14,7 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 def test_bounded_continuous_evidence_uses_stage_isolated_entrypoint() -> None:
     assert bounded._SPEC.script == "run_stage_isolated_evidence_pipeline.py"
-    assert bounded._SPEC.arguments == ()
+    assert bounded._SPEC.arguments == ("--once",)
     assert bounded._SPEC.default_timeout_seconds == 3600.0
 
 
