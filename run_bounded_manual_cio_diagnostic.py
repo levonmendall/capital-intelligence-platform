@@ -18,6 +18,7 @@ from collections.abc import Mapping, MutableMapping
 
 import run_bounded_manual_cio_diagnostic_core as _core
 from operations import manual_cio_diagnostic as _diagnostic_coordination
+from operations import reclaimable_memory_guard as _reclaimable_guard
 from operations.capability_scoped_release_diagnostic import (
     capability_scoped_operation_enabled,
     load_capability_operating_reference_manifest,
@@ -35,9 +36,6 @@ from operations.manual_cio_diagnostic import (
 )
 from operations.qualified_evidence_maintenance import (
     load_prequalified_reference_manifest,
-)
-from operations.reclaimable_memory_guard import (
-    wait_with_reclaimable_resource_bounds,
 )
 from providers.cme_futures_reference_executable import (
     CmeExecutableFuturesReferenceProvider,
@@ -58,6 +56,7 @@ _ORIGINAL_CONTAINER_MEMORY_KIB = _core._container_memory_kib
 _ORIGINAL_CGROUP_MEMORY_KIB = _core._cgroup_memory_kib
 _ORIGINAL_PROCESS_MEMORY_KIB = _core._process_memory_kib
 _ORIGINAL_WAIT_WITH_RESOURCE_BOUNDS = _core._wait_with_resource_bounds
+_core._last_reclaimable_memory_report = None
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -98,14 +97,52 @@ def _wait_with_reclaimable_bounds(process, **kwargs):
     with the original conservative watchdog instead of mixing synthetic raw counters with
     live ``memory.stat`` from another cgroup. Normal production keeps the original readers
     and therefore always uses the reclaimable-aware dual guard.
+
+    The guard's credential-safe trigger/peak record is also retained on the shared core
+    module for the caller that owns the bounded child. This does not alter the historical
+    five-value wait contract, so every existing worker remains compatible while release
+    telemetry can distinguish real working-set pressure from the independent raw hard cap.
     """
 
     if (
         _core._cgroup_memory_kib is not _ORIGINAL_CGROUP_MEMORY_KIB
         or _core._process_memory_kib is not _ORIGINAL_PROCESS_MEMORY_KIB
     ):
-        return _ORIGINAL_WAIT_WITH_RESOURCE_BOUNDS(process, **kwargs)
-    return wait_with_reclaimable_resource_bounds(process, **kwargs)
+        result = _ORIGINAL_WAIT_WITH_RESOURCE_BOUNDS(process, **kwargs)
+        _core._last_reclaimable_memory_report = {
+            "memory_limited": bool(result[2]),
+            "trigger_reason": "legacy_accounting" if result[2] else None,
+            "credential_safe": True,
+        }
+        return result
+
+    captured: dict[str, object] = {}
+    original_log = _reclaimable_guard._safe_log
+
+    def capture(event: str, **details: object) -> None:
+        if event == "reclaimable_memory_guard_triggered":
+            captured.update(details)
+            captured["triggered"] = True
+        elif event == "reclaimable_memory_guard_finished":
+            # Finish contains peak values that are more useful than the instantaneous
+            # trigger sample. Preserve trigger-only fields unless the finish record has a
+            # newer value for the same key.
+            captured.update(details)
+            captured["finished"] = True
+        original_log(event, **details)
+
+    _reclaimable_guard._safe_log = capture
+    try:
+        result = _reclaimable_guard.wait_with_reclaimable_resource_bounds(
+            process,
+            **kwargs,
+        )
+    finally:
+        _reclaimable_guard._safe_log = original_log
+    captured.setdefault("memory_limited", bool(result[2]))
+    captured.setdefault("credential_safe", True)
+    _core._last_reclaimable_memory_report = dict(captured)
+    return result
 
 
 def _install_recovery_progress_contract() -> None:
