@@ -7,6 +7,9 @@ from pathlib import Path
 from operations.asset_class_evaluation_status import load_asset_class_evaluation_status
 
 
+_GOVERNED_CLASS_COUNT = 13
+
+
 def _digest(value: object) -> str:
     encoded = json.dumps(
         value,
@@ -172,22 +175,34 @@ def _write_aggregate(
     )
 
 
-def test_current_attempt_reports_attempted_classes_without_overstating_completion(tmp_path: Path) -> None:
+def _rows_by_key(status: dict[str, object]) -> dict[str, dict[str, object]]:
+    rows = status["rows"]
+    assert isinstance(rows, list)
+    return {str(row["key"]): row for row in rows}
+
+
+def test_current_attempt_reports_full_governed_scope_without_overstating_completion(tmp_path: Path) -> None:
     _write_dag_attempt(tmp_path)
 
     status = load_asset_class_evaluation_status(values=_values(tmp_path))
 
-    assert status["attempted"] == 2
+    assert status["attempted"] == _GOVERNED_CLASS_COUNT
+    assert status["total"] == _GOVERNED_CLASS_COUNT
+    assert status["reached"] == 2
     assert status["successful"] == 0
     assert status["source"] == "Current comprehensive evaluation attempt"
-    rows = {row["key"]: row for row in status["rows"]}
+    rows = _rows_by_key(status)
+    assert len(rows) == _GOVERNED_CLASS_COUNT
+    assert "other" not in rows
     assert rows["us_equity"]["status"] == "In progress"
     assert "terminal evaluation pending" in rows["us_equity"]["detail"]
     assert rows["fixed_income"]["status"] == "Failed"
     assert "ProviderEvidenceError" in rows["fixed_income"]["detail"]
+    assert rows["crypto"]["status"] == "Awaiting evaluation"
+    assert "No current-cycle terminal evaluation" in rows["crypto"]["detail"]
 
 
-def test_partial_terminal_evaluation_reports_successful_over_attempted(tmp_path: Path) -> None:
+def test_partial_terminal_evaluation_reports_successful_over_full_governed_scope(tmp_path: Path) -> None:
     epoch = _write_dag_attempt(tmp_path)
     root = tmp_path / "all-market-certification"
     us_hash = _write_lane_artifact(
@@ -209,16 +224,19 @@ def test_partial_terminal_evaluation_reports_successful_over_attempted(tmp_path:
 
     status = load_asset_class_evaluation_status(values=_values(tmp_path))
 
-    assert status["attempted"] == 2
+    assert status["attempted"] == _GOVERNED_CLASS_COUNT
+    assert status["total"] == _GOVERNED_CLASS_COUNT
+    assert status["reached"] == 2
     assert status["successful"] == 1
     assert status["source"] == "Current all-market evaluation"
-    rows = {row["key"]: row for row in status["rows"]}
+    rows = _rows_by_key(status)
     assert rows["us_equity"]["status"] == "Evaluated"
     assert rows["fixed_income"]["status"] == "Failed"
     assert rows["fixed_income"]["detail"] == "missing"
+    assert rows["crypto"]["status"] == "Awaiting evaluation"
 
 
-def test_matching_terminal_certification_upgrades_attempted_classes_to_evaluated(tmp_path: Path) -> None:
+def test_matching_terminal_certification_keeps_unreached_classes_visible(tmp_path: Path) -> None:
     epoch = _write_dag_attempt(tmp_path)
     root = tmp_path / "all-market-certification"
     us_hash = _write_lane_artifact(
@@ -249,7 +267,24 @@ def test_matching_terminal_certification_upgrades_attempted_classes_to_evaluated
 
     status = load_asset_class_evaluation_status(values=_values(tmp_path))
 
-    assert status["attempted"] == 2
+    assert status["attempted"] == _GOVERNED_CLASS_COUNT
+    assert status["total"] == _GOVERNED_CLASS_COUNT
+    assert status["reached"] == 2
     assert status["successful"] == 2
     assert status["source"] == "Current all-market certification"
-    assert {row["status"] for row in status["rows"]} == {"Evaluated"}
+    rows = _rows_by_key(status)
+    assert len(rows) == _GOVERNED_CLASS_COUNT
+    assert sum(row["status"] == "Evaluated" for row in rows.values()) == 2
+    assert sum(row["status"] == "Awaiting evaluation" for row in rows.values()) == 11
+
+
+def test_no_runtime_evaluation_still_lists_entire_governed_universe(tmp_path: Path) -> None:
+    status = load_asset_class_evaluation_status(values=_values(tmp_path))
+
+    assert status["attempted"] == _GOVERNED_CLASS_COUNT
+    assert status["total"] == _GOVERNED_CLASS_COUNT
+    assert status["reached"] == 0
+    assert status["successful"] == 0
+    rows = _rows_by_key(status)
+    assert len(rows) == _GOVERNED_CLASS_COUNT
+    assert {row["status"] for row in rows.values()} == {"Awaiting evaluation"}
