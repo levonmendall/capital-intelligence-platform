@@ -68,7 +68,7 @@ def _bounded_evidence_values(values: Mapping[str, str]) -> dict[str, str]:
 
 
 def _memory_failure_context(values: Mapping[str, str]) -> None:
-    """Transport the exact governed memory trigger and active durable stage upstream."""
+    """Transport the governed memory trigger and exact active discovery unit upstream."""
 
     import run_bounded_manual_cio_diagnostic as memory_watchdog
     from operations.stage_isolated_evidence_pipeline import (
@@ -88,7 +88,69 @@ def _memory_failure_context(values: Mapping[str, str]) -> None:
         stage = state.current_stage or state.next_stage or "finalize"
         pipeline_id = state.pipeline_id
 
+    lane_context: Mapping[str, object] | None = None
+    if state is not None and stage == "comprehensive_discovery":
+        try:
+            from operations.comprehensive_discovery_memory_attribution import (
+                lane_local_memory_failure_context,
+            )
+
+            boundary = state.stage_started_at or state.evidence_as_of
+            lane_context = lane_local_memory_failure_context(
+                values,
+                boundary=boundary,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            # Failure attribution is observability-only. Never obscure the governed
+            # ResourceBoundaryExceeded event if its lane-local projection is unavailable.
+            lane_context = None
+
     trigger = str(safe_report.get("trigger_reason") or "unknown")
+    failure_stage = f"stage_isolated_evidence:{stage}"
+    lane_detail = ""
+    lane_fields: dict[str, object] = {}
+    if lane_context is not None:
+        progress_kind = str(lane_context.get("progress_kind") or "unknown")
+        substage = str(lane_context.get("substage") or "unknown")
+        asset_class = str(lane_context.get("asset_class") or "") or None
+        component = str(lane_context.get("component") or "") or None
+        lane_index = lane_context.get("active_lane_index")
+        metrics = lane_context.get("metrics")
+        safe_metrics = dict(metrics) if isinstance(metrics, Mapping) else {}
+        lane_fields = {
+            "failure_progress_kind": progress_kind,
+            "failure_substage": substage,
+            "failure_asset_class": asset_class,
+            "failure_component": component,
+            "failure_lane_index": lane_index,
+            "lane_progress_metrics": safe_metrics,
+        }
+        if progress_kind == "active" and asset_class and substage in {
+            "catalog-lane",
+            "publication-lane",
+            "screening-lane",
+        }:
+            # The coordinator writes the active marker immediately before launching the
+            # finite child, so this is exact failure attribution rather than inference.
+            failure_stage = (
+                f"stage_isolated_evidence:{stage}:{substage}:{asset_class}"
+            )
+            lane_detail = (
+                f"; lane_progress_kind=active; lane_substage={substage}; "
+                f"lane_asset_class={asset_class}; active_lane_index={lane_index}; "
+                f"lane_component={component}; lane_progress_metrics={safe_metrics}"
+            )
+        else:
+            # A completed component is useful as a last durable checkpoint, but must not
+            # be mislabeled as the unit that crossed the memory boundary.
+            lane_fields["last_durable_progress_component"] = component
+            lane_detail = (
+                f"; lane_progress_kind={progress_kind}; "
+                f"last_durable_component={component}; "
+                f"last_durable_asset_class={asset_class}; "
+                f"lane_progress_metrics={safe_metrics}"
+            )
+
     detail = (
         f"stage_isolated_evidence_resource_boundary; stage={stage}; "
         f"trigger_reason={trigger}; "
@@ -99,16 +161,22 @@ def _memory_failure_context(values: Mapping[str, str]) -> None:
         f"file_peak_kib={safe_report.get('container_peak_file_kib')}; "
         f"kernel_peak_kib={safe_report.get('container_peak_kernel_kib')}; "
         f"memory_accounting_source={safe_report.get('memory_accounting_source')}"
+        f"{lane_detail}"
     )[:1600]
     print(
         json.dumps(
             {
                 "event": _FAILURE_EVENT,
                 "error_type": "ResourceBoundaryExceeded",
-                "failure_stage": f"stage_isolated_evidence:{stage}",
+                "failure_stage": failure_stage,
                 "error_detail": detail,
                 "pipeline_id": pipeline_id,
                 "memory_trigger_reason": trigger,
+                "memory_working_set_peak_kib": safe_report.get(
+                    "container_peak_working_set_kib"
+                ),
+                "memory_raw_peak_kib": safe_report.get("container_peak_memory_kib"),
+                **lane_fields,
                 "credential_safe": True,
                 "decision_authority": False,
                 "candidate_authority": False,
