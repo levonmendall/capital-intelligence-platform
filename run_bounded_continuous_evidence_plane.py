@@ -154,8 +154,11 @@ def _memory_failure_context(values: Mapping[str, str]) -> None:
     detail = (
         f"stage_isolated_evidence_resource_boundary; stage={stage}; "
         f"trigger_reason={trigger}; "
+        f"process_peak_rss_kib={safe_report.get('process_peak_rss_kib')}; "
         f"working_set_peak_kib={safe_report.get('container_peak_working_set_kib')}; "
+        f"working_set_boundary_kib={safe_report.get('working_set_boundary_kib')}; "
         f"raw_peak_kib={safe_report.get('container_peak_memory_kib')}; "
+        f"raw_hard_boundary_kib={safe_report.get('raw_hard_boundary_kib')}; "
         f"inactive_file_peak_kib={safe_report.get('container_peak_inactive_file_kib')}; "
         f"anon_peak_kib={safe_report.get('container_peak_anon_kib')}; "
         f"file_peak_kib={safe_report.get('container_peak_file_kib')}; "
@@ -172,10 +175,17 @@ def _memory_failure_context(values: Mapping[str, str]) -> None:
                 "error_detail": detail,
                 "pipeline_id": pipeline_id,
                 "memory_trigger_reason": trigger,
+                "memory_process_peak_rss_kib": safe_report.get("process_peak_rss_kib"),
                 "memory_working_set_peak_kib": safe_report.get(
                     "container_peak_working_set_kib"
                 ),
+                "memory_working_set_boundary_kib": safe_report.get(
+                    "working_set_boundary_kib"
+                ),
                 "memory_raw_peak_kib": safe_report.get("container_peak_memory_kib"),
+                "memory_raw_hard_boundary_kib": safe_report.get(
+                    "raw_hard_boundary_kib"
+                ),
                 **lane_fields,
                 "credential_safe": True,
                 "decision_authority": False,
