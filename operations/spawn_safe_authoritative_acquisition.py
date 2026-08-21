@@ -3,9 +3,9 @@
 The comprehensive-discovery coordinator retains only compact certification-node metadata.
 Catalog assembly, provider preselection, and lane descriptor construction run in finite
 bounded-memory interpreters. Provider-facing market-evidence lanes are then executed one at
-a time in genuinely fresh Python interpreters. Frozen catalog/publication inputs are loaded
-only after every required lane qualifies, immediately before the existing provider-free
-canonical finalizer.
+a time in genuinely fresh Python interpreters. Frozen finalizer inputs remain lane-scoped
+and lazy after every required lane qualifies, so the canonical finalizer never rebuilds the
+complete universe or provider publication in one Python heap.
 
 The earlier spawn-safe implementation correctly bounded spool construction, but its lane
 runner was submitted through ``PersistentCertificationScheduler``'s ThreadPoolExecutor and
@@ -28,7 +28,7 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -36,7 +36,6 @@ from typing import Any, Mapping, Sequence
 from operations import authoritative_comprehensive_discovery as _authoritative
 from operations import comprehensive_discovery_input_spool as _spool
 from operations import persistent_certification_scheduler as _scheduler
-from operations.bounded_comprehensive_discovery_spool import build_spool, load_finalizer_inputs
 from operations.comprehensive_discovery_input_spool import (
     ComprehensiveDiscoverySpoolError,
     SpoolReference,
@@ -46,6 +45,12 @@ from operations.comprehensive_discovery_input_spool import (
     manifest_available,
     nodes_from_manifest,
     prepare_request,
+)
+from operations.lane_scoped_comprehensive_discovery_spool import (
+    LaneScopedCatalogMapping,
+    LaneScopedPublicationIndex,
+    build_spool,
+    load_finalizer_inputs,
 )
 
 
@@ -261,10 +266,9 @@ def _prepare_spool_process(request_path: Path, values: Mapping[str, str]) -> Non
     if manifest_available(request_path):
         return
     try:
-        # ``build_spool`` is itself only a compact coordinator. Every heavyweight catalog,
-        # publication, and lane materialization step still runs in its own finite child via
-        # bounded_comprehensive_discovery_spool._run_stage. Calling it here removes only the
-        # extra long-lived build interpreter that previously overlapped each finite child.
+        # ``build_spool`` is only a compact coordinator. Certified indexing and every
+        # catalog/publication/screening lane run in finite child interpreters; no child
+        # returns a complete cross-market object graph to this process.
         build_spool(request_path, values=values)
     except (ComprehensiveDiscoverySpoolError, OSError, ValueError) as error:
         failure = load_failure(request_path)
@@ -366,8 +370,8 @@ def spawn_safe_acquire(
         },
     )
 
-    # The historical acquisition result is intentionally reused as the integration seam,
-    # but the two heavyweight finalizer fields contain only tiny spool references.
+    # The historical acquisition result remains the integration seam, but both heavyweight
+    # finalizer fields are tiny spool references until the provider-free finalizer begins.
     return _authoritative._AcquisitionResult(
         timestamp=timestamp,
         policy=resolved,
@@ -404,9 +408,64 @@ def _install_spool_aware_finalizer() -> None:
             publication=publication,
             manifest=acquisition.manifest,
         )
-        # This is deliberately the first point at which frozen global finalizer payloads
-        # coexist in memory. Every provider-facing lane child has already exited.
-        return current(core, delegate, hydrated, **kwargs)
+        if not (
+            isinstance(raw_catalogs, LaneScopedCatalogMapping)
+            and isinstance(publication, LaneScopedPublicationIndex)
+        ):
+            return current(core, delegate, hydrated, **kwargs)
+
+        # The spool already performed the canonical certified merge independently for
+        # every lane.  Returning the lazy mapping here prevents v6 from copying every
+        # lane into one global dict/list graph and from loading the certified catalog again.
+        original_merge = core._base._merge_certified_catalog
+        original_terminal = core.build_bounded_terminal_preselection
+
+        def lane_scoped_merge(catalogs, *, as_of):
+            if isinstance(catalogs, LaneScopedCatalogMapping):
+                observed = core._base._legacy._aware(
+                    as_of, field_name="lane_scoped_finalizer_catalog_cutoff"
+                )
+                if observed != acquisition.timestamp:
+                    raise core._base._legacy.ComprehensiveMarketDiscoveryError(
+                        "lane-scoped finalizer catalog epoch changed"
+                    )
+                return catalogs
+            return original_merge(catalogs, as_of=as_of)
+
+        def lane_scoped_terminal(
+            records,
+            *,
+            as_of,
+            policy,
+            progress_label,
+            chunk_size,
+        ):
+            try:
+                publication_path = publication.path_for(
+                    progress_label,
+                    require_lane=bool(records),
+                )
+            except ComprehensiveDiscoverySpoolError as error:
+                raise core.BoundedTerminalScreeningError(str(error)) from error
+            lane_policy = replace(
+                policy,
+                provider_preselection_path=str(publication_path),
+            )
+            return original_terminal(
+                records,
+                as_of=as_of,
+                policy=lane_policy,
+                progress_label=progress_label,
+                chunk_size=chunk_size,
+            )
+
+        core._base._merge_certified_catalog = lane_scoped_merge
+        core.build_bounded_terminal_preselection = lane_scoped_terminal
+        try:
+            return current(core, delegate, hydrated, **kwargs)
+        finally:
+            core._base._merge_certified_catalog = original_merge
+            core.build_bounded_terminal_preselection = original_terminal
 
     provider_free_finalize._spool_aware_comprehensive_finalizer = True  # type: ignore[attr-defined]
     if getattr(current, "_comprehensive_discovery_failure_boundary", False):
@@ -415,7 +474,7 @@ def _install_spool_aware_finalizer() -> None:
 
 
 def install_spawn_safe_authoritative_acquisition() -> None:
-    """Install spool-backed acquisition and delayed provider-free finalizer hydration."""
+    """Install spool-backed acquisition and lane-scoped provider-free finalization."""
 
     current = _authoritative._acquire
     if not getattr(current, "_spawn_safe_authoritative_acquisition", False):
