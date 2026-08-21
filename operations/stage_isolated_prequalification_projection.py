@@ -11,7 +11,7 @@ investment or evidence authority.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
@@ -88,11 +88,12 @@ def _latest_failed_attempt(
     stage = state.current_stage or state.next_stage
     if stage not in _SAFE_STAGES:
         stage = None
+    # Never publish the archived error detail. Stage + error class are sufficient for
+    # diagnosis and cannot expose provider payload fragments, symbols, or credentials.
     return {
         "pipeline_id": state.pipeline_id,
         "failed_stage": stage,
         "error_type": _safe_text(state.error_type, limit=160),
-        "error_detail": _safe_text(state.error_detail, limit=1600),
         "evidence_as_of": state.evidence_as_of.isoformat(),
         "updated_at": state.updated_at.isoformat(),
         "completed_stages": list(state.completed_stages),
