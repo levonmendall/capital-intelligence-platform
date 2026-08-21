@@ -151,10 +151,19 @@ def prepare_runtime_workspace(values: dict[str, str] | None = None) -> Path:
 def main() -> int:
     prepare_runtime_workspace()
     import run_render_service_memory_safe as memory_safe
+    import run_render_service_nonblocking as render_bootstrap
     from run_render_service_memory_safe import main as run_service
     from operations.progress_aware_release_certification import (
         install_resume_aware_release_dag_projection,
     )
+    from operations.stage_isolated_audit_runtime import (
+        install as install_stage_isolated_audit_runtime,
+    )
+
+    # Route every pre-CIO audit refresh through the exact six-stage coordination journal.
+    # This changes only public operational attribution; the journal retains no evidence or
+    # investment authority and cannot qualify a stage by itself.
+    install_stage_isolated_audit_runtime(render_bootstrap)
 
     # The comprehensive research plane may legitimately resume a still-fresh discovery
     # epoch. Install its progress projection before the legacy parent watchdog.
