@@ -1,10 +1,9 @@
 """Supervise reusable reference acquisition at the individual component boundary.
 
-Reference readiness already persists release-independent lane components. This module
-finishes that architecture by giving each provider-facing reference component its own
-killable execution budget and by publishing one credential-safe progress manifest that
-survives a later component failure. The aggregate controller itself is never placed in a
-second process-group timeout.
+Reference readiness persists release-independent lane components. Provider-facing directory
+and futures work is executed in fresh, killable processes, while the controller carries
+only small progress and manifest metadata. Exact-release binding is also isolated so the
+controller never needs the full global reference catalog resident in memory.
 
 Nothing in this module has investment, specialist, construction, execution, or real-money
 authority. Required reference failures remain fail-closed; the option-definition prewarm
@@ -40,6 +39,7 @@ _DEFAULT_TIMEOUT_SECONDS = 120.0
 _DIRECTORY = "reference-directories"
 _FUTURES = "reference-futures-contracts"
 _OPTIONS = "option-reference-definitions"
+_BINDING = "reference-binding"
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -239,24 +239,113 @@ def _providers(values: Mapping[str, str]):
     )
 
 
-def _missing_required_directory_lanes(
-    component: Mapping[str, object],
-    *,
+def _directory_lanes(
     active_lanes: frozenset[CandidateAssetClass],
-) -> tuple[str, ...]:
-    """Return scheduled release lanes that cannot be bound from this aggregate component."""
+) -> tuple[CandidateAssetClass, ...]:
+    """Return every scheduled EODHD-backed lane without imposing a coverage cap."""
 
-    required = tuple(
+    return tuple(
         sorted(
             active_lanes & _generalized._EODHD_REFERENCE_LANES,
             key=lambda item: item.value,
         )
     )
-    try:
-        catalogs = _legacy._component_catalogs(component)
-    except _legacy.ReferenceReadinessError:
-        return tuple(item.value for item in required)
-    return tuple(item.value for item in required if not catalogs.get(item.value))
+
+
+def _directory_lane_component(lane: CandidateAssetClass) -> str:
+    return f"{_DIRECTORY}:{lane.value}"
+
+
+def _load_asset_component(
+    values: Mapping[str, str],
+    *,
+    discovery,
+    config,
+    lane: CandidateAssetClass,
+    timestamp: datetime,
+) -> Mapping[str, object] | None:
+    payload = _generalized.load_asset_reference_component(
+        values,
+        asset_class=lane,
+        as_of=timestamp,
+        config_fingerprint=_generalized._lane_config_fingerprint(config, lane),
+        coverage=_generalized._lane_coverage(discovery, config, lane),
+    )
+    if payload is None or not _generalized._component_records(payload):
+        return None
+    return payload
+
+
+def _collect_directory_lane(
+    *,
+    values: Mapping[str, str],
+    discovery,
+    config,
+    policy,
+    timestamp: datetime,
+    lane: CandidateAssetClass,
+) -> None:
+    """Collect and persist exactly one EODHD-backed lane inside a fresh child process."""
+
+    provider = discovery._base._legacy.build_eodhd_provider()
+    catalogs = discovery._catalog_from_eodhd(
+        as_of=timestamp,
+        config=config,
+        provider=provider,
+        policy=policy,
+        requested_asset_classes=frozenset({lane}),
+    )
+    records = tuple(catalogs.get(lane, ()))
+    if not records:
+        raise _plane.ContinuousEvidencePlaneError(
+            "reference directory lane is empty; "
+            f"failure_type=incomplete_lane_catalog; lane={lane.value}"
+        )
+    serialized = tuple(_legacy._record_payload(item) for item in records)
+    _generalized.store_asset_reference_component(
+        values,
+        asset_class=lane,
+        captured_at=timestamp,
+        config_fingerprint=_generalized._lane_config_fingerprint(config, lane),
+        coverage=_generalized._lane_coverage(discovery, config, lane),
+        records=serialized,
+        metadata={"collector": "eodhd_directory"},
+    )
+
+
+def _collect_futures_lane(
+    *,
+    values: Mapping[str, str],
+    discovery,
+    config,
+    timestamp: datetime,
+) -> None:
+    """Collect and persist futures reference records without creating an aggregate in parent."""
+
+    roots = _legacy._futures_roots(config)
+    provider = _providers(values)
+    records = tuple(
+        discovery._base._legacy._futures_catalog(
+            as_of=timestamp,
+            config=config,
+            massive_futures_provider=provider,
+        )
+    )
+    serialized = tuple(_legacy._record_payload(item) for item in records)
+    _legacy._validate_future_records(serialized, roots)
+    _generalized.store_asset_reference_component(
+        values,
+        asset_class=CandidateAssetClass.FUTURE,
+        captured_at=timestamp,
+        config_fingerprint=_generalized._lane_config_fingerprint(
+            config, CandidateAssetClass.FUTURE
+        ),
+        coverage=_generalized._lane_coverage(
+            discovery, config, CandidateAssetClass.FUTURE
+        ),
+        records=serialized,
+        metadata={"collector": "futures_contracts"},
+    )
 
 
 def _strict_release_binding(
@@ -282,6 +371,88 @@ def _strict_release_binding(
         ) from error
 
 
+def _manifest_metadata(manifest: _legacy.ReferenceReadinessManifest) -> dict[str, object]:
+    """Transport only small manifest metadata across the binding process boundary."""
+
+    return {
+        "manifest_id": manifest.manifest_id,
+        "release": manifest.release,
+        "captured_at": manifest.captured_at.isoformat(),
+        "config_fingerprint": manifest.config_fingerprint,
+        "eodhd_exchanges": list(manifest.eodhd_exchanges),
+        "futures_roots": list(manifest.futures_roots),
+        "catalog_counts": [list(item) for item in manifest.catalog_counts],
+        "path": str(manifest.path),
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+
+
+def _bind_release_in_child(
+    *,
+    values: MutableMapping[str, str],
+    timestamp: datetime,
+    discovery,
+    config,
+    option_ready_underlyings: int,
+) -> Mapping[str, object]:
+    """Build compatibility artifacts in a fresh process, then return metadata only."""
+
+    _generalized._write_asset_registry(
+        values=values,
+        timestamp=datetime.now(timezone.utc),
+        discovery=discovery,
+        config=config,
+        option_ready_underlyings=option_ready_underlyings,
+    )
+    manifest = _strict_release_binding(values, minimum_cutoff=timestamp)
+    return _manifest_metadata(manifest)
+
+
+def _manifest_from_metadata(
+    values: MutableMapping[str, str],
+    payload: Mapping[str, object],
+) -> _legacy.ReferenceReadinessManifest:
+    """Reconstruct the small manifest handle without loading the global catalog in parent."""
+
+    if payload.get("paper_only") is not True or payload.get("real_money_authorized") is not False:
+        raise _plane.ContinuousEvidencePlaneError(
+            "reference binding returned invalid governance metadata; "
+            "failure_type=release_binding_failure"
+        )
+    try:
+        captured_at = datetime.fromisoformat(
+            str(payload["captured_at"]).replace("Z", "+00:00")
+        )
+        counts = tuple(
+            (str(item[0]), int(item[1]))
+            for item in payload["catalog_counts"]
+        )
+        manifest = _legacy.ReferenceReadinessManifest(
+            manifest_id=str(payload["manifest_id"]),
+            release=str(payload["release"]),
+            captured_at=_aware(captured_at, field_name="reference_manifest_captured_at"),
+            config_fingerprint=str(payload["config_fingerprint"]),
+            eodhd_exchanges=tuple(str(item) for item in payload["eodhd_exchanges"]),
+            futures_roots=tuple(str(item) for item in payload["futures_roots"]),
+            catalog_counts=counts,
+            path=Path(str(payload["path"])),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise _plane.ContinuousEvidencePlaneError(
+            "reference binding returned invalid manifest metadata; "
+            "failure_type=release_binding_failure"
+        ) from error
+    if manifest.release != _release(values) or not manifest.manifest_id or not manifest.path.is_file():
+        raise _plane.ContinuousEvidencePlaneError(
+            "reference binding metadata does not match the active release; "
+            "failure_type=release_binding_failure"
+        )
+    values[_legacy._MANIFEST_PATH_ENV] = str(manifest.path)
+    values[_legacy._MANIFEST_ID_ENV] = manifest.manifest_id
+    return manifest
+
+
 def prepare_supervised_reference_prequalification(
     values: MutableMapping[str, str],
     *,
@@ -296,10 +467,10 @@ def prepare_supervised_reference_prequalification(
     discovery._base._reject_evidence_only_eodhd_directories(config)
     policy = discovery.ComprehensiveMarketDiscoveryPolicy()
     active_lanes = discovery._base.scheduled_discovery_lanes(timestamp)
-    active_lane_names = tuple(sorted(item.value for item in active_lanes))
-    config_fingerprint = _legacy._fingerprint(_legacy._config_material(config))
-    roots = _legacy._futures_roots(config)
-    required_components = (_DIRECTORY,) + ((_FUTURES,) if CandidateAssetClass.FUTURE in active_lanes else ())
+    directory_lanes = _directory_lanes(active_lanes)
+    required_components = (_DIRECTORY,) + (
+        (_FUTURES,) if CandidateAssetClass.FUTURE in active_lanes else ()
+    )
     components: dict[str, Mapping[str, object]] = {}
 
     _write_progress(
@@ -309,14 +480,6 @@ def prepare_supervised_reference_prequalification(
         components=components,
         active_component=None,
         state="qualifying",
-    )
-
-    _generalized._prime_legacy_components(
-        values=values,
-        timestamp=timestamp,
-        discovery=discovery,
-        config=config,
-        active_lanes=active_lanes,
     )
 
     option_ready_underlyings = 0
@@ -376,123 +539,104 @@ def prepare_supervised_reference_prequalification(
             state="qualifying",
         )
 
-    directory_component = _legacy._validated_component(
-        path=_legacy._component_path(values, _legacy._DIRECTORY_COMPONENT),
-        component=_legacy._DIRECTORY_COMPONENT,
-        timestamp=timestamp,
-        values=values,
-        config_fingerprint=config_fingerprint,
-        active_lanes=active_lane_names,
-        coverage=tuple(config.eodhd_exchange_codes),
-    )
-    if directory_component is not None and _missing_required_directory_lanes(
-        directory_component,
-        active_lanes=active_lanes,
-    ):
-        # A fresh/config-compatible aggregate can still be unusable by the exact-release
-        # binder when one scheduled lane has no persisted records. Never call that reused.
-        directory_component = None
-    if directory_component is not None:
-        components[_DIRECTORY] = _component_row(
-            _DIRECTORY, provider="eodhd", state="reused", required=True
-        )
-    else:
+    directory_reused = True
+    directory_failure: Mapping[str, object] | None = None
+    for lane in directory_lanes:
+        if _load_asset_component(
+            values,
+            discovery=discovery,
+            config=config,
+            lane=lane,
+            timestamp=timestamp,
+        ) is not None:
+            continue
+
+        directory_reused = False
+        lane_component = _directory_lane_component(lane)
         _write_progress(
             values=values,
             cutoff=timestamp,
             required_components=required_components,
             components=components,
-            active_component=_DIRECTORY,
+            active_component=lane_component,
             state="qualifying",
         )
         try:
-            eodhd_provider = discovery._base._legacy.build_eodhd_provider()
             _run_component(
                 values=values,
-                component=_DIRECTORY,
+                component=lane_component,
                 provider="eodhd",
-                operation=lambda: _legacy._collect_directory_component(
-                    discovery=discovery,
-                    timestamp=timestamp,
+                operation=lambda lane=lane: _collect_directory_lane(
                     values=values,
+                    discovery=discovery,
                     config=config,
                     policy=policy,
-                    provider=eodhd_provider,
-                    active_lanes=active_lanes,
-                    active_lane_names=active_lane_names,
-                    config_fingerprint=config_fingerprint,
+                    timestamp=timestamp,
+                    lane=lane,
                 ),
                 return_value=False,
             )
-            directory_component = _legacy._validated_component(
-                path=_legacy._component_path(values, _legacy._DIRECTORY_COMPONENT),
-                component=_legacy._DIRECTORY_COMPONENT,
+            if _load_asset_component(
+                values,
+                discovery=discovery,
+                config=config,
+                lane=lane,
                 timestamp=datetime.now(timezone.utc),
-                values=values,
-                config_fingerprint=config_fingerprint,
-                active_lanes=active_lane_names,
-                coverage=tuple(config.eodhd_exchange_codes),
-            )
-            if directory_component is None:
+            ) is None:
                 raise _plane.ContinuousEvidencePlaneError(
-                    "reference directory worker completed without a qualified checkpoint"
+                    "reference directory lane worker completed without a qualified checkpoint; "
+                    f"failure_type=missing_checkpoint; lane={lane.value}"
                 )
-            missing_directory_lanes = _missing_required_directory_lanes(
-                directory_component,
-                active_lanes=active_lanes,
-            )
-            if missing_directory_lanes:
-                raise _plane.ContinuousEvidencePlaneError(
-                    "reference directory component is incomplete for scheduled release lanes; "
-                    "failure_type=incomplete_lane_catalog; missing_lanes="
-                    + ",".join(missing_directory_lanes)
-                )
-            components[_DIRECTORY] = _component_row(
-                _DIRECTORY, provider="eodhd", state="qualified", required=True
-            )
         except _plane.ContinuousEvidencePlaneError as error:
-            components[_DIRECTORY] = _component_row(
-                _DIRECTORY,
+            directory_failure = _component_row(
+                lane_component,
                 provider="eodhd",
                 state="timed-out" if _failure_type(error) == "timeout" else "failed",
                 required=True,
                 failure_type=_failure_type(error),
             )
-        _write_progress(
-            values=values,
-            cutoff=timestamp,
-            required_components=required_components,
-            components=components,
-            active_component=None,
-            state="qualifying",
-        )
+            break
 
-    futures_component = None
-    if CandidateAssetClass.FUTURE in active_lanes:
-        futures_component = _legacy._validated_component(
-            path=_legacy._component_path(values, _legacy._FUTURES_COMPONENT),
-            component=_legacy._FUTURES_COMPONENT,
-            timestamp=timestamp,
-            values=values,
-            config_fingerprint=config_fingerprint,
-            active_lanes=active_lane_names,
-            coverage=roots,
+    if directory_failure is not None:
+        components[_DIRECTORY] = directory_failure
+    else:
+        components[_DIRECTORY] = _component_row(
+            _DIRECTORY,
+            provider="eodhd",
+            state="reused" if directory_reused else "qualified",
+            required=True,
         )
-        if futures_component is not None:
+    _write_progress(
+        values=values,
+        cutoff=timestamp,
+        required_components=required_components,
+        components=components,
+        active_component=None,
+        state="qualifying",
+    )
+
+    futures_ready = CandidateAssetClass.FUTURE not in active_lanes
+    if CandidateAssetClass.FUTURE in active_lanes:
+        futures_payload = _load_asset_component(
+            values,
+            discovery=discovery,
+            config=config,
+            lane=CandidateAssetClass.FUTURE,
+            timestamp=timestamp,
+        )
+        if futures_payload is not None:
             try:
                 _legacy._validate_future_records(
-                    _legacy._component_catalogs(futures_component).get(
-                        CandidateAssetClass.FUTURE.value, []
-                    ),
-                    roots,
+                    _generalized._component_records(futures_payload),
+                    _legacy._futures_roots(config),
+                )
+                futures_ready = True
+                components[_FUTURES] = _component_row(
+                    _FUTURES, provider="cme-massive", state="reused", required=True
                 )
             except _legacy.ReferenceReadinessError:
-                futures_component = None
-        if futures_component is not None:
-            components[_FUTURES] = _component_row(
-                _FUTURES, provider="cme-massive", state="reused", required=True
-            )
-        else:
+                futures_payload = None
+        if futures_payload is None:
             _write_progress(
                 values=values,
                 cutoff=timestamp,
@@ -502,46 +646,40 @@ def prepare_supervised_reference_prequalification(
                 state="qualifying",
             )
             try:
-                futures_provider = _providers(values)
                 _run_component(
                     values=values,
                     component=_FUTURES,
                     provider="cme-massive",
-                    operation=lambda: _legacy._collect_futures_component(
-                        discovery=discovery,
-                        timestamp=timestamp,
+                    operation=lambda: _collect_futures_lane(
                         values=values,
+                        discovery=discovery,
                         config=config,
-                        massive_futures_provider=futures_provider,
-                        active_lane_names=active_lane_names,
-                        config_fingerprint=config_fingerprint,
-                        roots=roots,
+                        timestamp=timestamp,
                     ),
                     return_value=False,
                 )
-                futures_component = _legacy._validated_component(
-                    path=_legacy._component_path(values, _legacy._FUTURES_COMPONENT),
-                    component=_legacy._FUTURES_COMPONENT,
+                futures_payload = _load_asset_component(
+                    values,
+                    discovery=discovery,
+                    config=config,
+                    lane=CandidateAssetClass.FUTURE,
                     timestamp=datetime.now(timezone.utc),
-                    values=values,
-                    config_fingerprint=config_fingerprint,
-                    active_lanes=active_lane_names,
-                    coverage=roots,
                 )
-                if futures_component is None:
+                if futures_payload is None:
                     raise _plane.ContinuousEvidencePlaneError(
-                        "reference futures worker completed without a qualified checkpoint"
+                        "reference futures worker completed without a qualified checkpoint; "
+                        "failure_type=missing_checkpoint"
                     )
                 _legacy._validate_future_records(
-                    _legacy._component_catalogs(futures_component).get(
-                        CandidateAssetClass.FUTURE.value, []
-                    ),
-                    roots,
+                    _generalized._component_records(futures_payload),
+                    _legacy._futures_roots(config),
                 )
+                futures_ready = True
                 components[_FUTURES] = _component_row(
                     _FUTURES, provider="cme-massive", state="qualified", required=True
                 )
             except (_plane.ContinuousEvidencePlaneError, _legacy.ReferenceReadinessError) as error:
+                futures_ready = False
                 components[_FUTURES] = _component_row(
                     _FUTURES,
                     provider="cme-massive",
@@ -564,9 +702,7 @@ def prepare_supervised_reference_prequalification(
         if row.get("required") is True and row.get("state") not in {"qualified", "reused"}
     ]
     missing_required = [name for name in required_components if name not in components]
-    if failed_required or missing_required or directory_component is None or (
-        CandidateAssetClass.FUTURE in active_lanes and futures_component is None
-    ):
+    if failed_required or missing_required or not futures_ready:
         _write_progress(
             values=values,
             cutoff=timestamp,
@@ -589,25 +725,34 @@ def prepare_supervised_reference_prequalification(
             f"failure_type={first.get('failure_type') or 'unknown'}"
         )
 
-    manifest = _legacy._bind_manifest(
+    _write_progress(
         values=values,
-        timestamp=timestamp,
-        release=_legacy._release(values),
-        config=config,
-        config_fingerprint=config_fingerprint,
-        active_lane_names=active_lane_names,
-        directory_component=directory_component,
-        futures_component=futures_component,
-        roots=roots,
-    )
-    _generalized._capture_manifest_components(
-        values=values,
-        manifest=manifest,
-        discovery=discovery,
-        config=config,
+        cutoff=timestamp,
+        required_components=required_components,
+        components=components,
+        active_component=_BINDING,
+        state="qualifying",
     )
     try:
-        manifest = _strict_release_binding(values, minimum_cutoff=timestamp)
+        metadata = _run_component(
+            values=values,
+            component=_BINDING,
+            provider="persistent-reference-components",
+            operation=lambda: _bind_release_in_child(
+                values=values,
+                timestamp=timestamp,
+                discovery=discovery,
+                config=config,
+                option_ready_underlyings=option_ready_underlyings,
+            ),
+            return_value=True,
+        )
+        if not isinstance(metadata, Mapping):
+            raise _plane.ContinuousEvidencePlaneError(
+                "reference binding returned no manifest metadata; "
+                "failure_type=release_binding_failure"
+            )
+        manifest = _manifest_from_metadata(values, metadata)
     except _plane.ContinuousEvidencePlaneError:
         _write_progress(
             values=values,
@@ -618,13 +763,7 @@ def prepare_supervised_reference_prequalification(
             state="incomplete",
         )
         raise
-    _generalized._write_asset_registry(
-        values=values,
-        timestamp=datetime.now(timezone.utc),
-        discovery=discovery,
-        config=config,
-        option_ready_underlyings=option_ready_underlyings,
-    )
+
     _write_progress(
         values=values,
         cutoff=timestamp,
