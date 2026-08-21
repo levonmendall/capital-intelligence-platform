@@ -1,31 +1,40 @@
-"""Spawn-safe, spool-backed authoritative comprehensive-discovery acquisition.
+"""Process-isolated, spool-backed authoritative comprehensive-discovery acquisition.
 
 The comprehensive-discovery coordinator retains only compact certification-node metadata.
 Catalog assembly, provider preselection, and lane descriptor construction run in finite
-bounded-memory interpreters. Each provider-facing lane then loads only its own records in
-a fresh spawn interpreter. Frozen catalog/publication inputs are loaded only after every
-required lane qualifies, immediately before the existing provider-free canonical finalizer.
+bounded-memory interpreters. Provider-facing market-evidence lanes are then executed one at
+a time in genuinely fresh Python interpreters. Frozen catalog/publication inputs are loaded
+only after every required lane qualifies, immediately before the existing provider-free
+canonical finalizer.
 
-The bounded builder runs directly in the already-isolated comprehensive coordinator. The
-previous implementation launched a redundant ``subprocess.Popen`` build coordinator which
-then launched the same finite catalog/publication/lane children, causing three Python/import
-working sets to overlap inside the container. Removing that middle interpreter lowers actual
-cgroup pressure while preserving every finite child boundary and the outer resource guard.
+The earlier spawn-safe implementation correctly bounded spool construction, but its lane
+runner was submitted through ``PersistentCertificationScheduler``'s ThreadPoolExecutor and
+performed the heavyweight provider probe directly in that scheduler thread. With the
+scheduler's default worker count, several complete market lanes could therefore coexist in
+one Python process even though the class described a fresh-interpreter boundary. This
+module makes that boundary real: the scheduler retains only compact node metadata, launches
+one finite lane subprocess at a time, and receives only a tiny integrity-protected result.
+Provider-level I/O inside the lane remains governed by the existing provider budgets.
 
-This module changes only memory lifetime and operational transport. It does not change
-market membership, evidence standards, screening, CIO authority, construction, execution,
-or paper-only governance.
+This changes only memory lifetime and operational transport. It does not change market
+membership, evidence standards, screening, CIO authority, construction, execution, or
+paper-only governance.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from operations import authoritative_comprehensive_discovery as _authoritative
+from operations import comprehensive_discovery_input_spool as _spool
 from operations import persistent_certification_scheduler as _scheduler
 from operations.bounded_comprehensive_discovery_spool import build_spool, load_finalizer_inputs
 from operations.comprehensive_discovery_input_spool import (
@@ -40,75 +49,188 @@ from operations.comprehensive_discovery_input_spool import (
 )
 
 
+_MODULE = "operations.spawn_safe_authoritative_acquisition"
+_LANE_RESULT_SCHEMA = "spawn-safe-certification-lane-result.v1"
+_SERIAL_LANE_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
+
+
+def _lane_result_path(manifest_path: str | Path, node_id: str) -> Path:
+    directory = Path(manifest_path).expanduser().parent
+    return directory / f"lane-result-{_spool._safe_release(node_id)}.json"
+
+
+def _write_lane_result(
+    manifest_path: str | Path,
+    *,
+    node: _scheduler.CertificationNode,
+    evidence_complete_count: int,
+) -> Path:
+    body: dict[str, object] = {
+        "schema_version": _LANE_RESULT_SCHEMA,
+        "node_id": node.node_id,
+        "input_fingerprint": node.input_fingerprint,
+        "evidence_complete_count": int(evidence_complete_count),
+        **_spool._authority_fields(),
+    }
+    path = _lane_result_path(manifest_path, node.node_id)
+    _spool._atomic_json(path, body)
+    return path
+
+
+def _load_lane_result(
+    manifest_path: str | Path,
+    *,
+    node: _scheduler.CertificationNode,
+) -> int:
+    body = _spool._load_json(
+        _lane_result_path(manifest_path, node.node_id),
+        schema=_LANE_RESULT_SCHEMA,
+    )
+    if str(body.get("node_id") or "") != node.node_id:
+        raise _scheduler.CertificationSchedulerError(
+            f"lane subprocess result node identity changed for {node.node_id}"
+        )
+    if str(body.get("input_fingerprint") or "") != node.input_fingerprint:
+        raise _scheduler.CertificationSchedulerError(
+            f"lane subprocess result fingerprint changed for {node.node_id}"
+        )
+    try:
+        count = int(body.get("evidence_complete_count", -1))
+    except (TypeError, ValueError) as error:
+        raise _scheduler.CertificationSchedulerError(
+            f"lane subprocess result count is malformed for {node.node_id}"
+        ) from error
+    if count < 0:
+        raise _scheduler.CertificationSchedulerError(
+            f"lane subprocess result count is invalid for {node.node_id}"
+        )
+    return count
+
+
+def _execute_lane_in_current_process(
+    *,
+    manifest_path: str,
+    node: _scheduler.CertificationNode,
+    timestamp: datetime,
+    policy_version: str,
+) -> int:
+    """Execute one lane inside the finite child interpreter only."""
+
+    records, policy, descriptor = load_lane_inputs(
+        manifest_path,
+        node_id=node.node_id,
+    )
+    if str(descriptor.get("input_fingerprint") or "") != node.input_fingerprint:
+        raise _scheduler.CertificationSchedulerError(
+            f"spooled certification input fingerprint changed for {node.node_id}"
+        )
+    if int(descriptor.get("decision_eligible_count", -1)) != node.decision_eligible_count:
+        raise _scheduler.CertificationSchedulerError(
+            f"spooled certification record count changed for {node.node_id}"
+        )
+
+    # Import only the canonical preserved core and exact-epoch checkpoint seams in this
+    # finite child. The long-lived serving process and scheduler never import or retain
+    # the provider-facing lane's complete record/evidence graph.
+    from operations import _comprehensive_market_discovery_v6 as core
+    from operations.all_market_lane_certification import install_checkpointed_market_probe
+    from operations.certification_work_progress import (
+        install_spawn_child_transport_only_progress,
+    )
+    from operations.certification_work_unit_runner import (
+        run_with_canonical_work_progress,
+    )
+
+    install_checkpointed_market_probe(core)
+    install_spawn_child_transport_only_progress()
+    values = os.environ
+    release_sha = _scheduler._release(values)
+    try:
+        features = run_with_canonical_work_progress(
+            core.default_redundant_market_probe,
+            records=records,
+            timestamp=timestamp,
+            policy=policy,
+            asset_class=node.asset_class,
+        )
+        if not isinstance(features, Mapping):
+            raise _scheduler.CertificationSchedulerError(
+                f"{node.node_id} market evidence probe returned a non-mapping"
+            )
+        return len(features)
+    finally:
+        # Publish compatibility only after a canonical exact-epoch checkpoint exists;
+        # the helper is a no-op when the lane failed before producing one.
+        _authoritative._publish_compatible_checkpoint(
+            values,
+            release_sha=release_sha,
+            node=node,
+            records=records,
+            epoch=timestamp,
+            policy_version=policy_version,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class SpawnSafeSingleLaneRunner:
-    """Picklable child callable that carries no lane records in the parent."""
+    """Compact parent callable that launches one finite provider-facing interpreter."""
 
     manifest_path: str
     node_id: str
     timestamp: datetime
     policy_version: str
+    environment: tuple[tuple[str, str], ...] = ()
 
     def __call__(self, node: _scheduler.CertificationNode) -> int:
         if node.node_id != self.node_id:
             raise _scheduler.CertificationSchedulerError(
-                "spool-backed lane runner node identity changed across spawn boundary"
+                "spool-backed lane runner node identity changed across process boundary"
             )
 
-        # The complete byte stream is size/SHA verified before deserialization. Only this
-        # selected lane and the small immutable policy are materialized in the child.
-        records, policy, descriptor = load_lane_inputs(
-            self.manifest_path,
-            node_id=node.node_id,
-        )
-        if str(descriptor.get("input_fingerprint") or "") != node.input_fingerprint:
-            raise _scheduler.CertificationSchedulerError(
-                f"spooled certification input fingerprint changed for {node.node_id}"
-            )
-        if int(descriptor.get("decision_eligible_count", -1)) != node.decision_eligible_count:
-            raise _scheduler.CertificationSchedulerError(
-                f"spooled certification record count changed for {node.node_id}"
-            )
-
-        # Import only the canonical preserved core and install the exact-epoch checkpoint
-        # seam in this fresh interpreter. Do not import the service orchestration stack.
-        from operations import _comprehensive_market_discovery_v6 as core
-        from operations.all_market_lane_certification import install_checkpointed_market_probe
-        from operations.certification_work_progress import (
-            install_spawn_child_transport_only_progress,
-        )
-        from operations.certification_work_unit_runner import (
-            run_with_canonical_work_progress,
-        )
-
-        install_checkpointed_market_probe(core)
-        install_spawn_child_transport_only_progress()
-        values = os.environ
-        release_sha = _scheduler._release(values)
+        result_path = _lane_result_path(self.manifest_path, node.node_id)
         try:
-            features = run_with_canonical_work_progress(
-                core.default_redundant_market_probe,
-                records=records,
-                timestamp=self.timestamp,
-                policy=policy,
-                asset_class=node.asset_class,
+            result_path.unlink()
+        except FileNotFoundError:
+            pass
+
+        repository_root = Path(__file__).resolve().parents[1]
+        command = (
+            sys.executable,
+            "-m",
+            _MODULE,
+            "run-lane",
+            "--manifest",
+            self.manifest_path,
+            "--node-id",
+            node.node_id,
+            "--timestamp",
+            self.timestamp.isoformat(),
+            "--policy-version",
+            self.policy_version,
+        )
+        environment = dict(os.environ)
+        environment.update(dict(self.environment))
+        process = subprocess.Popen(
+            command,
+            cwd=str(repository_root),
+            env=environment,
+            # Remain in the outer diagnostic process group so its resource/timeout
+            # supervisor can fail closed across the complete process tree.
+            start_new_session=False,
+        )
+        return_code = int(process.wait())
+        if return_code != 0:
+            raise _scheduler.CertificationSchedulerError(
+                f"provider-facing certification lane subprocess failed for {node.node_id}; "
+                f"return_code={return_code}; pid={getattr(process, 'pid', 'unknown')}"
             )
-            if not isinstance(features, Mapping):
-                raise _scheduler.CertificationSchedulerError(
-                    f"{node.node_id} market evidence probe returned a non-mapping"
-                )
-            return len(features)
-        finally:
-            # Publish compatibility only after a canonical exact-epoch checkpoint exists;
-            # the helper is a no-op when the lane failed before producing one.
-            _authoritative._publish_compatible_checkpoint(
-                values,
-                release_sha=release_sha,
-                node=node,
-                records=records,
-                epoch=self.timestamp,
-                policy_version=self.policy_version,
-            )
+        try:
+            return _load_lane_result(self.manifest_path, node=node)
+        except (ComprehensiveDiscoverySpoolError, OSError, ValueError) as error:
+            raise _scheduler.CertificationSchedulerError(
+                f"provider-facing certification lane subprocess produced no valid result "
+                f"for {node.node_id}: {error}"
+            ) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +240,7 @@ class SpawnSafeLaneRunner:
     manifest_path: str
     timestamp: datetime
     policy_version: str
+    environment: tuple[tuple[str, str], ...] = ()
 
     def for_node(self, node: _scheduler.CertificationNode) -> SpawnSafeSingleLaneRunner:
         return SpawnSafeSingleLaneRunner(
@@ -125,10 +248,10 @@ class SpawnSafeLaneRunner:
             node_id=node.node_id,
             timestamp=self.timestamp,
             policy_version=self.policy_version,
+            environment=self.environment,
         )
 
     def __call__(self, node: _scheduler.CertificationNode) -> int:
-        # Retained for compatibility with the unpatched scheduler in deterministic tests.
         return self.for_node(node)(node)
 
 
@@ -200,8 +323,14 @@ def spawn_safe_acquire(
             "comprehensive discovery input spool policy version mismatch"
         )
 
+    # A provider-facing lane now owns a complete finite child interpreter. Running several
+    # such children concurrently would reintroduce the exact cgroup overlap this boundary
+    # is intended to remove. Keep lane processes serial; provider I/O remains independently
+    # concurrent/budgeted inside each lane and the full market universe is unchanged.
+    scheduler_values = dict(values)
+    scheduler_values[_SERIAL_LANE_WORKERS_ENV] = "1"
     scheduler = _scheduler.PersistentCertificationScheduler(
-        values=values,
+        values=scheduler_values,
         release_sha=release_sha,
         epoch=timestamp,
         policy_version=policy_version,
@@ -210,6 +339,7 @@ def spawn_safe_acquire(
         manifest_path=str(manifest_path),
         timestamp=timestamp,
         policy_version=policy_version,
+        environment=tuple(sorted((str(key), str(value)) for key, value in values.items())),
     )
 
     try:
@@ -237,7 +367,7 @@ def spawn_safe_acquire(
     )
 
     # The historical acquisition result is intentionally reused as the integration seam,
-    # but the two heavyweight finalizer fields now contain only tiny spool references.
+    # but the two heavyweight finalizer fields contain only tiny spool references.
     return _authoritative._AcquisitionResult(
         timestamp=timestamp,
         policy=resolved,
@@ -292,6 +422,89 @@ def install_spawn_safe_authoritative_acquisition() -> None:
         spawn_safe_acquire._spawn_safe_authoritative_acquisition = True  # type: ignore[attr-defined]
         _authoritative._acquire = spawn_safe_acquire
     _install_spool_aware_finalizer()
+
+
+def _run_lane_cli(
+    *,
+    manifest_path: str,
+    node_id: str,
+    timestamp: datetime,
+    policy_version: str,
+) -> int:
+    manifest = _spool.load_manifest(manifest_path)
+    node = next((item for item in nodes_from_manifest(manifest) if item.node_id == node_id), None)
+    if node is None:
+        raise _scheduler.CertificationSchedulerError(
+            f"spool manifest has no certification node for {node_id}"
+        )
+    count = _execute_lane_in_current_process(
+        manifest_path=manifest_path,
+        node=node,
+        timestamp=timestamp,
+        policy_version=policy_version,
+    )
+    _write_lane_result(
+        manifest_path,
+        node=node,
+        evidence_complete_count=count,
+    )
+    return count
+
+
+def _main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("run-lane",))
+    parser.add_argument("--manifest", required=True)
+    parser.add_argument("--node-id", required=True)
+    parser.add_argument("--timestamp", required=True)
+    parser.add_argument("--policy-version", required=True)
+    args = parser.parse_args(argv)
+    try:
+        timestamp = datetime.fromisoformat(str(args.timestamp).replace("Z", "+00:00"))
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise ValueError("lane timestamp must be timezone-aware")
+        count = _run_lane_cli(
+            manifest_path=args.manifest,
+            node_id=args.node_id,
+            timestamp=timestamp,
+            policy_version=args.policy_version,
+        )
+    except BaseException as error:  # noqa: BLE001 - child boundary must fail closed.
+        print(
+            json.dumps(
+                {
+                    "event": "spawn_safe_certification_lane_failed",
+                    "node_id": args.node_id,
+                    "error_type": type(error).__name__,
+                    "credential_safe": True,
+                    "paper_only": True,
+                    "real_money_authorized": False,
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        return 2
+    print(
+        json.dumps(
+            {
+                "event": "spawn_safe_certification_lane_complete",
+                "node_id": args.node_id,
+                "evidence_complete_count": count,
+                "credential_safe": True,
+                "paper_only": True,
+                "real_money_authorized": False,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
 
 
 __all__ = [
