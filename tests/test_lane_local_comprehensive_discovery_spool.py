@@ -3,8 +3,9 @@ from __future__ import annotations
 import inspect
 
 from cio import CandidateAssetClass
-from operations import lane_local_comprehensive_discovery_spool as lane_local
 from operations import comprehensive_discovery_runtime_contract as runtime_contract
+from operations import lane_local_comprehensive_discovery_coordinator as coordinator
+from operations import lane_local_comprehensive_discovery_spool as lane_local
 
 
 def test_lane_shard_catalogs_retain_only_current_lane(monkeypatch, tmp_path):
@@ -51,10 +52,11 @@ def test_finalizer_uses_lazy_merged_catalogs_and_lane_publications():
     assert "provider_preselection_path=publication_path" in source
 
 
-def test_manifest_keeps_integrity_descriptors_without_dataclass_dict_access():
-    source = inspect.getsource(lane_local.build_spool)
+def test_coordinator_keeps_integrity_descriptors_without_dataclass_dict_access():
+    source = inspect.getsource(coordinator.build_spool)
     assert "_descriptor_dict" in source
     assert ".__dict__" not in source
+    assert "raw_catalogs" not in source
 
 
 def test_runtime_contract_installs_lane_local_overlay_after_spawn_safe_boundary():
