@@ -24,6 +24,7 @@ from typing import Mapping, Sequence
 from operations.stage_isolated_evidence_pipeline import (
     _STAGES,
     StageIsolatedEvidenceState,
+    begin_evidence_stage,
     ensure_stage_isolated_evidence_pipeline,
     load_stage_isolated_evidence_state,
 )
@@ -211,6 +212,19 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
         stage = state.next_stage
         if stage is None:
             raise RuntimeError("stage-isolated evidence pipeline has no runnable next stage")
+
+        # The parent must own the reference-stage handoff before it spawns the fresh child.
+        # Otherwise a child that stalls during interpreter/import startup leaves the outer
+        # prequalification watchdog observing only the previous public-live boundary. The
+        # child still calls begin_evidence_stage itself; that repeat write is deliberately
+        # harmless and immediately yields to the finer reference progress journal.
+        if stage == "reference" and state.current_stage != "reference":
+            state = begin_evidence_stage(
+                resolved,
+                pipeline_id=state.pipeline_id,
+                stage=stage,
+            )
+
         print(
             json.dumps(
                 {
