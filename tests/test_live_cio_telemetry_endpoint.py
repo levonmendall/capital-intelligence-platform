@@ -160,6 +160,7 @@ def test_render_telemetry_workflow_uses_public_static_audit():
         encoding="utf-8"
     )
     assert "onrender.com/app/static/cio-diagnostic.json\n" in workflow
-    assert "python scripts/capture_render_production_telemetry.py" in workflow
+    assert "python scripts/capture_render_production_telemetry_resilient.py" in workflow
+    assert "python scripts/enrich_stage_isolated_prequalification_telemetry.py" in workflow
     assert "capture_render_production_telemetry_canonical.py" not in workflow
     assert "onrender.com/v1/operations/cio-diagnostic\n" not in workflow
