@@ -30,6 +30,8 @@ def test_directory_collection_is_scoped_to_one_lane_per_child() -> None:
     source = inspect.getsource(reference._collect_directory_lane)
 
     assert "build_eodhd_provider()" in source
+    assert "discovery._base._catalog_from_eodhd(" in source
+    assert "discovery._catalog_from_eodhd(" not in source
     assert "requested_asset_classes=frozenset({lane})" in source
     assert "store_asset_reference_component(" in source
     assert "_collect_directory_component(" not in source
