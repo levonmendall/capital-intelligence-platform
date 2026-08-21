@@ -35,6 +35,8 @@ _LANE_PROGRESS_STAGES = frozenset(
         "certification_dag",
         "certification_dag_complete",
         "certification_dag_failed",
+        "bounded_spool_catalog_lane_complete",
+        "bounded_spool_publication_lane_complete",
     }
 )
 _PROGRESS_METRICS = frozenset(
@@ -48,6 +50,8 @@ _PROGRESS_METRICS = frozenset(
         "pending_nodes",
         "compatibility_rebound_nodes",
         "rebound_nodes",
+        "catalog_records",
+        "peak_rss_bytes",
     }
 )
 
@@ -103,11 +107,15 @@ def _install_spawn_safe_acquisition() -> None:
 def _install_lane_local_spool() -> None:
     """Keep catalog, publication, and finalizer materialization lane scoped."""
 
+    from operations.lane_local_comprehensive_discovery_coordinator import (
+        install_lane_local_comprehensive_discovery_coordinator,
+    )
     from operations.lane_local_comprehensive_discovery_spool import (
         install_lane_local_comprehensive_discovery_spool,
     )
 
     install_lane_local_comprehensive_discovery_spool()
+    install_lane_local_comprehensive_discovery_coordinator()
 
 
 def _install_dag_native_supervision() -> None:
