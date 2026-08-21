@@ -1,12 +1,11 @@
 """Typed, credential-safe attribution for release evidence prequalification.
 
-The evidence plane remains fail-closed.  This module does not decide whether evidence is
+The evidence plane remains fail-closed. This module does not decide whether evidence is
 acceptable and cannot promote an instrument, create a CIO request, or authorize execution.
 It only converts already-sanitized release-qualifier provenance into a bounded,
 machine-readable readiness result so production diagnostics identify the failing boundary
 without weakening any existing freshness, completeness, or provider rule.
 """
-
 from __future__ import annotations
 
 import re
@@ -35,28 +34,9 @@ class EvidencePrequalificationReason(str, Enum):
 
 
 _PROVIDER_NAMES = (
-    "alpaca",
-    "tradier",
-    "massive",
-    "cme",
-    "eodhd",
-    "yahoo",
-    "fred",
-    "sec",
-    "databento",
-    "deribit",
-    "openfigi",
-    "fca",
-    "esma",
-    "jpx",
-    "hkex",
-    "nasdaq",
-    "oecd",
-    "imf",
-    "bis",
-    "world bank",
-    "eia",
-    "cftc",
+    "alpaca", "tradier", "massive", "cme", "eodhd", "yahoo", "fred", "sec",
+    "databento", "deribit", "openfigi", "fca", "esma", "jpx", "hkex", "nasdaq",
+    "oecd", "imf", "bis", "world bank", "eia", "cftc",
 )
 
 _STAGE_CAPABILITIES = {
@@ -66,6 +46,20 @@ _STAGE_CAPABILITIES = {
     "qualified_paper_evidence_snapshot": "paper_evidence_snapshot",
     "component_qualified_evidence_maintenance": "evidence_maintenance",
     "continuous_evidence_plane": "evidence_maintenance",
+}
+
+_WATCHDOG_PHASE_CAPABILITIES = {
+    "reference": "reference_components",
+    "reference_acquisition": "reference_components",
+    "reference_binding": "reference_components",
+    "public_live": "public_live_information",
+    "us_equity_discovery": "us_equity_discovery",
+    "discovery_bootstrap": "comprehensive_discovery",
+    "discovery_preparation": "comprehensive_discovery",
+    "comprehensive_discovery": "comprehensive_discovery",
+    "paper_evidence": "paper_evidence",
+    "global_finalizer": "generation_publication",
+    "finalize": "generation_publication",
 }
 
 
@@ -124,8 +118,7 @@ def _text(value: object, *, limit: int = 1600) -> str:
 
 def _extract_named_token(text: str, name: str, *, limit: int = 240) -> str | None:
     match = re.search(
-        rf"(?i)(?:^|[;\s,]){re.escape(name)}\s*[=:]\s*([A-Za-z0-9_.:-]+)",
-        text,
+        rf"(?i)(?:^|[;\s,]){re.escape(name)}\s*[=:]\s*([A-Za-z0-9_.:-]+)", text
     )
     if match is None:
         return None
@@ -148,13 +141,8 @@ def _extract_number(text: str, names: Sequence[str]) -> float | None:
 
 
 def _extract_count(text: str) -> int | None:
-    value = _extract_number(
-        text,
-        ("affected_instrument_count", "instrument_count", "affected_count"),
-    )
-    if value is None:
-        return None
-    return max(0, int(value))
+    value = _extract_number(text, ("affected_instrument_count", "instrument_count", "affected_count"))
+    return None if value is None else max(0, int(value))
 
 
 def _extract_providers(text: str) -> tuple[str | None, tuple[str, ...]]:
@@ -167,8 +155,7 @@ def _extract_providers(text: str) -> tuple[str | None, tuple[str, ...]]:
                 observed.append(normalized)
 
     explicit_primary = re.search(
-        r"(?i)(?:primary_)?provider\s*[=:]\s*([A-Za-z0-9_.-]+)",
-        text,
+        r"(?i)(?:primary_)?provider\s*[=:]\s*([A-Za-z0-9_.-]+)", text
     )
     provider = (
         explicit_primary.group(1).strip().lower()
@@ -178,8 +165,7 @@ def _extract_providers(text: str) -> tuple[str | None, tuple[str, ...]]:
 
     fallback: list[str] = []
     explicit_fallback = re.search(
-        r"(?i)fallback(?:_providers)?(?:_attempted)?\s*[=:]\s*([^;]+)",
-        text,
+        r"(?i)fallback(?:_providers)?(?:_attempted)?\s*[=:]\s*([^;]+)", text
     )
     if explicit_fallback is not None:
         for raw in re.split(r"[,|>\s]+", explicit_fallback.group(1)):
@@ -190,6 +176,18 @@ def _extract_providers(text: str) -> tuple[str | None, tuple[str, ...]]:
     elif "fallback" in lowered and len(observed) > 1:
         fallback.extend(item for item in observed if item != provider)
     return provider, tuple(fallback[:12])
+
+
+def _watchdog_capability(stage: str, error_type: str, detail: str) -> str | None:
+    if (
+        stage.strip().lower() != "release_prequalification_parent_watchdog"
+        and error_type.strip().lower() != "parentstalltimeout"
+    ):
+        return None
+    phase = _extract_named_token(detail, "prequalification_phase")
+    if phase is None:
+        return None
+    return _WATCHDOG_PHASE_CAPABILITIES.get(phase)
 
 
 def _capability(stage: str, detail: str) -> str:
@@ -222,94 +220,47 @@ def _capability(stage: str, detail: str) -> str:
 def _reason(*, detail: str, error_type: str, return_code: int | None) -> EvidencePrequalificationReason:
     lowered = detail.lower()
     type_name = error_type.lower()
-
     if return_code == 124 or "deadline" in lowered or "timed out" in lowered or "timeout" in type_name:
         return EvidencePrequalificationReason.DEADLINE_EXCEEDED
     if return_code == 125 or any(
-        token in lowered
-        for token in ("memory_limited", "memory limited", "out of memory", "oom", "memoryerror")
+        token in lowered for token in ("memory_limited", "memory limited", "out of memory", "oom", "memoryerror")
     ):
         return EvidencePrequalificationReason.RESOURCE_EXHAUSTED
     if return_code == 126 or "memory lane busy" in lowered or "heavy_memory_lane_busy" in lowered:
         return EvidencePrequalificationReason.RESOURCE_BUSY
-    if any(
-        token in lowered
-        for token in (
-            "fallback exhausted",
-            "fallbacks exhausted",
-            "all providers failed",
-            "no provider succeeded",
-            "no provider could",
-        )
-    ):
+    if any(token in lowered for token in (
+        "fallback exhausted", "fallbacks exhausted", "all providers failed",
+        "no provider succeeded", "no provider could",
+    )):
         return EvidencePrequalificationReason.FALLBACK_EXHAUSTED
-    if any(
-        token in lowered
-        for token in (
-            "missing provider",
-            "provider is not configured",
-            "provider not configured",
-            "api key is required",
-            "api token is required",
-            "credential is required",
-            "credentials are required",
-        )
-    ):
+    if any(token in lowered for token in (
+        "missing provider", "provider is not configured", "provider not configured",
+        "api key is required", "api token is required", "credential is required",
+        "credentials are required",
+    )):
         return EvidencePrequalificationReason.MISSING_PROVIDER
-    if any(
-        token in lowered
-        for token in ("stale", "freshness", "too old", "expired evidence", "expired snapshot")
-    ):
+    if any(token in lowered for token in ("stale", "freshness", "too old", "expired evidence", "expired snapshot")):
         return EvidencePrequalificationReason.STALE
-    if any(
-        token in lowered
-        for token in (
-            "jsondecodeerror",
-            "invalid payload",
-            "malformed",
-            "schema mismatch",
-            "integrity mismatch",
-            "digest mismatch",
-            "unreadable",
-            "not an object",
-        )
-    ) or type_name in {"jsondecodeerror", "unicodeerror"}:
+    if any(token in lowered for token in (
+        "jsondecodeerror", "invalid payload", "malformed", "schema mismatch",
+        "integrity mismatch", "digest mismatch", "unreadable", "not an object",
+    )) or type_name in {"jsondecodeerror", "unicodeerror"}:
         return EvidencePrequalificationReason.INVALID_PAYLOAD
-    if any(
-        token in lowered
-        for token in (
-            "429",
-            "rate limit",
-            "http 5",
-            "connectionerror",
-            "connection error",
-            "connection reset",
-            "provider error",
-            "provider unavailable",
-            "request failed",
-        )
-    ):
+    if any(token in lowered for token in (
+        "429", "rate limit", "http 5", "connectionerror", "connection error",
+        "connection reset", "provider error", "provider unavailable", "request failed",
+    )):
         return EvidencePrequalificationReason.PROVIDER_ERROR
-    if any(
-        token in lowered
-        for token in (
-            "not qualified",
-            "incomplete",
-            "missing evidence",
-            "missing snapshot",
-            "no previously qualified",
-            "coverage is not qualified",
-            "coverage incomplete",
-            "returned success without a qualified generation",
-        )
-    ):
+    if any(token in lowered for token in (
+        "not qualified", "incomplete", "missing evidence", "missing snapshot",
+        "no previously qualified", "coverage is not qualified", "coverage incomplete",
+        "returned success without a qualified generation",
+    )):
         return EvidencePrequalificationReason.INCOMPLETE
     return EvidencePrequalificationReason.INTERNAL_ERROR
 
 
 def ready_prequalification_attribution(*, capability: str = "all_required_evidence") -> EvidencePrequalificationAttribution:
-    """Return the sole advancing state: all existing readiness gates already passed."""
-
     return EvidencePrequalificationAttribution(
         state=EvidencePrequalificationState.READY,
         reason=EvidencePrequalificationReason.READY,
@@ -320,16 +271,8 @@ def ready_prequalification_attribution(*, capability: str = "all_required_eviden
 
 
 def failed_prequalification_attribution(
-    *,
-    detail: object,
-    metrics: Mapping[str, int] | None = None,
+    *, detail: object, metrics: Mapping[str, int] | None = None
 ) -> EvidencePrequalificationAttribution:
-    """Attribute an already fail-closed terminal qualifier failure.
-
-    The input detail is produced by the credential-safe child failure transport added to
-    the evidence worker. Unknown fields remain unknown rather than being fabricated.
-    """
-
     raw_detail = _text(detail)
     child = _CHILD_PATTERN.search(raw_detail)
     if child is None:
@@ -359,14 +302,8 @@ def failed_prequalification_attribution(
             return_code = -raw_code if negative else raw_code
 
     provider, fallback_providers = _extract_providers(child_detail)
-    freshness_age = _extract_number(
-        child_detail,
-        ("freshness_age_seconds", "evidence_age_seconds", "age_seconds"),
-    )
-    freshness_limit = _extract_number(
-        child_detail,
-        ("freshness_limit_seconds", "max_age_seconds", "maximum_age_seconds"),
-    )
+    freshness_age = _extract_number(child_detail, ("freshness_age_seconds", "evidence_age_seconds", "age_seconds"))
+    freshness_limit = _extract_number(child_detail, ("freshness_limit_seconds", "max_age_seconds", "maximum_age_seconds"))
     reason = _reason(
         detail=child_detail or raw_detail,
         error_type=root_error_type or error_type,
@@ -378,15 +315,14 @@ def failed_prequalification_attribution(
         EvidencePrequalificationReason.STALE,
         EvidencePrequalificationReason.FALLBACK_EXHAUSTED,
     } else "unknown"
+    diagnostic_detail = child_detail or raw_detail
+    capability = _watchdog_capability(stage, error_type, diagnostic_detail) or _capability(stage, diagnostic_detail)
 
     return EvidencePrequalificationAttribution(
         state=EvidencePrequalificationState.FAILED,
         reason=reason,
-        capability=_capability(stage, child_detail or raw_detail),
-        required_information=_extract_named_token(
-            child_detail or raw_detail,
-            "required_information",
-        ),
+        capability=capability,
+        required_information=_extract_named_token(diagnostic_detail, "required_information"),
         failure_stage=stage,
         error_type=error_type or None,
         root_error_type=root_error_type,
@@ -396,7 +332,7 @@ def failed_prequalification_attribution(
         freshness_age_seconds=freshness_age,
         freshness_limit_seconds=freshness_limit,
         completeness=completeness,
-        detail=child_detail or raw_detail,
+        detail=diagnostic_detail,
         terminal=True,
     )
 

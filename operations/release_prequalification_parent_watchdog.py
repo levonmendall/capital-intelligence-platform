@@ -1,18 +1,17 @@
 """Supervise release evidence prequalification by durable child progress.
 
 The Render release bootstrap starts evidence qualification before a CIO request exists.
-Individual reference, public-live, post-public provider preparation, bounded comprehensive-
-discovery, and certification-DAG work units expose durable operational progress. The parent
-bootstrap historically waited on the aggregate evidence subprocess with an unbounded
-``subprocess.run``; later supervision still could misclassify bounded discovery as stalled
-because its integrity-protected stage artifacts were not part of the trusted progress set.
+Individual stage-isolated evidence boundaries, reference/public-live journals, post-public
+provider preparation, bounded comprehensive-discovery artifacts, and certification-DAG
+work units expose durable operational progress. The stage-isolated journal owns the
+high-level phase; finer journals may advance liveness only inside the stage that owns them.
 
 This module installs a narrow subprocess proxy into the memory-safe Render bootstrap. It
 recognizes only the one-shot bounded continuous-evidence command, observes only
 credential-safe current-attempt progress, republishes the active parent phase through the
 existing integrity-protected release-prequalification record, and terminates the aggregate
-process only when *durable progress* has stopped beyond the execution budget of the active
-unit. Long all-market work remains valid while progress advances.
+process only when *durable progress* has stopped beyond the finite execution budget of the
+active unit. Long all-market work remains valid while monotonic progress advances.
 
 Nothing here has investment, candidate, specialist, construction, sizing, execution, or
 real-money authority. A parent stall is fail-closed and is transported through the
@@ -41,6 +40,7 @@ from operations.release_evidence_prequalification import (
     load_release_evidence_prequalification,
     write_release_evidence_prequalification,
 )
+from operations.stage_isolated_evidence_pipeline import load_stage_isolated_evidence_state
 from operations.supervised_reference_prequalification import load_reference_prequalification_progress
 
 _FAILURE_EVENT = "continuous_evidence_plane_failure_context"
@@ -64,6 +64,17 @@ _COMPONENT_MARGIN_SECONDS = 45.0
 _DAG_MARGIN_SECONDS = 120.0
 _TERMINATION_GRACE_SECONDS = 10.0
 
+_STAGE_FINE_PHASES: Mapping[str, frozenset[str]] = {
+    "reference": frozenset({"reference_acquisition", "reference_binding"}),
+    "public_live": frozenset({"public_live", "discovery_bootstrap"}),
+    "us_equity_discovery": frozenset({"discovery_preparation"}),
+    "comprehensive_discovery": frozenset(
+        {"discovery_preparation", "comprehensive_discovery", "global_finalizer"}
+    ),
+    "paper_evidence": frozenset({"discovery_preparation"}),
+    "finalize": frozenset({"global_finalizer"}),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class PrequalificationProgress:
@@ -77,9 +88,6 @@ class PrequalificationProgress:
 
     @property
     def marker(self) -> tuple[str, str, str, str]:
-        # Trusted journals already provide a durable update timestamp. Bounded discovery
-        # instead uses a logical work token derived from integrity-checked stage state, so
-        # touching/re-writing the same stage cannot manufacture another liveness event.
         token = self.progress_token or self.updated_at.isoformat()
         return self.phase, self.component, self.state, token
 
@@ -97,8 +105,17 @@ def _aware(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _positive_seconds(values: Mapping[str, str], names: tuple[str, ...], default: float) -> float:
-    raw = next((str(values.get(name) or os.getenv(name, "")).strip() for name in names if str(values.get(name) or os.getenv(name, "")).strip()), "")
+def _positive_seconds(
+    values: Mapping[str, str], names: tuple[str, ...], default: float
+) -> float:
+    raw = next(
+        (
+            str(values.get(name) or os.getenv(name, "")).strip()
+            for name in names
+            if str(values.get(name) or os.getenv(name, "")).strip()
+        ),
+        "",
+    )
     if not raw:
         return default
     try:
@@ -113,7 +130,15 @@ def _positive_seconds(values: Mapping[str, str], names: tuple[str, ...], default
 def _nonnegative_metrics(value: object) -> dict[str, int]:
     if not isinstance(value, Mapping):
         return {}
-    return {str(name): int(item) for name, item in value.items() if isinstance(name, str) and name.strip() and isinstance(item, int) and not isinstance(item, bool) and item >= 0}
+    return {
+        str(name): int(item)
+        for name, item in value.items()
+        if isinstance(name, str)
+        and name.strip()
+        and isinstance(item, int)
+        and not isinstance(item, bool)
+        and item >= 0
+    }
 
 
 def _current(progress: Mapping[str, object] | None, *, boundary: datetime) -> bool:
@@ -122,11 +147,24 @@ def _current(progress: Mapping[str, object] | None, *, boundary: datetime) -> bo
 
 
 def _count_metrics(progress: Mapping[str, object]) -> dict[str, int]:
-    names = ("required_count", "qualified_count", "reused_count", "newly_qualified_count", "failed_count", "pending_count")
-    return {name: int(progress.get(name) or 0) for name in names if isinstance(progress.get(name), int) and not isinstance(progress.get(name), bool)}
+    names = (
+        "required_count",
+        "qualified_count",
+        "reused_count",
+        "newly_qualified_count",
+        "failed_count",
+        "pending_count",
+    )
+    return {
+        name: int(progress.get(name) or 0)
+        for name in names
+        if isinstance(progress.get(name), int) and not isinstance(progress.get(name), bool)
+    }
 
 
-def _reference_progress(values: Mapping[str, str], *, boundary: datetime) -> PrequalificationProgress | None:
+def _reference_progress(
+    values: Mapping[str, str], *, boundary: datetime
+) -> PrequalificationProgress | None:
     progress = load_reference_prequalification_progress(values)
     if not _current(progress, boundary=boundary):
         return None
@@ -137,11 +175,24 @@ def _reference_progress(values: Mapping[str, str], *, boundary: datetime) -> Pre
     active = str(progress.get("active_component") or "").strip()
     phase = "reference_binding" if state == "qualified" and not active else "reference_acquisition"
     component = "release-reference-manifest" if phase == "reference_binding" else active or "reference-controller"
-    timeout = _positive_seconds(values, (_REFERENCE_TIMEOUT_ENV, _REFERENCE_LEGACY_TIMEOUT_ENV), _DEFAULT_REFERENCE_TIMEOUT_SECONDS)
-    return PrequalificationProgress(phase, component, updated_at, state, max(_DEFAULT_STARTUP_STALL_SECONDS, timeout + _COMPONENT_MARGIN_SECONDS), _count_metrics(progress))
+    timeout = _positive_seconds(
+        values,
+        (_REFERENCE_TIMEOUT_ENV, _REFERENCE_LEGACY_TIMEOUT_ENV),
+        _DEFAULT_REFERENCE_TIMEOUT_SECONDS,
+    )
+    return PrequalificationProgress(
+        phase,
+        component,
+        updated_at,
+        state,
+        max(_DEFAULT_STARTUP_STALL_SECONDS, timeout + _COMPONENT_MARGIN_SECONDS),
+        _count_metrics(progress),
+    )
 
 
-def _public_progress(values: Mapping[str, str], *, boundary: datetime) -> PrequalificationProgress | None:
+def _public_progress(
+    values: Mapping[str, str], *, boundary: datetime
+) -> PrequalificationProgress | None:
     progress = load_public_live_requirement_progress(values)
     if not _current(progress, boundary=boundary):
         return None
@@ -151,14 +202,32 @@ def _public_progress(values: Mapping[str, str], *, boundary: datetime) -> Prequa
     state = str(progress.get("state") or "qualifying").strip().lower()
     active = str(progress.get("active_required_information") or "").strip()
     if state == "qualified" and not active:
-        return PrequalificationProgress("discovery_bootstrap", "comprehensive-discovery", updated_at, state, _positive_seconds(values, (_STARTUP_STALL_ENV,), _DEFAULT_STARTUP_STALL_SECONDS), _count_metrics(progress))
-    timeout = _positive_seconds(values, (_PUBLIC_TIMEOUT_ENV, _PUBLIC_LEGACY_TIMEOUT_ENV), _DEFAULT_PUBLIC_TIMEOUT_SECONDS)
-    return PrequalificationProgress("public_live", active or "public-live-controller", updated_at, state, max(120.0, timeout + _COMPONENT_MARGIN_SECONDS), _count_metrics(progress))
+        return PrequalificationProgress(
+            "discovery_bootstrap",
+            "comprehensive-discovery",
+            updated_at,
+            state,
+            _positive_seconds(values, (_STARTUP_STALL_ENV,), _DEFAULT_STARTUP_STALL_SECONDS),
+            _count_metrics(progress),
+        )
+    timeout = _positive_seconds(
+        values,
+        (_PUBLIC_TIMEOUT_ENV, _PUBLIC_LEGACY_TIMEOUT_ENV),
+        _DEFAULT_PUBLIC_TIMEOUT_SECONDS,
+    )
+    return PrequalificationProgress(
+        "public_live",
+        active or "public-live-controller",
+        updated_at,
+        state,
+        max(120.0, timeout + _COMPONENT_MARGIN_SECONDS),
+        _count_metrics(progress),
+    )
 
 
-def _preparation_progress(values: Mapping[str, str], *, boundary: datetime) -> PrequalificationProgress | None:
-    """Project real post-public provider completions before the first DAG journal exists."""
-
+def _preparation_progress(
+    values: Mapping[str, str], *, boundary: datetime
+) -> PrequalificationProgress | None:
     progress = load_evidence_preparation_progress(values)
     if not _current(progress, boundary=boundary):
         return None
@@ -191,15 +260,6 @@ def _path_mtime(path: Path) -> datetime | None:
 def _bounded_discovery_progress(
     values: Mapping[str, str], *, boundary: datetime
 ) -> PrequalificationProgress | None:
-    """Project integrity-checked bounded-builder completions into parent liveness.
-
-    The builder's stage files are already hash-verified, paper-only, authority-free state.
-    We accept only a request file created during this parent attempt and use a logical
-    position token rather than filesystem time as the liveness marker. Therefore stale
-    requests, malformed stage state, a touched file, or replay of the same completed stage
-    cannot repeatedly reset the watchdog.
-    """
-
     try:
         from operations import bounded_comprehensive_discovery_spool as bounded
         from operations import comprehensive_discovery_input_spool as spool
@@ -243,12 +303,8 @@ def _bounded_discovery_progress(
         if isinstance(catalog, Mapping) and catalog.get("request_id") == request_id:
             component = "bounded-catalog-complete"
             position = "10-catalog"
-            metrics = {
-                "catalog_records": int(catalog.get("catalog_record_count") or 0),
-            }
-            observed_at = _path_mtime(
-                request_path.parent / "catalog-stage.json"
-            ) or observed_at
+            metrics = {"catalog_records": int(catalog.get("catalog_record_count") or 0)}
+            observed_at = _path_mtime(request_path.parent / "catalog-stage.json") or observed_at
 
         try:
             publication = bounded._load_stage_state(request_path, "publication-stage")
@@ -263,9 +319,7 @@ def _bounded_discovery_progress(
                 "scheduled_lanes": len(lanes),
                 "catalog_records": int(publication.get("merged_catalog_record_count") or 0),
             }
-            observed_at = _path_mtime(
-                request_path.parent / "publication-stage.json"
-            ) or observed_at
+            observed_at = _path_mtime(request_path.parent / "publication-stage.json") or observed_at
 
             completed_lanes = 0
             for expected_index, raw_lane in enumerate(lanes):
@@ -279,9 +333,7 @@ def _bounded_discovery_progress(
                 if index != expected_index or not asset_class:
                     break
                 try:
-                    lane_state = bounded._load_stage_state(
-                        request_path, f"lane-stage-{index:03d}"
-                    )
+                    lane_state = bounded._load_stage_state(request_path, f"lane-stage-{index:03d}")
                 except (OSError, RuntimeError, TypeError, ValueError):
                     break
                 if lane_state.get("request_id") != request_id:
@@ -295,13 +347,9 @@ def _bounded_discovery_progress(
                 metrics = {
                     "scheduled_lanes": len(lanes),
                     "completed_lanes": completed_lanes,
-                    "decision_eligible_records": int(
-                        node.get("decision_eligible_count") or 0
-                    ),
+                    "decision_eligible_records": int(node.get("decision_eligible_count") or 0),
                 }
-                observed_at = _path_mtime(
-                    request_path.parent / f"lane-stage-{index:03d}.json"
-                ) or observed_at
+                observed_at = _path_mtime(request_path.parent / f"lane-stage-{index:03d}.json") or observed_at
 
         try:
             manifest_path, manifest = spool.load_manifest_for_request(request_path)
@@ -312,9 +360,7 @@ def _bounded_discovery_progress(
             nodes = manifest.get("nodes")
             component = "bounded-discovery-manifest-complete"
             position = "40-manifest"
-            metrics = {
-                "scheduled_lanes": len(nodes) if isinstance(nodes, list) else 0,
-            }
+            metrics = {"scheduled_lanes": len(nodes) if isinstance(nodes, list) else 0}
             observed_at = _path_mtime(manifest_path) or observed_at
 
         progress = PrequalificationProgress(
@@ -331,10 +377,9 @@ def _bounded_discovery_progress(
     return None if best is None else best[1]
 
 
-def _dag_progress(values: Mapping[str, str], *, boundary: datetime) -> PrequalificationProgress | None:
-    # A retry may reuse the original decision epoch. Require a current-attempt journal
-    # update, but do not reject a still-valid resumed epoch merely because it predates this
-    # child process launch.
+def _dag_progress(
+    values: Mapping[str, str], *, boundary: datetime
+) -> PrequalificationProgress | None:
     progress = load_release_certification_dag_progress(values, started_at=None)
     if not _current(progress, boundary=boundary):
         return None
@@ -348,33 +393,169 @@ def _dag_progress(values: Mapping[str, str], *, boundary: datetime) -> Prequalif
     if running or pending:
         component = str(progress.get("active_node") or progress.get("focus_node") or "certification-dag").strip()
         timeout = _positive_seconds(values, (_DAG_TIMEOUT_ENV,), _DEFAULT_DAG_TIMEOUT_SECONDS)
-        return PrequalificationProgress("comprehensive_discovery", component, updated_at, "running", timeout + _DAG_MARGIN_SECONDS, _nonnegative_metrics(counts))
+        return PrequalificationProgress(
+            "comprehensive_discovery",
+            component,
+            updated_at,
+            "running",
+            timeout + _DAG_MARGIN_SECONDS,
+            _nonnegative_metrics(counts),
+        )
     if failed:
         component = str(progress.get("blocking_node") or progress.get("focus_node") or "certification-dag").strip()
-        return PrequalificationProgress("comprehensive_discovery", component, updated_at, "failed", _positive_seconds(values, (_STARTUP_STALL_ENV,), _DEFAULT_STARTUP_STALL_SECONDS), _nonnegative_metrics(counts))
-    return PrequalificationProgress("global_finalizer", "provider-free-finalizer", updated_at, "running", _positive_seconds(values, (_FINALIZER_STALL_ENV,), _DEFAULT_FINALIZER_STALL_SECONDS), _nonnegative_metrics(counts))
+        return PrequalificationProgress(
+            "comprehensive_discovery",
+            component,
+            updated_at,
+            "failed",
+            _positive_seconds(values, (_STARTUP_STALL_ENV,), _DEFAULT_STARTUP_STALL_SECONDS),
+            _nonnegative_metrics(counts),
+        )
+    return PrequalificationProgress(
+        "global_finalizer",
+        "provider-free-finalizer",
+        updated_at,
+        "running",
+        _positive_seconds(values, (_FINALIZER_STALL_ENV,), _DEFAULT_FINALIZER_STALL_SECONDS),
+        _nonnegative_metrics(counts),
+    )
 
 
-def observe_current_prequalification_progress(values: Mapping[str, str], *, started_at: datetime) -> PrequalificationProgress:
-    """Return the newest credential-safe progress owned by the current child attempt."""
+def _stage_stall_limit(values: Mapping[str, str], stage: str) -> float:
+    if stage == "reference":
+        timeout = _positive_seconds(
+            values,
+            (_REFERENCE_TIMEOUT_ENV, _REFERENCE_LEGACY_TIMEOUT_ENV),
+            _DEFAULT_REFERENCE_TIMEOUT_SECONDS,
+        )
+        return max(_DEFAULT_STARTUP_STALL_SECONDS, timeout + _COMPONENT_MARGIN_SECONDS)
+    if stage == "public_live":
+        timeout = _positive_seconds(
+            values,
+            (_PUBLIC_TIMEOUT_ENV, _PUBLIC_LEGACY_TIMEOUT_ENV),
+            _DEFAULT_PUBLIC_TIMEOUT_SECONDS,
+        )
+        return max(120.0, timeout + _COMPONENT_MARGIN_SECONDS)
+    if stage == "comprehensive_discovery":
+        timeout = _positive_seconds(values, (_DAG_TIMEOUT_ENV,), _DEFAULT_DAG_TIMEOUT_SECONDS)
+        return timeout + _DAG_MARGIN_SECONDS
+    if stage == "finalize":
+        return _positive_seconds(values, (_FINALIZER_STALL_ENV,), _DEFAULT_FINALIZER_STALL_SECONDS)
+    return _positive_seconds(
+        values,
+        (_PREPARATION_STALL_ENV, _STARTUP_STALL_ENV),
+        _DEFAULT_STARTUP_STALL_SECONDS,
+    )
+
+
+def _stage_pipeline_progress(
+    values: Mapping[str, str], *, boundary: datetime
+) -> PrequalificationProgress | None:
+    try:
+        state = load_stage_isolated_evidence_state(values)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    if state is None or state.updated_at < boundary:
+        return None
+
+    stage = state.current_stage or state.next_stage
+    if stage is None:
+        stage = "finalize"
+    completed_count = len(state.completed_stages)
+    component = (
+        f"stage-isolated:{state.current_stage}"
+        if state.current_stage
+        else (
+            f"stage-complete:{state.completed_stages[-1]}"
+            if state.completed_stages
+            else "stage-isolated:starting"
+        )
+    )
+    return PrequalificationProgress(
+        stage,
+        component,
+        state.updated_at,
+        state.state,
+        _stage_stall_limit(values, stage),
+        {"stage_completed_count": completed_count, "stage_required_count": 6},
+        progress_token=f"{state.pipeline_id}:{completed_count}:{state.current_stage or 'between'}:{state.state}",
+    )
+
+
+def _fine_progress_candidates(
+    values: Mapping[str, str], *, boundary: datetime
+) -> tuple[PrequalificationProgress, ...]:
+    return tuple(
+        item
+        for item in (
+            _reference_progress(values, boundary=boundary),
+            _public_progress(values, boundary=boundary),
+            _preparation_progress(values, boundary=boundary),
+            _bounded_discovery_progress(values, boundary=boundary),
+            _dag_progress(values, boundary=boundary),
+        )
+        if item is not None
+    )
+
+
+def _progress_nested_under_stage(
+    stage_progress: PrequalificationProgress,
+    candidate: PrequalificationProgress,
+) -> PrequalificationProgress | None:
+    allowed = _STAGE_FINE_PHASES.get(stage_progress.phase, frozenset())
+    if candidate.phase not in allowed or candidate.updated_at < stage_progress.updated_at:
+        return None
+    return PrequalificationProgress(
+        stage_progress.phase,
+        candidate.component,
+        candidate.updated_at,
+        candidate.state,
+        max(stage_progress.stall_limit_seconds, candidate.stall_limit_seconds),
+        candidate.metrics,
+        progress_token=(
+            f"{stage_progress.progress_token}|{candidate.marker[3]}"
+            if stage_progress.progress_token
+            else candidate.marker[3]
+        ),
+    )
+
+
+def observe_current_prequalification_progress(
+    values: Mapping[str, str], *, started_at: datetime
+) -> PrequalificationProgress:
     boundary = started_at.astimezone(timezone.utc)
-    candidates = [item for item in (
-        _reference_progress(values, boundary=boundary),
-        _public_progress(values, boundary=boundary),
-        _preparation_progress(values, boundary=boundary),
-        _bounded_discovery_progress(values, boundary=boundary),
-        _dag_progress(values, boundary=boundary),
-    ) if item is not None]
-    if candidates:
-        return max(candidates, key=lambda item: item.updated_at)
-    return PrequalificationProgress("reference_binding", "release-reference-manifest", boundary, "starting", _positive_seconds(values, (_STARTUP_STALL_ENV,), _DEFAULT_STARTUP_STALL_SECONDS), {})
+    stage_progress = _stage_pipeline_progress(values, boundary=boundary)
+    fine = _fine_progress_candidates(values, boundary=boundary)
+
+    if stage_progress is not None:
+        nested = tuple(
+            item
+            for candidate in fine
+            if (item := _progress_nested_under_stage(stage_progress, candidate)) is not None
+        )
+        if nested:
+            return max((stage_progress, *nested), key=lambda item: item.updated_at)
+        return stage_progress
+
+    if fine:
+        return max(fine, key=lambda item: item.updated_at)
+    return PrequalificationProgress(
+        "reference_binding",
+        "release-reference-manifest",
+        boundary,
+        "starting",
+        _positive_seconds(values, (_STARTUP_STALL_ENV,), _DEFAULT_STARTUP_STALL_SECONDS),
+        {},
+    )
 
 
 def _public_stage(progress: PrequalificationProgress) -> str:
     return "reference_components" if progress.phase.startswith("reference") else "evidence_refresh"
 
 
-def _publish_parent_progress(values: Mapping[str, str], *, progress: PrequalificationProgress) -> None:
+def _publish_parent_progress(
+    values: Mapping[str, str], *, progress: PrequalificationProgress
+) -> None:
     status = load_release_evidence_prequalification(values)
     if not isinstance(status, Mapping) or str(status.get("state") or "").lower() not in {"pending", "in_progress"}:
         return
@@ -384,7 +565,15 @@ def _publish_parent_progress(values: Mapping[str, str], *, progress: Prequalific
         return
     metrics = _nonnegative_metrics(status.get("metrics"))
     metrics.update(progress.metrics)
-    write_release_evidence_prequalification(values, state="in_progress", stage=_public_stage(progress), prequalification_id=prequalification_id, started_at=started_at, detail=(f"governed_prequalification_phase={progress.phase}; component={progress.component}; state={progress.state}")[:1000], metrics=metrics)
+    write_release_evidence_prequalification(
+        values,
+        state="in_progress",
+        stage=_public_stage(progress),
+        prequalification_id=prequalification_id,
+        started_at=started_at,
+        detail=(f"governed_prequalification_phase={progress.phase}; component={progress.component}; state={progress.state}")[:1000],
+        metrics=metrics,
+    )
 
 
 def _is_evidence_command(command: object) -> bool:
@@ -420,7 +609,22 @@ def _stop_process_group(process: _subprocess.Popen[object]) -> None:
 
 
 def _stall_failure_line(progress: PrequalificationProgress, *, stall_seconds: float) -> str:
-    return json.dumps({"event": _FAILURE_EVENT, "error_type": "ParentStallTimeout", "failure_stage": "release_prequalification_parent_watchdog", "error_detail": ("release evidence prequalification made no durable progress; failure_type=ParentStallTimeout; " f"prequalification_phase={progress.phase}; component={progress.component}; " f"stall_seconds={int(max(0.0, stall_seconds))}; stall_limit_seconds={int(progress.stall_limit_seconds)}"), "credential_safe": True, "paper_only": True, "real_money_authorized": False}, sort_keys=True)
+    return json.dumps(
+        {
+            "event": _FAILURE_EVENT,
+            "error_type": "ParentStallTimeout",
+            "failure_stage": "release_prequalification_parent_watchdog",
+            "error_detail": (
+                "release evidence prequalification made no durable progress; failure_type=ParentStallTimeout; "
+                f"prequalification_phase={progress.phase}; component={progress.component}; "
+                f"stall_seconds={int(max(0.0, stall_seconds))}; stall_limit_seconds={int(progress.stall_limit_seconds)}"
+            ),
+            "credential_safe": True,
+            "paper_only": True,
+            "real_money_authorized": False,
+        },
+        sort_keys=True,
+    )
 
 
 def _watched_run(command: object, *, original_run, **kwargs):
@@ -454,13 +658,15 @@ def _watched_run(command: object, *, original_run, **kwargs):
                 _stop_process_group(process)
                 failure_line = _stall_failure_line(progress, stall_seconds=stalled_for)
                 error_stream.write(("\n" + failure_line + "\n") if text_mode else ("\n" + failure_line + "\n").encode("utf-8"))
-                error_stream.flush(); error_stream.seek(0)
+                error_stream.flush()
+                error_stream.seek(0)
                 captured = error_stream.read()
                 return _subprocess.CompletedProcess(command, 124, stdout=None, stderr=captured if requested_stderr == _subprocess.PIPE else None)
             time.sleep(min(poll_seconds, max(0.05, progress.stall_limit_seconds / 4.0)))
         if last_progress is not None:
             _publish_parent_progress(env, progress=last_progress)
-        error_stream.flush(); error_stream.seek(0)
+        error_stream.flush()
+        error_stream.seek(0)
         captured = error_stream.read()
         completed = _subprocess.CompletedProcess(command, int(process.returncode or 0), stdout=None, stderr=captured if requested_stderr == _subprocess.PIPE else None)
         if kwargs.get("check") and completed.returncode:
@@ -483,7 +689,6 @@ class _SubprocessProxy:
 
 
 def install_release_prequalification_parent_watchdog(memory_safe_module: ModuleType) -> None:
-    """Install once into the Render memory-safe bootstrap's local subprocess seam."""
     current = getattr(memory_safe_module, "subprocess", None)
     if isinstance(current, _SubprocessProxy):
         return
@@ -492,4 +697,8 @@ def install_release_prequalification_parent_watchdog(memory_safe_module: ModuleT
     memory_safe_module.subprocess = _SubprocessProxy(_subprocess)
 
 
-__all__ = ["PrequalificationProgress", "install_release_prequalification_parent_watchdog", "observe_current_prequalification_progress"]
+__all__ = [
+    "PrequalificationProgress",
+    "install_release_prequalification_parent_watchdog",
+    "observe_current_prequalification_progress",
+]
