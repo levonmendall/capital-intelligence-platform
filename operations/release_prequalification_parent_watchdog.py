@@ -48,6 +48,7 @@ _EVIDENCE_SCRIPT = "run_bounded_continuous_evidence_plane.py"
 _POLL_ENV = "CAPITAL_INTELLIGENCE_RELEASE_EVIDENCE_PARENT_POLL_SECONDS"
 _REFERENCE_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_REFERENCE_COMPONENT_TIMEOUT_SECONDS"
 _REFERENCE_LEGACY_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_REFERENCE_TIMEOUT_SECONDS"
+_REFERENCE_STARTUP_STALL_ENV = "CAPITAL_INTELLIGENCE_RELEASE_REFERENCE_CONTROLLER_STARTUP_STALL_SECONDS"
 _PUBLIC_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_REQUIREMENT_TIMEOUT_SECONDS"
 _PUBLIC_LEGACY_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_TIMEOUT_SECONDS"
 _DAG_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_NODE_TIMEOUT_SECONDS"
@@ -56,6 +57,7 @@ _PREPARATION_STALL_ENV = "CAPITAL_INTELLIGENCE_RELEASE_EVIDENCE_PREPARATION_STAL
 _FINALIZER_STALL_ENV = "CAPITAL_INTELLIGENCE_RELEASE_EVIDENCE_FINALIZER_STALL_SECONDS"
 _DEFAULT_POLL_SECONDS = 5.0
 _DEFAULT_REFERENCE_TIMEOUT_SECONDS = 120.0
+_DEFAULT_REFERENCE_STARTUP_STALL_SECONDS = 45.0
 _DEFAULT_PUBLIC_TIMEOUT_SECONDS = 75.0
 _DEFAULT_DAG_TIMEOUT_SECONDS = 540.0
 _DEFAULT_STARTUP_STALL_SECONDS = 180.0
@@ -423,12 +425,14 @@ def _dag_progress(
 
 def _stage_stall_limit(values: Mapping[str, str], stage: str) -> float:
     if stage == "reference":
-        timeout = _positive_seconds(
+        # The stage journal is now claimed by the lightweight coordinator before the
+        # reference interpreter is spawned. Until the fine-grained reference journal
+        # appears, this is strictly a controller-startup budget, not a provider budget.
+        return _positive_seconds(
             values,
-            (_REFERENCE_TIMEOUT_ENV, _REFERENCE_LEGACY_TIMEOUT_ENV),
-            _DEFAULT_REFERENCE_TIMEOUT_SECONDS,
+            (_REFERENCE_STARTUP_STALL_ENV,),
+            _DEFAULT_REFERENCE_STARTUP_STALL_SECONDS,
         )
-        return max(_DEFAULT_STARTUP_STALL_SECONDS, timeout + _COMPONENT_MARGIN_SECONDS)
     if stage == "public_live":
         timeout = _positive_seconds(
             values,
@@ -463,12 +467,16 @@ def _stage_pipeline_progress(
         stage = "finalize"
     completed_count = len(state.completed_stages)
     component = (
-        f"stage-isolated:{state.current_stage}"
-        if state.current_stage
+        "reference-controller-startup"
+        if state.current_stage == "reference"
         else (
-            f"stage-complete:{state.completed_stages[-1]}"
-            if state.completed_stages
-            else "stage-isolated:starting"
+            f"stage-isolated:{state.current_stage}"
+            if state.current_stage
+            else (
+                f"stage-complete:{state.completed_stages[-1]}"
+                if state.completed_stages
+                else "stage-isolated:starting"
+            )
         )
     )
     return PrequalificationProgress(
