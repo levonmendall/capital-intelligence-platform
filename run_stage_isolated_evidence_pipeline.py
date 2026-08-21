@@ -114,13 +114,13 @@ def _archive_failed_attempt(state: StageIsolatedEvidenceState) -> Path | None:
 
 
 def _ensure_active_attempt(values: Mapping[str, str]) -> StageIsolatedEvidenceState:
-    """Return a non-terminal attempt, superseding a fresh failed attempt exactly once."""
+    """Return a non-terminal attempt, superseding any persisted failed attempt exactly once."""
 
-    state = ensure_stage_isolated_evidence_pipeline(values)
-    if state.state != "failed":
-        return state
+    existing = load_stage_isolated_evidence_state(values)
+    if existing is None or existing.state != "failed":
+        return ensure_stage_isolated_evidence_pipeline(values)
 
-    previous = state
+    previous = existing
     archive = _archive_failed_attempt(previous)
     replacement = ensure_stage_isolated_evidence_pipeline(values)
     if replacement.state == "failed":
