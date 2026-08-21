@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import pickle
 
+import pytest
+
 from operations.persistent_certification_scheduler import CertificationNode
 from operations.spawn_safe_authoritative_acquisition import SpawnSafeLaneRunner
 
@@ -18,38 +20,37 @@ def _node(name: str, epoch: datetime) -> CertificationNode:
     )
 
 
-def test_spawn_payload_contains_only_selected_lane_records() -> None:
+def test_spawn_payload_contains_only_compact_spool_locator() -> None:
     epoch = datetime(2026, 8, 18, 18, 30, tzinfo=timezone.utc)
-    equity = _node("equity", epoch)
     crypto = _node("crypto", epoch)
     runner = SpawnSafeLaneRunner(
-        deep_records={
-            equity.node_id: ("eq-1", "eq-2"),
-            crypto.node_id: ("crypto-1",),
-        },
+        manifest_path="/tmp/governed-comprehensive-spool/manifest.json",
         timestamp=epoch,
-        policy="policy-v1",
+        policy_version="policy-v1",
     )
 
     child = runner.for_node(crypto)
-    assert child.records == ("crypto-1",)
-    assert "eq-1" not in child.records
-    assert pickle.loads(pickle.dumps(child)).records == ("crypto-1",)
+    assert child.manifest_path.endswith("manifest.json")
+    assert child.node_id == crypto.node_id
+    assert not hasattr(child, "records")
+    assert not hasattr(runner, "deep_records")
+
+    restored = pickle.loads(pickle.dumps(child))
+    assert restored.node_id == crypto.node_id
+    assert restored.manifest_path == child.manifest_path
+    assert not hasattr(restored, "records")
 
 
-def test_spawn_payload_requires_exact_node_membership() -> None:
+def test_spawn_payload_requires_exact_node_identity_before_loading_spool() -> None:
     epoch = datetime(2026, 8, 18, 18, 31, tzinfo=timezone.utc)
     known = _node("equity", epoch)
     unknown = _node("crypto", epoch)
     runner = SpawnSafeLaneRunner(
-        deep_records={known.node_id: ("eq-1",)},
+        manifest_path="/tmp/governed-comprehensive-spool/manifest.json",
         timestamp=epoch,
-        policy="policy-v1",
+        policy_version="policy-v1",
     )
+    child = runner.for_node(known)
 
-    try:
-        runner.for_node(unknown)
-    except RuntimeError as error:
-        assert unknown.node_id in str(error)
-    else:
-        raise AssertionError("missing lane records must fail closed")
+    with pytest.raises(RuntimeError, match="node identity changed"):
+        child(unknown)
