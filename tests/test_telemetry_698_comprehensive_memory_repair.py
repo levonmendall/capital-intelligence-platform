@@ -19,7 +19,7 @@ def _record(symbol: str) -> DiscoveryCatalogRecord:
         symbol=symbol,
         provider_symbol=symbol,
         name=f"{symbol} test",
-        asset_class=CandidateAssetClass.EQUITY,
+        asset_class=CandidateAssetClass.US_EQUITY,
         economic_exposure="equity",
         venue="XNYS",
         country_code="US",
@@ -35,7 +35,7 @@ def _record(symbol: str) -> DiscoveryCatalogRecord:
 def test_streaming_catalog_fingerprint_matches_canonical() -> None:
     records = (_record("ZZZ"), _record("AAA"), _record("MMM"))
     ordered = bounded_publication._records_for_lane(
-        {CandidateAssetClass.EQUITY: records}
+        {CandidateAssetClass.US_EQUITY: records}
     )
     assert bounded_publication._streaming_catalog_fingerprint(ordered) == (
         provider_core._catalog_fingerprint(ordered)
