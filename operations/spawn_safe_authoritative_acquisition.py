@@ -6,6 +6,12 @@ bounded-memory interpreters. Each provider-facing lane then loads only its own r
 a fresh spawn interpreter. Frozen catalog/publication inputs are loaded only after every
 required lane qualifies, immediately before the existing provider-free canonical finalizer.
 
+The bounded builder runs directly in the already-isolated comprehensive coordinator. The
+previous implementation launched a redundant ``subprocess.Popen`` build coordinator which
+then launched the same finite catalog/publication/lane children, causing three Python/import
+working sets to overlap inside the container. Removing that middle interpreter lowers actual
+cgroup pressure while preserving every finite child boundary and the outer resource guard.
+
 This module changes only memory lifetime and operational transport. It does not change
 market membership, evidence standards, screening, CIO authority, construction, execution,
 or paper-only governance.
@@ -14,8 +20,6 @@ or paper-only governance.
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -23,7 +27,7 @@ from typing import Any, Mapping, Sequence
 
 from operations import authoritative_comprehensive_discovery as _authoritative
 from operations import persistent_certification_scheduler as _scheduler
-from operations.bounded_comprehensive_discovery_spool import load_finalizer_inputs
+from operations.bounded_comprehensive_discovery_spool import build_spool, load_finalizer_inputs
 from operations.comprehensive_discovery_input_spool import (
     ComprehensiveDiscoverySpoolError,
     SpoolReference,
@@ -129,39 +133,29 @@ class SpawnSafeLaneRunner:
 
 
 def _prepare_spool_process(request_path: Path, values: Mapping[str, str]) -> None:
+    """Build the spool without a redundant nested coordinator interpreter."""
+
     if manifest_available(request_path):
         return
-    repository_root = Path(__file__).resolve().parents[1]
-    process = subprocess.Popen(
-        (
-            sys.executable,
-            "-m",
-            "operations.bounded_comprehensive_discovery_spool",
-            "build",
-            "--request",
-            str(request_path),
-        ),
-        cwd=str(repository_root),
-        env=dict(values),
-        # Keep every finite builder stage in the comprehensive stage process group so the
-        # existing reclaimable-aware outer guard remains the authoritative hard boundary.
-        start_new_session=False,
-    )
-    return_code = int(process.wait())
-    if return_code == 0:
-        return
-    failure = load_failure(request_path)
-    if failure is None:
+    try:
+        # ``build_spool`` is itself only a compact coordinator. Every heavyweight catalog,
+        # publication, and lane materialization step still runs in its own finite child via
+        # bounded_comprehensive_discovery_spool._run_stage. Calling it here removes only the
+        # extra long-lived build interpreter that previously overlapped each finite child.
+        build_spool(request_path, values=values)
+    except (ComprehensiveDiscoverySpoolError, OSError, ValueError) as error:
+        failure = load_failure(request_path)
+        if failure is None:
+            raise _scheduler.CertificationSchedulerError(
+                "comprehensive discovery input spool builder failed without durable failure attribution; "
+                f"error_type={type(error).__name__}; detail={error}"
+            ) from error
         raise _scheduler.CertificationSchedulerError(
-            "comprehensive discovery input spool builder exited without durable failure attribution; "
-            f"return_code={return_code}"
-        )
-    raise _scheduler.CertificationSchedulerError(
-        "comprehensive discovery input spool preparation failed; "
-        f"stage={failure.get('failure_stage')}; "
-        f"failure_type={failure.get('error_type')}; "
-        f"detail={failure.get('error_detail')}"
-    )
+            "comprehensive discovery input spool preparation failed; "
+            f"stage={failure.get('failure_stage')}; "
+            f"failure_type={failure.get('error_type')}; "
+            f"detail={failure.get('error_detail')}"
+        ) from error
 
 
 def spawn_safe_acquire(
