@@ -5,9 +5,11 @@ history, or paper-evidence stack. Each required evidence stage runs as a child p
 the same exclusive heavy-memory lane, commits its durable checkpoint, exits, and releases
 its working set before the next stage begins.
 
-A retry resumes the same still-fresh evidence epoch from the first incomplete stage. No
-stage can be skipped, reordered, or treated as certified merely because the coordinator
-survived. Missing or failed work remains fail-closed.
+A running attempt resumes the same still-fresh evidence epoch from the first incomplete
+stage. A terminal failed attempt is archived and superseded by a fresh attempt so durable
+stage stores are revalidated rather than allowing a failed operational journal to authorize
+skipping work. No stage can be skipped, reordered, or treated as certified merely because
+the coordinator survived. Missing or failed work remains fail-closed.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from typing import Mapping, Sequence
 
 from operations.stage_isolated_evidence_pipeline import (
     _STAGES,
+    StageIsolatedEvidenceState,
     ensure_stage_isolated_evidence_pipeline,
     load_stage_isolated_evidence_state,
 )
@@ -67,6 +70,91 @@ def _safe_failure(
     )
 
 
+def _archive_failed_attempt(state: StageIsolatedEvidenceState) -> Path | None:
+    """Archive one validated failed latest journal without overwriting prior lineage."""
+
+    try:
+        failed_bytes = state.path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+    archive_dir = state.path.parent / "attempts"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = archive_dir / f"{state.pipeline_id}.json"
+    try:
+        with archive_path.open("xb") as handle:
+            handle.write(failed_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError:
+        try:
+            archived_bytes = archive_path.read_bytes()
+        except OSError as error:
+            raise RuntimeError(
+                "failed stage-isolated attempt archive is unreadable"
+            ) from error
+        if archived_bytes != failed_bytes:
+            raise RuntimeError(
+                "failed stage-isolated attempt archive identity collision"
+            )
+
+    # Treat the latest pointer as a compare-and-remove boundary. If another coordinator
+    # already replaced it, leave that newer state untouched. Otherwise removing only the
+    # exact failed bytes makes the next ensure call create a new attempt identity.
+    try:
+        current_bytes = state.path.read_bytes()
+    except FileNotFoundError:
+        return archive_path
+    if current_bytes == failed_bytes:
+        try:
+            state.path.unlink()
+        except FileNotFoundError:
+            pass
+    return archive_path
+
+
+def _ensure_active_attempt(values: Mapping[str, str]) -> StageIsolatedEvidenceState:
+    """Return a non-terminal attempt, superseding a fresh failed attempt exactly once."""
+
+    state = ensure_stage_isolated_evidence_pipeline(values)
+    if state.state != "failed":
+        return state
+
+    previous = state
+    archive = _archive_failed_attempt(previous)
+    replacement = ensure_stage_isolated_evidence_pipeline(values)
+    if replacement.state == "failed":
+        raise RuntimeError(
+            "failed stage-isolated evidence attempt remained active after supersession"
+        )
+    if replacement.pipeline_id == previous.pipeline_id:
+        raise RuntimeError(
+            "stage-isolated evidence retry did not receive a fresh attempt identity"
+        )
+
+    print(
+        json.dumps(
+            {
+                "event": "stage_isolated_evidence_attempt_superseded",
+                "previous_pipeline_id": previous.pipeline_id,
+                "pipeline_id": replacement.pipeline_id,
+                "previous_failed_stage": previous.current_stage,
+                "previous_completed_stages": list(previous.completed_stages),
+                "previous_evidence_as_of": previous.evidence_as_of.isoformat(),
+                "evidence_as_of": replacement.evidence_as_of.isoformat(),
+                "archive": None if archive is None else str(archive),
+                "canonical_stage_revalidation_required": True,
+                "durable_evidence_reuse_permitted_only_by_stage_loaders": True,
+                "paper_only": True,
+                "real_money_authorized": False,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    return replacement
+
+
 def run_pipeline(values: Mapping[str, str] | None = None) -> int:
     resolved = dict(os.environ if values is None else values)
     if str(resolved.get("RENDER") or "").strip().lower() == "true":
@@ -76,7 +164,7 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
         resolved[_DAG_WORKERS_ENV] = "1"
         os.environ[_DAG_WORKERS_ENV] = "1"
 
-    state = ensure_stage_isolated_evidence_pipeline(resolved)
+    state = _ensure_active_attempt(resolved)
     if state.state == "completed" and state.generation_id:
         print(
             json.dumps(
