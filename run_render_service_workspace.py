@@ -169,10 +169,18 @@ def main() -> int:
     # epoch. Install its progress projection before the legacy parent watchdog.
     install_resume_aware_release_dag_projection()
 
+    from operations.lane_local_watchdog_progress import (
+        install_lane_local_watchdog_progress,
+    )
     from operations.release_prequalification_parent_watchdog import (
         install_release_prequalification_parent_watchdog,
     )
 
+    # PR #742 moved comprehensive discovery to per-lane catalog/publication/screening
+    # artifacts. Project those exact durable work units into the existing watchdog before
+    # its subprocess proxy is installed. Stall limits remain unchanged and retries of the
+    # same unit cannot manufacture liveness.
+    install_lane_local_watchdog_progress()
     install_release_prequalification_parent_watchdog(memory_safe)
 
     # Install the capability operating-evidence startup gate first. Comprehensive
