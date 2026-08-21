@@ -1,15 +1,15 @@
 """Supervise release evidence prequalification by durable child progress.
 
 The Render release bootstrap starts evidence qualification before a CIO request exists.
-Individual reference, public-live, post-public provider preparation, and certification-DAG
-work units have durable progress journals, while the parent bootstrap historically waited
-on the aggregate evidence subprocess with an unbounded ``subprocess.run``. A coordinator
-stall could therefore leave production in ``evidence_prequalifying`` forever while the
-public audit displayed an unrelated stale child journal.
+Individual reference, public-live, post-public provider preparation, bounded comprehensive-
+discovery, and certification-DAG work units expose durable operational progress. The parent
+bootstrap historically waited on the aggregate evidence subprocess with an unbounded
+``subprocess.run``; later supervision still could misclassify bounded discovery as stalled
+because its integrity-protected stage artifacts were not part of the trusted progress set.
 
 This module installs a narrow subprocess proxy into the memory-safe Render bootstrap. It
 recognizes only the one-shot bounded continuous-evidence command, observes only
-credential-safe current-attempt journals, republishes the active parent phase through the
+credential-safe current-attempt progress, republishes the active parent phase through the
 existing integrity-protected release-prequalification record, and terminates the aggregate
 process only when *durable progress* has stopped beyond the execution budget of the active
 unit. Long all-market work remains valid while progress advances.
@@ -30,6 +30,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from types import ModuleType
 from typing import Mapping
 
@@ -72,10 +73,15 @@ class PrequalificationProgress:
     state: str
     stall_limit_seconds: float
     metrics: Mapping[str, int]
+    progress_token: str | None = None
 
     @property
     def marker(self) -> tuple[str, str, str, str]:
-        return self.phase, self.component, self.state, self.updated_at.isoformat()
+        # Trusted journals already provide a durable update timestamp. Bounded discovery
+        # instead uses a logical work token derived from integrity-checked stage state, so
+        # touching/re-writing the same stage cannot manufacture another liveness event.
+        token = self.progress_token or self.updated_at.isoformat()
+        return self.phase, self.component, self.state, token
 
 
 def _aware(value: object) -> datetime | None:
@@ -175,6 +181,156 @@ def _preparation_progress(values: Mapping[str, str], *, boundary: datetime) -> P
     )
 
 
+def _path_mtime(path: Path) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return None
+
+
+def _bounded_discovery_progress(
+    values: Mapping[str, str], *, boundary: datetime
+) -> PrequalificationProgress | None:
+    """Project integrity-checked bounded-builder completions into parent liveness.
+
+    The builder's stage files are already hash-verified, paper-only, authority-free state.
+    We accept only a request file created during this parent attempt and use a logical
+    position token rather than filesystem time as the liveness marker. Therefore stale
+    requests, malformed stage state, a touched file, or replay of the same completed stage
+    cannot repeatedly reset the watchdog.
+    """
+
+    try:
+        from operations import bounded_comprehensive_discovery_spool as bounded
+        from operations import comprehensive_discovery_input_spool as spool
+
+        root = spool._root(values)
+    except (ImportError, OSError, RuntimeError, ValueError):
+        return None
+
+    try:
+        request_paths = tuple(root.glob("*/*/request.json"))
+    except OSError:
+        return None
+
+    best: tuple[datetime, PrequalificationProgress] | None = None
+    timeout = _positive_seconds(
+        values,
+        (_PREPARATION_STALL_ENV, _STARTUP_STALL_ENV),
+        _DEFAULT_STARTUP_STALL_SECONDS,
+    )
+    for request_path in request_paths:
+        request_mtime = _path_mtime(request_path)
+        if request_mtime is None or request_mtime < boundary:
+            continue
+        try:
+            request, _policy = spool.load_request(request_path)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+        request_id = str(request.get("request_id") or "").strip()
+        if not request_id or request.get("release") != spool._release(values):
+            continue
+
+        component = "bounded-discovery-request"
+        position = "00-request"
+        observed_at = request_mtime
+        metrics: dict[str, int] = {}
+
+        try:
+            catalog = bounded._load_stage_state(request_path, "catalog-stage")
+        except (OSError, RuntimeError, TypeError, ValueError):
+            catalog = None
+        if isinstance(catalog, Mapping) and catalog.get("request_id") == request_id:
+            component = "bounded-catalog-complete"
+            position = "10-catalog"
+            metrics = {
+                "catalog_records": int(catalog.get("catalog_record_count") or 0),
+            }
+            observed_at = _path_mtime(
+                request_path.parent / "catalog-stage.json"
+            ) or observed_at
+
+        try:
+            publication = bounded._load_stage_state(request_path, "publication-stage")
+        except (OSError, RuntimeError, TypeError, ValueError):
+            publication = None
+        if isinstance(publication, Mapping) and publication.get("request_id") == request_id:
+            raw_lanes = publication.get("lane_catalog_shards")
+            lanes = raw_lanes if isinstance(raw_lanes, list) else []
+            component = "bounded-provider-preselection-complete"
+            position = "20-publication"
+            metrics = {
+                "scheduled_lanes": len(lanes),
+                "catalog_records": int(publication.get("merged_catalog_record_count") or 0),
+            }
+            observed_at = _path_mtime(
+                request_path.parent / "publication-stage.json"
+            ) or observed_at
+
+            completed_lanes = 0
+            for expected_index, raw_lane in enumerate(lanes):
+                if not isinstance(raw_lane, Mapping):
+                    break
+                try:
+                    index = int(raw_lane.get("index", -1))
+                except (TypeError, ValueError):
+                    break
+                asset_class = str(raw_lane.get("asset_class") or "").strip().lower()
+                if index != expected_index or not asset_class:
+                    break
+                try:
+                    lane_state = bounded._load_stage_state(
+                        request_path, f"lane-stage-{index:03d}"
+                    )
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    break
+                if lane_state.get("request_id") != request_id:
+                    break
+                node = lane_state.get("node")
+                if not isinstance(node, Mapping) or str(node.get("asset_class") or "") != asset_class:
+                    break
+                completed_lanes += 1
+                component = f"bounded-lane-complete:{asset_class}"
+                position = f"30-lane-{index:03d}"
+                metrics = {
+                    "scheduled_lanes": len(lanes),
+                    "completed_lanes": completed_lanes,
+                    "decision_eligible_records": int(
+                        node.get("decision_eligible_count") or 0
+                    ),
+                }
+                observed_at = _path_mtime(
+                    request_path.parent / f"lane-stage-{index:03d}.json"
+                ) or observed_at
+
+        try:
+            manifest_path, manifest = spool.load_manifest_for_request(request_path)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            manifest = None
+            manifest_path = request_path.parent / "manifest.json"
+        if isinstance(manifest, Mapping) and manifest.get("request_id") == request_id:
+            nodes = manifest.get("nodes")
+            component = "bounded-discovery-manifest-complete"
+            position = "40-manifest"
+            metrics = {
+                "scheduled_lanes": len(nodes) if isinstance(nodes, list) else 0,
+            }
+            observed_at = _path_mtime(manifest_path) or observed_at
+
+        progress = PrequalificationProgress(
+            "discovery_preparation",
+            component,
+            observed_at,
+            "running",
+            timeout,
+            metrics,
+            progress_token=f"{request_id}:{position}",
+        )
+        if best is None or request_mtime > best[0]:
+            best = (request_mtime, progress)
+    return None if best is None else best[1]
+
+
 def _dag_progress(values: Mapping[str, str], *, boundary: datetime) -> PrequalificationProgress | None:
     # A retry may reuse the original decision epoch. Require a current-attempt journal
     # update, but do not reject a still-valid resumed epoch merely because it predates this
@@ -200,12 +356,13 @@ def _dag_progress(values: Mapping[str, str], *, boundary: datetime) -> Prequalif
 
 
 def observe_current_prequalification_progress(values: Mapping[str, str], *, started_at: datetime) -> PrequalificationProgress:
-    """Return the newest credential-safe journal updated by the current child attempt."""
+    """Return the newest credential-safe progress owned by the current child attempt."""
     boundary = started_at.astimezone(timezone.utc)
     candidates = [item for item in (
         _reference_progress(values, boundary=boundary),
         _public_progress(values, boundary=boundary),
         _preparation_progress(values, boundary=boundary),
+        _bounded_discovery_progress(values, boundary=boundary),
         _dag_progress(values, boundary=boundary),
     ) if item is not None]
     if candidates:
