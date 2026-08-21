@@ -35,8 +35,11 @@ _LANE_PROGRESS_STAGES = frozenset(
         "certification_dag",
         "certification_dag_complete",
         "certification_dag_failed",
+        "bounded_spool_catalog_lane",
         "bounded_spool_catalog_lane_complete",
+        "bounded_spool_publication_lane",
         "bounded_spool_publication_lane_complete",
+        "bounded_spool_screening_lane",
     }
 )
 _PROGRESS_METRICS = frozenset(
