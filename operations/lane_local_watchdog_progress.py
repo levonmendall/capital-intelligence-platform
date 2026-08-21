@@ -1,15 +1,15 @@
 """Bridge lane-local comprehensive-discovery work into the parent stall watchdog.
 
 Telemetry #704 showed the release parent watchdog timing out while comprehensive discovery
-was still running after the telemetry #698 memory repair.  The memory-bounded coordinator
+was still running after the telemetry #698 memory repair. The memory-bounded coordinator
 now persists one catalog, publication, and screening state per asset-class lane, while the
 legacy watchdog reader still understands only the older aggregate catalog/publication
-states.  This module supplies a narrow compatibility projection from the current lane-local
+states. This module supplies a narrow compatibility projection from the current lane-local
 state contract into the existing :class:`PrequalificationProgress` contract.
 
-The projection is deliberately logical rather than timestamp-heartbeat based.  Starting a
+The projection is deliberately logical rather than timestamp-heartbeat based. Starting a
 new lane/substage or durably completing a new lane/substage advances the progress token;
-touching or replaying the same file does not.  Existing watchdog stall budgets, fail-closed
+touching or replaying the same file does not. Existing watchdog stall budgets, fail-closed
 termination, market/candidate scope, evidence rules, CIO authority, and paper-only boundaries
 are unchanged.
 """
@@ -49,6 +49,32 @@ def _active_state_path(request_path: str | Path) -> Path:
     return Path(request_path).expanduser().parent / _ACTIVE_STATE_NAME
 
 
+def _load_request_identity(request_path: Path, spool) -> Mapping[str, object] | None:
+    """Validate the small request envelope without deserializing the policy blob."""
+
+    try:
+        body = spool._load_json(request_path, schema=spool._REQUEST_SCHEMA)
+        expected = spool._digest(
+            {
+                "schema_version": spool._REQUEST_SCHEMA,
+                "release": body.get("release"),
+                "decision_epoch": body.get("decision_epoch"),
+                "held_symbols": body.get("held_symbols"),
+                "tracked_symbols": body.get("tracked_symbols"),
+                "excluded_symbols": body.get("excluded_symbols"),
+                "policy_sha256": body.get("policy_sha256"),
+            }
+        )
+        if str(body.get("request_id") or "") != expected:
+            return None
+        policy_descriptor = spool._descriptor(body.get("policy_blob"))
+        if policy_descriptor.sha256 != str(body.get("policy_sha256") or ""):
+            return None
+        return body
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+
+
 def record_active_lane_watchdog_progress(
     request_path: str | Path,
     values: Mapping[str, str],
@@ -59,8 +85,8 @@ def record_active_lane_watchdog_progress(
 ) -> None:
     """Persist one credential-safe logical marker before a lane child is launched.
 
-    This state has no evidence or investment authority.  Its only purpose is to tell the
-    parent watchdog exactly which finite child unit is currently running.  Re-entering the
+    This state has no evidence or investment authority. Its only purpose is to tell the
+    parent watchdog exactly which finite child unit is currently running. Re-entering the
     same action/lane produces the same logical progress token, so retries cannot fabricate
     indefinite liveness.
     """
@@ -73,19 +99,21 @@ def record_active_lane_watchdog_progress(
     if not normalized_asset_class:
         raise ValueError("asset_class is required")
 
-    from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import comprehensive_discovery_input_spool as spool
 
     path = Path(request_path).expanduser()
-    request, _policy = bounded._validate_request(path, values)
+    request = _load_request_identity(path, spool)
+    if request is None:
+        raise RuntimeError("lane-local watchdog request identity is invalid")
     request_id = str(request.get("request_id") or "").strip()
-    if not request_id:
-        raise RuntimeError("lane-local watchdog request identity is missing")
+    release = spool._release(values)
+    if not request_id or request.get("release") != release:
+        raise RuntimeError("lane-local watchdog request release does not match runtime")
 
     payload: dict[str, object] = {
         "schema_version": _SCHEMA_VERSION,
         "request_id": request_id,
-        "release": spool._release(values),
+        "release": release,
         "action": action,
         "asset_class": normalized_asset_class,
         "index": index,
@@ -177,6 +205,26 @@ def _peak_metric(state: Mapping[str, object]) -> int:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
+def _progress(
+    watchdog,
+    *,
+    component: str,
+    updated_at: datetime,
+    timeout: float,
+    metrics: Mapping[str, int],
+    token: str,
+):
+    return watchdog.PrequalificationProgress(
+        "discovery_preparation",
+        component,
+        updated_at,
+        "running",
+        timeout,
+        metrics,
+        progress_token=token,
+    )
+
+
 def _lane_local_request_progress(
     request_path: Path,
     values: Mapping[str, str],
@@ -191,9 +239,8 @@ def _lane_local_request_progress(
     request_mtime = watchdog._path_mtime(request_path)
     if request_mtime is None or request_mtime < boundary:
         return None
-    try:
-        request, _policy = spool.load_request(request_path)
-    except (OSError, RuntimeError, TypeError, ValueError):
+    request = _load_request_identity(request_path, spool)
+    if request is None:
         return None
     request_id = str(request.get("request_id") or "").strip()
     release = spool._release(values)
@@ -221,26 +268,18 @@ def _lane_local_request_progress(
             lane_identity = lanes[index].value
         except IndexError:
             lane_identity = ""
-        if lane_identity == asset_class:
-            if action == "catalog-lane":
-                rank = 10_000 + index * 20
-            elif action == "publication-lane":
-                rank = 10_000 + index * 20 + 10
-            else:
-                rank = 20_000 + index * 20
+        if lane_identity == asset_class and action != "screening-lane":
+            rank = 10_000 + index * 20 + (10 if action == "publication-lane" else 0)
             candidates.append(
                 (
                     rank,
-                    watchdog.PrequalificationProgress(
-                        "discovery_preparation",
-                        f"{_ACTION_COMPONENTS[action]}:{asset_class}",
-                        updated_at,
-                        "running",
-                        timeout,
-                        {"active_lane_index": index, "candidate_lanes": len(lanes)},
-                        progress_token=(
-                            f"{request_id}:active:{action}:{index:03d}:{asset_class}"
-                        ),
+                    _progress(
+                        watchdog,
+                        component=f"{_ACTION_COMPONENTS[action]}:{asset_class}",
+                        updated_at=updated_at,
+                        timeout=timeout,
+                        metrics={"active_lane_index": index, "candidate_lanes": len(lanes)},
+                        token=f"{request_id}:active:{action}:{index:03d}:{asset_class}",
                     ),
                 )
             )
@@ -261,21 +300,18 @@ def _lane_local_request_progress(
         candidates.append(
             (
                 10_000 + index * 20 + 5,
-                watchdog.PrequalificationProgress(
-                    "discovery_preparation",
-                    f"bounded-catalog-lane-complete:{asset_class}",
-                    catalog_time,
-                    "running",
-                    timeout,
-                    {
+                _progress(
+                    watchdog,
+                    component=f"bounded-catalog-lane-complete:{asset_class}",
+                    updated_at=catalog_time,
+                    timeout=timeout,
+                    metrics={
                         "candidate_lanes": len(lanes),
                         "completed_catalog_lanes": index + 1,
                         "catalog_records": int(catalog.get("record_count") or 0),
                         "peak_rss_bytes": _peak_metric(catalog),
                     },
-                    progress_token=(
-                        f"{request_id}:catalog-lane:{index:03d}:{asset_class}:complete"
-                    ),
+                    token=f"{request_id}:catalog-lane:{index:03d}:{asset_class}:complete",
                 ),
             )
         )
@@ -296,13 +332,12 @@ def _lane_local_request_progress(
         candidates.append(
             (
                 10_000 + index * 20 + 15,
-                watchdog.PrequalificationProgress(
-                    "discovery_preparation",
-                    f"bounded-publication-lane-complete:{asset_class}",
-                    publication_time,
-                    "running",
-                    timeout,
-                    {
+                _progress(
+                    watchdog,
+                    component=f"bounded-publication-lane-complete:{asset_class}",
+                    updated_at=publication_time,
+                    timeout=timeout,
+                    metrics={
                         "candidate_lanes": len(lanes),
                         "completed_publication_lanes": index + 1,
                         "catalog_records": int(publication.get("record_count") or 0),
@@ -311,9 +346,7 @@ def _lane_local_request_progress(
                             publication.get("bounded_provider_publication") is True
                         ),
                     },
-                    progress_token=(
-                        f"{request_id}:publication-lane:{index:03d}:{asset_class}:complete"
-                    ),
+                    token=f"{request_id}:publication-lane:{index:03d}:{asset_class}:complete",
                 ),
             )
         )
@@ -329,18 +362,17 @@ def _lane_local_request_progress(
                 candidates.append(
                     (
                         20_000 + order * 20,
-                        watchdog.PrequalificationProgress(
-                            "discovery_preparation",
-                            f"bounded-spool-screening-lane:{active_asset}",
-                            updated_at,
-                            "running",
-                            timeout,
-                            {
+                        _progress(
+                            watchdog,
+                            component=f"bounded-spool-screening-lane:{active_asset}",
+                            updated_at=updated_at,
+                            timeout=timeout,
+                            metrics={
                                 "scheduled_lanes": len(scheduled),
                                 "completed_screening_lanes": order,
                                 "active_lane_index": active_index,
                             },
-                            progress_token=(
+                            token=(
                                 f"{request_id}:active:screening-lane:{active_index:03d}:{active_asset}"
                             ),
                         ),
@@ -361,24 +393,48 @@ def _lane_local_request_progress(
             candidates.append(
                 (
                     20_000 + order * 20 + 10,
-                    watchdog.PrequalificationProgress(
-                        "discovery_preparation",
-                        f"bounded-screening-lane-complete:{asset_class}",
-                        lane_time,
-                        "running",
-                        timeout,
-                        {
+                    _progress(
+                        watchdog,
+                        component=f"bounded-screening-lane-complete:{asset_class}",
+                        updated_at=lane_time,
+                        timeout=timeout,
+                        metrics={
                             "scheduled_lanes": len(scheduled),
                             "completed_screening_lanes": completed_screening,
                             "decision_eligible_records": int(node.get("decision_eligible_count") or 0),
                             "peak_rss_bytes": _peak_metric(lane_state),
                         },
-                        progress_token=(
-                            f"{request_id}:screening-lane:{index:03d}:{asset_class}:complete"
-                        ),
+                        token=f"{request_id}:screening-lane:{index:03d}:{asset_class}:complete",
                     ),
                 )
             )
+
+    manifest_path = request_path.parent / "manifest.json"
+    try:
+        manifest = spool.load_manifest(manifest_path)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        manifest = None
+    if (
+        isinstance(manifest, Mapping)
+        and manifest.get("request_id") == request_id
+        and manifest.get("release") == release
+        and manifest.get("decision_epoch") == request.get("decision_epoch")
+    ):
+        nodes = manifest.get("nodes")
+        manifest_time = watchdog._path_mtime(manifest_path) or request_mtime
+        candidates.append(
+            (
+                30_000,
+                _progress(
+                    watchdog,
+                    component="bounded-discovery-manifest-complete",
+                    updated_at=manifest_time,
+                    timeout=timeout,
+                    metrics={"scheduled_lanes": len(nodes) if isinstance(nodes, list) else 0},
+                    token=f"{request_id}:manifest:complete",
+                ),
+            )
+        )
 
     if not candidates:
         return None
@@ -428,15 +484,10 @@ def install_lane_local_watchdog_progress() -> None:
         return
 
     def combined(values: Mapping[str, str], *, boundary: datetime):
-        legacy = current(values, boundary=boundary)
         lane_local = lane_local_bounded_discovery_progress(values, boundary=boundary)
-        if lane_local is None:
-            return legacy
-        if legacy is None:
+        if lane_local is not None:
             return lane_local
-        if str(getattr(legacy, "component", "")) == "bounded-discovery-manifest-complete":
-            return legacy
-        return lane_local if lane_local.updated_at >= legacy.updated_at else legacy
+        return current(values, boundary=boundary)
 
     setattr(combined, _INSTALLED_ATTR, True)
     setattr(combined, "_legacy_bounded_discovery_progress", current)
