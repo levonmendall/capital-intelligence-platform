@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Mapping
 
-from operations import bounded_lane_comprehensive_discovery_worker as _worker
+from operations import bounded_lane_comprehensive_discovery_worker_v2 as _worker
 from operations import comprehensive_discovery_input_spool as _legacy
 from operations import lane_local_comprehensive_discovery_spool as _lane_local
 
@@ -167,6 +167,7 @@ def build_spool(
             "bounded_memory_builder": True,
             "lane_local_catalogs": True,
             "second_level_lane_memory_bound": True,
+            "bounded_provider_publication": True,
             "builder_peak_rss_bytes": {"lanes": lane_peaks},
             "nodes": node_bodies,
             **_legacy._authority_fields(),
