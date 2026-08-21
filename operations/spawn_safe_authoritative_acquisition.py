@@ -1,11 +1,10 @@
 """Spawn-safe, spool-backed authoritative comprehensive-discovery acquisition.
 
 The comprehensive-discovery coordinator retains only compact certification-node metadata.
-Catalog assembly and provider preselection run in a disposable builder interpreter that
-freezes immutable inputs to an integrity-protected local spool and exits before any lane
-worker starts. Each provider-facing lane then loads only its own records in a fresh spawn
-interpreter. Frozen catalog/publication inputs are loaded only after every required lane
-qualifies, immediately before the existing provider-free canonical finalizer.
+Catalog assembly, provider preselection, and lane descriptor construction run in finite
+bounded-memory interpreters. Each provider-facing lane then loads only its own records in
+a fresh spawn interpreter. Frozen catalog/publication inputs are loaded only after every
+required lane qualifies, immediately before the existing provider-free canonical finalizer.
 
 This module changes only memory lifetime and operational transport. It does not change
 market membership, evidence standards, screening, CIO authority, construction, execution,
@@ -24,11 +23,11 @@ from typing import Any, Mapping, Sequence
 
 from operations import authoritative_comprehensive_discovery as _authoritative
 from operations import persistent_certification_scheduler as _scheduler
+from operations.bounded_comprehensive_discovery_spool import load_finalizer_inputs
 from operations.comprehensive_discovery_input_spool import (
     ComprehensiveDiscoverySpoolError,
     SpoolReference,
     load_failure,
-    load_finalizer_inputs,
     load_lane_inputs,
     load_manifest_for_request,
     manifest_available,
@@ -137,14 +136,14 @@ def _prepare_spool_process(request_path: Path, values: Mapping[str, str]) -> Non
         (
             sys.executable,
             "-m",
-            "operations.comprehensive_discovery_input_spool",
+            "operations.bounded_comprehensive_discovery_spool",
             "build",
             "--request",
             str(request_path),
         ),
         cwd=str(repository_root),
         env=dict(values),
-        # Keep the disposable builder in the comprehensive stage process group so the
+        # Keep every finite builder stage in the comprehensive stage process group so the
         # existing reclaimable-aware outer guard remains the authoritative hard boundary.
         start_new_session=False,
     )
