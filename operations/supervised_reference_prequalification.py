@@ -252,6 +252,21 @@ def _directory_lanes(
     )
 
 
+def _missing_required_directory_lanes(
+    component: Mapping[str, object],
+    *,
+    active_lanes: frozenset[CandidateAssetClass],
+) -> tuple[str, ...]:
+    """Compatibility helper: identify scheduled EODHD lanes missing from an aggregate."""
+
+    required = _directory_lanes(active_lanes)
+    try:
+        catalogs = _legacy._component_catalogs(component)
+    except _legacy.ReferenceReadinessError:
+        return tuple(item.value for item in required)
+    return tuple(item.value for item in required if not catalogs.get(item.value))
+
+
 def _directory_lane_component(lane: CandidateAssetClass) -> str:
     return f"{_DIRECTORY}:{lane.value}"
 
@@ -288,7 +303,7 @@ def _collect_directory_lane(
     """Collect and persist exactly one EODHD-backed lane inside a fresh child process."""
 
     provider = discovery._base._legacy.build_eodhd_provider()
-    catalogs = discovery._catalog_from_eodhd(
+    catalogs = discovery._base._catalog_from_eodhd(
         as_of=timestamp,
         config=config,
         provider=provider,
