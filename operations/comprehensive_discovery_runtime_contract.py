@@ -3,7 +3,8 @@
 The manual CIO diagnostic intentionally rejects unknown stages and metrics, so every
 operational certification-DAG boundary must be registered before the scheduler emits it.
 This module also preserves a credential-safe finalizer boundary, installs the spawn-safe
-authoritative lane runner, and installs parent-owned DAG supervision.
+authoritative lane runner, installs lane-local bounded spool materialization, and installs
+parent-owned DAG supervision.
 
 This is operational orchestration only. It cannot relax market coverage, evidence
 freshness/completeness, screening, CIO authority, construction, execution, or paper-only
@@ -99,6 +100,16 @@ def _install_spawn_safe_acquisition() -> None:
     install_spawn_safe_authoritative_acquisition()
 
 
+def _install_lane_local_spool() -> None:
+    """Keep catalog, publication, and finalizer materialization lane scoped."""
+
+    from operations.lane_local_comprehensive_discovery_spool import (
+        install_lane_local_comprehensive_discovery_spool,
+    )
+
+    install_lane_local_comprehensive_discovery_spool()
+
+
 def _install_dag_native_supervision() -> None:
     """Move the hard kill boundary from the aggregate coordinator to each DAG node."""
 
@@ -116,11 +127,12 @@ def _install_dag_native_supervision() -> None:
 
 
 def install_comprehensive_discovery_runtime_contract() -> None:
-    """Install strict progress, spawn-safe acquisition, and DAG-native supervision."""
+    """Install strict progress, lane-local spawn safety, and DAG-native supervision."""
 
     _register_manual_diagnostic_contract()
     _install_finalizer_failure_boundary()
     _install_spawn_safe_acquisition()
+    _install_lane_local_spool()
     _install_dag_native_supervision()
 
 
