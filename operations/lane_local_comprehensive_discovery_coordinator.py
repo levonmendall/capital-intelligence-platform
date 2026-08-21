@@ -36,6 +36,24 @@ def _run_stage(
     index: int,
 ) -> None:
     _record_active_lane_stage(action, asset_class)
+    # Keep a request-local logical start marker for the parent watchdog.  This state is
+    # observability-only and fail-contained: inability to publish it must not change the
+    # child stage's own result.  Re-entering the same lane/substage yields the same logical
+    # token, so retries cannot manufacture indefinite liveness.
+    try:
+        from operations.lane_local_watchdog_progress import (
+            record_active_lane_watchdog_progress,
+        )
+
+        record_active_lane_watchdog_progress(
+            path,
+            values,
+            action=action,
+            asset_class=asset_class,
+            index=index,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        pass
     _worker.run_stage(
         action,
         path,
