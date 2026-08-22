@@ -39,6 +39,10 @@ from operations.free_paper_pilot import (
 from operations.production_capability_authority import (
     reconcile_production_capability_authority,
 )
+from production_context_screening_resource_guard import (
+    ensure_screening_headroom,
+    trim_released_heap,
+)
 from providers.alpaca_paper import create_alpaca_paper_client
 from providers.fred import FREDProvider
 
@@ -115,6 +119,29 @@ def _capability_scoped_operation_enabled() -> bool:
     if raw is not None:
         return raw.strip().lower() in {"1", "true", "yes", "on"}
     return os.getenv("RENDER", "").strip().lower() == "true"
+
+
+def _screening_resource_progress_probe(
+    progress_probe: Callable[[str], None] | None,
+) -> Callable[[str], None]:
+    """Protect the expensive screening stream without changing screening semantics.
+
+    The governed publisher has already deleted the large discovery graph when it emits
+    ``production_context_screening_graph_released``. A best-effort heap trim at that exact
+    handoff lets glibc return released arenas to the container. The existing
+    ``production_context_screening_start_persisted`` event is forwarded before the guard
+    runs so a low-headroom stop remains durable and attributable to the exact boundary.
+    """
+
+    def guarded(stage: str) -> None:
+        if stage == "production_context_screening_graph_released":
+            trim_released_heap()
+        if progress_probe is not None:
+            progress_probe(stage)
+        if stage == "production_context_screening_start_persisted":
+            ensure_screening_headroom()
+
+    return guarded
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,7 +336,7 @@ def prepare_production_context_for_cycle(
         comprehensive_discovery_probe=comprehensive_discovery_probe,
         comprehensive_discovery_required=comprehensive_discovery_required,
         clock=clock,
-        progress_probe=progress_probe,
+        progress_probe=_screening_resource_progress_probe(progress_probe),
     )
     _advance_screening_if_ready(result)
     _reconcile_capability_authority_if_ready(settings=settings, result=result)
