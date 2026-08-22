@@ -83,7 +83,7 @@ def test_capability_prequalification_timeout_fails_closed_and_does_not_stay_read
     assert "capability_operating_evidence_timeout" in str(status["detail"])
     assert status["generation_id"] == "generation-current"
     assert status["metrics"]["capability_operating_evidence_timeout"] == 1
-    assert memory_safe.audit_publications >= 2
+    assert memory_safe.render_bootstrap.audit_publications >= 2
 
 
 def test_capability_prequalification_success_restores_ready_only_after_fresh_snapshot(
