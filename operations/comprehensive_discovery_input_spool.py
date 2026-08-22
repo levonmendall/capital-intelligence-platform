@@ -86,6 +86,34 @@ class _HashingWriter:
         self.handle.flush()
 
 
+def _drop_clean_file_cache(handle: BinaryIO) -> bool:
+    """Best-effort eviction of clean scratch-file pages from the process cgroup.
+
+    Render's cgroup raw-memory accounting includes reclaimable page cache.  The spool
+    files are immutable scratch evidence after they are written or read, so retaining
+    clean pages provides little reuse value while it can exhaust the raw hard ceiling.
+    POSIX_FADV_DONTNEED is only an advisory optimization: unsupported platforms or file
+    systems fall back to the prior behavior without changing discovery semantics.
+    """
+
+    fadvise = getattr(os, "posix_fadvise", None)
+    dontneed = getattr(os, "POSIX_FADV_DONTNEED", None)
+    if not callable(fadvise) or dontneed is None:
+        return False
+    try:
+        fadvise(handle.fileno(), 0, 0, dontneed)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _flush_durable_and_drop_cache(handle: BinaryIO) -> None:
+    """Commit scratch bytes before asking Linux to release their clean cache pages."""
+
+    handle.flush()
+    os.fsync(handle.fileno())
+    _drop_clean_file_cache(handle)
+
 
 def _canonical(value: object) -> bytes:
     return json.dumps(
@@ -96,10 +124,8 @@ def _canonical(value: object) -> bytes:
     ).encode("utf-8")
 
 
-
 def _digest(value: object) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
-
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -111,11 +137,9 @@ def _release(values: Mapping[str, str]) -> str:
     ).strip()
 
 
-
 def _safe_release(value: str) -> str:
     normalized = _SAFE_RELEASE.sub("-", str(value or "").strip()).strip("-.")
     return normalized or "unknown"
-
 
 
 def _root(values: Mapping[str, str]) -> Path:
@@ -132,12 +156,10 @@ def _root(values: Mapping[str, str]) -> Path:
     return Path(data_dir).expanduser() / "comprehensive-discovery-spool" / _safe_release(release)
 
 
-
 def _aware(value: datetime, *, field_name: str) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
     return value.astimezone(timezone.utc)
-
 
 
 def _parse_timestamp(value: object, *, field_name: str) -> datetime:
@@ -150,7 +172,6 @@ def _parse_timestamp(value: object, *, field_name: str) -> datetime:
     return _aware(parsed, field_name=field_name)
 
 
-
 def _atomic_json(path: Path, body: Mapping[str, object]) -> None:
     payload = {"body": dict(body), "sha256": _digest(body)}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,7 +179,6 @@ def _atomic_json(path: Path, body: Mapping[str, object]) -> None:
     temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
     temporary.write_text(encoded, encoding="utf-8")
     os.replace(temporary, path)
-
 
 
 def _load_json(path: Path, *, schema: str) -> Mapping[str, object]:
@@ -195,7 +215,6 @@ def _load_json(path: Path, *, schema: str) -> Mapping[str, object]:
     return body
 
 
-
 def _authority_fields() -> dict[str, object]:
     return {
         "decision_authority": False,
@@ -208,14 +227,12 @@ def _authority_fields() -> dict[str, object]:
     }
 
 
-
 def _descriptor_dict(descriptor: BlobDescriptor) -> dict[str, object]:
     return {
         "relative_path": descriptor.relative_path,
         "sha256": descriptor.sha256,
         "byte_count": descriptor.byte_count,
     }
-
 
 
 def _descriptor(value: object) -> BlobDescriptor:
@@ -238,7 +255,6 @@ def _descriptor(value: object) -> BlobDescriptor:
     return BlobDescriptor(relative_path=relative, sha256=sha256, byte_count=byte_count)
 
 
-
 def _write_bytes_blob(directory: Path, name: str, payload: bytes) -> BlobDescriptor:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
@@ -248,10 +264,11 @@ def _write_bytes_blob(directory: Path, name: str, payload: bytes) -> BlobDescrip
         _verify_blob(directory, descriptor)
         return descriptor
     temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-    temporary.write_bytes(payload)
+    with temporary.open("wb") as handle:
+        handle.write(payload)
+        _flush_durable_and_drop_cache(handle)
     os.replace(temporary, path)
     return BlobDescriptor(name, digest, len(payload))
-
 
 
 def _write_pickle_blob(directory: Path, name: str, value: object) -> BlobDescriptor:
@@ -269,9 +286,10 @@ def _write_pickle_blob(directory: Path, name: str, value: object) -> BlobDescrip
             sha256=writer.digest.hexdigest(),
             byte_count=writer.byte_count,
         )
+        os.fsync(handle.fileno())
+        _drop_clean_file_cache(handle)
     os.replace(temporary, path)
     return descriptor
-
 
 
 def _verify_blob(directory: Path, descriptor: BlobDescriptor) -> Path:
@@ -291,6 +309,7 @@ def _verify_blob(directory: Path, descriptor: BlobDescriptor) -> Path:
         with path.open("rb") as handle:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
+            _drop_clean_file_cache(handle)
     except OSError as error:
         raise ComprehensiveDiscoverySpoolError(
             f"spool blob cannot be verified: {descriptor.relative_path}"
@@ -302,19 +321,20 @@ def _verify_blob(directory: Path, descriptor: BlobDescriptor) -> Path:
     return path
 
 
-
 def _load_pickle_blob(directory: Path, descriptor: BlobDescriptor) -> object:
     # Security/correctness invariant: verify the complete immutable byte stream before
     # pickle is allowed to instantiate anything from it.
     path = _verify_blob(directory, descriptor)
     try:
         with path.open("rb") as handle:
-            return pickle.load(handle)
+            try:
+                return pickle.load(handle)
+            finally:
+                _drop_clean_file_cache(handle)
     except (OSError, pickle.PickleError, EOFError, AttributeError, ImportError, IndexError) as error:
         raise ComprehensiveDiscoverySpoolError(
             f"verified spool blob cannot be deserialized: {descriptor.relative_path}"
         ) from error
-
 
 
 def prepare_request(
@@ -355,7 +375,6 @@ def prepare_request(
     return SpoolRequest(request_id=request_id, path=path, release=release, decision_epoch=epoch)
 
 
-
 def load_request(path: str | Path) -> tuple[Mapping[str, object], object]:
     request_path = Path(path).expanduser()
     body = _load_json(request_path, schema=_REQUEST_SCHEMA)
@@ -379,7 +398,6 @@ def load_request(path: str | Path) -> tuple[Mapping[str, object], object]:
     return body, policy
 
 
-
 def _node_body(node: object, lane: BlobDescriptor) -> dict[str, object]:
     deadline = getattr(node, "deadline")
     return {
@@ -395,7 +413,6 @@ def _node_body(node: object, lane: BlobDescriptor) -> dict[str, object]:
     }
 
 
-
 def _safe_detail(error: BaseException, values: Mapping[str, str]) -> str:
     text = str(error).strip() or type(error).__name__
     secrets = {
@@ -407,7 +424,6 @@ def _safe_detail(error: BaseException, values: Mapping[str, str]) -> str:
     for secret in sorted(secrets, key=len, reverse=True):
         text = text.replace(secret, "[REDACTED]")
     return text[:1600]
-
 
 
 def _write_failure(request_path: Path, *, stage: str, error: BaseException, values: Mapping[str, str]) -> None:
@@ -422,7 +438,6 @@ def _write_failure(request_path: Path, *, stage: str, error: BaseException, valu
     _atomic_json(request_path.parent / "failure.json", body)
 
 
-
 def load_failure(request_path: str | Path) -> Mapping[str, object] | None:
     path = Path(request_path).expanduser().parent / "failure.json"
     if not path.exists():
@@ -430,10 +445,8 @@ def load_failure(request_path: str | Path) -> Mapping[str, object] | None:
     return _load_json(path, schema=_FAILURE_SCHEMA)
 
 
-
 def _manifest_path(request_path: str | Path) -> Path:
     return Path(request_path).expanduser().parent / "manifest.json"
-
 
 
 def load_manifest(path: str | Path) -> Mapping[str, object]:
@@ -445,7 +458,6 @@ def load_manifest(path: str | Path) -> Mapping[str, object]:
     if not manifest_id or manifest_id != _digest(material):
         raise ComprehensiveDiscoverySpoolError("comprehensive discovery spool manifest id mismatch")
     return body
-
 
 
 def load_manifest_for_request(request_path: str | Path) -> tuple[Path, Mapping[str, object]]:
@@ -461,14 +473,12 @@ def load_manifest_for_request(request_path: str | Path) -> tuple[Path, Mapping[s
     return manifest_path, body
 
 
-
 def manifest_available(request_path: str | Path) -> bool:
     try:
         load_manifest_for_request(request_path)
     except ComprehensiveDiscoverySpoolError:
         return False
     return True
-
 
 
 def nodes_from_manifest(body: Mapping[str, object]):
@@ -498,10 +508,8 @@ def nodes_from_manifest(body: Mapping[str, object]):
     return tuple(nodes)
 
 
-
 def _manifest_directory(manifest_path: str | Path) -> Path:
     return Path(manifest_path).expanduser().parent
-
 
 
 def load_lane_inputs(
@@ -531,7 +539,6 @@ def load_lane_inputs(
     return records, policy, selected
 
 
-
 def load_finalizer_inputs(manifest_path: str | Path) -> tuple[Mapping[object, object], object]:
     body = load_manifest(manifest_path)
     directory = _manifest_directory(manifest_path)
@@ -540,7 +547,6 @@ def load_finalizer_inputs(manifest_path: str | Path) -> tuple[Mapping[object, ob
     if not isinstance(raw_catalogs, Mapping):
         raise ComprehensiveDiscoverySpoolError("spooled raw catalog is not a mapping")
     return raw_catalogs, publication
-
 
 
 def build_spool(request_path: str | Path, *, values: Mapping[str, str] | None = None) -> Path:
@@ -686,7 +692,6 @@ def build_spool(request_path: str | Path, *, values: Mapping[str, str] | None = 
         except BaseException:
             pass
         raise
-
 
 
 def _main(argv: Sequence[str] | None = None) -> int:
