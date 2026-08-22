@@ -3,6 +3,11 @@
 This read-only enrichment consumes only the already-public credential-safe audit. It copies
 operational stage names, timestamps, counts, and sanitized failure classifications; it never
 copies market symbols, holdings, recommendations, provider payloads, or credentials.
+
+Telemetry #716 also proved that the generic telemetry collector's historical progress-metric
+allowlist can discard newly governed memory/lane diagnostics. This final enrichment step
+therefore copies only the explicit non-authoritative resource fields emitted by the signed
+release-prequalification record.
 """
 
 from __future__ import annotations
@@ -29,6 +34,49 @@ _ALLOWED_STAGES = frozenset(
         "finalize",
         "complete",
     }
+)
+_RESOURCE_CONTEXT_KEYS = (
+    "failure_progress_kind",
+    "failure_substage",
+    "failure_asset_class",
+    "failure_component",
+    "last_durable_progress_component",
+    "memory_trigger_reason",
+    "memory_accounting_source",
+)
+_RESOURCE_METRIC_KEYS = (
+    "failure_lane_index",
+    "failure_progress_active",
+    "failure_progress_completed",
+    "memory_process_peak_rss_kib",
+    "memory_working_set_peak_kib",
+    "memory_raw_peak_kib",
+    "memory_inactive_file_peak_kib",
+    "memory_anon_peak_kib",
+    "memory_file_peak_kib",
+    "memory_kernel_peak_kib",
+    "memory_working_set_boundary_kib",
+    "memory_raw_hard_boundary_kib",
+    "memory_trigger_working_set",
+    "memory_trigger_raw_hard_ceiling",
+    "memory_trigger_other",
+    "lane_active_lane_index",
+    "lane_candidate_lanes",
+    "lane_completed_catalog_lanes",
+    "lane_completed_publication_lanes",
+    "lane_completed_screening_lanes",
+    "lane_scheduled_lanes",
+    "lane_catalog_records",
+    "lane_decision_eligible_records",
+    "lane_peak_rss_bytes",
+    "lane_bounded_provider_publication",
+)
+_AUTHORITY_FIELDS = (
+    "decision_authority",
+    "candidate_authority",
+    "sizing_authority",
+    "construction_authority",
+    "execution_authority",
 )
 
 
@@ -98,6 +146,45 @@ def _safe_retry_failure(value: object) -> dict[str, object] | None:
     }
 
 
+def _safe_resource_failure_context(value: object) -> dict[str, object] | None:
+    """Return only explicitly non-authoritative resource-failure identifiers."""
+
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("credential_safe") is not True:
+        return None
+    if value.get("paper_only") is not True or value.get("real_money_authorized") is not False:
+        return None
+    if any(value.get(field) is not False for field in _AUTHORITY_FIELDS):
+        return None
+
+    safe: dict[str, object] = {
+        "credential_safe": True,
+        **{field: False for field in _AUTHORITY_FIELDS},
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+    for key in _RESOURCE_CONTEXT_KEYS:
+        parsed = _base._safe_identifier(value.get(key))
+        if parsed is not None:
+            safe[key] = parsed
+    lane_index = _base._nonnegative_int(value.get("failure_lane_index"))
+    if lane_index is not None:
+        safe["failure_lane_index"] = lane_index
+    return safe
+
+
+def _safe_resource_metrics(value: object) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    safe: dict[str, int] = {}
+    for key in _RESOURCE_METRIC_KEYS:
+        parsed = _base._nonnegative_int(value.get(key))
+        if parsed is not None:
+            safe[key] = parsed
+    return safe
+
+
 def enrich_snapshot(
     snapshot: Mapping[str, Any],
     public_payload: Mapping[str, Any],
@@ -137,8 +224,28 @@ def enrich_snapshot(
         if error_type is not None:
             updated["prequalification_last_retry_failure_error_type"] = error_type
 
+    resource_context = _safe_resource_failure_context(
+        public_payload.get("prequalification_failure_context")
+    )
+    if resource_context is not None:
+        updated["prequalification_resource_failure_context"] = resource_context
+        for key in _RESOURCE_CONTEXT_KEYS:
+            value = resource_context.get(key)
+            if value is not None:
+                updated[f"prequalification_{key}"] = value
+        lane_index = resource_context.get("failure_lane_index")
+        if lane_index is not None:
+            updated["prequalification_failure_lane_index"] = lane_index
+
+    metrics = dict(updated.get("progress_metrics") or {})
+    metrics.update(_safe_resource_metrics(public_payload.get("progress_metrics")))
+    updated["progress_metrics"] = metrics
+
     enriched["diagnostic"] = updated
     enriched["enriched_from_stage_isolated_prequalification"] = progress is not None
+    enriched["enriched_from_resource_failure_context"] = bool(
+        resource_context is not None or _safe_resource_metrics(public_payload.get("progress_metrics"))
+    )
     return enriched
 
 
