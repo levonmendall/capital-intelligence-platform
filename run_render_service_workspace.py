@@ -159,6 +159,14 @@ def main() -> int:
     from operations.stage_isolated_audit_runtime import (
         install as install_stage_isolated_audit_runtime,
     )
+    from operations.telemetry_712_failure_context_bridge import (
+        install as install_telemetry_712_failure_context_bridge,
+    )
+
+    # Preserve the bounded worker's credential-safe lane and memory context in the signed
+    # release-prequalification record before any public audit publication can collapse it.
+    # This is observability-only; resource limits and all investment controls are unchanged.
+    install_telemetry_712_failure_context_bridge(memory_safe)
 
     # Route every pre-CIO audit refresh through the exact six-stage coordination journal.
     # This changes only public operational attribution; the journal retains no evidence or
