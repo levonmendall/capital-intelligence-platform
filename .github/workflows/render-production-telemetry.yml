@@ -116,6 +116,7 @@ jobs:
           enrichment_status=0
           discovery_enrichment_status=0
           stage_enrichment_status=0
+          freshness_status=0
           if [[ -f "$TELEMETRY_OUTPUT" ]]; then
             python scripts/enrich_render_production_telemetry.py \
               --url "$TELEMETRY_URL" \
@@ -135,8 +136,17 @@ jobs:
               --output "$TELEMETRY_OUTPUT" \
               --timeline-output "$TELEMETRY_TIMELINE" \
               || stage_enrichment_status=$?
+            # Independently derive diagnostic ages from captured_at and the published
+            # UTC timestamps.  This prevents a stale diagnostic from appearing fresh
+            # merely because the source-reported numeric age is inconsistent.
+            python scripts/validate_render_telemetry_freshness.py \
+              --input "$TELEMETRY_OUTPUT" \
+              || freshness_status=$?
           fi
 
+          if [[ "$freshness_status" -ne 0 ]]; then
+            exit "$freshness_status"
+          fi
           if [[ "$capture_status" -ne 0 ]]; then
             exit "$capture_status"
           fi
