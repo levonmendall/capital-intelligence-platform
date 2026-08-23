@@ -195,7 +195,9 @@ def _begin_attempt(
         raw_fence = previous.get("fence_version", 0)
         fence_version = (
             int(raw_fence) + 1
-            if isinstance(raw_fence, int) and not isinstance(raw_fence, bool) and raw_fence >= 0
+            if isinstance(raw_fence, int)
+            and not isinstance(raw_fence, bool)
+            and raw_fence >= 0
             else 1
         )
         previous_id = str(previous.get("attempt_id") or "").strip() or None
@@ -237,7 +239,13 @@ def _finish_attempt_if_owned(
             return False
         if current.get("fence_version") != fence_version:
             return False
-        _atomic_json(path, payload)
+        final_payload = dict(payload)
+        supersedes_attempt_id = str(
+            current.get("supersedes_attempt_id") or ""
+        ).strip()
+        if supersedes_attempt_id:
+            final_payload.setdefault("supersedes_attempt_id", supersedes_attempt_id)
+        _atomic_json(path, final_payload)
         return True
 
 
