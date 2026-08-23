@@ -2,7 +2,7 @@
 
 The Render capability-scoped operating process must not advance exhaustive certification,
 but it may verify immutable certification artifacts produced by the independent certification
-runtime.  This module deliberately contains no state-transition, provider-refresh, portfolio,
+runtime. This module deliberately contains no state-transition, provider-refresh, portfolio,
 or execution authority.
 """
 
@@ -35,12 +35,7 @@ from operations.certification_state_machine import CertificationState
 
 def _digest(payload: Mapping[str, object]) -> str:
     return hashlib.sha256(
-        json.dumps(
-            dict(payload),
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
+        json.dumps(dict(payload), sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     ).hexdigest()
 
 
@@ -67,6 +62,10 @@ def _data_root(values: Mapping[str, str]) -> Path:
     return Path(raw).expanduser()
 
 
+def _legacy_root(values: Mapping[str, str]) -> Path:
+    return Path(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "database").expanduser() / "all-market-certification"
+
+
 def _load_mapping(path: Path) -> Mapping[str, object] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -89,12 +88,7 @@ def _integrity_mapping(path: Path) -> Mapping[str, object] | None:
 def resolve_latest_certification_readonly(
     *, values: Mapping[str, str]
 ) -> CertificationRuntimeBinding:
-    """Resolve latest certification without acquiring advancement authority.
-
-    Unlike ``resolve_latest_certification`` this reader intentionally does not consult
-    ``certification_runtime_enabled``.  It reads the integrity-protected latest-input
-    pointer, then delegates to the exact-cutoff resolver, which is itself read-only.
-    """
+    """Resolve latest certification without acquiring advancement authority."""
 
     release = _release(values)
     if release == "unknown":
@@ -119,10 +113,7 @@ def resolve_latest_certification_readonly(
         raise CertificationRuntimeStateError("certification input cutoff is invalid") from error
     if cutoff.tzinfo is None or cutoff.utcoffset() is None:
         raise CertificationRuntimeStateError("certification input cutoff is not timezone-aware")
-    return resolve_certification_for_cutoff(
-        cutoff.astimezone(timezone.utc),
-        values=values,
-    )
+    return resolve_certification_for_cutoff(cutoff.astimezone(timezone.utc), values=values)
 
 
 def _readonly_v2(values: Mapping[str, str]) -> dict[str, object]:
@@ -209,7 +200,7 @@ def _legacy_lane_audit(values: Mapping[str, str]) -> dict[str, object]:
         "all_market_terminal_screening_complete": False,
         "all_market_certified_lanes": [],
     }
-    root = _data_root(values) / "all-market-certification"
+    root = _legacy_root(values)
     latest = _load_mapping(root / "latest.json")
     if latest is None:
         return unavailable
@@ -273,14 +264,11 @@ def _legacy_lane_audit(values: Mapping[str, str]) -> dict[str, object]:
 
 
 def public_all_market_certification_readonly(values: Mapping[str, str]) -> dict[str, object]:
-    """Return the public audit with independent certification readable but never advanced."""
+    """Return public audit with independent certification readable but never advanced."""
 
     base = public_all_market_certification(values)
     v2 = _readonly_v2(values)
     lanes = _legacy_lane_audit(values)
-    # V2 runtime mutation may legitimately be disabled in the web process.  The immutable
-    # read result is authoritative for audit fields; the legacy ``certification_v2_enabled``
-    # field remains untouched so callers can still see that advancement authority is absent.
     return {**base, **v2, **lanes}
 
 
