@@ -191,6 +191,15 @@ def main() -> int:
     install_lane_local_watchdog_progress()
     install_release_prequalification_parent_watchdog(memory_safe)
 
+    # Replace the duplicate preliminary full evidence graph with a held-symbol-only mark
+    # pass, then retain exactly one complete governed evidence build. The canonical feature
+    # path, evidence gates, and memory boundaries remain unchanged.
+    from operations.single_pass_marked_paper_evidence import (
+        install as install_single_pass_marked_paper_evidence,
+    )
+
+    install_single_pass_marked_paper_evidence()
+
     # Install the capability operating-evidence startup gate first. Comprehensive
     # all-market preparation remains background/noncritical and cannot block the CIO.
     from operations.capability_scoped_render_bootstrap import (
