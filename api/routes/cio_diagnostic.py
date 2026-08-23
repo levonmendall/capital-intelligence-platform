@@ -12,7 +12,9 @@ from typing import Any
 
 from fastapi import APIRouter, Request, Response, status
 
-from operations.all_market_certification_audit import public_all_market_certification
+from operations.all_market_certification_readonly import (
+    public_all_market_certification_readonly,
+)
 from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
 from operations.public_live_requirement_qualification import (
     load_public_live_requirement_progress,
@@ -74,41 +76,6 @@ def _latest_context_attempt(settings: Any) -> Mapping[str, Any]:
         return {}
     attempt = latest_attempt(settings)
     return attempt if isinstance(attempt, Mapping) else {}
-
-
-def _market_lanes(
-    payload: object,
-    *,
-    comprehensive_discovery_complete: bool,
-) -> tuple[dict[str, object], ...]:
-    """Return lane coverage without requiring a qualifying investment candidate."""
-    if not isinstance(payload, Mapping):
-        return ()
-    lanes: list[dict[str, object]] = []
-    for asset_class, raw in sorted(payload.items(), key=lambda item: str(item[0])):
-        if not isinstance(raw, Mapping):
-            continue
-        scheduled = raw.get("scheduled") is True
-        catalog = _count(raw, "catalog")
-        deep = _count(raw, "deep")
-        selected = _count(raw, "selected")
-        represented = (not scheduled) or (
-            comprehensive_discovery_complete and catalog > 0
-        )
-        lanes.append(
-            {
-                "asset_class": str(asset_class),
-                "scheduled": scheduled,
-                "schedule_reason": None
-                if raw.get("schedule_reason") in (None, "")
-                else str(raw.get("schedule_reason"))[:200],
-                "catalog_count": catalog,
-                "deep_analyzed_count": deep,
-                "selected_count": selected,
-                "represented": represented,
-            }
-        )
-    return tuple(lanes)
 
 
 def _safe_public_requirement_progress(
@@ -225,12 +192,12 @@ def build_cio_diagnostic_audit(
 
     resolved = os.environ if values is None else values
     release = _release(resolved)
-    certification = public_all_market_certification(resolved)
+    certification = public_all_market_certification_readonly(resolved)
     public_requirement_progress = _safe_public_requirement_progress(resolved)
     diagnostic = latest_manual_cio_diagnostic(values=resolved)
     if diagnostic is None:
         return {
-            "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
+            "schema_version": "public-cio-diagnostic-audit.v3-independent-certification",
             "credential_safe": True,
             "ready": False,
             "state": "not_recorded",
@@ -259,22 +226,36 @@ def build_cio_diagnostic_audit(
     configured_scope_required = str(
         resolved.get("CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY", "")
     ).strip().lower() in {"1", "true", "yes", "on"}
-    scope_required = context.get("comprehensive_discovery_required") is True or configured_scope_required
-    scope_state = str(context.get("comprehensive_discovery_scope_state") or "missing")
-    scope_complete = scope_state == "complete"
+    scope_required = (
+        context.get("comprehensive_discovery_required") is True
+        or configured_scope_required
+    )
+    operating_scope_state = str(
+        context.get("comprehensive_discovery_scope_state") or "missing"
+    )
+    scope_complete = (
+        certification.get("all_market_comprehensive_discovery_complete") is True
+    )
+    lanes_raw = certification.get("all_market_certified_lanes")
+    lanes = tuple(
+        dict(item)
+        for item in lanes_raw
+        if isinstance(item, Mapping)
+    ) if isinstance(lanes_raw, list) else ()
+    scheduled_market_coverage_complete = (
+        certification.get("all_market_scheduled_market_coverage_complete") is True
+    )
+    terminal_screening_complete = (
+        certification.get("all_market_terminal_screening_complete") is True
+    )
+
+    # Capability-scoped context counts remain useful operational telemetry, but they do
+    # not impersonate the independently certified all-market universe.
     instrument_count = _count(context, "instrument_count")
     candidate_count = _count(context, "candidate_count")
     exclusion_count = _count(context, "exclusion_count")
     qualified_candidate_count = _count(context, "qualified_candidate_count")
-    terminal_screening_complete = instrument_count > 0 and candidate_count + exclusion_count == instrument_count
-    lanes = _market_lanes(
-        context.get("comprehensive_discovery_lane_counts"),
-        comprehensive_discovery_complete=scope_complete,
-    )
-    scheduled_lanes = tuple(item for item in lanes if item["scheduled"] is True)
-    scheduled_market_coverage_complete = bool(scheduled_lanes) and all(
-        item["represented"] is True for item in scheduled_lanes
-    )
+
     expected_requester = f"render-release:{release}"
     release_matches = release != "unknown" and diagnostic.requested_by == expected_requester
     diagnostic_completed = diagnostic.state == "completed"
@@ -284,6 +265,10 @@ def build_cio_diagnostic_audit(
         certification,
         values=resolved,
         context_decision_as_of=context_decision_as_of,
+    )
+    terminal_outcome_certified = (
+        certification.get("all_market_paper_implementation_certified") is True
+        or certification.get("all_market_no_action_certified") is True
     )
     analytical_certification_complete = all(
         (
@@ -301,6 +286,8 @@ def build_cio_diagnostic_audit(
             certification.get("all_market_committee_certified") is True,
             certification.get("all_market_cio_certified") is True,
             certification.get("all_market_construction_certified") is True,
+            terminal_outcome_certified,
+            certification.get("all_market_operational_certified") is True,
         )
     )
     all_market_evaluation_complete = all(
@@ -328,7 +315,7 @@ def build_cio_diagnostic_audit(
     progress_recorded_at = getattr(diagnostic, "progress_recorded_at", None)
 
     return {
-        "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
+        "schema_version": "public-cio-diagnostic-audit.v3-independent-certification",
         "credential_safe": True,
         "ready": all_market_evaluation_complete,
         "state": diagnostic.state,
@@ -353,7 +340,8 @@ def build_cio_diagnostic_audit(
             attempt_cycle and diagnostic.cycle_key and attempt_cycle == diagnostic.cycle_key
         ),
         "comprehensive_discovery_required": scope_required,
-        "comprehensive_discovery_scope_state": scope_state,
+        "production_context_discovery_scope_state": operating_scope_state,
+        "comprehensive_discovery_scope_state": "complete" if scope_complete else "incomplete",
         "comprehensive_discovery_complete": scope_complete,
         "comprehensive_discovery_limitations": [
             str(item)[:500]
