@@ -67,33 +67,46 @@ def _load_fresh_operating_evidence(values: Mapping[str, str]):
         return None
 
 
+def _log_reuse(*, after_lane_busy: bool) -> None:
+    print(
+        json.dumps(
+            {
+                "event": "capability_operating_evidence_reused",
+                "after_lane_busy": bool(after_lane_busy),
+                "credential_safe": True,
+                "decision_authority": False,
+                "candidate_authority": False,
+                "sizing_authority": False,
+                "construction_authority": False,
+                "execution_authority": False,
+                "paper_only": True,
+                "real_money_authorized": False,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
 def run_operating_once(values: Mapping[str, str] | None = None) -> int:
     resolved = dict(os.environ if values is None else values)
     current = _load_fresh_operating_evidence(resolved)
     if current is not None:
-        print(
-            json.dumps(
-                {
-                    "event": "capability_operating_evidence_reused",
-                    "credential_safe": True,
-                    "decision_authority": False,
-                    "candidate_authority": False,
-                    "sizing_authority": False,
-                    "construction_authority": False,
-                    "execution_authority": False,
-                    "paper_only": True,
-                    "real_money_authorized": False,
-                },
-                sort_keys=True,
-            ),
-            flush=True,
-        )
+        _log_reuse(after_lane_busy=False)
         return 0
-    return _run_isolated_once(
+
+    return_code = _run_isolated_once(
         _SPEC,
         values=resolved,
         lane_wait_seconds=_lane_wait_seconds(resolved),
     )
+    if return_code == 126 and _load_fresh_operating_evidence(resolved) is not None:
+        # A background capability owner may have held the exclusive lane at entry and
+        # finished during this bounded wait. Accept only its canonical fresh snapshot;
+        # otherwise preserve the original resource-busy return code unchanged.
+        _log_reuse(after_lane_busy=True)
+        return 0
+    return return_code
 
 
 def run_operating_loop(
