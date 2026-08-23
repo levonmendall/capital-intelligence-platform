@@ -217,12 +217,7 @@ def load_release_certification_dag_progress(
     *,
     started_at: datetime | None = None,
 ) -> Mapping[str, object] | None:
-    """Load the newest current-release DAG journal that belongs to this attempt.
-
-    Runtime journals have no decision authority. This loader is deliberately strict about
-    release identity, timestamps, credential safety, paper-only state, and all authority
-    flags before allowing a journal to explain release prequalification progress.
-    """
+    """Load the newest current-release DAG journal that belongs to this attempt."""
 
     release = _release(values)
     if not release or release == "unknown":
@@ -258,6 +253,21 @@ def load_release_certification_dag_progress(
     return None if newest is None else newest[1]
 
 
+def _dag_has_blocking_failure(progress: Mapping[str, object]) -> bool:
+    """Return whether the DAG itself proves a terminal blocker.
+
+    A completed DAG remains useful provenance, but it cannot reclassify a later failure in
+    an orthogonal release gate. Only an explicit blocking node or positive failed-node count
+    makes the DAG the terminal failure source.
+    """
+
+    if _safe_token(progress.get("blocking_node")) is not None:
+        return True
+    counts = progress.get("counts")
+    safe_counts = counts if isinstance(counts, Mapping) else {}
+    return _safe_nonnegative_int(safe_counts.get("failed_nodes")) > 0
+
+
 def _dag_failure_detail(progress: Mapping[str, object]) -> str:
     counts = progress.get("counts")
     safe_counts = counts if isinstance(counts, Mapping) else {}
@@ -287,13 +297,7 @@ def _project_live_dag_progress(
     *,
     values: Mapping[str, str],
 ) -> Mapping[str, object]:
-    """Overlay validated live DAG progress after the stored integrity check succeeds.
-
-    This projection never rewrites the signed prequalification file. It exists so the
-    already-established public prequalification publisher can expose pre-CIO DAG progress
-    while the evidence child is still running. Terminal state always uses its signed DAG
-    snapshot instead of mutable live state.
-    """
+    """Overlay validated live DAG progress without rewriting signed state."""
 
     if str(raw.get("state") or "").strip().lower() not in {"pending", "in_progress"}:
         return raw
@@ -346,6 +350,41 @@ def _project_live_dag_progress(
     return projected
 
 
+def _is_capability_operating_failure(detail: str) -> bool:
+    lowered = detail.lower()
+    return bool(
+        "capability-operating evidence" in lowered
+        or "capability_operating_evidence" in lowered
+    )
+
+
+def _capability_operating_failure_context(
+    attribution: Mapping[str, object],
+    *,
+    detail: str,
+    metrics: Mapping[str, int],
+) -> dict[str, object]:
+    """Rebind a post-DAG failure to the independent capability-operating gate."""
+
+    corrected = dict(attribution)
+    timed_out = bool(
+        metrics.get("capability_operating_evidence_timeout") == 1
+        or "capability_operating_evidence_timeout" in detail.lower()
+    )
+    corrected.update(
+        {
+            "capability": "capability_operating_evidence",
+            "required_information": "fresh_capability_operating_snapshot",
+            "failure_stage": "capability_operating_gate",
+            "completeness": "incomplete",
+        }
+    )
+    if timed_out:
+        corrected["reason"] = "deadline_exceeded"
+        corrected["error_type"] = "CapabilityOperatingEvidenceTimeout"
+    return corrected
+
+
 def write_release_evidence_prequalification(
     values: Mapping[str, str],
     *,
@@ -380,18 +419,26 @@ def write_release_evidence_prequalification(
     persisted_detail = str(detail)[:1000]
     if normalized_state == "failed":
         dag_progress = load_release_certification_dag_progress(values, started_at=start)
-        if dag_progress is not None:
+        dag_failed = bool(
+            dag_progress is not None and _dag_has_blocking_failure(dag_progress)
+        )
+        if dag_failed and dag_progress is not None:
             dag_detail = _dag_failure_detail(dag_progress)
             persisted_detail = (persisted_detail + "; " + dag_detail).strip("; ")[:1000]
+
         attribution = failed_prequalification_attribution(
             detail=persisted_detail,
             metrics=normalized_metrics,
         ).as_dict()
-        if dag_progress is not None:
-            attribution = dict(attribution)
-            blocking_node = _safe_token(
-                dag_progress.get("blocking_node") or dag_progress.get("focus_node")
+        if _is_capability_operating_failure(persisted_detail):
+            attribution = _capability_operating_failure_context(
+                attribution,
+                detail=persisted_detail,
+                metrics=normalized_metrics,
             )
+        elif dag_failed and dag_progress is not None:
+            attribution = dict(attribution)
+            blocking_node = _safe_token(dag_progress.get("blocking_node"))
             asset_class = _safe_token(dag_progress.get("asset_class"))
             failure_type = _safe_token(dag_progress.get("failure_type"))
             providers = _safe_provider_groups(dag_progress.get("provider_groups"))
