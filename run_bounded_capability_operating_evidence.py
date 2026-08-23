@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
 from run_bounded_render_worker import WorkerSpec, _run_isolated_once, run_loop
@@ -40,13 +41,72 @@ def _lane_wait_seconds(values: Mapping[str, str]) -> float:
     return value
 
 
+def _load_fresh_operating_evidence(values: Mapping[str, str]):
+    """Reuse an already-qualified immutable operating snapshot for release one-shots.
+
+    The long-lived background owner can legitimately finish a fresh capability snapshot
+    while comprehensive all-market prequalification is still running. A later release
+    ``--once`` request should consume that same validated snapshot rather than launching a
+    duplicate heavy child and racing the background owner for the exclusive memory lane.
+
+    The canonical loader remains the sole freshness/integrity gate. Missing or stale state
+    is not accepted and falls through to the unchanged bounded refresh path.
+    """
+
+    from operations.capability_operating_evidence import (
+        CapabilityOperatingEvidenceError,
+        load_capability_operating_evidence,
+    )
+
+    try:
+        return load_capability_operating_evidence(
+            cutoff=datetime.now(timezone.utc),
+            values=values,
+        )
+    except CapabilityOperatingEvidenceError:
+        return None
+
+
+def _log_reuse(*, after_lane_busy: bool) -> None:
+    print(
+        json.dumps(
+            {
+                "event": "capability_operating_evidence_reused",
+                "after_lane_busy": bool(after_lane_busy),
+                "credential_safe": True,
+                "decision_authority": False,
+                "candidate_authority": False,
+                "sizing_authority": False,
+                "construction_authority": False,
+                "execution_authority": False,
+                "paper_only": True,
+                "real_money_authorized": False,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
 def run_operating_once(values: Mapping[str, str] | None = None) -> int:
     resolved = dict(os.environ if values is None else values)
-    return _run_isolated_once(
+    current = _load_fresh_operating_evidence(resolved)
+    if current is not None:
+        _log_reuse(after_lane_busy=False)
+        return 0
+
+    return_code = _run_isolated_once(
         _SPEC,
         values=resolved,
         lane_wait_seconds=_lane_wait_seconds(resolved),
     )
+    if return_code == 126 and _load_fresh_operating_evidence(resolved) is not None:
+        # A background capability owner may have held the exclusive lane at entry and
+        # finished during this bounded wait. Accept only its canonical fresh snapshot;
+        # otherwise preserve the original resource-busy return code unchanged.
+        _log_reuse(after_lane_busy=True)
+        return 0
+    return return_code
 
 
 def run_operating_loop(
