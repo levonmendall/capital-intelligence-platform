@@ -8,7 +8,7 @@ import pytest
 from operations import single_pass_marked_paper_evidence as subject
 
 
-def test_build_holding_marks_uses_canonical_feature_path(monkeypatch) -> None:
+def test_build_holding_marks_uses_base_feature_path_without_predictive_enrichment(monkeypatch) -> None:
     as_of = datetime(2026, 8, 23, 1, 40, tzinfo=timezone.utc)
     universe = SimpleNamespace(
         instruments=(SimpleNamespace(symbol="VTI"),),
@@ -23,11 +23,18 @@ def test_build_holding_marks_uses_canonical_feature_path(monkeypatch) -> None:
     quote = object()
     observed = {}
 
-    def features(symbol, raw_bars, raw_quote, **kwargs):
+    def base_features(symbol, raw_bars, raw_quote, **kwargs):
         observed.update(symbol=symbol, bars=raw_bars, quote=raw_quote, kwargs=kwargs)
         return SimpleNamespace(current_price=321.25)
 
-    monkeypatch.setattr(subject._evidence, "_features", features)
+    monkeypatch.setattr(subject._evidence, "_ORIGINAL_FEATURES", base_features)
+    monkeypatch.setattr(
+        subject._evidence,
+        "_features",
+        lambda *_args, **_kwargs: pytest.fail(
+            "mark-only pass must not run predictive feature enrichment"
+        ),
+    )
     marks = subject.build_holding_marks(
         universe=universe,
         decision_as_of=as_of,
@@ -60,11 +67,11 @@ def test_build_holding_marks_preserves_live_provider_clock_gate(monkeypatch) -> 
     )
     observed = {}
 
-    def features(_symbol, _bars, _quote, **kwargs):
+    def base_features(_symbol, _bars, _quote, **kwargs):
         observed.update(kwargs)
         return SimpleNamespace(current_price=100.0)
 
-    monkeypatch.setattr(subject._evidence, "_features", features)
+    monkeypatch.setattr(subject._evidence, "_ORIGINAL_FEATURES", base_features)
     marks = subject.build_holding_marks(
         universe=universe,
         decision_as_of=as_of,
@@ -81,6 +88,16 @@ def test_build_holding_marks_preserves_live_provider_clock_gate(monkeypatch) -> 
     assert marks == (("VTI", 100.0),)
     assert observed["maximum_future_skew_seconds"] == -1
     assert observed["future_reference_at"] == as_of
+
+
+def test_missing_base_feature_builder_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(subject._evidence, "_ORIGINAL_FEATURES", None)
+
+    with pytest.raises(
+        subject._evidence.ProductionPaperEvidenceError,
+        match="base feature extractor is unavailable",
+    ):
+        subject._base_feature_builder()
 
 
 def test_positioned_portfolio_builds_complete_evidence_once(monkeypatch) -> None:
@@ -121,6 +138,7 @@ def test_positioned_portfolio_builds_complete_evidence_once(monkeypatch) -> None
     assert build_calls[0]["portfolio"] is marked
     assert len(mark_calls) == 2
     assert progress == [
+        "production_context_holding_marks_started",
         "production_context_preliminary_evidence_built",
         "production_context_portfolio_marked",
         "production_context_evidence_built",
@@ -152,8 +170,9 @@ def test_final_holding_mark_mismatch_fails_closed(monkeypatch) -> None:
         )
 
 
-def test_holding_mark_failure_never_builds_complete_graph(monkeypatch) -> None:
+def test_holding_mark_failure_never_builds_complete_graph_and_records_boundary(monkeypatch) -> None:
     tentative = SimpleNamespace(positions=(SimpleNamespace(symbol="VTI"),))
+    progress = []
 
     def fail_marks(**_kwargs):
         raise subject._evidence.ProductionPaperEvidenceError("mandatory holding failed")
@@ -175,8 +194,13 @@ def test_holding_mark_failure_never_builds_complete_graph(monkeypatch) -> None:
             cash_expected_return=0.04,
             tentative=tentative,
             evidence_payload={},
-            progress_probe=None,
+            progress_probe=progress.append,
         )
+
+    assert progress == [
+        "production_context_holding_marks_started",
+        "production_context_holding_marks_failed",
+    ]
 
 
 def test_cash_only_portfolio_keeps_original_single_build_path(monkeypatch) -> None:
