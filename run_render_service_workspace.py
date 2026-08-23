@@ -87,12 +87,15 @@ def _cleanup_reference_readiness_cache(values: dict[str, str]) -> None:
     if root is None or not root.is_dir():
         return
 
+    # Atomic JSON writers can leave full-sized .tmp files after ENOSPC/interruption.
+    # Scratch is never authoritative until os.replace/Path.replace succeeds.
     for candidate in root.rglob("*.json.tmp"):
         if candidate.is_file() and not candidate.is_symlink():
             candidate.unlink(missing_ok=True)
 
     current_release = _release(values)
     if not current_release:
+        # Without an exact deployment identity, preserve all release-bound cache.
         return
 
     safe_release = _safe_release(current_release)
@@ -138,6 +141,10 @@ def prepare_runtime_workspace(values: dict[str, str] | None = None) -> Path:
     snapshot = preflight_storage_capacity(environment)
     if snapshot is not None:
         _publish_storage_preflight(environment, snapshot)
+
+    # tempfile.gettempdir() consults TMPDIR only if the directory exists. The
+    # workspace must therefore be created before importing the production
+    # bootstrap or any provider/backup module that may initialize tempfile.
     return workspace
 
 
@@ -156,8 +163,18 @@ def main() -> int:
         install as install_telemetry_712_failure_context_bridge,
     )
 
+    # Preserve the bounded worker's credential-safe lane and memory context in the signed
+    # release-prequalification record before any public audit publication can collapse it.
+    # This is observability-only; resource limits and all investment controls are unchanged.
     install_telemetry_712_failure_context_bridge(memory_safe)
+
+    # Route every pre-CIO audit refresh through the exact six-stage coordination journal.
+    # This changes only public operational attribution; the journal retains no evidence or
+    # investment authority and cannot qualify a stage by itself.
     install_stage_isolated_audit_runtime(render_bootstrap)
+
+    # The comprehensive research plane may legitimately resume a still-fresh discovery
+    # epoch. Install its progress projection before the legacy parent watchdog.
     install_resume_aware_release_dag_projection()
 
     from operations.lane_local_watchdog_progress import (
@@ -167,27 +184,43 @@ def main() -> int:
         install_release_prequalification_parent_watchdog,
     )
 
+    # PR #742 moved comprehensive discovery to per-lane catalog/publication/screening
+    # artifacts. Project those exact durable work units into the existing watchdog before
+    # its subprocess proxy is installed. Stall limits remain unchanged and retries of the
+    # same unit cannot manufacture liveness.
     install_lane_local_watchdog_progress()
     install_release_prequalification_parent_watchdog(memory_safe)
 
+    # Replace the duplicate preliminary full evidence graph with a held-symbol-only mark
+    # pass, then retain exactly one complete governed evidence build. The canonical feature
+    # path, evidence gates, and memory boundaries remain unchanged.
     from operations.single_pass_marked_paper_evidence import (
         install as install_single_pass_marked_paper_evidence,
     )
 
     install_single_pass_marked_paper_evidence()
 
+    # Install the capability operating-evidence startup gate first. Comprehensive
+    # all-market preparation remains background/noncritical and cannot block the CIO.
     from operations.capability_scoped_render_bootstrap import (
         install as install_capability_scoped_render_bootstrap,
     )
 
     install_capability_scoped_render_bootstrap(memory_safe)
 
+    # Revalidate capability evidence immediately before every diagnostic attempt. This
+    # closes the retry-age gap where startup-qualified evidence could cross its freshness
+    # boundary during a long first CIO attempt or bounded retry delay. The refresh itself
+    # still runs through the independent resource-bounded evidence owner.
     from operations.capability_operating_retry_refresh import (
         install as install_capability_operating_retry_refresh,
     )
 
     install_capability_operating_retry_refresh(memory_safe)
 
+    # Install the diagnostic seam last so both the capability startup wrapper and the
+    # retry-freshness wrapper see capability-scoped environment semantics and share a
+    # single durable CIO diagnostic owner rather than starting competing children.
     from operations.capability_scoped_release_diagnostic import (
         install as install_capability_scoped_release_diagnostic,
     )
