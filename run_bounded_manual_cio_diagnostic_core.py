@@ -37,6 +37,7 @@ _DEFAULT_MEMORY_HIGH_WATER_FRACTION = 0.70
 _DEFAULT_MEMORY_RESERVE_MB = 640.0
 _DEFAULT_MEMORY_POLL_SECONDS = 0.10
 _RENDER_MEMORY_LIMIT_FALLBACK_MB = 2048.0
+_HARD_CONTAINER_CURRENT_FRACTION = 0.90
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -238,6 +239,24 @@ def _read_byte_counter(path: Path) -> int | None:
         return None
 
 
+def _read_memory_stat_kib(path: Path) -> dict[str, int] | None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    result: dict[str, int] = {}
+    for line in content.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            value = int(parts[1])
+        except ValueError:
+            continue
+        result[parts[0]] = max(value // 1024, 0)
+    return result or None
+
+
 def _cgroup_memory_kib() -> tuple[int | None, int | None]:
     v2_current = _read_byte_counter(Path("/sys/fs/cgroup/memory.current"))
     v2_limit = _read_byte_counter(Path("/sys/fs/cgroup/memory.max"))
@@ -276,19 +295,48 @@ def _proc_total_rss_kib() -> int | None:
     return total if observed else None
 
 
+def _governed_cgroup_memory_kib(current_kib: int) -> tuple[int, str]:
+    """Return a conservative non-page-cache cgroup footprint when cgroup v2 exposes it.
+
+    `memory.current` includes reclaimable filesystem page cache. Using that total for the
+    normal operating boundary can terminate a healthy diagnostic merely because reference
+    catalogs were just read. `anon + kernel + shmem` keeps anonymous/application memory,
+    kernel memory and shared memory governed while excluding ordinary file cache. The
+    aggregate process RSS is a conservative floor so incomplete accounting cannot make the
+    watchdog more permissive. If memory.stat is unavailable, retain the previous fail-closed
+    `memory.current` behavior.
+    """
+    stat = _read_memory_stat_kib(Path("/sys/fs/cgroup/memory.stat"))
+    if stat is None or "anon" not in stat or "kernel" not in stat:
+        return current_kib, "cgroup_current_fallback"
+    nonreclaimable = stat["anon"] + stat["kernel"] + stat.get("shmem", 0)
+    proc_rss = _proc_total_rss_kib()
+    if proc_rss is not None:
+        nonreclaimable = max(nonreclaimable, proc_rss)
+    return max(nonreclaimable, 0), "cgroup_v2_nonreclaimable"
+
+
+def _container_memory_sample_kib(
+    values: Mapping[str, str],
+) -> tuple[int | None, int | None, int | None, str]:
+    current, limit = _cgroup_memory_kib()
+    if current is not None and limit is not None:
+        governed, source = _governed_cgroup_memory_kib(current)
+        return governed, current, limit, source
+    configured_limit = _configured_memory_limit_kib(values)
+    if configured_limit is None:
+        return None, None, None, "unavailable"
+    proc_rss = _proc_total_rss_kib()
+    if proc_rss is None:
+        return None, None, configured_limit, "configured_limit_only"
+    return proc_rss, proc_rss, configured_limit, "proc_rss_fallback"
+
+
 def _container_memory_kib(
     values: Mapping[str, str],
 ) -> tuple[int | None, int | None, str]:
-    current, limit = _cgroup_memory_kib()
-    if current is not None and limit is not None:
-        return current, limit, "cgroup"
-    configured_limit = _configured_memory_limit_kib(values)
-    if configured_limit is None:
-        return None, None, "unavailable"
-    proc_rss = _proc_total_rss_kib()
-    if proc_rss is None:
-        return None, configured_limit, "configured_limit_only"
-    return proc_rss, configured_limit, "proc_rss_fallback"
+    governed, _current, limit, source = _container_memory_sample_kib(values)
+    return governed, limit, source
 
 
 def _effective_memory_boundary_kib(
@@ -365,23 +413,31 @@ def _wait_with_resource_bounds(
         raise ValueError("poll_seconds must be positive")
     sampler_stop = Event()
     memory_limited = Event()
-    peaks = {"process": 0, "container": 0}
+    peaks = {"process": 0, "container": 0, "governed": 0}
 
     def sample_once() -> bool:
         pid = getattr(process, "pid", None)
         if isinstance(pid, int) and pid > 0:
             rss_kib, hwm_kib = _process_memory_kib(pid)
             peaks["process"] = max(peaks["process"], rss_kib or 0, hwm_kib or 0)
-        current_kib, limit_kib, _source = _container_memory_kib(resolved)
+        governed_kib, current_kib, limit_kib, _source = _container_memory_sample_kib(
+            resolved
+        )
         peaks["container"] = max(peaks["container"], current_kib or 0)
-        if current_kib is None or limit_kib is None or limit_kib <= 0:
+        peaks["governed"] = max(peaks["governed"], governed_kib or 0)
+        if governed_kib is None or limit_kib is None or limit_kib <= 0:
             return False
         boundary_kib = _effective_memory_boundary_kib(
             limit_kib,
             memory_high_water_fraction=memory_high_water_fraction,
             memory_reserve_kib=reserve,
         )
-        if current_kib < boundary_kib:
+        hard_total_boundary_kib = int(limit_kib * _HARD_CONTAINER_CURRENT_FRACTION)
+        normal_boundary_reached = governed_kib >= boundary_kib
+        hard_total_boundary_reached = (
+            current_kib is not None and current_kib >= hard_total_boundary_kib
+        )
+        if not normal_boundary_reached and not hard_total_boundary_reached:
             return False
         memory_limited.set()
         _signal_process_group(process, signal.SIGTERM)
@@ -474,13 +530,20 @@ def run_bounded_diagnostic(
     )
 
     script = Path(__file__).resolve().with_name("run_manual_cio_diagnostic.py")
-    current_kib, limit_kib, accounting_source = _container_memory_kib(resolved)
+    governed_kib, raw_current_kib, limit_kib, accounting_source = (
+        _container_memory_sample_kib(resolved)
+    )
     boundary_kib = (
         _effective_memory_boundary_kib(
             limit_kib,
             memory_high_water_fraction=memory_high_water_fraction,
             memory_reserve_kib=memory_reserve_kib,
         )
+        if limit_kib is not None
+        else None
+    )
+    hard_total_boundary_kib = (
+        int(limit_kib * _HARD_CONTAINER_CURRENT_FRACTION)
         if limit_kib is not None
         else None
     )
@@ -492,9 +555,11 @@ def run_bounded_diagnostic(
         memory_high_water_fraction=memory_high_water_fraction,
         memory_reserve_kib=memory_reserve_kib,
         memory_poll_seconds=memory_poll_seconds,
-        container_memory_current_kib=current_kib,
+        container_memory_current_kib=raw_current_kib,
+        container_governed_memory_kib=governed_kib,
         container_memory_limit_kib=limit_kib,
         container_memory_boundary_kib=boundary_kib,
+        container_hard_total_boundary_kib=hard_total_boundary_kib,
         memory_accounting_source=accounting_source,
     )
     command = [sys.executable, str(script)]
@@ -549,9 +614,10 @@ def run_bounded_diagnostic(
             values=resolved,
             detail=(
                 "Manual CIO diagnostic reached the operational container-memory boundary "
-                f"({memory_high_water_fraction:.0%} fractional ceiling with "
-                f"{memory_reserve_kib // 1024} MB service reserve) and was terminated "
-                "fail-closed before the hosting kernel could OOM-kill the service"
+                f"({memory_high_water_fraction:.0%} nonreclaimable ceiling with "
+                f"{memory_reserve_kib // 1024} MB service reserve and "
+                f"{_HARD_CONTAINER_CURRENT_FRACTION:.0%} hard total-memory ceiling) and "
+                "was terminated fail-closed before the hosting kernel could OOM-kill the service"
             ),
         )
         _log(
@@ -561,6 +627,7 @@ def run_bounded_diagnostic(
             request_id=request_id,
             request_state=request_state,
             memory_high_water_fraction=memory_high_water_fraction,
+            hard_container_current_fraction=_HARD_CONTAINER_CURRENT_FRACTION,
             memory_reserve_kib=memory_reserve_kib,
             process_peak_rss_kib=process_peak_kib,
             container_peak_memory_kib=container_peak_kib,
