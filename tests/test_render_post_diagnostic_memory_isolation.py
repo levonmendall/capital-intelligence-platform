@@ -6,7 +6,11 @@ from pathlib import Path
 import run_bounded_render_worker as bounded_worker
 import run_locked_background_provider_validation as locked_provider
 import run_render_service_memory_safe as memory_safe_service
-from render_memory_lane import acquire_memory_lane
+from render_memory_lane import (
+    MEMORY_LANE_PRIORITY_BYPASS_ENV,
+    acquire_memory_lane,
+    acquire_memory_lane_priority,
+)
 
 
 def test_memory_safe_supervisor_replaces_resident_heavy_loops() -> None:
@@ -105,6 +109,53 @@ def test_memory_lane_serializes_cross_process_heavy_work(tmp_path) -> None:
     )
     assert third is not None
     third.release()
+
+
+def test_release_priority_fence_blocks_new_background_lane_entries(tmp_path) -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RENDER_MEMORY_LANE_LOCK": str(tmp_path / "lane.lock"),
+        "CAPITAL_INTELLIGENCE_RENDER_MEMORY_LANE_PRIORITY_LOCK": str(
+            tmp_path / "lane.priority.lock"
+        ),
+    }
+    priority = acquire_memory_lane_priority(
+        "release-capability",
+        values=values,
+        timeout_seconds=0.0,
+        poll_seconds=0.01,
+    )
+    assert priority is not None
+    try:
+        blocked = acquire_memory_lane(
+            "background",
+            values=values,
+            timeout_seconds=0.0,
+            poll_seconds=0.01,
+        )
+        assert blocked is None
+
+        foreground_values = dict(values)
+        foreground_values[MEMORY_LANE_PRIORITY_BYPASS_ENV] = "true"
+        foreground = acquire_memory_lane(
+            "release-capability",
+            values=foreground_values,
+            timeout_seconds=0.0,
+            poll_seconds=0.01,
+        )
+        assert foreground is not None
+        foreground.release()
+    finally:
+        priority.release()
+
+    background = acquire_memory_lane(
+        "background",
+        values=values,
+        timeout_seconds=0.0,
+        poll_seconds=0.01,
+    )
+    assert background is not None
+    background.release()
 
 
 def test_render_workspace_routes_production_through_memory_safe_bootstrap() -> None:
