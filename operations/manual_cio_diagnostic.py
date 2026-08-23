@@ -22,6 +22,12 @@ _ACTIVE_STATES = frozenset({"pending", "in_progress"})
 _FINAL_STATES = frozenset({"completed", "failed"})
 _PROGRESS_ENABLED = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED"
 _CONTEXT_STATE_FILENAME = "production-context-publication-state.json"
+_CONTEXT_CYCLE_ADOPTION_STAGES = frozenset(
+    {
+        "production_context_portfolio_marked",
+        "six_specialist_committee_cio_cycle",
+    }
+)
 _DEFAULT_MEMORY_HIGH_WATER_FRACTION = 0.70
 _DEFAULT_MEMORY_RESERVE_MB = 640.0
 _RENDER_MEMORY_LIMIT_FALLBACK_MB = 2048.0
@@ -617,7 +623,7 @@ def record_manual_cio_diagnostic_progress(
         )
 
     cycle_key = existing.cycle_key
-    if cycle_key is None and normalized_stage == "six_specialist_committee_cio_cycle":
+    if cycle_key is None and normalized_stage in _CONTEXT_CYCLE_ADOPTION_STAGES:
         cycle_key = _published_context_cycle(path)
 
     updated = replace(
