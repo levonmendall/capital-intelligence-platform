@@ -27,6 +27,9 @@ from operations.cme_futures_reference_runtime import (
     install_cme_futures_reference_lineage,
 )
 from operations.continuous_evidence_plane import evidence_plane_enabled
+from operations.evidence_file_cache_release import (
+    release_completed_operating_evidence_file_cache,
+)
 from operations.generalized_reference_readiness import (
     prepare_reference_readiness as _prepare_reference,
 )
@@ -224,7 +227,13 @@ def _prepare_with_rate_budget(
         # Disk-only validation of the fresh immutable operating snapshot. The downstream
         # qualified-paper-evidence probe independently verifies the exact signed universe
         # and every requested structural subset before the CIO receives evidence.
-        return load_capability_operating_reference_manifest(values)
+        manifest = load_capability_operating_reference_manifest(values)
+        # Evidence-owner subprocesses have exited by this handoff. Release only clean pages
+        # from the now-qualified current evidence epoch so the bounded CIO child starts with
+        # its governed memory reserve intact. The advisory is fail-soft and never mutates
+        # evidence or changes the watchdog's limits.
+        release_completed_operating_evidence_file_cache(values)
+        return manifest
 
     install_cme_futures_reference_lineage()
     if _production_plane_enabled(values):
