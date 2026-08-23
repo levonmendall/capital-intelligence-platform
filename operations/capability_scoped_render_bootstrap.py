@@ -11,7 +11,9 @@ investment rule, threshold, construction, paper-execution, or real-money authori
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -31,6 +33,17 @@ from operations.release_evidence_prequalification import (
 
 _INSTALLED_ATTR = "_capability_scoped_operating_bootstrap_installed"
 _DEFAULT_OPERATING_EVIDENCE_SUBPROCESS_GRACE_SECONDS = 30.0
+_SAFE_FAILURE_TOKEN = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
+_SAFE_CHILD_FAILURE_EVENTS = frozenset(
+    {
+        "capability_operating_evidence_failed",
+        "capability_operating_evidence_coordinator_failed",
+        "heavy_memory_lane_busy",
+        "isolated_worker_pass_timed_out",
+        "isolated_worker_pass_memory_limited",
+        "bounded_worker_failed",
+    }
+)
 
 
 def _enabled(values: Mapping[str, str]) -> bool:
@@ -62,6 +75,11 @@ def _parse_aware(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _safe_failure_token(value: object) -> str | None:
+    candidate = str(value or "").strip()
+    return candidate if _SAFE_FAILURE_TOKEN.fullmatch(candidate) else None
+
+
 def _operating_prequalification_status(
     values: Mapping[str, str],
 ) -> tuple[str, datetime, str | None] | None:
@@ -89,6 +107,8 @@ def _publish_operating_prequalification(
     attempt: int,
     maximum_attempts: int,
     timed_out: bool = False,
+    return_code: int | None = None,
+    failure_reason: str | None = None,
 ) -> None:
     """Keep public release state truthful while the additional capability gate runs."""
 
@@ -105,6 +125,33 @@ def _publish_operating_prequalification(
         if state == "completed"
         else "evidence_refresh"
     )
+    metrics = {
+        "attempt": attempt,
+        "maximum_attempts": maximum_attempts,
+        "capability_operating_evidence_required": 1,
+        "capability_operating_evidence_timeout": int(timed_out),
+        "complete_all_market_coverage_required": 1,
+    }
+    if return_code is not None:
+        normalized_return_code = int(return_code)
+        metrics["capability_operating_evidence_return_code"] = abs(
+            normalized_return_code
+        )
+        metrics["capability_operating_evidence_return_code_negative"] = int(
+            normalized_return_code < 0
+        )
+    normalized_reason = _safe_failure_token(failure_reason)
+    if normalized_reason is not None:
+        metrics["capability_operating_evidence_resource_exhausted"] = int(
+            normalized_reason == "resource_exhausted"
+        )
+        metrics["capability_operating_evidence_resource_busy"] = int(
+            normalized_reason == "resource_busy"
+        )
+        metrics["capability_operating_evidence_internal_error"] = int(
+            normalized_reason == "internal_error"
+        )
+
     write_release_evidence_prequalification(
         values,
         state=state,
@@ -113,13 +160,7 @@ def _publish_operating_prequalification(
         started_at=started_at,
         detail=detail,
         generation_id=generation_id,
-        metrics={
-            "attempt": attempt,
-            "maximum_attempts": maximum_attempts,
-            "capability_operating_evidence_required": 1,
-            "capability_operating_evidence_timeout": int(timed_out),
-            "complete_all_market_coverage_required": 1,
-        },
+        metrics=metrics,
     )
     memory_safe.render_bootstrap._publish_release_diagnostic_audit(values)
 
@@ -147,6 +188,94 @@ def _operating_subprocess_timeout_seconds(memory_safe, values: Mapping[str, str]
             )
         return timeout
     return max(1.0, pass_timeout + _DEFAULT_OPERATING_EVIDENCE_SUBPROCESS_GRACE_SECONDS)
+
+
+def _safe_child_failure_identity(output: str) -> tuple[str | None, str | None]:
+    """Extract only allowlisted non-authoritative failure identity from child stdout."""
+
+    for raw_line in reversed(str(output or "").splitlines()):
+        line = raw_line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        event = _safe_failure_token(payload.get("event"))
+        if event not in _SAFE_CHILD_FAILURE_EVENTS:
+            continue
+        if payload.get("paper_only") is not True:
+            continue
+        if payload.get("real_money_authorized") is not False:
+            continue
+        if (
+            event == "capability_operating_evidence_failed"
+            and payload.get("credential_safe") is not True
+        ):
+            continue
+        return event, _safe_failure_token(payload.get("error_type"))
+    return None, None
+
+
+def _classify_capability_attempt_failure(
+    *,
+    return_code: int,
+    output: str,
+    timed_out: bool,
+    explicit_error_type: str | None = None,
+) -> tuple[str, str, str, str]:
+    """Classify the exact bounded attempt without persisting raw child/provider output."""
+
+    event, child_error_type = _safe_child_failure_identity(output)
+    explicit = _safe_failure_token(explicit_error_type)
+    observed_error_type = explicit or child_error_type
+
+    if timed_out or return_code == 124 or event == "isolated_worker_pass_timed_out":
+        return (
+            "deadline_exceeded",
+            "CapabilityOperatingEvidenceTimeout",
+            "capability_operating_evidence_timeout",
+            event or "outer_subprocess_timeout",
+        )
+    if return_code == 125 or event == "isolated_worker_pass_memory_limited":
+        return (
+            "resource_exhausted",
+            "CapabilityOperatingEvidenceMemoryLimited",
+            "capability_operating_evidence_memory_limited",
+            event or "memory_limited",
+        )
+    if return_code == 126 or event == "heavy_memory_lane_busy":
+        return (
+            "resource_busy",
+            "CapabilityOperatingEvidenceMemoryLaneBusy",
+            "heavy_memory_lane_busy",
+            event or "memory_lane_busy",
+        )
+
+    return (
+        "internal_error",
+        observed_error_type or "CapabilityOperatingEvidenceUnavailable",
+        "capability_operating_evidence_unavailable",
+        event or "unclassified_failure",
+    )
+
+
+def _safe_attempt_detail(
+    *,
+    prefix: str,
+    error_type: str,
+    detail_token: str,
+) -> str:
+    """Encode only typed safe tokens in the generic child-attribution grammar."""
+
+    safe_error = _safe_failure_token(error_type) or "CapabilityOperatingEvidenceUnavailable"
+    safe_detail = _safe_failure_token(detail_token) or "capability_operating_evidence_unavailable"
+    return (
+        f"{prefix}; child_stage=capability_operating_gate; "
+        f"child_error_type={safe_error}; child_detail={safe_detail}"
+    )
 
 
 def prequalify_capability_operating_evidence(
@@ -205,6 +334,7 @@ def prequalify_capability_operating_evidence(
         )
 
         timed_out = False
+        explicit_error_type: str | None = None
         try:
             completed = subprocess.run(
                 command,
@@ -220,12 +350,11 @@ def prequalify_capability_operating_evidence(
         except subprocess.TimeoutExpired as error:
             timed_out = True
             return_code = 124
-            output = f"TimeoutExpired: capability operating evidence exceeded {subprocess_timeout:g}s"
-            if isinstance(error.stdout, str) and error.stdout.strip():
-                output = (output + "; " + error.stdout[-1200:])[-1600:]
+            output = error.stdout[-1600:] if isinstance(error.stdout, str) else ""
         except OSError as error:
             return_code = 2
-            output = f"{type(error).__name__}: {error}"
+            output = ""
+            explicit_error_type = type(error).__name__
 
         evidence = None
         if return_code == 0:
@@ -235,7 +364,7 @@ def prequalify_capability_operating_evidence(
                     values=diagnostic_values,
                 )
             except CapabilityOperatingEvidenceError as error:
-                output = str(error)
+                explicit_error_type = type(error).__name__
 
         if return_code == 0 and evidence is not None:
             _publish_operating_prequalification(
@@ -271,17 +400,22 @@ def prequalify_capability_operating_evidence(
             )
             return True
 
+        failure_reason, failure_error_type, detail_token, failure_event = (
+            _classify_capability_attempt_failure(
+                return_code=return_code,
+                output=output,
+                timed_out=timed_out,
+                explicit_error_type=explicit_error_type,
+            )
+        )
         memory_safe.render_bootstrap._log(
             "release_operating_evidence_prequalification_retrying"
             if attempt < maximum_attempts
             else "release_operating_evidence_prequalification_failed",
             return_code=return_code,
-            failure_detail=output,
-            failure_reason=(
-                "capability_operating_evidence_timeout"
-                if timed_out
-                else "capability_operating_evidence_unavailable"
-            ),
+            failure_reason=failure_reason,
+            failure_error_type=failure_error_type,
+            failure_event=failure_event,
             release=diagnostic_values.get("CAPITAL_INTELLIGENCE_RELEASE"),
             attempt=attempt,
             maximum_attempts=maximum_attempts,
@@ -295,13 +429,16 @@ def prequalify_capability_operating_evidence(
                 memory_safe,
                 diagnostic_values,
                 state="in_progress",
-                detail=(
-                    "capability-operating evidence did not qualify; retry remains bounded; "
-                    f"reason={'timeout' if timed_out else 'unavailable'}"
+                detail=_safe_attempt_detail(
+                    prefix="capability-operating evidence did not qualify; retry remains bounded",
+                    error_type=failure_error_type,
+                    detail_token=detail_token,
                 ),
                 attempt=attempt,
                 maximum_attempts=maximum_attempts,
                 timed_out=timed_out,
+                return_code=return_code,
+                failure_reason=failure_reason,
             )
             if retry_seconds:
                 time.sleep(retry_seconds)
@@ -311,13 +448,16 @@ def prequalify_capability_operating_evidence(
             memory_safe,
             diagnostic_values,
             state="failed",
-            detail=(
-                "capability-operating evidence prequalification failed closed; "
-                f"reason={'capability_operating_evidence_timeout' if timed_out else 'capability_operating_evidence_unavailable'}"
+            detail=_safe_attempt_detail(
+                prefix="capability-operating evidence prequalification failed closed",
+                error_type=failure_error_type,
+                detail_token=detail_token,
             ),
             attempt=attempt,
             maximum_attempts=maximum_attempts,
             timed_out=timed_out,
+            return_code=return_code,
+            failure_reason=failure_reason,
         )
         return False
 
