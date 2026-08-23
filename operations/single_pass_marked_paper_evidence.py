@@ -1,15 +1,16 @@
-"""Remove the duplicate full evidence graph from production portfolio marking.
+"""Remove duplicate full evidence work from production portfolio marking.
 
 Production context needs current marks before it can compute exact portfolio weights, but
-those marks come from the same point-in-time market feature function used by the final
-paper-evidence build. Building the complete candidate/specialist graph once merely to read
-holding prices creates a large avoidable memory peak.
+those marks come from the same point-in-time market feature extractor used by the final
+paper-evidence build. Building predictive/candidate enrichment before marking is unnecessary
+and creates an avoidable failure and memory boundary.
 
 This module replaces only that orchestration seam on Render. Canonical held-position marks
-are computed through ``production_paper_evidence._features`` with the same timestamp,
+are computed through the preserved base feature extractor with the same timestamp,
 quote-age, provider-clock, scheduled-market, and mandatory-holding rules. The complete
-governed paper-evidence graph is then built exactly once against the marked portfolio and
-must reproduce the preliminary marks exactly. Any mismatch fails closed.
+governed paper-evidence graph, including predictive enrichment, is then built exactly once
+against the marked portfolio and must reproduce the preliminary marks exactly. Any mismatch
+fails closed.
 
 No market membership, evidence threshold, specialist/CIO authority, construction,
 execution, memory boundary, or paper-only rule is changed.
@@ -28,6 +29,17 @@ import production_paper_evidence as _evidence
 _INSTALLED_ATTR = "_single_pass_marked_paper_evidence_installed"
 
 
+def _base_feature_builder():
+    """Return the preserved canonical feature extractor without predictive enrichment."""
+
+    builder = getattr(_evidence, "_ORIGINAL_FEATURES", None)
+    if not callable(builder):
+        raise _evidence.ProductionPaperEvidenceError(
+            "canonical base feature extractor is unavailable"
+        )
+    return builder
+
+
 def build_holding_marks(
     *,
     universe,
@@ -36,7 +48,7 @@ def build_holding_marks(
     portfolio,
     payload: Mapping[str, object],
 ) -> tuple[tuple[str, float], ...]:
-    """Build only mandatory held-position marks through the canonical feature path."""
+    """Build only mandatory held-position marks through the canonical base feature path."""
 
     as_of = _evidence._aware(decision_as_of, field_name="decision_as_of")
     if portfolio.as_of != as_of:
@@ -108,10 +120,11 @@ def build_holding_marks(
                 "Alpaca market clock differs from the collection-complete decision timestamp by more than 15 minutes"
             )
 
+    feature_builder = _base_feature_builder()
     marks: list[tuple[str, float]] = []
     for position in portfolio.positions:
         try:
-            features = _evidence._features(
+            features = feature_builder(
                 position.symbol,
                 bars.get(position.symbol),
                 quotes.get(position.symbol),
@@ -154,13 +167,21 @@ def _single_pass_build_marked_paper_evidence(
             progress_probe=progress_probe,
         )
 
-    holding_marks = build_holding_marks(
-        universe=universe,
-        decision_as_of=decision_as_of,
-        cash_expected_return=cash_expected_return,
-        portfolio=tentative,
-        payload=evidence_payload,
-    )
+    if progress_probe is not None:
+        progress_probe("production_context_holding_marks_started")
+    try:
+        holding_marks = build_holding_marks(
+            universe=universe,
+            decision_as_of=decision_as_of,
+            cash_expected_return=cash_expected_return,
+            portfolio=tentative,
+            payload=evidence_payload,
+        )
+    except Exception:
+        if progress_probe is not None:
+            progress_probe("production_context_holding_marks_failed")
+        raise
+
     if progress_probe is not None:
         # Preserve the established stage name for telemetry consumers while replacing
         # its old full candidate graph with the lightweight mandatory-mark pass.
