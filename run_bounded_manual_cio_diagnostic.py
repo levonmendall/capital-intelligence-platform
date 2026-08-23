@@ -50,6 +50,12 @@ _RECOVERY_PROGRESS_METRICS = frozenset(
         "recovered_exchanges",
     }
 )
+_PRODUCTION_CONTEXT_PROGRESS_STAGES = frozenset(
+    {
+        "production_context_holding_marks_started",
+        "production_context_holding_marks_failed",
+    }
+)
 _PROVIDER_FREE_CONSUMER_ENV = "CAPITAL_INTELLIGENCE_CIO_PROVIDER_FREE_CONSUMER"
 _PUBLIC_COLLECTION_ENABLED_ENV = "CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_ENABLED"
 _ORIGINAL_CONTAINER_MEMORY_KIB = _core._container_memory_kib
@@ -146,12 +152,18 @@ def _wait_with_reclaimable_bounds(process, **kwargs):
 
 
 def _install_recovery_progress_contract() -> None:
-    """Keep provider recovery telemetry from aborting the recovery it describes."""
+    """Keep valid runtime progress telemetry from aborting the work it describes."""
 
-    current = frozenset(getattr(_diagnostic_coordination, "_PROGRESS_METRICS", ()))
-    if not _RECOVERY_PROGRESS_METRICS.issubset(current):
+    current_metrics = frozenset(getattr(_diagnostic_coordination, "_PROGRESS_METRICS", ()))
+    if not _RECOVERY_PROGRESS_METRICS.issubset(current_metrics):
         _diagnostic_coordination._PROGRESS_METRICS = frozenset(
-            (*current, *_RECOVERY_PROGRESS_METRICS)
+            (*current_metrics, *_RECOVERY_PROGRESS_METRICS)
+        )
+
+    current_stages = frozenset(getattr(_diagnostic_coordination, "_PROGRESS_STAGES", ()))
+    if not _PRODUCTION_CONTEXT_PROGRESS_STAGES.issubset(current_stages):
+        _diagnostic_coordination._PROGRESS_STAGES = frozenset(
+            (*current_stages, *_PRODUCTION_CONTEXT_PROGRESS_STAGES)
         )
 
 
