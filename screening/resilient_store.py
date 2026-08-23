@@ -31,11 +31,10 @@ class SQLiteFullUniverseScreeningStore(_SQLiteFullUniverseScreeningStore):
         super().__init__(path)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
-            self.path,
-            timeout=self._BUSY_TIMEOUT_SECONDS,
-        )
-        connection.row_factory = sqlite3.Row
+        # Preserve the base store's memory-bounded SQLite configuration
+        # (file-backed temp storage, bounded page cache, and mmap disabled),
+        # then layer production concurrency protections on top.
+        connection = super()._connect()
         connection.execute(
             f"PRAGMA busy_timeout = {int(self._BUSY_TIMEOUT_SECONDS * 1000)}"
         )
