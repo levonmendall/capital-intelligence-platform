@@ -26,10 +26,35 @@ def test_release_once_reuses_fresh_snapshot_without_competing_for_memory_lane(
 
     output = capsys.readouterr().out
     assert "capability_operating_evidence_reused" in output
+    assert '"after_lane_busy": false' in output
     assert '"decision_authority": false' in output
     assert '"execution_authority": false' in output
     assert '"paper_only": true' in output
     assert '"real_money_authorized": false' in output
+
+
+def test_lane_busy_accepts_snapshot_completed_during_bounded_wait(
+    monkeypatch,
+    capsys,
+) -> None:
+    evidence = SimpleNamespace(snapshot_id="snapshot-background")
+    snapshots = iter((None, evidence))
+    monkeypatch.setattr(
+        subject,
+        "_load_fresh_operating_evidence",
+        lambda _values: next(snapshots),
+    )
+    monkeypatch.setattr(
+        subject,
+        "_run_isolated_once",
+        lambda *_args, **_kwargs: 126,
+    )
+
+    assert subject.run_operating_once({}) == 0
+
+    output = capsys.readouterr().out
+    assert "capability_operating_evidence_reused" in output
+    assert '"after_lane_busy": true' in output
 
 
 def test_missing_or_stale_snapshot_falls_through_to_bounded_refresh(monkeypatch) -> None:
