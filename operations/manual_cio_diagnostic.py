@@ -22,6 +22,33 @@ _ACTIVE_STATES = frozenset({"pending", "in_progress"})
 _FINAL_STATES = frozenset({"completed", "failed"})
 _PROGRESS_ENABLED = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PROGRESS_ENABLED"
 _CONTEXT_STATE_FILENAME = "production-context-publication-state.json"
+_CONTEXT_ATTEMPT_STATE_FILENAME = "production-context-publication-attempt-state.json"
+_CONTEXT_ATTEMPT_SCHEMA = "production-context-publication-attempt-state.v2-cycle-owned"
+_CONTEXT_ATTEMPT_CYCLE_ADOPTION_STAGES = frozenset(
+    {
+        "production_context_base_universe_ready",
+        "production_context_portfolio_ready",
+        "production_context_equity_discovery_ready",
+        "production_context_comprehensive_discovery_ready",
+        "production_context_universe_ready",
+        "production_context_evidence_payload_ready",
+        "production_context_portfolio_finalized",
+        "production_context_preliminary_evidence_built",
+        "production_context_portfolio_marked",
+        "production_context_evidence_built",
+        "production_context_transient_evidence_released",
+        "production_context_eligible_universe_persisted",
+        "production_context_active_universe_persisted",
+        "production_context_opportunity_engine_ready",
+        "production_context_opportunity_set_ready",
+        "production_context_screening_results_persisted",
+        "production_context_screening_graph_released",
+        "production_context_screening_start_persisted",
+        "production_context_screening_publication_persisted",
+        "production_context_persisted",
+        "six_specialist_committee_cio_cycle",
+    }
+)
 _CONTEXT_CYCLE_ADOPTION_STAGES = frozenset(
     {
         "production_context_portfolio_marked",
@@ -547,6 +574,13 @@ def _write(path: Path, request: ManualCIODiagnosticRequest) -> None:
     temporary.replace(path)
 
 
+def _context_cycle_from_payload(payload: Mapping[str, object]) -> str | None:
+    cycle_key = str(payload.get("cycle_key") or "").strip()
+    if not cycle_key or cycle_key.startswith("refresh-required:"):
+        return None
+    return cycle_key
+
+
 def _published_context_cycle(path: Path) -> str | None:
     context_path = path.parent / _CONTEXT_STATE_FILENAME
     try:
@@ -555,10 +589,53 @@ def _published_context_cycle(path: Path) -> str | None:
         return None
     if not isinstance(payload, Mapping):
         return None
-    cycle_key = str(payload.get("cycle_key") or "").strip()
-    if not cycle_key or cycle_key.startswith("refresh-required:"):
+    return _context_cycle_from_payload(payload)
+
+
+def _current_context_attempt_cycle(
+    path: Path,
+    *,
+    diagnostic_started_at: datetime | None,
+) -> str | None:
+    """Return only the fenced attempt owned by this active diagnostic window."""
+
+    if diagnostic_started_at is None:
         return None
-    return cycle_key
+    attempt_path = path.parent / _CONTEXT_ATTEMPT_STATE_FILENAME
+    try:
+        payload = json.loads(attempt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    if payload.get("schema_version") != _CONTEXT_ATTEMPT_SCHEMA:
+        return None
+    if payload.get("paper_only") is not True or payload.get("real_money_authorized") is not False:
+        return None
+    attempt_id = str(payload.get("attempt_id") or "").strip()
+    fence_version = payload.get("fence_version")
+    if (
+        not attempt_id
+        or isinstance(fence_version, bool)
+        or not isinstance(fence_version, int)
+        or fence_version <= 0
+    ):
+        return None
+    try:
+        attempt_started_at = _optional_datetime(payload.get("started_at"))
+    except (TypeError, ValueError):
+        return None
+    if attempt_started_at is None or attempt_started_at < diagnostic_started_at:
+        return None
+    if str(payload.get("state") or "").strip().lower() not in {
+        "running",
+        "ready",
+        "reused",
+        "blocked",
+        "failed",
+    }:
+        return None
+    return _context_cycle_from_payload(payload)
 
 
 def latest_manual_cio_diagnostic(
@@ -623,6 +700,11 @@ def record_manual_cio_diagnostic_progress(
         )
 
     cycle_key = existing.cycle_key
+    if cycle_key is None and normalized_stage in _CONTEXT_ATTEMPT_CYCLE_ADOPTION_STAGES:
+        cycle_key = _current_context_attempt_cycle(
+            path,
+            diagnostic_started_at=existing.started_at,
+        )
     if cycle_key is None and normalized_stage in _CONTEXT_CYCLE_ADOPTION_STAGES:
         cycle_key = _published_context_cycle(path)
 
