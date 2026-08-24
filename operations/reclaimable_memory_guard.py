@@ -9,6 +9,11 @@ independent limits:
 * a higher raw-cgroup hard ceiling that still leaves explicit service headroom before the
   platform's absolute memory limit.
 
+A raw-only hard-ceiling crossing gets one bounded cgroup-v2 reclaim attempt before the child
+is terminated. The guard remeasures the exact same boundaries after that attempt and remains
+fail-closed: working-set pressure, unavailable reclaim, or ineffective reclaim still causes
+immediate termination. No threshold is raised and no investment/evidence authority changes.
+
 If cgroup memory.stat is unavailable the guard falls back to raw accounting, preserving the
 previous fail-closed behavior. This module changes only operational resource supervision; it
 cannot change evidence scope, CIO authority, investment thresholds, construction, execution,
@@ -31,6 +36,9 @@ _DEFAULT_RENDER_LIMIT_MB = 2048.0
 _DEFAULT_HARD_WATER_FRACTION = 0.90
 _DEFAULT_HARD_RESERVE_MB = 192.0
 _DEFAULT_POLL_SECONDS = 0.10
+_RECLAIM_MARGIN_KIB = 32 * 1024
+_RECLAIM_MAX_KIB = 256 * 1024
+_CGROUP_V2_RECLAIM_PATH = Path("/sys/fs/cgroup/memory.reclaim")
 _HARD_FRACTION_ENV = "CAPITAL_INTELLIGENCE_RENDER_MEMORY_HARD_WATER_FRACTION"
 _HARD_RESERVE_ENV = "CAPITAL_INTELLIGENCE_RENDER_MEMORY_HARD_RESERVE_MB"
 _CONFIGURED_LIMIT_ENV = "CAPITAL_INTELLIGENCE_CONTAINER_MEMORY_LIMIT_MB"
@@ -47,12 +55,27 @@ class MemorySnapshot:
     kernel_kib: int | None
     source: str
     memory_events: tuple[tuple[str, int], ...] = ()
+    active_file_kib: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class MemoryBoundaries:
     working_set_kib: int
     raw_hard_kib: int
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryReclaimResult:
+    attempted: bool
+    supported: bool
+    requested_kib: int
+    raw_before_kib: int | None
+    raw_after_kib: int | None
+    working_set_before_kib: int | None
+    working_set_after_kib: int | None
+    reclaimed_kib: int
+    effective: bool
+    error_type: str | None
 
 
 def _read_int(path: Path) -> int | None:
@@ -191,6 +214,7 @@ def memory_snapshot(values: Mapping[str, str] | None = None) -> MemorySnapshot:
             kernel_kib=_kib(stat.get("kernel")),
             source=source,
             memory_events=tuple(sorted(events.items())),
+            active_file_kib=_kib(stat.get("active_file")),
         )
 
     v1_current_bytes = _read_int(Path("/sys/fs/cgroup/memory/memory.usage_in_bytes"))
@@ -212,6 +236,7 @@ def memory_snapshot(values: Mapping[str, str] | None = None) -> MemorySnapshot:
         inactive = _kib(stat.get("total_inactive_file", stat.get("inactive_file")))
         file_bytes = stat.get("total_cache", stat.get("cache"))
         anon_bytes = stat.get("total_rss", stat.get("rss"))
+        active_file_bytes = stat.get("total_active_file", stat.get("active_file"))
         failcnt = _read_int(Path("/sys/fs/cgroup/memory/memory.failcnt"))
         return MemorySnapshot(
             raw_current_kib=raw_current,
@@ -223,6 +248,7 @@ def memory_snapshot(values: Mapping[str, str] | None = None) -> MemorySnapshot:
             kernel_kib=None,
             source=source,
             memory_events=(() if failcnt is None else (("failcnt", failcnt),)),
+            active_file_kib=_kib(active_file_bytes),
         )
 
     proc_rss = _proc_total_rss_kib()
@@ -236,6 +262,7 @@ def memory_snapshot(values: Mapping[str, str] | None = None) -> MemorySnapshot:
         kernel_kib=None,
         source="proc_rss_fallback" if proc_rss is not None else "unavailable",
         memory_events=(),
+        active_file_kib=None,
     )
 
 
@@ -307,6 +334,71 @@ def limit_reason(snapshot: MemorySnapshot, boundaries: MemoryBoundaries) -> str 
     return None
 
 
+def _raw_reclaim_request_kib(snapshot: MemorySnapshot, boundaries: MemoryBoundaries) -> int:
+    """Return one bounded reclaim request sized to raw overage plus a small safety margin."""
+
+    raw = snapshot.raw_current_kib
+    inactive = snapshot.inactive_file_kib
+    if raw is None or inactive is None or inactive <= 0 or raw < boundaries.raw_hard_kib:
+        return 0
+    overage = max(1, raw - boundaries.raw_hard_kib)
+    target = min(_RECLAIM_MAX_KIB, overage + _RECLAIM_MARGIN_KIB)
+    return max(1, min(inactive, target))
+
+
+def _attempt_cgroup_v2_reclaim(
+    snapshot: MemorySnapshot,
+    boundaries: MemoryBoundaries,
+    *,
+    values: Mapping[str, str],
+) -> tuple[MemoryReclaimResult, MemorySnapshot]:
+    """Request one synchronous cgroup-v2 reclaim and immediately remeasure.
+
+    ``memory.reclaim`` is deliberately best-effort at the syscall/filesystem layer but not
+    at the safety layer: an unavailable or ineffective request never suppresses the existing
+    raw hard ceiling. The caller evaluates the post-reclaim snapshot against unchanged
+    boundaries and terminates if it is still unsafe.
+    """
+
+    request_kib = _raw_reclaim_request_kib(snapshot, boundaries)
+    supported = snapshot.source.startswith("cgroup_v2") and _CGROUP_V2_RECLAIM_PATH.exists()
+    error_type: str | None = None
+    if request_kib > 0 and supported:
+        try:
+            with _CGROUP_V2_RECLAIM_PATH.open("w", encoding="ascii") as handle:
+                handle.write(str(request_kib * 1024))
+                handle.flush()
+        except OSError as error:
+            error_type = type(error).__name__
+    elif request_kib > 0 and not supported:
+        error_type = "UnsupportedCgroupReclaim"
+
+    after = memory_snapshot(values)
+    before_raw = snapshot.raw_current_kib
+    after_raw = after.raw_current_kib
+    reclaimed = (
+        max(0, before_raw - after_raw)
+        if before_raw is not None and after_raw is not None
+        else 0
+    )
+    effective = limit_reason(after, boundaries) is None
+    return (
+        MemoryReclaimResult(
+            attempted=request_kib > 0,
+            supported=supported,
+            requested_kib=request_kib,
+            raw_before_kib=before_raw,
+            raw_after_kib=after_raw,
+            working_set_before_kib=snapshot.working_set_kib,
+            working_set_after_kib=after.working_set_kib,
+            reclaimed_kib=reclaimed,
+            effective=effective,
+            error_type=error_type,
+        ),
+        after,
+    )
+
+
 def _signal_process_group(process: subprocess.Popen, sig: signal.Signals) -> None:
     pid = getattr(process, "pid", None)
     if os.name == "posix" and isinstance(pid, int) and pid > 0:
@@ -373,12 +465,36 @@ def wait_with_reclaimable_resource_bounds(
         "raw": 0,
         "working_set": 0,
         "inactive_file": 0,
+        "active_file": 0,
         "anon": 0,
         "file": 0,
         "kernel": 0,
     }
     last_snapshot: list[MemorySnapshot | None] = [None]
     trigger_reason: list[str | None] = [None]
+    reclaim_attempted: list[bool] = [False]
+    reclaim_report: dict[str, object] = {
+        "memory_reclaim_attempted": False,
+        "memory_reclaim_supported": False,
+        "memory_reclaim_requested_kib": 0,
+        "memory_reclaim_raw_before_kib": None,
+        "memory_reclaim_raw_after_kib": None,
+        "memory_reclaim_working_set_before_kib": None,
+        "memory_reclaim_working_set_after_kib": None,
+        "memory_reclaim_delta_kib": 0,
+        "memory_reclaim_effective": False,
+        "memory_reclaim_error_type": None,
+    }
+
+    def record_snapshot(snapshot: MemorySnapshot) -> None:
+        last_snapshot[0] = snapshot
+        peaks["raw"] = max(peaks["raw"], snapshot.raw_current_kib or 0)
+        peaks["working_set"] = max(peaks["working_set"], snapshot.working_set_kib or 0)
+        peaks["inactive_file"] = max(peaks["inactive_file"], snapshot.inactive_file_kib or 0)
+        peaks["active_file"] = max(peaks["active_file"], snapshot.active_file_kib or 0)
+        peaks["anon"] = max(peaks["anon"], snapshot.anon_kib or 0)
+        peaks["file"] = max(peaks["file"], snapshot.file_kib or 0)
+        peaks["kernel"] = max(peaks["kernel"], snapshot.kernel_kib or 0)
 
     def sample_once() -> bool:
         pid = getattr(process, "pid", None)
@@ -387,13 +503,7 @@ def wait_with_reclaimable_resource_bounds(
             peaks["process"] = max(peaks["process"], rss_kib or 0, hwm_kib or 0)
 
         snapshot = memory_snapshot(resolved)
-        last_snapshot[0] = snapshot
-        peaks["raw"] = max(peaks["raw"], snapshot.raw_current_kib or 0)
-        peaks["working_set"] = max(peaks["working_set"], snapshot.working_set_kib or 0)
-        peaks["inactive_file"] = max(peaks["inactive_file"], snapshot.inactive_file_kib or 0)
-        peaks["anon"] = max(peaks["anon"], snapshot.anon_kib or 0)
-        peaks["file"] = max(peaks["file"], snapshot.file_kib or 0)
-        peaks["kernel"] = max(peaks["kernel"], snapshot.kernel_kib or 0)
+        record_snapshot(snapshot)
         if snapshot.limit_kib is None:
             return False
 
@@ -407,6 +517,52 @@ def wait_with_reclaimable_resource_bounds(
         if reason is None:
             return False
 
+        if reason == "raw_hard_ceiling" and not reclaim_attempted[0]:
+            reclaim_attempted[0] = True
+            result, after = _attempt_cgroup_v2_reclaim(
+                snapshot,
+                boundaries,
+                values=resolved,
+            )
+            record_snapshot(after)
+            reclaim_report.update(
+                {
+                    "memory_reclaim_attempted": result.attempted,
+                    "memory_reclaim_supported": result.supported,
+                    "memory_reclaim_requested_kib": result.requested_kib,
+                    "memory_reclaim_raw_before_kib": result.raw_before_kib,
+                    "memory_reclaim_raw_after_kib": result.raw_after_kib,
+                    "memory_reclaim_working_set_before_kib": result.working_set_before_kib,
+                    "memory_reclaim_working_set_after_kib": result.working_set_after_kib,
+                    "memory_reclaim_delta_kib": result.reclaimed_kib,
+                    "memory_reclaim_effective": result.effective,
+                    "memory_reclaim_error_type": result.error_type,
+                }
+            )
+            _safe_log(
+                "reclaimable_memory_guard_reclaim_attempted",
+                **reclaim_report,
+                memory_reclaim_inactive_file_before_kib=snapshot.inactive_file_kib,
+                memory_reclaim_active_file_before_kib=snapshot.active_file_kib,
+                memory_reclaim_anon_before_kib=snapshot.anon_kib,
+                memory_reclaim_file_before_kib=snapshot.file_kib,
+                memory_reclaim_kernel_before_kib=snapshot.kernel_kib,
+                memory_reclaim_inactive_file_after_kib=after.inactive_file_kib,
+                memory_reclaim_active_file_after_kib=after.active_file_kib,
+                memory_reclaim_anon_after_kib=after.anon_kib,
+                memory_reclaim_file_after_kib=after.file_kib,
+                memory_reclaim_kernel_after_kib=after.kernel_kib,
+                working_set_boundary_kib=boundaries.working_set_kib,
+                raw_hard_boundary_kib=boundaries.raw_hard_kib,
+            )
+            reason = limit_reason(after, boundaries)
+            if reason is None:
+                # One successful reclaim earns continued execution, not a looser limit.
+                # A second raw hard-ceiling crossing in this child is terminal because the
+                # guard intentionally performs only one bounded reclaim attempt per pass.
+                return False
+            snapshot = after
+
         trigger_reason[0] = reason
         memory_limited.set()
         _safe_log(
@@ -416,6 +572,7 @@ def wait_with_reclaimable_resource_bounds(
             container_memory_current_kib=snapshot.raw_current_kib,
             container_memory_working_set_kib=snapshot.working_set_kib,
             container_memory_inactive_file_kib=snapshot.inactive_file_kib,
+            container_memory_active_file_kib=snapshot.active_file_kib,
             container_memory_anon_kib=snapshot.anon_kib,
             container_memory_file_kib=snapshot.file_kib,
             container_memory_kernel_kib=snapshot.kernel_kib,
@@ -424,6 +581,7 @@ def wait_with_reclaimable_resource_bounds(
             raw_hard_boundary_kib=boundaries.raw_hard_kib,
             memory_events=dict(snapshot.memory_events),
             service_oom_prevented=True,
+            **reclaim_report,
         )
         _signal_process_group(process, signal.SIGTERM)
         return True
@@ -465,11 +623,13 @@ def wait_with_reclaimable_resource_bounds(
         container_peak_memory_kib=peaks["raw"],
         container_peak_working_set_kib=peaks["working_set"],
         container_peak_inactive_file_kib=peaks["inactive_file"],
+        container_peak_active_file_kib=peaks["active_file"],
         container_peak_anon_kib=peaks["anon"],
         container_peak_file_kib=peaks["file"],
         container_peak_kernel_kib=peaks["kernel"],
         memory_accounting_source=None if snapshot is None else snapshot.source,
         memory_events={} if snapshot is None else dict(snapshot.memory_events),
+        **reclaim_report,
     )
     return (
         return_code,
@@ -482,6 +642,7 @@ def wait_with_reclaimable_resource_bounds(
 
 __all__ = [
     "MemoryBoundaries",
+    "MemoryReclaimResult",
     "MemorySnapshot",
     "limit_reason",
     "memory_boundaries",
