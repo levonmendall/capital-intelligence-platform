@@ -14,6 +14,7 @@ from typing import Mapping
 from operations import bounded_lane_comprehensive_discovery_worker_v2 as _worker
 from operations import comprehensive_discovery_input_spool as _legacy
 from operations import lane_local_comprehensive_discovery_spool as _lane_local
+from operations.evidence_file_cache_release import release_current_reference_file_cache
 
 
 def _record_active_lane_stage(action: str, asset_class: str) -> None:
@@ -84,6 +85,11 @@ def build_spool(
                 asset_class=asset_class.value,
                 index=index,
             )
+            # Each finite catalog child may rewarm its durable lane-reference component.
+            # Once that child has exited successfully, those clean source pages are no
+            # longer active inputs. Reclaim them before the next heavyweight lane stage
+            # so successful catalog reads cannot accumulate toward the raw cgroup ceiling.
+            release_current_reference_file_cache(resolved_values)
             _run_stage(
                 "publication-lane",
                 path,
