@@ -111,6 +111,48 @@ def test_release_is_fail_soft_and_advises_only_existing_files(
     assert set(advised) == {state, history, reference}
 
 
+def test_reference_release_excludes_paper_and_historical_evidence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-current",
+    }
+    reference_root = tmp_path / "reference_readiness"
+    reference_files = {
+        reference_root / "prequalification-latest.json",
+        reference_root / "instrument-master-release-current.json",
+        reference_root / "assets" / "future" / "catalog-latest-qualified.json",
+        reference_root / "assets" / "registry.json",
+    }
+    for path in reference_files:
+        _write_json(path, {})
+
+    paper = tmp_path / "continuous_evidence_plane" / "paper-evidence" / "latest.json"
+    history = tmp_path / "historical_evidence" / "market_history.sqlite3"
+    _write_json(paper, {})
+    history.parent.mkdir(parents=True, exist_ok=True)
+    history.write_bytes(b"history")
+
+    advised: list[Path] = []
+
+    def fake_advise(path: Path) -> bool:
+        if not path.is_file():
+            return False
+        advised.append(path)
+        return True
+
+    monkeypatch.setattr(cache_release, "_advise_file_cache_dontneed", fake_advise)
+
+    released = cache_release.release_current_reference_file_cache(values)
+
+    assert set(released) == reference_files
+    assert set(advised) == reference_files
+    assert paper not in advised
+    assert history not in advised
+
+
 def test_posix_cache_advisory_is_optional_and_fail_soft(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "evidence.sqlite3"
     target.write_bytes(b"evidence")

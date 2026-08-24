@@ -175,6 +175,21 @@ def _advise_file_cache_dontneed(path: Path) -> bool:
             pass
 
 
+def release_current_reference_file_cache(
+    values: Mapping[str, str],
+) -> tuple[Path, ...]:
+    """Release only current durable reference pages after a completed catalog read."""
+
+    data_root = _data_root(values)
+    if data_root is None:
+        return ()
+    released: list[Path] = []
+    for path in _current_reference_paths(values, data_root):
+        if _advise_file_cache_dontneed(path):
+            released.append(path)
+    return tuple(released)
+
+
 def release_completed_operating_evidence_file_cache(
     values: Mapping[str, str],
 ) -> tuple[Path, ...]:
@@ -190,4 +205,5 @@ def release_completed_operating_evidence_file_cache(
 __all__ = [
     "completed_operating_evidence_paths",
     "release_completed_operating_evidence_file_cache",
+    "release_current_reference_file_cache",
 ]
