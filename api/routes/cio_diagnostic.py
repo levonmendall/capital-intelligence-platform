@@ -233,8 +233,19 @@ def build_cio_diagnostic_audit(
     operating_scope_state = str(
         context.get("comprehensive_discovery_scope_state") or "missing"
     )
+    certification_available = bool(
+        certification.get("all_market_runtime_certified") is True
+        or certification.get("all_market_certification_v2_available") is True
+    )
     scope_complete = (
         certification.get("all_market_comprehensive_discovery_complete") is True
+    )
+    certification_scope_state = (
+        "complete"
+        if scope_complete
+        else "incomplete"
+        if certification_available
+        else "missing"
     )
     lanes_raw = certification.get("all_market_certified_lanes")
     lanes = tuple(
@@ -341,7 +352,7 @@ def build_cio_diagnostic_audit(
         ),
         "comprehensive_discovery_required": scope_required,
         "production_context_discovery_scope_state": operating_scope_state,
-        "comprehensive_discovery_scope_state": "complete" if scope_complete else "incomplete",
+        "comprehensive_discovery_scope_state": certification_scope_state,
         "comprehensive_discovery_complete": scope_complete,
         "comprehensive_discovery_limitations": [
             str(item)[:500]
