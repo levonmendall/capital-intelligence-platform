@@ -24,6 +24,11 @@ from production_context_state_resilience import latest_attempt
 
 router = APIRouter(tags=["operations"])
 
+# Compatibility seam for existing tests/integrations that patch the historical symbol.
+# The production default remains the strictly read-only resolver and grants no advancement
+# authority to the serving/audit process.
+public_all_market_certification = public_all_market_certification_readonly
+
 
 def _release(values: Mapping[str, str]) -> str:
     return (
@@ -233,7 +238,7 @@ def build_cio_diagnostic_audit(
 
     resolved = os.environ if values is None else values
     release = _release(resolved)
-    certification = public_all_market_certification_readonly(resolved)
+    certification = public_all_market_certification(resolved)
     public_requirement_progress = _safe_public_requirement_progress(resolved)
     diagnostic = latest_manual_cio_diagnostic(values=resolved)
     if diagnostic is None:
