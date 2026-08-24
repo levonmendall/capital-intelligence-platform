@@ -7,10 +7,14 @@ from operations import comprehensive_market_discovery as facade
 from operations import lane_local_comprehensive_discovery_spool as lane_local
 
 
-def test_catalog_child_releases_reference_cache_before_completion(monkeypatch, tmp_path):
+def test_catalog_child_reclaims_before_and_after_raw_catalog_persist(
+    monkeypatch,
+    tmp_path,
+) -> None:
     order: list[str] = []
 
     def final_progress(stage: str, *args, **kwargs):
+        del args, kwargs
         order.append(f"progress:{stage}")
 
     monkeypatch.setattr(
@@ -20,11 +24,29 @@ def test_catalog_child_releases_reference_cache_before_completion(monkeypatch, t
     )
     monkeypatch.setattr(
         worker,
-        "release_current_reference_file_cache",
-        lambda values: order.append("cache") or (),
+        "_release_catalog_lane_reference_cache",
+        lambda values, *, phase: order.append(f"cache:{phase}") or (),
+    )
+    monkeypatch.setattr(
+        worker,
+        "_reclaim_catalog_lane_cgroup_cache",
+        lambda values, *, phase="handoff": order.append(f"reclaim:{phase}") or None,
     )
 
+    def fake_write(directory, name, value):
+        del directory, value
+        order.append(f"write:{name}")
+        return object()
+
+    monkeypatch.setattr(worker._legacy, "_write_pickle_blob", fake_write)
+
     def fake_catalog_stage(request_path, values, *, asset_class_value, index):
+        del request_path, values
+        worker._legacy._write_pickle_blob(
+            tmp_path,
+            f"raw-catalog-{index:03d}-{asset_class_value}.pkl",
+            ("record",),
+        )
         order.append("state:persisted")
         facade._core.record_manual_cio_diagnostic_progress(
             f"bounded_spool_catalog_lane_complete:{asset_class_value}",
@@ -41,11 +63,14 @@ def test_catalog_child_releases_reference_cache_before_completion(monkeypatch, t
     )
 
     assert order == [
+        "cache:pre_persist",
+        "reclaim:pre_persist",
+        "write:raw-catalog-004-international_equity.pkl",
+        "reclaim:post_persist",
         "state:persisted",
-        "cache",
         "progress:bounded_spool_catalog_lane_complete:international_equity",
     ]
-    assert facade._core.record_manual_cio_diagnostic_progress is final_progress
+    assert worker._legacy._write_pickle_blob is fake_write
 
 
 def test_durable_catalog_state_precedes_completion_progress():
@@ -55,9 +80,12 @@ def test_durable_catalog_state_precedes_completion_progress():
     )
 
 
-def test_catalog_child_cache_release_is_completion_scoped():
+def test_catalog_child_reclaim_is_scoped_to_raw_catalog_pickle():
     source = inspect.getsource(worker._catalog_lane_stage)
-    assert 'complete_stage = f"bounded_spool_catalog_lane_complete:{asset_class_value}"' in source
-    assert source.index("release_current_reference_file_cache(values)") < source.index(
-        "return original_progress(stage, *args, **kwargs)"
+    assert "expected_blob" in source
+    assert source.index('_release_catalog_lane_reference_cache(values, phase="pre_persist")') < source.index(
+        "descriptor = original_write_pickle_blob(directory, name, value)"
     )
+    assert source.index(
+        "descriptor = original_write_pickle_blob(directory, name, value)"
+    ) < source.index('_reclaim_catalog_lane_cgroup_cache(values, phase="post_persist")')

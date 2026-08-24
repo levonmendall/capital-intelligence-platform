@@ -56,20 +56,64 @@ def _memory_reserve_kib(values: Mapping[str, str]) -> int:
     return int(value * 1024)
 
 
-def _reclaim_catalog_lane_cgroup_cache(values: Mapping[str, str]):
-    """Preempt raw-only cgroup pressure at a durable catalog-lane handoff.
+def _safe_reclaim_log(event: str, **details: object) -> None:
+    try:
+        _memory_guard._safe_log(event, **details)
+    except (OSError, TypeError, ValueError):
+        pass
 
-    This is deliberately advisory.  The outer reclaimable-memory guard retains exclusive
+
+def _release_catalog_lane_reference_cache(
+    values: Mapping[str, str],
+    *,
+    phase: str,
+) -> tuple[object, ...]:
+    """Make completed reference files reclaimable without affecting evidence authority."""
+
+    try:
+        released = tuple(release_current_reference_file_cache(values))
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        _safe_reclaim_log(
+            "catalog_lane_reference_cache_release_failed",
+            catalog_reclaim_phase=phase,
+            cache_release_error_type=type(error).__name__,
+            advisory_only=True,
+        )
+        return ()
+    _safe_reclaim_log(
+        "catalog_lane_reference_cache_release",
+        catalog_reclaim_phase=phase,
+        cache_release_file_count=len(released),
+        advisory_only=True,
+    )
+    return released
+
+
+def _reclaim_catalog_lane_cgroup_cache(
+    values: Mapping[str, str],
+    *,
+    phase: str = "handoff",
+):
+    """Preempt raw-only cgroup pressure around durable catalog persistence.
+
+    This is deliberately advisory. The outer reclaimable-memory guard retains exclusive
     authority to terminate an unsafe child and still uses the unchanged working-set and raw
-    boundaries.  At this handoff we only begin reclaim one existing reclaim margin before
-    the raw hard ceiling, reuse the guard's capped cgroup-v2 reclaim implementation, and
-    remeasure immediately.  Failure is fail-soft because evidence state was already made
-    durable and this helper has no qualification authority.
+    boundaries. At the catalog persistence seam we begin reclaim one existing reclaim
+    margin before the raw hard ceiling, reuse the guard's capped cgroup-v2 implementation,
+    and remeasure immediately. Failure is fail-soft and cannot change evidence state.
     """
 
     try:
         snapshot = _memory_guard.memory_snapshot(values)
         if snapshot.limit_kib is None:
+            _safe_reclaim_log(
+                "catalog_lane_reclaim_checkpoint",
+                catalog_reclaim_phase=phase,
+                memory_accounting_source=snapshot.source,
+                memory_reclaim_attempted=False,
+                reclaim_skip_reason="memory_limit_unavailable",
+                advisory_only=True,
+            )
             return None
         boundaries = _memory_guard.memory_boundaries(
             snapshot.limit_kib,
@@ -77,8 +121,23 @@ def _reclaim_catalog_lane_cgroup_cache(values: Mapping[str, str]):
             working_set_reserve_kib=_memory_reserve_kib(values),
             values=values,
         )
+        reason = _memory_guard.limit_reason(snapshot, boundaries)
         # Never let an operational cache advisory obscure genuine working-set pressure.
-        if _memory_guard.limit_reason(snapshot, boundaries) == "working_set":
+        if reason == "working_set":
+            _safe_reclaim_log(
+                "catalog_lane_reclaim_checkpoint",
+                catalog_reclaim_phase=phase,
+                memory_accounting_source=snapshot.source,
+                container_memory_current_kib=snapshot.raw_current_kib,
+                container_memory_working_set_kib=snapshot.working_set_kib,
+                container_memory_inactive_file_kib=snapshot.inactive_file_kib,
+                container_memory_active_file_kib=snapshot.active_file_kib,
+                working_set_boundary_kib=boundaries.working_set_kib,
+                raw_hard_boundary_kib=boundaries.raw_hard_kib,
+                memory_reclaim_attempted=False,
+                reclaim_skip_reason="working_set_pressure",
+                advisory_only=True,
+            )
             return None
         reclaim_boundary = max(
             boundaries.working_set_kib + 1,
@@ -86,6 +145,21 @@ def _reclaim_catalog_lane_cgroup_cache(values: Mapping[str, str]):
         )
         raw = snapshot.raw_current_kib
         if raw is None or raw < reclaim_boundary:
+            _safe_reclaim_log(
+                "catalog_lane_reclaim_checkpoint",
+                catalog_reclaim_phase=phase,
+                memory_accounting_source=snapshot.source,
+                container_memory_current_kib=raw,
+                container_memory_working_set_kib=snapshot.working_set_kib,
+                container_memory_inactive_file_kib=snapshot.inactive_file_kib,
+                container_memory_active_file_kib=snapshot.active_file_kib,
+                working_set_boundary_kib=boundaries.working_set_kib,
+                raw_hard_boundary_kib=boundaries.raw_hard_kib,
+                catalog_handoff_reclaim_boundary_kib=reclaim_boundary,
+                memory_reclaim_attempted=False,
+                reclaim_skip_reason="below_preemptive_margin",
+                advisory_only=True,
+            )
             return None
         proactive_boundaries = _memory_guard.MemoryBoundaries(
             working_set_kib=boundaries.working_set_kib,
@@ -96,37 +170,38 @@ def _reclaim_catalog_lane_cgroup_cache(values: Mapping[str, str]):
             proactive_boundaries,
             values=values,
         )
-        try:
-            _memory_guard._safe_log(
-                "catalog_lane_handoff_reclaim",
-                memory_reclaim_attempted=result.attempted,
-                memory_reclaim_supported=result.supported,
-                memory_reclaim_requested_kib=result.requested_kib,
-                memory_reclaim_raw_before_kib=result.raw_before_kib,
-                memory_reclaim_raw_after_kib=result.raw_after_kib,
-                memory_reclaim_working_set_before_kib=result.working_set_before_kib,
-                memory_reclaim_working_set_after_kib=result.working_set_after_kib,
-                memory_reclaim_delta_kib=result.reclaimed_kib,
-                memory_reclaim_effective=result.effective,
-                memory_reclaim_error_type=result.error_type,
-                catalog_handoff_reclaim_boundary_kib=reclaim_boundary,
-                working_set_boundary_kib=boundaries.working_set_kib,
-                raw_hard_boundary_kib=boundaries.raw_hard_kib,
-                post_reclaim_guard_reason=_memory_guard.limit_reason(after, boundaries),
-                advisory_only=True,
-            )
-        except (OSError, TypeError, ValueError):
-            pass
+        _safe_reclaim_log(
+            "catalog_lane_reclaim_checkpoint",
+            catalog_reclaim_phase=phase,
+            memory_accounting_source=snapshot.source,
+            memory_reclaim_attempted=result.attempted,
+            memory_reclaim_supported=result.supported,
+            memory_reclaim_requested_kib=result.requested_kib,
+            memory_reclaim_raw_before_kib=result.raw_before_kib,
+            memory_reclaim_raw_after_kib=result.raw_after_kib,
+            memory_reclaim_working_set_before_kib=result.working_set_before_kib,
+            memory_reclaim_working_set_after_kib=result.working_set_after_kib,
+            memory_reclaim_inactive_file_before_kib=snapshot.inactive_file_kib,
+            memory_reclaim_inactive_file_after_kib=after.inactive_file_kib,
+            memory_reclaim_active_file_before_kib=snapshot.active_file_kib,
+            memory_reclaim_active_file_after_kib=after.active_file_kib,
+            memory_reclaim_delta_kib=result.reclaimed_kib,
+            memory_reclaim_effective=result.effective,
+            memory_reclaim_error_type=result.error_type,
+            catalog_handoff_reclaim_boundary_kib=reclaim_boundary,
+            working_set_boundary_kib=boundaries.working_set_kib,
+            raw_hard_boundary_kib=boundaries.raw_hard_kib,
+            post_reclaim_guard_reason=_memory_guard.limit_reason(after, boundaries),
+            advisory_only=True,
+        )
         return result
     except (OSError, RuntimeError, TypeError, ValueError) as error:
-        try:
-            _memory_guard._safe_log(
-                "catalog_lane_handoff_reclaim_failed",
-                memory_reclaim_error_type=type(error).__name__,
-                advisory_only=True,
-            )
-        except (OSError, TypeError, ValueError):
-            pass
+        _safe_reclaim_log(
+            "catalog_lane_reclaim_checkpoint_failed",
+            catalog_reclaim_phase=phase,
+            memory_reclaim_error_type=type(error).__name__,
+            advisory_only=True,
+        )
         return None
 
 
@@ -137,32 +212,32 @@ def _catalog_lane_stage(
     asset_class_value: str,
     index: int,
 ) -> None:
-    """Release durable reference pages before catalog-complete progress is observable.
+    """Reclaim source/cache pressure immediately around raw-catalog persistence.
 
-    The lane-local catalog stage persists its bounded raw-catalog shard and durable stage
-    state immediately before emitting ``bounded_spool_catalog_lane_complete``.  Production
-    telemetry showed the parent raw-cgroup guard can react to that completion boundary
-    before the coordinator regains control, so parent-side cache reclamation is too late.
-
-    This child-local wrapper intercepts only that completion emission, makes completed
-    reference pages reclaimable, performs one bounded cgroup-v2 reclaim when raw pressure
-    is already close to the unchanged hard ceiling, then forwards the unchanged progress
-    event.  Both reclamation steps are fail-soft and carry no decision authority.
+    The lane-local catalog algorithm reconstructs a complete lane and then persists one
+    integrity-checked raw-catalog pickle before writing durable stage state and publishing
+    completion. The outer cgroup guard samples continuously, so waiting until completion to
+    reclaim can lose the race. This wrapper therefore intercepts only that raw-catalog
+    pickle write in the finite child: source reference cache is released and bounded cgroup
+    reclaim is attempted immediately before persistence, then one second bounded reclaim is
+    attempted after the durable pickle write. The canonical lane algorithm is unchanged.
     """
 
-    from operations import comprehensive_market_discovery as facade
+    expected_blob = (
+        f"raw-catalog-{index:03d}-{_legacy._safe_release(asset_class_value)}.pkl"
+    )
+    original_write_pickle_blob = _legacy._write_pickle_blob
 
-    core = facade._core
-    original_progress = core.record_manual_cio_diagnostic_progress
-    complete_stage = f"bounded_spool_catalog_lane_complete:{asset_class_value}"
+    def write_pickle_with_catalog_reclaim(directory, name, value):
+        if str(name) != expected_blob:
+            return original_write_pickle_blob(directory, name, value)
+        _release_catalog_lane_reference_cache(values, phase="pre_persist")
+        _reclaim_catalog_lane_cgroup_cache(values, phase="pre_persist")
+        descriptor = original_write_pickle_blob(directory, name, value)
+        _reclaim_catalog_lane_cgroup_cache(values, phase="post_persist")
+        return descriptor
 
-    def progress_with_reference_cache_release(stage: str, *args, **kwargs):
-        if stage == complete_stage:
-            release_current_reference_file_cache(values)
-            _reclaim_catalog_lane_cgroup_cache(values)
-        return original_progress(stage, *args, **kwargs)
-
-    core.record_manual_cio_diagnostic_progress = progress_with_reference_cache_release
+    _legacy._write_pickle_blob = write_pickle_with_catalog_reclaim
     try:
         _lane_local._catalog_lane_stage(
             request_path,
@@ -171,7 +246,7 @@ def _catalog_lane_stage(
             index=index,
         )
     finally:
-        core.record_manual_cio_diagnostic_progress = original_progress
+        _legacy._write_pickle_blob = original_write_pickle_blob
 
 
 def _publication_lane_stage(
