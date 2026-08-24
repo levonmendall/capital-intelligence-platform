@@ -21,9 +21,113 @@ from operations import bounded_lane_comprehensive_discovery_worker as _base
 from operations import bounded_provider_preselection_publication as _publication
 from operations import comprehensive_discovery_input_spool as _legacy
 from operations import lane_local_comprehensive_discovery_spool as _lane_local
+from operations import reclaimable_memory_guard as _memory_guard
 from operations.evidence_file_cache_release import release_current_reference_file_cache
 
 _MODULE = "operations.bounded_lane_comprehensive_discovery_worker_v2"
+_MEMORY_HIGH_WATER_ENV = (
+    "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_MEMORY_HIGH_WATER_FRACTION"
+)
+_MEMORY_RESERVE_ENV = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_MEMORY_RESERVE_MB"
+_DEFAULT_MEMORY_HIGH_WATER_FRACTION = 0.70
+_DEFAULT_MEMORY_RESERVE_MB = 640.0
+_CATALOG_HANDOFF_RECLAIM_MARGIN_KIB = 32 * 1024
+
+
+def _memory_high_water_fraction(values: Mapping[str, str]) -> float:
+    """Mirror the existing bounded-worker working-set configuration without changing it."""
+
+    raw = str(values.get(_MEMORY_HIGH_WATER_ENV) or "").strip()
+    if not raw:
+        return _DEFAULT_MEMORY_HIGH_WATER_FRACTION
+    value = float(raw)
+    if not 0.5 <= value < 0.9:
+        raise ValueError(f"{_MEMORY_HIGH_WATER_ENV} must be at least 0.5 and below 0.9")
+    return value
+
+
+def _memory_reserve_kib(values: Mapping[str, str]) -> int:
+    """Mirror the existing bounded-worker service reserve without changing it."""
+
+    raw = str(values.get(_MEMORY_RESERVE_ENV) or "").strip()
+    value = _DEFAULT_MEMORY_RESERVE_MB if not raw else float(raw)
+    if value < 256.0:
+        raise ValueError(f"{_MEMORY_RESERVE_ENV} must be at least 256")
+    return int(value * 1024)
+
+
+def _reclaim_catalog_lane_cgroup_cache(values: Mapping[str, str]):
+    """Preempt raw-only cgroup pressure at a durable catalog-lane handoff.
+
+    This is deliberately advisory.  The outer reclaimable-memory guard retains exclusive
+    authority to terminate an unsafe child and still uses the unchanged working-set and raw
+    boundaries.  At this handoff we only begin reclaim one existing reclaim margin before
+    the raw hard ceiling, reuse the guard's capped cgroup-v2 reclaim implementation, and
+    remeasure immediately.  Failure is fail-soft because evidence state was already made
+    durable and this helper has no qualification authority.
+    """
+
+    try:
+        snapshot = _memory_guard.memory_snapshot(values)
+        if snapshot.limit_kib is None:
+            return None
+        boundaries = _memory_guard.memory_boundaries(
+            snapshot.limit_kib,
+            working_set_fraction=_memory_high_water_fraction(values),
+            working_set_reserve_kib=_memory_reserve_kib(values),
+            values=values,
+        )
+        # Never let an operational cache advisory obscure genuine working-set pressure.
+        if _memory_guard.limit_reason(snapshot, boundaries) == "working_set":
+            return None
+        reclaim_boundary = max(
+            boundaries.working_set_kib + 1,
+            boundaries.raw_hard_kib - _CATALOG_HANDOFF_RECLAIM_MARGIN_KIB,
+        )
+        raw = snapshot.raw_current_kib
+        if raw is None or raw < reclaim_boundary:
+            return None
+        proactive_boundaries = _memory_guard.MemoryBoundaries(
+            working_set_kib=boundaries.working_set_kib,
+            raw_hard_kib=reclaim_boundary,
+        )
+        result, after = _memory_guard._attempt_cgroup_v2_reclaim(
+            snapshot,
+            proactive_boundaries,
+            values=values,
+        )
+        try:
+            _memory_guard._safe_log(
+                "catalog_lane_handoff_reclaim",
+                memory_reclaim_attempted=result.attempted,
+                memory_reclaim_supported=result.supported,
+                memory_reclaim_requested_kib=result.requested_kib,
+                memory_reclaim_raw_before_kib=result.raw_before_kib,
+                memory_reclaim_raw_after_kib=result.raw_after_kib,
+                memory_reclaim_working_set_before_kib=result.working_set_before_kib,
+                memory_reclaim_working_set_after_kib=result.working_set_after_kib,
+                memory_reclaim_delta_kib=result.reclaimed_kib,
+                memory_reclaim_effective=result.effective,
+                memory_reclaim_error_type=result.error_type,
+                catalog_handoff_reclaim_boundary_kib=reclaim_boundary,
+                working_set_boundary_kib=boundaries.working_set_kib,
+                raw_hard_boundary_kib=boundaries.raw_hard_kib,
+                post_reclaim_guard_reason=_memory_guard.limit_reason(after, boundaries),
+                advisory_only=True,
+            )
+        except (OSError, TypeError, ValueError):
+            pass
+        return result
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        try:
+            _memory_guard._safe_log(
+                "catalog_lane_handoff_reclaim_failed",
+                memory_reclaim_error_type=type(error).__name__,
+                advisory_only=True,
+            )
+        except (OSError, TypeError, ValueError):
+            pass
+        return None
 
 
 def _catalog_lane_stage(
@@ -40,9 +144,10 @@ def _catalog_lane_stage(
     telemetry showed the parent raw-cgroup guard can react to that completion boundary
     before the coordinator regains control, so parent-side cache reclamation is too late.
 
-    This child-local wrapper intercepts only that completion emission, advises the kernel
-    that current durable reference pages may be reclaimed, then forwards the unchanged
-    progress event.  The advisory is fail-soft and carries no decision authority.
+    This child-local wrapper intercepts only that completion emission, makes completed
+    reference pages reclaimable, performs one bounded cgroup-v2 reclaim when raw pressure
+    is already close to the unchanged hard ceiling, then forwards the unchanged progress
+    event.  Both reclamation steps are fail-soft and carry no decision authority.
     """
 
     from operations import comprehensive_market_discovery as facade
@@ -54,6 +159,7 @@ def _catalog_lane_stage(
     def progress_with_reference_cache_release(stage: str, *args, **kwargs):
         if stage == complete_stage:
             release_current_reference_file_cache(values)
+            _reclaim_catalog_lane_cgroup_cache(values)
         return original_progress(stage, *args, **kwargs)
 
     core.record_manual_cio_diagnostic_progress = progress_with_reference_cache_release
@@ -265,4 +371,9 @@ if __name__ == "__main__":
     raise SystemExit(_main())
 
 
-__all__ = ["_catalog_lane_stage", "_publication_lane_stage", "run_stage"]
+__all__ = [
+    "_catalog_lane_stage",
+    "_publication_lane_stage",
+    "_reclaim_catalog_lane_cgroup_cache",
+    "run_stage",
+]
