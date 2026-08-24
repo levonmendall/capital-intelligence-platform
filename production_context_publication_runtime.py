@@ -30,6 +30,9 @@ from zoneinfo import ZoneInfo
 from api.config import ApiSettings
 from operations.certification_runtime_state import advance_linear_state_for_cutoff
 from operations.certification_state_machine import CertificationState
+from operations.evidence_file_cache_release import (
+    release_completed_operating_evidence_file_cache,
+)
 from operations.free_paper_pilot import (
     DEFAULT_UNIVERSE_PATH,
     FreePaperPilotUniverse,
@@ -127,8 +130,9 @@ def _screening_resource_progress_probe(
     """Protect the expensive screening stream without changing screening semantics.
 
     The governed publisher has already deleted the large discovery graph when it emits
-    ``production_context_screening_graph_released``. A best-effort heap trim at that exact
-    handoff lets glibc return released arenas to the container. The existing
+    ``production_context_screening_graph_released``. At that exact handoff, release both
+    already-unreferenced heap arenas and clean file-cache pages belonging to the qualified
+    operating-evidence epoch that the context build has just consumed. The existing
     ``production_context_screening_start_persisted`` event is forwarded before the guard
     runs so a low-headroom stop remains durable and attributable to the exact boundary.
     """
@@ -136,6 +140,7 @@ def _screening_resource_progress_probe(
     def guarded(stage: str) -> None:
         if stage == "production_context_screening_graph_released":
             trim_released_heap()
+            release_completed_operating_evidence_file_cache(os.environ)
         if progress_probe is not None:
             progress_probe(stage)
         if stage == "production_context_screening_start_persisted":

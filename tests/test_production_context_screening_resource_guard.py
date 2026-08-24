@@ -101,16 +101,52 @@ def test_start_progress_is_persisted_before_low_headroom_failure(monkeypatch) ->
     assert order == ["production_context_screening_start_persisted", "guard"]
 
 
-def test_graph_release_trims_before_progress_is_persisted(monkeypatch) -> None:
+def test_graph_release_reclaims_heap_and_evidence_cache_before_progress(monkeypatch) -> None:
     order: list[str] = []
 
     def trim() -> bool:
         order.append("trim")
         return True
 
+    def release_cache(_values) -> tuple[Path, ...]:
+        order.append("cache")
+        return ()
+
     monkeypatch.setattr(runtime, "trim_released_heap", trim)
+    monkeypatch.setattr(
+        runtime,
+        "release_completed_operating_evidence_file_cache",
+        release_cache,
+    )
     guarded = runtime._screening_resource_progress_probe(order.append)
 
     guarded("production_context_screening_graph_released")
 
-    assert order == ["trim", "production_context_screening_graph_released"]
+    assert order == [
+        "trim",
+        "cache",
+        "production_context_screening_graph_released",
+    ]
+
+
+def test_cache_release_is_not_repeated_at_screening_start(monkeypatch) -> None:
+    order: list[str] = []
+
+    def release_cache(_values) -> tuple[Path, ...]:
+        order.append("cache")
+        return ()
+
+    def guard() -> None:
+        order.append("guard")
+
+    monkeypatch.setattr(
+        runtime,
+        "release_completed_operating_evidence_file_cache",
+        release_cache,
+    )
+    monkeypatch.setattr(runtime, "ensure_screening_headroom", guard)
+    guarded = runtime._screening_resource_progress_probe(order.append)
+
+    guarded("production_context_screening_start_persisted")
+
+    assert order == ["production_context_screening_start_persisted", "guard"]
