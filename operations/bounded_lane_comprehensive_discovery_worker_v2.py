@@ -21,8 +21,51 @@ from operations import bounded_lane_comprehensive_discovery_worker as _base
 from operations import bounded_provider_preselection_publication as _publication
 from operations import comprehensive_discovery_input_spool as _legacy
 from operations import lane_local_comprehensive_discovery_spool as _lane_local
+from operations.evidence_file_cache_release import release_current_reference_file_cache
 
 _MODULE = "operations.bounded_lane_comprehensive_discovery_worker_v2"
+
+
+def _catalog_lane_stage(
+    request_path: str | Path,
+    values: Mapping[str, str],
+    *,
+    asset_class_value: str,
+    index: int,
+) -> None:
+    """Release durable reference pages before catalog-complete progress is observable.
+
+    The lane-local catalog stage persists its bounded raw-catalog shard and durable stage
+    state immediately before emitting ``bounded_spool_catalog_lane_complete``.  Production
+    telemetry showed the parent raw-cgroup guard can react to that completion boundary
+    before the coordinator regains control, so parent-side cache reclamation is too late.
+
+    This child-local wrapper intercepts only that completion emission, advises the kernel
+    that current durable reference pages may be reclaimed, then forwards the unchanged
+    progress event.  The advisory is fail-soft and carries no decision authority.
+    """
+
+    from operations import comprehensive_market_discovery as facade
+
+    core = facade._core
+    original_progress = core.record_manual_cio_diagnostic_progress
+    complete_stage = f"bounded_spool_catalog_lane_complete:{asset_class_value}"
+
+    def progress_with_reference_cache_release(stage: str, *args, **kwargs):
+        if stage == complete_stage:
+            release_current_reference_file_cache(values)
+        return original_progress(stage, *args, **kwargs)
+
+    core.record_manual_cio_diagnostic_progress = progress_with_reference_cache_release
+    try:
+        _lane_local._catalog_lane_stage(
+            request_path,
+            values,
+            asset_class_value=asset_class_value,
+            index=index,
+        )
+    finally:
+        core.record_manual_cio_diagnostic_progress = original_progress
 
 
 def _publication_lane_stage(
@@ -188,7 +231,7 @@ def _main(argv: Sequence[str] | None = None) -> int:
     values = dict(os.environ)
     try:
         if args.action == "catalog-lane":
-            _lane_local._catalog_lane_stage(
+            _catalog_lane_stage(
                 args.request,
                 values,
                 asset_class_value=args.asset_class,
@@ -222,4 +265,4 @@ if __name__ == "__main__":
     raise SystemExit(_main())
 
 
-__all__ = ["_publication_lane_stage", "run_stage"]
+__all__ = ["_catalog_lane_stage", "_publication_lane_stage", "run_stage"]
