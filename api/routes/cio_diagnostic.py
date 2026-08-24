@@ -78,6 +78,47 @@ def _latest_context_attempt(settings: Any) -> Mapping[str, Any]:
     return attempt if isinstance(attempt, Mapping) else {}
 
 
+def _market_lanes(
+    payload: object,
+    *,
+    comprehensive_discovery_complete: bool,
+) -> tuple[dict[str, object], ...]:
+    """Legacy lane read-model helper retained for import compatibility only.
+
+    The independent certification audit no longer uses capability-scoped context lane
+    counts to decide all-market readiness. Existing read-model callers may still use this
+    projection for presentation and regression compatibility.
+    """
+
+    if not isinstance(payload, Mapping):
+        return ()
+    lanes: list[dict[str, object]] = []
+    for asset_class, raw in sorted(payload.items(), key=lambda item: str(item[0])):
+        if not isinstance(raw, Mapping):
+            continue
+        scheduled = raw.get("scheduled") is True
+        catalog = _count(raw, "catalog")
+        deep = _count(raw, "deep")
+        selected = _count(raw, "selected")
+        represented = (not scheduled) or (
+            comprehensive_discovery_complete and catalog > 0
+        )
+        lanes.append(
+            {
+                "asset_class": str(asset_class),
+                "scheduled": scheduled,
+                "schedule_reason": None
+                if raw.get("schedule_reason") in (None, "")
+                else str(raw.get("schedule_reason"))[:200],
+                "catalog_count": catalog,
+                "deep_analyzed_count": deep,
+                "selected_count": selected,
+                "represented": represented,
+            }
+        )
+    return tuple(lanes)
+
+
 def _safe_public_requirement_progress(
     values: Mapping[str, str],
 ) -> dict[str, object] | None:
