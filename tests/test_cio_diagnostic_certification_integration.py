@@ -33,22 +33,41 @@ def _certificate(
         "all_market_us_equity_discovery_snapshot_id": "equity",
         "all_market_paper_evidence_snapshot_id": "paper",
         "all_market_policy_compatibility_hash": "b" * 64,
-        "all_market_certification_v2_state": (
-            "CONSTRUCTION_COMPLETE" if complete else "COMMITTEE_COMPLETE"
-        ),
+        "all_market_certification_v2_state": "CERTIFIED" if complete else "COMMITTEE_COMPLETE",
         "all_market_evidence_certified": True,
         "all_market_screening_certified": True,
         "all_market_committee_certified": True,
         "all_market_cio_certified": complete,
         "all_market_construction_certified": complete,
         "all_market_paper_implementation_certified": False,
-        "all_market_no_action_certified": False,
-        "all_market_operational_certified": False,
+        "all_market_no_action_certified": complete,
+        "all_market_operational_certified": complete,
+        "all_market_comprehensive_discovery_complete": True,
+        "all_market_scheduled_market_coverage_complete": True,
+        "all_market_terminal_screening_complete": True,
+        "all_market_certified_lanes": [
+            {
+                "asset_class": "crypto",
+                "scheduled": True,
+                "catalog_count": 5,
+                "deep_analyzed_count": 5,
+                "selected_count": 2,
+                "represented": True,
+                "terminal_accounting_complete": True,
+            },
+            {
+                "asset_class": "fixed_income",
+                "scheduled": True,
+                "catalog_count": 5,
+                "deep_analyzed_count": 5,
+                "selected_count": 1,
+                "represented": True,
+                "terminal_accounting_complete": True,
+            },
+        ],
         "certification_v2_enabled": True,
         "certification_v2_id": "v2-cert",
-        "certification_v2_state": (
-            "CONSTRUCTION_COMPLETE" if complete else "COMMITTEE_COMPLETE"
-        ),
+        "certification_v2_state": "CERTIFIED" if complete else "COMMITTEE_COMPLETE",
         "certification_v2_cutoff": cutoff.isoformat(),
         "certification_v2_evidence_generation_id": "generation",
         "certification_v2_snapshot_id": "pit",
@@ -56,7 +75,7 @@ def _certificate(
         "certification_v2_us_equity_discovery_snapshot_id": "equity",
         "certification_v2_paper_evidence_snapshot_id": "paper",
         "certification_v2_policy_compatibility_hash": "b" * 64,
-        "certification_v2_blocker": "state:CONSTRUCTION_COMPLETE",
+        "certification_v2_blocker": None if complete else "state:COMMITTEE_COMPLETE",
     }
 
 
@@ -122,26 +141,12 @@ def _context(*, cutoff: datetime) -> dict[str, object]:
         "cycle_key": "canonical-cio:America/Los_Angeles:2026-08-14",
         "decision_as_of": cutoff.isoformat(),
         "comprehensive_discovery_required": True,
-        "comprehensive_discovery_scope_state": "complete",
+        "comprehensive_discovery_scope_state": "capability_scoped",
         "comprehensive_discovery_limitations": [],
         "instrument_count": 10,
         "candidate_count": 3,
         "exclusion_count": 7,
         "qualified_candidate_count": 2,
-        "comprehensive_discovery_lane_counts": {
-            "crypto": {
-                "scheduled": True,
-                "catalog": 5,
-                "deep": 5,
-                "selected": 2,
-            },
-            "fixed_income": {
-                "scheduled": True,
-                "catalog": 5,
-                "deep": 5,
-                "selected": 1,
-            },
-        },
     }
 
 
@@ -167,7 +172,7 @@ def test_public_diagnostic_accepts_fresh_reused_evidence_at_later_cio_cutoff(
     monkeypatch.setattr(audit, "_latest_context_attempt", lambda _settings: {})
     monkeypatch.setattr(
         audit,
-        "public_all_market_certification",
+        "public_all_market_certification_readonly",
         lambda _values: _certificate(
             cutoff=cutoff,
             evidence_as_of=evidence_as_of,
@@ -176,12 +181,15 @@ def test_public_diagnostic_accepts_fresh_reused_evidence_at_later_cio_cutoff(
 
     payload = audit.build_cio_diagnostic_audit(settings=settings, values=values)
 
-    assert payload["schema_version"] == "public-cio-diagnostic-audit.v2-end-to-end"
+    assert payload["schema_version"] == "public-cio-diagnostic-audit.v3-independent-certification"
     assert payload["credential_safe"] is True
     assert payload["all_market_certification_context_matches"] is True
     assert payload["all_market_certification_v2_context_matches"] is True
     assert payload["all_market_construction_certified"] is True
-    assert payload["all_market_operational_certified"] is False
+    assert payload["all_market_no_action_certified"] is True
+    assert payload["all_market_operational_certified"] is True
+    assert payload["production_context_discovery_scope_state"] == "capability_scoped"
+    assert payload["comprehensive_discovery_complete"] is True
     assert payload["paper_only"] is True
     assert payload["real_money_authorized"] is False
     assert payload["ready"] is True
@@ -210,7 +218,7 @@ def test_public_diagnostic_fails_closed_when_v2_stops_before_cio_construction(
     monkeypatch.setattr(audit, "_latest_context_attempt", lambda _settings: {})
     monkeypatch.setattr(
         audit,
-        "public_all_market_certification",
+        "public_all_market_certification_readonly",
         lambda _values: _certificate(
             cutoff=cutoff,
             evidence_as_of=evidence_as_of,
@@ -223,5 +231,7 @@ def test_public_diagnostic_fails_closed_when_v2_stops_before_cio_construction(
     assert payload["all_market_committee_certified"] is True
     assert payload["all_market_cio_certified"] is False
     assert payload["all_market_construction_certified"] is False
+    assert payload["all_market_no_action_certified"] is False
+    assert payload["all_market_operational_certified"] is False
     assert payload["ready"] is False
     assert payload["all_market_evaluation_complete"] is False

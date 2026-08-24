@@ -25,7 +25,7 @@ def _request() -> SimpleNamespace:
 
 def _in_progress_payload() -> dict[str, object]:
     return {
-        "schema_version": "public-cio-diagnostic-audit.v2-end-to-end",
+        "schema_version": "public-cio-diagnostic-audit.v3-independent-certification",
         "credential_safe": True,
         "ready": False,
         "state": "in_progress",
@@ -53,7 +53,7 @@ def test_canonical_audit_contract_is_credential_safe_when_not_recorded(monkeypat
     )
 
     assert payload["state"] == "not_recorded"
-    assert payload["schema_version"] == "public-cio-diagnostic-audit.v2-end-to-end"
+    assert payload["schema_version"] == "public-cio-diagnostic-audit.v3-independent-certification"
     assert payload["credential_safe"] is True
     assert payload["ready"] is False
     assert payload["paper_only"] is True
