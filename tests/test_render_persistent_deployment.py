@@ -206,7 +206,7 @@ def test_render_interface_displays_release_and_persistent_state_identity() -> No
     assert isinstance(context.state_root, Path)
 
 
-def test_signed_out_render_surface_publishes_exact_release_identity(
+def test_render_surface_opens_public_read_only_without_credentials(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -230,9 +230,16 @@ def test_signed_out_render_surface_publishes_exact_release_identity(
         runtime_settings.clear()
 
     assert not app.exception
-    assert "Capital Intelligence Platform" in [item.value for item in app.title]
+    assert len(app.segmented_control) == 1
+    markdown = [item.value for item in app.markdown]
+    assert any("Public read-only viewer" in value for value in markdown)
+    assert "Email address" not in [item.label for item in app.text_input]
+    assert "Password" not in [item.label for item in app.text_input]
+    assert "Sign in" not in [item.label for item in app.button]
+    assert "Sign out" not in [item.label for item in app.button]
     captions = [item.value for item in app.caption]
-    assert f"Deployed Git SHA: `{release}`" in captions
+    assert not any("Deployed Git SHA" in value for value in captions)
+    assert not any(release in value for value in captions)
     assert not any(str(tmp_path) in value for value in captions)
 
 

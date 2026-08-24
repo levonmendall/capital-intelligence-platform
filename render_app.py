@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Any, Callable
 
@@ -158,6 +159,20 @@ def prepare_render_surface_runtime() -> None:
         setattr(app_impl, attribute_name, guarded)
 
 
+def _enable_public_streamlit_access(
+    values: MutableMapping[str, str] | None = None,
+) -> None:
+    """Open only the Render Streamlit process as the existing read-only public viewer.
+
+    The API is a separate managed process and retains the supervisor's authentication
+    setting. This child-local override removes the browser credential gate without
+    granting administrator, paper-operation, investment, or execution authority.
+    """
+
+    environment = os.environ if values is None else values
+    environment["CAPITAL_INTELLIGENCE_AUTHENTICATION_REQUIRED"] = "false"
+
+
 def deployment_context_from_environment() -> DeploymentContext:
     release = (
         os.getenv("CAPITAL_INTELLIGENCE_RELEASE")
@@ -174,6 +189,7 @@ def deployment_context_from_environment() -> DeploymentContext:
 
 
 def main() -> None:
+    _enable_public_streamlit_access()
     public_event_recency_runtime.install(educational_market_briefing_ui)
     prepare_render_data_runtime()
     today_event_alignment_runtime.install(
