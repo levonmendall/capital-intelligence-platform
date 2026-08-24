@@ -12,7 +12,10 @@ def _write_json(path: Path, payload: object) -> None:
 
 
 def test_completed_operating_evidence_paths_are_current_epoch_only(tmp_path: Path) -> None:
-    values = {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-current",
+    }
     snapshot_id = "snapshot-current"
     quote_digest = "quote-digest"
     company_digest = "company-digest"
@@ -36,6 +39,24 @@ def test_completed_operating_evidence_paths_are_current_epoch_only(tmp_path: Pat
         },
     )
 
+    reference_root = tmp_path / "reference_readiness"
+    current_reference_files = {
+        reference_root / "prequalification-latest.json",
+        reference_root / "eodhd_directories-latest-qualified.json",
+        reference_root / "futures_contracts-latest-qualified.json",
+        reference_root / "instrument-master-release-current.json",
+        reference_root / "progress-release-current.json",
+        reference_root / "assets" / "future" / "catalog-latest-qualified.json",
+        reference_root / "assets" / "registry.json",
+    }
+    for path in current_reference_files:
+        _write_json(path, {})
+    _write_json(reference_root / "instrument-master-release-old.json", {})
+    _write_json(
+        reference_root / "assets" / "future" / "attempt-archived.json",
+        {},
+    )
+
     observed = set(cache_release.completed_operating_evidence_paths(values))
     evidence_root = tmp_path / "continuous_evidence_plane" / "paper-evidence"
     history = tmp_path / "historical_evidence" / "market_history.sqlite3"
@@ -49,6 +70,9 @@ def test_completed_operating_evidence_paths_are_current_epoch_only(tmp_path: Pat
     assert history in observed
     assert Path(f"{history}-wal") in observed
     assert Path(f"{history}-shm") in observed
+    assert current_reference_files <= observed
+    assert reference_root / "instrument-master-release-old.json" not in observed
+    assert reference_root / "assets" / "future" / "attempt-archived.json" not in observed
     assert not any("snapshot-old" in str(path) for path in observed)
 
 
@@ -62,6 +86,14 @@ def test_release_is_fail_soft_and_advises_only_existing_files(
     history = tmp_path / "historical_evidence" / "market_history.sqlite3"
     history.parent.mkdir(parents=True, exist_ok=True)
     history.write_bytes(b"history")
+    reference = (
+        tmp_path
+        / "reference_readiness"
+        / "assets"
+        / "future"
+        / "catalog-latest-qualified.json"
+    )
+    _write_json(reference, {})
 
     advised: list[Path] = []
 
@@ -75,8 +107,8 @@ def test_release_is_fail_soft_and_advises_only_existing_files(
 
     released = cache_release.release_completed_operating_evidence_file_cache(values)
 
-    assert set(released) == {state, history}
-    assert set(advised) == {state, history}
+    assert set(released) == {state, history, reference}
+    assert set(advised) == {state, history, reference}
 
 
 def test_posix_cache_advisory_is_optional_and_fail_soft(tmp_path: Path, monkeypatch) -> None:
