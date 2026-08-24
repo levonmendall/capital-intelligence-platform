@@ -59,6 +59,15 @@ def test_coordinator_keeps_integrity_descriptors_without_dataclass_dict_access()
     assert "raw_catalogs" not in source
 
 
+def test_coordinator_releases_reference_cache_after_catalog_child():
+    source = inspect.getsource(coordinator.build_spool)
+    catalog_start = source.index('"catalog-lane"')
+    cache_release = source.index("release_current_reference_file_cache(resolved_values)")
+    publication_start = source.index('"publication-lane"')
+
+    assert catalog_start < cache_release < publication_start
+
+
 def test_runtime_contract_installs_lane_local_overlay_after_spawn_safe_boundary():
     source = inspect.getsource(runtime_contract.install_comprehensive_discovery_runtime_contract)
     assert source.index("_install_spawn_safe_acquisition()") < source.index(
