@@ -98,14 +98,33 @@ _FAILURE_RULES: tuple[tuple[str, str], ...] = (
     ),
 )
 
-# This fixed reason is owned by ScreeningResourceDeferred. It is intentionally classified
-# only at the durable screening-start boundary so a coincidental phrase elsewhere cannot
-# be promoted into a screening diagnosis.
-_SCREENING_FAILURE_RULES: tuple[tuple[str, str, str], ...] = (
+# Screening failures are classified only at durable screening boundaries. These phrases are
+# exact fixed contracts owned either by the inner screening resource guard or the bounded CIO
+# supervisor. Unknown free-form text is deliberately left unclassified rather than guessed.
+_SCREENING_FAILURE_RULES: tuple[tuple[str, str, str, str], ...] = (
     (
         "insufficient_runtime_memory_for_screening",
         "screening_memory_boundary",
         "post_screening_start_resource_guard",
+        "governed_resource_guard",
+    ),
+    (
+        "reached the operational container-memory boundary",
+        "screening_memory_boundary",
+        "bounded_cio_supervisor_memory_guard",
+        "bounded_cio_supervisor",
+    ),
+    (
+        "exceeded its governed operational deadline",
+        "screening_timeout",
+        "bounded_cio_supervisor_timeout",
+        "bounded_cio_supervisor",
+    ),
+    (
+        "diagnostic execution was interrupted by a prior service process",
+        "screening_child_terminated",
+        "bounded_cio_supervisor_child_exit",
+        "bounded_cio_supervisor",
     ),
 )
 _SCREENING_FAILURE_STAGES = frozenset(
@@ -155,7 +174,7 @@ def classify_context_failure(detail: object) -> str | None:
 
 def classify_screening_failure(
     *, stage: object, detail: object
-) -> tuple[str, str] | None:
+) -> tuple[str, str, str] | None:
     """Classify only fixed screening-boundary reasons; never infer from unknown text."""
 
     normalized_stage = str(stage or "").strip().lower()
@@ -164,9 +183,9 @@ def classify_screening_failure(
     text = str(detail or "").strip().lower()
     if not text:
         return None
-    for phrase, code, substage in _SCREENING_FAILURE_RULES:
+    for phrase, code, substage, source in _SCREENING_FAILURE_RULES:
         if phrase in text:
-            return code, substage
+            return code, substage, source
     return None
 
 
@@ -232,10 +251,10 @@ def enrich_snapshot(
         enriched_diagnostic["context_failure_code"] = failure_code
         enriched["enriched_from_context_failure"] = True
     if screening_failure is not None:
-        screening_code, screening_substage = screening_failure
+        screening_code, screening_substage, screening_source = screening_failure
         enriched_diagnostic["screening_failure_code"] = screening_code
         enriched_diagnostic["screening_failure_substage"] = screening_substage
-        enriched_diagnostic["screening_failure_source"] = "governed_resource_guard"
+        enriched_diagnostic["screening_failure_source"] = screening_source
         enriched["enriched_from_screening_failure"] = True
     enriched["diagnostic"] = enriched_diagnostic
     return enriched
