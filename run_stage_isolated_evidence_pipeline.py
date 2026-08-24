@@ -32,6 +32,13 @@ from operations.stage_isolated_evidence_pipeline import (
 
 _FAILURE_EVENT = "continuous_evidence_plane_failure_context"
 _DAG_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
+_REFERENCE_CACHE_RECLAMATION_EVENT = "stage_isolated_reference_cache_reclamation"
+_REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
+_REFERENCE_CACHE_RECLAMATION_CODE = """
+import os
+from operations.evidence_file_cache_release import release_completed_operating_evidence_file_cache
+release_completed_operating_evidence_file_cache(os.environ)
+""".strip()
 
 
 def _safe_failure(
@@ -67,6 +74,66 @@ def _safe_failure(
             sort_keys=True,
         ),
         file=sys.stderr,
+        flush=True,
+    )
+
+
+def _run_reference_cache_reclamation(values: Mapping[str, str]) -> None:
+    """Bound and isolate advisory cache reclamation before reference imports begin.
+
+    The coordinator must remain descriptor-only.  Importing the cache/evidence stack here
+    would retain that module graph in the same interpreter that supervises every stage, so
+    the existing cache-release helper is invoked in a disposable child instead.  Timeout,
+    launch failure, and nonzero exit are advisory only: they cannot advance any evidence
+    checkpoint, and the fresh reference interpreter still owns all qualification authority.
+    """
+
+    status = "completed"
+    return_code: int | None = None
+    error_type: str | None = None
+    try:
+        completed = subprocess.run(
+            (sys.executable, "-c", _REFERENCE_CACHE_RECLAMATION_CODE),
+            env=dict(values),
+            cwd=str(Path(__file__).resolve().parent),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS,
+            check=False,
+            start_new_session=False,
+        )
+        return_code = int(completed.returncode)
+        if return_code != 0:
+            status = "failed"
+            error_type = "CacheReclamationProcessError"
+    except subprocess.TimeoutExpired:
+        status = "timed_out"
+        error_type = "CacheReclamationTimeout"
+    except OSError:
+        status = "unavailable"
+        error_type = "CacheReclamationLaunchError"
+
+    print(
+        json.dumps(
+            {
+                "event": _REFERENCE_CACHE_RECLAMATION_EVENT,
+                "stage": "reference",
+                "status": status,
+                "return_code": return_code,
+                "error_type": error_type,
+                "advisory_only": True,
+                "evidence_certified": False,
+                "decision_authority": False,
+                "candidate_authority": False,
+                "sizing_authority": False,
+                "construction_authority": False,
+                "execution_authority": False,
+                "paper_only": True,
+                "real_money_authorized": False,
+            },
+            sort_keys=True,
+        ),
         flush=True,
     )
 
@@ -224,6 +291,14 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
                 pipeline_id=state.pipeline_id,
                 stage=stage,
             )
+
+        # Release clean pages left by the completed operating-evidence epoch before the
+        # first heavyweight reference/provider imports enter the shared Render cgroup.
+        # The helper runs in a finite child so this coordinator remains lightweight.  Its
+        # result is advisory only; reference qualification still occurs solely in the
+        # subsequently spawned fresh interpreter and remains fail-closed.
+        if stage == "reference":
+            _run_reference_cache_reclamation(resolved)
 
         print(
             json.dumps(
