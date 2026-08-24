@@ -1,9 +1,9 @@
-"""Enrich Render telemetry with a fixed credential-safe production-context failure code.
+"""Enrich Render telemetry with fixed credential-safe production failure codes.
 
 The public CIO diagnostic already carries a redacted fail-closed detail for operators. GitHub
 telemetry deliberately does not copy that free-form text. This helper classifies only known
 failure phrases into fixed identifiers, preserving the no-secrets/no-portfolio-details
-artifact contract while making the exact blocked boundary actionable.
+artifact contract while making exact blocked boundaries actionable.
 """
 
 from __future__ import annotations
@@ -75,10 +75,7 @@ _FAILURE_RULES: tuple[tuple[str, str], ...] = (
         "persisted exact-time portfolio marks conflict with current evidence",
         "persisted_portfolio_mark_conflict",
     ),
-    (
-        "certified holding marks are invalid",
-        "certified_holding_marks_invalid",
-    ),
+    ("certified holding marks are invalid", "certified_holding_marks_invalid"),
     (
         "current marks are unavailable for canonical holdings",
         "canonical_holding_marks_missing",
@@ -99,6 +96,25 @@ _FAILURE_RULES: tuple[tuple[str, str], ...] = (
         "canonical portfolio finalization failed",
         "canonical_portfolio_finalization_failed",
     ),
+)
+
+# This fixed reason is owned by ScreeningResourceDeferred. It is intentionally classified
+# only at the durable screening-start boundary so a coincidental phrase elsewhere cannot
+# be promoted into a screening diagnosis.
+_SCREENING_FAILURE_RULES: tuple[tuple[str, str, str], ...] = (
+    (
+        "insufficient_runtime_memory_for_screening",
+        "screening_memory_boundary",
+        "post_screening_start_resource_guard",
+    ),
+)
+_SCREENING_FAILURE_STAGES = frozenset(
+    {
+        "production_context_screening_start_persisted",
+        "production_context_screening_results_persisted",
+        "production_context_screening_graph_released",
+        "production_context_screening_publication_persisted",
+    }
 )
 
 
@@ -137,6 +153,23 @@ def classify_context_failure(detail: object) -> str | None:
     return None
 
 
+def classify_screening_failure(
+    *, stage: object, detail: object
+) -> tuple[str, str] | None:
+    """Classify only fixed screening-boundary reasons; never infer from unknown text."""
+
+    normalized_stage = str(stage or "").strip().lower()
+    if normalized_stage not in _SCREENING_FAILURE_STAGES:
+        return None
+    text = str(detail or "").strip().lower()
+    if not text:
+        return None
+    for phrase, code, substage in _SCREENING_FAILURE_RULES:
+        if phrase in text:
+            return code, substage
+    return None
+
+
 def _fetch_json(url: str) -> Mapping[str, Any]:
     request = urllib.request.Request(
         url,
@@ -169,7 +202,7 @@ def enrich_snapshot(
     *,
     expected_release: str,
 ) -> dict[str, object]:
-    """Attach only a fixed failure code when release and diagnostic identity still match."""
+    """Attach only fixed failure codes when release and diagnostic identity still match."""
 
     _assert_safe(public_payload)
     enriched = dict(snapshot)
@@ -185,14 +218,26 @@ def enrich_snapshot(
     if existing_id and public_id and existing_id != public_id:
         return enriched
 
-    failure_code = classify_context_failure(public_payload.get("detail"))
-    if failure_code is None:
+    detail = public_payload.get("detail")
+    failure_code = classify_context_failure(detail)
+    screening_failure = classify_screening_failure(
+        stage=public_payload.get("stage") or diagnostic.get("stage"),
+        detail=detail,
+    )
+    if failure_code is None and screening_failure is None:
         return enriched
 
     enriched_diagnostic = dict(diagnostic)
-    enriched_diagnostic["context_failure_code"] = failure_code
+    if failure_code is not None:
+        enriched_diagnostic["context_failure_code"] = failure_code
+        enriched["enriched_from_context_failure"] = True
+    if screening_failure is not None:
+        screening_code, screening_substage = screening_failure
+        enriched_diagnostic["screening_failure_code"] = screening_code
+        enriched_diagnostic["screening_failure_substage"] = screening_substage
+        enriched_diagnostic["screening_failure_source"] = "governed_resource_guard"
+        enriched["enriched_from_screening_failure"] = True
     enriched["diagnostic"] = enriched_diagnostic
-    enriched["enriched_from_context_failure"] = True
     return enriched
 
 
