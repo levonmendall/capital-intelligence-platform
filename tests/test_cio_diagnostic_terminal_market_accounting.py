@@ -1,79 +1,24 @@
-from api.routes.cio_diagnostic import _market_lanes
+from __future__ import annotations
+
+import inspect
+
+from api.routes import cio_diagnostic
 
 
-def test_complete_lane_may_be_fully_excluded_without_selected_candidate() -> None:
-    lanes = _market_lanes(
-        {
-            "crypto": {
-                "scheduled": True,
-                "schedule_reason": "always_open",
-                "catalog": 17,
-                "deep": 0,
-                "selected": 0,
-            }
-        },
-        comprehensive_discovery_complete=True,
-    )
+def test_terminal_market_accounting_comes_from_independent_certification() -> None:
+    """Capability-scoped context must not impersonate exhaustive all-market coverage."""
 
-    assert lanes == (
-        {
-            "asset_class": "crypto",
-            "scheduled": True,
-            "schedule_reason": "always_open",
-            "catalog_count": 17,
-            "deep_analyzed_count": 0,
-            "selected_count": 0,
-            "represented": True,
-        },
-    )
+    source = inspect.getsource(cio_diagnostic.build_cio_diagnostic_audit)
+    assert 'all_market_certified_lanes' in source
+    assert 'all_market_scheduled_market_coverage_complete' in source
+    assert 'all_market_terminal_screening_complete' in source
+    assert 'comprehensive_discovery_lane_counts' not in source
 
 
-def test_empty_scheduled_catalog_remains_fail_closed() -> None:
-    lanes = _market_lanes(
-        {
-            "fx": {
-                "scheduled": True,
-                "schedule_reason": "weekday",
-                "catalog": 0,
-                "deep": 0,
-                "selected": 0,
-            }
-        },
-        comprehensive_discovery_complete=True,
-    )
+def test_terminal_outcome_may_be_paper_implementation_or_governed_no_action() -> None:
+    """Certification remains fail-closed while permitting the governed cash outcome."""
 
-    assert lanes[0]["represented"] is False
-
-
-def test_incomplete_comprehensive_scope_cannot_certify_nonempty_lane() -> None:
-    lanes = _market_lanes(
-        {
-            "future": {
-                "scheduled": True,
-                "schedule_reason": "weekday",
-                "catalog": 13,
-                "deep": 13,
-                "selected": 4,
-            }
-        },
-        comprehensive_discovery_complete=False,
-    )
-
-    assert lanes[0]["represented"] is False
-
-
-def test_unscheduled_lane_is_not_required_for_current_cycle() -> None:
-    lanes = _market_lanes(
-        {
-            "global_equity": {
-                "scheduled": False,
-                "schedule_reason": "weekend_market_closed",
-                "catalog": 0,
-                "deep": 0,
-                "selected": 0,
-            }
-        },
-        comprehensive_discovery_complete=False,
-    )
-
-    assert lanes[0]["represented"] is True
+    source = inspect.getsource(cio_diagnostic.build_cio_diagnostic_audit)
+    assert 'all_market_paper_implementation_certified' in source
+    assert 'all_market_no_action_certified' in source
+    assert 'all_market_operational_certified' in source

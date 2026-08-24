@@ -50,7 +50,7 @@ def _write_context(
     tmp_path: Path,
     *,
     cycle_key: str,
-    scope_state: str = "complete",
+    scope_state: str = "capability_scoped",
 ) -> None:
     payload = {
         "cycle_key": cycle_key,
@@ -62,12 +62,6 @@ def _write_context(
         "candidate_count": 9,
         "exclusion_count": 15,
         "qualified_candidate_count": 4,
-        "comprehensive_discovery_lane_counts": {
-            "commodity": {"scheduled": True, "schedule_reason": None, "catalog": 6, "deep": 6, "selected": 3},
-            "crypto": {"scheduled": True, "schedule_reason": None, "catalog": 5, "deep": 5, "selected": 2},
-            "fixed_income": {"scheduled": True, "schedule_reason": None, "catalog": 7, "deep": 7, "selected": 3},
-            "fx": {"scheduled": True, "schedule_reason": None, "catalog": 6, "deep": 6, "selected": 2},
-        },
         "paper_only": True,
         "real_money_authorized": False,
     }
@@ -97,15 +91,36 @@ def _analytical_certificate() -> dict[str, object]:
         "all_market_us_equity_discovery_snapshot_id": "equity-1",
         "all_market_paper_evidence_snapshot_id": "paper-1",
         "all_market_policy_compatibility_hash": "b" * 64,
-        "all_market_certification_v2_state": "CONSTRUCTION_COMPLETE",
+        "all_market_certification_v2_state": "CERTIFIED",
         "all_market_evidence_certified": True,
         "all_market_screening_certified": True,
         "all_market_committee_certified": True,
         "all_market_cio_certified": True,
         "all_market_construction_certified": True,
         "all_market_paper_implementation_certified": False,
-        "all_market_no_action_certified": False,
-        "all_market_operational_certified": False,
+        "all_market_no_action_certified": True,
+        "all_market_operational_certified": True,
+        "all_market_comprehensive_discovery_complete": True,
+        "all_market_scheduled_market_coverage_complete": True,
+        "all_market_terminal_screening_complete": True,
+        "all_market_certified_lanes": [
+            {
+                "asset_class": asset_class,
+                "scheduled": True,
+                "schedule_reason": None,
+                "catalog_count": catalog,
+                "deep_analyzed_count": deep,
+                "selected_count": selected,
+                "represented": True,
+                "terminal_accounting_complete": True,
+            }
+            for asset_class, catalog, deep, selected in (
+                ("commodity", 6, 6, 3),
+                ("crypto", 5, 5, 2),
+                ("fixed_income", 7, 7, 3),
+                ("fx", 6, 6, 2),
+            )
+        ],
         "certification_v2_cutoff": _DECISION_AS_OF.isoformat(),
     }
 
@@ -122,7 +137,7 @@ def test_completed_current_release_reports_all_market_evaluation_complete(
     _write_context(tmp_path, cycle_key="cycle:complete")
     monkeypatch.setattr(
         cio_diagnostic,
-        "public_all_market_certification",
+        "public_all_market_certification_readonly",
         lambda _values: _analytical_certificate(),
     )
     monkeypatch.setattr(
@@ -133,13 +148,17 @@ def test_completed_current_release_reports_all_market_evaluation_complete(
 
     payload = cio_diagnostic.build_cio_diagnostic_audit(settings=settings, values=values)
 
+    assert payload["schema_version"] == "public-cio-diagnostic-audit.v3-independent-certification"
     assert payload["ready"] is True
     assert payload["all_market_evaluation_complete"] is True
     assert payload["all_market_construction_certified"] is True
-    assert payload["all_market_operational_certified"] is False
+    assert payload["all_market_no_action_certified"] is True
+    assert payload["all_market_operational_certified"] is True
     assert payload["context_cycle_matches"] is True
     assert payload["terminal_screening_complete"] is True
     assert payload["scheduled_market_coverage_complete"] is True
+    assert payload["production_context_discovery_scope_state"] == "capability_scoped"
+    assert payload["comprehensive_discovery_scope_state"] == "complete"
     assert payload["instrument_count"] == 24
     assert payload["candidate_count"] == 9
     assert payload["exclusion_count"] == 15
@@ -197,7 +216,7 @@ def test_missing_diagnostic_is_truthfully_not_recorded(tmp_path: Path) -> None:
 
     payload = cio_diagnostic.build_cio_diagnostic_audit(settings=settings, values=values)
 
-    assert payload["schema_version"] == "public-cio-diagnostic-audit.v2-end-to-end"
+    assert payload["schema_version"] == "public-cio-diagnostic-audit.v3-independent-certification"
     assert payload["credential_safe"] is True
     assert payload["ready"] is False
     assert payload["state"] == "not_recorded"
