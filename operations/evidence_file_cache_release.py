@@ -152,11 +152,27 @@ def completed_operating_evidence_paths(values: Mapping[str, str]) -> tuple[Path,
 
 
 def _advise_file_cache_dontneed(path: Path) -> bool:
-    """Ask Linux to reclaim clean pages for one completed evidence file."""
+    """Durably flush, then ask Linux to reclaim pages for one completed evidence file.
+
+    ``POSIX_FADV_DONTNEED`` is permitted to leave dirty pages resident. Reference
+    components are intentionally immutable once qualified, but some legacy writers use an
+    atomic rename without an explicit fsync. Synchronizing the completed file here makes
+    those pages eligible for reclaim before the next heavyweight certification lane.
+
+    Both sync and cache advice remain operational-only and fail-soft: any unsupported
+    platform/filesystem behavior simply preserves the prior cached state and cannot alter
+    evidence bytes, authority, or the resource boundaries themselves.
+    """
 
     posix_fadvise = getattr(os, "posix_fadvise", None)
     advice = getattr(os, "POSIX_FADV_DONTNEED", None)
-    if posix_fadvise is None or advice is None or not path.is_file():
+    fsync = getattr(os, "fsync", None)
+    if (
+        posix_fadvise is None
+        or advice is None
+        or not callable(fsync)
+        or not path.is_file()
+    ):
         return False
     try:
         descriptor = os.open(path, os.O_RDONLY)
@@ -164,6 +180,7 @@ def _advise_file_cache_dontneed(path: Path) -> bool:
         return False
     try:
         try:
+            fsync(descriptor)
             posix_fadvise(descriptor, 0, 0, advice)
         except OSError:
             return False

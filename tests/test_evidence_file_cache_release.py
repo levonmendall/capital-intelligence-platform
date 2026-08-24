@@ -153,6 +153,74 @@ def test_reference_release_excludes_paper_and_historical_evidence(
     assert history not in advised
 
 
+def test_cache_advisory_fsyncs_before_dontneed(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "reference.json"
+    target.write_bytes(b"reference")
+    events: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(cache_release.os, "POSIX_FADV_DONTNEED", 4, raising=False)
+    monkeypatch.setattr(
+        cache_release.os,
+        "open",
+        lambda path, flags: events.append(("open", Path(path), flags)) or 73,
+    )
+    monkeypatch.setattr(
+        cache_release.os,
+        "fsync",
+        lambda descriptor: events.append(("fsync", descriptor)),
+    )
+    monkeypatch.setattr(
+        cache_release.os,
+        "posix_fadvise",
+        lambda descriptor, offset, length, advice: events.append(
+            ("fadvise", descriptor, offset, length, advice)
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cache_release.os,
+        "close",
+        lambda descriptor: events.append(("close", descriptor)),
+    )
+
+    assert cache_release._advise_file_cache_dontneed(target) is True
+    assert [event[0] for event in events] == ["open", "fsync", "fadvise", "close"]
+    assert events[1] == ("fsync", 73)
+    assert events[2] == ("fadvise", 73, 0, 0, 4)
+
+
+def test_cache_advisory_does_not_claim_release_when_fsync_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    target = tmp_path / "reference.json"
+    target.write_bytes(b"reference")
+    events: list[str] = []
+
+    monkeypatch.setattr(cache_release.os, "POSIX_FADV_DONTNEED", 4, raising=False)
+    monkeypatch.setattr(cache_release.os, "open", lambda _path, _flags: 91)
+
+    def fail_fsync(_descriptor: int) -> None:
+        events.append("fsync")
+        raise OSError("sync unavailable")
+
+    monkeypatch.setattr(cache_release.os, "fsync", fail_fsync)
+    monkeypatch.setattr(
+        cache_release.os,
+        "posix_fadvise",
+        lambda *_args: events.append("fadvise"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cache_release.os,
+        "close",
+        lambda _descriptor: events.append("close"),
+    )
+
+    assert cache_release._advise_file_cache_dontneed(target) is False
+    assert events == ["fsync", "close"]
+
+
 def test_posix_cache_advisory_is_optional_and_fail_soft(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "evidence.sqlite3"
     target.write_bytes(b"evidence")
