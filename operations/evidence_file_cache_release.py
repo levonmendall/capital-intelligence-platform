@@ -1,12 +1,12 @@
 """Release clean file-cache pages from completed operating-evidence work.
 
 Capability-scoped production evidence is prepared and validated before the bounded CIO
-consumer starts.  The evidence-owner processes may leave clean pages charged to the
-service cgroup even after their Python RSS has exited.  This module advises the kernel that
-only the files belonging to the already-completed current operating snapshot may be
-reclaimed before the CIO child begins.
+consumer starts. The evidence-owner processes may leave clean pages charged to the
+service cgroup even after their Python RSS has exited. This module advises the kernel that
+only files belonging to completed, durable current evidence may be reclaimed before the
+next heavyweight certification/CIO boundary begins.
 
-The advisory is deliberately narrow and fail-soft.  It never drops global caches, deletes
+The advisory is deliberately narrow and fail-soft. It never drops global caches, deletes
 or mutates evidence, changes investment semantics, or weakens the bounded diagnostic's
 memory guard.
 """
@@ -15,14 +15,32 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
 
+_SAFE_RELEASE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
 def _data_root(values: Mapping[str, str]) -> Path | None:
     raw = str(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "").strip()
     return None if not raw else Path(raw).expanduser()
+
+
+def _release(values: Mapping[str, str]) -> str:
+    return (
+        values.get("CAPITAL_INTELLIGENCE_RELEASE")
+        or values.get("RENDER_GIT_COMMIT")
+        or values.get("GITHUB_SHA")
+        or "unknown"
+    ).strip()
+
+
+def _safe_release(value: str) -> str:
+    normalized = _SAFE_RELEASE.sub("-", str(value or "").strip()).strip("-.")
+    return normalized or "unknown"
 
 
 def _read_mapping(path: Path) -> Mapping[str, object]:
@@ -43,8 +61,44 @@ def _snapshot_stamp(raw: object) -> str | None:
     return value.strftime("%Y%m%dT%H%M%S%fZ")
 
 
+def _current_reference_paths(values: Mapping[str, str], data_root: Path) -> tuple[Path, ...]:
+    """Return only current/latest durable reference artifacts used by certification.
+
+    Reference readiness is release-independent at the lane-component level and rebound to
+    the exact release through a manifest. The latest-qualified component files are the
+    durable authority consumed by a fresh reference stage; old archived attempts and old
+    release manifests are intentionally excluded.
+    """
+
+    root = data_root / "reference_readiness"
+    release = _release(values)
+    paths: list[Path] = [
+        root / "prequalification-latest.json",
+        root / "eodhd_directories-latest-qualified.json",
+        root / "futures_contracts-latest-qualified.json",
+    ]
+    if release and release != "unknown":
+        safe = _safe_release(release)
+        paths.extend(
+            (
+                root / f"instrument-master-{safe}.json",
+                root / f"progress-{safe}.json",
+            )
+        )
+
+    assets = root / "assets"
+    if assets.is_dir():
+        try:
+            paths.extend(sorted(assets.glob("*/catalog-latest-qualified.json")))
+            registry = assets / "registry.json"
+            paths.append(registry)
+        except OSError:
+            pass
+    return tuple(paths)
+
+
 def completed_operating_evidence_paths(values: Mapping[str, str]) -> tuple[Path, ...]:
-    """Return only files belonging to the currently qualified operating evidence epoch."""
+    """Return files belonging to current qualified operating/all-market evidence."""
 
     data_root = _data_root(values)
     if data_root is None:
@@ -85,6 +139,7 @@ def completed_operating_evidence_paths(values: Mapping[str, str]) -> tuple[Path,
             Path(f"{history_path}-shm"),
         )
     )
+    paths.extend(_current_reference_paths(values, data_root))
 
     unique: list[Path] = []
     seen: set[Path] = set()
@@ -123,7 +178,7 @@ def _advise_file_cache_dontneed(path: Path) -> bool:
 def release_completed_operating_evidence_file_cache(
     values: Mapping[str, str],
 ) -> tuple[Path, ...]:
-    """Release reclaimable pages after evidence validation and before CIO child launch."""
+    """Release reclaimable pages after evidence validation and before heavy work."""
 
     released: list[Path] = []
     for path in completed_operating_evidence_paths(values):
