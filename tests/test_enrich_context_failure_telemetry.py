@@ -90,21 +90,100 @@ def test_typed_screening_resource_failure_survives_as_fixed_safe_code() -> None:
     assert "detail" not in encoded
 
 
-def test_screening_reason_is_not_promoted_outside_screening_boundary() -> None:
+def test_supervisor_memory_boundary_survives_as_fixed_safe_code() -> None:
+    stage = "production_context_screening_graph_released"
+    detail = (
+        "Manual CIO diagnostic reached the operational container-memory boundary "
+        "(70% fractional ceiling with 640 MB service reserve) and was terminated "
+        "fail-closed before the hosting kernel could OOM-kill the service; "
+        "last_governed_progress=production_context_screening_graph_released."
+    )
+
     enriched = telemetry.enrich_snapshot(
-        _snapshot(stage="production_context_portfolio_finalized"),
-        _public("insufficient_runtime_memory_for_screening"),
+        _snapshot(stage=stage),
+        _public(detail, stage=stage),
         expected_release="release-current",
     )
-    assert "enriched_from_screening_failure" not in enriched
-    assert "screening_failure_code" not in enriched["diagnostic"]
+
+    diagnostic = enriched["diagnostic"]
+    assert isinstance(diagnostic, dict)
+    assert diagnostic["screening_failure_code"] == "screening_memory_boundary"
+    assert diagnostic["screening_failure_substage"] == "bounded_cio_supervisor_memory_guard"
+    assert diagnostic["screening_failure_source"] == "bounded_cio_supervisor"
+    assert enriched["enriched_from_screening_failure"] is True
+    encoded = json.dumps(enriched)
+    assert "640 MB" not in encoded
+    assert "container-memory boundary" not in encoded
+    assert "detail" not in encoded
+
+
+def test_supervisor_timeout_survives_as_fixed_safe_code() -> None:
+    stage = "production_context_screening_graph_released"
+    detail = (
+        "Manual CIO diagnostic exceeded its governed operational deadline of 1800 seconds "
+        "and was terminated fail-closed; "
+        "last_governed_progress=production_context_screening_graph_released."
+    )
+
+    enriched = telemetry.enrich_snapshot(
+        _snapshot(stage=stage),
+        _public(detail, stage=stage),
+        expected_release="release-current",
+    )
+
+    diagnostic = enriched["diagnostic"]
+    assert isinstance(diagnostic, dict)
+    assert diagnostic["screening_failure_code"] == "screening_timeout"
+    assert diagnostic["screening_failure_substage"] == "bounded_cio_supervisor_timeout"
+    assert diagnostic["screening_failure_source"] == "bounded_cio_supervisor"
+    assert "1800" not in json.dumps(enriched)
+
+
+def test_interrupted_screening_child_survives_as_fixed_safe_code() -> None:
+    stage = "production_context_screening_graph_released"
+    detail = (
+        "Diagnostic execution was interrupted by a prior service process; "
+        "no live owner lease remains, so a replacement request may proceed."
+    )
+
+    enriched = telemetry.enrich_snapshot(
+        _snapshot(stage=stage),
+        _public(detail, stage=stage),
+        expected_release="release-current",
+    )
+
+    diagnostic = enriched["diagnostic"]
+    assert isinstance(diagnostic, dict)
+    assert diagnostic["screening_failure_code"] == "screening_child_terminated"
+    assert diagnostic["screening_failure_substage"] == "bounded_cio_supervisor_child_exit"
+    assert diagnostic["screening_failure_source"] == "bounded_cio_supervisor"
+    assert "prior service process" not in json.dumps(enriched)
+
+
+def test_screening_reason_is_not_promoted_outside_screening_boundary() -> None:
+    for detail in (
+        "insufficient_runtime_memory_for_screening",
+        "reached the operational container-memory boundary",
+        "exceeded its governed operational deadline",
+        "diagnostic execution was interrupted by a prior service process",
+    ):
+        enriched = telemetry.enrich_snapshot(
+            _snapshot(stage="production_context_portfolio_finalized"),
+            _public(detail),
+            expected_release="release-current",
+        )
+        assert "enriched_from_screening_failure" not in enriched
+        assert "screening_failure_code" not in enriched["diagnostic"]
 
 
 def test_unknown_screening_failure_is_not_copied_or_inferred() -> None:
     stage = "production_context_screening_start_persisted"
     enriched = telemetry.enrich_snapshot(
         _snapshot(stage=stage),
-        _public("opaque screening exception with sensitive implementation detail", stage=stage),
+        _public(
+            "opaque screening exception with sensitive implementation detail",
+            stage=stage,
+        ),
         expected_release="release-current",
     )
     assert "enriched_from_screening_failure" not in enriched
