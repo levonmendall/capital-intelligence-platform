@@ -75,15 +75,30 @@ def _certified_analytical_lineage() -> dict[str, object]:
         "all_market_us_equity_discovery_snapshot_id": "equity-1",
         "all_market_paper_evidence_snapshot_id": "paper-1",
         "all_market_policy_compatibility_hash": "b" * 64,
-        "all_market_certification_v2_state": "CONSTRUCTION_COMPLETE",
+        "all_market_certification_v2_state": "CERTIFIED",
         "all_market_evidence_certified": True,
         "all_market_screening_certified": True,
         "all_market_committee_certified": True,
         "all_market_cio_certified": True,
         "all_market_construction_certified": True,
         "all_market_paper_implementation_certified": False,
-        "all_market_no_action_certified": False,
-        "all_market_operational_certified": False,
+        "all_market_no_action_certified": True,
+        "all_market_operational_certified": True,
+        "all_market_comprehensive_discovery_complete": True,
+        "all_market_scheduled_market_coverage_complete": True,
+        "all_market_terminal_screening_complete": True,
+        "all_market_certified_lanes": [
+            {
+                "asset_class": "global_equity",
+                "scheduled": True,
+                "schedule_reason": None,
+                "catalog_count": 3,
+                "deep_analyzed_count": 2,
+                "selected_count": 1,
+                "represented": True,
+                "terminal_accounting_complete": True,
+            }
+        ],
         "certification_v2_cutoff": _DECISION_AS_OF.isoformat(),
     }
 
@@ -155,20 +170,12 @@ def test_matching_diagnostic_cycle_requires_certified_analytical_lineage(
         "cycle_key": "current-cycle",
         "decision_as_of": _DECISION_AS_OF.isoformat(),
         "comprehensive_discovery_required": True,
-        "comprehensive_discovery_scope_state": "complete",
+        "comprehensive_discovery_scope_state": "capability_scoped",
         "comprehensive_discovery_limitations": ["Current-cycle limitation."],
         "instrument_count": 3,
         "candidate_count": 1,
         "exclusion_count": 2,
         "qualified_candidate_count": 1,
-        "comprehensive_discovery_lane_counts": {
-            "global_equity": {
-                "scheduled": True,
-                "catalog": 3,
-                "deep": 2,
-                "selected": 1,
-            }
-        },
     }
     monkeypatch.setattr(
         cio_diagnostic,
@@ -183,7 +190,7 @@ def test_matching_diagnostic_cycle_requires_certified_analytical_lineage(
     monkeypatch.setattr(cio_diagnostic, "_load_json", lambda _: context)
     monkeypatch.setattr(
         cio_diagnostic,
-        "public_all_market_certification",
+        "public_all_market_certification_readonly",
         lambda _values: _certified_analytical_lineage(),
     )
     # Exact two-clock behavior is separately covered by the certification integration
@@ -202,7 +209,10 @@ def test_matching_diagnostic_cycle_requires_certified_analytical_lineage(
     assert audit["ready"] is True
     assert audit["context_cycle_matches"] is True
     assert audit["all_market_construction_certified"] is True
-    assert audit["all_market_operational_certified"] is False
+    assert audit["all_market_no_action_certified"] is True
+    assert audit["all_market_operational_certified"] is True
+    assert audit["production_context_discovery_scope_state"] == "capability_scoped"
+    assert audit["comprehensive_discovery_scope_state"] == "complete"
     assert audit["comprehensive_discovery_limitations"] == [
         "Current-cycle limitation."
     ]
@@ -219,5 +229,6 @@ def test_matching_diagnostic_cycle_requires_certified_analytical_lineage(
             "deep_analyzed_count": 2,
             "selected_count": 1,
             "represented": True,
+            "terminal_accounting_complete": True,
         }
     ]
