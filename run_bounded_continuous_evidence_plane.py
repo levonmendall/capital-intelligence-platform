@@ -151,6 +151,22 @@ def _memory_failure_context(values: Mapping[str, str]) -> None:
                 f"lane_progress_metrics={safe_metrics}"
             )
 
+    reclaim_fields = {
+        "memory_reclaim_attempted": safe_report.get("memory_reclaim_attempted"),
+        "memory_reclaim_supported": safe_report.get("memory_reclaim_supported"),
+        "memory_reclaim_requested_kib": safe_report.get("memory_reclaim_requested_kib"),
+        "memory_reclaim_raw_before_kib": safe_report.get("memory_reclaim_raw_before_kib"),
+        "memory_reclaim_raw_after_kib": safe_report.get("memory_reclaim_raw_after_kib"),
+        "memory_reclaim_working_set_before_kib": safe_report.get(
+            "memory_reclaim_working_set_before_kib"
+        ),
+        "memory_reclaim_working_set_after_kib": safe_report.get(
+            "memory_reclaim_working_set_after_kib"
+        ),
+        "memory_reclaim_delta_kib": safe_report.get("memory_reclaim_delta_kib"),
+        "memory_reclaim_effective": safe_report.get("memory_reclaim_effective"),
+        "memory_reclaim_error_type": safe_report.get("memory_reclaim_error_type"),
+    }
     detail = (
         f"stage_isolated_evidence_resource_boundary; stage={stage}; "
         f"trigger_reason={trigger}; "
@@ -163,7 +179,12 @@ def _memory_failure_context(values: Mapping[str, str]) -> None:
         f"anon_peak_kib={safe_report.get('container_peak_anon_kib')}; "
         f"file_peak_kib={safe_report.get('container_peak_file_kib')}; "
         f"kernel_peak_kib={safe_report.get('container_peak_kernel_kib')}; "
-        f"memory_accounting_source={safe_report.get('memory_accounting_source')}"
+        f"memory_accounting_source={safe_report.get('memory_accounting_source')}; "
+        f"memory_reclaim_attempted={safe_report.get('memory_reclaim_attempted')}; "
+        f"memory_reclaim_supported={safe_report.get('memory_reclaim_supported')}; "
+        f"memory_reclaim_effective={safe_report.get('memory_reclaim_effective')}; "
+        f"memory_reclaim_delta_kib={safe_report.get('memory_reclaim_delta_kib')}; "
+        f"memory_reclaim_error_type={safe_report.get('memory_reclaim_error_type')}"
         f"{lane_detail}"
     )[:1600]
     print(
@@ -186,6 +207,7 @@ def _memory_failure_context(values: Mapping[str, str]) -> None:
                 "memory_raw_hard_boundary_kib": safe_report.get(
                     "raw_hard_boundary_kib"
                 ),
+                **reclaim_fields,
                 **lane_fields,
                 "credential_safe": True,
                 "decision_authority": False,
