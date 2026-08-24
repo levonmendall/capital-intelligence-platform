@@ -293,21 +293,25 @@ def _catalog_lane_stage(
     asset_class_value: str,
     index: int,
 ) -> None:
-    """Bound dirty raw-catalog cache before the outer cgroup guard can win the race.
+    """Bound dirty raw-catalog cache and defer completion until child teardown.
 
-    The lane-local algorithm still owns reconstruction, descriptor creation, stage-state
-    persistence, and completion publication. This finite-child wrapper changes only the
-    expected raw-catalog pickle sink: every 8 MiB of serialized bytes is flushed, fsynced,
-    advised DONTNEED for the completed prefix, and followed by the existing conditional
-    bounded cgroup reclaim. The final descriptor and atomic rename remain owned by the
-    legacy writer, so a partial temporary pickle has no evidence or certification authority.
+    The lane-local algorithm still owns reconstruction, descriptor creation, and durable
+    stage-state persistence. This finite-child wrapper changes only the expected raw-catalog
+    pickle sink and the completion signal. Every 8 MiB of serialized bytes is flushed,
+    fsynced, advised DONTNEED for the completed prefix, and followed by the existing
+    conditional bounded cgroup reclaim. The lane completion progress marker is suppressed
+    in the child and is published by the parent only after this finite process has exited.
     """
+
+    from operations import comprehensive_market_discovery as facade
 
     expected_blob = (
         f"raw-catalog-{index:03d}-{_legacy._safe_release(asset_class_value)}.pkl"
     )
+    completion_label = f"bounded_spool_catalog_lane_complete:{asset_class_value}"
     original_write_pickle_blob = _legacy._write_pickle_blob
     original_hashing_writer = _legacy._HashingWriter
+    original_progress = facade._core.record_manual_cio_diagnostic_progress
 
     def serialization_checkpoint(persisted_bytes: int) -> None:
         _safe_reclaim_log(
@@ -335,7 +339,18 @@ def _catalog_lane_stage(
         _reclaim_catalog_lane_cgroup_cache(values, phase="post_persist")
         return descriptor
 
+    def defer_catalog_completion(component, *args, **kwargs):
+        if str(component) == completion_label:
+            _safe_reclaim_log(
+                "catalog_lane_completion_deferred",
+                catalog_lane=asset_class_value,
+                advisory_only=True,
+            )
+            return None
+        return original_progress(component, *args, **kwargs)
+
     _legacy._write_pickle_blob = write_pickle_with_catalog_reclaim
+    facade._core.record_manual_cio_diagnostic_progress = defer_catalog_completion
     try:
         _lane_local._catalog_lane_stage(
             request_path,
@@ -344,8 +359,55 @@ def _catalog_lane_stage(
             index=index,
         )
     finally:
+        facade._core.record_manual_cio_diagnostic_progress = original_progress
         _legacy._HashingWriter = original_hashing_writer
         _legacy._write_pickle_blob = original_write_pickle_blob
+
+
+def _publish_catalog_lane_completion_after_child_exit(
+    request_path: str | Path,
+    values: Mapping[str, str],
+    *,
+    asset_class: str,
+    index: int,
+) -> None:
+    """Publish durable catalog completion only after the finite child has exited."""
+
+    path = Path(request_path).expanduser()
+    request, _policy = _bounded._validate_request(path, values)
+    state = _bounded._load_stage_state(
+        path, _lane_local._lane_state_name("catalog-lane", index)
+    )
+    if str(state.get("request_id") or "") != str(request.get("request_id") or ""):
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "catalog lane durable state request changed before parent completion publication"
+        )
+    if str(state.get("asset_class") or "") != str(asset_class):
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "catalog lane durable state identity changed before parent completion publication"
+        )
+
+    _release_catalog_lane_reference_cache(values, phase="post_child_exit")
+    _reclaim_catalog_lane_cgroup_cache(values, phase="post_child_exit")
+
+    from operations import comprehensive_market_discovery as facade
+
+    record_count = int(state.get("record_count") or 0)
+    peak_rss_bytes = int(state.get("peak_rss_bytes") or 0)
+    facade._core.record_manual_cio_diagnostic_progress(
+        f"bounded_spool_catalog_lane_complete:{asset_class}",
+        metrics={
+            "catalog_records": record_count,
+            "peak_rss_bytes": peak_rss_bytes,
+        },
+    )
+    _safe_reclaim_log(
+        "catalog_lane_completion_published_after_child_exit",
+        catalog_lane=asset_class,
+        catalog_records=record_count,
+        peak_rss_bytes=peak_rss_bytes,
+        advisory_only=True,
+    )
 
 
 def _publication_lane_stage(
@@ -482,6 +544,13 @@ def run_stage(
     )
     return_code = int(process.wait())
     if return_code == 0:
+        if action == "catalog-lane":
+            _publish_catalog_lane_completion_after_child_exit(
+                request_path,
+                values,
+                asset_class=asset_class,
+                index=index,
+            )
         return
 
     failure = _legacy.load_failure(request_path)
@@ -547,6 +616,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "_catalog_lane_stage",
+    "_publish_catalog_lane_completion_after_child_exit",
     "_publication_lane_stage",
     "_reclaim_catalog_lane_cgroup_cache",
     "run_stage",

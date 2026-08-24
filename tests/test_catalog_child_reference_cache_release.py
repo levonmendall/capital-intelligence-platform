@@ -7,7 +7,7 @@ from operations import comprehensive_market_discovery as facade
 from operations import lane_local_comprehensive_discovery_spool as lane_local
 
 
-def test_catalog_child_reclaims_before_and_after_raw_catalog_persist(
+def test_catalog_child_reclaims_around_raw_catalog_and_defers_completion(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -68,9 +68,9 @@ def test_catalog_child_reclaims_before_and_after_raw_catalog_persist(
         "write:raw-catalog-004-international_equity.pkl",
         "reclaim:post_persist",
         "state:persisted",
-        "progress:bounded_spool_catalog_lane_complete:international_equity",
     ]
     assert worker._legacy._write_pickle_blob is fake_write
+    assert facade._core.record_manual_cio_diagnostic_progress is final_progress
 
 
 def test_durable_catalog_state_precedes_completion_progress():
@@ -83,9 +83,12 @@ def test_durable_catalog_state_precedes_completion_progress():
 def test_catalog_child_reclaim_is_scoped_to_raw_catalog_pickle():
     source = inspect.getsource(worker._catalog_lane_stage)
     assert "expected_blob" in source
-    assert source.index('_release_catalog_lane_reference_cache(values, phase="pre_persist")') < source.index(
-        "descriptor = original_write_pickle_blob(directory, name, value)"
-    )
+    assert source.index(
+        '_release_catalog_lane_reference_cache(values, phase="pre_persist")'
+    ) < source.index("descriptor = original_write_pickle_blob(directory, name, value)")
     assert source.index(
         "descriptor = original_write_pickle_blob(directory, name, value)"
-    ) < source.index('_reclaim_catalog_lane_cgroup_cache(values, phase="post_persist")')
+    ) < source.index(
+        '_reclaim_catalog_lane_cgroup_cache(values, phase="post_persist")'
+    )
+    assert "catalog_lane_completion_deferred" in source
