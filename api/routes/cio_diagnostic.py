@@ -24,10 +24,11 @@ from production_context_state_resilience import latest_attempt
 
 router = APIRouter(tags=["operations"])
 
-# Compatibility seam for existing tests/integrations that patch the historical symbol.
-# The production default remains the strictly read-only resolver and grants no advancement
-# authority to the serving/audit process.
-public_all_market_certification = public_all_market_certification_readonly
+
+def public_all_market_certification(values: Mapping[str, str]) -> dict[str, object]:
+    """Compatibility seam forwarding to the strictly read-only certification resolver."""
+
+    return public_all_market_certification_readonly(values)
 
 
 def _release(values: Mapping[str, str]) -> str:
