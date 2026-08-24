@@ -8,12 +8,14 @@ in-memory provider-publication writer with the SQLite-spooled bounded publisher.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import BinaryIO, Callable
 
 from cio import CandidateAssetClass
 from operations import bounded_comprehensive_discovery_spool as _bounded
@@ -32,6 +34,7 @@ _MEMORY_RESERVE_ENV = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_MEMORY_RESERVE
 _DEFAULT_MEMORY_HIGH_WATER_FRACTION = 0.70
 _DEFAULT_MEMORY_RESERVE_MB = 640.0
 _CATALOG_HANDOFF_RECLAIM_MARGIN_KIB = 32 * 1024
+_CATALOG_PERSIST_CHECKPOINT_BYTES = 8 * 1024 * 1024
 
 
 def _memory_high_water_fraction(values: Mapping[str, str]) -> float:
@@ -61,6 +64,84 @@ def _safe_reclaim_log(event: str, **details: object) -> None:
         _memory_guard._safe_log(event, **details)
     except (OSError, TypeError, ValueError):
         pass
+
+
+def _drop_catalog_persisted_cache(
+    handle: BinaryIO,
+    *,
+    offset: int,
+    length: int,
+) -> bool:
+    """Best-effort DONTNEED for one already-fsynced catalog prefix.
+
+    The raw catalog is still a private temporary file at these checkpoints, so dropping
+    already-durable clean pages cannot expose partial evidence. Unsupported filesystems
+    retain the prior behavior and the outer cgroup guard remains authoritative.
+    """
+
+    if offset < 0 or length <= 0:
+        return False
+    fadvise = getattr(os, "posix_fadvise", None)
+    dontneed = getattr(os, "POSIX_FADV_DONTNEED", None)
+    if not callable(fadvise) or dontneed is None:
+        return False
+    try:
+        fadvise(handle.fileno(), offset, length, dontneed)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+class _CatalogCheckpointWriter:
+    """Hashing pickle sink that bounds dirty raw-catalog file-cache lifetime."""
+
+    def __init__(
+        self,
+        handle: BinaryIO,
+        *,
+        checkpoint: Callable[[int], None],
+    ) -> None:
+        self.handle = handle
+        self.digest = hashlib.sha256()
+        self.byte_count = 0
+        self._checkpoint = checkpoint
+        self._durable_offset = 0
+        self._bytes_since_checkpoint = 0
+
+    def _persist_checkpoint(self) -> None:
+        if self.byte_count <= self._durable_offset:
+            return
+        self.handle.flush()
+        os.fsync(self.handle.fileno())
+        offset = self._durable_offset
+        length = self.byte_count - offset
+        _drop_catalog_persisted_cache(self.handle, offset=offset, length=length)
+        self._durable_offset = self.byte_count
+        self._bytes_since_checkpoint = 0
+        self._checkpoint(self.byte_count)
+
+    def write(self, payload: bytes) -> int:
+        view = memoryview(payload)
+        total = 0
+        while total < len(view):
+            remaining = _CATALOG_PERSIST_CHECKPOINT_BYTES - self._bytes_since_checkpoint
+            chunk = view[total : total + remaining]
+            written = self.handle.write(chunk)
+            if written is None:
+                written = len(chunk)
+            if written <= 0:
+                raise OSError("catalog pickle writer made no forward progress")
+            persisted = chunk[:written]
+            self.digest.update(persisted)
+            self.byte_count += written
+            self._bytes_since_checkpoint += written
+            total += written
+            if self._bytes_since_checkpoint >= _CATALOG_PERSIST_CHECKPOINT_BYTES:
+                self._persist_checkpoint()
+        return total
+
+    def flush(self) -> None:
+        self.handle.flush()
 
 
 def _release_catalog_lane_reference_cache(
@@ -212,28 +293,45 @@ def _catalog_lane_stage(
     asset_class_value: str,
     index: int,
 ) -> None:
-    """Reclaim source/cache pressure immediately around raw-catalog persistence.
+    """Bound dirty raw-catalog cache before the outer cgroup guard can win the race.
 
-    The lane-local catalog algorithm reconstructs a complete lane and then persists one
-    integrity-checked raw-catalog pickle before writing durable stage state and publishing
-    completion. The outer cgroup guard samples continuously, so waiting until completion to
-    reclaim can lose the race. This wrapper therefore intercepts only that raw-catalog
-    pickle write in the finite child: source reference cache is released and bounded cgroup
-    reclaim is attempted immediately before persistence, then one second bounded reclaim is
-    attempted after the durable pickle write. The canonical lane algorithm is unchanged.
+    The lane-local algorithm still owns reconstruction, descriptor creation, stage-state
+    persistence, and completion publication. This finite-child wrapper changes only the
+    expected raw-catalog pickle sink: every 8 MiB of serialized bytes is flushed, fsynced,
+    advised DONTNEED for the completed prefix, and followed by the existing conditional
+    bounded cgroup reclaim. The final descriptor and atomic rename remain owned by the
+    legacy writer, so a partial temporary pickle has no evidence or certification authority.
     """
 
     expected_blob = (
         f"raw-catalog-{index:03d}-{_legacy._safe_release(asset_class_value)}.pkl"
     )
     original_write_pickle_blob = _legacy._write_pickle_blob
+    original_hashing_writer = _legacy._HashingWriter
+
+    def serialization_checkpoint(persisted_bytes: int) -> None:
+        _safe_reclaim_log(
+            "catalog_lane_serialization_checkpoint",
+            catalog_reclaim_phase="during_persist",
+            catalog_persisted_bytes=persisted_bytes,
+            catalog_checkpoint_bytes=_CATALOG_PERSIST_CHECKPOINT_BYTES,
+            advisory_only=True,
+        )
+        _reclaim_catalog_lane_cgroup_cache(values, phase="during_persist")
 
     def write_pickle_with_catalog_reclaim(directory, name, value):
         if str(name) != expected_blob:
             return original_write_pickle_blob(directory, name, value)
         _release_catalog_lane_reference_cache(values, phase="pre_persist")
         _reclaim_catalog_lane_cgroup_cache(values, phase="pre_persist")
-        descriptor = original_write_pickle_blob(directory, name, value)
+        _legacy._HashingWriter = lambda handle: _CatalogCheckpointWriter(
+            handle,
+            checkpoint=serialization_checkpoint,
+        )
+        try:
+            descriptor = original_write_pickle_blob(directory, name, value)
+        finally:
+            _legacy._HashingWriter = original_hashing_writer
         _reclaim_catalog_lane_cgroup_cache(values, phase="post_persist")
         return descriptor
 
@@ -246,6 +344,7 @@ def _catalog_lane_stage(
             index=index,
         )
     finally:
+        _legacy._HashingWriter = original_hashing_writer
         _legacy._write_pickle_blob = original_write_pickle_blob
 
 
