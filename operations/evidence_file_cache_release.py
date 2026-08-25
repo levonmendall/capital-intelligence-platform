@@ -97,6 +97,31 @@ def _current_reference_paths(values: Mapping[str, str], data_root: Path) -> tupl
     return tuple(paths)
 
 
+def _current_comprehensive_discovery_catalog_paths(
+    values: Mapping[str, str], data_root: Path
+) -> tuple[Path, ...]:
+    """Return immutable raw catalog shards belonging only to the exact active release.
+
+    Lane-local comprehensive discovery persists raw catalog shards beneath a release-scoped
+    scratch root and later reopens them during provider publication. Completed catalog
+    children can therefore leave clean shard pages charged to the service cgroup even after
+    the child interpreter exits. Advising these immutable scratch files is safe: no bytes are
+    read, deleted, rewritten, or granted any decision authority, and later consumers still
+    perform the normal integrity verification before deserializing a shard.
+    """
+
+    release = _release(values)
+    if not release or release == "unknown":
+        return ()
+    root = data_root / "comprehensive-discovery-spool" / _safe_release(release)
+    if not root.is_dir():
+        return ()
+    try:
+        return tuple(sorted(path for path in root.rglob("raw-catalog-*.pkl") if path.is_file()))
+    except OSError:
+        return ()
+
+
 def completed_operating_evidence_paths(values: Mapping[str, str]) -> tuple[Path, ...]:
     """Return files belonging to current qualified operating/all-market evidence."""
 
@@ -195,13 +220,21 @@ def _advise_file_cache_dontneed(path: Path) -> bool:
 def release_current_reference_file_cache(
     values: Mapping[str, str],
 ) -> tuple[Path, ...]:
-    """Release only current durable reference pages after a completed catalog read."""
+    """Release current reference and completed raw-catalog pages at lane handoff."""
 
     data_root = _data_root(values)
     if data_root is None:
         return ()
+    paths = (
+        *_current_reference_paths(values, data_root),
+        *_current_comprehensive_discovery_catalog_paths(values, data_root),
+    )
     released: list[Path] = []
-    for path in _current_reference_paths(values, data_root):
+    seen: set[Path] = set()
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
         if _advise_file_cache_dontneed(path):
             released.append(path)
     return tuple(released)
