@@ -47,6 +47,13 @@ def test_lane_local_memory_context_identifies_active_screening_lane(monkeypatch)
         "lane_local_bounded_discovery_progress",
         lambda _values, *, boundary: observed,
     )
+    # This regression isolates the legacy lane-projection contract. Live cgroup/store
+    # enrichment is covered separately by the terminal-attribution snapshot tests.
+    monkeypatch.setattr(
+        attribution,
+        "capture_memory_attribution",
+        lambda *args, **kwargs: {},
+    )
 
     context = attribution.lane_local_memory_failure_context(
         {},
@@ -84,6 +91,11 @@ def test_lane_local_memory_context_labels_completed_progress_as_non_exact(monkey
         lane_local_watchdog_progress,
         "lane_local_bounded_discovery_progress",
         lambda _values, *, boundary: observed,
+    )
+    monkeypatch.setattr(
+        attribution,
+        "capture_memory_attribution",
+        lambda *args, **kwargs: {},
     )
 
     context = attribution.lane_local_memory_failure_context(
