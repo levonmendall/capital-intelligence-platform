@@ -33,6 +33,9 @@ from operations.stage_isolated_evidence_pipeline import (
 _FAILURE_EVENT = "continuous_evidence_plane_failure_context"
 _DAG_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
 _REFERENCE_CACHE_RECLAMATION_EVENT = "stage_isolated_reference_cache_reclamation"
+_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_EVENT = (
+    "stage_isolated_comprehensive_discovery_cache_reclamation"
+)
 _REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
 _REFERENCE_CACHE_RECLAMATION_CODE = """
 import os
@@ -78,14 +81,19 @@ def _safe_failure(
     )
 
 
-def _run_reference_cache_reclamation(values: Mapping[str, str]) -> None:
-    """Bound and isolate advisory cache reclamation before reference imports begin.
+def _run_completed_evidence_cache_reclamation(
+    values: Mapping[str, str],
+    *,
+    stage: str,
+    event: str,
+) -> None:
+    """Bound and isolate advisory completed-evidence cache reclamation at one boundary.
 
-    The coordinator must remain descriptor-only.  Importing the cache/evidence stack here
+    The coordinator must remain descriptor-only. Importing the cache/evidence stack here
     would retain that module graph in the same interpreter that supervises every stage, so
-    the existing cache-release helper is invoked in a disposable child instead.  Timeout,
+    the existing cache-release helper is invoked in a disposable child instead. Timeout,
     launch failure, and nonzero exit are advisory only: they cannot advance any evidence
-    checkpoint, and the fresh reference interpreter still owns all qualification authority.
+    checkpoint or certify the subsequently spawned stage.
     """
 
     status = "completed"
@@ -117,8 +125,8 @@ def _run_reference_cache_reclamation(values: Mapping[str, str]) -> None:
     print(
         json.dumps(
             {
-                "event": _REFERENCE_CACHE_RECLAMATION_EVENT,
-                "stage": "reference",
+                "event": event,
+                "stage": stage,
                 "status": status,
                 "return_code": return_code,
                 "error_type": error_type,
@@ -135,6 +143,26 @@ def _run_reference_cache_reclamation(values: Mapping[str, str]) -> None:
             sort_keys=True,
         ),
         flush=True,
+    )
+
+
+def _run_reference_cache_reclamation(values: Mapping[str, str]) -> None:
+    """Release completed evidence cache before reference imports begin."""
+
+    _run_completed_evidence_cache_reclamation(
+        values,
+        stage="reference",
+        event=_REFERENCE_CACHE_RECLAMATION_EVENT,
+    )
+
+
+def _run_comprehensive_discovery_cache_reclamation(values: Mapping[str, str]) -> None:
+    """Release completed evidence cache after US discovery and before all-market discovery."""
+
+    _run_completed_evidence_cache_reclamation(
+        values,
+        stage="comprehensive_discovery",
+        event=_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_EVENT,
     )
 
 
@@ -292,13 +320,16 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
                 stage=stage,
             )
 
-        # Release clean pages left by the completed operating-evidence epoch before the
-        # first heavyweight reference/provider imports enter the shared Render cgroup.
-        # The helper runs in a finite child so this coordinator remains lightweight.  Its
-        # result is advisory only; reference qualification still occurs solely in the
-        # subsequently spawned fresh interpreter and remains fail-closed.
+        # Release clean pages at the two heavyweight stage boundaries where production
+        # telemetry has shown persistent raw cgroup pressure. Both reclamations run in a
+        # finite child, are advisory only, and cannot advance evidence state. In particular,
+        # the comprehensive-discovery reclamation occurs only after the prior
+        # us_equity_discovery child has durably completed and exited, and before the fresh
+        # comprehensive-discovery interpreter is spawned.
         if stage == "reference":
             _run_reference_cache_reclamation(resolved)
+        elif stage == "comprehensive_discovery":
+            _run_comprehensive_discovery_cache_reclamation(resolved)
 
         print(
             json.dumps(
