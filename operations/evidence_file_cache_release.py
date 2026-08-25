@@ -9,7 +9,10 @@ next heavyweight certification/CIO boundary begins.
 Release-scoped comprehensive-discovery raw catalog shards are scratch transport rather
 than evidence authority. Once a matching, integrity-valid publication-lane state proves
 that the same request has durably consumed a raw shard, this module may retire that closed
-scratch file before a later heavyweight catalog lane begins. It never deletes qualified
+scratch file before a later heavyweight catalog lane begins. Durable merged-catalog and
+provider-publication files remain required by screening/finalization, so they are never
+deleted; only their clean file-cache pages are advised reclaimable after the same durable
+publication state proves the files are complete. This module never deletes qualified
 reference/history evidence, changes investment semantics, or weakens the bounded
 diagnostic's memory guard.
 """
@@ -235,6 +238,106 @@ def _published_comprehensive_discovery_catalog_paths(
     return tuple(paths)
 
 
+def _published_comprehensive_discovery_publication_paths(
+    values: Mapping[str, str], data_root: Path
+) -> tuple[Path, ...]:
+    """Return completed merged/provider files whose clean pages may be reclaimed.
+
+    Unlike raw catalog shards, merged catalogs and provider-preselection publications are
+    durable inputs to later screening/finalization and must remain on disk. Only an
+    integrity-valid catalog/publication state pair for the exact release may nominate
+    these files for advisory cache release. The publication state must be no older than
+    the catalog state or nominated file so stale retry state cannot release a newly
+    rebuilt artifact prematurely.
+    """
+
+    release = _release(values)
+    if not release or release == "unknown":
+        return ()
+    root = data_root / "comprehensive-discovery-spool" / _safe_release(release)
+    if not root.is_dir():
+        return ()
+
+    paths: list[Path] = []
+    try:
+        catalog_states = sorted(root.rglob("catalog-lane-*.json"))
+    except OSError:
+        return ()
+    for catalog_state_path in catalog_states:
+        match = _CATALOG_STAGE_NAME.fullmatch(catalog_state_path.name)
+        if match is None:
+            continue
+        index = int(match.group(1))
+        catalog_stage = f"catalog-lane-{index:03d}"
+        publication_stage = f"publication-lane-{index:03d}"
+        publication_state_path = catalog_state_path.with_name(f"{publication_stage}.json")
+        catalog = _validated_stage_body(catalog_state_path, expected_stage=catalog_stage)
+        publication = _validated_stage_body(
+            publication_state_path, expected_stage=publication_stage
+        )
+        if not catalog or not publication:
+            continue
+
+        request_id = str(catalog.get("request_id") or "").strip()
+        asset_class = str(catalog.get("asset_class") or "").strip()
+        if (
+            not request_id
+            or not asset_class
+            or str(publication.get("request_id") or "").strip() != request_id
+            or str(publication.get("asset_class") or "").strip() != asset_class
+        ):
+            continue
+
+        blob = publication.get("blob")
+        if not isinstance(blob, Mapping):
+            continue
+        relative_path = str(blob.get("relative_path") or "").strip()
+        safe_asset = _safe_release(asset_class)
+        expected_name = f"merged-catalog-{index:03d}-{safe_asset}.pkl"
+        if relative_path != expected_name:
+            continue
+        sha256 = str(blob.get("sha256") or "").strip().lower()
+        try:
+            byte_count = int(blob.get("byte_count", -1))
+        except (TypeError, ValueError):
+            continue
+        if re.fullmatch(r"[0-9a-f]{64}", sha256) is None or byte_count < 0:
+            continue
+
+        merged_path = publication_state_path.parent / relative_path
+        try:
+            catalog_mtime = catalog_state_path.stat().st_mtime_ns
+            publication_mtime = publication_state_path.stat().st_mtime_ns
+            merged_mtime = merged_path.stat().st_mtime_ns
+        except OSError:
+            continue
+        if publication_mtime < catalog_mtime or publication_mtime < merged_mtime:
+            continue
+        if merged_path.is_symlink() or not merged_path.is_file():
+            continue
+        paths.append(merged_path)
+
+        provider_raw = str(publication.get("provider_preselection_path") or "").strip()
+        if not provider_raw or publication.get("scheduled") is not True:
+            continue
+        expected_provider = publication_state_path.parent / (
+            f"provider-preselection-{index:03d}-{safe_asset}.json"
+        )
+        provider_path = Path(provider_raw).expanduser()
+        if str(provider_path) != str(expected_provider):
+            continue
+        try:
+            provider_mtime = provider_path.stat().st_mtime_ns
+        except OSError:
+            continue
+        if publication_mtime < provider_mtime:
+            continue
+        if provider_path.is_symlink() or not provider_path.is_file():
+            continue
+        paths.append(provider_path)
+    return tuple(paths)
+
+
 def _retire_published_comprehensive_discovery_catalogs(
     values: Mapping[str, str], data_root: Path
 ) -> tuple[Path, ...]:
@@ -348,7 +451,7 @@ def _advise_file_cache_dontneed(path: Path) -> bool:
 def release_current_reference_file_cache(
     values: Mapping[str, str],
 ) -> tuple[Path, ...]:
-    """Retire consumed raw scratch shards, then release remaining current file cache."""
+    """Retire raw scratch, then release current reference/publication file cache."""
 
     data_root = _data_root(values)
     if data_root is None:
@@ -357,6 +460,7 @@ def release_current_reference_file_cache(
     paths = (
         *_current_reference_paths(values, data_root),
         *_current_comprehensive_discovery_catalog_paths(values, data_root),
+        *_published_comprehensive_discovery_publication_paths(values, data_root),
     )
     released: list[Path] = list(retired)
     seen: set[Path] = set(retired)
