@@ -19,6 +19,10 @@ import os
 from pathlib import Path
 from typing import Mapping
 
+from operations.comprehensive_discovery_memory_attribution import (
+    safe_persisted_attribution_metrics,
+)
+
 
 _EVENT = "continuous_evidence_plane_failure_context"
 _INSTALLED_ATTR = "_telemetry_712_failure_context_bridge_v1"
@@ -92,6 +96,14 @@ def _safe_lane_metrics(value: object) -> dict[str, int]:
     return safe
 
 
+def _safe_progress_metrics(value: object) -> dict[str, int]:
+    """Keep legacy lane fields plus the existing credential-safe attribution allowlist."""
+
+    safe = _safe_lane_metrics(value)
+    safe.update(safe_persisted_attribution_metrics(value))
+    return safe
+
+
 def extract_failure_context(stderr: object) -> dict[str, object] | None:
     """Extract one explicitly non-authoritative child resource event.
 
@@ -147,9 +159,9 @@ def extract_failure_context(stderr: object) -> dict[str, object] | None:
             value = _safe_nonnegative_int(payload.get(field))
             if value is not None:
                 safe[field] = value
-        lane_metrics = _safe_lane_metrics(payload.get("lane_progress_metrics"))
-        if lane_metrics:
-            safe["lane_progress_metrics"] = lane_metrics
+        progress_metrics = _safe_progress_metrics(payload.get("lane_progress_metrics"))
+        if progress_metrics:
+            safe["lane_progress_metrics"] = progress_metrics
         return safe
     return None
 
@@ -176,6 +188,9 @@ def _metric_projection(context: Mapping[str, object]) -> dict[str, int]:
     if isinstance(lane_metrics, Mapping):
         for name, value in _safe_lane_metrics(lane_metrics).items():
             metrics[f"lane_{name}"] = value
+        # Attribution names are already globally scoped memory metrics. Preserve the
+        # credential-safe allowlist exactly and do not rewrite them as lane_memory_*.
+        metrics.update(safe_persisted_attribution_metrics(lane_metrics))
 
     progress_kind = str(context.get("failure_progress_kind") or "").strip().lower()
     if progress_kind == "active":
