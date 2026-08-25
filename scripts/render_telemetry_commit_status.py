@@ -25,7 +25,7 @@ class InvalidTelemetrySnapshot(RuntimeError):
     """Raised when the supplied snapshot is not the credential-safe telemetry contract."""
 
 
-def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--allow-awaiting-deployment",
@@ -106,7 +106,10 @@ def status_for_snapshot(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parse_args(argv)
+    # Direct callers historically invoke main() without arguments, so preserve that
+    # interface instead of accidentally consuming the host process's argv (for example
+    # pytest flags). The executable entry point explicitly forwards sys.argv below.
+    args = _parse_args(() if argv is None else argv)
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError, TypeError, ValueError):
@@ -126,4 +129,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
