@@ -35,7 +35,9 @@ from operations import lane_local_comprehensive_discovery_spool as _lane_local
 from operations import persistent_certification_scheduler as _scheduler
 from operations.evidence_file_cache_release import release_current_reference_file_cache
 
-_TRANSACTION_SCHEMA = "comprehensive-discovery-lane-transaction.v1"
+# Transaction state is stored through bounded_comprehensive_discovery_spool's existing
+# integrity-protected stage envelope, so its schema must remain the bounded stage schema.
+_TRANSACTION_SCHEMA = _bounded._STAGE_SCHEMA
 
 
 def _transaction_state_name(index: int) -> str:
@@ -420,7 +422,6 @@ def run_lane_transaction(
             peak = max(peak, screening_peak)
 
         transaction_state: dict[str, object] = {
-            "schema_version": _TRANSACTION_SCHEMA,
             "request_id": request_id,
             "asset_class": asset_class.value,
             "raw_record_count": raw_record_count,
@@ -438,9 +439,6 @@ def run_lane_transaction(
         }
         _bounded._write_stage_state(path, _transaction_state_name(index), transaction_state)
 
-        # The transaction is durable.  Nothing downstream needs a raw catalog scratch
-        # artifact.  Retain only the merged finalizer shard, provider publication and deep
-        # lane checkpoint, and make their clean pages immediately reclaimable.
         _retire_obsolete_raw_catalog(
             directory, asset_class=asset_class.value, index=index
         )
