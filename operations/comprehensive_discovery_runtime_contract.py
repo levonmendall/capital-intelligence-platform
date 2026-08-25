@@ -3,7 +3,7 @@
 The manual CIO diagnostic intentionally rejects unknown stages and metrics, so every
 operational certification-DAG boundary must be registered before the scheduler emits it.
 This module also preserves a credential-safe finalizer boundary, installs the spawn-safe
-authoritative lane runner, installs lane-local bounded spool materialization, installs
+authoritative lane runner, installs transactional bounded spool materialization, installs
 parent-owned DAG supervision, and releases clean file cache after each durable serialized
 Render lane.
 
@@ -109,17 +109,17 @@ def _install_spawn_safe_acquisition() -> None:
 
 
 def _install_lane_local_spool() -> None:
-    """Keep catalog, publication, and finalizer materialization lane scoped."""
+    """Keep every comprehensive lane as one compact, resumable transaction."""
 
-    from operations.lane_local_comprehensive_discovery_coordinator import (
-        install_lane_local_comprehensive_discovery_coordinator,
-    )
     from operations.lane_local_comprehensive_discovery_spool import (
         install_lane_local_comprehensive_discovery_spool,
     )
+    from operations.transactional_lane_comprehensive_discovery_coordinator import (
+        install_transactional_lane_comprehensive_discovery_coordinator,
+    )
 
     install_lane_local_comprehensive_discovery_spool()
-    install_lane_local_comprehensive_discovery_coordinator()
+    install_transactional_lane_comprehensive_discovery_coordinator()
 
 
 def _install_dag_native_supervision() -> None:
@@ -154,10 +154,6 @@ def _install_post_lane_cache_reclamation() -> None:
             node,
             evidence_complete_count=evidence_complete_count,
         )
-        # The durable qualified-node artifact now exists.  On Render the DAG is forced to
-        # one worker, so this finite helper exits before the scheduler can submit the next
-        # lane.  Reclamation is intentionally advisory: an operational helper defect must
-        # never change the already-written evidence qualification result.
         try:
             run_post_lane_cache_reclamation(
                 self.values,
@@ -173,7 +169,7 @@ def _install_post_lane_cache_reclamation() -> None:
 
 
 def install_comprehensive_discovery_runtime_contract() -> None:
-    """Install strict progress, lane-local spawn safety, DAG supervision, and cache hygiene."""
+    """Install strict progress, transactional lanes, DAG supervision, and cache hygiene."""
 
     _register_manual_diagnostic_contract()
     _install_finalizer_failure_boundary()
