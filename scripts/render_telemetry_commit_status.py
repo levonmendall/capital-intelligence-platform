@@ -6,6 +6,7 @@ telemetry snapshot and emits a tiny status state/description suitable for a GitH
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -24,6 +25,16 @@ class InvalidTelemetrySnapshot(RuntimeError):
     """Raised when the supplied snapshot is not the credential-safe telemetry contract."""
 
 
+def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--allow-awaiting-deployment",
+        action="store_true",
+        help="Treat a verified release mismatch as a successful awaiting-deployment observation.",
+    )
+    return parser.parse_args(argv)
+
+
 def _safe_token(value: object, *, fallback: str) -> str:
     candidate = str(value or "").strip()
     return candidate if _SAFE_TOKEN.fullmatch(candidate) else fallback
@@ -35,7 +46,9 @@ def _elapsed_text(value: object) -> str:
     return f"{max(0, int(round(float(value))))}s"
 
 
-def status_for_snapshot(snapshot: Mapping[str, Any]) -> tuple[str, str]:
+def status_for_snapshot(
+    snapshot: Mapping[str, Any], *, allow_awaiting_deployment: bool = False
+) -> tuple[str, str]:
     """Return GitHub status state and a strictly allowlisted live description."""
 
     if snapshot.get("credential_safe") is not True:
@@ -63,6 +76,15 @@ def status_for_snapshot(snapshot: Mapping[str, Any]) -> tuple[str, str]:
     elapsed = _elapsed_text(diagnostic.get("elapsed_seconds"))
     release_match = diagnostic.get("release_matches_expected")
     release_text = "yes" if release_match is True else "no" if release_match is False else "unknown"
+    failure_class = str(snapshot.get("failure_class") or "").strip()
+
+    if (
+        allow_awaiting_deployment
+        and capture_state == "ok"
+        and release_match is False
+        and failure_class in {"release_mismatch", "deployment_unresolved"}
+    ):
+        return "success", "awaiting deployment of expected production release"
 
     complete = bool(
         capture_state == "ok"
@@ -84,7 +106,10 @@ def status_for_snapshot(snapshot: Mapping[str, Any]) -> tuple[str, str]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    del argv
+    # Direct callers historically invoke main() without arguments, so preserve that
+    # interface instead of accidentally consuming the host process's argv (for example
+    # pytest flags). The executable entry point explicitly forwards sys.argv below.
+    args = _parse_args(() if argv is None else argv)
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError, TypeError, ValueError):
@@ -92,7 +117,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not isinstance(payload, Mapping):
         return 2
     try:
-        state, description = status_for_snapshot(payload)
+        state, description = status_for_snapshot(
+            payload,
+            allow_awaiting_deployment=args.allow_awaiting_deployment,
+        )
     except InvalidTelemetrySnapshot:
         return 2
     print(state)
@@ -101,4 +129,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
