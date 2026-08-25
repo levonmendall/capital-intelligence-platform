@@ -6,13 +6,17 @@ service cgroup even after their Python RSS has exited. This module advises the k
 only files belonging to completed, durable current evidence may be reclaimed before the
 next heavyweight certification/CIO boundary begins.
 
-The advisory is deliberately narrow and fail-soft. It never drops global caches, deletes
-or mutates evidence, changes investment semantics, or weakens the bounded diagnostic's
-memory guard.
+Release-scoped comprehensive-discovery raw catalog shards are scratch transport rather
+than evidence authority. Once a matching, integrity-valid publication-lane state proves
+that the same request has durably consumed a raw shard, this module may retire that closed
+scratch file before a later heavyweight catalog lane begins. It never deletes qualified
+reference/history evidence, changes investment semantics, or weakens the bounded
+diagnostic's memory guard.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -22,6 +26,8 @@ from typing import Mapping
 
 
 _SAFE_RELEASE = re.compile(r"[^A-Za-z0-9_.-]+")
+_STAGE_STATE_SCHEMA = "bounded-comprehensive-discovery-stage.v1"
+_CATALOG_STAGE_NAME = re.compile(r"catalog-lane-(\d{3})\.json")
 
 
 def _data_root(values: Mapping[str, str]) -> Path | None:
@@ -49,6 +55,42 @@ def _read_mapping(path: Path) -> Mapping[str, object]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, Mapping) else {}
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _digest(value: object) -> str:
+    return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def _validated_stage_body(path: Path, *, expected_stage: str) -> Mapping[str, object]:
+    """Read one bounded-discovery stage only when integrity and authority are intact."""
+
+    payload = _read_mapping(path)
+    body = payload.get("body") if isinstance(payload, Mapping) else None
+    if not isinstance(body, Mapping) or payload.get("sha256") != _digest(body):
+        return {}
+    if body.get("schema_version") != _STAGE_STATE_SCHEMA or body.get("stage") != expected_stage:
+        return {}
+    if body.get("paper_only") is not True or body.get("real_money_authorized") is not False:
+        return {}
+    for authority in (
+        "decision_authority",
+        "candidate_authority",
+        "sizing_authority",
+        "construction_authority",
+        "execution_authority",
+    ):
+        if body.get(authority) is not False:
+            return {}
+    return body
 
 
 def _snapshot_stamp(raw: object) -> str | None:
@@ -100,15 +142,7 @@ def _current_reference_paths(values: Mapping[str, str], data_root: Path) -> tupl
 def _current_comprehensive_discovery_catalog_paths(
     values: Mapping[str, str], data_root: Path
 ) -> tuple[Path, ...]:
-    """Return immutable raw catalog shards belonging only to the exact active release.
-
-    Lane-local comprehensive discovery persists raw catalog shards beneath a release-scoped
-    scratch root and later reopens them during provider publication. Completed catalog
-    children can therefore leave clean shard pages charged to the service cgroup even after
-    the child interpreter exits. Advising these immutable scratch files is safe: no bytes are
-    read, deleted, rewritten, or granted any decision authority, and later consumers still
-    perform the normal integrity verification before deserializing a shard.
-    """
+    """Return immutable raw catalog shards belonging only to the exact active release."""
 
     release = _release(values)
     if not release or release == "unknown":
@@ -120,6 +154,100 @@ def _current_comprehensive_discovery_catalog_paths(
         return tuple(sorted(path for path in root.rglob("raw-catalog-*.pkl") if path.is_file()))
     except OSError:
         return ()
+
+
+def _published_comprehensive_discovery_catalog_paths(
+    values: Mapping[str, str], data_root: Path
+) -> tuple[Path, ...]:
+    """Return raw shards durably consumed by a matching publication-lane child.
+
+    A release root may contain state from an earlier retry. Publication therefore does not
+    qualify a raw shard for retirement unless the catalog and publication state share the
+    same request/asset identity and the publication state is at least as new as both the
+    catalog state and raw file. The catalog descriptor must also name the exact lane-local
+    raw shard expected for that index and asset class.
+    """
+
+    release = _release(values)
+    if not release or release == "unknown":
+        return ()
+    root = data_root / "comprehensive-discovery-spool" / _safe_release(release)
+    if not root.is_dir():
+        return ()
+
+    paths: list[Path] = []
+    try:
+        catalog_states = sorted(root.rglob("catalog-lane-*.json"))
+    except OSError:
+        return ()
+    for catalog_state_path in catalog_states:
+        match = _CATALOG_STAGE_NAME.fullmatch(catalog_state_path.name)
+        if match is None:
+            continue
+        index = int(match.group(1))
+        catalog_stage = f"catalog-lane-{index:03d}"
+        publication_stage = f"publication-lane-{index:03d}"
+        publication_state_path = catalog_state_path.with_name(f"{publication_stage}.json")
+        catalog = _validated_stage_body(catalog_state_path, expected_stage=catalog_stage)
+        publication = _validated_stage_body(
+            publication_state_path, expected_stage=publication_stage
+        )
+        if not catalog or not publication:
+            continue
+
+        request_id = str(catalog.get("request_id") or "").strip()
+        asset_class = str(catalog.get("asset_class") or "").strip()
+        if (
+            not request_id
+            or not asset_class
+            or str(publication.get("request_id") or "").strip() != request_id
+            or str(publication.get("asset_class") or "").strip() != asset_class
+        ):
+            continue
+
+        blob = catalog.get("blob")
+        if not isinstance(blob, Mapping):
+            continue
+        relative_path = str(blob.get("relative_path") or "").strip()
+        expected_name = f"raw-catalog-{index:03d}-{_safe_release(asset_class)}.pkl"
+        if relative_path != expected_name:
+            continue
+        sha256 = str(blob.get("sha256") or "").strip().lower()
+        try:
+            byte_count = int(blob.get("byte_count", -1))
+        except (TypeError, ValueError):
+            continue
+        if re.fullmatch(r"[0-9a-f]{64}", sha256) is None or byte_count < 0:
+            continue
+
+        raw_path = catalog_state_path.parent / relative_path
+        try:
+            catalog_mtime = catalog_state_path.stat().st_mtime_ns
+            publication_mtime = publication_state_path.stat().st_mtime_ns
+            raw_mtime = raw_path.stat().st_mtime_ns
+        except OSError:
+            continue
+        if publication_mtime < catalog_mtime or publication_mtime < raw_mtime:
+            continue
+        if raw_path.is_symlink() or not raw_path.is_file():
+            continue
+        paths.append(raw_path)
+    return tuple(paths)
+
+
+def _retire_published_comprehensive_discovery_catalogs(
+    values: Mapping[str, str], data_root: Path
+) -> tuple[Path, ...]:
+    """Unlink only closed raw scratch shards already replaced by durable publication state."""
+
+    retired: list[Path] = []
+    for path in _published_comprehensive_discovery_catalog_paths(values, data_root):
+        try:
+            path.unlink()
+        except (FileNotFoundError, OSError):
+            continue
+        retired.append(path)
+    return tuple(retired)
 
 
 def completed_operating_evidence_paths(values: Mapping[str, str]) -> tuple[Path, ...]:
@@ -220,17 +348,18 @@ def _advise_file_cache_dontneed(path: Path) -> bool:
 def release_current_reference_file_cache(
     values: Mapping[str, str],
 ) -> tuple[Path, ...]:
-    """Release current reference and completed raw-catalog pages at lane handoff."""
+    """Retire consumed raw scratch shards, then release remaining current file cache."""
 
     data_root = _data_root(values)
     if data_root is None:
         return ()
+    retired = list(_retire_published_comprehensive_discovery_catalogs(values, data_root))
     paths = (
         *_current_reference_paths(values, data_root),
         *_current_comprehensive_discovery_catalog_paths(values, data_root),
     )
-    released: list[Path] = []
-    seen: set[Path] = set()
+    released: list[Path] = list(retired)
+    seen: set[Path] = set(retired)
     for path in paths:
         if path in seen:
             continue
