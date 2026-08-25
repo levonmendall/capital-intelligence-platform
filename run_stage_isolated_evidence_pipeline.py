@@ -37,10 +37,18 @@ _COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_EVENT = (
     "stage_isolated_comprehensive_discovery_cache_reclamation"
 )
 _REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
+_PRECOMPREHENSIVE_CACHE_RECLAMATION_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
 _REFERENCE_CACHE_RECLAMATION_CODE = """
 import os
 from operations.evidence_file_cache_release import release_completed_operating_evidence_file_cache
 release_completed_operating_evidence_file_cache(os.environ)
+""".strip()
+_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE = """
+import json
+import os
+from operations.pre_comprehensive_cache_reclamation import release_pre_comprehensive_completed_stage_file_cache
+report = release_pre_comprehensive_completed_stage_file_cache(os.environ)
+print(json.dumps(report, sort_keys=True))
 """.strip()
 
 
@@ -81,32 +89,61 @@ def _safe_failure(
     )
 
 
+def _validated_cache_ownership_report(raw: str | None) -> dict[str, object] | None:
+    try:
+        report = json.loads(str(raw or "").strip())
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(report, dict):
+        return None
+    if report.get("schema_version") != _PRECOMPREHENSIVE_CACHE_RECLAMATION_SCHEMA:
+        return None
+    expected = {
+        "advisory_only": True,
+        "evidence_certified": False,
+        "decision_authority": False,
+        "candidate_authority": False,
+        "sizing_authority": False,
+        "construction_authority": False,
+        "execution_authority": False,
+        "paper_only": True,
+        "real_money_authorized": False,
+        "credential_safe": True,
+    }
+    if any(report.get(key) is not value for key, value in expected.items()):
+        return None
+    return report
+
+
 def _run_completed_evidence_cache_reclamation(
     values: Mapping[str, str],
     *,
     stage: str,
     event: str,
+    code: str,
+    capture_report: bool = False,
 ) -> None:
     """Bound and isolate advisory completed-evidence cache reclamation at one boundary.
 
-    The coordinator must remain descriptor-only. Importing the cache/evidence stack here
-    would retain that module graph in the same interpreter that supervises every stage, so
-    the existing cache-release helper is invoked in a disposable child instead. Timeout,
-    launch failure, and nonzero exit are advisory only: they cannot advance any evidence
-    checkpoint or certify the subsequently spawned stage.
+    The coordinator remains descriptor-only. Cache ownership discovery and page-cache
+    advice execute in a disposable child. Timeout, launch failure, malformed telemetry,
+    and nonzero exit are advisory only: none can advance an evidence checkpoint or certify
+    the subsequently spawned stage.
     """
 
     status = "completed"
     return_code: int | None = None
     error_type: str | None = None
+    report: dict[str, object] | None = None
     try:
         completed = subprocess.run(
-            (sys.executable, "-c", _REFERENCE_CACHE_RECLAMATION_CODE),
+            (sys.executable, "-c", code),
             env=dict(values),
             cwd=str(Path(__file__).resolve().parent),
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE if capture_report else subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            text=capture_report,
             timeout=_REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS,
             check=False,
             start_new_session=False,
@@ -115,6 +152,11 @@ def _run_completed_evidence_cache_reclamation(
         if return_code != 0:
             status = "failed"
             error_type = "CacheReclamationProcessError"
+        elif capture_report:
+            report = _validated_cache_ownership_report(completed.stdout)
+            if report is None:
+                status = "invalid_report"
+                error_type = "CacheReclamationReportError"
     except subprocess.TimeoutExpired:
         status = "timed_out"
         error_type = "CacheReclamationTimeout"
@@ -122,28 +164,39 @@ def _run_completed_evidence_cache_reclamation(
         status = "unavailable"
         error_type = "CacheReclamationLaunchError"
 
-    print(
-        json.dumps(
-            {
-                "event": event,
-                "stage": stage,
-                "status": status,
-                "return_code": return_code,
-                "error_type": error_type,
-                "advisory_only": True,
-                "evidence_certified": False,
-                "decision_authority": False,
-                "candidate_authority": False,
-                "sizing_authority": False,
-                "construction_authority": False,
-                "execution_authority": False,
-                "paper_only": True,
-                "real_money_authorized": False,
-            },
-            sort_keys=True,
-        ),
-        flush=True,
-    )
+    payload: dict[str, object] = {
+        "event": event,
+        "stage": stage,
+        "status": status,
+        "return_code": return_code,
+        "error_type": error_type,
+        "advisory_only": True,
+        "evidence_certified": False,
+        "decision_authority": False,
+        "candidate_authority": False,
+        "sizing_authority": False,
+        "construction_authority": False,
+        "execution_authority": False,
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+    if report is not None:
+        payload["cache_ownership"] = report
+        for key in (
+            "candidate_file_count",
+            "candidate_bytes",
+            "selected_file_count",
+            "selected_bytes",
+            "released_file_count",
+            "released_bytes",
+            "scan_truncated",
+            "manifest_truncated",
+            "raw_current_reclaimed_kib",
+            "inactive_file_reclaimed_kib",
+        ):
+            payload[key] = report.get(key)
+
+    print(json.dumps(payload, sort_keys=True), flush=True)
 
 
 def _run_reference_cache_reclamation(values: Mapping[str, str]) -> None:
@@ -153,16 +206,19 @@ def _run_reference_cache_reclamation(values: Mapping[str, str]) -> None:
         values,
         stage="reference",
         event=_REFERENCE_CACHE_RECLAMATION_EVENT,
+        code=_REFERENCE_CACHE_RECLAMATION_CODE,
     )
 
 
 def _run_comprehensive_discovery_cache_reclamation(values: Mapping[str, str]) -> None:
-    """Release completed evidence cache after US discovery and before all-market discovery."""
+    """Release exact clean cache owners after US discovery and before all-market discovery."""
 
     _run_completed_evidence_cache_reclamation(
         values,
         stage="comprehensive_discovery",
         event=_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_EVENT,
+        code=_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE,
+        capture_report=True,
     )
 
 
@@ -321,11 +377,10 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
             )
 
         # Release clean pages at the two heavyweight stage boundaries where production
-        # telemetry has shown persistent raw cgroup pressure. Both reclamations run in a
-        # finite child, are advisory only, and cannot advance evidence state. In particular,
-        # the comprehensive-discovery reclamation occurs only after the prior
-        # us_equity_discovery child has durably completed and exited, and before the fresh
-        # comprehensive-discovery interpreter is spawned.
+        # telemetry has shown persistent raw cgroup pressure. The reference boundary stays
+        # narrow. The comprehensive boundary additionally performs a bounded exact-path
+        # data-root ownership scan only after us_equity_discovery has durably completed and
+        # exited. Both children are advisory only and cannot advance evidence state.
         if stage == "reference":
             _run_reference_cache_reclamation(resolved)
         elif stage == "comprehensive_discovery":
