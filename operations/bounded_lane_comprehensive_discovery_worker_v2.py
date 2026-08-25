@@ -74,7 +74,7 @@ def _drop_catalog_persisted_cache(
 ) -> bool:
     """Best-effort DONTNEED for one already-fsynced catalog prefix.
 
-    The raw catalog is still a private temporary file at these checkpoints, so dropping
+    The catalog is still a private temporary file at these checkpoints, so dropping
     already-durable clean pages cannot expose partial evidence. Unsupported filesystems
     retain the prior behavior and the outer cgroup guard remains authoritative.
     """
@@ -93,7 +93,7 @@ def _drop_catalog_persisted_cache(
 
 
 class _CatalogCheckpointWriter:
-    """Hashing pickle sink that bounds dirty raw-catalog file-cache lifetime."""
+    """Hashing pickle sink that bounds dirty catalog file-cache lifetime."""
 
     def __init__(
         self,
@@ -149,7 +149,7 @@ def _release_catalog_lane_reference_cache(
     *,
     phase: str,
 ) -> tuple[object, ...]:
-    """Make completed reference files reclaimable without affecting evidence authority."""
+    """Make completed reference/publication files reclaimable without authority changes."""
 
     try:
         released = tuple(release_current_reference_file_cache(values))
@@ -161,10 +161,20 @@ def _release_catalog_lane_reference_cache(
             advisory_only=True,
         )
         return ()
+    merged_count = sum(
+        isinstance(path, Path) and path.name.startswith("merged-catalog-")
+        for path in released
+    )
+    provider_count = sum(
+        isinstance(path, Path) and path.name.startswith("provider-preselection-")
+        for path in released
+    )
     _safe_reclaim_log(
         "catalog_lane_reference_cache_release",
         catalog_reclaim_phase=phase,
         cache_release_file_count=len(released),
+        merged_catalog_cache_release_file_count=merged_count,
+        provider_publication_cache_release_file_count=provider_count,
         advisory_only=True,
     )
     return released
@@ -203,7 +213,6 @@ def _reclaim_catalog_lane_cgroup_cache(
             values=values,
         )
         reason = _memory_guard.limit_reason(snapshot, boundaries)
-        # Never let an operational cache advisory obscure genuine working-set pressure.
         if reason == "working_set":
             _safe_reclaim_log(
                 "catalog_lane_reclaim_checkpoint",
@@ -410,6 +419,41 @@ def _publish_catalog_lane_completion_after_child_exit(
     )
 
 
+def _release_publication_lane_cache_after_child_exit(
+    request_path: str | Path,
+    values: Mapping[str, str],
+    *,
+    asset_class: str,
+    index: int,
+) -> None:
+    """Release completed publication cache only after its finite child has exited."""
+
+    path = Path(request_path).expanduser()
+    request, _policy = _bounded._validate_request(path, values)
+    state = _bounded._load_stage_state(
+        path, _lane_local._lane_state_name("publication-lane", index)
+    )
+    if str(state.get("request_id") or "") != str(request.get("request_id") or ""):
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "publication lane durable state request changed before cache release"
+        )
+    if str(state.get("asset_class") or "") != str(asset_class):
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "publication lane durable state identity changed before cache release"
+        )
+
+    released = _release_catalog_lane_reference_cache(
+        values, phase="post_publication_child_exit"
+    )
+    _reclaim_catalog_lane_cgroup_cache(values, phase="post_publication_child_exit")
+    _safe_reclaim_log(
+        "publication_lane_cache_released_after_child_exit",
+        publication_lane=asset_class,
+        cache_release_file_count=len(released),
+        advisory_only=True,
+    )
+
+
 def _publication_lane_stage(
     request_path: str | Path,
     values: Mapping[str, str],
@@ -456,11 +500,39 @@ def _publication_lane_stage(
             dynamic and core._base._lane_is_scheduled(asset_class, timestamp)
         )
 
-        descriptor = _legacy._write_pickle_blob(
-            path.parent,
-            f"merged-catalog-{index:03d}-{_legacy._safe_release(asset_class.value)}.pkl",
-            merged,
+        merged_name = (
+            f"merged-catalog-{index:03d}-{_legacy._safe_release(asset_class.value)}.pkl"
         )
+        original_hashing_writer = _legacy._HashingWriter
+
+        def merged_serialization_checkpoint(persisted_bytes: int) -> None:
+            _safe_reclaim_log(
+                "merged_catalog_serialization_checkpoint",
+                catalog_reclaim_phase="during_merged_persist",
+                merged_catalog_persisted_bytes=persisted_bytes,
+                catalog_checkpoint_bytes=_CATALOG_PERSIST_CHECKPOINT_BYTES,
+                advisory_only=True,
+            )
+            _reclaim_catalog_lane_cgroup_cache(
+                values, phase="during_merged_persist"
+            )
+
+        _release_catalog_lane_reference_cache(values, phase="pre_merged_persist")
+        _reclaim_catalog_lane_cgroup_cache(values, phase="pre_merged_persist")
+        _legacy._HashingWriter = lambda handle: _CatalogCheckpointWriter(
+            handle,
+            checkpoint=merged_serialization_checkpoint,
+        )
+        try:
+            descriptor = _legacy._write_pickle_blob(
+                path.parent,
+                merged_name,
+                merged,
+            )
+        finally:
+            _legacy._HashingWriter = original_hashing_writer
+        _reclaim_catalog_lane_cgroup_cache(values, phase="post_merged_persist")
+
         publication_path: str | None = None
         if scheduled:
             publication_path = str(
@@ -551,6 +623,13 @@ def run_stage(
                 asset_class=asset_class,
                 index=index,
             )
+        elif action == "publication-lane":
+            _release_publication_lane_cache_after_child_exit(
+                request_path,
+                values,
+                asset_class=asset_class,
+                index=index,
+            )
         return
 
     failure = _legacy.load_failure(request_path)
@@ -619,5 +698,6 @@ __all__ = [
     "_publish_catalog_lane_completion_after_child_exit",
     "_publication_lane_stage",
     "_reclaim_catalog_lane_cgroup_cache",
+    "_release_publication_lane_cache_after_child_exit",
     "run_stage",
 ]

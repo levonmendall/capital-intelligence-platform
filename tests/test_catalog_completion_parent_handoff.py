@@ -181,6 +181,7 @@ def test_run_stage_never_publishes_completion_for_failed_child(monkeypatch):
 
 def test_non_catalog_stage_does_not_publish_catalog_completion(monkeypatch):
     published: list[object] = []
+    publication_releases: list[object] = []
 
     class Process:
         def wait(self):
@@ -192,6 +193,13 @@ def test_non_catalog_stage_does_not_publish_catalog_completion(monkeypatch):
         "_publish_catalog_lane_completion_after_child_exit",
         lambda *args, **kwargs: published.append(True),
     )
+    monkeypatch.setattr(
+        worker,
+        "_release_publication_lane_cache_after_child_exit",
+        lambda request_path, values, *, asset_class, index: publication_releases.append(
+            (asset_class, index)
+        ),
+    )
 
     worker.run_stage(
         "publication-lane",
@@ -202,6 +210,7 @@ def test_non_catalog_stage_does_not_publish_catalog_completion(monkeypatch):
     )
 
     assert published == []
+    assert publication_releases == [("international_equity", 4)]
 
 
 def test_governed_memory_boundaries_remain_unchanged():
