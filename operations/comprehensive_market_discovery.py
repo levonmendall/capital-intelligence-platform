@@ -26,6 +26,9 @@ from operations.all_market_lane_certification import (
 from operations.authoritative_comprehensive_discovery import (
     install_authoritative_certification_scheduler,
 )
+from operations.bounded_reference_component_io import (
+    install_bounded_asset_reference_component_io,
+)
 from operations.certification_input_manifest import (
     CertificationInputError,
     freeze_certification_input,
@@ -49,6 +52,7 @@ from operations.resumable_options_discovery import install_resumable_options_cat
 from storage_governance import install_persistent_history_storage_governance
 
 
+install_bounded_asset_reference_component_io()
 install_checkpointed_market_probe(_core)
 install_comprehensive_discovery_runtime_contract()
 install_authoritative_certification_scheduler(_core)
