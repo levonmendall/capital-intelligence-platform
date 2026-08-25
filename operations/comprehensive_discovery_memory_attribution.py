@@ -1,19 +1,19 @@
 """Credential-safe memory attribution for stage-isolated comprehensive discovery.
 
 The fail-closed resource guard intentionally treats the cgroup raw-memory hard ceiling as
-an independent safety boundary.  Production telemetry has repeatedly shown that this raw
+an independent safety boundary. Production telemetry has repeatedly shown that this raw
 charge can be dominated by inactive/file-backed memory while process working sets remain
-healthy.  This module therefore records *advisory-only* attribution snapshots at existing
-stage and lane boundaries.  It never changes a memory boundary or evidence rule.
+healthy. This module records *advisory-only* attribution snapshots. It never changes a
+memory boundary or evidence rule.
 
 Snapshots combine selected cgroup ``memory.stat`` counters with bounded, stat-only disk
-footprints for the persistent evidence stores.  Directory scans never follow symlinks and
-stop after a fixed entry budget.  Failure to read cgroup or filesystem attribution is
+footprints for the persistent evidence stores. Directory scans never follow symlinks and
+stop after a fixed entry budget. Failure to read cgroup or filesystem attribution is
 fail-soft: the substantive evidence path and the outer memory guard remain authoritative.
 
-The existing lane-progress projection remains integrity/release validated.  Only an
+The existing lane-progress projection remains integrity/release validated. Only an
 explicit allowlist of nonnegative integer metrics may flow into credential-safe terminal
-failure telemetry.  This module has no decision, candidate, sizing, construction,
+failure telemetry. This module has no decision, candidate, sizing, construction,
 execution, or real-money authority.
 """
 
@@ -135,7 +135,7 @@ def _safe_metrics(metrics: object) -> dict[str, int]:
 
 
 def safe_persisted_attribution_metrics(metrics: object) -> dict[str, int]:
-    """Return only persisted attribution integers approved for public failure telemetry."""
+    """Return only attribution integers approved for public failure telemetry."""
 
     safe = _safe_metrics(metrics)
     return {name: value for name, value in safe.items() if name in _ATTRIBUTION_METRICS}
@@ -472,7 +472,7 @@ def lane_local_memory_failure_context(
     *,
     boundary: datetime,
 ) -> dict[str, object] | None:
-    """Return the newest exact-release lane progress suitable for failure telemetry."""
+    """Return exact-release lane progress plus a live safe memory attribution snapshot."""
 
     from operations.lane_local_watchdog_progress import (
         lane_local_bounded_discovery_progress,
@@ -480,10 +480,25 @@ def lane_local_memory_failure_context(
 
     observed = lane_local_bounded_discovery_progress(values, boundary=boundary)
     context = None if observed is None else _context_from_progress(observed)
-    if context is not None:
-        return context
+    if context is None:
+        context = _current_active_marker_context(values, boundary=boundary)
+    if context is None:
+        return None
 
-    return _current_active_marker_context(values, boundary=boundary)
+    lane_index = context.get("active_lane_index")
+    live = capture_memory_attribution(
+        values,
+        phase="terminal_resource_failure_context",
+        stage="comprehensive_discovery",
+        asset_class=str(context.get("asset_class") or "") or None,
+        lane_index=lane_index if isinstance(lane_index, int) else None,
+        include_store_sizes=True,
+    )
+    enriched = dict(context)
+    metrics = dict(context.get("metrics") or {})
+    metrics.update(live)
+    enriched["metrics"] = _safe_metrics(metrics)
+    return enriched
 
 
 __all__ = [
