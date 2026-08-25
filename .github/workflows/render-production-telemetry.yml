@@ -60,6 +60,16 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "deployment_status" ]]; then
             watch_seconds=2100
           fi
+
+          # Render deploys main only after required checks pass. Scheduled telemetry may
+          # therefore observe the previous production SHA while a newly merged main SHA is
+          # legitimately waiting for deployment. Only the schedule event opts into that
+          # non-certifying waiting state; deployment-triggered and manual runs stay strict.
+          telemetry_mode_args=()
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
+            telemetry_mode_args+=(--allow-awaiting-deployment)
+          fi
+
           status_target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
           publish_live_status() {
@@ -69,7 +79,7 @@ jobs:
             local status_description=""
             local -a status_lines=()
 
-            if ! status_output="$(printf '%s\n' "$snapshot" | python scripts/render_telemetry_commit_status.py)"; then
+            if ! status_output="$(printf '%s\n' "$snapshot" | python scripts/render_telemetry_commit_status.py "${telemetry_mode_args[@]}")"; then
               echo "::warning::Credential-safe telemetry status formatting failed"
               return 0
             fi
@@ -97,7 +107,9 @@ jobs:
           # A watch window ending while the exact release is still actively
           # prequalifying is an observation boundary, not a diagnostic failure. The
           # resilient wrapper preserves unsafe, release-mismatch, and terminal-failure
-          # exits while returning success for that still-active state.
+          # exits while returning success for that still-active state. Scheduled runs
+          # additionally allow only a verified safe release mismatch to mean the expected
+          # release is awaiting deployment.
           set +e
           python scripts/capture_render_production_telemetry_resilient.py \
             --url "$TELEMETRY_URL" \
@@ -106,6 +118,7 @@ jobs:
             --timeline-output "$TELEMETRY_TIMELINE" \
             --watch-seconds "$watch_seconds" \
             --interval-seconds 30 \
+            "${telemetry_mode_args[@]}" \
           | while IFS= read -r snapshot; do
               printf '%s\n' "$snapshot"
               publish_live_status "$snapshot"
