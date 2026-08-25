@@ -39,30 +39,33 @@ def test_cgroup_v2_stat_metrics_are_projected_in_kib(monkeypatch):
 
 
 def test_data_store_metrics_attribute_bounded_stat_only_footprints(tmp_path):
-    historical = tmp_path / "historical_evidence"
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+
+    historical = data_root / "historical_evidence"
     historical.mkdir()
     (historical / "market_history.sqlite3").write_bytes(b"x" * 2048)
     (historical / "market_history.sqlite3-wal").write_bytes(b"x" * 1024)
     (historical / "market_history.sqlite3-shm").write_bytes(b"x" * 4096)
 
-    spool = tmp_path / "comprehensive-discovery-spool"
+    spool = data_root / "comprehensive-discovery-spool"
     spool.mkdir()
     (spool / "lane.pkl").write_bytes(b"x" * 3072)
 
-    reference = tmp_path / "reference_readiness"
+    reference = data_root / "reference_readiness"
     reference.mkdir()
     (reference / "asset.json").write_bytes(b"x" * 5120)
 
-    continuous = tmp_path / "continuous_evidence_plane"
+    continuous = data_root / "continuous_evidence_plane"
     continuous.mkdir()
     (continuous / "blob.json").write_bytes(b"x" * 6144)
 
-    other = tmp_path / "other_store"
+    other = data_root / "other_store"
     other.mkdir()
     (other / "other.bin").write_bytes(b"x" * 7168)
 
     metrics = attribution._bounded_data_store_metrics(
-        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(data_root)}
     )
 
     assert metrics["memory_store_historical_kib"] == 7
