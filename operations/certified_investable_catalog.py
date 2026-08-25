@@ -70,6 +70,39 @@ def configured_crypto_venue_bindings_path() -> Path:
     )
 
 
+def _advise_read_file_cache_dontneed(path: Path) -> bool:
+    """Make clean pages from one completed read eligible for immediate reclaim.
+
+    Comprehensive-discovery publication lanes are finite child processes, but Linux may
+    keep pages read from their durable catalog inputs charged to the service cgroup after
+    those children exit.  The production memory guard cannot depend on writable cgroup
+    ``memory.reclaim`` support, so advise only the exact read-only source file once its
+    contents have been consumed.  This is advisory and fail-soft: unsupported platforms
+    or filesystems preserve the prior behavior without changing catalog bytes or evidence
+    authority.
+    """
+
+    fadvise = getattr(os, "posix_fadvise", None)
+    dontneed = getattr(os, "POSIX_FADV_DONTNEED", None)
+    if not callable(fadvise) or dontneed is None:
+        return False
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        try:
+            fadvise(descriptor, 0, 0, dontneed)
+        except (OSError, ValueError):
+            return False
+        return True
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+
 def _crypto_symbol(product_id: str, *, quote_currency: str) -> tuple[str, str]:
     parts = tuple(item.strip().upper() for item in product_id.split("-") if item.strip())
     if len(parts) != 2 or parts[1] != quote_currency:
@@ -83,7 +116,10 @@ def _crypto_symbol(product_id: str, *, quote_currency: str) -> tuple[str, str]:
 def _certified_crypto_records() -> tuple[Mapping[str, object], ...]:
     source = configured_crypto_venue_bindings_path()
     try:
-        registry = load_crypto_venue_bindings(source)
+        try:
+            registry = load_crypto_venue_bindings(source)
+        finally:
+            _advise_read_file_cache_dontneed(source)
     except (CryptoVenueProviderError, OSError, TypeError, ValueError) as error:
         raise CertifiedInvestableCatalogError(
             f"certified multi-venue crypto catalog is unavailable at {source}: "
@@ -142,11 +178,16 @@ def _external_catalog_records(
     if source is None:
         return ()
     try:
-        payload = json.loads(source.read_text(encoding="utf-8"))
+        try:
+            raw_payload = source.read_text(encoding="utf-8")
+        finally:
+            _advise_read_file_cache_dontneed(source)
     except OSError as error:
         raise CertifiedInvestableCatalogError(
             f"configured certified catalog is unavailable at {source}"
         ) from error
+    try:
+        payload = json.loads(raw_payload)
     except json.JSONDecodeError as error:
         raise CertifiedInvestableCatalogError(
             "configured certified catalog is invalid JSON"
