@@ -3,8 +3,9 @@
 The manual CIO diagnostic intentionally rejects unknown stages and metrics, so every
 operational certification-DAG boundary must be registered before the scheduler emits it.
 This module also preserves a credential-safe finalizer boundary, installs the spawn-safe
-authoritative lane runner, installs lane-local bounded spool materialization, and installs
-parent-owned DAG supervision.
+authoritative lane runner, installs lane-local bounded spool materialization, installs
+parent-owned DAG supervision, and releases clean file cache after each durable serialized
+Render lane.
 
 This is operational orchestration only. It cannot relax market coverage, evidence
 freshness/completeness, screening, CIO authority, construction, execution, or paper-only
@@ -137,14 +138,49 @@ def _install_dag_native_supervision() -> None:
     install_resume_aware_release_dag_projection()
 
 
+def _install_post_lane_cache_reclamation() -> None:
+    """Reclaim clean cache only after a lane success checkpoint is durable."""
+
+    from operations import persistent_certification_scheduler as scheduler
+    from operations.post_lane_cache_reclamation import run_post_lane_cache_reclamation
+
+    current = scheduler.PersistentCertificationScheduler._write_success
+    if getattr(current, "_post_lane_cache_reclamation", False):
+        return
+
+    def write_success(self, node, *, evidence_complete_count: int):
+        result = current(
+            self,
+            node,
+            evidence_complete_count=evidence_complete_count,
+        )
+        # The durable qualified-node artifact now exists.  On Render the DAG is forced to
+        # one worker, so this finite helper exits before the scheduler can submit the next
+        # lane.  Reclamation is intentionally advisory: an operational helper defect must
+        # never change the already-written evidence qualification result.
+        try:
+            run_post_lane_cache_reclamation(
+                self.values,
+                node_id=node.node_id,
+                asset_class=node.asset_class,
+            )
+        except Exception:  # noqa: BLE001 - cache hygiene is deliberately fail-soft.
+            pass
+        return result
+
+    write_success._post_lane_cache_reclamation = True  # type: ignore[attr-defined]
+    scheduler.PersistentCertificationScheduler._write_success = write_success
+
+
 def install_comprehensive_discovery_runtime_contract() -> None:
-    """Install strict progress, lane-local spawn safety, and DAG-native supervision."""
+    """Install strict progress, lane-local spawn safety, DAG supervision, and cache hygiene."""
 
     _register_manual_diagnostic_contract()
     _install_finalizer_failure_boundary()
     _install_spawn_safe_acquisition()
     _install_lane_local_spool()
     _install_dag_native_supervision()
+    _install_post_lane_cache_reclamation()
 
 
 __all__ = ["install_comprehensive_discovery_runtime_contract"]
