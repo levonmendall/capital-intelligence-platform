@@ -34,6 +34,11 @@ _MEMORY_RESERVE_ENV = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_MEMORY_RESERVE
 _DEFAULT_MEMORY_HIGH_WATER_FRACTION = 0.70
 _DEFAULT_MEMORY_RESERVE_MB = 640.0
 _CATALOG_HANDOFF_RECLAIM_MARGIN_KIB = 32 * 1024
+_CATALOG_FILE_CACHE_RECLAIM_HEADROOM_KIB = 256 * 1024
+_CATALOG_FILE_CACHE_MIN_INACTIVE_KIB = 256 * 1024
+_CATALOG_SERIALIZATION_RECLAIM_PHASES = frozenset(
+    {"during_persist", "during_merged_persist"}
+)
 _CATALOG_PERSIST_CHECKPOINT_BYTES = 8 * 1024 * 1024
 
 
@@ -189,9 +194,11 @@ def _reclaim_catalog_lane_cgroup_cache(
 
     This is deliberately advisory. The outer reclaimable-memory guard retains exclusive
     authority to terminate an unsafe child and still uses the unchanged working-set and raw
-    boundaries. At the catalog persistence seam we begin reclaim one existing reclaim
-    margin before the raw hard ceiling, reuse the guard's capped cgroup-v2 implementation,
-    and remeasure immediately. Failure is fail-soft and cannot change evidence state.
+    boundaries. The existing 32 MiB handoff margin remains the fallback trigger. During the
+    existing 8 MiB serialization checkpoints only, a substantial inactive-file charge may
+    trigger the same capped cgroup-v2 reclaim earlier so clean cache cannot accumulate until
+    the independent hard ceiling wins the sampling race. Failure is fail-soft and cannot
+    change evidence state.
     """
 
     try:
@@ -229,11 +236,34 @@ def _reclaim_catalog_lane_cgroup_cache(
                 advisory_only=True,
             )
             return None
-        reclaim_boundary = max(
+
+        emergency_reclaim_boundary = max(
             boundaries.working_set_kib + 1,
             boundaries.raw_hard_kib - _CATALOG_HANDOFF_RECLAIM_MARGIN_KIB,
         )
+        file_cache_reclaim_boundary = max(
+            boundaries.working_set_kib + 1,
+            boundaries.raw_hard_kib - _CATALOG_FILE_CACHE_RECLAIM_HEADROOM_KIB,
+        )
         raw = snapshot.raw_current_kib
+        inactive = snapshot.inactive_file_kib
+        early_file_cache_pressure = bool(
+            phase in _CATALOG_SERIALIZATION_RECLAIM_PHASES
+            and raw is not None
+            and inactive is not None
+            and inactive >= _CATALOG_FILE_CACHE_MIN_INACTIVE_KIB
+            and raw >= file_cache_reclaim_boundary
+        )
+        reclaim_boundary = (
+            file_cache_reclaim_boundary
+            if early_file_cache_pressure
+            else emergency_reclaim_boundary
+        )
+        reclaim_trigger = (
+            "inactive_file_serialization_pressure"
+            if early_file_cache_pressure
+            else "hard_ceiling_margin"
+        )
         if raw is None or raw < reclaim_boundary:
             _safe_reclaim_log(
                 "catalog_lane_reclaim_checkpoint",
@@ -241,11 +271,13 @@ def _reclaim_catalog_lane_cgroup_cache(
                 memory_accounting_source=snapshot.source,
                 container_memory_current_kib=raw,
                 container_memory_working_set_kib=snapshot.working_set_kib,
-                container_memory_inactive_file_kib=snapshot.inactive_file_kib,
+                container_memory_inactive_file_kib=inactive,
                 container_memory_active_file_kib=snapshot.active_file_kib,
                 working_set_boundary_kib=boundaries.working_set_kib,
                 raw_hard_boundary_kib=boundaries.raw_hard_kib,
-                catalog_handoff_reclaim_boundary_kib=reclaim_boundary,
+                catalog_handoff_reclaim_boundary_kib=emergency_reclaim_boundary,
+                catalog_file_cache_reclaim_boundary_kib=file_cache_reclaim_boundary,
+                catalog_file_cache_min_inactive_kib=_CATALOG_FILE_CACHE_MIN_INACTIVE_KIB,
                 memory_reclaim_attempted=False,
                 reclaim_skip_reason="below_preemptive_margin",
                 advisory_only=True,
@@ -263,6 +295,7 @@ def _reclaim_catalog_lane_cgroup_cache(
         _safe_reclaim_log(
             "catalog_lane_reclaim_checkpoint",
             catalog_reclaim_phase=phase,
+            catalog_reclaim_trigger=reclaim_trigger,
             memory_accounting_source=snapshot.source,
             memory_reclaim_attempted=result.attempted,
             memory_reclaim_supported=result.supported,
@@ -271,14 +304,16 @@ def _reclaim_catalog_lane_cgroup_cache(
             memory_reclaim_raw_after_kib=result.raw_after_kib,
             memory_reclaim_working_set_before_kib=result.working_set_before_kib,
             memory_reclaim_working_set_after_kib=result.working_set_after_kib,
-            memory_reclaim_inactive_file_before_kib=snapshot.inactive_file_kib,
+            memory_reclaim_inactive_file_before_kib=inactive,
             memory_reclaim_inactive_file_after_kib=after.inactive_file_kib,
             memory_reclaim_active_file_before_kib=snapshot.active_file_kib,
             memory_reclaim_active_file_after_kib=after.active_file_kib,
             memory_reclaim_delta_kib=result.reclaimed_kib,
             memory_reclaim_effective=result.effective,
             memory_reclaim_error_type=result.error_type,
-            catalog_handoff_reclaim_boundary_kib=reclaim_boundary,
+            catalog_handoff_reclaim_boundary_kib=emergency_reclaim_boundary,
+            catalog_file_cache_reclaim_boundary_kib=file_cache_reclaim_boundary,
+            catalog_effective_reclaim_boundary_kib=reclaim_boundary,
             working_set_boundary_kib=boundaries.working_set_kib,
             raw_hard_boundary_kib=boundaries.raw_hard_kib,
             post_reclaim_guard_reason=_memory_guard.limit_reason(after, boundaries),
