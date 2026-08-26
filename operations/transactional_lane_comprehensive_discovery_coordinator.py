@@ -23,7 +23,12 @@ from operations import bounded_comprehensive_discovery_spool as _bounded
 from operations import comprehensive_discovery_input_spool as _legacy
 from operations import lane_local_comprehensive_discovery_spool as _lane_local
 from operations import transactional_comprehensive_discovery_lane as _transaction
-from operations.post_lane_cache_reclamation import run_post_lane_cache_reclamation
+from operations.post_lane_cache_reclamation import (
+    run_lane_exit_exact_spool_cache_reclamation,
+)
+from operations.publication_lane_cache_reclamation import (
+    run_publication_lane_cache_reclamation,
+)
 
 _MODULE = "operations.transactional_comprehensive_discovery_lane"
 
@@ -77,6 +82,47 @@ def _publish_transaction_completion(
             "peak_rss_bytes": int(peak_rss_bytes),
         },
     )
+
+
+def run_post_lane_cache_reclamation(
+    values: Mapping[str, str],
+    *,
+    node_id: str,
+    asset_class: str,
+    index: int = 0,
+) -> dict[str, object]:
+    """Preserve the established post-lane hook while removing helper-process overlap.
+
+    The coordinator has historically exposed one monkeypatchable post-lane reclamation
+    seam. Keep that contract intact: first release the exact completed spool, then run the
+    bounded ownership-validated broad data-root clean-page pass in this already-running
+    serialized parent. The caller remains responsible for fail-soft behavior.
+    """
+
+    exact_spool = run_lane_exit_exact_spool_cache_reclamation(
+        values,
+        node_id=node_id,
+        asset_class=asset_class,
+    )
+    broad = run_publication_lane_cache_reclamation(
+        values,
+        asset_class=asset_class,
+        index=index,
+    )
+    return {
+        "exact_release_spool": exact_spool,
+        "broad_reclamation": broad,
+        "advisory_only": True,
+        "evidence_certified": False,
+        "decision_authority": False,
+        "candidate_authority": False,
+        "sizing_authority": False,
+        "construction_authority": False,
+        "execution_authority": False,
+        "paper_only": True,
+        "real_money_authorized": False,
+        "credential_safe": True,
+    }
 
 
 def _run_lane_transaction(
@@ -143,14 +189,19 @@ def _run_lane_transaction(
             f"transactional lane identity changed for {asset_class}"
         )
 
-    # This bounded exact-owner scan is now a post-transaction safety net rather than the
-    # primary memory architecture.  The raw catalog was never persisted and the child has
-    # already exited before this advisory helper runs.
+    # The child is fully gone and the compact transaction checkpoint above has been
+    # integrity-validated. The established post-lane hook first advises only the exact
+    # release spool and then runs the same bounded ownership-reporting clean data-root
+    # reclaimer used at the successful reference boundary directly in this parent. Keeping
+    # the broad pass in-process avoids another interpreter at the high-raw-memory handoff.
+    # The single wrapper remains advisory and completes before another serialized lane can
+    # launch.
     try:
         run_post_lane_cache_reclamation(
             values,
             node_id=f"comprehensive-lane:{asset_class}",
             asset_class=asset_class,
+            index=index,
         )
     except Exception:  # noqa: BLE001 - cache hygiene cannot change evidence state.
         pass
