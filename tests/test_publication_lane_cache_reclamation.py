@@ -34,10 +34,9 @@ def _safe_report() -> dict[str, object]:
     }
 
 
-def test_publication_lane_reclaimer_runs_same_bounded_helper_in_process(monkeypatch) -> None:
+def test_publication_lane_reclaimer_runs_same_bounded_helper_without_dag_override(monkeypatch) -> None:
     values = {
         "RENDER": "true",
-        "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "1",
         "CAPITAL_INTELLIGENCE_MEMORY_LIMIT_MB": "2048",
         "CAPITAL_INTELLIGENCE_MEMORY_RESERVE_MB": "640",
         "CAPITAL_INTELLIGENCE_CGROUP_HARD_CEILING_RATIO": "0.90",
@@ -63,6 +62,7 @@ def test_publication_lane_reclaimer_runs_same_bounded_helper_in_process(monkeypa
 
     assert calls == [values]
     assert values == original
+    assert "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS" not in values
     assert payload["status"] == "completed"
     assert payload["released_bytes"] == 2_100_000
     assert payload["raw_current_reclaimed_kib"] == 512_000
@@ -78,6 +78,28 @@ def test_publication_lane_reclaimer_runs_same_bounded_helper_in_process(monkeypa
     assert payload["real_money_authorized"] is False
 
 
+def test_publication_lane_reclaimer_stays_disabled_outside_render(monkeypatch) -> None:
+    def forbidden(_values):  # pragma: no cover - assertion helper
+        raise AssertionError("publication reclaimer must remain Render-scoped")
+
+    monkeypatch.setattr(
+        broad_reclamation,
+        "release_pre_comprehensive_completed_stage_file_cache",
+        forbidden,
+    )
+
+    payload = reclamation.run_publication_lane_cache_reclamation(
+        {},
+        asset_class="real_estate",
+        index=8,
+    )
+
+    assert payload["status"] == "skipped"
+    assert payload["evidence_certified"] is False
+    assert payload["decision_authority"] is False
+    assert payload["real_money_authorized"] is False
+
+
 def test_publication_lane_reclaimer_rejects_authoritative_report(monkeypatch) -> None:
     unsafe = _safe_report()
     unsafe["decision_authority"] = True
@@ -88,10 +110,7 @@ def test_publication_lane_reclaimer_rejects_authoritative_report(monkeypatch) ->
     )
 
     payload = reclamation.run_publication_lane_cache_reclamation(
-        {
-            "RENDER": "true",
-            "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "1",
-        },
+        {"RENDER": "true"},
         asset_class="fixed_income",
         index=7,
     )
@@ -115,10 +134,7 @@ def test_publication_lane_reclaimer_failure_is_advisory(monkeypatch) -> None:
     )
 
     payload = reclamation.run_publication_lane_cache_reclamation(
-        {
-            "RENDER": "true",
-            "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "1",
-        },
+        {"RENDER": "true"},
         asset_class="real_estate",
         index=8,
     )
