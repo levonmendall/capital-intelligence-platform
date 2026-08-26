@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from operations import pre_comprehensive_cache_reclamation as broad_reclamation
@@ -103,6 +101,36 @@ def test_publication_lane_reclaimer_rejects_authoritative_report(monkeypatch) ->
     assert "cache_ownership" not in payload
     assert payload["evidence_certified"] is False
     assert payload["decision_authority"] is False
+    assert payload["real_money_authorized"] is False
+
+
+def test_publication_lane_reclaimer_failure_is_advisory(monkeypatch) -> None:
+    def fail(_values):
+        raise RuntimeError("simulated cache-advice failure")
+
+    monkeypatch.setattr(
+        broad_reclamation,
+        "release_pre_comprehensive_completed_stage_file_cache",
+        fail,
+    )
+
+    payload = reclamation.run_publication_lane_cache_reclamation(
+        {
+            "RENDER": "true",
+            "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "1",
+        },
+        asset_class="real_estate",
+        index=8,
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["error_type"] == "CacheReclamationError"
+    assert "cache_ownership" not in payload
+    assert payload["advisory_only"] is True
+    assert payload["evidence_certified"] is False
+    assert payload["decision_authority"] is False
+    assert payload["execution_authority"] is False
+    assert payload["paper_only"] is True
     assert payload["real_money_authorized"] is False
 
 
