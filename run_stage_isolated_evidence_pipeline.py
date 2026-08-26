@@ -201,13 +201,14 @@ def _run_completed_evidence_cache_reclamation(
 
 
 def _run_reference_cache_reclamation(values: Mapping[str, str]) -> None:
-    """Release completed evidence cache before reference imports begin."""
+    """Release bounded clean data-root cache before reference imports begin."""
 
     _run_completed_evidence_cache_reclamation(
         values,
         stage="reference",
         event=_REFERENCE_CACHE_RECLAMATION_EVENT,
-        code=_REFERENCE_CACHE_RECLAMATION_CODE,
+        code=_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE,
+        capture_report=True,
     )
 
 
@@ -391,10 +392,10 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
             )
 
         # Release clean pages at the two heavyweight stage boundaries where production
-        # telemetry has shown persistent raw cgroup pressure. The reference boundary stays
-        # narrow. The comprehensive boundary additionally performs a bounded exact-path
-        # data-root ownership scan only after us_equity_discovery has durably completed and
-        # exited. Both children are advisory only and cannot advance evidence state.
+        # telemetry has shown persistent raw cgroup pressure. Both boundaries use the same
+        # bounded data-root scan and clean-page advice before the fresh stage interpreter is
+        # spawned. Failed-attempt dirty-page flushing remains separately restricted to the
+        # supersession boundary. Neither path changes an evidence or memory threshold.
         if stage == "reference":
             _run_reference_cache_reclamation(resolved)
         elif stage == "comprehensive_discovery":
