@@ -125,7 +125,15 @@ def _stage_public_live(values: dict[str, str], state) -> dict[str, object]:
     _apply_reference_binding(values, state)
     os.environ[_PREPARING_ENV] = "true"
     values[_PREPARING_ENV] = "true"
-    result = maintenance._component_public_collector(values)(state.evidence_as_of)
+    collector = maintenance._component_public_collector(values)
+    try:
+        result = collector(state.evidence_as_of)
+    except maintenance._plane.ContinuousEvidencePlaneError:
+        # Requirement groups are checkpointed durably as they qualify. Re-entering the
+        # canonical collector therefore reuses still-fresh successes and reacquires only
+        # unresolved groups. One bounded replay absorbs a transient provider failure while
+        # a second failure still propagates and leaves the stage fail-closed.
+        result = collector(state.evidence_as_of)
     if getattr(result, "required_sources_ready", None) is not True:
         raise RuntimeError("required public-live evidence did not qualify")
     return {
