@@ -183,6 +183,9 @@ def main() -> int:
     from operations.release_prequalification_parent_watchdog import (
         install_release_prequalification_parent_watchdog,
     )
+    from operations.release_prequalification_timeout_contract import (
+        install_release_prequalification_timeout_contract,
+    )
 
     # PR #742 moved comprehensive discovery to per-lane catalog/publication/screening
     # artifacts. Project those exact durable work units into the existing watchdog before
@@ -190,6 +193,11 @@ def main() -> int:
     # same unit cannot manufacture liveness.
     install_lane_local_watchdog_progress()
     install_release_prequalification_parent_watchdog(memory_safe)
+
+    # Mark only the evidence command passing through the installed durable-progress parent
+    # proxy. The inner bounded worker keeps all memory boundaries but no longer competes
+    # with the parent's finite stage/lane stall contract using a blind aggregate clock.
+    install_release_prequalification_timeout_contract(memory_safe)
 
     # Replace the duplicate preliminary full evidence graph with a held-symbol-only mark
     # pass, then retain exactly one complete governed evidence build. The canonical feature

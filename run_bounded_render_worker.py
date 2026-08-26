@@ -29,6 +29,12 @@ from typing import Mapping, MutableMapping, Sequence
 from render_memory_lane import acquire_memory_lane
 
 
+_RELEASE_PREQUALIFICATION_PROGRESS_WATCHDOG_ENV = (
+    "CAPITAL_INTELLIGENCE_RELEASE_PREQUALIFICATION_PROGRESS_WATCHDOG"
+)
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
 @dataclass(frozen=True, slots=True)
 class WorkerSpec:
     name: str
@@ -117,6 +123,33 @@ def _interval_seconds(spec: WorkerSpec, values: Mapping[str, str]) -> float:
     return _seconds(values, spec.interval_env, spec.default_interval_seconds)
 
 
+def _aggregate_timeout_enabled(spec: WorkerSpec, values: Mapping[str, str]) -> bool:
+    """Keep generic worker deadlines, except under the exact release progress watchdog."""
+
+    supervised = (
+        spec.name == "continuous-evidence-plane"
+        and str(values.get(_RELEASE_PREQUALIFICATION_PROGRESS_WATCHDOG_ENV) or "")
+        .strip()
+        .lower()
+        in _TRUTHY
+    )
+    return not supervised
+
+
+def _resource_wait_timeout(
+    spec: WorkerSpec,
+    values: Mapping[str, str],
+    timeout_seconds: float,
+) -> float:
+    """Return the ordinary deadline or a non-competing wait under parent supervision."""
+
+    return (
+        timeout_seconds
+        if _aggregate_timeout_enabled(spec, values)
+        else float("inf")
+    )
+
+
 def _log(worker: str, event: str, **details: object) -> None:
     print(
         json.dumps(
@@ -151,6 +184,11 @@ def _run_isolated_once(
     )
     if timeout <= 0:
         raise ValueError("timeout_seconds must be positive")
+    aggregate_timeout_enabled = _aggregate_timeout_enabled(spec, resolved)
+    # The exact release parent already owns finite durable-progress stall termination.
+    # Use an infinite wait only at that supervised seam so the existing memory sampler and
+    # unchanged cgroup boundaries remain active without a competing aggregate wall clock.
+    resource_wait_timeout = _resource_wait_timeout(spec, resolved, timeout)
     if lane_wait_seconds < 0:
         raise ValueError("lane_wait_seconds cannot be negative")
 
@@ -199,6 +237,8 @@ def _run_isolated_once(
             container_memory_boundary_kib=boundary_kib,
             memory_accounting_source=accounting_source,
             exclusive_heavy_memory_lane=True,
+            aggregate_timeout_enforced=aggregate_timeout_enabled,
+            aggregate_timeout_seconds=timeout if aggregate_timeout_enabled else None,
         )
         process = subprocess.Popen(
             (sys.executable, str(script), *spec.arguments),
@@ -211,7 +251,7 @@ def _run_isolated_once(
         return_code, timed_out, memory_limited, process_peak_kib, container_peak_kib = (
             memory_watchdog._wait_with_resource_bounds(
                 process,
-                timeout_seconds=timeout,
+                timeout_seconds=resource_wait_timeout,
                 memory_high_water_fraction=memory_watchdog._memory_high_water_fraction(
                     resolved
                 ),
