@@ -136,6 +136,20 @@ def _aggregate_timeout_enabled(spec: WorkerSpec, values: Mapping[str, str]) -> b
     return not supervised
 
 
+def _resource_wait_timeout(
+    spec: WorkerSpec,
+    values: Mapping[str, str],
+    timeout_seconds: float,
+) -> float:
+    """Return the ordinary deadline or a non-competing wait under parent supervision."""
+
+    return (
+        timeout_seconds
+        if _aggregate_timeout_enabled(spec, values)
+        else float("inf")
+    )
+
+
 def _log(worker: str, event: str, **details: object) -> None:
     print(
         json.dumps(
@@ -174,7 +188,7 @@ def _run_isolated_once(
     # The exact release parent already owns finite durable-progress stall termination.
     # Use an infinite wait only at that supervised seam so the existing memory sampler and
     # unchanged cgroup boundaries remain active without a competing aggregate wall clock.
-    resource_wait_timeout = timeout if aggregate_timeout_enabled else float("inf")
+    resource_wait_timeout = _resource_wait_timeout(spec, resolved, timeout)
     if lane_wait_seconds < 0:
         raise ValueError("lane_wait_seconds cannot be negative")
 
