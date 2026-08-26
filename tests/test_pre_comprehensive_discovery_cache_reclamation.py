@@ -219,17 +219,33 @@ def test_comprehensive_reclamation_preserves_memory_controls(monkeypatch) -> Non
     assert "release_completed_operating_evidence_file_cache" in runtime._REFERENCE_CACHE_RECLAMATION_CODE
 
 
-def test_reference_boundary_keeps_narrow_reclaimer(monkeypatch) -> None:
+def test_reference_boundary_uses_broad_clean_page_reclaimer(monkeypatch, capsys) -> None:
     calls: list[dict[str, object]] = []
+    report = _safe_report()
+    report["failed_attempt_supersession_detected"] = False
+    report["flush_attempted_file_count"] = 0
+    report["flushed_file_count"] = 0
 
     def _completed(command, **kwargs):
         calls.append({"command": command, **kwargs})
-        return subprocess.CompletedProcess(command, 0)
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(report))
 
     monkeypatch.setattr(runtime.subprocess, "run", _completed)
     runtime._run_reference_cache_reclamation({})
 
     assert len(calls) == 1
-    assert calls[0]["command"][2] == runtime._REFERENCE_CACHE_RECLAMATION_CODE
-    assert calls[0]["stdout"] == subprocess.DEVNULL
+    assert calls[0]["command"][2] == runtime._COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE
+    assert calls[0]["stdout"] == subprocess.PIPE
+    assert calls[0]["text"] is True
     assert calls[0]["start_new_session"] is False
+
+    event = json.loads(capsys.readouterr().out.strip())
+    assert event["stage"] == "reference"
+    assert event["status"] == "completed"
+    assert event["cache_ownership"]["failed_attempt_supersession_detected"] is False
+    assert event["cache_ownership"]["flush_attempted_file_count"] == 0
+    assert event["cache_ownership"]["flushed_file_count"] == 0
+    assert event["advisory_only"] is True
+    assert event["evidence_certified"] is False
+    assert event["decision_authority"] is False
+    assert event["real_money_authorized"] is False
