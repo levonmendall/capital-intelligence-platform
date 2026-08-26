@@ -224,3 +224,106 @@ def test_exact_spool_reclamation_precedes_broad_helper(monkeypatch):
     assert payload["exact_spool_raw_current_reclaimed_kib"] == 256
     assert payload["cache_ownership"] == _valid_report()
     assert payload["evidence_certified"] is False
+
+
+def test_lane_exit_reclamation_is_exact_only_and_non_authoritative(monkeypatch):
+    events: list[str] = []
+
+    def exact(values):
+        events.append("exact")
+        return {
+            "candidate_file_count": 3,
+            "candidate_bytes": 300,
+            "released_file_count": 3,
+            "released_bytes": 300,
+            "scan_truncated": False,
+            "raw_current_reclaimed_kib": 384,
+            "inactive_file_reclaimed_kib": 384,
+            "advisory_only": True,
+            "evidence_certified": False,
+            "decision_authority": False,
+            "candidate_authority": False,
+            "sizing_authority": False,
+            "construction_authority": False,
+            "execution_authority": False,
+            "paper_only": True,
+            "real_money_authorized": False,
+            "credential_safe": True,
+        }
+
+    def forbidden_broad(*args, **kwargs):  # pragma: no cover - assertion helper
+        raise AssertionError("lane-exit boundary must not launch broad helper")
+
+    monkeypatch.setattr(reclamation, "_release_current_release_spool_file_cache", exact)
+    monkeypatch.setattr(reclamation.subprocess, "run", forbidden_broad)
+
+    payload = reclamation.run_lane_exit_exact_spool_cache_reclamation(
+        {"RENDER": "true", "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "1"},
+        node_id="comprehensive-lane:fixed_income",
+        asset_class="fixed_income",
+    )
+
+    assert events == ["exact"]
+    assert payload["status"] == "completed"
+    assert payload["exact_spool_released_bytes"] == 300
+    assert payload["exact_spool_raw_current_reclaimed_kib"] == 384
+    assert payload["advisory_only"] is True
+    assert payload["evidence_certified"] is False
+    assert payload["decision_authority"] is False
+
+
+def test_lane_exit_runtime_hook_runs_before_scheduler_success(monkeypatch):
+    from operations import comprehensive_discovery_runtime_contract as contract
+    from operations import dag_native_comprehensive_supervision as supervision
+
+    events: list[str] = []
+
+    def base_terminal(item, message):
+        events.append("child-exit")
+        return 7
+
+    def exact_exit(values, *, node_id, asset_class):
+        events.append(f"reclaim:{asset_class}")
+        return {"advisory_only": True, "evidence_certified": False}
+
+    monkeypatch.setattr(supervision, "_terminal_result", base_terminal)
+    monkeypatch.setattr(
+        reclamation,
+        "run_lane_exit_exact_spool_cache_reclamation",
+        exact_exit,
+    )
+
+    contract._install_lane_exit_cache_reclamation()
+    outcome = supervision._terminal_result(
+        SimpleNamespace(
+            node=SimpleNamespace(node_id="lane:fixed_income", asset_class="fixed_income")
+        ),
+        ("ok", 7),
+    )
+
+    assert outcome == 7
+    assert events == ["child-exit", "reclaim:fixed_income"]
+
+
+def test_lane_exit_runtime_hook_does_not_reclaim_failed_lane(monkeypatch):
+    from operations import comprehensive_discovery_runtime_contract as contract
+    from operations import dag_native_comprehensive_supervision as supervision
+
+    events: list[str] = []
+    failure = RuntimeError("lane failed")
+
+    monkeypatch.setattr(supervision, "_terminal_result", lambda item, message: failure)
+    monkeypatch.setattr(
+        reclamation,
+        "run_lane_exit_exact_spool_cache_reclamation",
+        lambda *args, **kwargs: events.append("reclaim"),
+    )
+
+    contract._install_lane_exit_cache_reclamation()
+    outcome = supervision._terminal_result(
+        SimpleNamespace(node=SimpleNamespace(node_id="lane:fx", asset_class="fx")),
+        ("error",),
+    )
+
+    assert outcome is failure
+    assert events == []
