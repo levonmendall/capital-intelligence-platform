@@ -15,6 +15,7 @@ controls.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from operations import manual_cio_diagnostic as _diagnostic
@@ -156,7 +157,7 @@ def _install_lane_exit_cache_reclamation() -> None:
         if not isinstance(outcome, BaseException):
             try:
                 run_lane_exit_exact_spool_cache_reclamation(
-                    getattr(item, "values", None) or {},
+                    os.environ,
                     node_id=str(getattr(item.node, "node_id", "certification-node")),
                     asset_class=str(getattr(item.node, "asset_class", "other")),
                 )
