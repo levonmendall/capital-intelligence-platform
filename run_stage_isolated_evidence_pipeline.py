@@ -36,6 +36,7 @@ _REFERENCE_CACHE_RECLAMATION_EVENT = "stage_isolated_reference_cache_reclamation
 _COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_EVENT = (
     "stage_isolated_comprehensive_discovery_cache_reclamation"
 )
+_FAILED_ATTEMPT_CACHE_RECLAMATION_EVENT = "stage_isolated_failed_attempt_cache_reclamation"
 _REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
 _PRECOMPREHENSIVE_CACHE_RECLAMATION_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
 _REFERENCE_CACHE_RECLAMATION_CODE = """
@@ -222,6 +223,18 @@ def _run_comprehensive_discovery_cache_reclamation(values: Mapping[str, str]) ->
     )
 
 
+def _run_failed_attempt_cache_reclamation(values: Mapping[str, str]) -> None:
+    """Release clean cache owned by a durably archived failed evidence attempt."""
+
+    _run_completed_evidence_cache_reclamation(
+        values,
+        stage="attempt_supersession",
+        event=_FAILED_ATTEMPT_CACHE_RECLAMATION_EVENT,
+        code=_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE,
+        capture_report=True,
+    )
+
+
 def _archive_failed_attempt(state: StageIsolatedEvidenceState) -> Path | None:
     """Archive one validated failed latest journal without overwriting prior lineage."""
 
@@ -274,6 +287,7 @@ def _ensure_active_attempt(values: Mapping[str, str]) -> StageIsolatedEvidenceSt
 
     previous = existing
     archive = _archive_failed_attempt(previous)
+    _run_failed_attempt_cache_reclamation(values)
     replacement = ensure_stage_isolated_evidence_pipeline(values)
     if replacement.state == "failed":
         raise RuntimeError(
