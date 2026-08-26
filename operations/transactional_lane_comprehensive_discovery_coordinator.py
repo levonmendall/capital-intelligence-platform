@@ -23,7 +23,12 @@ from operations import bounded_comprehensive_discovery_spool as _bounded
 from operations import comprehensive_discovery_input_spool as _legacy
 from operations import lane_local_comprehensive_discovery_spool as _lane_local
 from operations import transactional_comprehensive_discovery_lane as _transaction
-from operations.post_lane_cache_reclamation import run_post_lane_cache_reclamation
+from operations.post_lane_cache_reclamation import (
+    run_lane_exit_exact_spool_cache_reclamation,
+)
+from operations.publication_lane_cache_reclamation import (
+    run_publication_lane_cache_reclamation,
+)
 
 _MODULE = "operations.transactional_comprehensive_discovery_lane"
 
@@ -143,14 +148,25 @@ def _run_lane_transaction(
             f"transactional lane identity changed for {asset_class}"
         )
 
-    # This bounded exact-owner scan is now a post-transaction safety net rather than the
-    # primary memory architecture.  The raw catalog was never persisted and the child has
-    # already exited before this advisory helper runs.
+    # The child is fully gone and the compact transaction checkpoint above has been
+    # integrity-validated. First flush/advise only the exact release spool, then run the
+    # same bounded ownership-reporting clean data-root reclaimer used at the successful
+    # reference boundary directly in this parent. Keeping the broad pass in-process avoids
+    # allocating another Python interpreter at the exact high-raw-memory handoff. Both
+    # operations remain advisory and complete before another serialized lane can launch.
     try:
-        run_post_lane_cache_reclamation(
+        run_lane_exit_exact_spool_cache_reclamation(
             values,
             node_id=f"comprehensive-lane:{asset_class}",
             asset_class=asset_class,
+        )
+    except Exception:  # noqa: BLE001 - cache hygiene cannot change evidence state.
+        pass
+    try:
+        run_publication_lane_cache_reclamation(
+            values,
+            asset_class=asset_class,
+            index=index,
         )
     except Exception:  # noqa: BLE001 - cache hygiene cannot change evidence state.
         pass
