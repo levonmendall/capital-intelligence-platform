@@ -379,15 +379,15 @@ def release_pre_comprehensive_completed_stage_file_cache(
 
     manifest: list[dict[str, object]] = []
     for size, category, relative, path in selected[:manifest_max_files]:
-        manifest.append(
-            {
-                "path": relative[:320],
-                "category": category[:96],
-                "bytes": size,
-                "flushed": path in flushed_paths,
-                "released": path in released_paths,
-            }
-        )
+        row: dict[str, object] = {
+            "path": relative[:320],
+            "category": category[:96],
+            "bytes": size,
+            "released": path in released_paths,
+        }
+        if failed_attempt_supersession:
+            row["flushed"] = path in flushed_paths
+        manifest.append(row)
 
     return {
         "schema_version": _SCHEMA_VERSION,
