@@ -1,0 +1,35 @@
+name: Temporary progress-aware repair PR runner
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: repair/progress-aware-prequalification-timeout
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply repair
+        run: python tools/_temporary_progress_timeout_repair.py
+      - name: Verify syntax and patch hygiene
+        run: |
+          python -m py_compile run_render_service_memory_safe.py run_bounded_render_worker.py operations/reclaimable_memory_guard.py tests/test_progress_aware_prequalification_timeout.py
+          git diff --check
+      - name: Commit repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add run_render_service_memory_safe.py run_bounded_render_worker.py operations/reclaimable_memory_guard.py tests/test_progress_aware_prequalification_timeout.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Use progress-aware timeout for release evidence qualification'
+          git push origin HEAD:repair/progress-aware-prequalification-timeout
