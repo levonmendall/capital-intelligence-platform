@@ -4,8 +4,9 @@ The manual CIO diagnostic intentionally rejects unknown stages and metrics, so e
 operational certification-DAG boundary must be registered before the scheduler emits it.
 This module also preserves a credential-safe finalizer boundary, installs the spawn-safe
 authoritative lane runner, installs transactional bounded spool materialization, installs
-parent-owned DAG supervision, and releases clean file cache after each durable serialized
-Render lane.
+parent-owned DAG supervision, reclaims exact-release spool cache immediately after each
+successful lane process exits, and retains broader fail-soft cache reclamation after the
+durable success checkpoint.
 
 This is operational orchestration only. It cannot relax market coverage, evidence
 freshness/completeness, screening, CIO authority, construction, execution, or paper-only
@@ -138,8 +139,37 @@ def _install_dag_native_supervision() -> None:
     install_resume_aware_release_dag_projection()
 
 
+def _install_lane_exit_cache_reclamation() -> None:
+    """Reclaim exact-release spool cache at the parent-owned child-exit handoff."""
+
+    from operations import dag_native_comprehensive_supervision as supervision
+    from operations.post_lane_cache_reclamation import (
+        run_lane_exit_exact_spool_cache_reclamation,
+    )
+
+    current = supervision._terminal_result
+    if getattr(current, "_lane_exit_exact_spool_cache_reclamation", False):
+        return
+
+    def terminal_result(item, message):
+        outcome = current(item, message)
+        if not isinstance(outcome, BaseException):
+            try:
+                run_lane_exit_exact_spool_cache_reclamation(
+                    getattr(item, "values", None) or {},
+                    node_id=str(getattr(item.node, "node_id", "certification-node")),
+                    asset_class=str(getattr(item.node, "asset_class", "other")),
+                )
+            except Exception:  # noqa: BLE001 - operational cache hygiene is fail-soft.
+                pass
+        return outcome
+
+    terminal_result._lane_exit_exact_spool_cache_reclamation = True  # type: ignore[attr-defined]
+    supervision._terminal_result = terminal_result
+
+
 def _install_post_lane_cache_reclamation() -> None:
-    """Reclaim clean cache only after a lane success checkpoint is durable."""
+    """Retain broad cache fallback only after a lane success checkpoint is durable."""
 
     from operations import persistent_certification_scheduler as scheduler
     from operations.post_lane_cache_reclamation import run_post_lane_cache_reclamation
@@ -176,6 +206,7 @@ def install_comprehensive_discovery_runtime_contract() -> None:
     _install_spawn_safe_acquisition()
     _install_lane_local_spool()
     _install_dag_native_supervision()
+    _install_lane_exit_cache_reclamation()
     _install_post_lane_cache_reclamation()
 
 
