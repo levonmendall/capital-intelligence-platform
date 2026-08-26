@@ -171,7 +171,10 @@ def _run_isolated_once(
     if timeout <= 0:
         raise ValueError("timeout_seconds must be positive")
     aggregate_timeout_enabled = _aggregate_timeout_enabled(spec, resolved)
-    resource_wait_timeout = timeout if aggregate_timeout_enabled else None
+    # The exact release parent already owns finite durable-progress stall termination.
+    # Use an infinite wait only at that supervised seam so the existing memory sampler and
+    # unchanged cgroup boundaries remain active without a competing aggregate wall clock.
+    resource_wait_timeout = timeout if aggregate_timeout_enabled else float("inf")
     if lane_wait_seconds < 0:
         raise ValueError("lane_wait_seconds cannot be negative")
 
