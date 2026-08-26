@@ -8,8 +8,9 @@ competing aggregate wall-clock deadline while retaining its unchanged memory gua
 
 The same startup seam also installs the granular futures-reference progress projection so
 the parent sees the venue/root checkpoints already persisted by the reference coordinator.
-This does not extend any provider or stall timeout; it prevents real root-level progress
-from being misclassified as an aggregate reference stall.
+It also binds retry observation to the persisted prequalification generation start so a
+wrapper retry cannot hide valid same-generation stage progress. Neither adapter extends any
+provider or stall timeout.
 
 This is operational coordination only. It has no evidence, candidate, CIO, construction,
 sizing, execution, or real-money authority.
@@ -22,6 +23,9 @@ from types import ModuleType
 
 from operations.granular_futures_parent_watchdog_progress import (
     install_granular_futures_parent_watchdog_progress,
+)
+from operations.release_prequalification_retry_progress_boundary import (
+    install_release_prequalification_retry_progress_boundary,
 )
 
 
@@ -59,12 +63,17 @@ class _ProgressSupervisedSubprocessProxy:
         return self._parent_proxy.run(command, **delegated)
 
 
+def _install_parent_progress_adapters() -> None:
+    install_release_prequalification_retry_progress_boundary()
+    install_granular_futures_parent_watchdog_progress()
+
+
 def install_release_prequalification_timeout_contract(memory_safe_module: ModuleType) -> None:
     """Install only after the exact durable-progress parent proxy is active."""
 
     current = getattr(memory_safe_module, "subprocess", None)
     if isinstance(current, _ProgressSupervisedSubprocessProxy):
-        install_granular_futures_parent_watchdog_progress()
+        _install_parent_progress_adapters()
         return
     current_type = type(current)
     if (
@@ -74,7 +83,7 @@ def install_release_prequalification_timeout_contract(memory_safe_module: Module
         raise RuntimeError(
             "progress-aware timeout contract requires the release prequalification parent watchdog"
         )
-    install_granular_futures_parent_watchdog_progress()
+    _install_parent_progress_adapters()
     memory_safe_module.subprocess = _ProgressSupervisedSubprocessProxy(current)
 
 
