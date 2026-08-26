@@ -178,6 +178,11 @@ def test_failed_attempt_flush_byte_budget_is_bounded(tmp_path, monkeypatch) -> N
         "CAPITAL_INTELLIGENCE_FAILED_ATTEMPT_CACHE_FLUSH_MAX_BYTES": str(16 * 1024 * 1024),
     }
     state = pipeline.ensure_stage_isolated_evidence_pipeline(values)
+    pipeline.begin_evidence_stage(
+        values,
+        pipeline_id=state.pipeline_id,
+        stage="reference",
+    )
     failed = pipeline.fail_evidence_stage(
         values,
         pipeline_id=state.pipeline_id,
