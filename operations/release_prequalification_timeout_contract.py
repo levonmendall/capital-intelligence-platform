@@ -6,6 +6,11 @@ termination. This module adds a credential-safe environment marker only while th
 proxy is wrapping the evidence command, allowing the inner bounded worker to avoid a
 competing aggregate wall-clock deadline while retaining its unchanged memory guard.
 
+The same startup seam also installs the granular futures-reference progress projection so
+the parent sees the venue/root checkpoints already persisted by the reference coordinator.
+This does not extend any provider or stall timeout; it prevents real root-level progress
+from being misclassified as an aggregate reference stall.
+
 This is operational coordination only. It has no evidence, candidate, CIO, construction,
 sizing, execution, or real-money authority.
 """
@@ -14,6 +19,10 @@ from __future__ import annotations
 
 import os
 from types import ModuleType
+
+from operations.granular_futures_parent_watchdog_progress import (
+    install_granular_futures_parent_watchdog_progress,
+)
 
 
 _EVIDENCE_SCRIPT = "run_bounded_continuous_evidence_plane.py"
@@ -55,6 +64,7 @@ def install_release_prequalification_timeout_contract(memory_safe_module: Module
 
     current = getattr(memory_safe_module, "subprocess", None)
     if isinstance(current, _ProgressSupervisedSubprocessProxy):
+        install_granular_futures_parent_watchdog_progress()
         return
     current_type = type(current)
     if (
@@ -64,6 +74,7 @@ def install_release_prequalification_timeout_contract(memory_safe_module: Module
         raise RuntimeError(
             "progress-aware timeout contract requires the release prequalification parent watchdog"
         )
+    install_granular_futures_parent_watchdog_progress()
     memory_safe_module.subprocess = _ProgressSupervisedSubprocessProxy(current)
 
 
