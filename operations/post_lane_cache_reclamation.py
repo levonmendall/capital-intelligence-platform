@@ -1,13 +1,13 @@
-"""Release clean data-root cache after each durable comprehensive lane on Render.
+"""Release clean data-root cache around comprehensive-discovery lane handoffs on Render.
 
-The comprehensive-discovery stage is serialized to one DAG worker on Render. Once a lane
-has durably qualified, this module first reclaims the exact current-release comprehensive
-spool synchronously in the lightweight coordinator. That narrow pass advises each durable
-regular file as it is encountered, so progress does not depend on a full data-root scan
-finishing inside the bounded helper timeout. A short-lived helper then retains the broader
-bounded data-root reclamation as a fail-soft fallback.
+The comprehensive-discovery stage is serialized to one DAG worker on Render. Immediately
+after a successful lane process exits, the lightweight parent can reclaim the exact
+current-release comprehensive spool synchronously before durable success bookkeeping or
+the next lane launch. After the success checkpoint is durable, this module repeats that
+narrow pass and launches the existing short-lived broad data-root helper as a fail-soft
+fallback.
 
-Both passes are advisory operational hygiene only. Timeout, launch failure, malformed
+All reclamation is advisory operational hygiene only. Failure, timeout, malformed
 telemetry, or cache-advice failure cannot qualify evidence or change investment authority.
 """
 
@@ -23,6 +23,7 @@ from typing import Mapping
 
 
 _EVENT = "comprehensive_discovery_lane_cache_reclamation"
+_EXIT_EVENT = "comprehensive_discovery_lane_exit_cache_reclamation"
 _REPORT_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
 _TIMEOUT_SECONDS = 10.0
 _WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
@@ -159,14 +160,7 @@ def _advise_clean_file_cache_dontneed(path: Path) -> bool:
 def _release_current_release_spool_file_cache(
     values: Mapping[str, str],
 ) -> dict[str, object]:
-    """Stream exact-release spool files through cache advice before the broad fallback.
-
-    The prior broad helper must first walk and rank the whole data root before issuing its
-    largest-file advice. Production telemetry showed the raw hard ceiling can be crossed
-    at a completed lane boundary while most charged memory is clean inactive file cache.
-    This exact pass instead starts reclaiming immediately from the only release-scoped
-    spool owned by comprehensive discovery. It never deletes or deserializes evidence.
-    """
+    """Stream exact-release spool files through cache advice without touching evidence."""
 
     root = _current_release_spool_root(values)
     scan_max_entries = _bounded_int(
@@ -231,9 +225,7 @@ def _release_current_release_spool_file_cache(
         "candidate_bytes": candidate_bytes,
         "released_file_count": released_file_count,
         "released_bytes": released_bytes,
-        "raw_current_reclaimed_kib": _reclaimed_kib(
-            before, after, "raw_current_kib"
-        ),
+        "raw_current_reclaimed_kib": _reclaimed_kib(before, after, "raw_current_kib"),
         "inactive_file_reclaimed_kib": _reclaimed_kib(
             before, after, "inactive_file_kib"
         ),
@@ -248,6 +240,66 @@ def _release_current_release_spool_file_cache(
         "real_money_authorized": False,
         "credential_safe": True,
     }
+
+
+def run_lane_exit_exact_spool_cache_reclamation(
+    values: Mapping[str, str],
+    *,
+    node_id: str,
+    asset_class: str,
+) -> dict[str, object]:
+    """Reclaim exact spool cache immediately after a successful lane child exits.
+
+    This intentionally does not launch the broad helper. The purpose of this boundary is
+    to begin useful cache advice before success persistence/progress publication and before
+    another serialized lane can be launched. It is strictly advisory and fail-soft.
+    """
+
+    status = "skipped"
+    error_type: str | None = None
+    report: dict[str, object] | None = None
+    if _enabled(values):
+        try:
+            report = _release_current_release_spool_file_cache(values)
+            status = "completed"
+        except Exception:  # noqa: BLE001 - cache hygiene remains advisory.
+            status = "failed"
+            error_type = "ExactSpoolCacheReclamationError"
+
+    payload: dict[str, object] = {
+        "event": _EXIT_EVENT,
+        "node_id": str(node_id)[:160],
+        "asset_class": str(asset_class)[:96],
+        "status": status,
+        "error_type": error_type,
+        "advisory_only": True,
+        "evidence_certified": False,
+        "decision_authority": False,
+        "candidate_authority": False,
+        "sizing_authority": False,
+        "construction_authority": False,
+        "execution_authority": False,
+        "paper_only": True,
+        "real_money_authorized": False,
+        "credential_safe": True,
+    }
+    if report is not None:
+        payload["exact_release_spool"] = report
+        for source, target in (
+            ("candidate_file_count", "exact_spool_candidate_file_count"),
+            ("candidate_bytes", "exact_spool_candidate_bytes"),
+            ("released_file_count", "exact_spool_released_file_count"),
+            ("released_bytes", "exact_spool_released_bytes"),
+            ("scan_truncated", "exact_spool_scan_truncated"),
+            ("raw_current_reclaimed_kib", "exact_spool_raw_current_reclaimed_kib"),
+            (
+                "inactive_file_reclaimed_kib",
+                "exact_spool_inactive_file_reclaimed_kib",
+            ),
+        ):
+            payload[target] = report.get(source)
+    print(json.dumps(payload, sort_keys=True), flush=True)
+    return payload
 
 
 def _validated_report(raw: str | None) -> dict[str, object] | None:
@@ -280,7 +332,7 @@ def run_post_lane_cache_reclamation(
     node_id: str,
     asset_class: str,
 ) -> dict[str, object]:
-    """Run exact spool release, then one bounded fail-soft broad cache reclaimer."""
+    """Repeat exact spool release, then one bounded fail-soft broad reclaimer."""
 
     status = "skipped"
     return_code: int | None = None
@@ -289,10 +341,6 @@ def run_post_lane_cache_reclamation(
     exact_spool: dict[str, object] | None = None
 
     if _enabled(values):
-        # This narrow pass is intentionally parent-owned and synchronous. It imports no
-        # provider/evidence graph and merely opens exact release-scoped files long enough
-        # to fsync + fadvise them. Therefore useful reclamation happens before the broader
-        # scanner can time out, and before the next serialized lane can be submitted.
         try:
             exact_spool = _release_current_release_spool_file_cache(values)
         except Exception:  # noqa: BLE001 - cache hygiene remains strictly advisory.
@@ -394,4 +442,7 @@ def run_post_lane_cache_reclamation(
     return payload
 
 
-__all__ = ["run_post_lane_cache_reclamation"]
+__all__ = [
+    "run_lane_exit_exact_spool_cache_reclamation",
+    "run_post_lane_cache_reclamation",
+]
