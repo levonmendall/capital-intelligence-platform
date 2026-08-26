@@ -1,12 +1,15 @@
-"""Bound and report clean file-cache reclamation before comprehensive discovery.
+"""Bound and report file-cache reclamation at completed evidence boundaries.
 
-The reference boundary deliberately keeps its narrower evidence-specific reclaimer. This
-module is used only after reference, public-live, and US-equity discovery have durably
-completed and their finite child interpreters have exited. At that boundary, clean pages
-for regular files below the configured Capital Intelligence data root may be advised
-reclaimable without changing file bytes, evidence authority, or any investment decision.
+Normal post-stage reclamation advises only already-clean regular-file pages below the
+configured Capital Intelligence data root. A failed stage-isolated attempt is different:
+the failed coordinator is durably archived and its latest pointer is removed before this
+helper runs, so no failed-attempt child remains active, but recently written closed files
+may still have dirty file-backed pages charged to the service cgroup. At that exact
+supersession boundary, this module boundedly flushes only the largest closed regular files
+before advising their pages reclaimable.
 
-The scan and manifest are bounded. Cache advice is fail-soft and never certifies evidence.
+The scan, failed-attempt flush set, and manifest are bounded. Cache advice is fail-soft and
+never changes file bytes, evidence authority, resource limits, or investment decisions.
 """
 
 from __future__ import annotations
@@ -18,15 +21,27 @@ from typing import Mapping
 from operations.evidence_file_cache_release import (
     release_completed_operating_evidence_file_cache,
 )
+from operations.stage_isolated_evidence_pipeline import (
+    _path as _stage_isolated_state_path,
+    load_stage_isolated_evidence_state,
+)
 
 
 _SCHEMA_VERSION = "pre-comprehensive-cache-reclamation.v1"
 _SCAN_MAX_ENTRIES_ENV = "CAPITAL_INTELLIGENCE_PRECOMPREHENSIVE_CACHE_SCAN_MAX_ENTRIES"
 _RECLAIM_MAX_FILES_ENV = "CAPITAL_INTELLIGENCE_PRECOMPREHENSIVE_CACHE_RECLAIM_MAX_FILES"
 _MANIFEST_MAX_FILES_ENV = "CAPITAL_INTELLIGENCE_PRECOMPREHENSIVE_CACHE_MANIFEST_MAX_FILES"
+_FAILED_ATTEMPT_FLUSH_MAX_FILES_ENV = (
+    "CAPITAL_INTELLIGENCE_FAILED_ATTEMPT_CACHE_FLUSH_MAX_FILES"
+)
+_FAILED_ATTEMPT_FLUSH_MAX_BYTES_ENV = (
+    "CAPITAL_INTELLIGENCE_FAILED_ATTEMPT_CACHE_FLUSH_MAX_BYTES"
+)
 _DEFAULT_SCAN_MAX_ENTRIES = 50_000
 _DEFAULT_RECLAIM_MAX_FILES = 4_096
 _DEFAULT_MANIFEST_MAX_FILES = 32
+_DEFAULT_FAILED_ATTEMPT_FLUSH_MAX_FILES = 64
+_DEFAULT_FAILED_ATTEMPT_FLUSH_MAX_BYTES = 512 * 1024 * 1024
 _TRANSIENT_SUFFIXES = (".lock", ".part", ".partial", ".tmp")
 
 
@@ -129,6 +144,46 @@ def _advise_clean_file_cache_dontneed(path: Path) -> bool:
             pass
 
 
+def _flush_then_advise_file_cache_dontneed(path: Path) -> tuple[bool, bool]:
+    """Flush one closed file, then advise its now-clean pages reclaimable.
+
+    This is reserved for the failed-attempt supersession boundary. The file is opened
+    read-only and never modified. A failed fsync does not prevent advisory release of any
+    pages that were already clean.
+    """
+
+    posix_fadvise = getattr(os, "posix_fadvise", None)
+    advice = getattr(os, "POSIX_FADV_DONTNEED", None)
+    if posix_fadvise is None or advice is None:
+        return False, False
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False, False
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return False, False
+
+    flushed = False
+    released = False
+    try:
+        try:
+            os.fsync(descriptor)
+            flushed = True
+        except OSError:
+            pass
+        try:
+            posix_fadvise(descriptor, 0, 0, advice)
+            released = True
+        except (OSError, TypeError, ValueError):
+            pass
+        return flushed, released
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+
 def _scan_candidates(
     data_root: Path,
     *,
@@ -182,10 +237,36 @@ def _scan_candidates(
     return candidates, scanned_entries, truncated
 
 
+def _failed_attempt_supersession(values: Mapping[str, str]) -> bool:
+    """Return true only after a failed stage journal was archived and unlinked.
+
+    ``run_stage_isolated_evidence_pipeline`` archives the validated failed latest journal,
+    removes that exact latest pointer, and invokes this reclaimer before creating the
+    replacement attempt. Normal comprehensive/post-lane reclamation retains a current
+    stage journal and therefore stays on clean-page-only advice.
+    """
+
+    try:
+        current = load_stage_isolated_evidence_state(values)
+        state_path = _stage_isolated_state_path(values)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+    if current is not None or state_path.exists():
+        return False
+
+    archive_dir = state_path.parent / "attempts"
+    try:
+        return archive_dir.is_dir() and any(
+            path.is_file() for path in archive_dir.glob("*.json")
+        )
+    except OSError:
+        return False
+
+
 def release_pre_comprehensive_completed_stage_file_cache(
     values: Mapping[str, str],
 ) -> dict[str, object]:
-    """Reclaim bounded clean data-root cache and return exact ownership telemetry."""
+    """Reclaim bounded data-root cache and return exact ownership telemetry."""
 
     data_root = _data_root(values)
     scan_max_entries = _bounded_int(
@@ -209,6 +290,21 @@ def release_pre_comprehensive_completed_stage_file_cache(
         minimum=1,
         maximum=64,
     )
+    flush_max_files = _bounded_int(
+        values,
+        _FAILED_ATTEMPT_FLUSH_MAX_FILES_ENV,
+        _DEFAULT_FAILED_ATTEMPT_FLUSH_MAX_FILES,
+        minimum=1,
+        maximum=256,
+    )
+    flush_max_bytes = _bounded_int(
+        values,
+        _FAILED_ATTEMPT_FLUSH_MAX_BYTES_ENV,
+        _DEFAULT_FAILED_ATTEMPT_FLUSH_MAX_BYTES,
+        minimum=16 * 1024 * 1024,
+        maximum=2 * 1024 * 1024 * 1024,
+    )
+    failed_attempt_supersession = _failed_attempt_supersession(values)
 
     before = _memory_snapshot()
     legacy_released = tuple(release_completed_operating_evidence_file_cache(values))
@@ -225,8 +321,26 @@ def release_pre_comprehensive_completed_stage_file_cache(
     selected = candidates[:reclaim_max_files]
     released_paths = set(legacy_released)
     broad_released_paths: set[Path] = set()
-    for _size, _category, _relative, path in selected:
-        if _advise_clean_file_cache_dontneed(path):
+    flushed_paths: set[Path] = set()
+    flush_attempted_file_count = 0
+    flush_attempted_bytes = 0
+
+    for size, _category, _relative, path in selected:
+        released = False
+        should_flush = (
+            failed_attempt_supersession
+            and flush_attempted_file_count < flush_max_files
+            and flush_attempted_bytes < flush_max_bytes
+        )
+        if should_flush:
+            flush_attempted_file_count += 1
+            flush_attempted_bytes += size
+            flushed, released = _flush_then_advise_file_cache_dontneed(path)
+            if flushed:
+                flushed_paths.add(path)
+        else:
+            released = _advise_clean_file_cache_dontneed(path)
+        if released:
             broad_released_paths.add(path)
             released_paths.add(path)
 
@@ -265,19 +379,21 @@ def release_pre_comprehensive_completed_stage_file_cache(
 
     manifest: list[dict[str, object]] = []
     for size, category, relative, path in selected[:manifest_max_files]:
-        manifest.append(
-            {
-                "path": relative[:320],
-                "category": category[:96],
-                "bytes": size,
-                "released": path in released_paths,
-            }
-        )
+        row: dict[str, object] = {
+            "path": relative[:320],
+            "category": category[:96],
+            "bytes": size,
+            "released": path in released_paths,
+        }
+        if failed_attempt_supersession:
+            row["flushed"] = path in flushed_paths
+        manifest.append(row)
 
     return {
         "schema_version": _SCHEMA_VERSION,
         "status": "completed",
         "data_root_configured": data_root is not None,
+        "failed_attempt_supersession_detected": failed_attempt_supersession,
         "scan_entries": scanned_entries,
         "scan_max_entries": scan_max_entries,
         "scan_truncated": scan_truncated,
@@ -295,6 +411,14 @@ def release_pre_comprehensive_completed_stage_file_cache(
             size
             for size, _category, _relative, path in candidates
             if path in released_candidate_paths
+        ),
+        "flush_max_files": flush_max_files,
+        "flush_max_bytes": flush_max_bytes,
+        "flush_attempted_file_count": flush_attempted_file_count,
+        "flush_attempted_bytes": flush_attempted_bytes,
+        "flushed_file_count": len(flushed_paths),
+        "flushed_bytes": sum(
+            size for size, _category, _relative, path in candidates if path in flushed_paths
         ),
         "manifest_max_files": manifest_max_files,
         "manifest_truncated": len(selected) > manifest_max_files,
