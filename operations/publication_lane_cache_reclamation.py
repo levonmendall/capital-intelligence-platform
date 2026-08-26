@@ -7,10 +7,12 @@ at a high raw-cgroup watermark can add pressure before useful cache advice begin
 
 This module therefore invokes the same bounded data-root clean-cache reclaimer directly in
 the existing serialized publication-lane coordinator after a child has exited and its
-durable transaction state has been validated. The returned ownership report is accepted
-only when the same non-authoritative contract used by the reference boundary is intact.
-Reclamation remains advisory and fail-soft and cannot certify evidence or alter any memory,
-provider, market, CIO, construction, execution, or paper-only control.
+durable transaction state has been validated. Publication transactions are intrinsically
+serial at this call site, so the helper must not depend on the later provider-facing DAG
+worker override being present in the incoming environment. The returned ownership report
+is accepted only when the same non-authoritative contract used by the reference boundary is
+intact. Reclamation remains advisory and fail-soft and cannot certify evidence or alter any
+memory, provider, market, CIO, construction, execution, or paper-only control.
 """
 
 from __future__ import annotations
@@ -21,7 +23,6 @@ from collections.abc import Mapping
 
 _EVENT = "comprehensive_discovery_publication_lane_cache_reclamation"
 _REPORT_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
-_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
 
 _AUTHORITY_CONTRACT = {
     "advisory_only": True,
@@ -38,10 +39,11 @@ _AUTHORITY_CONTRACT = {
 
 
 def _enabled(values: Mapping[str, str]) -> bool:
-    return (
-        str(values.get("RENDER") or "").strip().lower() == "true"
-        and str(values.get(_WORKERS_ENV) or "").strip() == "1"
-    )
+    # This wrapper is called only by the transactional publication coordinator, whose lane
+    # loop is strictly serial independent of the later provider-facing DAG worker count.
+    # Requiring that later scheduler override here can silently skip the exact boundary we
+    # need to protect. Keep only the production-platform guard.
+    return str(values.get("RENDER") or "").strip().lower() == "true"
 
 
 def _validated_report(report: object) -> dict[str, object] | None:
