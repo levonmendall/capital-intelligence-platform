@@ -227,12 +227,19 @@ def _failure_type(error: BaseException) -> str:
     return _safe(match.group(1)) if match else "provider_failure"
 
 
-def _providers(values: Mapping[str, str]):
+def _install_futures_runtime() -> None:
+    """Install granular futures supervision before the first futures dispatch."""
+
     from operations.cme_futures_reference_runtime import install_cme_futures_reference_lineage
+
+    install_cme_futures_reference_lineage()
+
+
+def _providers(values: Mapping[str, str]):
     from providers.cme_futures_reference_executable import CmeExecutableFuturesReferenceProvider
     from providers.massive_futures_reference_rate_resilient import MassiveFuturesReferenceProvider
 
-    install_cme_futures_reference_lineage()
+    _install_futures_runtime()
     return CmeExecutableFuturesReferenceProvider(
         fallback_provider=MassiveFuturesReferenceProvider(),
         values=values,
@@ -476,6 +483,11 @@ def prepare_supervised_reference_prequalification(
     """Qualify required reference components independently, then bind one manifest."""
 
     from operations import _comprehensive_market_discovery_v4 as discovery
+
+    # The granular futures adapter must be installed before the first futures-wide
+    # _run_component call is entered. Installing it from _providers() is too late for
+    # that first dispatch because the obsolete 120-second wrapper is already running.
+    _install_futures_runtime()
 
     timestamp = _aware(now or datetime.now(timezone.utc), field_name="now")
     config = discovery._base.load_comprehensive_market_discovery_config()
