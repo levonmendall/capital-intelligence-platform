@@ -1,0 +1,54 @@
+name: Temporary validate fresh-epoch repair
+
+on:
+  push:
+    branches: [codex/fresh-epoch-after-structural-prep]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      CAPITAL_INTELLIGENCE_DAILY_STAGE_BINDINGS: ${{ github.workspace }}/deploy/canonical-daily-stage-bindings.validation.json
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
+          pip install -r requirements-browser.txt
+          python -m pip check
+          python scripts/verify_requirements_lock.py
+      - name: Compile repair surface
+        run: |
+          python -m py_compile \
+            operations/comprehensive_discovery_structural_preparation.py \
+            operations/release_prequalification_parent_watchdog.py \
+            operations/stage_isolated_evidence_pipeline.py \
+            operations/transactional_comprehensive_discovery_lane.py \
+            run_stage_isolated_evidence_stage.py
+      - name: Run focused regression suite
+        run: >-
+          pytest -q
+          tests/test_comprehensive_discovery_structural_preparation.py
+          tests/test_stage_isolated_evidence_pipeline.py
+          tests/test_stage_isolated_prequalification_telemetry.py
+          tests/test_release_prequalification_stage_liveness.py
+          tests/test_pre_comprehensive_discovery_cache_reclamation.py
+          tests/test_transactional_comprehensive_discovery_lanes.py
+          tests/test_component_qualified_evidence_maintenance.py
+          tests/test_release_evidence_retry.py
+          tests/test_stage_isolated_attempt_lifecycle.py
+          tests/test_failed_attempt_cache_reclamation.py
+          tests/test_public_live_retry.py
+      - name: Run full test suite
+        run: pytest -q --maxfail=1
