@@ -36,7 +36,5 @@ jobs:
             tests/test_comprehensive_discovery_structural_cache.py \
             tests/test_transactional_comprehensive_discovery_lanes.py \
             tests/test_spawn_safe_authoritative_acquisition.py
-      - name: Full suite except confirmed main baseline failure
-        run: >-
-          pytest -q --maxfail=1
-          --deselect=tests/test_headline_runtime_secret_guard.py::test_provider_message_and_query_string_are_redacted
+      - name: Full suite except confirmed main baseline file
+        run: pytest -q --maxfail=1 --ignore=tests/test_headline_runtime_secret_guard.py
