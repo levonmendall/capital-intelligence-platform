@@ -14,8 +14,8 @@ and callers rebuild the structural catalog fail-closed.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,6 +25,13 @@ from operations import comprehensive_discovery_input_spool as _spool
 
 _SCHEMA = "comprehensive-discovery-structural-cache.v1"
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
+
+
+@dataclass(frozen=True, slots=True)
+class StructuralCatalogCacheEntry:
+    records: tuple[object, ...]
+    raw_record_count: int
+    source_as_of: datetime
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -86,8 +93,8 @@ def load_structural_catalog(
     asset_class: CandidateAssetClass,
     policy_version: str,
     requested_as_of: datetime,
-) -> tuple[object, ...] | None:
-    """Load a compatible structural catalog without changing its evidence timestamp."""
+) -> StructuralCatalogCacheEntry | None:
+    """Load compatible structure without changing or certifying its observation time."""
 
     if not _enabled(values, asset_class):
         return None
@@ -108,15 +115,18 @@ def load_structural_catalog(
         return None
     if body.get("provider_preselection_included") is not False:
         return None
+    if body.get("terminal_screening_included") is not False:
+        return None
     if body.get("market_evidence_included") is not False:
         return None
     try:
         source_as_of = _spool._parse_timestamp(
             body.get("source_as_of"), field_name="structural_cache_source_as_of"
         )
+        raw_record_count = int(body.get("raw_record_count", -1))
     except (TypeError, ValueError, _spool.ComprehensiveDiscoverySpoolError):
         return None
-    if source_as_of > requested:
+    if source_as_of > requested or raw_record_count < 0:
         return None
     try:
         descriptor = _spool._descriptor(body.get("blob"))
@@ -130,7 +140,11 @@ def load_structural_catalog(
         return None
     if int(body.get("record_count", -1)) != len(loaded):
         return None
-    return tuple(loaded)
+    return StructuralCatalogCacheEntry(
+        records=tuple(loaded),
+        raw_record_count=raw_record_count,
+        source_as_of=source_as_of,
+    )
 
 
 def publish_structural_catalog(
@@ -139,12 +153,15 @@ def publish_structural_catalog(
     asset_class: CandidateAssetClass,
     policy_version: str,
     source_as_of: datetime,
+    raw_record_count: int,
     records: Sequence[object],
 ) -> bool:
-    """Persist only structural merged-catalog records for a later fresh-epoch retry."""
+    """Persist merged catalog structure only; never exact-epoch market qualification."""
 
     if not _enabled(values, asset_class):
         return False
+    if raw_record_count < 0:
+        raise ValueError("raw_record_count must be nonnegative")
     timestamp = _aware(source_as_of, field_name="structural_cache_source_as_of")
     metadata_path, blob_path = _paths(
         values,
@@ -153,10 +170,9 @@ def publish_structural_catalog(
     )
     identity = _identity(values, asset_class=asset_class, policy_version=policy_version)
 
-    # Never overwrite a valid compatible structural entry. The exact reference-manifest
-    # identity makes the catalog immutable for this release/policy key, and preserving the
-    # earliest source cutoff prevents a retry from pretending the structure was observed
-    # later than it really was.
+    # Do not overwrite a valid compatible entry. The exact manifest/release/policy key
+    # makes the structural input immutable, and preserving its earliest source cutoff
+    # prevents a retry from pretending that structural information was observed later.
     existing = load_structural_catalog(
         values,
         asset_class=asset_class,
@@ -175,11 +191,13 @@ def publish_structural_catalog(
         **identity,
         "source_as_of": timestamp.isoformat(),
         "published_at": datetime.now(timezone.utc).isoformat(),
+        "raw_record_count": int(raw_record_count),
         "record_count": len(records),
         "blob": _spool._descriptor_dict(descriptor),
         "structural_only": True,
         "evidence_certified": False,
         "provider_preselection_included": False,
+        "terminal_screening_included": False,
         "market_evidence_included": False,
         **_spool._authority_fields(),
     }
@@ -188,6 +206,7 @@ def publish_structural_catalog(
 
 
 __all__ = [
+    "StructuralCatalogCacheEntry",
     "load_structural_catalog",
     "publish_structural_catalog",
 ]
