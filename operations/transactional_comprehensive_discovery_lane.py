@@ -108,11 +108,34 @@ def _load_catalog_records(
 
     config = core._base.load_comprehensive_market_discovery_config()
     active = core._base.scheduled_discovery_lanes(timestamp)
+    if asset_class not in active:
+        return ()
+
     records: tuple[object, ...] = ()
     reference_lanes = frozenset(
         (*generalized._EODHD_REFERENCE_LANES, CandidateAssetClass.FUTURE)
     )
-    if asset_class in active and asset_class in reference_lanes:
+    if asset_class in reference_lanes:
+        # The stage-isolated evidence owner may bind a verified structural manifest whose
+        # only contents are release-qualified reference catalogs.  When that binding is
+        # present it is mandatory: a missing/corrupt/incompatible shard must fail closed
+        # rather than silently rebuilding slow reference structure inside the fresh
+        # decision-evidence epoch.  Other discovery callers retain the established direct
+        # component reconstruction path.
+        from operations import comprehensive_discovery_structural_preparation as structural
+
+        structural_path = str(
+            values.get(structural._MANIFEST_ENV)
+            or os.environ.get(structural._MANIFEST_ENV)
+            or ""
+        ).strip()
+        if structural_path:
+            return structural.load_bound_reference_lane_records(
+                values,
+                asset_class=asset_class,
+                exact_as_of=timestamp,
+            )
+
         component = supervised._load_asset_component(
             values,
             discovery=core,
@@ -129,7 +152,9 @@ def _load_catalog_records(
             component,
             record_type=core._base._legacy.DiscoveryCatalogRecord,
         )
-    elif asset_class is CandidateAssetClass.OPTION and asset_class in active:
+    elif asset_class is CandidateAssetClass.OPTION:
+        # Options remain exact-epoch because contract selection depends on current pricing
+        # and history.  They are deliberately never included in structural preparation.
         records = tuple(
             core._base._legacy._option_catalog(
                 as_of=timestamp,

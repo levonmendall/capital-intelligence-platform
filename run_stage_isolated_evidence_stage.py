@@ -24,6 +24,7 @@ from operations.stage_isolated_evidence_pipeline import (
     begin_evidence_stage,
     complete_evidence_stage,
     fail_evidence_stage,
+    heartbeat_evidence_stage,
     load_stage_isolated_evidence_state,
 )
 
@@ -116,6 +117,46 @@ def _stage_reference(values: dict[str, str], state) -> dict[str, object]:
         "evidence_as_of": effective_cutoff,
         "reference_manifest_id": manifest_id,
         "reference_manifest_path": str(Path(manifest_path).expanduser()),
+    }
+
+
+def _stage_comprehensive_structure(values: dict[str, str], state) -> dict[str, object]:
+    """Freeze slow reference catalogs, then begin a new decision-evidence epoch."""
+
+    from operations import comprehensive_discovery_structural_preparation as structural
+
+    _apply_reference_binding(values, state)
+    reference_id = str(state.reference_manifest_id or "").strip()
+    if not reference_id:
+        raise RuntimeError("structural preparation has no durable reference binding")
+
+    # Structural preparation is intentionally outside the 900-second evidence clock.  It
+    # may use only already-qualified reference catalogs; current options/provider factors,
+    # screening and market evidence remain forbidden until the new exact epoch below.
+    manifest = structural.prepare_structural_reference_catalogs(
+        values,
+        reference_manifest_id=reference_id,
+        preparation_as_of=datetime.now(timezone.utc),
+        progress_callback=lambda _lane, _completed, _total: heartbeat_evidence_stage(
+            values,
+            pipeline_id=state.pipeline_id,
+            stage="comprehensive_structure",
+        ),
+    )
+    fresh_epoch = datetime.now(timezone.utc)
+    structural.load_structural_manifest(
+        manifest.path,
+        values=values,
+        reference_manifest_id=reference_id,
+        exact_as_of=fresh_epoch,
+    )
+    return {
+        "evidence_as_of": fresh_epoch,
+        "structural_manifest_id": manifest.manifest_id,
+        "structural_manifest_path": str(manifest.path),
+        "structural_reference_lane_count": len(manifest.reference_lanes),
+        "structural_record_count": manifest.record_count,
+        "fresh_epoch_started_after_structural_preparation": True,
     }
 
 
@@ -212,6 +253,15 @@ def _stage_comprehensive_discovery(values: dict[str, str], state) -> dict[str, o
     from operations.evidence_state_scope import load_evidence_state_scope
 
     _apply_reference_binding(values, state)
+    if not state.reference_manifest_id:
+        raise RuntimeError("comprehensive discovery has no durable reference binding")
+    from operations import comprehensive_discovery_structural_preparation as structural
+
+    structural.bind_structural_manifest_for_fresh_epoch(
+        values,
+        reference_manifest_id=state.reference_manifest_id,
+        exact_as_of=state.evidence_as_of,
+    )
     os.environ[_PREPARING_ENV] = "true"
     values[_PREPARING_ENV] = "true"
     scope = load_evidence_state_scope(as_of=state.evidence_as_of, values=values)
@@ -408,6 +458,7 @@ def _stage_finalize(values: dict[str, str], state) -> dict[str, object]:
 
 _STAGE_RUNNERS = {
     "reference": _stage_reference,
+    "comprehensive_structure": _stage_comprehensive_structure,
     "public_live": _stage_public_live,
     "us_equity_discovery": _stage_us_equity_discovery,
     "comprehensive_discovery": _stage_comprehensive_discovery,

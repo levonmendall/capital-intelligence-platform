@@ -15,7 +15,7 @@ def _state(*, next_stage: str):
         next_stage=next_stage,
         pipeline_id="pipeline-test",
         evidence_as_of=datetime(2026, 8, 25, 17, 23, tzinfo=timezone.utc),
-        completed_stages=("reference", "public_live", "us_equity_discovery"),
+        completed_stages=("reference", "comprehensive_structure", "public_live", "us_equity_discovery"),
         current_stage="us_equity_discovery",
         error_type=None,
         error_detail=None,

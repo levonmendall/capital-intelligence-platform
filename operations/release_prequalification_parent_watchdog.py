@@ -40,7 +40,10 @@ from operations.release_evidence_prequalification import (
     load_release_evidence_prequalification,
     write_release_evidence_prequalification,
 )
-from operations.stage_isolated_evidence_pipeline import load_stage_isolated_evidence_state
+from operations.stage_isolated_evidence_pipeline import (
+    _STAGES as _STAGE_ISOLATED_STAGES,
+    load_stage_isolated_evidence_state,
+)
 from operations.supervised_reference_prequalification import load_reference_prequalification_progress
 
 _FAILURE_EVENT = "continuous_evidence_plane_failure_context"
@@ -68,6 +71,7 @@ _TERMINATION_GRACE_SECONDS = 10.0
 
 _STAGE_FINE_PHASES: Mapping[str, frozenset[str]] = {
     "reference": frozenset({"reference_acquisition", "reference_binding"}),
+    "comprehensive_structure": frozenset({"discovery_preparation"}),
     "public_live": frozenset({"public_live", "discovery_bootstrap"}),
     "us_equity_discovery": frozenset({"discovery_preparation"}),
     "comprehensive_discovery": frozenset(
@@ -485,7 +489,7 @@ def _stage_pipeline_progress(
         state.updated_at,
         state.state,
         _stage_stall_limit(values, stage),
-        {"stage_completed_count": completed_count, "stage_required_count": 6},
+        {"stage_completed_count": completed_count, "stage_required_count": len(_STAGE_ISOLATED_STAGES)},
         progress_token=f"{state.pipeline_id}:{completed_count}:{state.current_stage or 'between'}:{state.state}",
     )
 

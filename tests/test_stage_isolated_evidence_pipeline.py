@@ -46,8 +46,24 @@ def test_stage_pipeline_persists_canonical_prefix_and_effective_cutoff(tmp_path)
 
     assert state.evidence_as_of == effective
     assert state.completed_stages == ("reference",)
-    assert state.next_stage == "public_live"
+    assert state.next_stage == "comprehensive_structure"
     assert state.reference_manifest_id == "manifest-1"
+
+    state = pipeline.begin_evidence_stage(
+        values,
+        pipeline_id=state.pipeline_id,
+        stage="comprehensive_structure",
+    )
+    fresh_epoch = effective + timedelta(minutes=12)
+    state = pipeline.complete_evidence_stage(
+        values,
+        pipeline_id=state.pipeline_id,
+        stage="comprehensive_structure",
+        evidence_as_of=fresh_epoch,
+    )
+    assert state.evidence_as_of == fresh_epoch
+    assert state.completed_stages == ("reference", "comprehensive_structure")
+    assert state.next_stage == "public_live"
 
     with pytest.raises(pipeline.StageIsolatedEvidencePipelineError):
         pipeline.begin_evidence_stage(
@@ -210,7 +226,7 @@ def test_pre_reference_cache_reclamation_runs_only_at_reference_boundary(
     )
 
     assert runtime.run_pipeline(values) == 9
-    assert events == [("spawn", "public_live")]
+    assert events == [("spawn", "comprehensive_structure")]
 
 
 def test_pre_reference_cache_reclamation_timeout_is_advisory_and_cannot_certify(
@@ -278,3 +294,36 @@ def test_pre_reference_cache_reclamation_preserves_memory_controls(
     assert calls[0]["start_new_session"] is False
     assert "operations.evidence_file_cache_release" in runtime._REFERENCE_CACHE_RECLAMATION_CODE
     assert "release_completed_operating_evidence_file_cache" in runtime._REFERENCE_CACHE_RECLAMATION_CODE
+
+
+def test_stage_heartbeat_updates_liveness_without_advancing_epoch_or_prefix(tmp_path) -> None:
+    values = _values(tmp_path)
+    state = pipeline.ensure_stage_isolated_evidence_pipeline(values)
+    state = pipeline.begin_evidence_stage(
+        values, pipeline_id=state.pipeline_id, stage="reference"
+    )
+    state = pipeline.complete_evidence_stage(
+        values,
+        pipeline_id=state.pipeline_id,
+        stage="reference",
+        reference_manifest_id="manifest-heartbeat",
+        reference_manifest_path=str(tmp_path / "reference.json"),
+    )
+    state = pipeline.begin_evidence_stage(
+        values, pipeline_id=state.pipeline_id, stage="comprehensive_structure"
+    )
+    before = state.updated_at
+    epoch = state.evidence_as_of
+
+    heartbeat = pipeline.heartbeat_evidence_stage(
+        values,
+        pipeline_id=state.pipeline_id,
+        stage="comprehensive_structure",
+    )
+
+    assert heartbeat.updated_at >= before
+    assert heartbeat.evidence_as_of == epoch
+    assert heartbeat.completed_stages == ("reference",)
+    assert heartbeat.current_stage == "comprehensive_structure"
+    assert heartbeat.state == "running"
+

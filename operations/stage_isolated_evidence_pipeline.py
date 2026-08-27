@@ -27,9 +27,10 @@ from pathlib import Path
 from typing import Mapping
 
 
-_SCHEMA_VERSION = "stage-isolated-evidence-pipeline.v1"
+_SCHEMA_VERSION = "stage-isolated-evidence-pipeline.v2-fresh-epoch"
 _STAGES = (
     "reference",
+    "comprehensive_structure",
     "public_live",
     "us_equity_discovery",
     "comprehensive_discovery",
@@ -473,6 +474,32 @@ def begin_evidence_stage(
     return _state_from_payload(state.path, payload)
 
 
+def heartbeat_evidence_stage(
+    values: Mapping[str, str],
+    *,
+    pipeline_id: str,
+    stage: str,
+) -> StageIsolatedEvidenceState:
+    """Refresh operational liveness without advancing evidence or stage authority."""
+
+    state = _require_pipeline(values, pipeline_id=pipeline_id)
+    normalized = str(stage).strip()
+    if normalized not in _STAGES:
+        raise ValueError("unsupported stage-isolated evidence stage")
+    if state.current_stage != normalized or state.next_stage != normalized:
+        raise StageIsolatedEvidencePipelineError(
+            "stage-isolated evidence heartbeat does not own the current boundary"
+        )
+    payload = _payload_for(
+        state,
+        status="running",
+        current_stage=normalized,
+        stage_started_at=state.stage_started_at,
+    )
+    _atomic_write(state.path, payload)
+    return _state_from_payload(state.path, payload)
+
+
 def complete_evidence_stage(
     values: Mapping[str, str],
     *,
@@ -554,5 +581,6 @@ __all__ = [
     "complete_evidence_stage",
     "ensure_stage_isolated_evidence_pipeline",
     "fail_evidence_stage",
+    "heartbeat_evidence_stage",
     "load_stage_isolated_evidence_state",
 ]

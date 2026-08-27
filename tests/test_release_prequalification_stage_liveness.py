@@ -40,7 +40,7 @@ def test_stage_journal_owns_phase_over_newer_unrelated_public_progress(monkeypat
         lambda _values: _stage_state(
             updated_at=stage_at,
             current_stage="comprehensive_discovery",
-            completed_stages=("reference", "public_live", "us_equity_discovery"),
+            completed_stages=("reference", "comprehensive_structure", "public_live", "us_equity_discovery"),
             next_stage="comprehensive_discovery",
         ),
     )
@@ -76,7 +76,7 @@ def test_current_stage_accepts_newer_nested_dag_progress(monkeypatch) -> None:
         lambda _values: _stage_state(
             updated_at=stage_at,
             current_stage="comprehensive_discovery",
-            completed_stages=("reference", "public_live", "us_equity_discovery"),
+            completed_stages=("reference", "comprehensive_structure", "public_live", "us_equity_discovery"),
             next_stage="comprehensive_discovery",
         ),
     )
@@ -113,6 +113,7 @@ def test_same_stage_rewrite_does_not_create_new_logical_liveness(monkeypatch) ->
                 current_stage="paper_evidence",
                 completed_stages=(
                     "reference",
+                    "comprehensive_structure",
                     "public_live",
                     "us_equity_discovery",
                     "comprehensive_discovery",
@@ -124,6 +125,7 @@ def test_same_stage_rewrite_does_not_create_new_logical_liveness(monkeypatch) ->
                 current_stage="paper_evidence",
                 completed_stages=(
                     "reference",
+                    "comprehensive_structure",
                     "public_live",
                     "us_equity_discovery",
                     "comprehensive_discovery",
@@ -153,7 +155,7 @@ def test_stage_transition_changes_logical_liveness_token(monkeypatch) -> None:
             _stage_state(
                 updated_at=boundary + timedelta(seconds=2),
                 current_stage="comprehensive_discovery",
-                completed_stages=("reference", "public_live", "us_equity_discovery"),
+                completed_stages=("reference", "comprehensive_structure", "public_live", "us_equity_discovery"),
                 next_stage="comprehensive_discovery",
             ),
             _stage_state(
@@ -161,6 +163,7 @@ def test_stage_transition_changes_logical_liveness_token(monkeypatch) -> None:
                 current_stage="paper_evidence",
                 completed_stages=(
                     "reference",
+                    "comprehensive_structure",
                     "public_live",
                     "us_equity_discovery",
                     "comprehensive_discovery",

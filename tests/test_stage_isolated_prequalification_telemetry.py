@@ -22,7 +22,7 @@ def _state(tmp_path: Path, *, stage: str = "comprehensive_discovery"):
         requested_at=_NOW,
         evidence_as_of=_NOW,
         updated_at=_NOW,
-        completed_stages=("reference", "public_live", "us_equity_discovery"),
+        completed_stages=("reference", "comprehensive_structure", "public_live", "us_equity_discovery"),
         current_stage=stage,
         stage_started_at=_NOW,
         reference_manifest_id="reference-1",
@@ -52,8 +52,8 @@ def test_projection_uses_exact_stage_instead_of_legacy_public_live(monkeypatch, 
     )
 
     assert result["prequalification_progress"]["active_phase"] == "comprehensive_discovery"
-    assert result["stage_isolated_evidence_progress"]["completed_stage_count"] == 3
-    assert result["stage_isolated_evidence_progress"]["required_stage_count"] == 6
+    assert result["stage_isolated_evidence_progress"]["completed_stage_count"] == 4
+    assert result["stage_isolated_evidence_progress"]["required_stage_count"] == 7
 
 
 def test_projection_retains_previous_retry_failure(monkeypatch, tmp_path):
@@ -69,8 +69,8 @@ def test_projection_retains_previous_retry_failure(monkeypatch, tmp_path):
             "error_detail": "bounded child exceeded governed resource boundary",
             "evidence_as_of": _NOW.isoformat(),
             "updated_at": _NOW.isoformat(),
-            "completed_stages": ["reference", "public_live", "us_equity_discovery"],
-            "completed_stage_count": 3,
+            "completed_stages": ["reference", "comprehensive_structure", "public_live", "us_equity_discovery"],
+            "completed_stage_count": 4,
             "credential_safe": True,
             "decision_evidence_authority": False,
             "paper_only": True,
@@ -189,9 +189,9 @@ def test_stage_enrichment_overrides_false_public_live_phase():
             "next_stage": "comprehensive_discovery",
             "active_stage": "comprehensive_discovery",
             "stage_started_at": _NOW.isoformat(),
-            "completed_stages": ["reference", "public_live", "us_equity_discovery"],
-            "completed_stage_count": 3,
-            "required_stage_count": 6,
+            "completed_stages": ["reference", "comprehensive_structure", "public_live", "us_equity_discovery"],
+            "completed_stage_count": 4,
+            "required_stage_count": 7,
             "error_type": None,
         },
         "prequalification_last_retry_failure": {
@@ -200,8 +200,8 @@ def test_stage_enrichment_overrides_false_public_live_phase():
             "error_type": "TimeoutError",
             "evidence_as_of": _NOW.isoformat(),
             "updated_at": _NOW.isoformat(),
-            "completed_stages": ["reference", "public_live"],
-            "completed_stage_count": 2,
+            "completed_stages": ["reference", "comprehensive_structure", "public_live"],
+            "completed_stage_count": 3,
         },
         "credential_safe": True,
         "paper_only": True,
