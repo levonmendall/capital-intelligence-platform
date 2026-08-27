@@ -35,7 +35,6 @@ jobs:
           pytest -q \
             tests/test_comprehensive_discovery_structural_cache.py \
             tests/test_transactional_comprehensive_discovery_lanes.py \
-            tests/test_spawn_safe_authoritative_acquisition.py \
-            tests/test_dag_native_continuous_evidence_plane.py
+            tests/test_spawn_safe_authoritative_acquisition.py
       - name: Full suite
         run: pytest -q --maxfail=1
