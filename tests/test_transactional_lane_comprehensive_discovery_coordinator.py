@@ -5,7 +5,6 @@ import os
 import signal
 import subprocess
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -30,7 +29,11 @@ def test_remaining_epoch_uses_existing_900_second_freshness_contract() -> None:
 
 
 def test_expired_epoch_refuses_to_spawn_lane(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(coordinator, "_record_transaction_start", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        coordinator,
+        "_record_transaction_start",
+        lambda *args, **kwargs: None,
+    )
     monkeypatch.setattr(coordinator, "_remaining_epoch_seconds", lambda **kwargs: 0.0)
 
     def fail_spawn(*args, **kwargs):
@@ -38,7 +41,10 @@ def test_expired_epoch_refuses_to_spawn_lane(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(coordinator.subprocess, "Popen", fail_spawn)
 
-    with pytest.raises(legacy.ComprehensiveDiscoverySpoolError, match="refused expired evidence epoch"):
+    with pytest.raises(
+        legacy.ComprehensiveDiscoverySpoolError,
+        match="refused expired evidence epoch",
+    ):
         coordinator._run_lane_transaction(
             tmp_path / "request.json",
             {"CAPITAL_INTELLIGENCE_RELEASE": "release-1"},
@@ -48,7 +54,10 @@ def test_expired_epoch_refuses_to_spawn_lane(monkeypatch, tmp_path) -> None:
         )
 
 
-def test_timeout_terminates_child_tree_and_never_loads_timed_out_state(monkeypatch, tmp_path) -> None:
+def test_timeout_terminates_child_tree_and_never_loads_timed_out_state(
+    monkeypatch,
+    tmp_path,
+) -> None:
     class TimedOutProcess:
         pid = 12345
 
@@ -66,7 +75,11 @@ def test_timeout_terminates_child_tree_and_never_loads_timed_out_state(monkeypat
         popen_kwargs.update(kwargs)
         return process
 
-    monkeypatch.setattr(coordinator, "_record_transaction_start", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        coordinator,
+        "_record_transaction_start",
+        lambda *args, **kwargs: None,
+    )
     monkeypatch.setattr(coordinator, "_remaining_epoch_seconds", lambda **kwargs: 0.01)
     monkeypatch.setattr(coordinator.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(
@@ -83,7 +96,10 @@ def test_timeout_terminates_child_tree_and_never_loads_timed_out_state(monkeypat
         ),
     )
 
-    with pytest.raises(legacy.ComprehensiveDiscoverySpoolError, match="exceeded the existing evidence freshness epoch"):
+    with pytest.raises(
+        legacy.ComprehensiveDiscoverySpoolError,
+        match="exceeded the existing evidence freshness epoch",
+    ):
         coordinator._run_lane_transaction(
             tmp_path / "request.json",
             {"CAPITAL_INTELLIGENCE_RELEASE": "release-1"},
@@ -122,7 +138,10 @@ def test_process_tree_termination_escalates_to_sigkill_and_reaps(monkeypatch) ->
         lambda candidate, sig: signals.append(sig),
     )
 
-    terminated, killed = coordinator._terminate_process_tree(process, grace_seconds=0.0)
+    terminated, killed = coordinator._terminate_process_tree(
+        process,
+        grace_seconds=0.0,
+    )
 
     assert terminated is True
     assert killed is True
@@ -141,7 +160,11 @@ def test_posix_signal_targets_process_group(monkeypatch) -> None:
             return None
 
     calls = []
-    monkeypatch.setattr(coordinator.os, "killpg", lambda pid, sig: calls.append((pid, sig)))
+    monkeypatch.setattr(
+        coordinator.os,
+        "killpg",
+        lambda pid, sig: calls.append((pid, sig)),
+    )
 
     coordinator._signal_process_tree(Process(), signal.SIGTERM)
 
@@ -185,17 +208,40 @@ def test_fresh_retry_can_start_after_timed_out_attempt(monkeypatch, tmp_path) ->
         "peak_rss_bytes": 0,
     }
 
-    monkeypatch.setattr(coordinator, "_record_transaction_start", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        coordinator,
+        "_record_transaction_start",
+        lambda *args, **kwargs: None,
+    )
     monkeypatch.setattr(coordinator, "_remaining_epoch_seconds", lambda **kwargs: 1.0)
     monkeypatch.setattr(coordinator.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(coordinator, "_terminate_process_tree", lambda *args, **kwargs: (True, True))
+    monkeypatch.setattr(
+        coordinator,
+        "_terminate_process_tree",
+        lambda *args, **kwargs: (True, True),
+    )
     monkeypatch.setattr(coordinator, "_process_tree_alive", lambda process: False)
-    monkeypatch.setattr(coordinator._bounded, "_load_stage_state", lambda *args, **kwargs: state)
-    monkeypatch.setattr(coordinator, "run_post_lane_cache_reclamation", lambda *args, **kwargs: {})
-    monkeypatch.setattr(coordinator, "_publish_transaction_completion", lambda **kwargs: None)
+    monkeypatch.setattr(
+        coordinator._bounded,
+        "_load_stage_state",
+        lambda *args, **kwargs: state,
+    )
+    monkeypatch.setattr(
+        coordinator,
+        "run_post_lane_cache_reclamation",
+        lambda *args, **kwargs: {},
+    )
+    monkeypatch.setattr(
+        coordinator,
+        "_publish_transaction_completion",
+        lambda **kwargs: None,
+    )
 
     decision_epoch = datetime(2026, 8, 27, 5, 0, tzinfo=timezone.utc)
-    with pytest.raises(legacy.ComprehensiveDiscoverySpoolError, match="exceeded the existing evidence freshness epoch"):
+    with pytest.raises(
+        legacy.ComprehensiveDiscoverySpoolError,
+        match="exceeded the existing evidence freshness epoch",
+    ):
         coordinator._run_lane_transaction(
             tmp_path / "request.json",
             {"CAPITAL_INTELLIGENCE_RELEASE": "release-1"},
