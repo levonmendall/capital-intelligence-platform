@@ -14,13 +14,18 @@ already processed.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
+import time
 from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from operations import bounded_comprehensive_discovery_spool as _bounded
 from operations import comprehensive_discovery_input_spool as _legacy
+from operations import comprehensive_discovery_structural_cache as _structural
+from operations import continuous_evidence_plane as _evidence_plane
 from operations import lane_local_comprehensive_discovery_spool as _lane_local
 from operations import transactional_comprehensive_discovery_lane as _transaction
 from operations.post_lane_cache_reclamation import (
@@ -31,6 +36,7 @@ from operations.publication_lane_cache_reclamation import (
 )
 
 _MODULE = "operations.transactional_comprehensive_discovery_lane"
+_PROCESS_TERMINATE_GRACE_SECONDS = 2.0
 
 
 def _record_transaction_start(path: Path, values: Mapping[str, str], *, asset_class: str, index: int) -> None:
@@ -127,16 +133,99 @@ def run_post_lane_cache_reclamation(
     }
 
 
+def _remaining_epoch_seconds(
+    *,
+    decision_epoch: datetime,
+    values: Mapping[str, str],
+    now: datetime | None = None,
+) -> float:
+    """Return only the unused portion of the existing evidence-plane freshness epoch."""
+
+    timestamp = _legacy._aware(decision_epoch, field_name="decision_epoch")
+    current = _legacy._aware(
+        now or datetime.now(timezone.utc),
+        field_name="comprehensive_discovery_now",
+    )
+    expiry = timestamp + timedelta(seconds=_evidence_plane._max_age_seconds(values))
+    return (expiry - current).total_seconds()
+
+
+def _process_tree_alive(process: subprocess.Popen[bytes]) -> bool:
+    if os.name != "posix":
+        return process.poll() is None
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return process.poll() is None
+    except PermissionError:
+        return True
+    return True
+
+
+def _signal_process_tree(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, sig)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
+    if process.poll() is not None:
+        return
+    if sig == signal.SIGKILL:
+        process.kill()
+    else:
+        process.terminate()
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes],
+    *,
+    grace_seconds: float = _PROCESS_TERMINATE_GRACE_SECONDS,
+) -> tuple[bool, bool]:
+    """Terminate every process in the disposable lane session and reap its leader."""
+
+    if not _process_tree_alive(process):
+        return False, False
+    terminated = True
+    killed = False
+    _signal_process_tree(process, signal.SIGTERM)
+    deadline = time.monotonic() + max(0.0, float(grace_seconds))
+    while _process_tree_alive(process) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if _process_tree_alive(process):
+        killed = True
+        _signal_process_tree(process, signal.SIGKILL)
+    try:
+        process.wait(timeout=max(0.1, float(grace_seconds) + 0.1))
+    except subprocess.TimeoutExpired:
+        killed = True
+        _signal_process_tree(process, signal.SIGKILL)
+        process.wait(timeout=1.0)
+    return terminated, killed
+
+
 def _run_lane_transaction(
     path: Path,
     values: Mapping[str, str],
     *,
     asset_class: str,
     index: int,
+    decision_epoch: datetime,
 ) -> Mapping[str, object]:
-    """Run one complete lane child and return only its validated compact state."""
+    """Run one complete lane child inside the remaining evidence freshness budget."""
 
     _record_transaction_start(path, values, asset_class=asset_class, index=index)
+    remaining_seconds = _remaining_epoch_seconds(
+        decision_epoch=decision_epoch,
+        values=values,
+    )
+    if remaining_seconds <= 0.0:
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "transactional comprehensive lane refused expired evidence epoch; "
+            f"asset_class={asset_class}"
+        )
     command = (
         sys.executable,
         "-m",
@@ -152,9 +241,25 @@ def _run_lane_transaction(
         command,
         cwd=str(Path(__file__).resolve().parents[1]),
         env=dict(values),
-        start_new_session=False,
+        start_new_session=(os.name == "posix"),
     )
-    return_code = int(process.wait())
+    try:
+        try:
+            return_code = int(process.wait(timeout=max(0.001, remaining_seconds)))
+        except subprocess.TimeoutExpired as error:
+            _terminate_process_tree(process)
+            raise _legacy.ComprehensiveDiscoverySpoolError(
+                "transactional comprehensive lane exceeded the existing evidence freshness epoch; "
+                f"asset_class={asset_class}; freshness_seconds="
+                f"{_evidence_plane._max_age_seconds(values):.3f}"
+            ) from error
+    finally:
+        # Defensive cleanup also covers cancellation/exception paths. A successful child
+        # has already exited and this is a no-op; no nested provider worker may survive an
+        # expired or aborted attempt.
+        if _process_tree_alive(process):
+            _terminate_process_tree(process)
+
     if return_code != 0:
         failure = _legacy.load_failure(path)
         if failure is None:
@@ -228,6 +333,21 @@ def build_spool(
         request, policy = _bounded._validate_request(path, resolved_values)
         if _legacy.manifest_available(path):
             return _legacy._manifest_path(path)
+        decision_epoch = _legacy._parse_timestamp(
+            request.get("decision_epoch"),
+            field_name="decision_epoch",
+        )
+
+        # Compute the reference-content identity once in the parent. Every finite child
+        # receives the same verified digest, avoiding repeated full-manifest reads while
+        # allowing a freshly bound manifest with identical structural catalogs to reuse the
+        # prior structural cache. Failure only disables advisory reuse; canonical discovery
+        # remains the fail-closed authority.
+        resolved_values.pop(_structural._REFERENCE_STRUCTURAL_FINGERPRINT_ENV, None)
+        try:
+            _structural.bind_reference_structural_fingerprint(resolved_values)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            resolved_values.pop(_structural._REFERENCE_STRUCTURAL_FINGERPRINT_ENV, None)
 
         node_bodies: list[Mapping[str, object]] = []
         rebound_count = 0
@@ -242,6 +362,7 @@ def build_spool(
                 resolved_values,
                 asset_class=asset_class.value,
                 index=index,
+                decision_epoch=decision_epoch,
             )
             lane_peaks[asset_class.value] = int(state.get("peak_rss_bytes") or 0)
             if state.get("dynamic") is not True:
