@@ -204,13 +204,18 @@ def test_pre_reference_cache_reclamation_runs_only_at_reference_boundary(
         lambda _values: events.append(("reclaim", "reference")),
     )
     monkeypatch.setattr(
+        runtime,
+        "_run_completed_evidence_cache_reclamation",
+        lambda _values, **kwargs: events.append(("reclaim", str(kwargs["stage"]))),
+    )
+    monkeypatch.setattr(
         runtime.subprocess,
         "Popen",
         lambda command, **kwargs: _FailingStageProcess(command, events=events, **kwargs),
     )
 
     assert runtime.run_pipeline(values) == 9
-    assert events == [("spawn", "public_live")]
+    assert events == [("reclaim", "public_live"), ("spawn", "public_live")]
 
 
 def test_pre_reference_cache_reclamation_timeout_is_advisory_and_cannot_certify(
