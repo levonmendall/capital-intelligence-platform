@@ -24,6 +24,9 @@ from operations.comprehensive_discovery_runtime_contract import (
 )
 
 
+_CACHED_TRANSACTION_MODULE = "operations.cached_transactional_comprehensive_discovery_lane"
+
+
 def install_and_verify_dag_native_runtime() -> None:
     """Install the runtime contract and fail closed if any legacy seam remains active."""
 
@@ -41,6 +44,13 @@ def install_and_verify_dag_native_runtime() -> None:
     from operations import authoritative_comprehensive_discovery as authoritative
     from operations import component_qualified_evidence_maintenance as maintenance
     from operations import persistent_certification_scheduler as scheduler
+    from operations import transactional_lane_comprehensive_discovery_coordinator as coordinator
+
+    # Comprehensive retry epochs may reuse only release/reference-bound raw catalog
+    # reconstruction. The finite child wrapper delegates every current-epoch provider
+    # publication, screening, node, and market-evidence step to the unchanged canonical
+    # transaction implementation.
+    coordinator._MODULE = _CACHED_TRANSACTION_MODULE
 
     missing: list[str] = []
     if not getattr(
@@ -61,6 +71,8 @@ def install_and_verify_dag_native_runtime() -> None:
         False,
     ):
         missing.append("spawn_safe_acquisition")
+    if coordinator._MODULE != _CACHED_TRANSACTION_MODULE:
+        missing.append("structural_cache_transaction_worker")
     if missing:
         raise RuntimeError(
             "continuous evidence refused legacy comprehensive-discovery runtime: "
