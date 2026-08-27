@@ -91,12 +91,14 @@ def run_post_lane_cache_reclamation(
     asset_class: str,
     index: int = 0,
 ) -> dict[str, object]:
-    """Preserve the established post-lane hook while removing helper-process overlap.
+    """Preserve the established post-lane hook with bounded two-step reclamation.
 
     The coordinator has historically exposed one monkeypatchable post-lane reclamation
-    seam. Keep that contract intact: first release the exact completed spool, then run the
-    bounded ownership-validated broad data-root clean-page pass in this already-running
-    serialized parent. The caller remains responsible for fail-soft behavior.
+    seam. Keep that contract intact: first release the exact completed spool in the parent,
+    then run the broader ownership-validated data-root clean-page pass in a disposable
+    child. The child must exit before the next serialized lane can launch, so its scan heap
+    cannot accumulate in the long-lived comprehensive coordinator. The caller remains
+    responsible for fail-soft behavior.
     """
 
     exact_spool = run_lane_exit_exact_spool_cache_reclamation(
@@ -189,13 +191,11 @@ def _run_lane_transaction(
             f"transactional lane identity changed for {asset_class}"
         )
 
-    # The child is fully gone and the compact transaction checkpoint above has been
+    # The lane child is fully gone and the compact transaction checkpoint above has been
     # integrity-validated. The established post-lane hook first advises only the exact
-    # release spool and then runs the same bounded ownership-reporting clean data-root
-    # reclaimer used at the successful reference boundary directly in this parent. Keeping
-    # the broad pass in-process avoids another interpreter at the high-raw-memory handoff.
-    # The single wrapper remains advisory and completes before another serialized lane can
-    # launch.
+    # release spool in this parent, then launches one bounded broad reclaimer child. That
+    # child must exit before completion is published or another serialized lane can launch,
+    # which returns its scan heap to the OS while preserving the clean-cache benefit.
     try:
         run_post_lane_cache_reclamation(
             values,
