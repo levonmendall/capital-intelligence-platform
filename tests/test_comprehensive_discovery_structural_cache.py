@@ -19,6 +19,13 @@ def _values(tmp_path):
     }
 
 
+def _core_with_schedule(*, active: bool = True):
+    lanes = (CandidateAssetClass.FX,) if active else ()
+    return SimpleNamespace(
+        _base=SimpleNamespace(scheduled_discovery_lanes=lambda _timestamp: lanes)
+    )
+
+
 def test_structural_cache_reuses_only_same_release_reference_and_policy(tmp_path) -> None:
     values = _values(tmp_path)
     source = datetime(2026, 8, 27, 5, 0, tzinfo=timezone.utc)
@@ -106,7 +113,7 @@ def test_cached_lane_reuses_merged_structure_but_not_epoch_work(monkeypatch, tmp
     )
 
     raw = cached_lane._load_catalog_records(
-        core=object(),
+        core=_core_with_schedule(active=True),
         values=values,
         policy=SimpleNamespace(version="policy-1"),
         timestamp=timestamp,
@@ -125,6 +132,40 @@ def test_cached_lane_reuses_merged_structure_but_not_epoch_work(monkeypatch, tmp
     assert "_canonical._build_deep_lane" not in source
     assert "ensure_provider_preselection_publication" not in source
     assert "default_redundant_market_probe" not in source
+
+
+def test_schedule_change_rejects_structural_reuse(monkeypatch, tmp_path) -> None:
+    values = _values(tmp_path)
+    timestamp = datetime(2026, 8, 27, 5, 20, tzinfo=timezone.utc)
+    entry = structural.StructuralCatalogCacheEntry(
+        records=("cached",),
+        raw_record_count=1,
+        source_as_of=timestamp - timedelta(minutes=20),
+    )
+    monkeypatch.setattr(structural, "load_structural_catalog", lambda *args, **kwargs: entry)
+    monkeypatch.setattr(
+        cached_lane,
+        "_ORIGINAL_LOAD_CATALOG_RECORDS",
+        lambda **kwargs: ("fresh",),
+    )
+    core = SimpleNamespace(
+        _base=SimpleNamespace(
+            scheduled_discovery_lanes=lambda when: (
+                (CandidateAssetClass.FX,)
+                if when == timestamp
+                else ()
+            )
+        )
+    )
+
+    raw = cached_lane._load_catalog_records(
+        core=core,
+        values=values,
+        policy=SimpleNamespace(version="policy-1"),
+        timestamp=timestamp,
+        asset_class=CandidateAssetClass.FX,
+    )
+    assert raw == ("fresh",)
 
 
 def test_cache_miss_runs_canonical_structure_and_write_is_advisory(monkeypatch, tmp_path) -> None:
@@ -148,7 +189,7 @@ def test_cache_miss_runs_canonical_structure_and_write_is_advisory(monkeypatch, 
     )
 
     raw = cached_lane._load_catalog_records(
-        core=object(),
+        core=_core_with_schedule(active=True),
         values=values,
         policy=SimpleNamespace(version="policy-1"),
         timestamp=timestamp,
