@@ -391,13 +391,21 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
                 stage=stage,
             )
 
-        # Release clean pages at the two heavyweight stage boundaries where production
-        # telemetry has shown persistent raw cgroup pressure. Both boundaries use the same
+        # Release clean pages at the heavyweight stage boundaries where production
+        # telemetry has shown persistent raw cgroup pressure. Each boundary uses the same
         # bounded data-root scan and clean-page advice before the fresh stage interpreter is
         # spawned. Failed-attempt dirty-page flushing remains separately restricted to the
         # supersession boundary. Neither path changes an evidence or memory threshold.
         if stage == "reference":
             _run_reference_cache_reclamation(resolved)
+        elif stage == "public_live":
+            _run_completed_evidence_cache_reclamation(
+                resolved,
+                stage="public_live",
+                event="stage_isolated_public_live_cache_reclamation",
+                code=_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE,
+                capture_report=True,
+            )
         elif stage == "comprehensive_discovery":
             _run_comprehensive_discovery_cache_reclamation(resolved)
 
