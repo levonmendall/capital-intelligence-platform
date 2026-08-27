@@ -42,6 +42,11 @@ _PROGRESS_SCHEMA = "public-live-requirement-progress.v1"
 _REQUIREMENT_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_REQUIREMENT_TIMEOUT_SECONDS"
 _LEGACY_PUBLIC_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_TIMEOUT_SECONDS"
 _DEFAULT_REQUIREMENT_TIMEOUT_SECONDS = 75.0
+_GDELT_REQUIREMENT_GROUP = "gdelt-global-news-discovery"
+_GDELT_MAX_ATTEMPTS_PER_PROVIDER = 2
+_GDELT_WORK_BUDGET_FRACTION = 0.80
+_PROVIDER_RETRY_BASE_DELAY_SECONDS = 0.25
+_DEFAULT_PROVIDER_REQUEST_TIMEOUT_SECONDS = 20.0
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -219,6 +224,71 @@ def _requirement_timeout_seconds(values: Mapping[str, str]) -> float:
     return timeout
 
 
+def _gdelt_provider_request_policy(
+    *,
+    requirement_group: str,
+    provider_count: int,
+    values: Mapping[str, str],
+) -> tuple[float, int] | None:
+    """Reserve bounded runtime for every governed GDELT alternative.
+
+    The generic provider can spend ``timeout * max_attempts`` on one source before
+    advancing to the next member of a requirement group.  With the production
+    defaults that is about 60 seconds against a 75-second group supervisor, so a
+    slow DOC primary can starve Context of a meaningful attempt.
+
+    Only the GDELT requirement receives a tighter inner policy.  Eighty percent of
+    the unchanged outer requirement timeout is divided across every configured
+    member and its bounded retries; the remaining twenty percent is retained for
+    parsing, durable record publication, and checkpoint commit.  This does not
+    extend the outer timeout or the evidence freshness epoch.
+    """
+
+    if str(requirement_group).strip() != _GDELT_REQUIREMENT_GROUP:
+        return None
+    if provider_count < 2:
+        return None
+
+    outer_timeout = _requirement_timeout_seconds(values)
+    work_budget = outer_timeout * _GDELT_WORK_BUDGET_FRACTION
+    attempts = _GDELT_MAX_ATTEMPTS_PER_PROVIDER
+    retry_delay_per_provider = _PROVIDER_RETRY_BASE_DELAY_SECONDS
+    retry_delay_budget = provider_count * retry_delay_per_provider
+
+    if work_budget <= retry_delay_budget:
+        attempts = 1
+        retry_delay_budget = 0.0
+
+    request_budget = max(0.001, work_budget - retry_delay_budget)
+    request_timeout = request_budget / float(provider_count * attempts)
+    request_timeout = min(
+        _DEFAULT_PROVIDER_REQUEST_TIMEOUT_SECONDS,
+        max(0.001, request_timeout),
+    )
+    return request_timeout, attempts
+
+
+def _requirement_provider(
+    *,
+    scoped_catalog: PublicLiveSourceCatalog,
+    requirement_group: str,
+    values: Mapping[str, str],
+):
+    policy = _gdelt_provider_request_policy(
+        requirement_group=requirement_group,
+        provider_count=len(scoped_catalog.sources),
+        values=values,
+    )
+    if policy is None:
+        return ImpactfulPublicLiveInformationProvider(scoped_catalog)
+    request_timeout, max_attempts = policy
+    return ImpactfulPublicLiveInformationProvider(
+        scoped_catalog,
+        timeout=request_timeout,
+        max_attempts=max_attempts,
+    )
+
+
 def _write_rolling_records(
     *,
     values: Mapping[str, str],
@@ -278,7 +348,11 @@ def collect_required_public_live_requirement(
     scoped_catalog = PublicLiveSourceCatalog(
         identifier=str(getattr(catalog, "identifier", "")), sources=selected
     )
-    report = ImpactfulPublicLiveInformationProvider(scoped_catalog).collect(include_optional=False)
+    report = _requirement_provider(
+        scoped_catalog=scoped_catalog,
+        requirement_group=group,
+        values=values,
+    ).collect(include_optional=False)
     members = tuple(
         item
         for item in tuple(getattr(report, "sources", ()) or ())
