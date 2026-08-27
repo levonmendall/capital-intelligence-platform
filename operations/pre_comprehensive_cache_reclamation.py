@@ -38,7 +38,7 @@ _FAILED_ATTEMPT_FLUSH_MAX_BYTES_ENV = (
     "CAPITAL_INTELLIGENCE_FAILED_ATTEMPT_CACHE_FLUSH_MAX_BYTES"
 )
 _DEFAULT_SCAN_MAX_ENTRIES = 50_000
-_DEFAULT_RECLAIM_MAX_FILES = 4_096
+_DEFAULT_RECLAIM_MAX_FILES = 16_384
 _DEFAULT_MANIFEST_MAX_FILES = 32
 _DEFAULT_FAILED_ATTEMPT_FLUSH_MAX_FILES = 64
 _DEFAULT_FAILED_ATTEMPT_FLUSH_MAX_BYTES = 512 * 1024 * 1024
@@ -281,7 +281,7 @@ def release_pre_comprehensive_completed_stage_file_cache(
         _RECLAIM_MAX_FILES_ENV,
         _DEFAULT_RECLAIM_MAX_FILES,
         minimum=1,
-        maximum=8_192,
+        maximum=16_384,
     )
     manifest_max_files = _bounded_int(
         values,
