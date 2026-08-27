@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 import pytest
 
@@ -192,7 +193,7 @@ class _SuccessfulProcess:
         self._events = events
         events.append("spawn")
 
-    def wait(self) -> int:
+    def wait(self, timeout=None) -> int:
         self._events.append("exit")
         return 0
 
@@ -202,7 +203,7 @@ class _FailedProcess:
         self._events = events
         events.append("spawn")
 
-    def wait(self) -> int:
+    def wait(self, timeout=None) -> int:
         self._events.append("exit-failed")
         return 9
 
@@ -228,6 +229,7 @@ def test_publication_reclamation_runs_after_durable_state_validation_and_before_
         "Popen",
         lambda command, **kwargs: _SuccessfulProcess(command, events=events, **kwargs),
     )
+    monkeypatch.setattr(coordinator, "_process_tree_alive", lambda _process: False)
 
     def load_state(*_args, **_kwargs):
         events.append("durable-state-validated")
@@ -255,6 +257,7 @@ def test_publication_reclamation_runs_after_durable_state_validation_and_before_
         {},
         asset_class="real_estate",
         index=8,
+        decision_epoch=datetime.now(timezone.utc),
     )
 
     assert result is state
@@ -276,6 +279,7 @@ def test_failed_publication_lane_never_runs_reclamation(monkeypatch, tmp_path) -
         "Popen",
         lambda command, **kwargs: _FailedProcess(command, events=events, **kwargs),
     )
+    monkeypatch.setattr(coordinator, "_process_tree_alive", lambda _process: False)
     monkeypatch.setattr(
         coordinator._legacy,
         "load_failure",
@@ -302,6 +306,7 @@ def test_failed_publication_lane_never_runs_reclamation(monkeypatch, tmp_path) -
             {},
             asset_class="real_estate",
             index=8,
+            decision_epoch=datetime.now(timezone.utc),
         )
 
     assert events == ["spawn", "exit-failed"]

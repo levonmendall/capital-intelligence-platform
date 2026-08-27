@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -93,11 +94,12 @@ def test_parent_reclaims_only_after_transaction_child_exit_and_before_completion
     )
 
     class Process:
-        def wait(self) -> int:
+        def wait(self, timeout=None) -> int:
             events.append("child_exit")
             return 0
 
     monkeypatch.setattr(coordinator.subprocess, "Popen", lambda *args, **kwargs: Process())
+    monkeypatch.setattr(coordinator, "_process_tree_alive", lambda _process: False)
     monkeypatch.setattr(
         coordinator._bounded,
         "_load_stage_state",
@@ -130,6 +132,7 @@ def test_parent_reclaims_only_after_transaction_child_exit_and_before_completion
         {"RENDER": "true", "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "1"},
         asset_class="international_equity",
         index=4,
+        decision_epoch=datetime.now(timezone.utc),
     )
 
     assert state["raw_catalog_persisted"] is False
@@ -148,11 +151,12 @@ def test_post_transaction_reclamation_failure_cannot_change_durable_lane(monkeyp
     published: list[bool] = []
 
     class Process:
-        def wait(self) -> int:
+        def wait(self, timeout=None) -> int:
             return 0
 
     monkeypatch.setattr(coordinator, "_record_transaction_start", lambda *args, **kwargs: None)
     monkeypatch.setattr(coordinator.subprocess, "Popen", lambda *args, **kwargs: Process())
+    monkeypatch.setattr(coordinator, "_process_tree_alive", lambda _process: False)
     monkeypatch.setattr(
         coordinator._bounded,
         "_load_stage_state",
@@ -182,6 +186,7 @@ def test_post_transaction_reclamation_failure_cannot_change_durable_lane(monkeyp
         {},
         asset_class="fx",
         index=1,
+        decision_epoch=datetime.now(timezone.utc),
     )
 
     assert state["transactional_lane_compaction"] is True

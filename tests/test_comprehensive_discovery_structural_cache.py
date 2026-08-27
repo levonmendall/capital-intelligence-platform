@@ -1,22 +1,71 @@
 from __future__ import annotations
 
 import inspect
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+
+import pytest
 
 from cio import CandidateAssetClass
 from operations import cached_transactional_comprehensive_discovery_lane as cached_lane
 from operations import comprehensive_discovery_structural_cache as structural
+from operations import reference_readiness as reference
 from operations import transactional_comprehensive_discovery_lane as canonical_lane
 import run_dag_native_continuous_evidence_plane as dag_runtime
 
 
+def _write_reference_manifest(
+    tmp_path,
+    *,
+    name: str = "manifest-1.json",
+    captured_at: str = "2026-08-27T04:00:00+00:00",
+    bound_at: str = "2026-08-27T04:01:00+00:00",
+    component_id: str = "component-1",
+    catalog_symbol: str = "EURUSD",
+    config_fingerprint: str = "config-1",
+):
+    material = {
+        "schema_version": reference._SCHEMA_VERSION,
+        "release": "release-1",
+        "captured_at": captured_at,
+        "bound_at": bound_at,
+        "config_fingerprint": config_fingerprint,
+        "eodhd_exchanges": ["US"],
+        "futures_roots": ["ES"],
+        "active_lanes": [CandidateAssetClass.FX.value],
+        "component_ids": {"catalog": component_id},
+        "component_captured_at": {"catalog": captured_at},
+        "catalogs": {
+            CandidateAssetClass.FX.value: [
+                {
+                    "symbol": catalog_symbol,
+                    "provider_symbol": catalog_symbol,
+                }
+            ]
+        },
+        "paper_only": True,
+        "real_money_authorized": False,
+    }
+    manifest_id = reference._fingerprint(material)
+    path = tmp_path / name
+    path.write_text(
+        json.dumps({**material, "manifest_id": manifest_id}, sort_keys=True),
+        encoding="utf-8",
+    )
+    return path, manifest_id
+
+
 def _values(tmp_path):
-    return {
+    path, manifest_id = _write_reference_manifest(tmp_path)
+    values = {
         "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
         "CAPITAL_INTELLIGENCE_RELEASE": "release-1",
-        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID": "manifest-1",
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID": manifest_id,
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH": str(path),
     }
+    structural.bind_reference_structural_fingerprint(values)
+    return values
 
 
 def _core_with_schedule(*, active: bool = True):
@@ -26,13 +75,36 @@ def _core_with_schedule(*, active: bool = True):
     )
 
 
-def test_structural_cache_reuses_only_same_release_reference_and_policy(tmp_path) -> None:
-    values = _values(tmp_path)
+def test_structural_cache_reuses_same_certified_content_across_fresh_manifests(tmp_path) -> None:
+    path_1, manifest_1 = _write_reference_manifest(tmp_path, name="manifest-1.json")
+    path_2, manifest_2 = _write_reference_manifest(
+        tmp_path,
+        name="manifest-2.json",
+        captured_at="2026-08-27T05:00:00+00:00",
+        bound_at="2026-08-27T05:01:00+00:00",
+        component_id="component-2",
+    )
+    assert manifest_1 != manifest_2
+
+    values_1 = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-1",
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID": manifest_1,
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH": str(path_1),
+    }
+    values_2 = {
+        **values_1,
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID": manifest_2,
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH": str(path_2),
+    }
+    fingerprint_1 = structural.bind_reference_structural_fingerprint(values_1)
+    fingerprint_2 = structural.bind_reference_structural_fingerprint(values_2)
+    assert fingerprint_1 == fingerprint_2
+
     source = datetime(2026, 8, 27, 5, 0, tzinfo=timezone.utc)
     records = ("A", "B")
-
     assert structural.publish_structural_catalog(
-        values,
+        values_1,
         asset_class=CandidateAssetClass.FX,
         policy_version="policy-1",
         source_as_of=source,
@@ -41,7 +113,7 @@ def test_structural_cache_reuses_only_same_release_reference_and_policy(tmp_path
     )
 
     loaded = structural.load_structural_catalog(
-        values,
+        values_2,
         asset_class=CandidateAssetClass.FX,
         policy_version="policy-1",
         requested_as_of=source + timedelta(minutes=20),
@@ -52,17 +124,69 @@ def test_structural_cache_reuses_only_same_release_reference_and_policy(tmp_path
     assert loaded.source_as_of == source
 
     assert structural.load_structural_catalog(
-        {**values, "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID": "manifest-2"},
-        asset_class=CandidateAssetClass.FX,
-        policy_version="policy-1",
-        requested_as_of=source + timedelta(minutes=20),
-    ) is None
-    assert structural.load_structural_catalog(
-        values,
+        values_2,
         asset_class=CandidateAssetClass.FX,
         policy_version="policy-2",
         requested_as_of=source + timedelta(minutes=20),
     ) is None
+    assert structural.load_structural_catalog(
+        {**values_2, "CAPITAL_INTELLIGENCE_RELEASE": "release-2"},
+        asset_class=CandidateAssetClass.FX,
+        policy_version="policy-1",
+        requested_as_of=source + timedelta(minutes=20),
+    ) is None
+
+
+def test_structural_cache_misses_when_certified_structure_changes(tmp_path) -> None:
+    path_1, manifest_1 = _write_reference_manifest(tmp_path, name="stable.json")
+    path_2, manifest_2 = _write_reference_manifest(
+        tmp_path,
+        name="changed.json",
+        catalog_symbol="GBPUSD",
+    )
+    values_1 = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-1",
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID": manifest_1,
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH": str(path_1),
+    }
+    values_2 = {
+        **values_1,
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID": manifest_2,
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH": str(path_2),
+    }
+    assert structural.bind_reference_structural_fingerprint(values_1) != structural.bind_reference_structural_fingerprint(values_2)
+
+    source = datetime(2026, 8, 27, 5, 0, tzinfo=timezone.utc)
+    assert structural.publish_structural_catalog(
+        values_1,
+        asset_class=CandidateAssetClass.FX,
+        policy_version="policy-1",
+        source_as_of=source,
+        raw_record_count=1,
+        records=("A",),
+    )
+    assert structural.load_structural_catalog(
+        values_2,
+        asset_class=CandidateAssetClass.FX,
+        policy_version="policy-1",
+        requested_as_of=source + timedelta(minutes=20),
+    ) is None
+
+
+def test_structural_fingerprint_rejects_tampered_manifest(tmp_path) -> None:
+    path, manifest_id = _write_reference_manifest(tmp_path, name="tampered.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["catalogs"][CandidateAssetClass.FX.value][0]["symbol"] = "TAMPERED"
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-1",
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID": manifest_id,
+        "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH": str(path),
+    }
+    with pytest.raises(reference.ReferenceReadinessError, match="integrity check failed"):
+        structural.reference_structural_fingerprint(values)
 
 
 def test_structural_cache_never_relabels_future_or_option_structure(tmp_path) -> None:

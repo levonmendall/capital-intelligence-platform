@@ -5,15 +5,17 @@ preselection, terminal screening, market features, certification nodes, and any 
 that could authorize a candidate or portfolio action. A new evidence epoch must rebuild
 all of those exact-time artifacts.
 
-Reuse is permitted only inside the exact software release, policy version, and bound
-reference-manifest identity that produced the structural catalog. The option lane is not
-cacheable because its catalog is constructed directly from the requested timestamp.
-Missing, corrupt, mismatched, future-dated, or authority-bearing cache entries are ignored
-and callers rebuild the structural catalog fail-closed.
+Reuse is permitted only inside the exact software release, policy version, and stable
+fingerprint of the certified structural reference content. Reference-manifest ids, paths,
+and capture/binding timestamps are audit lineage, not structural cache identity. The option
+lane is not cacheable because its catalog is constructed directly from the requested
+timestamp. Missing, corrupt, mismatched, future-dated, or authority-bearing cache entries
+are ignored and callers rebuild the structural catalog fail-closed.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,10 +23,15 @@ from pathlib import Path
 
 from cio import CandidateAssetClass
 from operations import comprehensive_discovery_input_spool as _spool
+from operations import reference_readiness as _reference
 
 
-_SCHEMA = "comprehensive-discovery-structural-cache.v1"
+_SCHEMA = "comprehensive-discovery-structural-cache.v2"
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
+_REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
+_REFERENCE_STRUCTURAL_FINGERPRINT_ENV = (
+    "CAPITAL_INTELLIGENCE_REFERENCE_STRUCTURAL_FINGERPRINT"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,11 +47,89 @@ def _aware(value: datetime, *, field_name: str) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def reference_structural_fingerprint(values: Mapping[str, str]) -> str:
+    """Fingerprint only integrity-verified, epoch-stable certified reference content."""
+
+    configured_path = str(values.get(_REFERENCE_MANIFEST_PATH_ENV) or "").strip()
+    configured_id = str(values.get(_REFERENCE_MANIFEST_ID_ENV) or "").strip()
+    if not configured_path or not configured_id:
+        raise _reference.ReferenceReadinessError(
+            "qualified reference manifest path/id are required for structural fingerprint"
+        )
+    path = Path(configured_path).expanduser()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise _reference.ReferenceReadinessError(
+            "bound reference manifest is unavailable for structural fingerprint"
+        ) from error
+    if not isinstance(payload, Mapping) or payload.get("schema_version") != _reference._SCHEMA_VERSION:
+        raise _reference.ReferenceReadinessError(
+            "bound reference manifest schema is invalid for structural fingerprint"
+        )
+    expected_id = str(payload.get("manifest_id") or "").strip()
+    material = {key: value for key, value in payload.items() if key != "manifest_id"}
+    if not expected_id or _reference._fingerprint(material) != expected_id:
+        raise _reference.ReferenceReadinessError(
+            "bound reference manifest integrity check failed for structural fingerprint"
+        )
+    if expected_id != configured_id:
+        raise _reference.ReferenceReadinessError(
+            "bound reference manifest identity changed before structural fingerprint"
+        )
+    if str(payload.get("release") or "").strip() != _spool._release(values):
+        raise _reference.ReferenceReadinessError(
+            "bound reference manifest release changed before structural fingerprint"
+        )
+    if payload.get("paper_only") is not True or payload.get("real_money_authorized") is not False:
+        raise _reference.ReferenceReadinessError(
+            "bound reference manifest authority is invalid for structural fingerprint"
+        )
+    catalogs = payload.get("catalogs")
+    if not isinstance(catalogs, Mapping):
+        raise _reference.ReferenceReadinessError(
+            "bound reference manifest catalogs are missing for structural fingerprint"
+        )
+    for records in catalogs.values():
+        if not isinstance(records, Sequence) or isinstance(records, (str, bytes, bytearray)):
+            raise _reference.ReferenceReadinessError(
+                "bound reference manifest catalog lane is malformed"
+            )
+        if any(not isinstance(record, Mapping) for record in records):
+            raise _reference.ReferenceReadinessError(
+                "bound reference manifest catalog record is malformed"
+            )
+
+    # Deliberately exclude captured_at, bound_at, component ids, manifest id/path, and
+    # release. The cache separately binds release and policy. The material below is the
+    # certified structural content that determines catalog reconstruction and lane scope.
+    structural_material = {
+        "config_fingerprint": str(payload.get("config_fingerprint") or ""),
+        "eodhd_exchanges": list(payload.get("eodhd_exchanges") or ()),
+        "futures_roots": list(payload.get("futures_roots") or ()),
+        "active_lanes": list(payload.get("active_lanes") or ()),
+        "catalogs": {str(name): list(records) for name, records in catalogs.items()},
+    }
+    return _reference._fingerprint(structural_material)
+
+
+def bind_reference_structural_fingerprint(values: dict[str, str]) -> str:
+    """Bind one verified structural fingerprint for all finite children in this attempt."""
+
+    fingerprint = reference_structural_fingerprint(values)
+    values[_REFERENCE_STRUCTURAL_FINGERPRINT_ENV] = fingerprint
+    return fingerprint
+
+
+def _structural_fingerprint(values: Mapping[str, str]) -> str:
+    return str(values.get(_REFERENCE_STRUCTURAL_FINGERPRINT_ENV) or "").strip()
+
+
 def _enabled(values: Mapping[str, str], asset_class: CandidateAssetClass) -> bool:
     return (
         asset_class is not CandidateAssetClass.OPTION
         and bool(str(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "").strip())
-        and bool(str(values.get(_REFERENCE_MANIFEST_ID_ENV) or "").strip())
+        and bool(_structural_fingerprint(values))
         and _spool._release(values) not in {"", "unknown"}
     )
 
@@ -58,7 +143,7 @@ def _identity(
     return {
         "schema_version": _SCHEMA,
         "release": _spool._release(values),
-        "reference_manifest_id": str(values.get(_REFERENCE_MANIFEST_ID_ENV) or "").strip(),
+        "reference_structural_fingerprint": _structural_fingerprint(values),
         "policy_version": str(policy_version),
         "asset_class": asset_class.value,
     }
@@ -170,7 +255,7 @@ def publish_structural_catalog(
     )
     identity = _identity(values, asset_class=asset_class, policy_version=policy_version)
 
-    # Do not overwrite a valid compatible entry. The exact manifest/release/policy key
+    # Do not overwrite a valid compatible entry. The exact release/policy/content key
     # makes the structural input immutable, and preserving its earliest source cutoff
     # prevents a retry from pretending that structural information was observed later.
     existing = load_structural_catalog(
@@ -191,6 +276,9 @@ def publish_structural_catalog(
         **identity,
         "source_as_of": timestamp.isoformat(),
         "published_at": datetime.now(timezone.utc).isoformat(),
+        "reference_manifest_id_at_publication": str(
+            values.get(_REFERENCE_MANIFEST_ID_ENV) or ""
+        ).strip(),
         "raw_record_count": int(raw_record_count),
         "record_count": len(records),
         "blob": _spool._descriptor_dict(descriptor),
@@ -207,6 +295,8 @@ def publish_structural_catalog(
 
 __all__ = [
     "StructuralCatalogCacheEntry",
+    "bind_reference_structural_fingerprint",
     "load_structural_catalog",
     "publish_structural_catalog",
+    "reference_structural_fingerprint",
 ]
