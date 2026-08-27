@@ -23,6 +23,7 @@ from operations import transactional_comprehensive_discovery_lane as _canonical
 
 _ORIGINAL_LOAD_CATALOG_RECORDS = _canonical._load_catalog_records
 _ORIGINAL_MERGE_CERTIFIED_LANE = _canonical._bounded_lane._merge_certified_lane
+_ACTIVE_POLICY_VERSION = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +50,9 @@ def _load_catalog_records(
     timestamp,
     asset_class: CandidateAssetClass,
 ):
+    global _ACTIVE_POLICY_VERSION
     policy_version = str(getattr(policy, "version", ""))
+    _ACTIVE_POLICY_VERSION = policy_version
     cached = _structural.load_structural_catalog(
         values,
         asset_class=asset_class,
@@ -81,12 +84,11 @@ def _merge_certified_lane(core, raw: Sequence[object], *, asset_class, timestamp
         asset_class=asset_class,
         timestamp=timestamp,
     )
-    policy_version = str(getattr(core.ComprehensiveMarketDiscoveryPolicy(), "version", ""))
     try:
         _structural.publish_structural_catalog(
             dict(_canonical.os.environ),
             asset_class=asset_class,
-            policy_version=policy_version,
+            policy_version=_ACTIVE_POLICY_VERSION,
             source_as_of=timestamp,
             raw_record_count=len(raw),
             records=merged,
