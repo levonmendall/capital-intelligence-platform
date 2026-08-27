@@ -1,0 +1,23 @@
+name: Temporary repair worktree export
+
+on:
+  push:
+    branches: [codex/fresh-epoch-after-structural-prep]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repair-worktree
+          path: |
+            .
+            !.git
+          include-hidden-files: true
+          retention-days: 1
