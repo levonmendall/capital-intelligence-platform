@@ -46,9 +46,9 @@ jobs:
           tests/test_pre_comprehensive_discovery_cache_reclamation.py
           tests/test_transactional_comprehensive_discovery_lanes.py
           tests/test_component_qualified_evidence_maintenance.py
-          tests/test_release_evidence_retry.py
-          tests/test_stage_isolated_attempt_lifecycle.py
-          tests/test_failed_attempt_cache_reclamation.py
-          tests/test_public_live_retry.py
+          tests/test_release_evidence_prequalification_retry.py
+          tests/test_stage_isolated_evidence_attempt_lifecycle.py
+          tests/test_stage_isolated_failed_attempt_reclamation.py
+          tests/test_stage_isolated_public_live_retry.py
       - name: Run full test suite
         run: pytest -q --maxfail=1
