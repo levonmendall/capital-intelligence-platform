@@ -253,7 +253,11 @@ def test_cached_lane_reuses_merged_structure_but_not_epoch_work(monkeypatch, tmp
     source = inspect.getsource(cached_lane)
     assert "_canonical._load_catalog_records = _load_catalog_records" in source
     assert "_canonical._bounded_lane._merge_certified_lane = _merge_certified_lane" in source
-    assert "_canonical._build_deep_lane" not in source
+    # Screening may be wrapped for non-authoritative progress instrumentation, but it must
+    # still execute the canonical current-epoch implementation rather than being cached.
+    assert "_canonical._build_deep_lane = _build_deep_lane" in source
+    assert "return _ORIGINAL_BUILD_DEEP_LANE(*args, **kwargs)" in source
+    assert '_record_watchdog_phase("screening-lane")' in source
     assert "ensure_provider_preselection_publication" not in source
     assert "default_redundant_market_probe" not in source
 
