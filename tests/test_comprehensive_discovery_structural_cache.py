@@ -29,7 +29,7 @@ def test_structural_cache_reuses_only_same_release_reference_and_policy(tmp_path
         asset_class=CandidateAssetClass.FX,
         policy_version="policy-1",
         source_as_of=source,
-        raw_record_count=2,
+        raw_record_count=1,
         records=records,
     )
 
@@ -41,7 +41,7 @@ def test_structural_cache_reuses_only_same_release_reference_and_policy(tmp_path
     )
     assert loaded is not None
     assert loaded.records == records
-    assert loaded.raw_record_count == 2
+    assert loaded.raw_record_count == 1
     assert loaded.source_as_of == source
 
     assert structural.load_structural_catalog(
@@ -85,11 +85,11 @@ def test_structural_cache_never_relabels_future_or_option_structure(tmp_path) ->
     ) is False
 
 
-def test_cached_lane_reuses_structure_but_not_canonical_epoch_work(monkeypatch, tmp_path) -> None:
+def test_cached_lane_reuses_merged_structure_but_not_epoch_work(monkeypatch, tmp_path) -> None:
     values = _values(tmp_path)
     timestamp = datetime(2026, 8, 27, 5, 20, tzinfo=timezone.utc)
     entry = structural.StructuralCatalogCacheEntry(
-        records=("cached-record",),
+        records=("merged-a", "merged-b"),
         raw_record_count=1,
         source_as_of=timestamp - timedelta(minutes=20),
     )
@@ -99,31 +99,47 @@ def test_cached_lane_reuses_structure_but_not_canonical_epoch_work(monkeypatch, 
         "_ORIGINAL_LOAD_CATALOG_RECORDS",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("canonical structural load ran")),
     )
+    monkeypatch.setattr(
+        cached_lane,
+        "_ORIGINAL_MERGE_CERTIFIED_LANE",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("canonical merge ran")),
+    )
 
-    result = cached_lane._load_catalog_records(
+    raw = cached_lane._load_catalog_records(
         core=object(),
         values=values,
         policy=SimpleNamespace(version="policy-1"),
         timestamp=timestamp,
         asset_class=CandidateAssetClass.FX,
     )
-    assert result == ("cached-record",)
+    assert len(raw) == 1
+    assert tuple(raw) == ("merged-a", "merged-b")
+    merged = cached_lane._merge_certified_lane(
+        object(), raw, asset_class=CandidateAssetClass.FX, timestamp=timestamp
+    )
+    assert merged == ("merged-a", "merged-b")
 
     source = inspect.getsource(cached_lane)
     assert "_canonical._load_catalog_records = _load_catalog_records" in source
+    assert "_canonical._bounded_lane._merge_certified_lane = _merge_certified_lane" in source
     assert "_canonical._build_deep_lane" not in source
     assert "ensure_provider_preselection_publication" not in source
     assert "default_redundant_market_probe" not in source
 
 
-def test_cached_lane_miss_delegates_and_cache_write_is_advisory(monkeypatch, tmp_path) -> None:
+def test_cache_miss_runs_canonical_structure_and_write_is_advisory(monkeypatch, tmp_path) -> None:
     values = _values(tmp_path)
     timestamp = datetime(2026, 8, 27, 5, 20, tzinfo=timezone.utc)
     monkeypatch.setattr(structural, "load_structural_catalog", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         cached_lane,
         "_ORIGINAL_LOAD_CATALOG_RECORDS",
-        lambda **kwargs: ("fresh-record",),
+        lambda **kwargs: ("raw-record",),
+    )
+    monkeypatch.setattr(
+        cached_lane,
+        "_ORIGINAL_MERGE_CERTIFIED_LANE",
+        lambda *args, **kwargs: ("merged-record",),
     )
     monkeypatch.setattr(
         structural,
@@ -131,14 +147,18 @@ def test_cached_lane_miss_delegates_and_cache_write_is_advisory(monkeypatch, tmp
         lambda *args, **kwargs: (_ for _ in ()).throw(OSError("advisory cache write")),
     )
 
-    result = cached_lane._load_catalog_records(
+    raw = cached_lane._load_catalog_records(
         core=object(),
         values=values,
         policy=SimpleNamespace(version="policy-1"),
         timestamp=timestamp,
         asset_class=CandidateAssetClass.FX,
     )
-    assert result == ("fresh-record",)
+    assert raw == ("raw-record",)
+    merged = cached_lane._merge_certified_lane(
+        object(), raw, asset_class=CandidateAssetClass.FX, timestamp=timestamp
+    )
+    assert merged == ("merged-record",)
 
 
 def test_runtime_routes_only_transaction_child_through_structural_cache(monkeypatch) -> None:
@@ -148,11 +168,11 @@ def test_runtime_routes_only_transaction_child_through_structural_cache(monkeypa
     from operations import transactional_lane_comprehensive_discovery_coordinator as coordinator
 
     monkeypatch.setattr(dag_runtime, "install_comprehensive_discovery_runtime_contract", lambda: None)
-    monkeypatch.setattr(
-        __import__("operations.evidence_preparation_progress", fromlist=["install_post_public_provider_progress"]),
-        "install_post_public_provider_progress",
-        lambda: None,
+    progress = __import__(
+        "operations.evidence_preparation_progress",
+        fromlist=["install_post_public_provider_progress"],
     )
+    monkeypatch.setattr(progress, "install_post_public_provider_progress", lambda: None)
     monkeypatch.setattr(
         maintenance._supervised_discovery_runner,
         "_dag_native_supervision",
