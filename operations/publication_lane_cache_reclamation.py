@@ -1,28 +1,44 @@
-"""Reclaim completed publication-lane clean cache without spawning another interpreter.
+"""Reclaim completed publication-lane clean cache in a disposable bounded child.
 
-The stage-isolated reference boundary can afford a disposable reclaimer interpreter because
-its coordinator is deliberately lightweight. Comprehensive discovery is different: its
-parent already carries the discovery runtime working set, so starting another interpreter
-at a high raw-cgroup watermark can add pressure before useful cache advice begins.
+Production telemetry after the in-process publication reclaimer showed the opposite memory
+shape from the preceding failure: file cache fell materially, but cgroup anonymous memory
+rose sharply and the long-lived comprehensive parent failed after fewer lanes. The broad
+reclaimer allocates a bounded scan/manifest working set that should not survive the lane
+handoff merely because Python's allocator keeps heap pages attached to the parent.
 
-This module therefore invokes the same bounded data-root clean-cache reclaimer directly in
-the existing serialized publication-lane coordinator after a child has exited and its
-durable transaction state has been validated. Publication transactions are intrinsically
-serial at this call site, so the helper must not depend on the later provider-facing DAG
-worker override being present in the incoming environment. The returned ownership report
-is accepted only when the same non-authoritative contract used by the reference boundary is
-intact. Reclamation remains advisory and fail-soft and cannot certify evidence or alter any
-memory, provider, market, CIO, construction, execution, or paper-only control.
+This module therefore keeps the publication boundary introduced for comprehensive discovery
+but executes the broad data-root scan in a fresh short-lived interpreter after the completed
+lane child has exited and its durable transaction state has been validated. The coordinator
+already performs the exact-spool release first, so useful file-cache advice begins before
+this child is launched. When this child exits, all of its anonymous heap is returned to the
+OS before another serialized publication lane can begin.
+
+Publication transactions are intrinsically serial at this call site, so this wrapper does
+not depend on the later provider-facing DAG worker override. The returned ownership report
+is accepted only when the established non-authoritative contract is intact. Reclamation is
+bounded, advisory, and fail-soft and cannot certify evidence or alter resource limits,
+providers, market scope, CIO authority, construction, execution, or paper-only controls.
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from collections.abc import Mapping
+from pathlib import Path
 
 
 _EVENT = "comprehensive_discovery_publication_lane_cache_reclamation"
 _REPORT_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
+_TIMEOUT_SECONDS = 10.0
+_CODE = """
+import json
+import os
+from operations.pre_comprehensive_cache_reclamation import release_pre_comprehensive_completed_stage_file_cache
+report = release_pre_comprehensive_completed_stage_file_cache(os.environ)
+print(json.dumps(report, sort_keys=True))
+""".strip()
 
 _AUTHORITY_CONTRACT = {
     "advisory_only": True,
@@ -46,15 +62,16 @@ def _enabled(values: Mapping[str, str]) -> bool:
     return str(values.get("RENDER") or "").strip().lower() == "true"
 
 
-def _validated_report(report: object) -> dict[str, object] | None:
-    if not isinstance(report, Mapping):
+def _validated_report(raw: str | None) -> dict[str, object] | None:
+    try:
+        report = json.loads(str(raw or "").strip())
+    except (json.JSONDecodeError, TypeError, ValueError):
         return None
-    normalized = dict(report)
-    if normalized.get("schema_version") != _REPORT_SCHEMA:
+    if not isinstance(report, dict) or report.get("schema_version") != _REPORT_SCHEMA:
         return None
-    if any(normalized.get(key) is not value for key, value in _AUTHORITY_CONTRACT.items()):
+    if any(report.get(key) is not value for key, value in _AUTHORITY_CONTRACT.items()):
         return None
-    return normalized
+    return report
 
 
 def run_publication_lane_cache_reclamation(
@@ -63,35 +80,52 @@ def run_publication_lane_cache_reclamation(
     asset_class: str,
     index: int,
 ) -> dict[str, object]:
-    """Run the bounded clean-cache helper in-process at one completed lane handoff."""
+    """Run one bounded broad clean-cache pass in a disposable interpreter."""
 
     status = "skipped"
+    return_code: int | None = None
     error_type: str | None = None
     report: dict[str, object] | None = None
 
     if _enabled(values):
         try:
-            from operations.pre_comprehensive_cache_reclamation import (
-                release_pre_comprehensive_completed_stage_file_cache,
+            completed = subprocess.run(
+                (sys.executable, "-c", _CODE),
+                env=dict(values),
+                cwd=str(Path(__file__).resolve().parents[1]),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=_TIMEOUT_SECONDS,
+                check=False,
+                start_new_session=False,
             )
-
-            report = _validated_report(
-                release_pre_comprehensive_completed_stage_file_cache(values)
-            )
-            if report is None:
-                status = "invalid_report"
-                error_type = "CacheReclamationReportError"
+            return_code = int(completed.returncode)
+            if return_code != 0:
+                status = "failed"
+                error_type = "CacheReclamationProcessError"
             else:
-                status = "completed"
-        except Exception:  # noqa: BLE001 - cache hygiene is deliberately fail-soft.
-            status = "failed"
-            error_type = "CacheReclamationError"
+                report = _validated_report(completed.stdout)
+                if report is None:
+                    status = "invalid_report"
+                    error_type = "CacheReclamationReportError"
+                else:
+                    status = "completed"
+        except subprocess.TimeoutExpired:
+            status = "timed_out"
+            error_type = "CacheReclamationTimeout"
+        except OSError:
+            status = "unavailable"
+            error_type = "CacheReclamationLaunchError"
 
     payload: dict[str, object] = {
         "event": _EVENT,
         "asset_class": str(asset_class)[:96],
         "lane_index": int(index),
         "status": status,
+        "return_code": return_code,
+        "disposable_child": True,
         "error_type": error_type,
         **_AUTHORITY_CONTRACT,
     }
