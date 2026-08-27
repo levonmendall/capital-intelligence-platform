@@ -39,7 +39,7 @@ def test_reference_stage_marker_is_controller_startup_with_short_budget(monkeypa
     assert progress.stall_limit_seconds == 45.0
     assert progress.metrics == {
         "stage_completed_count": 0,
-        "stage_required_count": 6,
+        "stage_required_count": 7,
     }
 
 
