@@ -1,14 +1,14 @@
 """Transactional comprehensive lane with release-bound structural input reuse.
 
 A warm evidence retry may reuse only the already-merged structural catalog produced by
-the same software release, policy version, and bound reference manifest. Provider
-preselection, terminal screening, certification-node construction, exact-epoch market
-evidence, and durable transaction state all remain owned by the unchanged canonical
-transaction and are rebuilt for the new evidence epoch.
+the same software release, policy version, bound reference manifest, and lane scheduling
+state. Provider preselection, terminal screening, certification-node construction,
+exact-epoch market evidence, and durable transaction state all remain owned by the
+unchanged canonical transaction and are rebuilt for the new evidence epoch.
 
 This wrapper cannot certify evidence or authorize an investment action. Cache misses,
-corruption, identity changes, and option catalogs fall through to the unchanged canonical
-reconstruction and merge path.
+corruption, identity changes, schedule changes, and option catalogs fall through to the
+unchanged canonical reconstruction and merge path.
 """
 
 from __future__ import annotations
@@ -42,6 +42,12 @@ class _CachedMergedRecords(Sequence[object]):
         return iter(self.records)
 
 
+def _same_lane_schedule(core, asset_class: CandidateAssetClass, source, requested) -> bool:
+    source_active = asset_class in core._base.scheduled_discovery_lanes(source)
+    requested_active = asset_class in core._base.scheduled_discovery_lanes(requested)
+    return source_active is requested_active
+
+
 def _load_catalog_records(
     *,
     core,
@@ -59,7 +65,9 @@ def _load_catalog_records(
         policy_version=policy_version,
         requested_as_of=timestamp,
     )
-    if cached is not None:
+    if cached is not None and _same_lane_schedule(
+        core, asset_class, cached.source_as_of, timestamp
+    ):
         return _CachedMergedRecords(cached.records, cached.raw_record_count)
 
     return _ORIGINAL_LOAD_CATALOG_RECORDS(
@@ -74,8 +82,8 @@ def _load_catalog_records(
 def _merge_certified_lane(core, raw: Sequence[object], *, asset_class, timestamp):
     if isinstance(raw, _CachedMergedRecords):
         # The cache identity proves this merged structure came from the exact release,
-        # policy, and currently bound reference manifest. Do not re-merge it, but also do
-        # not reuse any publication/screening/market artifact from the source epoch.
+        # policy, currently bound reference manifest, and compatible lane schedule. Do not
+        # reuse any publication/screening/market artifact from the source epoch.
         return raw.records
 
     merged = _ORIGINAL_MERGE_CERTIFIED_LANE(
