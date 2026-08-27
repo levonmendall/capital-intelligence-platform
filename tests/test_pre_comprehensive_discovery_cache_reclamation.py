@@ -100,13 +100,18 @@ def test_comprehensive_reclamation_does_not_run_at_other_stage_boundaries(monkey
         lambda _values: events.append(("reclaim", "comprehensive_discovery")),
     )
     monkeypatch.setattr(
+        runtime,
+        "_run_completed_evidence_cache_reclamation",
+        lambda _values, **kwargs: events.append(("reclaim", str(kwargs["stage"]))),
+    )
+    monkeypatch.setattr(
         runtime.subprocess,
         "Popen",
         lambda command, **kwargs: _FailingStageProcess(command, events=events, **kwargs),
     )
 
     assert runtime.run_pipeline({}) == 9
-    assert events == [("spawn", "public_live")]
+    assert events == [("reclaim", "public_live"), ("spawn", "public_live")]
 
 
 def test_comprehensive_reclamation_timeout_is_advisory_and_cannot_certify(
