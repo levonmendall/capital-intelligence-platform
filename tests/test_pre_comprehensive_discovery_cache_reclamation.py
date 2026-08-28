@@ -54,7 +54,11 @@ class _FailingStageProcess:
     def __init__(self, command, *, events: list[tuple[str, str]], **_kwargs) -> None:
         events.append(("spawn", str(command[2])))
 
-    def wait(self) -> int:
+    def wait(self, timeout=None) -> int:
+        del timeout
+        return 9
+
+    def poll(self) -> int:
         return 9
 
 
