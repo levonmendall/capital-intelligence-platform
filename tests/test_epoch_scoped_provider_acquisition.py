@@ -100,15 +100,12 @@ def test_provider_fanout_preserves_downstream_epoch_reserve(monkeypatch) -> None
     monkeypatch.setattr(plane, "_max_age_seconds", lambda _values: 900.0)
     epoch = _epoch()
 
-    # With 800 seconds left, the fan-out is capped at five minutes and leaves at least
-    # eight minutes for serialized screening, paper evidence, and finalization.
     assert fanout._fanout_budget_seconds(
         epoch,
         {},
         now=epoch + timedelta(seconds=100),
     ) == 300.0
 
-    # Once only the downstream reserve remains, provider fan-out refuses to consume it.
     assert fanout._fanout_budget_seconds(
         epoch,
         {},
@@ -209,6 +206,7 @@ def test_lane_fanout_builds_canonical_publication_without_screening(monkeypatch,
 
 
 def test_runtime_wrapper_runs_fanout_before_canonical_builder(monkeypatch, tmp_path) -> None:
+    from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import comprehensive_discovery_input_spool as legacy
     from operations import spawn_safe_authoritative_acquisition as spawn_safe
 
@@ -222,7 +220,11 @@ def test_runtime_wrapper_runs_fanout_before_canonical_builder(monkeypatch, tmp_p
         return Path(path).with_name("manifest.json")
 
     monkeypatch.setattr(spawn_safe, "build_spool", canonical)
-    monkeypatch.setattr(legacy, "_load_request", lambda _path: {"decision_epoch": timestamp.isoformat()})
+    monkeypatch.setattr(
+        bounded,
+        "_validate_request",
+        lambda _path, _values: ({"decision_epoch": timestamp.isoformat()}, object()),
+    )
     monkeypatch.setattr(legacy, "_parse_timestamp", lambda _value, field_name: timestamp)
     monkeypatch.setattr(
         fanout,
