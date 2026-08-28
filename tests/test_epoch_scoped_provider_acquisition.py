@@ -57,14 +57,16 @@ def test_provider_fanout_serially_prewarms_structure_then_overlaps_provider_io(
             self.pid = pid
             self.structural = structural
             self.poll_count = 0
+            self.waited = False
 
         def poll(self):
             if self.structural:
                 return 0
             self.poll_count += 1
-            return None if self.poll_count == 1 else 0
+            return None if self.poll_count <= 5 else 0
 
         def wait(self, timeout=None):
+            self.waited = True
             return 0
 
         def terminate(self):
@@ -75,6 +77,10 @@ def test_provider_fanout_serially_prewarms_structure_then_overlaps_provider_io(
 
     def fake_popen(command, **kwargs):
         command = tuple(command)
+        if "--prepare-structure" in command:
+            assert not any(
+                item[2].structural and not item[2].waited for item in created
+            )
         process = FakeProcess(
             10_000 + len(created),
             structural="--prepare-structure" in command,
@@ -96,26 +102,36 @@ def test_provider_fanout_serially_prewarms_structure_then_overlaps_provider_io(
     provider = [item for item in created if "--prepare-structure" not in item[0]]
     assert len(structural) == len(lanes)
     assert len(provider) == len(lanes)
-    assert max(created.index(item) for item in structural) < min(
-        created.index(item) for item in provider
-    )
+    assert created.index(provider[0]) < created.index(structural[-1])
     assert report["structural_prewarm_attempted"] == len(lanes)
     assert report["structural_prewarm_completed"] == len(lanes)
     assert report["structural_prewarm_failed"] == 0
     assert report["structural_prewarm_maximum_parallel"] == 1
+    assert report["maximum_structural_concurrency"] == 1
     assert report["provider_attempted_lanes"] == len(lanes)
     assert report["completed"] == len(lanes)
     assert report["failed"] == 0
     assert report["maximum_parallel"] == 3
+    assert report["maximum_provider_concurrency"] == 3
     assert report["worker_limit"] == 3
+    assert report["provider_activity_overlapped_structure"] is True
+    assert report["provider_structural_overlap_events"] > 0
+    assert report["structural_lanes_skipped"] == 0
+    assert report["provider_lanes_skipped"] == 0
+    assert report["structural_elapsed_seconds"] >= 0.0
+    assert 0.0 <= report["acceleration_elapsed_seconds"] <= report["budget_seconds"]
     assert report["structural_reconstruction_parallelized"] is False
     assert report["limited_publication_promoted"] is False
     assert report["outer_process_group_inherited"] is True
     assert report["evidence_certified"] is False
     assert report["decision_authority"] is False
+    assert report["candidate_authority"] is False
+    assert report["sizing_authority"] is False
+    assert report["construction_authority"] is False
     assert report["execution_authority"] is False
     assert report["paper_only"] is True
     assert report["real_money_authorized"] is False
+    assert report["credential_safe"] is True
     assert all(item[1]["start_new_session"] is False for item in created)
 
 
@@ -136,6 +152,138 @@ def test_provider_fanout_preserves_downstream_epoch_reserve(monkeypatch) -> None
         {},
         now=epoch + timedelta(seconds=500),
     ) == 0.0
+
+    assert fanout._MAX_FANOUT_SECONDS == 300.0
+    assert fanout._DOWNSTREAM_RESERVE_SECONDS == 480.0
+    assert plane._DEFAULT_MAX_AGE_SECONDS == 900.0
+
+
+def test_structural_and_provider_failures_remain_advisory(monkeypatch, tmp_path) -> None:
+    lanes = tuple(
+        item
+        for item in CandidateAssetClass
+        if item not in {CandidateAssetClass.OTHER, CandidateAssetClass.OPTION}
+    )[:3]
+    monkeypatch.setattr(fanout, "_scheduled_lane_items", lambda _epoch: tuple(enumerate(lanes)))
+    monkeypatch.setattr(fanout, "_fanout_budget_seconds", lambda *_args, **_kwargs: 30.0)
+    monkeypatch.setattr(fanout.time, "sleep", lambda _seconds: None)
+
+    class FakeProcess:
+        def __init__(self, *, return_code: int) -> None:
+            self.return_code = return_code
+
+        def poll(self):
+            return self.return_code
+
+        def wait(self, timeout=None):
+            return self.return_code
+
+        def terminate(self):
+            return None
+
+        def kill(self):
+            return None
+
+    def fake_popen(command, **_kwargs):
+        command = tuple(command)
+        index = int(command[command.index("--index") + 1])
+        structural = "--prepare-structure" in command
+        if structural and index == 0:
+            return FakeProcess(return_code=2)
+        if not structural and index == 1:
+            return FakeProcess(return_code=2)
+        return FakeProcess(return_code=0)
+
+    report = fanout.run_provider_acquisition_fanout(
+        tmp_path / "request.json",
+        values={"RENDER": "true"},
+        decision_epoch=_epoch(),
+        popen=fake_popen,
+    )
+
+    assert report["structural_lanes_attempted"] == 3
+    assert report["structural_lanes_completed"] == 2
+    assert report["structural_prewarm_failed"] == 1
+    assert report["provider_lanes_attempted"] == 2
+    assert report["provider_lanes_completed"] == 1
+    assert report["provider_lanes_skipped"] == 1
+    assert report["failed"] == 1
+    assert report["advisory_only"] is True
+    assert report["evidence_certified"] is False
+
+
+def test_shared_acceleration_deadline_stops_structural_and_provider_children(
+    monkeypatch, tmp_path
+) -> None:
+    lanes = tuple(
+        item
+        for item in CandidateAssetClass
+        if item not in {CandidateAssetClass.OTHER, CandidateAssetClass.OPTION}
+    )[:3]
+    monkeypatch.setattr(fanout, "_scheduled_lane_items", lambda _epoch: tuple(enumerate(lanes)))
+    monkeypatch.setattr(fanout, "_fanout_budget_seconds", lambda *_args, **_kwargs: 5.0)
+    monkeypatch.setattr(fanout.time, "sleep", lambda _seconds: None)
+
+    clock = SimpleNamespace(now=0.0)
+    monkeypatch.setattr(fanout.time, "monotonic", lambda: clock.now)
+    created = []
+
+    class FakeProcess:
+        def __init__(self, *, structural: bool, index: int) -> None:
+            self.structural = structural
+            self.index = index
+            self.done = False
+            self.terminated = False
+
+        def poll(self):
+            return 0 if self.done else None
+
+        def wait(self, timeout=None):
+            if self.terminated:
+                self.done = True
+                return 0
+            if self.structural and self.index == 0:
+                clock.now += 1.0
+                self.done = True
+                return 0
+            if self.structural:
+                clock.now += float(timeout)
+                raise fanout.subprocess.TimeoutExpired("structural", timeout)
+            return 0
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.terminated = True
+
+    def fake_popen(command, **_kwargs):
+        command = tuple(command)
+        process = FakeProcess(
+            structural="--prepare-structure" in command,
+            index=int(command[command.index("--index") + 1]),
+        )
+        created.append(process)
+        return process
+
+    report = fanout.run_provider_acquisition_fanout(
+        tmp_path / "request.json",
+        values={"RENDER": "true"},
+        decision_epoch=_epoch(),
+        popen=fake_popen,
+    )
+
+    assert clock.now == 5.0
+    assert report["budget_seconds"] == 5.0
+    assert report["acceleration_elapsed_seconds"] == 5.0
+    assert report["structural_lanes_attempted"] == 2
+    assert report["structural_lanes_completed"] == 1
+    assert report["structural_lanes_skipped"] == 1
+    assert report["structural_prewarm_timed_out"] == 1
+    assert report["provider_lanes_attempted"] == 1
+    assert report["provider_lanes_skipped"] == 2
+    assert report["timed_out"] == 1
+    assert all(process.done or process.terminated for process in created)
 
 
 def test_cold_release_structural_prewarm_uses_canonical_merge_without_provider_or_screening(
