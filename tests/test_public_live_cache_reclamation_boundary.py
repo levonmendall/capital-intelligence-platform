@@ -18,7 +18,8 @@ class _FailingPublicLiveProcess:
     def __init__(self, command, *, events: list[tuple[object, ...]], **_kwargs) -> None:
         events.append(("spawn", str(command[2])))
 
-    def wait(self) -> int:
+    def wait(self, timeout=None) -> int:
+        del timeout
         return 9
 
 
