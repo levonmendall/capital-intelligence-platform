@@ -25,7 +25,9 @@ inheriting degraded acceleration output.
 
 The fan-out has no evidence, candidate, sizing, construction, execution, CIO, or real-money
 authority. A child failure, timeout, partial file, cache miss, or unsupported environment
-falls back to the unchanged serialized transaction. A fixed portion of the existing
+falls back to the unchanged serialized transaction. All fan-out children remain in the
+outer evidence stage's process group, so the existing resource/freshness supervisor can
+still terminate the complete active tree fail-closed. A fixed portion of the existing
 evidence epoch is always reserved for serialized screening, paper evidence, and
 provider-free finalization; this module never extends or resets the freshness deadline.
 """
@@ -35,7 +37,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -113,34 +114,24 @@ def _scheduled_lane_items(
     )
 
 
-def _signal_process_tree(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
-    if process.poll() is not None:
-        return
-    if os.name == "posix":
-        try:
-            os.killpg(process.pid, sig)
-            return
-        except (OSError, ProcessLookupError):
-            pass
-    try:
-        if sig == signal.SIGKILL:
-            process.kill()
-        else:
-            process.terminate()
-    except OSError:
-        pass
-
-
 def _terminate_and_reap(process: subprocess.Popen[bytes]) -> None:
+    """Stop one advisory child without escaping the outer process-group supervisor."""
+
     if process.poll() is not None:
         return
-    _signal_process_tree(process, signal.SIGTERM)
+    try:
+        process.terminate()
+    except OSError:
+        return
     try:
         process.wait(timeout=_TERMINATION_GRACE_SECONDS)
         return
     except (OSError, subprocess.TimeoutExpired):
         pass
-    _signal_process_tree(process, signal.SIGKILL)
+    try:
+        process.kill()
+    except OSError:
+        return
     try:
         process.wait(timeout=_TERMINATION_GRACE_SECONDS)
     except (OSError, subprocess.TimeoutExpired):
@@ -223,7 +214,9 @@ def run_provider_acquisition_fanout(
                         stdin=subprocess.DEVNULL,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
-                        start_new_session=(os.name == "posix"),
+                        # Keep every fan-out child subordinate to the existing outer stage
+                        # resource/freshness process-group kill boundary.
+                        start_new_session=False,
                     )
                 except (OSError, ValueError):
                     failed += 1
@@ -269,6 +262,7 @@ def run_provider_acquisition_fanout(
         "budget_seconds": round(budget, 3),
         "structural_reconstruction_parallelized": False,
         "limited_publication_promoted": False,
+        "outer_process_group_inherited": True,
         "advisory_only": True,
         "evidence_certified": False,
         "decision_authority": False,
@@ -380,11 +374,19 @@ def prepare_lane_provider_publication(
             raise RuntimeError(
                 f"{asset_class.value} provider fanout publication count changed"
             )
-        if Path(result.path) != staging_path or not staging_path.is_file() or staging_path.is_symlink():
+        if (
+            Path(result.path) != staging_path
+            or not staging_path.is_file()
+            or staging_path.is_symlink()
+        ):
             raise RuntimeError(
                 f"{asset_class.value} provider fanout did not publish the expected staging file"
             )
-        limitations = tuple(str(item) for item in getattr(result, "limitations", ()) if str(item))
+        limitations = tuple(
+            str(item)
+            for item in getattr(result, "limitations", ())
+            if str(item)
+        )
         if limitations:
             raise RuntimeError(
                 f"{asset_class.value} provider fanout produced limited evidence"
