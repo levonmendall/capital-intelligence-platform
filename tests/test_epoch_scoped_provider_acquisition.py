@@ -89,6 +89,7 @@ def test_provider_fanout_is_bounded_and_overlaps(monkeypatch, tmp_path) -> None:
     assert report["maximum_parallel"] == 3
     assert report["worker_limit"] == 3
     assert report["structural_reconstruction_parallelized"] is False
+    assert report["limited_publication_promoted"] is False
     assert report["evidence_certified"] is False
     assert report["decision_authority"] is False
     assert report["execution_authority"] is False
@@ -116,11 +117,8 @@ def test_provider_fanout_preserves_downstream_epoch_reserve(monkeypatch) -> None
     ) == 0.0
 
 
-def test_lane_fanout_builds_canonical_publication_without_screening_or_reconstruction(
-    monkeypatch, tmp_path
-) -> None:
+def _configure_cached_lane(monkeypatch, tmp_path):
     from operations import bounded_comprehensive_discovery_spool as bounded
-    from operations import bounded_provider_preselection_publication as publication
     from operations import comprehensive_discovery_input_spool as legacy
     from operations import comprehensive_discovery_structural_cache as structural
     from operations import comprehensive_market_discovery as facade
@@ -194,7 +192,17 @@ def test_lane_fanout_builds_canonical_publication_without_screening_or_reconstru
         "_publication_path",
         lambda _directory, *, asset_class, index: publication_path,
     )
+    return asset_class, request_path, timestamp, merged, events, publication_path
 
+
+def test_lane_fanout_builds_and_promotes_clean_publication_without_screening_or_reconstruction(
+    monkeypatch, tmp_path
+) -> None:
+    from operations import bounded_provider_preselection_publication as publication
+
+    asset_class, request_path, timestamp, merged, events, publication_path = _configure_cached_lane(
+        monkeypatch, tmp_path
+    )
     observed = {}
 
     def fake_publication(catalogs, *, as_of, policy, market_probe):
@@ -202,8 +210,15 @@ def test_lane_fanout_builds_canonical_publication_without_screening_or_reconstru
         observed["as_of"] = as_of
         observed["policy"] = policy
         observed["market_probe"] = market_probe
-        events.append(("publication",))
-        return SimpleNamespace(catalog_count=2, reused=False)
+        stage_path = Path(policy.provider_preselection_path)
+        stage_path.write_text("{}", encoding="utf-8")
+        events.append(("publication", stage_path))
+        return SimpleNamespace(
+            path=stage_path,
+            catalog_count=2,
+            reused=False,
+            limitations=(),
+        )
 
     monkeypatch.setattr(publication, "ensure_provider_preselection_publication", fake_publication)
 
@@ -214,17 +229,53 @@ def test_lane_fanout_builds_canonical_publication_without_screening_or_reconstru
         index=2,
     )
 
+    staging_path = publication_path.with_name(publication_path.name + ".fanout")
     assert result["publication_ready"] is True
     assert result["record_count"] == 2
     assert result["structural_reconstruction_parallelized"] is False
+    assert result["limited_publication_promoted"] is False
     assert observed["as_of"] == timestamp
-    assert observed["policy"].provider_preselection_path == str(publication_path)
+    assert observed["policy"].provider_preselection_path == str(staging_path)
     assert observed["catalogs"] == {asset_class: merged}
+    assert publication_path.is_file()
+    assert not staging_path.exists()
     assert events == [
         ("bind-fingerprint",),
         ("load-cache", asset_class, "policy-v1", timestamp),
-        ("publication",),
+        ("publication", staging_path),
     ]
+
+
+def test_lane_fanout_discards_limited_publication_for_serial_retry(monkeypatch, tmp_path) -> None:
+    from operations import bounded_provider_preselection_publication as publication
+
+    asset_class, request_path, _timestamp, _merged, _events, publication_path = _configure_cached_lane(
+        monkeypatch, tmp_path
+    )
+
+    def limited_publication(catalogs, *, as_of, policy, market_probe):
+        stage_path = Path(policy.provider_preselection_path)
+        stage_path.write_text("limited", encoding="utf-8")
+        return SimpleNamespace(
+            path=stage_path,
+            catalog_count=2,
+            reused=False,
+            limitations=("provider throttled",),
+        )
+
+    monkeypatch.setattr(publication, "ensure_provider_preselection_publication", limited_publication)
+
+    with pytest.raises(RuntimeError, match="produced limited evidence"):
+        fanout.prepare_lane_provider_publication(
+            request_path,
+            values={"RENDER": "true"},
+            asset_class_value=asset_class.value,
+            index=2,
+        )
+
+    staging_path = publication_path.with_name(publication_path.name + ".fanout")
+    assert not publication_path.exists()
+    assert not staging_path.exists()
 
 
 def test_lane_fanout_cache_miss_falls_back_without_reconstruction(monkeypatch, tmp_path) -> None:
