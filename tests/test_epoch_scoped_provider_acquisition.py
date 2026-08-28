@@ -90,12 +90,13 @@ def test_provider_fanout_is_bounded_and_overlaps(monkeypatch, tmp_path) -> None:
     assert report["worker_limit"] == 3
     assert report["structural_reconstruction_parallelized"] is False
     assert report["limited_publication_promoted"] is False
+    assert report["outer_process_group_inherited"] is True
     assert report["evidence_certified"] is False
     assert report["decision_authority"] is False
     assert report["execution_authority"] is False
     assert report["paper_only"] is True
     assert report["real_money_authorized"] is False
-    assert all(item[1]["start_new_session"] is (fanout.os.name == "posix") for item in created)
+    assert all(item[1]["start_new_session"] is False for item in created)
 
 
 def test_provider_fanout_preserves_downstream_epoch_reserve(monkeypatch) -> None:
