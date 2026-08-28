@@ -180,6 +180,9 @@ def main() -> int:
     from operations.lane_local_watchdog_progress import (
         install_lane_local_watchdog_progress,
     )
+    from operations.transactional_screening_watchdog_progress import (
+        install_transactional_screening_watchdog_progress,
+    )
     from operations.release_prequalification_parent_watchdog import (
         install_release_prequalification_parent_watchdog,
     )
@@ -192,6 +195,12 @@ def main() -> int:
     # its subprocess proxy is installed. Stall limits remain unchanged and retries of the
     # same unit cannot manufacture liveness.
     install_lane_local_watchdog_progress()
+
+    # Transactional lanes now perform publication and screening inside the same finite
+    # child. Accept the child's screening marker only after the same lane's publication
+    # checkpoint is durable, so legitimate screening advances parent liveness without
+    # weakening or extending the existing fail-closed stall budget.
+    install_transactional_screening_watchdog_progress()
     install_release_prequalification_parent_watchdog(memory_safe)
 
     # Mark only the evidence command passing through the installed durable-progress parent
