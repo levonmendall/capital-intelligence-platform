@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from cio import CandidateAssetClass
 from operations import epoch_scoped_provider_acquisition as fanout
 
@@ -36,7 +38,7 @@ def test_provider_fanout_is_bounded_and_overlaps(monkeypatch, tmp_path) -> None:
     lanes = tuple(
         item
         for item in CandidateAssetClass
-        if item is not CandidateAssetClass.OTHER
+        if item not in {CandidateAssetClass.OTHER, CandidateAssetClass.OPTION}
     )[:5]
     monkeypatch.setattr(
         fanout,
@@ -81,11 +83,12 @@ def test_provider_fanout_is_bounded_and_overlaps(monkeypatch, tmp_path) -> None:
         popen=fake_popen,
     )
 
-    assert len(created) == 5
-    assert report["completed"] == 5
+    assert len(created) == len(lanes)
+    assert report["completed"] == len(lanes)
     assert report["failed"] == 0
     assert report["maximum_parallel"] == 3
     assert report["worker_limit"] == 3
+    assert report["structural_reconstruction_parallelized"] is False
     assert report["evidence_certified"] is False
     assert report["decision_authority"] is False
     assert report["execution_authority"] is False
@@ -113,11 +116,13 @@ def test_provider_fanout_preserves_downstream_epoch_reserve(monkeypatch) -> None
     ) == 0.0
 
 
-def test_lane_fanout_builds_canonical_publication_without_screening(monkeypatch, tmp_path) -> None:
+def test_lane_fanout_builds_canonical_publication_without_screening_or_reconstruction(
+    monkeypatch, tmp_path
+) -> None:
     from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import bounded_provider_preselection_publication as publication
-    from operations import cached_transactional_comprehensive_discovery_lane as cached
     from operations import comprehensive_discovery_input_spool as legacy
+    from operations import comprehensive_discovery_structural_cache as structural
     from operations import comprehensive_market_discovery as facade
     from operations import transactional_comprehensive_discovery_lane as transaction
 
@@ -132,23 +137,47 @@ def test_lane_fanout_builds_canonical_publication_without_screening(monkeypatch,
     @dataclass(frozen=True)
     class Policy:
         provider_preselection_path: str | None = None
+        version: str = "policy-v1"
 
     policy = Policy()
     timestamp = _epoch()
+    source_as_of = timestamp - timedelta(minutes=1)
     merged = (SimpleNamespace(symbol="A"), SimpleNamespace(symbol="B"))
     events: list[tuple[object, ...]] = []
 
-    monkeypatch.setattr(bounded, "_validate_request", lambda _path, _values: ({"decision_epoch": timestamp.isoformat()}, policy))
+    monkeypatch.setattr(
+        bounded,
+        "_validate_request",
+        lambda _path, _values: ({"decision_epoch": timestamp.isoformat()}, policy),
+    )
     monkeypatch.setattr(legacy, "_parse_timestamp", lambda _value, field_name: timestamp)
-    monkeypatch.setattr(cached, "install_cached_structural_lane_loader", lambda: events.append(("install-cache",)))
+
+    def bind_fingerprint(values):
+        values[structural._REFERENCE_STRUCTURAL_FINGERPRINT_ENV] = "fingerprint-1"
+        events.append(("bind-fingerprint",))
+        return "fingerprint-1"
+
+    monkeypatch.setattr(structural, "bind_reference_structural_fingerprint", bind_fingerprint)
+    monkeypatch.setattr(
+        structural,
+        "load_structural_catalog",
+        lambda values, *, asset_class, policy_version, requested_as_of: (
+            events.append(("load-cache", asset_class, policy_version, requested_as_of))
+            or SimpleNamespace(records=merged, raw_record_count=2, source_as_of=source_as_of)
+        ),
+    )
 
     base = SimpleNamespace(
         _DEFAULT_REQUIRED_DISCOVERY_LANES=frozenset({asset_class}),
         _lane_is_scheduled=lambda lane, as_of: lane is asset_class and as_of == timestamp,
+        scheduled_discovery_lanes=lambda as_of: frozenset({asset_class}),
     )
 
     def forbidden_screening(*args, **kwargs):  # pragma: no cover - assertion helper
         raise AssertionError("provider fan-out must never perform terminal screening")
+
+    def forbidden_reconstruction(*args, **kwargs):  # pragma: no cover - assertion helper
+        raise AssertionError("provider fan-out must never reconstruct structural catalogs")
 
     core = SimpleNamespace(
         _base=base,
@@ -156,16 +185,9 @@ def test_lane_fanout_builds_canonical_publication_without_screening(monkeypatch,
         build_bounded_terminal_preselection=forbidden_screening,
     )
     monkeypatch.setattr(facade, "_core", core)
-    monkeypatch.setattr(
-        transaction,
-        "_load_catalog_records",
-        lambda **kwargs: events.append(("load", kwargs["asset_class"], kwargs["timestamp"])) or (object(),),
-    )
-    monkeypatch.setattr(
-        transaction._bounded_lane,
-        "_merge_certified_lane",
-        lambda _core, _raw, *, asset_class, timestamp: events.append(("merge", asset_class, timestamp)) or merged,
-    )
+    monkeypatch.setattr(transaction, "_load_catalog_records", forbidden_reconstruction)
+    monkeypatch.setattr(transaction._bounded_lane, "_merge_certified_lane", forbidden_reconstruction)
+
     publication_path = tmp_path / "provider-preselection.json"
     monkeypatch.setattr(
         transaction,
@@ -194,15 +216,65 @@ def test_lane_fanout_builds_canonical_publication_without_screening(monkeypatch,
 
     assert result["publication_ready"] is True
     assert result["record_count"] == 2
+    assert result["structural_reconstruction_parallelized"] is False
     assert observed["as_of"] == timestamp
     assert observed["policy"].provider_preselection_path == str(publication_path)
     assert observed["catalogs"] == {asset_class: merged}
     assert events == [
-        ("install-cache",),
-        ("load", asset_class, timestamp),
-        ("merge", asset_class, timestamp),
+        ("bind-fingerprint",),
+        ("load-cache", asset_class, "policy-v1", timestamp),
         ("publication",),
     ]
+
+
+def test_lane_fanout_cache_miss_falls_back_without_reconstruction(monkeypatch, tmp_path) -> None:
+    from operations import bounded_comprehensive_discovery_spool as bounded
+    from operations import comprehensive_discovery_input_spool as legacy
+    from operations import comprehensive_discovery_structural_cache as structural
+    from operations import comprehensive_market_discovery as facade
+    from operations import transactional_comprehensive_discovery_lane as transaction
+
+    asset_class = next(
+        item
+        for item in CandidateAssetClass
+        if item not in {CandidateAssetClass.OTHER, CandidateAssetClass.OPTION}
+    )
+    timestamp = _epoch()
+    request_path = tmp_path / "request.json"
+    request_path.write_text("{}", encoding="utf-8")
+    policy = SimpleNamespace(version="policy-v1")
+
+    monkeypatch.setattr(
+        bounded,
+        "_validate_request",
+        lambda _path, _values: ({"decision_epoch": timestamp.isoformat()}, policy),
+    )
+    monkeypatch.setattr(legacy, "_parse_timestamp", lambda _value, field_name: timestamp)
+    monkeypatch.setattr(
+        structural,
+        "bind_reference_structural_fingerprint",
+        lambda values: values.__setitem__(structural._REFERENCE_STRUCTURAL_FINGERPRINT_ENV, "fp") or "fp",
+    )
+    monkeypatch.setattr(structural, "load_structural_catalog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        facade,
+        "_core",
+        SimpleNamespace(_base=SimpleNamespace(scheduled_discovery_lanes=lambda _as_of: frozenset({asset_class}))),
+    )
+
+    def forbidden_reconstruction(*args, **kwargs):  # pragma: no cover - assertion helper
+        raise AssertionError("cache miss must fall back to later serialized reconstruction")
+
+    monkeypatch.setattr(transaction, "_load_catalog_records", forbidden_reconstruction)
+    monkeypatch.setattr(transaction._bounded_lane, "_merge_certified_lane", forbidden_reconstruction)
+
+    with pytest.raises(RuntimeError, match="requires prewarmed structural cache"):
+        fanout.prepare_lane_provider_publication(
+            request_path,
+            values={"RENDER": "true"},
+            asset_class_value=asset_class.value,
+            index=0,
+        )
 
 
 def test_runtime_wrapper_runs_fanout_before_canonical_builder(monkeypatch, tmp_path) -> None:
@@ -229,7 +301,10 @@ def test_runtime_wrapper_runs_fanout_before_canonical_builder(monkeypatch, tmp_p
     monkeypatch.setattr(
         fanout,
         "run_provider_acquisition_fanout",
-        lambda path, *, values, decision_epoch: events.append(("fanout", Path(path), decision_epoch, dict(values))) or {},
+        lambda path, *, values, decision_epoch: events.append(
+            ("fanout", Path(path), decision_epoch, dict(values))
+        )
+        or {},
     )
 
     fanout.install_epoch_scoped_provider_acquisition()
