@@ -6,13 +6,14 @@ advances to the next lane. That is ideal for memory isolation but it serializes 
 network latency across every scheduled market and can consume the fixed evidence-freshness
 epoch before screening can finish.
 
-This module separates only the provider-I/O resource boundary. On Render it first prepares
-release/reference-bound structural catalogs serially in finite child interpreters, then
-uses a small bounded fan-out to pre-build canonical provider-preselection publications from
-those verified structural caches. The canonical transaction still runs one lane at a time
-and must validate/reuse the structural cache and publication before terminal screening,
-certification-node creation, market-evidence qualification, and durable transaction
-completion.
+This module separates only the provider-I/O resource boundary. On Render it prepares
+release/reference-bound structural catalogs serially in finite child interpreters and hands
+each verified catalog directly to a small bounded fan-out. Provider I/O for an early ready
+lane may therefore run while the next single structural child prepares, without ever
+running two structural reconstructions together. The canonical transaction still runs one
+lane at a time and must validate/reuse the structural cache and publication before terminal
+screening, certification-node creation, market-evidence qualification, and durable
+transaction completion.
 
 Structural preparation is deliberately serial and provider-free. It reuses the exact
 canonical governed catalog loader and certified merge seam, persists only the existing
@@ -182,76 +183,6 @@ def _publication_command(
     )
 
 
-def _prepare_structural_caches_serially(
-    request_path: Path,
-    *,
-    values: Mapping[str, str],
-    lane_items: Sequence[tuple[int, CandidateAssetClass]],
-    deadline: float,
-    popen: Callable[..., subprocess.Popen[bytes]],
-) -> tuple[tuple[tuple[int, CandidateAssetClass], ...], Mapping[str, int]]:
-    """Prepare cacheable structure one child at a time inside the shared acceleration budget."""
-
-    ready: list[tuple[int, CandidateAssetClass]] = []
-    completed = 0
-    failed = 0
-    timed_out = 0
-    attempted = 0
-
-    for index, asset_class in lane_items:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0.0:
-            break
-        attempted += 1
-        try:
-            process = popen(
-                _structural_command(
-                    request_path=request_path,
-                    asset_class=asset_class,
-                    index=index,
-                ),
-                cwd=str(Path(__file__).resolve().parents[1]),
-                env=dict(values),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                # Structural reconstruction is intentionally serial. Keep the child in
-                # the outer evidence process group so the freshness/resource supervisor
-                # can still terminate the entire active tree fail-closed.
-                start_new_session=False,
-            )
-        except (OSError, ValueError):
-            failed += 1
-            continue
-
-        try:
-            return_code = int(process.wait(timeout=max(0.001, remaining)))
-        except subprocess.TimeoutExpired:
-            timed_out += 1
-            failed += 1
-            _terminate_and_reap(process)
-            break
-        except OSError:
-            failed += 1
-            _terminate_and_reap(process)
-            continue
-
-        if return_code == 0:
-            completed += 1
-            ready.append((index, asset_class))
-        else:
-            failed += 1
-
-    return tuple(ready), {
-        "attempted": attempted,
-        "completed": completed,
-        "failed": failed,
-        "timed_out": timed_out,
-        "skipped_budget": max(0, len(lane_items) - attempted),
-        "maximum_parallel": 1 if attempted else 0,
-    }
-
-
 def run_provider_acquisition_fanout(
     request_path: str | Path,
     *,
@@ -259,7 +190,7 @@ def run_provider_acquisition_fanout(
     decision_epoch: datetime,
     popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
 ) -> Mapping[str, object]:
-    """Serially warm structure, then pre-acquire provider publications inside one epoch budget."""
+    """Pipeline provider I/O behind strictly serial structure inside one epoch budget."""
 
     resolved = dict(values)
     if not _render_enabled(resolved):
@@ -284,71 +215,148 @@ def run_provider_acquisition_fanout(
             "failed": 0,
         }
 
-    deadline = time.monotonic() + budget
-    structurally_ready, structural = _prepare_structural_caches_serially(
-        path,
-        values=resolved,
-        lane_items=lane_items,
-        deadline=deadline,
-        popen=popen,
-    )
-
+    acceleration_started = time.monotonic()
+    deadline = acceleration_started + budget
     workers = _worker_count(resolved)
-    pending = list(structurally_ready)
+    pending: list[tuple[int, CandidateAssetClass]] = []
     active: dict[int, tuple[subprocess.Popen[bytes], CandidateAssetClass]] = {}
-    completed = 0
-    failed = 0
-    timed_out = 0
+    structural_attempted = 0
+    structural_completed = 0
+    structural_failed = 0
+    structural_timed_out = 0
+    structural_elapsed_seconds = 0.0
+    structural_active = 0
+    maximum_structural_concurrency = 0
     provider_attempted = 0
-    maximum_parallel = 0
+    provider_completed = 0
+    provider_failed = 0
+    provider_timed_out = 0
+    maximum_provider_concurrency = 0
+    provider_activity_overlapped_structure = False
+    provider_structural_overlap_events = 0
+
+    def reap_provider_children() -> bool:
+        nonlocal provider_completed, provider_failed
+        progressed = False
+        for index, (process, _asset_class) in tuple(active.items()):
+            return_code = process.poll()
+            if return_code is None:
+                continue
+            active.pop(index, None)
+            progressed = True
+            if int(return_code) == 0:
+                provider_completed += 1
+            else:
+                provider_failed += 1
+        return progressed
+
+    def launch_ready_provider_children() -> None:
+        nonlocal provider_attempted, provider_failed, maximum_provider_concurrency
+        while pending and len(active) < workers and time.monotonic() < deadline:
+            index, asset_class = pending.pop(0)
+            provider_attempted += 1
+            try:
+                process = popen(
+                    _publication_command(
+                        request_path=path,
+                        asset_class=asset_class,
+                        index=index,
+                    ),
+                    cwd=str(Path(__file__).resolve().parents[1]),
+                    env=resolved,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    # Keep every fan-out child subordinate to the existing outer stage
+                    # resource/freshness process-group kill boundary.
+                    start_new_session=False,
+                )
+            except (OSError, ValueError):
+                provider_failed += 1
+                continue
+            active[index] = (process, asset_class)
+            maximum_provider_concurrency = max(maximum_provider_concurrency, len(active))
 
     try:
-        while pending or active:
-            while pending and len(active) < workers and time.monotonic() < deadline:
-                index, asset_class = pending.pop(0)
-                provider_attempted += 1
-                try:
-                    process = popen(
-                        _publication_command(
-                            request_path=path,
-                            asset_class=asset_class,
-                            index=index,
-                        ),
-                        cwd=str(Path(__file__).resolve().parents[1]),
-                        env=resolved,
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        # Keep every fan-out child subordinate to the existing outer stage
-                        # resource/freshness process-group kill boundary.
-                        start_new_session=False,
-                    )
-                except (OSError, ValueError):
-                    failed += 1
-                    continue
-                active[index] = (process, asset_class)
-                maximum_parallel = max(maximum_parallel, len(active))
-
-            progressed = False
-            for index, (process, _asset_class) in tuple(active.items()):
-                return_code = process.poll()
-                if return_code is None:
-                    continue
-                active.pop(index, None)
-                progressed = True
-                if int(return_code) == 0:
-                    completed += 1
-                else:
-                    failed += 1
-
-            if not pending and not active:
+        # This loop is the structural semaphore: it waits for the one current structural
+        # child before it can create the next. Provider children are launched immediately
+        # after each verified structural result and remain free to run during that wait.
+        for index, asset_class in lane_items:
+            reap_provider_children()
+            launch_ready_provider_children()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
                 break
+
+            structural_attempted += 1
+            structural_started = time.monotonic()
+            try:
+                process = popen(
+                    _structural_command(
+                        request_path=path,
+                        asset_class=asset_class,
+                        index=index,
+                    ),
+                    cwd=str(Path(__file__).resolve().parents[1]),
+                    env=dict(resolved),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    # Structural reconstruction is intentionally serial. Keep the child
+                    # in the outer evidence process group so freshness/resource
+                    # supervision can still terminate the complete tree fail-closed.
+                    start_new_session=False,
+                )
+            except (OSError, ValueError):
+                structural_failed += 1
+                structural_elapsed_seconds += max(0.0, time.monotonic() - structural_started)
+                continue
+
+            structural_active += 1
+            maximum_structural_concurrency = max(
+                maximum_structural_concurrency, structural_active
+            )
+            if active:
+                provider_activity_overlapped_structure = True
+                provider_structural_overlap_events += 1
+
+            try:
+                return_code = int(process.wait(timeout=max(0.001, remaining)))
+            except subprocess.TimeoutExpired:
+                structural_timed_out += 1
+                structural_failed += 1
+                _terminate_and_reap(process)
+                structural_active -= 1
+                structural_elapsed_seconds += max(0.0, time.monotonic() - structural_started)
+                break
+            except OSError:
+                structural_failed += 1
+                _terminate_and_reap(process)
+                structural_active -= 1
+                structural_elapsed_seconds += max(0.0, time.monotonic() - structural_started)
+                continue
+
+            structural_active -= 1
+            structural_elapsed_seconds += max(0.0, time.monotonic() - structural_started)
+            if return_code == 0:
+                structural_completed += 1
+                pending.append((index, asset_class))
+                reap_provider_children()
+                launch_ready_provider_children()
+            else:
+                structural_failed += 1
+
+        while pending or active:
             if time.monotonic() >= deadline:
-                timed_out += len(active)
-                failed += len(active)
+                provider_timed_out += len(active)
+                provider_failed += len(active)
                 for process, _asset_class in tuple(active.values()):
                     _terminate_and_reap(process)
                 active.clear()
+                break
+            progressed = reap_provider_children()
+            launch_ready_provider_children()
+            if not pending and not active:
                 break
             if not progressed:
                 time.sleep(0.02)
@@ -356,22 +364,40 @@ def run_provider_acquisition_fanout(
         for process, _asset_class in tuple(active.values()):
             _terminate_and_reap(process)
 
+    acceleration_elapsed_seconds = max(0.0, time.monotonic() - acceleration_started)
+    structural_skipped = max(0, len(lane_items) - structural_attempted)
+    provider_skipped = max(0, len(lane_items) - provider_attempted)
+
     report = {
         "attempted": True,
         "worker_limit": workers,
-        "maximum_parallel": maximum_parallel,
+        "maximum_parallel": maximum_provider_concurrency,
         "scheduled_lanes": len(lane_items),
         "provider_attempted_lanes": provider_attempted,
-        "provider_skipped_budget": max(0, len(structurally_ready) - provider_attempted),
-        "completed": completed,
-        "failed": failed,
-        "timed_out": timed_out,
-        "structural_prewarm_attempted": int(structural["attempted"]),
-        "structural_prewarm_completed": int(structural["completed"]),
-        "structural_prewarm_failed": int(structural["failed"]),
-        "structural_prewarm_timed_out": int(structural["timed_out"]),
-        "structural_prewarm_skipped_budget": int(structural["skipped_budget"]),
-        "structural_prewarm_maximum_parallel": int(structural["maximum_parallel"]),
+        "provider_completed_lanes": provider_completed,
+        "provider_skipped_lanes": provider_skipped,
+        "provider_skipped_budget": max(0, structural_completed - provider_attempted),
+        "completed": provider_completed,
+        "failed": provider_failed,
+        "timed_out": provider_timed_out,
+        "structural_prewarm_attempted": structural_attempted,
+        "structural_prewarm_completed": structural_completed,
+        "structural_prewarm_failed": structural_failed,
+        "structural_prewarm_timed_out": structural_timed_out,
+        "structural_prewarm_skipped_budget": structural_skipped,
+        "structural_prewarm_maximum_parallel": maximum_structural_concurrency,
+        "structural_lanes_attempted": structural_attempted,
+        "structural_lanes_completed": structural_completed,
+        "structural_lanes_skipped": structural_skipped,
+        "provider_lanes_attempted": provider_attempted,
+        "provider_lanes_completed": provider_completed,
+        "provider_lanes_skipped": provider_skipped,
+        "structural_elapsed_seconds": round(structural_elapsed_seconds, 3),
+        "provider_activity_overlapped_structure": provider_activity_overlapped_structure,
+        "provider_structural_overlap_events": provider_structural_overlap_events,
+        "maximum_structural_concurrency": maximum_structural_concurrency,
+        "maximum_provider_concurrency": maximum_provider_concurrency,
+        "acceleration_elapsed_seconds": round(acceleration_elapsed_seconds, 3),
         "budget_seconds": round(budget, 3),
         "structural_reconstruction_parallelized": False,
         "limited_publication_promoted": False,
