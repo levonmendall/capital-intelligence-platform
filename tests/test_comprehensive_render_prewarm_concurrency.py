@@ -3,7 +3,7 @@ from __future__ import annotations
 import run_stage_isolated_evidence_stage as runtime
 
 
-def test_render_comprehensive_prewarm_uses_two_bounded_workers(monkeypatch) -> None:
+def test_render_comprehensive_prewarm_uses_three_bounded_workers(monkeypatch) -> None:
     monkeypatch.delenv(runtime._DAG_WORKERS_ENV, raising=False)
     values = {
         "RENDER": "true",
@@ -12,9 +12,9 @@ def test_render_comprehensive_prewarm_uses_two_bounded_workers(monkeypatch) -> N
 
     runtime._configure_render_dag_workers(values)
 
-    assert runtime._RENDER_DAG_WORKERS == "2"
-    assert values[runtime._DAG_WORKERS_ENV] == "2"
-    assert runtime.os.environ[runtime._DAG_WORKERS_ENV] == "2"
+    assert runtime._RENDER_DAG_WORKERS == "3"
+    assert values[runtime._DAG_WORKERS_ENV] == "3"
+    assert runtime.os.environ[runtime._DAG_WORKERS_ENV] == "3"
 
 
 def test_non_render_comprehensive_prewarm_does_not_override_worker_count(monkeypatch) -> None:
