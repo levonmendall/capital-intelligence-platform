@@ -285,8 +285,6 @@ def prepare_lane_provider_publication(
     timestamp = legacy._parse_timestamp(request.get("decision_epoch"), field_name="decision_epoch")
     asset_class = CandidateAssetClass(asset_class_value)
 
-    # Install the same release/reference-bound structural cache loader used by the later
-    # canonical lane transaction.  No provider or screening output is reused cross-epoch.
     cached.install_cached_structural_lane_loader()
     core = facade._core
     raw = transaction._load_catalog_records(
@@ -328,9 +326,7 @@ def prepare_lane_provider_publication(
         market_probe=core.default_provider_preselection_market_probe,
     )
     if int(getattr(result, "catalog_count", -1)) != len(merged):
-        raise RuntimeError(
-            f"{asset_class.value} provider fanout publication count changed"
-        )
+        raise RuntimeError(f"{asset_class.value} provider fanout publication count changed")
     return {
         "scheduled": True,
         "asset_class": asset_class.value,
@@ -343,6 +339,7 @@ def prepare_lane_provider_publication(
 def install_epoch_scoped_provider_acquisition() -> None:
     """Wrap the canonical spool builder with bounded provider-I/O fan-out on Render."""
 
+    from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import comprehensive_discovery_input_spool as legacy
     from operations import spawn_safe_authoritative_acquisition as spawn_safe
 
@@ -355,7 +352,7 @@ def install_epoch_scoped_provider_acquisition() -> None:
         if _render_enabled(resolved):
             path = Path(request_path).expanduser()
             try:
-                request = legacy._load_request(path)
+                request, _policy = bounded._validate_request(path, resolved)
                 epoch = legacy._parse_timestamp(
                     request.get("decision_epoch"), field_name="decision_epoch"
                 )
@@ -364,7 +361,7 @@ def install_epoch_scoped_provider_acquisition() -> None:
                     values=resolved,
                     decision_epoch=epoch,
                 )
-            except Exception as error:  # noqa: BLE001 - canonical serial path remains authority.
+            except Exception as error:
                 print(
                     json.dumps(
                         {
@@ -402,7 +399,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             asset_class_value=str(args.asset_class),
             index=int(args.index),
         )
-    except BaseException as error:  # noqa: BLE001 - advisory child reports type only.
+    except BaseException as error:
         print(
             json.dumps(
                 {
