@@ -9,10 +9,11 @@ independent limits:
 * a higher raw-cgroup hard ceiling that still leaves explicit service headroom before the
   platform's absolute memory limit.
 
-A raw-only hard-ceiling crossing gets one bounded cgroup-v2 reclaim attempt before the child
-is terminated. The guard remeasures the exact same boundaries after that attempt and remains
-fail-closed: working-set pressure, unavailable reclaim, or ineffective reclaim still causes
-immediate termination. No threshold is raised and no investment/evidence authority changes.
+A raw-only hard-ceiling crossing gets a tightly bounded cgroup-v2 reclaim/re-measure sequence
+before the child is terminated. The guard remeasures the exact same boundaries after every
+attempt and remains fail-closed: working-set pressure, unavailable reclaim, reclaim errors,
+or no meaningful progress still cause immediate termination. No threshold is raised and no
+investment/evidence authority changes.
 
 If cgroup memory.stat is unavailable the guard falls back to raw accounting, preserving the
 previous fail-closed behavior. This module changes only operational resource supervision; it
@@ -38,6 +39,10 @@ _DEFAULT_HARD_RESERVE_MB = 192.0
 _DEFAULT_POLL_SECONDS = 0.10
 _RECLAIM_MARGIN_KIB = 32 * 1024
 _RECLAIM_MAX_KIB = 256 * 1024
+# Keep raw-only recovery synchronous and small: at most 768 MiB requested, and retry only
+# after an observable page-cache reduction large enough to exceed sampling noise.
+_RAW_RECLAIM_MAX_ATTEMPTS = 3
+_RAW_RECLAIM_MIN_PROGRESS_KIB = 8 * 1024
 _CGROUP_V2_RECLAIM_PATH = Path("/sys/fs/cgroup/memory.reclaim")
 _HARD_FRACTION_ENV = "CAPITAL_INTELLIGENCE_RENDER_MEMORY_HARD_WATER_FRACTION"
 _HARD_RESERVE_ENV = "CAPITAL_INTELLIGENCE_RENDER_MEMORY_HARD_RESERVE_MB"
@@ -472,7 +477,7 @@ def wait_with_reclaimable_resource_bounds(
     }
     last_snapshot: list[MemorySnapshot | None] = [None]
     trigger_reason: list[str | None] = [None]
-    reclaim_attempted: list[bool] = [False]
+    reclaim_attempt_count: list[int] = [0]
     reclaim_report: dict[str, object] = {
         "memory_reclaim_attempted": False,
         "memory_reclaim_supported": False,
@@ -482,8 +487,13 @@ def wait_with_reclaimable_resource_bounds(
         "memory_reclaim_working_set_before_kib": None,
         "memory_reclaim_working_set_after_kib": None,
         "memory_reclaim_delta_kib": 0,
+        "memory_reclaim_reclaimed_kib": 0,
         "memory_reclaim_effective": False,
+        "memory_reclaim_ever_effective": False,
         "memory_reclaim_error_type": None,
+        "memory_reclaim_attempt_count": 0,
+        "memory_reclaim_success_count": 0,
+        "memory_reclaim_max_attempts": _RAW_RECLAIM_MAX_ATTEMPTS,
     }
 
     def record_snapshot(snapshot: MemorySnapshot) -> None:
@@ -517,36 +527,67 @@ def wait_with_reclaimable_resource_bounds(
         if reason is None:
             return False
 
-        if reason == "raw_hard_ceiling" and not reclaim_attempted[0]:
-            reclaim_attempted[0] = True
+        while (
+            reason == "raw_hard_ceiling"
+            and reclaim_attempt_count[0] < _RAW_RECLAIM_MAX_ATTEMPTS
+        ):
+            before = snapshot
             result, after = _attempt_cgroup_v2_reclaim(
-                snapshot,
+                before,
                 boundaries,
                 values=resolved,
             )
+            reclaim_attempt_count[0] += 1
             record_snapshot(after)
+            first_raw = reclaim_report["memory_reclaim_raw_before_kib"]
+            first_working = reclaim_report["memory_reclaim_working_set_before_kib"]
+            requested_total = int(reclaim_report["memory_reclaim_requested_kib"]) + int(
+                result.requested_kib
+            )
+            raw_before = result.raw_before_kib if first_raw is None else first_raw
+            working_before = (
+                result.working_set_before_kib if first_working is None else first_working
+            )
+            net_reclaimed = (
+                max(0, int(raw_before) - int(result.raw_after_kib))
+                if isinstance(raw_before, int) and isinstance(result.raw_after_kib, int)
+                else 0
+            )
             reclaim_report.update(
                 {
-                    "memory_reclaim_attempted": result.attempted,
+                    "memory_reclaim_attempted": bool(
+                        reclaim_report["memory_reclaim_attempted"] or result.attempted
+                    ),
                     "memory_reclaim_supported": result.supported,
-                    "memory_reclaim_requested_kib": result.requested_kib,
-                    "memory_reclaim_raw_before_kib": result.raw_before_kib,
+                    "memory_reclaim_requested_kib": requested_total,
+                    "memory_reclaim_raw_before_kib": raw_before,
                     "memory_reclaim_raw_after_kib": result.raw_after_kib,
-                    "memory_reclaim_working_set_before_kib": result.working_set_before_kib,
+                    "memory_reclaim_working_set_before_kib": working_before,
                     "memory_reclaim_working_set_after_kib": result.working_set_after_kib,
-                    "memory_reclaim_delta_kib": result.reclaimed_kib,
+                    "memory_reclaim_delta_kib": net_reclaimed,
+                    "memory_reclaim_reclaimed_kib": net_reclaimed,
                     "memory_reclaim_effective": result.effective,
+                    "memory_reclaim_ever_effective": bool(
+                        reclaim_report["memory_reclaim_ever_effective"] or result.effective
+                    ),
                     "memory_reclaim_error_type": result.error_type,
+                    "memory_reclaim_attempt_count": reclaim_attempt_count[0],
+                    "memory_reclaim_success_count": int(
+                        reclaim_report["memory_reclaim_success_count"]
+                    ) + int(result.effective),
                 }
             )
             _safe_log(
                 "reclaimable_memory_guard_reclaim_attempted",
                 **reclaim_report,
-                memory_reclaim_inactive_file_before_kib=snapshot.inactive_file_kib,
-                memory_reclaim_active_file_before_kib=snapshot.active_file_kib,
-                memory_reclaim_anon_before_kib=snapshot.anon_kib,
-                memory_reclaim_file_before_kib=snapshot.file_kib,
-                memory_reclaim_kernel_before_kib=snapshot.kernel_kib,
+                memory_reclaim_attempt_number=reclaim_attempt_count[0],
+                memory_reclaim_attempt_requested_kib=result.requested_kib,
+                memory_reclaim_attempt_delta_kib=result.reclaimed_kib,
+                memory_reclaim_inactive_file_before_kib=before.inactive_file_kib,
+                memory_reclaim_active_file_before_kib=before.active_file_kib,
+                memory_reclaim_anon_before_kib=before.anon_kib,
+                memory_reclaim_file_before_kib=before.file_kib,
+                memory_reclaim_kernel_before_kib=before.kernel_kib,
                 memory_reclaim_inactive_file_after_kib=after.inactive_file_kib,
                 memory_reclaim_active_file_after_kib=after.active_file_kib,
                 memory_reclaim_anon_after_kib=after.anon_kib,
@@ -556,12 +597,18 @@ def wait_with_reclaimable_resource_bounds(
                 raw_hard_boundary_kib=boundaries.raw_hard_kib,
             )
             reason = limit_reason(after, boundaries)
-            if reason is None:
-                # One successful reclaim earns continued execution, not a looser limit.
-                # A second raw hard-ceiling crossing in this child is terminal because the
-                # guard intentionally performs only one bounded reclaim attempt per pass.
-                return False
             snapshot = after
+            if reason is None:
+                return False
+            if reason == "working_set":
+                break
+            if (
+                not result.attempted
+                or not result.supported
+                or result.error_type is not None
+                or result.reclaimed_kib < _RAW_RECLAIM_MIN_PROGRESS_KIB
+            ):
+                break
 
         trigger_reason[0] = reason
         memory_limited.set()

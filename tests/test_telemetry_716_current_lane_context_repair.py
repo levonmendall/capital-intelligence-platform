@@ -125,6 +125,20 @@ def _public_resource_payload() -> dict[str, object]:
             "failure_lane_index": 7,
             "memory_trigger_reason": "working_set",
             "memory_accounting_source": "cgroup_v2",
+            "memory_reclaim_attempted": True,
+            "memory_reclaim_supported": True,
+            "memory_reclaim_effective": False,
+            "memory_reclaim_ever_effective": True,
+            "memory_reclaim_error_type": "IneffectiveReclaim",
+            "memory_reclaim_requested_kib": 108376,
+            "memory_reclaim_raw_before_kib": 1963044,
+            "memory_reclaim_raw_after_kib": 1900000,
+            "memory_reclaim_working_set_before_kib": 646572,
+            "memory_reclaim_working_set_after_kib": 650000,
+            "memory_reclaim_reclaimed_kib": 63044,
+            "memory_reclaim_attempt_count": 3,
+            "memory_reclaim_success_count": 1,
+            "memory_reclaim_max_attempts": 3,
             "ignored_field": "must-not-copy",
         },
         "progress_metrics": {
@@ -162,6 +176,20 @@ def test_final_telemetry_enrichment_preserves_only_safe_resource_context() -> No
     assert context["failure_substage"] == "publication-lane"
     assert context["failure_asset_class"] == "crypto"
     assert context["failure_lane_index"] == 7
+    assert context["memory_reclaim_attempted"] is True
+    assert context["memory_reclaim_supported"] is True
+    assert context["memory_reclaim_effective"] is False
+    assert context["memory_reclaim_ever_effective"] is True
+    assert context["memory_reclaim_error_type"] == "IneffectiveReclaim"
+    assert context["memory_reclaim_requested_kib"] == 108376
+    assert context["memory_reclaim_raw_before_kib"] == 1963044
+    assert context["memory_reclaim_raw_after_kib"] == 1900000
+    assert context["memory_reclaim_working_set_before_kib"] == 646572
+    assert context["memory_reclaim_working_set_after_kib"] == 650000
+    assert context["memory_reclaim_reclaimed_kib"] == 63044
+    assert context["memory_reclaim_attempt_count"] == 3
+    assert context["memory_reclaim_success_count"] == 1
+    assert context["memory_reclaim_max_attempts"] == 3
     assert "ignored_field" not in context
     assert diagnostic["prequalification_failure_asset_class"] == "crypto"
     assert diagnostic["prequalification_failure_lane_index"] == 7
@@ -191,3 +219,33 @@ def test_resource_context_requires_explicit_non_authority() -> None:
     diagnostic = enriched["diagnostic"]
     assert "prequalification_resource_failure_context" not in diagnostic
     assert diagnostic["progress_metrics"]["memory_trigger_working_set"] == 1
+
+
+def test_render_reclaim_outcomes_remain_distinguishable() -> None:
+    cases = (
+        (False, False, "UnsupportedCgroupReclaim"),
+        (True, False, None),
+        (True, True, None),
+    )
+    observed = []
+    for supported, effective, error_type in cases:
+        payload = _public_resource_payload()
+        context = payload["prequalification_failure_context"]
+        context["memory_reclaim_supported"] = supported
+        context["memory_reclaim_effective"] = effective
+        context["memory_reclaim_error_type"] = error_type
+        enriched = enrichment.enrich_snapshot(
+            {"diagnostic": {"release_matches_expected": True, "progress_metrics": {}}},
+            payload,
+            expected_release="release-716",
+        )
+        terminal = enriched["diagnostic"]["prequalification_resource_failure_context"]
+        observed.append(
+            (
+                terminal["memory_reclaim_supported"],
+                terminal["memory_reclaim_effective"],
+                terminal.get("memory_reclaim_error_type"),
+            )
+        )
+
+    assert observed == list(cases)
