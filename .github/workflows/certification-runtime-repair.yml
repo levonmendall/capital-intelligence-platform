@@ -12,6 +12,7 @@ on:
       - "operations/spawn_safe_authoritative_acquisition.py"
       - "operations/comprehensive_discovery_input_spool.py"
       - "operations/evidence_preparation_progress.py"
+      - "operations/epoch_scoped_provider_acquisition.py"
       - "operations/release_prequalification_parent_watchdog.py"
       - "run_bounded_continuous_evidence_plane.py"
       - "run_dag_native_continuous_evidence_plane.py"
@@ -22,6 +23,7 @@ on:
       - "tests/test_comprehensive_discovery_input_spool.py"
       - "tests/test_spawn_safe_authoritative_acquisition.py"
       - "tests/test_evidence_preparation_progress.py"
+      - "tests/test_epoch_scoped_provider_acquisition.py"
       - "tests/test_release_prequalification_parent_watchdog.py"
       - "tests/test_dag_native_continuous_evidence_bootstrap.py"
       - "tests/test_runtime_v2_continuous_certification.py"
@@ -70,6 +72,7 @@ jobs:
           tests/test_comprehensive_discovery_input_spool.py
           tests/test_spawn_safe_authoritative_acquisition.py
           tests/test_evidence_preparation_progress.py
+          tests/test_epoch_scoped_provider_acquisition.py
           tests/test_release_prequalification_parent_watchdog.py
           tests/test_dag_native_continuous_evidence_bootstrap.py
           tests/test_runtime_v2_continuous_certification.py
