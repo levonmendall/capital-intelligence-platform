@@ -141,6 +141,7 @@ def release_streaming_clean_file_cache(values: Mapping[str, str]) -> dict[str, o
     before = _memory_snapshot()
     supported = bool(
         data_root is not None
+        and data_root.is_dir()
         and getattr(os, "posix_fadvise", None) is not None
         and getattr(os, "POSIX_FADV_DONTNEED", None) is not None
     )
