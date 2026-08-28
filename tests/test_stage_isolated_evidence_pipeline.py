@@ -18,6 +18,30 @@ def _values(tmp_path, *, max_age: str = "900") -> dict[str, str]:
     }
 
 
+def _advance_to_comprehensive(values: dict[str, str], tmp_path):
+    state = pipeline.ensure_stage_isolated_evidence_pipeline(
+        values,
+        requested_at=datetime.now(timezone.utc),
+    )
+    for stage in ("reference", "public_live", "us_equity_discovery"):
+        state = pipeline.begin_evidence_stage(
+            values,
+            pipeline_id=state.pipeline_id,
+            stage=stage,
+        )
+        state = pipeline.complete_evidence_stage(
+            values,
+            pipeline_id=state.pipeline_id,
+            stage=stage,
+            reference_manifest_id=("manifest-1" if stage == "reference" else None),
+            reference_manifest_path=(
+                str(tmp_path / "manifest.json") if stage == "reference" else None
+            ),
+        )
+    assert state.next_stage == "comprehensive_discovery"
+    return state
+
+
 def test_stage_pipeline_persists_canonical_prefix_and_effective_cutoff(tmp_path) -> None:
     values = _values(tmp_path)
     requested = datetime(2026, 8, 20, 20, 0, tzinfo=timezone.utc)
@@ -148,8 +172,149 @@ class _FailingStageProcess:
     def __init__(self, command, *, events: list[tuple[str, str]], **_kwargs) -> None:
         events.append(("spawn", str(command[2])))
 
-    def wait(self) -> int:
+    def wait(self, timeout=None) -> int:
+        del timeout
         return 9
+
+
+class _FreshnessExpiredProcess:
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.terminated = False
+        self.killed = False
+        self.wait_timeouts: list[float | None] = []
+
+    def wait(self, timeout=None) -> int:
+        self.wait_timeouts.append(timeout)
+        if self.returncode is not None:
+            return self.returncode
+        if self.killed:
+            self.returncode = -9
+            return self.returncode
+        if self.terminated:
+            self.returncode = -15
+            return self.returncode
+        raise subprocess.TimeoutExpired("stage-child", timeout)
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+class _TerminalRaceProcess:
+    def __init__(self, on_timeout) -> None:
+        self._on_timeout = on_timeout
+        self._raised = False
+        self.returncode: int | None = None
+        self.terminate_called = False
+        self.kill_called = False
+
+    def wait(self, timeout=None) -> int:
+        if not self._raised:
+            self._raised = True
+            self._on_timeout()
+            self.returncode = 17
+            raise subprocess.TimeoutExpired("stage-child", timeout)
+        assert self.returncode is not None
+        return self.returncode
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminate_called = True
+
+    def kill(self) -> None:
+        self.kill_called = True
+
+
+def test_comprehensive_child_is_bounded_by_existing_evidence_freshness(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    values = _values(tmp_path)
+    original = dict(values)
+    _advance_to_comprehensive(values, tmp_path)
+    child = _FreshnessExpiredProcess()
+
+    monkeypatch.setattr(
+        runtime,
+        "_run_comprehensive_discovery_cache_reclamation",
+        lambda _values: None,
+    )
+    monkeypatch.setattr(runtime.subprocess, "Popen", lambda *_args, **_kwargs: child)
+
+    assert runtime.run_pipeline(values) == runtime._STAGE_FRESHNESS_EXPIRED_RETURN_CODE
+
+    state = pipeline.load_stage_isolated_evidence_state(values)
+    assert state is not None
+    assert state.state == "failed"
+    assert state.current_stage == "comprehensive_discovery"
+    assert state.completed_stages == (
+        "reference",
+        "public_live",
+        "us_equity_discovery",
+    )
+    assert state.error_type == "EvidenceFreshnessExpired"
+    assert "max_age_seconds=900" in str(state.error_detail)
+    assert child.terminated is True
+    assert child.killed is False
+    assert len(child.wait_timeouts) == 2
+    assert child.wait_timeouts[0] is not None
+    assert 0.0 < float(child.wait_timeouts[0]) <= 900.0
+    assert child.wait_timeouts[1] == runtime._STAGE_TERMINATION_GRACE_SECONDS
+    assert values == original
+
+    failure_events = [
+        json.loads(line)
+        for line in capsys.readouterr().err.splitlines()
+        if "continuous_evidence_plane_failure_context" in line
+    ]
+    assert len(failure_events) == 1
+    assert failure_events[0]["error_type"] == "EvidenceFreshnessExpired"
+    assert failure_events[0]["failure_stage"] == (
+        "stage_isolated_evidence:comprehensive_discovery"
+    )
+    assert failure_events[0]["decision_authority"] is False
+    assert failure_events[0]["execution_authority"] is False
+    assert failure_events[0]["real_money_authorized"] is False
+
+
+def test_child_terminal_failure_wins_timeout_race(tmp_path, monkeypatch) -> None:
+    values = _values(tmp_path)
+    state = _advance_to_comprehensive(values, tmp_path)
+
+    def _publish_child_terminal_failure() -> None:
+        pipeline.fail_evidence_stage(
+            values,
+            pipeline_id=state.pipeline_id,
+            stage="comprehensive_discovery",
+            error_type="ChildDiscoveryFailure",
+            error_detail="child terminal truth",
+        )
+
+    child = _TerminalRaceProcess(_publish_child_terminal_failure)
+    monkeypatch.setattr(
+        runtime,
+        "_run_comprehensive_discovery_cache_reclamation",
+        lambda _values: None,
+    )
+    monkeypatch.setattr(runtime.subprocess, "Popen", lambda *_args, **_kwargs: child)
+
+    assert runtime.run_pipeline(values) == 17
+
+    latest = pipeline.load_stage_isolated_evidence_state(values)
+    assert latest is not None
+    assert latest.state == "failed"
+    assert latest.current_stage == "comprehensive_discovery"
+    assert latest.error_type == "ChildDiscoveryFailure"
+    assert latest.error_detail == "child terminal truth"
+    assert child.terminate_called is False
+    assert child.kill_called is False
 
 
 def test_pre_reference_cache_reclamation_runs_before_reference_child(
