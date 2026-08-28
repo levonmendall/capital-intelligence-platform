@@ -16,6 +16,7 @@ from typing import Any
 _FINAL_STATES = frozenset({"completed", "failed"})
 _ACTIVE_STATES = frozenset({"pending", "in_progress", "running"})
 _SUCCESS_STATE = "completed"
+_PREQUALIFICATION_FAILURE_STAGE = "evidence_prequalification_failed"
 _FORBIDDEN_KEYS = frozenset(
     {
         "holdings",
@@ -320,6 +321,14 @@ def poll_render_audit(
                 )
                 and str(payload.get("state") or "") == "failed"
             )
+
+            # Evidence prequalification runs before a new CIO request is lawful. If it
+            # becomes terminal after polling has already started, that exact-release failure
+            # is the current diagnostic truth and must win over the stale-request grace timer.
+            if current_failed and _progress_stage(payload) == _PREQUALIFICATION_FAILURE_STAGE:
+                raise RenderAuditVerificationError(
+                    _terminal_failure_detail(payload)
+                )
 
             # A scheduled verifier can begin after the release diagnostic has already
             # started. Adopt that exact-release request rather than demanding a second
