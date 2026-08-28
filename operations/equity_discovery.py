@@ -12,10 +12,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from statistics import pstdev
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 from cio import CandidateAssetClass
@@ -25,6 +27,7 @@ from providers.sec_edgar import SECEdgarProvider
 
 _ALLOWED_EXCHANGES = frozenset({"NYSE", "NASDAQ", "AMEX", "ARCA", "BATS", "NYSEARCA"})
 _US_EQUITY_DISCOVERY_TIMEZONE = ZoneInfo("America/New_York")
+_RENDER_DEEP_HISTORY_WORKERS = 2
 _FUND_NAME_MARKERS = (
     " ETF",
     " FUND",
@@ -425,9 +428,7 @@ def _deep_candidate(
         + 0.05 * _clip((drawdown + 0.60) / 0.60, 0.0, 1.0)
     )
     cik, name, venue, sec_instrument_id = sec_map[symbol]
-    price_source = (
-        f"alpaca-iex-discovery:{symbol}:{latest.isoformat()}:{len(closes)}"
-    )
+    price_source = f"alpaca-iex-discovery:{symbol}:{latest.isoformat()}:{len(closes)}"
     candidate = DiscoveredEquity(
         symbol=symbol,
         name=name,
@@ -452,6 +453,48 @@ def _deep_candidate(
         ),
     )
     return candidate, (symbol, round(closes[-1], 8), price_source)
+
+
+def _render_deep_history_workers() -> int:
+    """Keep equity-history concurrency operational and Render-only."""
+
+    return _RENDER_DEEP_HISTORY_WORKERS if os.environ.get("RENDER", "").lower() == "true" else 1
+
+
+def _deep_history_batches(
+    *,
+    alpaca: AlpacaPaperClient,
+    shortlist: Sequence[str],
+    timestamp: datetime,
+    policy: EquityDiscoveryPolicy,
+    workers: int,
+) -> Iterator[tuple[tuple[str, ...], Mapping[str, Sequence[Mapping[str, Any]]]]]:
+    """Fetch bounded independent history batches while yielding deterministic order."""
+
+    batches = tuple(
+        tuple(shortlist[start : start + policy.deep_history_batch_size])
+        for start in range(0, len(shortlist), policy.deep_history_batch_size)
+    )
+
+    def fetch(batch: tuple[str, ...]):
+        return alpaca.historical_bars(
+            batch,
+            start=timestamp - timedelta(days=policy.deep_history_days),
+            end=timestamp,
+            timeframe="1Day",
+        )
+
+    if workers <= 1 or len(batches) <= 1:
+        for batch in batches:
+            yield batch, fetch(batch)
+        return
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="equity-history") as executor:
+        for start in range(0, len(batches), workers):
+            window = batches[start : start + workers]
+            futures = tuple(executor.submit(fetch, batch) for batch in window)
+            for batch, future in zip(window, futures):
+                yield batch, future.result()
 
 
 def discover_us_equities(
@@ -479,10 +522,7 @@ def discover_us_equities(
             json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
         return EquityDiscoveryResult(
-            identifier=(
-                f"equity-discovery:{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}:"
-                f"{digest[:16]}"
-            ),
+            identifier=f"equity-discovery:{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}:{digest[:16]}",
             as_of=timestamp,
             policy_version=resolved.version,
             screened_asset_count=0,
@@ -491,20 +531,14 @@ def discover_us_equities(
             selected=(),
             observed_prices=(),
             exclusions=(("__lane__", "weekend_market_closed"),),
-            security_master_snapshot_identifier=(
-                f"schedule:us-equity:{local_date.isoformat()}:closed"
-            ),
+            security_master_snapshot_identifier=f"schedule:us-equity:{local_date.isoformat()}:closed",
         )
 
     alpaca = client or create_alpaca_paper_client()
     sec = sec_provider or SECEdgarProvider()
     sec_map, sec_identifier = _sec_equity_map(sec)
     raw_assets = alpaca.assets(status="active", asset_class="us_equity")
-    blocked = {
-        str(item).strip().upper()
-        for item in excluded_symbols
-        if str(item).strip()
-    }
+    blocked = {str(item).strip().upper() for item in excluded_symbols if str(item).strip()}
     assets, structural_exclusions = _eligible_assets(
         raw_assets,
         sec_map,
@@ -524,33 +558,18 @@ def discover_us_equities(
 
     preliminary: list[tuple[float, str]] = []
     for symbol, (price, dollar_volume, daily_return, _observed) in snapshot_rows.items():
-        if (
-            price < resolved.minimum_price
-            or dollar_volume < resolved.minimum_daily_dollar_volume
-        ):
+        if price < resolved.minimum_price or dollar_volume < resolved.minimum_daily_dollar_volume:
             continue
-        liquidity = _clip(
-            (math.log10(max(dollar_volume, 1.0)) - 6.0) / 4.0,
-            0.0,
-            1.0,
-        )
+        liquidity = _clip((math.log10(max(dollar_volume, 1.0)) - 6.0) / 4.0, 0.0, 1.0)
         gain = _clip(daily_return / 0.10, -1.0, 1.0)
         preliminary.append((0.65 * gain + 0.35 * liquidity, symbol))
     preliminary.sort(key=lambda item: (item[0], item[1]), reverse=True)
 
-    held = {
-        str(item).strip().upper() for item in held_symbols if str(item).strip()
-    }
-    tracked = {
-        str(item).strip().upper() for item in tracked_symbols if str(item).strip()
-    }
+    held = {str(item).strip().upper() for item in held_symbols if str(item).strip()}
+    tracked = {str(item).strip().upper() for item in tracked_symbols if str(item).strip()}
     protected = held | tracked
     ranked_symbols = [symbol for _score, symbol in preliminary]
-    deep_limit = (
-        len(ranked_symbols)
-        if resolved.deep_shortlist_count is None
-        else resolved.deep_shortlist_count
-    )
+    deep_limit = len(ranked_symbols) if resolved.deep_shortlist_count is None else resolved.deep_shortlist_count
     shortlist = ranked_symbols[:deep_limit]
     for symbol in sorted(protected):
         if symbol in assets and symbol not in shortlist:
@@ -571,21 +590,18 @@ def discover_us_equities(
         as_of=timestamp,
         minimum_bars=resolved.minimum_history_bars,
     )
-    benchmark_return = (
-        0.0 if benchmark is None else _period_return(benchmark[0], 252)
-    )
+    benchmark_return = 0.0 if benchmark is None else _period_return(benchmark[0], 252)
     del benchmark_payload
 
     selected: list[DiscoveredEquity] = []
     observed_prices: list[tuple[str, float, str]] = []
-    for start in range(0, len(shortlist), resolved.deep_history_batch_size):
-        batch = tuple(shortlist[start : start + resolved.deep_history_batch_size])
-        batch_bars = alpaca.historical_bars(
-            batch,
-            start=timestamp - timedelta(days=resolved.deep_history_days),
-            end=timestamp,
-            timeframe="1Day",
-        )
+    for batch, batch_bars in _deep_history_batches(
+        alpaca=alpaca,
+        shortlist=shortlist,
+        timestamp=timestamp,
+        policy=resolved,
+        workers=_render_deep_history_workers(),
+    ):
         for symbol in batch:
             if symbol not in assets or symbol not in sec_map:
                 continue
@@ -616,18 +632,12 @@ def discover_us_equities(
         ),
         reverse=True,
     )
-    new_limit = (
-        len(selected)
-        if resolved.selected_candidate_count is None
-        else resolved.selected_candidate_count
-    )
+    new_limit = len(selected) if resolved.selected_candidate_count is None else resolved.selected_candidate_count
     chosen_new = [item for item in selected if item.symbol not in protected][:new_limit]
     chosen_symbols = {item.symbol for item in chosen_new} | {
         item.symbol for item in selected if item.symbol in protected
     }
-    selected_symbols = [
-        item for item in selected if item.symbol in chosen_symbols
-    ]
+    selected_symbols = [item for item in selected if item.symbol in chosen_symbols]
     for item in selected:
         if item.symbol not in chosen_symbols:
             exclusions.append((item.symbol, "outside_decision_evidence_cohort"))
@@ -646,10 +656,7 @@ def discover_us_equities(
         json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return EquityDiscoveryResult(
-        identifier=(
-            f"equity-discovery:{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}:"
-            f"{digest[:16]}"
-        ),
+        identifier=f"equity-discovery:{timestamp.strftime('%Y%m%dT%H%M%S%fZ')}:{digest[:16]}",
         as_of=timestamp,
         policy_version=resolved.version,
         screened_asset_count=len(assets),
