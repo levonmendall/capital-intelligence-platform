@@ -18,14 +18,17 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
 from operations.stage_isolated_evidence_pipeline import (
     _STAGES,
+    _max_age_seconds,
     StageIsolatedEvidenceState,
     begin_evidence_stage,
     ensure_stage_isolated_evidence_pipeline,
+    fail_evidence_stage,
     load_stage_isolated_evidence_state,
 )
 
@@ -38,6 +41,9 @@ _COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_EVENT = (
 )
 _FAILED_ATTEMPT_CACHE_RECLAMATION_EVENT = "stage_isolated_failed_attempt_cache_reclamation"
 _REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
+_STAGE_TERMINATION_GRACE_SECONDS = 5.0
+_STAGE_FRESHNESS_EXPIRED_RETURN_CODE = 124
+_STAGE_FRESHNESS_ERROR_TYPE = "EvidenceFreshnessExpired"
 _PRECOMPREHENSIVE_CACHE_RECLAMATION_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
 _REFERENCE_CACHE_RECLAMATION_CODE = """
 import os
@@ -88,6 +94,78 @@ def _safe_failure(
         file=sys.stderr,
         flush=True,
     )
+
+
+def _evidence_deadline(
+    state: StageIsolatedEvidenceState,
+    values: Mapping[str, str],
+) -> datetime:
+    return state.evidence_as_of + timedelta(seconds=_max_age_seconds(values))
+
+
+def _remaining_evidence_lifetime_seconds(
+    state: StageIsolatedEvidenceState,
+    values: Mapping[str, str],
+) -> float:
+    return max(
+        0.0,
+        (_evidence_deadline(state, values) - datetime.now(timezone.utc)).total_seconds(),
+    )
+
+
+def _terminate_and_reap_stage_process(process: subprocess.Popen[bytes]) -> int:
+    """Bound termination of one stale stage child without touching the parent process group."""
+
+    process.terminate()
+    try:
+        return int(process.wait(timeout=_STAGE_TERMINATION_GRACE_SECONDS))
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            return int(process.wait(timeout=_STAGE_TERMINATION_GRACE_SECONDS))
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(
+                "stage-isolated evidence child remained live after bounded kill"
+            ) from error
+
+
+def _wait_for_stage_process(
+    process: subprocess.Popen[bytes],
+    *,
+    state: StageIsolatedEvidenceState,
+    values: Mapping[str, str],
+) -> tuple[int, bool]:
+    """Wait only through the evidence epoch and identify a supervisor-owned expiration."""
+
+    remaining = _remaining_evidence_lifetime_seconds(state, values)
+    if remaining > 0.0:
+        try:
+            return int(process.wait(timeout=remaining)), False
+        except subprocess.TimeoutExpired:
+            pass
+
+    # The child may have exited while Popen.wait was raising TimeoutExpired. Re-check
+    # liveness before sending any signal so real child terminal evidence always wins.
+    return_code = process.poll()
+    if return_code is not None:
+        return int(return_code), False
+    return _terminate_and_reap_stage_process(process), True
+
+
+def _freshness_expired_detail(
+    state: StageIsolatedEvidenceState,
+    values: Mapping[str, str],
+    *,
+    stage: str,
+    child_return_code: int | None,
+) -> str:
+    return (
+        "stage-isolated evidence epoch expired while stage child remained live; "
+        f"stage={stage}; evidence_as_of={state.evidence_as_of.isoformat()}; "
+        f"deadline={_evidence_deadline(state, values).isoformat()}; "
+        f"max_age_seconds={_max_age_seconds(values):g}; "
+        f"child_return_code={child_return_code}"
+    )[:1600]
 
 
 def _validated_cache_ownership_report(raw: str | None) -> dict[str, object] | None:
@@ -440,8 +518,63 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
             # memory governor can therefore terminate the entire active stage tree safely.
             start_new_session=False,
         )
-        return_code = int(process.wait())
+        return_code, freshness_expired = _wait_for_stage_process(
+            process,
+            state=state,
+            values=resolved,
+        )
         latest = load_stage_isolated_evidence_state(resolved)
+
+        if freshness_expired:
+            # Reload after the stale child has been reaped. A child can commit terminal
+            # truth between the timeout and liveness re-check; never overwrite that newer
+            # durable evidence with a supervisor timeout classification.
+            if latest is not None and latest.pipeline_id == state.pipeline_id:
+                if stage in latest.completed_stages:
+                    continue
+                if latest.state == "failed" and latest.current_stage == stage:
+                    _safe_failure(
+                        pipeline_id=state.pipeline_id,
+                        stage=stage,
+                        return_code=(return_code if return_code != 0 else 2),
+                        error_type=latest.error_type,
+                        error_detail=latest.error_detail,
+                    )
+                    return return_code if return_code != 0 else 2
+            if latest is None or latest.pipeline_id != state.pipeline_id:
+                _safe_failure(
+                    pipeline_id=state.pipeline_id,
+                    stage=stage,
+                    return_code=2,
+                    error_type="StageCheckpointError",
+                    error_detail=(
+                        "stage evidence identity changed while enforcing freshness deadline"
+                    ),
+                )
+                return 2
+
+            detail = _freshness_expired_detail(
+                state,
+                resolved,
+                stage=stage,
+                child_return_code=return_code,
+            )
+            latest = fail_evidence_stage(
+                resolved,
+                pipeline_id=state.pipeline_id,
+                stage=stage,
+                error_type=_STAGE_FRESHNESS_ERROR_TYPE,
+                error_detail=detail,
+            )
+            _safe_failure(
+                pipeline_id=state.pipeline_id,
+                stage=stage,
+                return_code=_STAGE_FRESHNESS_EXPIRED_RETURN_CODE,
+                error_type=latest.error_type,
+                error_detail=latest.error_detail,
+            )
+            return _STAGE_FRESHNESS_EXPIRED_RETURN_CODE
+
         if return_code != 0:
             _safe_failure(
                 pipeline_id=state.pipeline_id,
