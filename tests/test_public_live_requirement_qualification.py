@@ -306,8 +306,127 @@ def test_timeout_does_not_prevent_later_group_checkpoint_and_is_published(
             "provider": "fred",
             "fallback_providers_attempted": ["oecd"],
             "failure_type": "timeout",
+            "error_type": "ContinuousEvidencePlaneError",
+            "error_message": "provider terminal detail unavailable",
+            "fallback_failures": [
+                {
+                    "provider": "oecd",
+                    "error_type": "ContinuousEvidencePlaneError",
+                    "error_message": "fallback terminal detail unavailable",
+                }
+            ],
         }
     ]
+
+
+def test_provider_and_fallback_terminal_messages_survive_progress_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    now = datetime.now(timezone.utc)
+    catalog = SimpleNamespace(
+        identifier="catalog",
+        sources=(
+            _source("gdelt-doc", "gdelt-news"),
+            _source("gdelt-context", "gdelt-news"),
+        ),
+    )
+    monkeypatch.setattr(qualification, "_catalog", lambda _values: catalog)
+    monkeypatch.setattr(
+        qualification,
+        "required_public_live_requirement_groups",
+        lambda _values: ("gdelt-news",),
+    )
+    monkeypatch.setattr(qualification, "_component_compatibility", lambda *_args: "compatibility")
+    monkeypatch.setattr(qualification._ledger, "load_qualified_component", lambda **_kwargs: None)
+
+    def acquire(**_kwargs):
+        raise qualification._plane.ContinuousEvidencePlaneError(
+            "required public live information is not qualified; "
+            "required_information=gdelt-news; provider=gdelt-doc; "
+            "fallback_providers_attempted=gdelt-context; "
+            "provider_error_type=ProviderTimeout; "
+            "provider_error_message=DOC read timed out after 14.875s; "
+            "fallback_error_type=ProviderInvalidPayload; "
+            "fallback_error_message=Context response was not valid JSON"
+        )
+
+    monkeypatch.setattr(
+        qualification,
+        "_supervised_qualify_and_checkpoint_requirement",
+        acquire,
+    )
+
+    with pytest.raises(qualification._plane.ContinuousEvidencePlaneError):
+        qualification.maintain_required_public_live_requirements(
+            as_of=now,
+            values={"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)},
+        )
+
+    progress = qualification.load_public_live_requirement_progress(
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    )
+    assert progress is not None
+    assert progress["failures"] == [
+        {
+            "required_information": "gdelt-news",
+            "provider": "gdelt-doc",
+            "fallback_providers_attempted": ["gdelt-context"],
+            "failure_type": "provider_failure",
+            "error_type": "ProviderTimeout",
+            "error_message": "DOC read timed out after 14.875s",
+            "fallback_failures": [
+                {
+                    "provider": "gdelt-context",
+                    "error_type": "ProviderInvalidPayload",
+                    "error_message": "Context response was not valid JSON",
+                }
+            ],
+        }
+    ]
+
+
+def test_supervisor_keeps_both_provider_terminal_messages_within_its_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(timezone.utc)
+    catalog = SimpleNamespace(
+        identifier="catalog",
+        sources=(
+            _source("gdelt-doc", "gdelt-news"),
+            _source("gdelt-context", "gdelt-news"),
+        ),
+    )
+
+    def fail(**_kwargs):
+        raise qualification._plane.ContinuousEvidencePlaneError(
+            "required public live information is not qualified; "
+            "required_information=gdelt-news; provider=gdelt-doc; "
+            "fallback_providers_attempted=gdelt-context; "
+            "provider_error_type=ProviderHttpError; "
+            "provider_error_message=DOC returned HTTP 502; "
+            "fallback_error_type=ProviderTimeout; "
+            "fallback_error_message=Context timed out after 14.875s"
+        )
+
+    monkeypatch.setattr(qualification, "_qualify_and_checkpoint_requirement", fail)
+
+    with pytest.raises(
+        qualification._plane.ContinuousEvidencePlaneError,
+    ) as captured:
+        qualification._supervised_qualify_and_checkpoint_requirement(
+            requirement_group="gdelt-news",
+            as_of=now,
+            values={"CAPITAL_INTELLIGENCE_EVIDENCE_PUBLIC_REQUIREMENT_TIMEOUT_SECONDS": "5"},
+            compatibility="compatibility",
+            catalog=catalog,
+        )
+
+    detail = str(captured.value)
+    assert "provider_error_type=ProviderHttpError" in detail
+    assert "provider_error_message=DOC returned HTTP 502" in detail
+    assert "fallback_error_type=ProviderTimeout" in detail
+    assert "fallback_error_message=Context timed out after 14.875s" in detail
 
 
 def test_stale_checkpoint_is_not_reused(tmp_path) -> None:

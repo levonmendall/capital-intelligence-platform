@@ -47,6 +47,11 @@ _GDELT_MAX_ATTEMPTS_PER_PROVIDER = 2
 _GDELT_WORK_BUDGET_FRACTION = 0.80
 _PROVIDER_RETRY_BASE_DELAY_SECONDS = 0.25
 _DEFAULT_PROVIDER_REQUEST_TIMEOUT_SECONDS = 20.0
+_MAX_PROVIDER_ERROR_MESSAGE_LENGTH = 160
+_SENSITIVE_ERROR_PATTERN = re.compile(
+    r"(?i)(api[_-]?key|access[_-]?token|token|secret|password|authorization)"
+    r"(\s*[:=]\s*)([^\s,;]+)"
+)
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -58,6 +63,65 @@ def _aware(value: datetime, *, field_name: str) -> datetime:
 def _safe(value: object) -> str:
     normalized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "").strip())
     return normalized.strip("-.") or "unknown"
+
+
+def _safe_provider_error_message(value: object, values: Mapping[str, str]) -> str:
+    """Return bounded provider evidence that is safe for the public diagnostic."""
+
+    text = " ".join(str(value or "unknown provider error").split())
+    secrets = {
+        str(secret).strip()
+        for name, secret in values.items()
+        if any(
+            marker in str(name).upper()
+            for marker in ("API_KEY", "API_TOKEN", "ACCESS_TOKEN", "SECRET", "PASSWORD")
+        )
+        and len(str(secret).strip()) >= 4
+    }
+    for secret in sorted(secrets, key=len, reverse=True):
+        text = text.replace(secret, "[REDACTED]")
+    text = _SENSITIVE_ERROR_PATTERN.sub(r"\1\2[REDACTED]", text)
+    text = re.sub(
+        r"(https?://[^?\s]+)\?[^\s]+",
+        r"\1?[query omitted]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    # Semicolons delimit the machine-readable terminal detail propagated by the
+    # stage worker. Preserve the message itself without letting it create false fields.
+    return text.replace(";", ",")[:_MAX_PROVIDER_ERROR_MESSAGE_LENGTH]
+
+
+def _provider_error_type(message: str) -> str:
+    lowered = message.lower()
+    if "timed out" in lowered or "timeout" in lowered:
+        return "ProviderTimeout"
+    if "429" in lowered or "rate limit" in lowered:
+        return "ProviderRateLimit"
+    if "http" in lowered and any(token in lowered for token in ("400", "401", "403", "404", "500", "502", "503", "504")):
+        return "ProviderHttpError"
+    if "invalid payload" in lowered or "json" in lowered:
+        return "ProviderInvalidPayload"
+    return "PublicLiveInformationError"
+
+
+def _provider_terminal_detail(
+    members: tuple[object, ...], values: Mapping[str, str]
+) -> str:
+    failures = [item for item in members if not bool(getattr(item, "succeeded", False))]
+    if not failures:
+        return ""
+    fields: list[str] = []
+    for index, item in enumerate(failures[:2]):
+        prefix = "provider" if index == 0 else "fallback"
+        message = _safe_provider_error_message(getattr(item, "error", None), values)
+        fields.extend(
+            (
+                f"{prefix}_error_type={_provider_error_type(message)}",
+                f"{prefix}_error_message={message}",
+            )
+        )
+    return "; " + "; ".join(fields)
 
 
 def _data_path(values: Mapping[str, str], environment_name: str, default_name: str) -> Path:
@@ -376,6 +440,7 @@ def collect_required_public_live_requirement(
             "required public live information is not qualified; "
             f"required_information={_safe(group)}; provider={primary}; "
             f"fallback_providers_attempted={fallback_detail}"
+            f"{_provider_terminal_detail(members, values)}"
         )
 
     provider = _safe(getattr(successful, "source_identifier", ""))
@@ -537,17 +602,46 @@ def _failure_record(group: str, detail: str, catalog: object) -> dict[str, objec
     provider_match = re.search(r"(?:^|;\s*)provider=([^;\s]+)", detail)
     fallback_match = re.search(r"(?:^|;\s*)fallback_providers_attempted=([^;\s]+)", detail)
     failure_match = re.search(r"(?:^|;\s*)failure_type=([^;\s]+)", detail)
+    error_type_match = re.search(r"(?:^|;\s*)provider_error_type=([^;\s]+)", detail)
+    error_message_match = re.search(r"(?:^|;\s*)provider_error_message=([^;]+)", detail)
+    fallback_error_type_match = re.search(r"(?:^|;\s*)fallback_error_type=([^;\s]+)", detail)
+    fallback_error_message_match = re.search(r"(?:^|;\s*)fallback_error_message=([^;]+)", detail)
     if provider_match:
         provider = _safe(provider_match.group(1))
     if fallback_match:
         raw = fallback_match.group(1).strip()
         fallbacks = [] if raw in {"", "none"} else [_safe(item) for item in raw.split(",") if item]
-    return {
+    record: dict[str, object] = {
         "required_information": _safe(group),
         "provider": provider,
         "fallback_providers_attempted": fallbacks,
         "failure_type": _safe(failure_match.group(1) if failure_match else "provider_failure"),
+        "error_type": _safe(
+            error_type_match.group(1) if error_type_match else "ContinuousEvidencePlaneError"
+        ),
+        "error_message": (
+            error_message_match.group(1).strip()[:_MAX_PROVIDER_ERROR_MESSAGE_LENGTH]
+            if error_message_match
+            else "provider terminal detail unavailable"
+        ),
     }
+    if fallbacks:
+        record["fallback_failures"] = [
+            {
+                "provider": fallbacks[0],
+                "error_type": _safe(
+                    fallback_error_type_match.group(1)
+                    if fallback_error_type_match
+                    else "ContinuousEvidencePlaneError"
+                ),
+                "error_message": (
+                    fallback_error_message_match.group(1).strip()[:_MAX_PROVIDER_ERROR_MESSAGE_LENGTH]
+                    if fallback_error_message_match
+                    else "fallback terminal detail unavailable"
+                ),
+            }
+        ]
+    return record
 
 
 def _write_progress(
