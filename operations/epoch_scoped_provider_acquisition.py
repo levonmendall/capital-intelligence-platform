@@ -10,19 +10,24 @@ This module separates only that resource boundary. On Render, scheduled market l
 release/reference-bound structural catalogs are already present may pre-build their
 canonical provider-preselection publications in a small bounded set of finite child
 interpreters. Each child uses the same decision epoch, policy, structural catalog identity,
-provider implementation, publication schema, and output path that the subsequent canonical
-transaction uses. The canonical transaction still runs one lane at a time and must
-validate/reuse the publication before terminal screening, certification-node creation,
-market-evidence qualification, and durable transaction completion.
+provider implementation, and publication schema that the subsequent canonical transaction
+uses. The canonical transaction still runs one lane at a time and must validate/reuse the
+publication before terminal screening, certification-node creation, market-evidence
+qualification, and durable transaction completion.
 
 The fan-out is provider-I/O acceleration only. It is forbidden from reconstructing a
 missing structural catalog in parallel: a cache miss exits the advisory child and leaves
-that lane to the unchanged serialized transaction. The fan-out has no evidence, candidate,
-sizing, construction, execution, CIO, or real-money authority. A child failure, timeout,
-partial file, cache miss, or unsupported environment falls back to the unchanged serialized
-transaction. A fixed portion of the existing evidence epoch is always reserved for
-serialized screening, paper evidence, and provider-free finalization; this module never
-extends or resets the freshness deadline.
+that lane to the unchanged serialized transaction. Provider output is written to a staging
+path and is atomically promoted to the canonical lane path only when the provider runtime
+reports no limitations. A throttled, partial, or otherwise limited fan-out result is
+removed so the serialized authority performs its normal fresh acquisition instead of
+inheriting degraded acceleration output.
+
+The fan-out has no evidence, candidate, sizing, construction, execution, CIO, or real-money
+authority. A child failure, timeout, partial file, cache miss, or unsupported environment
+falls back to the unchanged serialized transaction. A fixed portion of the existing
+evidence epoch is always reserved for serialized screening, paper evidence, and
+provider-free finalization; this module never extends or resets the freshness deadline.
 """
 
 from __future__ import annotations
@@ -44,8 +49,8 @@ from cio import CandidateAssetClass
 
 
 _MODULE = "operations.epoch_scoped_provider_acquisition"
-_DEFAULT_WORKERS = 3
-_MAX_WORKERS = 4
+_DEFAULT_WORKERS = 2
+_MAX_WORKERS = 3
 _MAX_FANOUT_SECONDS = 300.0
 _DOWNSTREAM_RESERVE_SECONDS = 480.0
 _TERMINATION_GRACE_SECONDS = 1.0
@@ -263,6 +268,7 @@ def run_provider_acquisition_fanout(
         "timed_out": timed_out,
         "budget_seconds": round(budget, 3),
         "structural_reconstruction_parallelized": False,
+        "limited_publication_promoted": False,
         "advisory_only": True,
         "evidence_certified": False,
         "decision_authority": False,
@@ -284,6 +290,18 @@ def run_provider_acquisition_fanout(
     return report
 
 
+def _remove_staging_publication(path: Path) -> None:
+    for candidate in (path, path.with_suffix(path.suffix + ".tmp")):
+        try:
+            if candidate.is_symlink():
+                continue
+            candidate.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
 def prepare_lane_provider_publication(
     request_path: str | Path,
     *,
@@ -291,7 +309,7 @@ def prepare_lane_provider_publication(
     asset_class_value: str,
     index: int,
 ) -> Mapping[str, object]:
-    """Build one provider publication from verified prewarmed structure only."""
+    """Build one clean provider publication from verified prewarmed structure only."""
 
     from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import bounded_provider_preselection_publication as publication
@@ -343,29 +361,47 @@ def prepare_lane_provider_publication(
             "structural_reconstruction_parallelized": False,
         }
 
-    publication_path = transaction._publication_path(
+    canonical_path = transaction._publication_path(
         path.parent,
         asset_class=asset_class.value,
         index=index,
     )
-    lane_policy = replace(policy, provider_preselection_path=str(publication_path))
-    result = publication.ensure_provider_preselection_publication(
-        {asset_class: merged},
-        as_of=timestamp,
-        policy=lane_policy,
-        market_probe=core.default_provider_preselection_market_probe,
-    )
-    if int(getattr(result, "catalog_count", -1)) != len(merged):
-        raise RuntimeError(
-            f"{asset_class.value} provider fanout publication count changed"
+    staging_path = canonical_path.with_name(canonical_path.name + ".fanout")
+    _remove_staging_publication(staging_path)
+    lane_policy = replace(policy, provider_preselection_path=str(staging_path))
+    try:
+        result = publication.ensure_provider_preselection_publication(
+            {asset_class: merged},
+            as_of=timestamp,
+            policy=lane_policy,
+            market_probe=core.default_provider_preselection_market_probe,
         )
+        if int(getattr(result, "catalog_count", -1)) != len(merged):
+            raise RuntimeError(
+                f"{asset_class.value} provider fanout publication count changed"
+            )
+        if Path(result.path) != staging_path or not staging_path.is_file() or staging_path.is_symlink():
+            raise RuntimeError(
+                f"{asset_class.value} provider fanout did not publish the expected staging file"
+            )
+        limitations = tuple(str(item) for item in getattr(result, "limitations", ()) if str(item))
+        if limitations:
+            raise RuntimeError(
+                f"{asset_class.value} provider fanout produced limited evidence"
+            )
+        staging_path.replace(canonical_path)
+    except BaseException:
+        _remove_staging_publication(staging_path)
+        raise
+
     return {
         "scheduled": True,
         "asset_class": asset_class.value,
         "record_count": len(merged),
         "publication_ready": True,
-        "reused": bool(getattr(result, "reused", False)),
+        "reused": False,
         "structural_reconstruction_parallelized": False,
+        "limited_publication_promoted": False,
     }
 
 
