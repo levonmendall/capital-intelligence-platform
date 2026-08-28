@@ -22,6 +22,9 @@ from collections.abc import Sequence
 from operations.comprehensive_discovery_runtime_contract import (
     install_comprehensive_discovery_runtime_contract,
 )
+from operations.epoch_scoped_provider_acquisition import (
+    install_epoch_scoped_provider_acquisition,
+)
 
 
 _CACHED_TRANSACTION_MODULE = "operations.cached_transactional_comprehensive_discovery_lane"
@@ -31,6 +34,10 @@ def install_and_verify_dag_native_runtime() -> None:
     """Install the runtime contract and fail closed if any legacy seam remains active."""
 
     install_comprehensive_discovery_runtime_contract()
+    # Separate independent provider I/O from the serialized heavy screening lane.  The
+    # wrapper is Render-only, epoch-bounded, advisory, and leaves the canonical transactional
+    # coordinator as the sole certification authority.
+    install_epoch_scoped_provider_acquisition()
 
     from operations.evidence_preparation_progress import (
         install_post_public_provider_progress,
@@ -44,6 +51,7 @@ def install_and_verify_dag_native_runtime() -> None:
     from operations import authoritative_comprehensive_discovery as authoritative
     from operations import component_qualified_evidence_maintenance as maintenance
     from operations import persistent_certification_scheduler as scheduler
+    from operations import spawn_safe_authoritative_acquisition as spawn_safe
     from operations import transactional_lane_comprehensive_discovery_coordinator as coordinator
 
     # Comprehensive retry epochs may reuse only release/reference-bound raw catalog
@@ -73,6 +81,12 @@ def install_and_verify_dag_native_runtime() -> None:
         missing.append("spawn_safe_acquisition")
     if coordinator._MODULE != _CACHED_TRANSACTION_MODULE:
         missing.append("structural_cache_transaction_worker")
+    if not getattr(
+        spawn_safe.build_spool,
+        "_epoch_scoped_provider_acquisition",
+        False,
+    ):
+        missing.append("epoch_scoped_provider_acquisition")
     if missing:
         raise RuntimeError(
             "continuous evidence refused legacy comprehensive-discovery runtime: "
