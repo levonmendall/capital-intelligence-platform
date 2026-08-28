@@ -2,6 +2,65 @@
   "identifier": "public-live-information-sources.global-depth.v1",
   "sources": [
     {
+      "identifier": "google-news-global-discovery",
+      "source_name": "Google News RSS Search discovery metadata",
+      "parser": "rss_atom",
+      "endpoint": "https://news.google.com/rss/search",
+      "source_type": "alternative",
+      "independence_group": "google-news-discovery",
+      "enabled": true,
+      "required": true,
+      "requirement_group": "gdelt-global-news-discovery",
+      "credential_environment_variables": [],
+      "parameters": {
+        "q": "economy OR markets OR stocks OR bonds OR oil OR inflation OR \"central bank\" OR earnings OR commodities OR sanctions OR conflict OR ceasefire OR trade OR cyber OR weather",
+        "hl": "en-US",
+        "gl": "US",
+        "ceid": "US:en"
+      },
+      "headers": {
+        "Accept": "application/rss+xml, application/xml;q=0.9"
+      },
+      "maximum_records": 100,
+      "domains": [
+        "current_events_news",
+        "geopolitical_security",
+        "government_policy_regulation",
+        "public_health",
+        "cybersecurity_incidents",
+        "supply_chain_shipping_inventories",
+        "weather_climate_disasters",
+        "social_search_sentiment"
+      ],
+      "impact_channels": [
+        "growth",
+        "inflation",
+        "policy",
+        "earnings",
+        "credit",
+        "supply",
+        "demand",
+        "commodity",
+        "currency",
+        "volatility",
+        "regulation",
+        "geopolitical",
+        "cyber",
+        "climate_weather",
+        "sentiment"
+      ],
+      "reliability": 0.55,
+      "relevance": 0.7,
+      "materiality": 0.45,
+      "license_identifier": "Google-News-RSS-public-feed",
+      "usage_rights_identifier": "metadata-and-links-only.no-article-body-storage",
+      "limitations": [
+        "Last-resort discovery metadata only; the feed is not an authoritative or licensed newswire.",
+        "Only feed metadata and publisher links are normalized; article bodies are not copied or stored.",
+        "Must be corroborated by an original or independently licensed source before CIO reliance."
+      ]
+    },
+    {
       "identifier": "oecd-leading-indicators-global",
       "source_name": "OECD Composite Leading Indicators",
       "parser": "sdmx_csv",
