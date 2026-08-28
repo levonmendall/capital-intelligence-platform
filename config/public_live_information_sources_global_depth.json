@@ -13,7 +13,7 @@
       "requirement_group": "gdelt-global-news-discovery",
       "credential_environment_variables": [],
       "parameters": {
-        "q": "economy OR markets OR stocks OR bonds OR oil OR inflation OR \"central bank\" OR earnings OR commodities OR sanctions OR conflict OR ceasefire OR trade OR cyber OR weather",
+        "q": "economy OR markets OR stocks OR bonds OR oil OR inflation OR \"central bank\" OR earnings OR commodities OR sanctions OR conflict OR ceasefire OR trade OR cyber OR weather when:1d",
         "hl": "en-US",
         "gl": "US",
         "ceid": "US:en"
@@ -52,11 +52,11 @@
       "reliability": 0.55,
       "relevance": 0.7,
       "materiality": 0.45,
-      "license_identifier": "Google-News-RSS-public-feed",
+      "license_identifier": "Google-News-public-RSS-feed-undocumented",
       "usage_rights_identifier": "metadata-and-links-only.no-article-body-storage",
       "limitations": [
-        "Last-resort discovery metadata only; the feed is not an authoritative or licensed newswire.",
-        "Only feed metadata and publisher links are normalized; article bodies are not copied or stored.",
+        "Last-resort discovery metadata only; Google does not publish an official API contract for this RSS search endpoint and it may change without notice.",
+        "Only feed metadata and Google discovery links are normalized; article bodies are not copied or stored.",
         "Must be corroborated by an original or independently licensed source before CIO reliance."
       ]
     },
