@@ -40,6 +40,9 @@ from operations.manual_cio_diagnostic import (
 from operations.qualified_evidence_maintenance import (
     load_prequalified_reference_manifest,
 )
+from operations.streaming_file_cache_reclamation import (
+    release_streaming_clean_file_cache,
+)
 from providers.cme_futures_reference_executable import (
     CmeExecutableFuturesReferenceProvider,
 )
@@ -107,6 +110,11 @@ def _wait_with_reclaimable_bounds(process, **kwargs):
     live ``memory.stat`` from another cgroup. Normal production keeps the original readers
     and therefore always uses the reclaimable-aware dual guard.
 
+    When cgroup-v2 ``memory.reclaim`` exists but cannot actually reclaim the raw-only file
+    cache, make one bounded streaming clean-file pass before the unchanged hard ceiling is
+    allowed to terminate the child. The fallback is attempted only for raw-only pressure,
+    never working-set pressure, and cannot change any resource boundary.
+
     The guard's credential-safe trigger/peak record is also retained on the shared core
     module for the caller that owns the bounded child. This does not alter the historical
     five-value wait contract, so every existing worker remains compatible while release
@@ -127,26 +135,104 @@ def _wait_with_reclaimable_bounds(process, **kwargs):
 
     captured: dict[str, object] = {}
     original_log = _reclaimable_guard._safe_log
+    original_reclaim = _reclaimable_guard._attempt_cgroup_v2_reclaim
+    fallback_used = False
 
     def capture(event: str, **details: object) -> None:
         if event == "reclaimable_memory_guard_triggered":
             captured.update(details)
             captured["triggered"] = True
         elif event == "reclaimable_memory_guard_finished":
-            # Finish contains peak values that are more useful than the instantaneous
-            # trigger sample. Preserve trigger-only fields unless the finish record has a
-            # newer value for the same key.
             captured.update(details)
             captured["finished"] = True
+        elif event == "reclaimable_memory_guard_file_cache_fallback":
+            captured.update(details)
+            captured["file_cache_fallback_observed"] = True
         original_log(event, **details)
 
+    def reclaim_with_file_cache_fallback(snapshot, boundaries, *, values):
+        nonlocal fallback_used
+        result, after = original_reclaim(snapshot, boundaries, values=values)
+        reason = _reclaimable_guard.limit_reason(after, boundaries)
+        should_fallback = (
+            not fallback_used
+            and reason == "raw_hard_ceiling"
+            and (
+                result.error_type is not None
+                or not result.supported
+                or result.reclaimed_kib < _reclaimable_guard._RAW_RECLAIM_MIN_PROGRESS_KIB
+            )
+        )
+        if not should_fallback:
+            return result, after
+
+        fallback_used = True
+        fallback_error_type: str | None = None
+        try:
+            report = release_streaming_clean_file_cache(values)
+        except Exception as error:  # noqa: BLE001 - operational fallback stays fail-soft.
+            report = {}
+            fallback_error_type = type(error).__name__
+        fallback_after = _reclaimable_guard.memory_snapshot(values)
+        before_raw = after.raw_current_kib
+        after_raw = fallback_after.raw_current_kib
+        fallback_reclaimed = (
+            max(0, int(before_raw) - int(after_raw))
+            if isinstance(before_raw, int) and isinstance(after_raw, int)
+            else 0
+        )
+        net_reclaimed = (
+            max(0, int(result.raw_before_kib) - int(after_raw))
+            if isinstance(result.raw_before_kib, int) and isinstance(after_raw, int)
+            else result.reclaimed_kib + fallback_reclaimed
+        )
+        fallback_effective = (
+            _reclaimable_guard.limit_reason(fallback_after, boundaries) is None
+        )
+        capture(
+            "reclaimable_memory_guard_file_cache_fallback",
+            memory_reclaim_operable=bool(result.supported and result.error_type is None),
+            memory_cgroup_reclaim_error_type=result.error_type,
+            memory_file_cache_fallback_attempted=True,
+            memory_file_cache_fallback_supported=bool(report.get("supported")),
+            memory_file_cache_fallback_scan_entries=report.get("scan_entries"),
+            memory_file_cache_fallback_released_file_count=report.get(
+                "released_file_count"
+            ),
+            memory_file_cache_fallback_released_bytes=report.get("released_bytes"),
+            memory_file_cache_fallback_raw_before_kib=before_raw,
+            memory_file_cache_fallback_raw_after_kib=after_raw,
+            memory_file_cache_fallback_reclaimed_kib=fallback_reclaimed,
+            memory_file_cache_fallback_effective=fallback_effective,
+            memory_file_cache_fallback_error_type=fallback_error_type,
+            working_set_boundary_kib=boundaries.working_set_kib,
+            raw_hard_boundary_kib=boundaries.raw_hard_kib,
+        )
+        return (
+            _reclaimable_guard.MemoryReclaimResult(
+                attempted=result.attempted or bool(report.get("selected_file_count")),
+                supported=bool(result.supported and result.error_type is None),
+                requested_kib=result.requested_kib,
+                raw_before_kib=result.raw_before_kib,
+                raw_after_kib=after_raw,
+                working_set_before_kib=result.working_set_before_kib,
+                working_set_after_kib=fallback_after.working_set_kib,
+                reclaimed_kib=net_reclaimed,
+                effective=fallback_effective,
+                error_type=None if fallback_effective else result.error_type,
+            ),
+            fallback_after,
+        )
+
     _reclaimable_guard._safe_log = capture
+    _reclaimable_guard._attempt_cgroup_v2_reclaim = reclaim_with_file_cache_fallback
     try:
         result = _reclaimable_guard.wait_with_reclaimable_resource_bounds(
             process,
             **kwargs,
         )
     finally:
+        _reclaimable_guard._attempt_cgroup_v2_reclaim = original_reclaim
         _reclaimable_guard._safe_log = original_log
     captured.setdefault("memory_limited", bool(result[2]))
     captured.setdefault("credential_safe", True)
@@ -183,9 +269,6 @@ def _prime_forced_replacement(values: Mapping[str, str]) -> None:
 
 
 def _production_plane_enabled(values: Mapping[str, str]) -> bool:
-    # Capability-scoped Render is independently qualified by its operating evidence plane;
-    # it must remain provider-free even when the comprehensive evidence plane is absent or
-    # stale. Legacy full-discovery operation retains the original evidence-plane contract.
     if capability_scoped_operation_enabled(values):
         return True
     explicit = values.get("CAPITAL_INTELLIGENCE_CONTINUOUS_EVIDENCE_PLANE_ENABLED", "").strip()
@@ -197,14 +280,7 @@ def _production_plane_enabled(values: Mapping[str, str]) -> bool:
 
 
 def _configure_provider_free_consumer(values: MutableMapping[str, str]) -> bool:
-    """Keep the production CIO child from initiating public/provider acquisition.
-
-    Evidence qualification happens in a separate bounded evidence-owner process before
-    this watchdog is invoked. The historical manual diagnostic still contains a forced
-    public-collection call; disabling collection in the child environment makes that call
-    a local no-op rather than an external provider transaction. The evidence owner does not
-    inherit this child-only environment mutation.
-    """
+    """Keep the production CIO child from initiating public/provider acquisition."""
 
     if not _production_plane_enabled(values):
         return False
@@ -224,14 +300,7 @@ def _prepare_with_rate_budget(
             raise TypeError(
                 "capability operating evidence requires a mutable watchdog environment"
             )
-        # Disk-only validation of the fresh immutable operating snapshot. The downstream
-        # qualified-paper-evidence probe independently verifies the exact signed universe
-        # and every requested structural subset before the CIO receives evidence.
         manifest = load_capability_operating_reference_manifest(values)
-        # Evidence-owner subprocesses have exited by this handoff. Release only clean pages
-        # from the now-qualified current evidence epoch so the bounded CIO child starts with
-        # its governed memory reserve intact. The advisory is fail-soft and never mutates
-        # evidence or changes the watchdog's limits.
         release_completed_operating_evidence_file_cache(values)
         return manifest
 
@@ -241,8 +310,6 @@ def _prepare_with_rate_budget(
             raise TypeError(
                 "production prequalified evidence requires a mutable watchdog environment"
             )
-        # Legacy full-discovery mode: bind the exact comprehensive reference manifest after
-        # validating the current immutable evidence generation. No provider calls here.
         return load_prequalified_reference_manifest(values)
 
     kwargs.setdefault(
@@ -259,9 +326,6 @@ _install_recovery_progress_contract()
 _core.prepare_reference_readiness = _prepare_with_rate_budget
 _core._prime_forced_replacement = _prime_forced_replacement
 _core._container_memory_kib = _container_memory_with_configured_ceiling
-# All bounded Render jobs import this wrapper before invoking the shared watchdog. Replace
-# the legacy raw-memory kill test with the dual reclaimable-aware guard while preserving the
-# watchdog's exact return contract, hard service-OOM boundary, and explicit injection seam.
 _core._wait_with_resource_bounds = _wait_with_reclaimable_bounds
 
 
@@ -271,7 +335,4 @@ if __name__ == "__main__":
         _prime_forced_replacement(os.environ)
     raise SystemExit(_core.main())
 
-# Preserve the historical import surface. Test and library imports of
-# run_bounded_manual_cio_diagnostic receive the unchanged core module after the runtime
-# provider injection above, so module-global monkeypatches continue to affect the core.
 sys.modules[__name__] = _core
