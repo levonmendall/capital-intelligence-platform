@@ -210,6 +210,61 @@ def test_completed_lane_is_last_durable_progress_not_false_failure_source(
     ]
 
 
+def test_raw_boundary_event_preserves_terminal_reclaim_outcome(monkeypatch, capsys) -> None:
+    state = _state()
+    monkeypatch.setattr(
+        stage_isolated_evidence_pipeline,
+        "load_stage_isolated_evidence_state",
+        lambda _values: state,
+    )
+    monkeypatch.setattr(
+        attribution,
+        "lane_local_memory_failure_context",
+        lambda _values, *, boundary: None,
+    )
+    monkeypatch.setattr(
+        memory_watchdog,
+        "_last_reclaimable_memory_report",
+        {
+            "trigger_reason": "raw_hard_ceiling",
+            "memory_reclaim_attempted": True,
+            "memory_reclaim_supported": False,
+            "memory_reclaim_requested_kib": 108_376,
+            "memory_reclaim_raw_before_kib": 1_963_044,
+            "memory_reclaim_raw_after_kib": 1_963_044,
+            "memory_reclaim_working_set_before_kib": 646_572,
+            "memory_reclaim_working_set_after_kib": 646_572,
+            "memory_reclaim_delta_kib": 0,
+            "memory_reclaim_reclaimed_kib": 0,
+            "memory_reclaim_effective": False,
+            "memory_reclaim_ever_effective": False,
+            "memory_reclaim_error_type": "UnsupportedCgroupReclaim",
+            "memory_reclaim_attempt_count": 1,
+            "memory_reclaim_success_count": 0,
+            "memory_reclaim_max_attempts": 3,
+        },
+        raising=False,
+    )
+
+    continuous._memory_failure_context({})
+
+    payload = json.loads(capsys.readouterr().err.strip())
+    assert payload["memory_reclaim_attempted"] is True
+    assert payload["memory_reclaim_supported"] is False
+    assert payload["memory_reclaim_requested_kib"] == 108_376
+    assert payload["memory_reclaim_raw_before_kib"] == 1_963_044
+    assert payload["memory_reclaim_raw_after_kib"] == 1_963_044
+    assert payload["memory_reclaim_working_set_before_kib"] == 646_572
+    assert payload["memory_reclaim_working_set_after_kib"] == 646_572
+    assert payload["memory_reclaim_reclaimed_kib"] == 0
+    assert payload["memory_reclaim_effective"] is False
+    assert payload["memory_reclaim_ever_effective"] is False
+    assert payload["memory_reclaim_error_type"] == "UnsupportedCgroupReclaim"
+    assert payload["memory_reclaim_attempt_count"] == 1
+    assert payload["memory_reclaim_success_count"] == 0
+    assert payload["memory_reclaim_max_attempts"] == 3
+
+
 def test_missing_lane_projection_preserves_coarse_fail_closed_memory_event(
     monkeypatch, capsys
 ) -> None:

@@ -37,6 +37,7 @@ _SAFE_STRING_FIELDS = (
     "last_durable_progress_component",
     "memory_trigger_reason",
     "memory_accounting_source",
+    "memory_reclaim_error_type",
 )
 _SAFE_INT_FIELDS = (
     "failure_lane_index",
@@ -49,6 +50,22 @@ _SAFE_INT_FIELDS = (
     "memory_kernel_peak_kib",
     "memory_working_set_boundary_kib",
     "memory_raw_hard_boundary_kib",
+    "memory_reclaim_requested_kib",
+    "memory_reclaim_raw_before_kib",
+    "memory_reclaim_raw_after_kib",
+    "memory_reclaim_working_set_before_kib",
+    "memory_reclaim_working_set_after_kib",
+    "memory_reclaim_delta_kib",
+    "memory_reclaim_reclaimed_kib",
+    "memory_reclaim_attempt_count",
+    "memory_reclaim_success_count",
+    "memory_reclaim_max_attempts",
+)
+_SAFE_BOOL_FIELDS = (
+    "memory_reclaim_attempted",
+    "memory_reclaim_supported",
+    "memory_reclaim_effective",
+    "memory_reclaim_ever_effective",
 )
 _SAFE_LANE_METRICS = frozenset(
     {
@@ -158,6 +175,10 @@ def extract_failure_context(stderr: object) -> dict[str, object] | None:
         for field in _SAFE_INT_FIELDS:
             value = _safe_nonnegative_int(payload.get(field))
             if value is not None:
+                safe[field] = value
+        for field in _SAFE_BOOL_FIELDS:
+            value = payload.get(field)
+            if isinstance(value, bool):
                 safe[field] = value
         progress_metrics = _safe_progress_metrics(payload.get("lane_progress_metrics"))
         if progress_metrics:

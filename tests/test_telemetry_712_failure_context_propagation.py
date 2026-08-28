@@ -56,6 +56,21 @@ def _memory_event(
         "memory_working_set_boundary_kib": 1441792,
         "memory_raw_hard_boundary_kib": 1887436,
         "memory_accounting_source": "cgroup_v2_configured_ceiling",
+        "memory_reclaim_attempted": True,
+        "memory_reclaim_supported": False,
+        "memory_reclaim_requested_kib": 108376,
+        "memory_reclaim_raw_before_kib": 1963044,
+        "memory_reclaim_raw_after_kib": 1963044,
+        "memory_reclaim_working_set_before_kib": 646572,
+        "memory_reclaim_working_set_after_kib": 646572,
+        "memory_reclaim_delta_kib": 0,
+        "memory_reclaim_reclaimed_kib": 0,
+        "memory_reclaim_effective": False,
+        "memory_reclaim_ever_effective": False,
+        "memory_reclaim_error_type": "UnsupportedCgroupReclaim",
+        "memory_reclaim_attempt_count": 1,
+        "memory_reclaim_success_count": 0,
+        "memory_reclaim_max_attempts": 3,
         "credential_safe": True,
         "decision_authority": False,
         "candidate_authority": False,
@@ -120,6 +135,20 @@ def test_active_lane_and_memory_metrics_survive_signed_prequalification(tmp_path
     assert failure["failure_lane_index"] == 7
     assert failure["memory_trigger_reason"] == "working_set"
     assert failure["memory_accounting_source"] == "cgroup_v2_configured_ceiling"
+    assert failure["memory_reclaim_attempted"] is True
+    assert failure["memory_reclaim_supported"] is False
+    assert failure["memory_reclaim_requested_kib"] == 108376
+    assert failure["memory_reclaim_raw_before_kib"] == 1963044
+    assert failure["memory_reclaim_raw_after_kib"] == 1963044
+    assert failure["memory_reclaim_working_set_before_kib"] == 646572
+    assert failure["memory_reclaim_working_set_after_kib"] == 646572
+    assert failure["memory_reclaim_reclaimed_kib"] == 0
+    assert failure["memory_reclaim_effective"] is False
+    assert failure["memory_reclaim_ever_effective"] is False
+    assert failure["memory_reclaim_error_type"] == "UnsupportedCgroupReclaim"
+    assert failure["memory_reclaim_attempt_count"] == 1
+    assert failure["memory_reclaim_success_count"] == 0
+    assert failure["memory_reclaim_max_attempts"] == 3
     assert failure["lane_progress_metrics"] == {
         "active_lane_index": 7,
         "candidate_lanes": 13,

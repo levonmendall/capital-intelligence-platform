@@ -43,6 +43,13 @@ _RESOURCE_CONTEXT_KEYS = (
     "last_durable_progress_component",
     "memory_trigger_reason",
     "memory_accounting_source",
+    "memory_reclaim_error_type",
+)
+_RESOURCE_BOOL_KEYS = (
+    "memory_reclaim_attempted",
+    "memory_reclaim_supported",
+    "memory_reclaim_effective",
+    "memory_reclaim_ever_effective",
 )
 _RESOURCE_METRIC_KEYS = (
     "failure_lane_index",
@@ -60,6 +67,16 @@ _RESOURCE_METRIC_KEYS = (
     "memory_trigger_working_set",
     "memory_trigger_raw_hard_ceiling",
     "memory_trigger_other",
+    "memory_reclaim_requested_kib",
+    "memory_reclaim_raw_before_kib",
+    "memory_reclaim_raw_after_kib",
+    "memory_reclaim_working_set_before_kib",
+    "memory_reclaim_working_set_after_kib",
+    "memory_reclaim_delta_kib",
+    "memory_reclaim_reclaimed_kib",
+    "memory_reclaim_attempt_count",
+    "memory_reclaim_success_count",
+    "memory_reclaim_max_attempts",
     # Keep the terminal exporter contract aligned with the exact credential-safe numeric
     # attribution emitted by comprehensive_discovery_memory_attribution. These values are
     # advisory-only resource accounting; paths, provider payloads, symbols, and arbitrary
@@ -205,9 +222,17 @@ def _safe_resource_failure_context(value: object) -> dict[str, object] | None:
         parsed = _base._safe_identifier(value.get(key))
         if parsed is not None:
             safe[key] = parsed
+    for key in _RESOURCE_BOOL_KEYS:
+        raw = value.get(key)
+        if isinstance(raw, bool):
+            safe[key] = raw
     lane_index = _base._nonnegative_int(value.get("failure_lane_index"))
     if lane_index is not None:
         safe["failure_lane_index"] = lane_index
+    for key in _RESOURCE_METRIC_KEYS:
+        parsed = _base._nonnegative_int(value.get(key))
+        if parsed is not None:
+            safe[key] = parsed
     return safe
 
 

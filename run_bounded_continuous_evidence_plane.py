@@ -164,8 +164,17 @@ def _memory_failure_context(values: Mapping[str, str]) -> None:
             "memory_reclaim_working_set_after_kib"
         ),
         "memory_reclaim_delta_kib": safe_report.get("memory_reclaim_delta_kib"),
+        "memory_reclaim_reclaimed_kib": safe_report.get(
+            "memory_reclaim_reclaimed_kib"
+        ),
         "memory_reclaim_effective": safe_report.get("memory_reclaim_effective"),
+        "memory_reclaim_ever_effective": safe_report.get(
+            "memory_reclaim_ever_effective"
+        ),
         "memory_reclaim_error_type": safe_report.get("memory_reclaim_error_type"),
+        "memory_reclaim_attempt_count": safe_report.get("memory_reclaim_attempt_count"),
+        "memory_reclaim_success_count": safe_report.get("memory_reclaim_success_count"),
+        "memory_reclaim_max_attempts": safe_report.get("memory_reclaim_max_attempts"),
     }
     detail = (
         f"stage_isolated_evidence_resource_boundary; stage={stage}; "
@@ -184,6 +193,9 @@ def _memory_failure_context(values: Mapping[str, str]) -> None:
         f"memory_reclaim_supported={safe_report.get('memory_reclaim_supported')}; "
         f"memory_reclaim_effective={safe_report.get('memory_reclaim_effective')}; "
         f"memory_reclaim_delta_kib={safe_report.get('memory_reclaim_delta_kib')}; "
+        f"memory_reclaim_attempt_count={safe_report.get('memory_reclaim_attempt_count')}; "
+        f"memory_reclaim_success_count={safe_report.get('memory_reclaim_success_count')}; "
+        f"memory_reclaim_max_attempts={safe_report.get('memory_reclaim_max_attempts')}; "
         f"memory_reclaim_error_type={safe_report.get('memory_reclaim_error_type')}"
         f"{lane_detail}"
     )[:1600]
