@@ -32,7 +32,7 @@ _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _DAG_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
-_RENDER_DAG_WORKERS = "3"
+_RENDER_DAG_WORKERS = "4"
 _PAPER_HISTORY_DAYS = 365 * 10 + 20
 _REDACTED = "[REDACTED]"
 _SENSITIVE_ENV_MARKERS = (
@@ -204,7 +204,7 @@ def _stage_us_equity_discovery(values: dict[str, str], state) -> dict[str, objec
 
 def _stage_comprehensive_discovery(values: dict[str, str], state) -> dict[str, object]:
     # The fresh stage interpreter installs the authoritative DAG runtime before importing
-    # discovery. On Render, allow only three provider-facing prewarm workers so independent
+    # discovery. On Render, allow only four provider-facing prewarm workers so independent
     # acquisitions can overlap inside the existing evidence epoch. The transactional
     # publication coordinator remains strictly serialized and still owns the heavy-memory
     # lane, cache-reclamation handoff, and unchanged memory ceilings.
