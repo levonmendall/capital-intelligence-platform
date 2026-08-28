@@ -1,25 +1,28 @@
 """Bound exact-epoch provider acquisition ahead of serialized comprehensive screening.
 
 Comprehensive discovery historically performs provider acquisition and terminal screening
-inside one end-to-end market-lane child and then advances to the next lane.  That is ideal
+inside one end-to-end market-lane child and then advances to the next lane. That is ideal
 for memory isolation but it serializes independent network latency across every scheduled
 market and repeatedly consumes the fixed evidence-freshness epoch before screening can
 finish.
 
-This module separates only that resource boundary.  On Render, scheduled market lanes may
-pre-build their canonical provider-preselection publications in a small bounded set of
-finite child interpreters.  Each child uses the same decision epoch, policy, structural
-catalog identity, provider code, publication schema, and output path that the subsequent
-canonical transaction uses.  The canonical transaction still runs one lane at a time and
-must validate/reuse the publication before terminal screening, certification-node creation,
+This module separates only that resource boundary. On Render, scheduled market lanes whose
+release/reference-bound structural catalogs are already present may pre-build their
+canonical provider-preselection publications in a small bounded set of finite child
+interpreters. Each child uses the same decision epoch, policy, structural catalog identity,
+provider implementation, publication schema, and output path that the subsequent canonical
+transaction uses. The canonical transaction still runs one lane at a time and must
+validate/reuse the publication before terminal screening, certification-node creation,
 market-evidence qualification, and durable transaction completion.
 
-The fan-out is acceleration only.  It has no evidence, candidate, sizing, construction,
-execution, CIO, or real-money authority.  A child failure, timeout, partial file, cache miss,
-or unsupported environment falls back to the unchanged serialized transaction.  A fixed
-portion of the existing 900-second evidence epoch is always reserved for serialized
-screening, paper evidence, and provider-free finalization; this module never extends or
-resets the freshness deadline.
+The fan-out is provider-I/O acceleration only. It is forbidden from reconstructing a
+missing structural catalog in parallel: a cache miss exits the advisory child and leaves
+that lane to the unchanged serialized transaction. The fan-out has no evidence, candidate,
+sizing, construction, execution, CIO, or real-money authority. A child failure, timeout,
+partial file, cache miss, or unsupported environment falls back to the unchanged serialized
+transaction. A fixed portion of the existing evidence epoch is always reserved for
+serialized screening, paper evidence, and provider-free finalization; this module never
+extends or resets the freshness deadline.
 """
 
 from __future__ import annotations
@@ -89,8 +92,10 @@ def _fanout_budget_seconds(
     return max(0.0, min(_MAX_FANOUT_SECONDS, spare))
 
 
-def _scheduled_lane_items(decision_epoch: datetime) -> tuple[tuple[int, CandidateAssetClass], ...]:
-    """Return canonical lane indices for lanes scheduled in this exact decision epoch."""
+def _scheduled_lane_items(
+    decision_epoch: datetime,
+) -> tuple[tuple[int, CandidateAssetClass], ...]:
+    """Return canonical indices for cacheable lanes scheduled in this exact epoch."""
 
     from operations import comprehensive_market_discovery as facade
     from operations import lane_local_comprehensive_discovery_spool as lane_local
@@ -99,7 +104,7 @@ def _scheduled_lane_items(decision_epoch: datetime) -> tuple[tuple[int, Candidat
     return tuple(
         (index, asset_class)
         for index, asset_class in enumerate(lane_local._candidate_lanes())
-        if asset_class in active
+        if asset_class in active and asset_class is not CandidateAssetClass.OPTION
     )
 
 
@@ -163,7 +168,7 @@ def run_provider_acquisition_fanout(
     decision_epoch: datetime,
     popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
 ) -> Mapping[str, object]:
-    """Pre-acquire scheduled lane publications concurrently inside the existing epoch."""
+    """Pre-acquire cached-structure lane publications inside the existing epoch."""
 
     resolved = dict(values)
     if not _render_enabled(resolved):
@@ -171,12 +176,23 @@ def run_provider_acquisition_fanout(
 
     budget = _fanout_budget_seconds(decision_epoch, resolved)
     if budget <= 0.0:
-        return {"attempted": False, "reason": "downstream_reserve", "completed": 0, "failed": 0}
+        return {
+            "attempted": False,
+            "reason": "downstream_reserve",
+            "completed": 0,
+            "failed": 0,
+        }
 
     path = Path(request_path).expanduser()
-    pending = list(_scheduled_lane_items(decision_epoch))
+    lane_items = _scheduled_lane_items(decision_epoch)
+    pending = list(lane_items)
     if not pending:
-        return {"attempted": False, "reason": "no_scheduled_lanes", "completed": 0, "failed": 0}
+        return {
+            "attempted": False,
+            "reason": "no_cacheable_scheduled_lanes",
+            "completed": 0,
+            "failed": 0,
+        }
 
     workers = _worker_count(resolved)
     active: dict[int, tuple[subprocess.Popen[bytes], CandidateAssetClass]] = {}
@@ -241,11 +257,12 @@ def run_provider_acquisition_fanout(
         "attempted": True,
         "worker_limit": workers,
         "maximum_parallel": maximum_parallel,
-        "scheduled_lanes": len(_scheduled_lane_items(decision_epoch)),
+        "scheduled_lanes": len(lane_items),
         "completed": completed,
         "failed": failed,
         "timed_out": timed_out,
         "budget_seconds": round(budget, 3),
+        "structural_reconstruction_parallelized": False,
         "advisory_only": True,
         "evidence_certified": False,
         "decision_authority": False,
@@ -258,7 +275,10 @@ def run_provider_acquisition_fanout(
         "credential_safe": True,
     }
     print(
-        json.dumps({"event": "epoch_scoped_provider_acquisition_fanout", **report}, sort_keys=True),
+        json.dumps(
+            {"event": "epoch_scoped_provider_acquisition_fanout", **report},
+            sort_keys=True,
+        ),
         flush=True,
     )
     return report
@@ -271,36 +291,45 @@ def prepare_lane_provider_publication(
     asset_class_value: str,
     index: int,
 ) -> Mapping[str, object]:
-    """Build only one canonical provider publication; never perform terminal screening."""
+    """Build one provider publication from verified prewarmed structure only."""
 
     from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import bounded_provider_preselection_publication as publication
-    from operations import cached_transactional_comprehensive_discovery_lane as cached
     from operations import comprehensive_discovery_input_spool as legacy
+    from operations import comprehensive_discovery_structural_cache as structural
     from operations import comprehensive_market_discovery as facade
     from operations import transactional_comprehensive_discovery_lane as transaction
 
     path = Path(request_path).expanduser()
-    request, policy = bounded._validate_request(path, values)
-    timestamp = legacy._parse_timestamp(request.get("decision_epoch"), field_name="decision_epoch")
+    resolved = dict(values)
+    request, policy = bounded._validate_request(path, resolved)
+    timestamp = legacy._parse_timestamp(
+        request.get("decision_epoch"), field_name="decision_epoch"
+    )
     asset_class = CandidateAssetClass(asset_class_value)
+    if asset_class is CandidateAssetClass.OPTION:
+        raise RuntimeError("provider fanout refuses timestamp-constructed option catalogs")
 
-    cached.install_cached_structural_lane_loader()
     core = facade._core
-    raw = transaction._load_catalog_records(
-        core=core,
-        values=values,
-        policy=policy,
-        timestamp=timestamp,
+    policy_version = str(getattr(policy, "version", ""))
+    structural.bind_reference_structural_fingerprint(resolved)
+    cached = structural.load_structural_catalog(
+        resolved,
         asset_class=asset_class,
+        policy_version=policy_version,
+        requested_as_of=timestamp,
     )
-    merged = transaction._bounded_lane._merge_certified_lane(
-        core,
-        raw,
-        asset_class=asset_class,
-        timestamp=timestamp,
-    )
-    del raw
+    if cached is None:
+        raise RuntimeError(
+            f"provider fanout requires prewarmed structural cache; asset_class={asset_class.value}"
+        )
+    source_active = asset_class in core._base.scheduled_discovery_lanes(cached.source_as_of)
+    requested_active = asset_class in core._base.scheduled_discovery_lanes(timestamp)
+    if source_active is not requested_active:
+        raise RuntimeError(
+            f"provider fanout structural schedule changed; asset_class={asset_class.value}"
+        )
+    merged = cached.records
 
     required = asset_class in core._base._DEFAULT_REQUIRED_DISCOVERY_LANES
     dynamic = bool(required or merged)
@@ -311,6 +340,7 @@ def prepare_lane_provider_publication(
             "asset_class": asset_class.value,
             "record_count": len(merged),
             "publication_ready": False,
+            "structural_reconstruction_parallelized": False,
         }
 
     publication_path = transaction._publication_path(
@@ -326,13 +356,16 @@ def prepare_lane_provider_publication(
         market_probe=core.default_provider_preselection_market_probe,
     )
     if int(getattr(result, "catalog_count", -1)) != len(merged):
-        raise RuntimeError(f"{asset_class.value} provider fanout publication count changed")
+        raise RuntimeError(
+            f"{asset_class.value} provider fanout publication count changed"
+        )
     return {
         "scheduled": True,
         "asset_class": asset_class.value,
         "record_count": len(merged),
         "publication_ready": True,
         "reused": bool(getattr(result, "reused", False)),
+        "structural_reconstruction_parallelized": False,
     }
 
 
@@ -347,7 +380,11 @@ def install_epoch_scoped_provider_acquisition() -> None:
     if getattr(current, "_epoch_scoped_provider_acquisition", False):
         return
 
-    def build_spool(request_path: str | Path, *, values: Mapping[str, str] | None = None):
+    def build_spool(
+        request_path: str | Path,
+        *,
+        values: Mapping[str, str] | None = None,
+    ):
         resolved = dict(os.environ if values is None else values)
         if _render_enabled(resolved):
             path = Path(request_path).expanduser()
@@ -361,7 +398,7 @@ def install_epoch_scoped_provider_acquisition() -> None:
                     values=resolved,
                     decision_epoch=epoch,
                 )
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - serial path remains authority.
                 print(
                     json.dumps(
                         {
@@ -399,7 +436,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             asset_class_value=str(args.asset_class),
             index=int(args.index),
         )
-    except BaseException as error:
+    except BaseException as error:  # noqa: BLE001 - advisory child reports type only.
         print(
             json.dumps(
                 {
