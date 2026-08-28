@@ -130,6 +130,50 @@ def test_observation_metadata_is_bounded_and_safe():
     assert "positions" not in snapshot
 
 
+def test_public_provider_terminal_evidence_survives_safe_capture():
+    payload = _payload(state="failed")
+    payload["public_live_requirement_progress"] = {
+        "state": "incomplete",
+        "required_count": 13,
+        "qualified_count": 12,
+        "failed_count": 1,
+        "failures": [
+            {
+                "required_information": "gdelt-global-news-discovery",
+                "provider": "gdelt-global-news-discovery",
+                "fallback_providers_attempted": ["gdelt-global-context-discovery"],
+                "failure_type": "provider_failure",
+                "error_type": "ProviderTimeout",
+                "error_message": "DOC read timed out after 14.875s",
+                "fallback_failures": [
+                    {
+                        "provider": "gdelt-global-context-discovery",
+                        "error_type": "ProviderInvalidPayload",
+                        "error_message": "Context response was not valid JSON",
+                    }
+                ],
+            }
+        ],
+    }
+
+    snapshot = telemetry.build_snapshot(
+        payload,
+        expected_release=EXPECTED_RELEASE,
+        captured_at=CAPTURED_AT,
+    )
+
+    failures = snapshot["diagnostic"]["public_live_requirement_progress"]["failures"]
+    assert failures[0]["error_type"] == "ProviderTimeout"
+    assert failures[0]["error_message"] == "DOC read timed out after 14.875s"
+    assert failures[0]["fallback_failures"] == [
+        {
+            "provider": "gdelt-global-context-discovery",
+            "error_type": "ProviderInvalidPayload",
+            "error_message": "Context response was not valid JSON",
+        }
+    ]
+
+
 def test_forbidden_source_fields_remain_rejected():
     payload = _payload(state="failed")
     payload["holdings"] = ["sensitive"]

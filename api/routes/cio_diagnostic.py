@@ -100,6 +100,17 @@ def _safe_public_requirement_progress(
                     if str(value).strip()
                 ],
                 "failure_type": _safe(str(item.get("failure_type") or "unknown")),
+                "error_type": _safe(str(item.get("error_type") or "unknown")),
+                "error_message": str(item.get("error_message") or "")[:160] or None,
+                "fallback_failures": [
+                    {
+                        "provider": _safe(str(failure.get("provider") or "unknown")),
+                        "error_type": _safe(str(failure.get("error_type") or "unknown")),
+                        "error_message": str(failure.get("error_message") or "")[:160] or None,
+                    }
+                    for failure in item.get("fallback_failures", [])
+                    if isinstance(failure, Mapping)
+                ],
             }
         )
     return {

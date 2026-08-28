@@ -174,6 +174,19 @@ def _safe_identifier(value: object) -> str | None:
     return identifier
 
 
+def _safe_error_message(value: object, *, maximum: int = 160) -> str | None:
+    message = " ".join(str(value or "").split())
+    if not message:
+        return None
+    lowered = message.lower()
+    if any(
+        marker in lowered
+        for marker in ("api_key=", "apikey=", "api_token=", "access_token=", "authorization=")
+    ):
+        return "credential-bearing provider detail suppressed"
+    return message[:maximum]
+
+
 def _safe_nonnegative_number(value: object) -> float | None:
     if isinstance(value, bool):
         return None
@@ -251,6 +264,17 @@ def _safe_requirement_progress(value: object) -> dict[str, object] | None:
                         else []
                     ),
                     "failure_type": _safe_identifier(item.get("failure_type")),
+                    "error_type": _safe_identifier(item.get("error_type")),
+                    "error_message": _safe_error_message(item.get("error_message")),
+                    "fallback_failures": [
+                        {
+                            "provider": _safe_identifier(failure.get("provider")),
+                            "error_type": _safe_identifier(failure.get("error_type")),
+                            "error_message": _safe_error_message(failure.get("error_message")),
+                        }
+                        for failure in item.get("fallback_failures", [])
+                        if isinstance(failure, Mapping)
+                    ],
                 }
             )
     progress["failures"] = failures
