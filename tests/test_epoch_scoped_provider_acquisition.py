@@ -34,7 +34,9 @@ def test_non_render_never_spawns_provider_fanout(monkeypatch, tmp_path) -> None:
     }
 
 
-def test_provider_fanout_is_bounded_and_overlaps(monkeypatch, tmp_path) -> None:
+def test_provider_fanout_serially_prewarms_structure_then_overlaps_provider_io(
+    monkeypatch, tmp_path
+) -> None:
     lanes = tuple(
         item
         for item in CandidateAssetClass
@@ -51,11 +53,14 @@ def test_provider_fanout_is_bounded_and_overlaps(monkeypatch, tmp_path) -> None:
     created = []
 
     class FakeProcess:
-        def __init__(self, pid: int) -> None:
+        def __init__(self, pid: int, *, structural: bool) -> None:
             self.pid = pid
+            self.structural = structural
             self.poll_count = 0
 
         def poll(self):
+            if self.structural:
+                return 0
             self.poll_count += 1
             return None if self.poll_count == 1 else 0
 
@@ -69,8 +74,12 @@ def test_provider_fanout_is_bounded_and_overlaps(monkeypatch, tmp_path) -> None:
             return None
 
     def fake_popen(command, **kwargs):
-        process = FakeProcess(10_000 + len(created))
-        created.append((tuple(command), dict(kwargs), process))
+        command = tuple(command)
+        process = FakeProcess(
+            10_000 + len(created),
+            structural="--prepare-structure" in command,
+        )
+        created.append((command, dict(kwargs), process))
         return process
 
     report = fanout.run_provider_acquisition_fanout(
@@ -83,7 +92,18 @@ def test_provider_fanout_is_bounded_and_overlaps(monkeypatch, tmp_path) -> None:
         popen=fake_popen,
     )
 
-    assert len(created) == len(lanes)
+    structural = [item for item in created if "--prepare-structure" in item[0]]
+    provider = [item for item in created if "--prepare-structure" not in item[0]]
+    assert len(structural) == len(lanes)
+    assert len(provider) == len(lanes)
+    assert max(created.index(item) for item in structural) < min(
+        created.index(item) for item in provider
+    )
+    assert report["structural_prewarm_attempted"] == len(lanes)
+    assert report["structural_prewarm_completed"] == len(lanes)
+    assert report["structural_prewarm_failed"] == 0
+    assert report["structural_prewarm_maximum_parallel"] == 1
+    assert report["provider_attempted_lanes"] == len(lanes)
     assert report["completed"] == len(lanes)
     assert report["failed"] == 0
     assert report["maximum_parallel"] == 3
@@ -116,6 +136,148 @@ def test_provider_fanout_preserves_downstream_epoch_reserve(monkeypatch) -> None
         {},
         now=epoch + timedelta(seconds=500),
     ) == 0.0
+
+
+def test_cold_release_structural_prewarm_uses_canonical_merge_without_provider_or_screening(
+    monkeypatch, tmp_path
+) -> None:
+    from operations import bounded_comprehensive_discovery_spool as bounded
+    from operations import bounded_provider_preselection_publication as publication
+    from operations import comprehensive_discovery_input_spool as legacy
+    from operations import comprehensive_discovery_structural_cache as structural
+    from operations import comprehensive_market_discovery as facade
+    from operations import transactional_comprehensive_discovery_lane as transaction
+
+    asset_class = next(
+        item
+        for item in CandidateAssetClass
+        if item not in {CandidateAssetClass.OTHER, CandidateAssetClass.OPTION}
+    )
+    timestamp = _epoch()
+    request_path = tmp_path / "request.json"
+    request_path.write_text("{}", encoding="utf-8")
+
+    @dataclass(frozen=True)
+    class Policy:
+        version: str = "policy-v1"
+
+    policy = Policy()
+    raw = (SimpleNamespace(symbol="RAW"),)
+    merged = (SimpleNamespace(symbol="A"), SimpleNamespace(symbol="B"))
+    cache = []
+    events: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(
+        bounded,
+        "_validate_request",
+        lambda _path, _values: ({"decision_epoch": timestamp.isoformat()}, policy),
+    )
+    monkeypatch.setattr(legacy, "_parse_timestamp", lambda _value, field_name: timestamp)
+
+    def bind_fingerprint(values):
+        values[structural._REFERENCE_STRUCTURAL_FINGERPRINT_ENV] = "fingerprint-1"
+        events.append(("bind-fingerprint",))
+        return "fingerprint-1"
+
+    monkeypatch.setattr(structural, "bind_reference_structural_fingerprint", bind_fingerprint)
+
+    def load_cache(values, *, asset_class, policy_version, requested_as_of):
+        events.append(("load-cache", asset_class, policy_version, requested_as_of))
+        return cache[0] if cache else None
+
+    monkeypatch.setattr(structural, "load_structural_catalog", load_cache)
+
+    def load_records(*, core, values, policy, timestamp, asset_class):
+        events.append(("load-canonical", asset_class, timestamp))
+        return raw
+
+    monkeypatch.setattr(transaction, "_load_catalog_records", load_records)
+
+    def merge_records(core, records, *, asset_class, timestamp):
+        events.append(("merge-canonical", asset_class, timestamp, tuple(records)))
+        return merged
+
+    monkeypatch.setattr(transaction._bounded_lane, "_merge_certified_lane", merge_records)
+
+    def publish_cache(
+        values,
+        *,
+        asset_class,
+        policy_version,
+        source_as_of,
+        raw_record_count,
+        records,
+    ):
+        events.append(
+            (
+                "publish-cache",
+                asset_class,
+                policy_version,
+                source_as_of,
+                raw_record_count,
+                tuple(records),
+            )
+        )
+        cache.append(
+            SimpleNamespace(
+                records=tuple(records),
+                raw_record_count=raw_record_count,
+                source_as_of=source_as_of,
+            )
+        )
+        return True
+
+    monkeypatch.setattr(structural, "publish_structural_catalog", publish_cache)
+
+    def forbidden_provider(*args, **kwargs):  # pragma: no cover - assertion helper
+        raise AssertionError("structural prewarm must not perform provider preselection")
+
+    monkeypatch.setattr(publication, "ensure_provider_preselection_publication", forbidden_provider)
+
+    def forbidden_screening(*args, **kwargs):  # pragma: no cover - assertion helper
+        raise AssertionError("structural prewarm must not perform terminal screening")
+
+    base = SimpleNamespace(
+        scheduled_discovery_lanes=lambda as_of: frozenset({asset_class})
+        if as_of == timestamp
+        else frozenset(),
+    )
+    monkeypatch.setattr(
+        facade,
+        "_core",
+        SimpleNamespace(
+            _base=base,
+            build_bounded_terminal_preselection=forbidden_screening,
+        ),
+    )
+
+    result = fanout.prepare_lane_structural_catalog(
+        request_path,
+        values={"RENDER": "true"},
+        asset_class_value=asset_class.value,
+        index=0,
+    )
+
+    assert result["structural_ready"] is True
+    assert result["reused"] is False
+    assert result["raw_record_count"] == 1
+    assert result["record_count"] == 2
+    assert result["provider_preselection_performed"] is False
+    assert result["terminal_screening_performed"] is False
+    assert result["structural_reconstruction_parallelized"] is False
+    assert result["evidence_certified"] is False
+    assert result["decision_authority"] is False
+    assert result["execution_authority"] is False
+    assert result["paper_only"] is True
+    assert result["real_money_authorized"] is False
+    assert [event[0] for event in events] == [
+        "bind-fingerprint",
+        "load-cache",
+        "load-canonical",
+        "merge-canonical",
+        "publish-cache",
+        "load-cache",
+    ]
 
 
 def _configure_cached_lane(monkeypatch, tmp_path):
@@ -329,7 +491,7 @@ def test_lane_fanout_cache_miss_falls_back_without_reconstruction(monkeypatch, t
         )
 
 
-def test_runtime_wrapper_runs_fanout_before_canonical_builder(monkeypatch, tmp_path) -> None:
+def test_runtime_wrapper_runs_acceleration_before_canonical_builder(monkeypatch, tmp_path) -> None:
     from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import comprehensive_discovery_input_spool as legacy
     from operations import spawn_safe_authoritative_acquisition as spawn_safe
