@@ -1,23 +1,20 @@
 """Reclaim completed publication-lane clean cache in a disposable bounded child.
 
-Production telemetry after the in-process publication reclaimer showed the opposite memory
-shape from the preceding failure: file cache fell materially, but cgroup anonymous memory
-rose sharply and the long-lived comprehensive parent failed after fewer lanes. The broad
-reclaimer allocates a bounded scan/manifest working set that should not survive the lane
-handoff merely because Python's allocator keeps heap pages attached to the parent.
+Production telemetry shows comprehensive discovery can cross the raw cgroup ceiling with a
+large inactive file-cache charge while the working set remains safe. The publication-lane
+handoff is the last serialized boundary before another heavy lane can start, so useful cache
+advice must begin immediately rather than depend on a full data-root ranking scan finishing
+inside the helper timeout.
 
-This module therefore keeps the publication boundary introduced for comprehensive discovery
-but executes the broad data-root scan in a fresh short-lived interpreter after the completed
-lane child has exited and its durable transaction state has been validated. The coordinator
-already performs the exact-spool release first, so useful file-cache advice begins before
-this child is launched. When this child exits, all of its anonymous heap is returned to the
-OS before another serialized publication lane can begin.
+This module therefore runs a streaming bounded clean-file reclaimer in a fresh short-lived
+interpreter after the completed lane child has exited and its durable transaction state has
+been validated. The coordinator still performs the exact-spool release first. The streaming
+pass advises eligible regular files as they are encountered, so even a later helper timeout
+cannot erase cache advice already issued. When the helper exits, its scan heap is returned
+to the OS before another serialized publication lane can begin.
 
-Publication transactions are intrinsically serial at this call site, so this wrapper does
-not depend on the later provider-facing DAG worker override. The returned ownership report
-is accepted only when the established non-authoritative contract is intact. Reclamation is
-bounded, advisory, and fail-soft and cannot certify evidence or alter resource limits,
-providers, market scope, CIO authority, construction, execution, or paper-only controls.
+Reclamation is bounded, advisory, fail-soft, non-destructive, and has no evidence,
+candidate, CIO, construction, execution, or real-money authority.
 """
 
 from __future__ import annotations
@@ -35,8 +32,8 @@ _TIMEOUT_SECONDS = 10.0
 _CODE = """
 import json
 import os
-from operations.pre_comprehensive_cache_reclamation import release_pre_comprehensive_completed_stage_file_cache
-report = release_pre_comprehensive_completed_stage_file_cache(os.environ)
+from operations.streaming_file_cache_reclamation import release_streaming_clean_file_cache
+report = release_streaming_clean_file_cache(os.environ)
 print(json.dumps(report, sort_keys=True))
 """.strip()
 
@@ -55,10 +52,6 @@ _AUTHORITY_CONTRACT = {
 
 
 def _enabled(values: Mapping[str, str]) -> bool:
-    # This wrapper is called only by the transactional publication coordinator, whose lane
-    # loop is strictly serial independent of the later provider-facing DAG worker count.
-    # Requiring that later scheduler override here can silently skip the exact boundary we
-    # need to protect. Keep only the production-platform guard.
     return str(values.get("RENDER") or "").strip().lower() == "true"
 
 
@@ -80,7 +73,7 @@ def run_publication_lane_cache_reclamation(
     asset_class: str,
     index: int,
 ) -> dict[str, object]:
-    """Run one bounded broad clean-cache pass in a disposable interpreter."""
+    """Run one bounded streaming clean-cache pass in a disposable interpreter."""
 
     status = "skipped"
     return_code: int | None = None
@@ -126,20 +119,23 @@ def run_publication_lane_cache_reclamation(
         "status": status,
         "return_code": return_code,
         "disposable_child": True,
+        "streaming_release": True,
         "error_type": error_type,
         **_AUTHORITY_CONTRACT,
     }
     if report is not None:
         payload["cache_ownership"] = report
         for key in (
+            "supported",
             "candidate_file_count",
             "candidate_bytes",
             "selected_file_count",
             "selected_bytes",
             "released_file_count",
             "released_bytes",
+            "scan_entries",
             "scan_truncated",
-            "manifest_truncated",
+            "reclaim_truncated",
             "raw_current_reclaimed_kib",
             "inactive_file_reclaimed_kib",
         ):
