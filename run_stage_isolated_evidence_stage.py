@@ -32,6 +32,7 @@ _PREPARING_ENV = "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _DAG_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
+_RENDER_DAG_WORKERS = "2"
 _PAPER_HISTORY_DAYS = 365 * 10 + 20
 _REDACTED = "[REDACTED]"
 _SENSITIVE_ENV_MARKERS = (
@@ -82,6 +83,15 @@ def _apply_reference_binding(values: dict[str, str], state) -> None:
     if state.reference_manifest_path:
         values[_REFERENCE_MANIFEST_PATH_ENV] = state.reference_manifest_path
         os.environ[_REFERENCE_MANIFEST_PATH_ENV] = state.reference_manifest_path
+
+
+def _configure_render_dag_workers(values: dict[str, str]) -> None:
+    """Use bounded provider prewarm concurrency without parallelizing publication lanes."""
+
+    if str(values.get("RENDER") or "").strip().lower() != "true":
+        return
+    values[_DAG_WORKERS_ENV] = _RENDER_DAG_WORKERS
+    os.environ[_DAG_WORKERS_ENV] = _RENDER_DAG_WORKERS
 
 
 def _base_universe_symbols() -> tuple[str, ...]:
@@ -194,11 +204,11 @@ def _stage_us_equity_discovery(values: dict[str, str], state) -> dict[str, objec
 
 def _stage_comprehensive_discovery(values: dict[str, str], state) -> dict[str, object]:
     # The fresh stage interpreter installs the authoritative DAG runtime before importing
-    # discovery. On Render, serialize lane workers so the outer exclusive memory lease
-    # remains truthful while still executing every required lane.
-    if str(values.get("RENDER") or "").strip().lower() == "true":
-        values[_DAG_WORKERS_ENV] = "1"
-        os.environ[_DAG_WORKERS_ENV] = "1"
+    # discovery. On Render, allow only two provider-facing prewarm workers so independent
+    # acquisitions can overlap inside the existing evidence epoch. The transactional
+    # publication coordinator remains strictly serialized and still owns the heavy-memory
+    # lane, cache-reclamation handoff, and unchanged memory ceilings.
+    _configure_render_dag_workers(values)
     from run_dag_native_continuous_evidence_plane import (
         install_and_verify_dag_native_runtime,
     )
