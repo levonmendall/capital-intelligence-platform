@@ -59,6 +59,8 @@ def test_google_news_is_third_independent_global_news_fallback() -> None:
     assert google.endpoint == "https://news.google.com/rss/search"
     assert google.credential_environment_variables == ()
     assert google.independence_group == "google-news-discovery"
+    assert str(google.parameters["q"]).endswith("when:1d")
+    assert google.license_identifier == "Google-News-public-RSS-feed-undocumented"
     assert google.usage_rights_identifier == (
         "metadata-and-links-only.no-article-body-storage"
     )
