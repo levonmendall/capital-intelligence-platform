@@ -55,8 +55,8 @@ from cio import CandidateAssetClass
 
 
 _MODULE = "operations.epoch_scoped_provider_acquisition"
-_DEFAULT_WORKERS = 2
-_MAX_WORKERS = 3
+_DEFAULT_WORKERS = 6
+_MAX_WORKERS = 6
 _MAX_FANOUT_SECONDS = 300.0
 _DOWNSTREAM_RESERVE_SECONDS = 480.0
 _TERMINATION_GRACE_SECONDS = 1.0
