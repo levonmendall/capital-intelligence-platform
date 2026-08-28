@@ -15,6 +15,7 @@ budget.
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
 import os
@@ -29,6 +30,8 @@ _SCHEMA_VERSION = "evidence-preparation-progress.v1"
 _STAGE = "post-public-provider-io"
 _SAFE_RELEASE = re.compile(r"[^A-Za-z0-9_.-]+")
 _LOCK = threading.Lock()
+_STRUCTURAL_PREWARM_LOCK = threading.Lock()
+_STRUCTURAL_PREWARM_STARTED = False
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -213,6 +216,45 @@ def load_evidence_preparation_progress(
     }
 
 
+def _start_us_equity_structural_prewarm(values: Mapping[str, str]) -> None:
+    """Start structural-only comprehensive work iff this is the active Render equity stage."""
+
+    global _STRUCTURAL_PREWARM_STARTED
+    if str(values.get("RENDER") or "").strip().lower() != "true":
+        return
+    with _STRUCTURAL_PREWARM_LOCK:
+        if _STRUCTURAL_PREWARM_STARTED:
+            return
+        try:
+            from operations.stage_isolated_evidence_pipeline import (
+                load_stage_isolated_evidence_state,
+            )
+
+            state = load_stage_isolated_evidence_state(values)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return
+        if state is None or state.state != "running" or state.current_stage != "us_equity_discovery":
+            return
+        try:
+            from operations.comprehensive_discovery_structural_prewarm import (
+                start_render_structural_prewarm,
+            )
+
+            handle = start_render_structural_prewarm(
+                evidence_as_of=state.evidence_as_of,
+                values=values,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return
+        if handle.process is None:
+            return
+        # The stage process does not exit until atexit handlers finish.  Reap the sidecar
+        # before the coordinator can launch comprehensive discovery, preserving the existing
+        # exclusive heavy/publication lane.  Any failure remains advisory and non-authoritative.
+        atexit.register(handle.stop)
+        _STRUCTURAL_PREWARM_STARTED = True
+
+
 def install_post_public_provider_progress(values: Mapping[str, str] | None = None) -> None:
     """Observe distinct completed requests only after required public-live qualification.
 
@@ -279,6 +321,11 @@ def install_post_public_provider_progress(values: Mapping[str, str] | None = Non
 
     request_with_progress._post_public_provider_progress = True  # type: ignore[attr-defined]
     requests.sessions.Session.request = request_with_progress
+    try:
+        _start_us_equity_structural_prewarm(resolved)
+    except Exception:
+        # Structural prewarm is acceleration only and must never change evidence behavior.
+        pass
 
 
 __all__ = [
