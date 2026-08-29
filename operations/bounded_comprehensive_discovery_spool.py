@@ -32,6 +32,7 @@ from operations import comprehensive_discovery_input_spool as _legacy
 
 _STAGE_SCHEMA = "bounded-comprehensive-discovery-stage.v1"
 _MODULE = "operations.bounded_comprehensive_discovery_spool"
+_PUBLICATION_TERMINATION_GRACE_SECONDS = 1.0
 
 
 def _peak_rss_bytes() -> int:
@@ -482,6 +483,41 @@ def _lane_stage(
         raise
 
 
+def _provider_publication_timeout_seconds(
+    request_path: Path,
+    values: Mapping[str, str],
+) -> float:
+    """Reuse the existing fanout epoch budget for the canonical publication fallback."""
+
+    request, _policy = _validate_request(request_path, values)
+    decision_epoch = _legacy._parse_timestamp(
+        request.get("decision_epoch"),
+        field_name="decision_epoch",
+    )
+    from operations.epoch_scoped_provider_acquisition import _fanout_budget_seconds
+
+    return float(_fanout_budget_seconds(decision_epoch, values))
+
+
+def _terminate_and_reap_publication(process: subprocess.Popen[bytes]) -> int:
+    """Stop only the still-live canonical publication child after its existing epoch budget."""
+
+    return_code = process.poll()
+    if return_code is not None:
+        return int(return_code)
+    process.terminate()
+    try:
+        return int(process.wait(timeout=_PUBLICATION_TERMINATION_GRACE_SECONDS))
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            return int(process.wait(timeout=_PUBLICATION_TERMINATION_GRACE_SECONDS))
+        except subprocess.TimeoutExpired as error:
+            raise _legacy.ComprehensiveDiscoverySpoolError(
+                "bounded provider publication child remained live after bounded kill"
+            ) from error
+
+
 def _run_stage(
     action: str,
     request_path: Path,
@@ -503,13 +539,36 @@ def _run_stage(
         command.extend(("--asset-class", asset_class))
     if index is not None:
         command.extend(("--index", str(index)))
+
+    publication_timeout: float | None = None
+    if action == "publication":
+        publication_timeout = _provider_publication_timeout_seconds(request_path, values)
+        if publication_timeout <= 0.0:
+            raise _legacy.ComprehensiveDiscoverySpoolError(
+                "bounded provider publication cannot start because the existing evidence "
+                "epoch has no provider-acquisition time beyond the downstream reserve"
+            )
+
     process = subprocess.Popen(
         tuple(command),
         cwd=str(repository_root),
         env=dict(values),
         start_new_session=False,
     )
-    return_code = int(process.wait())
+    try:
+        return_code = int(
+            process.wait(timeout=publication_timeout)
+            if publication_timeout is not None
+            else process.wait()
+        )
+    except subprocess.TimeoutExpired as error:
+        return_code = _terminate_and_reap_publication(process)
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "bounded provider publication exceeded the existing epoch-scoped provider "
+            f"acquisition window; timeout_seconds={publication_timeout:.3f}; "
+            f"child_return_code={return_code}; downstream reserve preserved"
+        ) from error
+
     if return_code == 0:
         return
     failure = _legacy.load_failure(request_path)

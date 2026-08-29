@@ -44,6 +44,7 @@ _REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
 _STAGE_TERMINATION_GRACE_SECONDS = 5.0
 _STAGE_FRESHNESS_EXPIRED_RETURN_CODE = 124
 _STAGE_FRESHNESS_ERROR_TYPE = "EvidenceFreshnessExpired"
+_COMPREHENSIVE_DISCOVERY_RESTART_RESERVE_SECONDS = 480.0
 _PRECOMPREHENSIVE_CACHE_RECLAMATION_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
 _REFERENCE_CACHE_RECLAMATION_CODE = """
 import os
@@ -165,6 +166,23 @@ def _freshness_expired_detail(
         f"deadline={_evidence_deadline(state, values).isoformat()}; "
         f"max_age_seconds={_max_age_seconds(values):g}; "
         f"child_return_code={child_return_code}"
+    )[:1600]
+
+
+def _comprehensive_restart_freshness_detail(
+    state: StageIsolatedEvidenceState,
+    values: Mapping[str, str],
+    *,
+    remaining_seconds: float,
+) -> str:
+    return (
+        "stage-isolated comprehensive discovery restart refused because the existing "
+        "evidence epoch no longer preserves the downstream reserve; "
+        f"stage=comprehensive_discovery; evidence_as_of={state.evidence_as_of.isoformat()}; "
+        f"deadline={_evidence_deadline(state, values).isoformat()}; "
+        f"max_age_seconds={_max_age_seconds(values):g}; "
+        f"remaining_seconds={remaining_seconds:.3f}; "
+        f"required_remaining_seconds={_COMPREHENSIVE_DISCOVERY_RESTART_RESERVE_SECONDS:g}"
     )[:1600]
 
 
@@ -456,6 +474,35 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
         stage = state.next_stage
         if stage is None:
             raise RuntimeError("stage-isolated evidence pipeline has no runnable next stage")
+
+        # A comprehensive child that already exited without completing its durable stage
+        # may be retried by a later coordinator invocation. Do not relaunch that same heavy
+        # stage once the unchanged evidence epoch can no longer preserve the existing
+        # 480-second downstream reserve. Mark the attempt failed before cache reclamation
+        # or process spawn so the normal supersession path obtains a genuinely fresh epoch.
+        if stage == "comprehensive_discovery" and state.current_stage == stage:
+            remaining = _remaining_evidence_lifetime_seconds(state, resolved)
+            if remaining <= _COMPREHENSIVE_DISCOVERY_RESTART_RESERVE_SECONDS:
+                detail = _comprehensive_restart_freshness_detail(
+                    state,
+                    resolved,
+                    remaining_seconds=remaining,
+                )
+                latest = fail_evidence_stage(
+                    resolved,
+                    pipeline_id=state.pipeline_id,
+                    stage=stage,
+                    error_type=_STAGE_FRESHNESS_ERROR_TYPE,
+                    error_detail=detail,
+                )
+                _safe_failure(
+                    pipeline_id=state.pipeline_id,
+                    stage=stage,
+                    return_code=_STAGE_FRESHNESS_EXPIRED_RETURN_CODE,
+                    error_type=latest.error_type,
+                    error_detail=latest.error_detail,
+                )
+                return _STAGE_FRESHNESS_EXPIRED_RETURN_CODE
 
         # The parent must own the reference-stage handoff before it spawns the fresh child.
         # Otherwise a child that stalls during interpreter/import startup leaves the outer
