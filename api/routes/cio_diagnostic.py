@@ -15,6 +15,7 @@ from fastapi import APIRouter, Request, Response, status
 from operations.all_market_certification_readonly import (
     public_all_market_certification_readonly,
 )
+from operations.comprehensive_discovery_lane_telemetry import load_public_lane_telemetry
 from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
 from operations.public_live_requirement_qualification import (
     load_public_live_requirement_progress,
@@ -205,6 +206,7 @@ def build_cio_diagnostic_audit(
     release = _release(resolved)
     certification = public_all_market_certification_readonly(resolved)
     public_requirement_progress = _safe_public_requirement_progress(resolved)
+    lane_telemetry = load_public_lane_telemetry(resolved)
     diagnostic = latest_manual_cio_diagnostic(values=resolved)
     if diagnostic is None:
         return {
@@ -222,6 +224,7 @@ def build_cio_diagnostic_audit(
             "all_market_certification_v2_context_matches": False,
             "market_lanes": [],
             "public_live_requirement_progress": public_requirement_progress,
+            "comprehensive_discovery_lane_telemetry": lane_telemetry,
             **certification,
         }
 
@@ -381,6 +384,7 @@ def build_cio_diagnostic_audit(
         "all_market_certification_v2_context_matches": v2_context_matches,
         "market_lanes": list(lanes),
         "public_live_requirement_progress": public_requirement_progress,
+        "comprehensive_discovery_lane_telemetry": lane_telemetry,
         "paper_only": True,
         "real_money_authorized": False,
         **certification,
