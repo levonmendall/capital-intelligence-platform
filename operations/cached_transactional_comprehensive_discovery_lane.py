@@ -13,6 +13,7 @@ unchanged canonical reconstruction and merge path.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -28,6 +29,10 @@ _ORIGINAL_LOAD_CATALOG_RECORDS = _canonical._load_catalog_records
 _ORIGINAL_MERGE_CERTIFIED_LANE = _canonical._bounded_lane._merge_certified_lane
 _ORIGINAL_RUN_LANE_TRANSACTION = _canonical.run_lane_transaction
 _ORIGINAL_BUILD_DEEP_LANE = _canonical._build_deep_lane
+_ORIGINAL_ENSURE_PROVIDER_PRESELECTION_PUBLICATION = (
+    _canonical._publication.ensure_provider_preselection_publication
+)
+_RENDER_PUBLICATION_TERMINATION_GRACE_SECONDS = 1.0
 _ACTIVE_POLICY_VERSION = ""
 _ACTIVE_REQUEST_PATH: Path | None = None
 _ACTIVE_VALUES: Mapping[str, str] | None = None
@@ -112,6 +117,110 @@ def _same_lane_schedule(core, asset_class: CandidateAssetClass, source, requeste
     source_active = asset_class in core._base.scheduled_discovery_lanes(source)
     requested_active = asset_class in core._base.scheduled_discovery_lanes(requested)
     return source_active is requested_active
+
+
+def _render_enabled(values: Mapping[str, str]) -> bool:
+    return str(values.get("RENDER") or "").strip().lower() == "true"
+
+
+def _terminate_and_reap_provider_publication(process: subprocess.Popen[bytes]) -> int:
+    return_code = process.poll()
+    if return_code is not None:
+        return int(return_code)
+    process.terminate()
+    try:
+        return int(process.wait(timeout=_RENDER_PUBLICATION_TERMINATION_GRACE_SECONDS))
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            return int(process.wait(timeout=_RENDER_PUBLICATION_TERMINATION_GRACE_SECONDS))
+        except subprocess.TimeoutExpired as error:
+            raise _canonical._publication.ProviderPreselectionPublicationError(
+                "transactional provider publication child remained live after bounded kill"
+            ) from error
+
+
+def _ensure_provider_preselection_publication(
+    catalogs,
+    *,
+    as_of,
+    policy=None,
+    http_get=_canonical._publication._core.requests.get,
+    market_probe=None,
+):
+    """Keep Render's canonical per-lane provider acquisition inside the existing epoch budget."""
+
+    values = _ACTIVE_VALUES
+    request_path = _ACTIVE_REQUEST_PATH
+    if values is None or request_path is None or not _render_enabled(values):
+        return _ORIGINAL_ENSURE_PROVIDER_PRESELECTION_PUBLICATION(
+            catalogs,
+            as_of=as_of,
+            policy=policy,
+            http_get=http_get,
+            market_probe=market_probe,
+        )
+    if not _ACTIVE_ASSET_CLASS or _ACTIVE_INDEX < 0:
+        raise _canonical._publication.ProviderPreselectionPublicationError(
+            "transactional provider publication has no active lane identity"
+        )
+
+    from operations import epoch_scoped_provider_acquisition as fanout
+
+    timeout = float(fanout._fanout_budget_seconds(as_of, values))
+    if timeout <= 0.0:
+        raise _canonical._publication.ProviderPreselectionPublicationError(
+            "transactional provider publication cannot start because the existing evidence "
+            "epoch has no provider-acquisition time beyond the downstream reserve"
+        )
+
+    asset_class = CandidateAssetClass(_ACTIVE_ASSET_CLASS)
+    process = subprocess.Popen(
+        fanout._publication_command(
+            request_path=request_path,
+            asset_class=asset_class,
+            index=_ACTIVE_INDEX,
+        ),
+        cwd=str(Path(__file__).resolve().parents[1]),
+        env=dict(values),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=False,
+    )
+    try:
+        return_code = int(process.wait(timeout=timeout))
+    except subprocess.TimeoutExpired as error:
+        return_code = _terminate_and_reap_provider_publication(process)
+        raise _canonical._publication.ProviderPreselectionPublicationError(
+            "transactional provider publication exceeded the existing epoch-scoped provider "
+            f"acquisition window; timeout_seconds={timeout:.3f}; "
+            f"child_return_code={return_code}; downstream reserve preserved"
+        ) from error
+    if return_code != 0:
+        raise _canonical._publication.ProviderPreselectionPublicationError(
+            "transactional bounded provider publication child failed; "
+            f"return_code={return_code}; downstream reserve preserved"
+        )
+
+    resolved_policy = policy or _canonical._publication.ComprehensiveMarketDiscoveryPolicy()
+    records = _canonical._publication._records_for_lane(catalogs)
+    fingerprint = _canonical._publication._streaming_catalog_fingerprint(records)
+    publication_path = _canonical._publication._core._publication_path(resolved_policy)
+    freshness_days = int(getattr(resolved_policy, "preselection_freshness_days", 3))
+    result = _canonical._publication._existing_result_bounded(
+        publication_path,
+        as_of=as_of,
+        fingerprint=fingerprint,
+        catalog_count=len(records),
+        freshness_days=freshness_days,
+    )
+    if result is None or tuple(getattr(result, "limitations", ())):
+        raise _canonical._publication.ProviderPreselectionPublicationError(
+            "transactional bounded provider publication child did not produce a clean, "
+            "current canonical publication"
+        )
+    return result
 
 
 def _load_catalog_records(
@@ -248,10 +357,13 @@ def _run_lane_transaction(
 
 
 def install_cached_structural_lane_loader() -> None:
-    """Install structural-only reuse and exact advisory phase transitions in this child."""
+    """Install structural reuse, bounded Render publication, and advisory phase timing."""
 
     _canonical._load_catalog_records = _load_catalog_records
     _canonical._bounded_lane._merge_certified_lane = _merge_certified_lane
+    _canonical._publication.ensure_provider_preselection_publication = (
+        _ensure_provider_preselection_publication
+    )
     _canonical._build_deep_lane = _build_deep_lane
     _canonical.run_lane_transaction = _run_lane_transaction
 
