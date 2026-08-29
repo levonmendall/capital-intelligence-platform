@@ -36,6 +36,7 @@ _WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
 _DEFAULT_WORKERS = 3
 _MAX_WORKERS = 6
 _DEFAULT_MARKET_NODE_VALID_SECONDS = 900.0
+_FAILURE_MESSAGE_LIMIT = 1600
 
 _PROVIDER_DEFAULT_CAPACITIES: Mapping[str, int] = {
     "alpaca": 2,
@@ -75,6 +76,10 @@ class CertificationNodeResult:
     completed_at: datetime | None
     retry_after: datetime | None = None
     failure_type: str | None = None
+    failure_message: str | None = None
+    failure_cause_type: str | None = None
+    failure_cause_message: str | None = None
+    retryable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +109,23 @@ def _canonical(value: object) -> bytes:
 
 def _digest(value: object) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def _bounded_failure_text(value: object) -> str | None:
+    text = " ".join(str(value).split())
+    if not text:
+        return None
+    if len(text) <= _FAILURE_MESSAGE_LIMIT:
+        return text
+    return text[: _FAILURE_MESSAGE_LIMIT - 3] + "..."
+
+
+def _failure_cause(error: BaseException) -> BaseException | None:
+    if error.__cause__ is not None:
+        return error.__cause__
+    if not error.__suppress_context__:
+        return error.__context__
+    return None
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -359,6 +381,11 @@ class PersistentCertificationScheduler:
     ) -> CertificationNodeResult:
         failed_at = datetime.now(timezone.utc)
         retry_after = self._retry_after(error)
+        cause = _failure_cause(error)
+        failure_message = _bounded_failure_text(error)
+        failure_cause_type = None if cause is None else type(cause).__name__
+        failure_cause_message = None if cause is None else _bounded_failure_text(cause)
+        retryable = retry_after is not None
         body: dict[str, object] = {
             "schema_version": _NODE_SCHEMA_VERSION,
             "release_sha": self.release_sha,
@@ -375,6 +402,10 @@ class PersistentCertificationScheduler:
             "completed_at": failed_at.isoformat(),
             "status": "failed",
             "failure_type": type(error).__name__,
+            "failure_message": failure_message,
+            "failure_cause_type": failure_cause_type,
+            "failure_cause_message": failure_cause_message,
+            "retryable": retryable,
             "retry_after": None if retry_after is None else retry_after.isoformat(),
             "decision_authority": False,
             "candidate_authority": False,
@@ -392,6 +423,10 @@ class PersistentCertificationScheduler:
             completed_at=failed_at,
             retry_after=retry_after,
             failure_type=type(error).__name__,
+            failure_message=failure_message,
+            failure_cause_type=failure_cause_type,
+            failure_cause_message=failure_cause_message,
+            retryable=retryable,
         )
 
     def _publish_manifest(
@@ -419,6 +454,10 @@ class PersistentCertificationScheduler:
                     "reused": item.reused,
                     "evidence_complete_count": item.evidence_complete_count,
                     "failure_type": item.failure_type,
+                    "failure_message": item.failure_message,
+                    "failure_cause_type": item.failure_cause_type,
+                    "failure_cause_message": item.failure_cause_message,
+                    "retryable": item.retryable,
                     "retry_after": None if item.retry_after is None else item.retry_after.isoformat(),
                 }
                 for node_id, item in sorted(results.items())
@@ -547,8 +586,15 @@ class PersistentCertificationScheduler:
             for node_id in manifest.failed_nodes:
                 item = results[node_id]
                 suffix = item.failure_type or "unqualified"
+                if item.failure_message:
+                    suffix += f": {item.failure_message}"
+                if item.failure_cause_type:
+                    suffix += f"; cause={item.failure_cause_type}"
+                    if item.failure_cause_message:
+                        suffix += f": {item.failure_cause_message}"
+                suffix += f"; retryable={str(item.retryable).lower()}"
                 if item.retry_after is not None:
-                    suffix += f" retry_after={item.retry_after.isoformat()}"
+                    suffix += f"; retry_after={item.retry_after.isoformat()}"
                 details.append(f"{node_id}:{suffix}")
             raise CertificationSchedulerError(
                 "required certification DAG nodes did not qualify: " + "; ".join(details)
