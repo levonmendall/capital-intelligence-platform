@@ -1,22 +1,30 @@
-"""Advisory structural-only prewarm for comprehensive discovery during U.S. equity work.
+"""Advisory comprehensive-input prewarm during U.S. equity discovery.
 
 Production certification has repeatedly exhausted the unchanged 900-second evidence epoch
 inside ``comprehensive_discovery`` after reference, public-live, and U.S.-equity discovery
-have already qualified.  The expensive comprehensive transaction begins by reconstructing
-and merging release/reference-bound catalog structure before it performs any exact-epoch
-provider publication, terminal screening, or market-evidence qualification.
+have already qualified. The expensive comprehensive transaction needs release/reference-
+bound structural catalogs and exact-epoch provider-preselection publications before it can
+perform terminal screening and market-evidence qualification.
 
-This module moves only that structural reconstruction earlier.  A disposable sidecar may
-run while the independent U.S.-equity provider acquisition is active and populate the
-existing structural cache.  The sidecar never creates provider-preselection publication,
-terminal-screening results, certification nodes, market evidence, candidates, sizing,
-construction, execution, or investment authority.  The canonical comprehensive stage must
-still rebuild every exact-epoch artifact and qualify every required lane fail-closed.
+This module moves those prerequisite operations earlier without moving any certification or
+investment authority. A disposable sidecar may run while the independent U.S.-equity stage
+is active. It creates the exact deterministic comprehensive request that the later canonical
+stage will use, then delegates structural preparation and provider I/O to the existing
+``epoch_scoped_provider_acquisition`` owner. That owner remains bounded by the unchanged
+300-second acceleration ceiling, six-worker cap, evidence lifetime, and 480-second downstream
+reserve. Provider children atomically promote only clean, limitation-free publications.
 
-The sidecar is advisory and bounded by the U.S.-equity stage lifetime.  The caller always
-stops/reaps it before publishing the U.S.-equity stage result, so no structural-prewarm
-process can overlap the subsequent comprehensive publication/evidence lane or outlive the
-stage that launched it.
+The later serialized comprehensive transaction still owns terminal screening,
+certification-node construction, market-evidence qualification, durable transaction state,
+and global certification. It may validate and consume an exact-epoch provider publication
+but must never start a second late provider-network fallback.
+
+The sidecar is advisory and bounded by the same provider-acquisition window that existed
+before this overlap. The U.S.-equity stage may use otherwise idle time while the sidecar is
+running, then waits only until that original absolute acceleration deadline and always
+reaps the child before publishing its stage result. Neither this sidecar nor its provider
+fanout has evidence, candidate, sizing, construction, execution, CIO, or real-money
+authority.
 """
 
 from __future__ import annotations
@@ -36,6 +44,7 @@ from cio import CandidateAssetClass
 
 _MODULE = "operations.comprehensive_discovery_structural_prewarm"
 _STOP_GRACE_SECONDS = 1.0
+_COMPLETION_CLEANUP_RESERVE_SECONDS = 2.0 * _STOP_GRACE_SECONDS
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 
@@ -61,9 +70,10 @@ def _eligible(values: Mapping[str, str]) -> bool:
 
 @dataclass(slots=True)
 class StructuralPrewarmHandle:
-    """Own one disposable advisory sidecar and guarantee bounded cleanup."""
+    """Own one disposable advisory overlap sidecar and guarantee bounded cleanup."""
 
     process: subprocess.Popen[bytes] | None = None
+    deadline_monotonic: float | None = None
 
     def stop(self) -> None:
         process = self.process
@@ -85,9 +95,30 @@ class StructuralPrewarmHandle:
         try:
             process.wait(timeout=_STOP_GRACE_SECONDS)
         except (OSError, subprocess.TimeoutExpired):
-            # Advisory cache work has no authority.  The sidecar remains in the stage's
-            # process group, so the existing stage supervisor is still the final kill wall.
+            # Advisory work has no authority. The sidecar remains in the stage process
+            # group, so the existing stage supervisor is still the final kill wall.
             pass
+
+    def finish(self) -> None:
+        """Let the sidecar finish only inside its original absolute acceleration window."""
+
+        process = self.process
+        if process is None:
+            return
+        if process.poll() is not None:
+            self.process = None
+            return
+        deadline = self.deadline_monotonic
+        if deadline is not None:
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining > 0.0:
+                try:
+                    process.wait(timeout=remaining)
+                    self.process = None
+                    return
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+        self.stop()
 
 
 def start_render_structural_prewarm(
@@ -95,7 +126,7 @@ def start_render_structural_prewarm(
     evidence_as_of: datetime,
     values: Mapping[str, str],
 ) -> StructuralPrewarmHandle:
-    """Start one structural-only sidecar on Render; all failures are fail-soft."""
+    """Start the exact-epoch comprehensive prerequisite sidecar on Render."""
 
     resolved = dict(values)
     if not _eligible(resolved):
@@ -104,6 +135,21 @@ def start_render_structural_prewarm(
         timestamp = _aware(evidence_as_of, field_name="structural_prewarm_evidence_as_of")
     except ValueError:
         return StructuralPrewarmHandle()
+
+    from operations.epoch_scoped_provider_acquisition import _fanout_budget_seconds
+
+    try:
+        budget = float(_fanout_budget_seconds(timestamp, resolved))
+    except (OSError, RuntimeError, TypeError, ValueError):
+        budget = 0.0
+    # The child is the canonical owner of the provider budget and independently applies
+    # the unchanged evidence lifetime, 300-second ceiling, and 480-second downstream
+    # reserve before any provider I/O. Keep the launcher contract stable even when the
+    # current epoch has no spare acquisition time: the subordinate child may still start,
+    # observe a zero budget, and exit without provider work. The parent deadline never
+    # extends that budget and reserves cleanup time only when spare budget actually exists.
+    usable_budget = max(0.0, budget - _COMPLETION_CLEANUP_RESERVE_SECONDS)
+    deadline = time.monotonic() + usable_budget
 
     environment = dict(os.environ)
     environment.update({str(key): str(value) for key, value in resolved.items()})
@@ -122,13 +168,13 @@ def start_render_structural_prewarm(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            # Keep the sidecar inside the existing stage process group.  If the unchanged
-            # freshness/resource supervisor terminates the stage, this child dies with it.
+            # Keep the sidecar inside the existing stage process group. If freshness or
+            # resource supervision terminates the stage, this child dies with it.
             start_new_session=False,
         )
     except (OSError, ValueError):
         return StructuralPrewarmHandle()
-    return StructuralPrewarmHandle(process=process)
+    return StructuralPrewarmHandle(process=process, deadline_monotonic=deadline)
 
 
 def _same_lane_schedule(core, asset_class: CandidateAssetClass, source, requested) -> bool:
@@ -168,8 +214,6 @@ def prewarm_structural_catalogs(
     published = 0
 
     for asset_class in lane_local._candidate_lanes():
-        # Options are timestamp-constructed and explicitly excluded by the structural cache.
-        # Unscheduled lanes cannot contribute to this exact comprehensive attempt.
         if asset_class is CandidateAssetClass.OPTION or asset_class not in active:
             continue
         existing = structural.load_structural_catalog(
@@ -207,8 +251,8 @@ def prewarm_structural_catalogs(
             ):
                 published += 1
         except (OSError, RuntimeError, TypeError, ValueError):
-            # Cache warming is acceleration only.  A miss/failure leaves the unchanged
-            # comprehensive transaction responsible for canonical reconstruction.
+            # Cache warming is advisory only. The bounded epoch provider owner will treat
+            # a missing structural input as a failed lane and cannot certify anything.
             pass
         finally:
             try:
@@ -227,16 +271,63 @@ def prewarm_structural_catalogs(
     return published
 
 
+def prewarm_epoch_provider_inputs(
+    *,
+    evidence_as_of: datetime,
+    values: Mapping[str, str] | None = None,
+) -> Mapping[str, object]:
+    """Acquire exact comprehensive provider prerequisites during the U.S.-equity window.
+
+    ``prepare_request`` is deterministic over release, epoch, state scope, exclusions, and
+    policy. Using the same default policy and empty comprehensive exclusions as the later
+    evidence-owner call therefore creates the exact request directory that
+    ``spawn_safe_acquire`` will reopen. No authority is transferred to this sidecar.
+    """
+
+    resolved = dict(os.environ if values is None else values)
+    timestamp = _aware(evidence_as_of, field_name="provider_prewarm_evidence_as_of")
+    if not _eligible(resolved):
+        return {
+            "attempted": False,
+            "reason": "ineligible",
+            "completed": 0,
+            "failed": 0,
+        }
+
+    from operations import comprehensive_market_discovery as facade
+    from operations.comprehensive_discovery_input_spool import prepare_request
+    from operations.evidence_state_scope import load_evidence_state_scope
+    from operations.epoch_scoped_provider_acquisition import (
+        run_provider_acquisition_fanout,
+    )
+
+    scope = load_evidence_state_scope(as_of=timestamp, values=resolved)
+    policy = facade._core.ComprehensiveMarketDiscoveryPolicy()
+    request = prepare_request(
+        values=resolved,
+        decision_epoch=timestamp,
+        held_symbols=scope.held_symbols,
+        tracked_symbols=scope.tracked_symbols,
+        excluded_symbols=(),
+        policy=policy,
+    )
+    return run_provider_acquisition_fanout(
+        request.path,
+        values=resolved,
+        decision_epoch=timestamp,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--as-of", required=True)
     args = parser.parse_args(argv)
     try:
         timestamp = datetime.fromisoformat(str(args.as_of).replace("Z", "+00:00"))
-        prewarm_structural_catalogs(evidence_as_of=timestamp)
+        prewarm_epoch_provider_inputs(evidence_as_of=timestamp)
     except (OSError, RuntimeError, TypeError, ValueError):
-        # The parent deliberately ignores this advisory process's status.  Return a
-        # nonzero code for local observability without changing evidence qualification.
+        # The parent deliberately ignores this advisory process's status. Return nonzero
+        # for local observability without changing evidence qualification.
         return 2
     return 0
 
@@ -247,6 +338,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "StructuralPrewarmHandle",
+    "prewarm_epoch_provider_inputs",
     "prewarm_structural_catalogs",
     "start_render_structural_prewarm",
 ]

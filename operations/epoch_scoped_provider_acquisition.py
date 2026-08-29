@@ -22,17 +22,19 @@ screening. This makes the acceleration usable on the first evidence attempt of a
 deployed release without recreating the parallel structural-memory pressure that the
 transactional lane design removed.
 
-The fan-out remains provider-I/O acceleration only. Provider output is written to a staging
-path and is atomically promoted to the canonical lane path only when the provider runtime
-reports no limitations. A throttled, partial, or otherwise limited fan-out result is
-removed so the serialized authority performs its normal fresh acquisition instead of
-inheriting degraded acceleration output.
+The early fan-out remains provider-I/O acceleration only. Provider output is written to a
+staging path and is atomically promoted to the canonical lane path only when the provider
+runtime reports no limitations. A throttled, partial, or otherwise limited result is
+removed. When the later comprehensive spool builder re-enters this wrapper it runs the same
+lane fanout in reuse-only mode: clean exact-request publications may be validated and reused,
+but a missing or invalid publication cannot trigger a second provider-network acquisition.
+The serialized transactional lane independently enforces the same reuse-only contract.
 
 Neither structural preparation nor provider fan-out has evidence, candidate, sizing,
 construction, execution, CIO, or real-money authority. A child failure, timeout, partial
-file, cache miss, or unsupported environment falls back to the unchanged serialized
-transaction. All acceleration children remain in the outer evidence stage's process group,
-so the existing resource/freshness supervisor can terminate the complete active tree
+file, cache miss, or unsupported environment remains fail-closed at the canonical evidence
+boundary. All acceleration children remain in the outer evidence stage's process group, so
+the existing resource/freshness supervisor can terminate the complete active tree
 fail-closed. Both phases share one fixed portion of the existing evidence epoch; a hard
 reserve remains for serialized screening, paper evidence, and provider-free finalization.
 This module never extends or resets the freshness deadline.
@@ -62,6 +64,7 @@ _MAX_FANOUT_SECONDS = 300.0
 _DOWNSTREAM_RESERVE_SECONDS = 480.0
 _TERMINATION_GRACE_SECONDS = 1.0
 _WORKERS_ENV = "CAPITAL_INTELLIGENCE_PROVIDER_ACQUISITION_WORKERS"
+_REUSE_ONLY_ENV = "CAPITAL_INTELLIGENCE_PROVIDER_ACQUISITION_REUSE_ONLY"
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -72,6 +75,10 @@ def _aware(value: datetime, *, field_name: str) -> datetime:
 
 def _render_enabled(values: Mapping[str, str]) -> bool:
     return str(values.get("RENDER") or "").strip().lower() == "true"
+
+
+def _reuse_only(values: Mapping[str, str]) -> bool:
+    return str(values.get(_REUSE_ONLY_ENV) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _worker_count(values: Mapping[str, str]) -> int:
@@ -370,6 +377,7 @@ def run_provider_acquisition_fanout(
 
     report = {
         "attempted": True,
+        "reuse_only": _reuse_only(resolved),
         "worker_limit": workers,
         "maximum_parallel": maximum_provider_concurrency,
         "scheduled_lanes": len(lane_items),
@@ -554,6 +562,42 @@ def _remove_staging_publication(path: Path) -> None:
             pass
 
 
+def _existing_clean_publication(publication, catalogs, *, as_of, policy):
+    """Return one exact compatible canonical publication without invoking a provider."""
+
+    try:
+        records = publication._records_for_lane(catalogs)
+    except (RuntimeError, TypeError, ValueError):
+        # Reuse validation is an optimization for the early acquisition owner. Malformed
+        # synthetic/pre-validation input means only that no reusable artifact can be
+        # established here. Reuse-only comprehensive mode still fails closed below, while
+        # the early owner delegates validation to its unchanged canonical publication call.
+        return None
+    if not records:
+        return None
+    timestamp = publication._core._aware(as_of, field_name="as_of")
+    fingerprint = publication._streaming_catalog_fingerprint(records)
+    path = publication._core._publication_path(policy)
+    freshness_days = int(getattr(policy, "preselection_freshness_days", 3))
+    existing = publication._existing_result_bounded(
+        path,
+        as_of=timestamp,
+        fingerprint=fingerprint,
+        catalog_count=len(records),
+        freshness_days=freshness_days,
+    )
+    if existing is None:
+        return None
+    limitations = tuple(
+        str(item)
+        for item in getattr(existing, "limitations", ())
+        if str(item).strip()
+    )
+    if limitations:
+        return None
+    return existing
+
+
 def prepare_lane_provider_publication(
     request_path: str | Path,
     *,
@@ -561,7 +605,7 @@ def prepare_lane_provider_publication(
     asset_class_value: str,
     index: int,
 ) -> Mapping[str, object]:
-    """Build one clean provider publication from verified prewarmed structure only."""
+    """Build or reuse one clean provider publication from verified structure only."""
 
     from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import bounded_provider_preselection_publication as publication
@@ -618,6 +662,29 @@ def prepare_lane_provider_publication(
         asset_class=asset_class.value,
         index=index,
     )
+    canonical_policy = replace(policy, provider_preselection_path=str(canonical_path))
+    existing = _existing_clean_publication(
+        publication,
+        {asset_class: merged},
+        as_of=timestamp,
+        policy=canonical_policy,
+    )
+    if existing is not None:
+        return {
+            "scheduled": True,
+            "asset_class": asset_class.value,
+            "record_count": len(merged),
+            "publication_ready": True,
+            "reused": True,
+            "structural_reconstruction_parallelized": False,
+            "limited_publication_promoted": False,
+        }
+    if _reuse_only(resolved):
+        raise RuntimeError(
+            f"{asset_class.value} exact-epoch provider publication is unavailable; "
+            "reuse-only comprehensive fanout refuses provider reacquisition"
+        )
+
     staging_path = canonical_path.with_name(canonical_path.name + ".fanout")
     _remove_staging_publication(staging_path)
     lane_policy = replace(policy, provider_preselection_path=str(staging_path))
@@ -666,7 +733,7 @@ def prepare_lane_provider_publication(
 
 
 def install_epoch_scoped_provider_acquisition() -> None:
-    """Wrap the canonical spool builder with bounded cold-release provider acceleration."""
+    """Wrap canonical spooling with early-acquisition reuse validation on Render."""
 
     from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import comprehensive_discovery_input_spool as legacy
@@ -689,17 +756,20 @@ def install_epoch_scoped_provider_acquisition() -> None:
                 epoch = legacy._parse_timestamp(
                     request.get("decision_epoch"), field_name="decision_epoch"
                 )
+                reuse_only_values = dict(resolved)
+                reuse_only_values[_REUSE_ONLY_ENV] = "true"
                 run_provider_acquisition_fanout(
                     path,
-                    values=resolved,
+                    values=reuse_only_values,
                     decision_epoch=epoch,
                 )
-            except Exception as error:  # noqa: BLE001 - serial path remains authority.
+            except Exception as error:  # noqa: BLE001 - canonical lane remains fail-closed.
                 print(
                     json.dumps(
                         {
                             "event": "epoch_scoped_provider_acquisition_fanout_unavailable",
                             "error_type": type(error).__name__,
+                            "reuse_only": True,
                             "advisory_only": True,
                             "evidence_certified": False,
                             "decision_authority": False,

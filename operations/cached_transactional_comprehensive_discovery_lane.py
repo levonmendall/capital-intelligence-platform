@@ -2,13 +2,15 @@
 
 A warm evidence retry may reuse only the already-merged structural catalog produced by
 the same software release, policy version, bound reference manifest, and lane scheduling
-state. Provider preselection, terminal screening, certification-node construction,
-exact-epoch market evidence, and durable transaction state all remain owned by the
-unchanged canonical transaction and are rebuilt for the new evidence epoch.
+state. Provider acquisition ownership is installed separately as a reuse-only guard before
+this serialized transaction runs; this module remains responsible only for structural reuse
+and advisory lane timing around the unchanged canonical transaction.
 
 This wrapper cannot certify evidence or authorize an investment action. Cache misses,
 corruption, identity changes, schedule changes, and option catalogs fall through to the
-unchanged canonical reconstruction and merge path.
+unchanged canonical structural reconstruction and merge path. Terminal screening,
+certification-node construction, exact-epoch market evidence, and durable transaction
+completion remain canonical current-epoch work.
 """
 
 from __future__ import annotations
@@ -22,6 +24,10 @@ from pathlib import Path
 from cio import CandidateAssetClass
 from operations import comprehensive_discovery_structural_cache as _structural
 from operations import transactional_comprehensive_discovery_lane as _canonical
+from operations.reuse_only_provider_preselection import (
+    install_reuse_only_provider_publication as _install_provider_guard,
+    reuse_only_provider_publication as _reuse_only_provider_preselection_publication,
+)
 
 
 _ORIGINAL_LOAD_CATALOG_RECORDS = _canonical._load_catalog_records
@@ -156,7 +162,7 @@ def _merge_certified_lane(core, raw: Sequence[object], *, asset_class, timestamp
     if isinstance(raw, _CachedMergedRecords):
         # The cache identity proves this merged structure came from the exact release,
         # policy, currently bound reference manifest, and compatible lane schedule. Do not
-        # reuse any publication/screening/market artifact from the source epoch.
+        # reuse screening/market artifacts from the source epoch.
         merged = raw.records
     else:
         merged = _ORIGINAL_MERGE_CERTIFIED_LANE(
@@ -179,9 +185,6 @@ def _merge_certified_lane(core, raw: Sequence[object], *, asset_class, timestamp
             # must never change the canonical current-epoch evidence result.
             pass
 
-    # The canonical transaction moves directly from merge into provider publication. The
-    # old transactional coordinator published only the initial catalog-lane start, leaving
-    # the parent watchdog pinned to the prior durable completion during long later phases.
     transition = _now()
     _record_lane_timing(
         structural_completed_at=transition,
@@ -248,8 +251,9 @@ def _run_lane_transaction(
 
 
 def install_cached_structural_lane_loader() -> None:
-    """Install structural-only reuse and exact advisory phase transitions in this child."""
+    """Install structural reuse, provider guard, and advisory phase timing."""
 
+    _install_provider_guard()
     _canonical._load_catalog_records = _load_catalog_records
     _canonical._bounded_lane._merge_certified_lane = _merge_certified_lane
     _canonical._build_deep_lane = _build_deep_lane
