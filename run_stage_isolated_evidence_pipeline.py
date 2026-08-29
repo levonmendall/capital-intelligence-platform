@@ -44,6 +44,7 @@ _REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
 _STAGE_TERMINATION_GRACE_SECONDS = 5.0
 _STAGE_FRESHNESS_EXPIRED_RETURN_CODE = 124
 _STAGE_FRESHNESS_ERROR_TYPE = "EvidenceFreshnessExpired"
+_STAGE_WRAPPER_INTERNAL_ERROR_RETURN_CODE = 2
 _COMPREHENSIVE_DISCOVERY_RESTART_RESERVE_SECONDS = 480.0
 _PRECOMPREHENSIVE_CACHE_RECLAMATION_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
 _REFERENCE_CACHE_RECLAMATION_CODE = """
@@ -104,10 +105,10 @@ def _durably_completed_stage_exit(
     stage: str,
     return_code: int,
 ) -> bool:
-    """Accept only ordinary late exits after this exact stage was durably completed."""
+    """Accept only the wrapper's late internal error after exact durable completion."""
 
     return (
-        return_code > 0
+        return_code == _STAGE_WRAPPER_INTERNAL_ERROR_RETURN_CODE
         and latest is not None
         and latest.pipeline_id == pipeline_id
         and latest.state in {"running", "completed"}
@@ -675,9 +676,8 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
             return _STAGE_FRESHNESS_EXPIRED_RETURN_CODE
 
         if return_code != 0:
-            # Once the exact same pipeline/stage is durably completed, a later ordinary
-            # positive process exit cannot revoke that checkpoint. This reconciles the
-            # narrow post-commit telemetry/shutdown race while signals, identity changes,
+            # Only the wrapper's known generic internal-error exit may be reconciled after
+            # exact durable completion. All other positive exits, signals, identity changes,
             # failed journals, and every pre-completion exit remain fail-closed.
             if _durably_completed_stage_exit(
                 latest,
