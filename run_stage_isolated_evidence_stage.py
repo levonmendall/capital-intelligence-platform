@@ -155,6 +155,9 @@ def _stage_public_live(values: dict[str, str], state) -> dict[str, object]:
 
 
 def _stage_us_equity_discovery(values: dict[str, str], state) -> dict[str, object]:
+    from operations.comprehensive_discovery_structural_prewarm import (
+        start_render_structural_prewarm,
+    )
     from operations.evidence_preparation_progress import (
         install_post_public_provider_progress,
     )
@@ -170,36 +173,46 @@ def _stage_us_equity_discovery(values: dict[str, str], state) -> dict[str, objec
     os.environ[_PREPARING_ENV] = "true"
     values[_PREPARING_ENV] = "true"
     install_post_public_provider_progress(values)
-    scope = load_evidence_state_scope(as_of=state.evidence_as_of, values=values)
-    base_symbols = _base_universe_symbols()
-    try:
-        snapshot = load_equity_discovery_snapshot(
-            evidence_as_of=state.evidence_as_of,
-            values=values,
-        )
-    except EquityDiscoverySnapshotError:
-        snapshot = None
-    if snapshot is not None and (
-        snapshot.held_symbols == scope.held_symbols
-        and snapshot.tracked_symbols == scope.tracked_symbols
-        and snapshot.excluded_symbols == base_symbols
-    ):
-        return {"snapshot_id": snapshot.snapshot_id, "reused": True}
-
-    result = discover_us_equities(
-        as_of=state.evidence_as_of,
-        held_symbols=scope.held_symbols,
-        tracked_symbols=scope.tracked_symbols,
-        excluded_symbols=base_symbols,
-    )
-    snapshot_id = publish_equity_discovery_snapshot(
-        result,
-        held_symbols=scope.held_symbols,
-        tracked_symbols=scope.tracked_symbols,
-        excluded_symbols=base_symbols,
+    prewarm = start_render_structural_prewarm(
+        evidence_as_of=state.evidence_as_of,
         values=values,
     )
-    return {"snapshot_id": snapshot_id, "reused": False}
+    try:
+        scope = load_evidence_state_scope(as_of=state.evidence_as_of, values=values)
+        base_symbols = _base_universe_symbols()
+        try:
+            snapshot = load_equity_discovery_snapshot(
+                evidence_as_of=state.evidence_as_of,
+                values=values,
+            )
+        except EquityDiscoverySnapshotError:
+            snapshot = None
+        if snapshot is not None and (
+            snapshot.held_symbols == scope.held_symbols
+            and snapshot.tracked_symbols == scope.tracked_symbols
+            and snapshot.excluded_symbols == base_symbols
+        ):
+            return {"snapshot_id": snapshot.snapshot_id, "reused": True}
+
+        result = discover_us_equities(
+            as_of=state.evidence_as_of,
+            held_symbols=scope.held_symbols,
+            tracked_symbols=scope.tracked_symbols,
+            excluded_symbols=base_symbols,
+        )
+        snapshot_id = publish_equity_discovery_snapshot(
+            result,
+            held_symbols=scope.held_symbols,
+            tracked_symbols=scope.tracked_symbols,
+            excluded_symbols=base_symbols,
+            values=values,
+        )
+        return {"snapshot_id": snapshot_id, "reused": False}
+    finally:
+        # Provider/structural prerequisites are advisory, but comprehensive is now
+        # reuse-only. Give the sidecar only its original absolute acceleration window,
+        # then guarantee it is reaped before this stage is durably completed.
+        prewarm.finish()
 
 
 def _stage_comprehensive_discovery(values: dict[str, str], state) -> dict[str, object]:
