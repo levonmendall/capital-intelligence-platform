@@ -28,6 +28,16 @@ def test_remaining_epoch_uses_existing_900_second_freshness_contract() -> None:
     assert "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_MAX_AGE_SECONDS" not in source
 
 
+def test_transactional_manifest_preserves_policy_blob_for_lane_children() -> None:
+    source = inspect.getsource(coordinator.build_spool)
+
+    assert 'request_policy = _legacy._descriptor(request.get("policy_blob"))' in source
+    assert '"policy_blob": _legacy._descriptor_dict(request_policy)' in source
+
+    lane_loader = inspect.getsource(legacy.load_lane_inputs)
+    assert '_descriptor(body.get("policy_blob"))' in lane_loader
+
+
 def test_expired_epoch_refuses_to_spawn_lane(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         coordinator,
