@@ -565,7 +565,14 @@ def _remove_staging_publication(path: Path) -> None:
 def _existing_clean_publication(publication, catalogs, *, as_of, policy):
     """Return one exact compatible canonical publication without invoking a provider."""
 
-    records = publication._records_for_lane(catalogs)
+    try:
+        records = publication._records_for_lane(catalogs)
+    except (RuntimeError, TypeError, ValueError):
+        # Reuse validation is an optimization for the early acquisition owner. Malformed
+        # synthetic/pre-validation input means only that no reusable artifact can be
+        # established here. Reuse-only comprehensive mode still fails closed below, while
+        # the early owner delegates validation to its unchanged canonical publication call.
+        return None
     if not records:
         return None
     timestamp = publication._core._aware(as_of, field_name="as_of")
