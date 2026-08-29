@@ -14,13 +14,19 @@ def _timestamp(second: int) -> str:
     return datetime(2026, 8, 28, 23, 0, second, tzinfo=timezone.utc).isoformat()
 
 
-def _request(tmp_path: Path, *, request_id: str = "request-1") -> Path:
-    path = tmp_path / "request.json"
+def _request(
+    tmp_path: Path,
+    *,
+    request_id: str = "request-1",
+    decision_epoch: str = "2026-08-28T23:00:00+00:00",
+    filename: str = "request.json",
+) -> Path:
+    path = tmp_path / filename
     path.write_text(
         json.dumps(
             {
                 "request_id": request_id,
-                "decision_epoch": "2026-08-28T23:00:00+00:00",
+                "decision_epoch": decision_epoch,
             }
         ),
         encoding="utf-8",
@@ -130,7 +136,11 @@ def test_new_request_resets_prior_lane_telemetry(tmp_path) -> None:
         structural_cache_hit=True,
     )
 
-    request = _request(tmp_path, request_id="request-2")
+    request = _request(
+        tmp_path,
+        request_id="request-2",
+        decision_epoch="2026-08-28T23:01:00+00:00",
+    )
     telemetry.record_lane_phase(
         request,
         values,
@@ -144,6 +154,47 @@ def test_new_request_resets_prior_lane_telemetry(tmp_path) -> None:
     assert public is not None
     assert public["request_id"] == "request-2"
     assert [item["asset_class"] for item in public["lanes"]] == ["future"]
+
+
+def test_stale_epoch_writer_cannot_replace_newer_lane_telemetry(tmp_path) -> None:
+    values = _values(tmp_path)
+    stale = _request(
+        tmp_path,
+        request_id="stale-request",
+        decision_epoch="2026-08-28T23:00:00+00:00",
+        filename="stale-request.json",
+    )
+    current = _request(
+        tmp_path,
+        request_id="current-request",
+        decision_epoch="2026-08-28T23:01:00+00:00",
+        filename="current-request.json",
+    )
+
+    telemetry.record_lane_phase(
+        current,
+        values,
+        asset_class="future",
+        index=9,
+        lane_started_at=_timestamp(1),
+        structural_cache_hit=True,
+    )
+    telemetry.record_lane_phase(
+        stale,
+        values,
+        asset_class="us_equity",
+        index=0,
+        lane_started_at=_timestamp(2),
+        structural_cache_hit=False,
+    )
+
+    public = telemetry.load_public_lane_telemetry(values)
+    assert public is not None
+    assert public["request_id"] == "current-request"
+    assert public["decision_epoch"] == "2026-08-28T23:01:00+00:00"
+    assert [item["asset_class"] for item in public["lanes"]] == ["future"]
+    assert public["structural_cache_hits"] == 1
+    assert public["structural_cache_misses"] == 0
 
 
 def test_public_lane_telemetry_rejects_authority_tampering(tmp_path) -> None:
