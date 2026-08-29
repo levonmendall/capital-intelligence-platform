@@ -20,6 +20,12 @@ from operations import persistent_certification_scheduler as _scheduler
 from operations import release_evidence_prequalification as _release
 
 
+def _bounded_optional_failure_text(value: object) -> str | None:
+    if value is None:
+        return None
+    return _scheduler._bounded_failure_text(value)
+
+
 def _result_failure_fields(result: object) -> dict[str, object]:
     """Return only bounded scheduler-owned terminal failure metadata."""
 
@@ -35,13 +41,13 @@ def _result_failure_fields(result: object) -> dict[str, object]:
         else None
     )
     return {
-        "failure_message": _scheduler._bounded_failure_text(
+        "failure_message": _bounded_optional_failure_text(
             getattr(result, "failure_message", None)
         ),
         "failure_cause_type": _release._safe_token(
             getattr(result, "failure_cause_type", None)
         ),
-        "failure_cause_message": _scheduler._bounded_failure_text(
+        "failure_cause_message": _bounded_optional_failure_text(
             getattr(result, "failure_cause_message", None)
         ),
         "retryable": getattr(result, "retryable", False) is True,
@@ -78,9 +84,9 @@ def _safe_projected_failure_fields(raw_state: Mapping[str, object]) -> dict[str,
 
     if str(raw_state.get("state") or "").strip().lower() != "failed":
         return {}
-    failure_message = _scheduler._bounded_failure_text(raw_state.get("failure_message"))
+    failure_message = _bounded_optional_failure_text(raw_state.get("failure_message"))
     failure_cause_type = _release._safe_token(raw_state.get("failure_cause_type"))
-    failure_cause_message = _scheduler._bounded_failure_text(
+    failure_cause_message = _bounded_optional_failure_text(
         raw_state.get("failure_cause_message")
     )
     retry_after = _release._parse_aware(raw_state.get("retry_after"))
