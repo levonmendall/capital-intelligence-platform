@@ -229,6 +229,10 @@ def _install_terminal_failure_projection() -> None:
                 raise
             raise _scheduler.CertificationSchedulerError(detail) from error
 
+    # This is a transparent terminal projection around the already-installed scheduler
+    # runtime. Preserve every upstream runtime identity/capability marker so strict bootstrap
+    # verification still sees the same DAG-native/progress-aware supervision contract.
+    run.__dict__.update(getattr(current, "__dict__", {}))
     run._exact_terminal_failure_projection = True  # type: ignore[attr-defined]
     _scheduler.PersistentCertificationScheduler.run = run
 
