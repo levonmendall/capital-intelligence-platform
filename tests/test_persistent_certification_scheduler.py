@@ -108,10 +108,19 @@ def test_successful_node_is_reused_after_other_node_failure(tmp_path) -> None:
         "reused": False,
         "evidence_complete_count": 3,
         "failure_type": None,
+        "failure_message": None,
+        "failure_cause_type": None,
+        "failure_cause_message": None,
+        "retryable": False,
         "retry_after": None,
     }
     assert first_manifest["node_results"][crypto.node_id]["status"] == "failed"
     assert first_manifest["node_results"][crypto.node_id]["failure_type"] == "RuntimeError"
+    assert (
+        first_manifest["node_results"][crypto.node_id]["failure_message"]
+        == "simulated crypto provider failure"
+    )
+    assert first_manifest["node_results"][crypto.node_id]["retryable"] is False
 
     second = PersistentCertificationScheduler(
         values=values,
@@ -131,6 +140,42 @@ def test_successful_node_is_reused_after_other_node_failure(tmp_path) -> None:
     assert second_manifest["node_results"][equity.node_id]["evidence_complete_count"] == 3
     assert second_manifest["node_results"][crypto.node_id]["reused"] is False
     assert second_manifest["node_results"][crypto.node_id]["evidence_complete_count"] == 2
+
+
+def test_nested_crypto_failure_persists_exact_terminal_truth(tmp_path) -> None:
+    epoch = datetime(2026, 8, 18, 0, 47, tzinfo=timezone.utc)
+    values = _values(tmp_path)
+    crypto = _node("deep-market-evidence:crypto", provider="coinbase", epoch=epoch)
+    scheduler = PersistentCertificationScheduler(
+        values=values,
+        release_sha="release-test",
+        epoch=epoch,
+        policy_version="policy-v1",
+    )
+
+    def fail_crypto(_node: CertificationNode) -> int:
+        try:
+            raise RuntimeError("coinbase checkpoint integrity failed")
+        except RuntimeError as cause:
+            raise CertificationSchedulerError(
+                "crypto market evidence qualification failed"
+            ) from cause
+
+    with pytest.raises(CertificationSchedulerError) as raised:
+        scheduler.run((crypto,), fail_crypto)
+
+    assert "crypto market evidence qualification failed" in str(raised.value)
+    assert "cause=RuntimeError: coinbase checkpoint integrity failed" in str(raised.value)
+    assert "retryable=false" in str(raised.value)
+
+    manifest = _latest_manifest(values, epoch=epoch)
+    result = manifest["node_results"][crypto.node_id]
+    assert result["failure_type"] == "CertificationSchedulerError"
+    assert result["failure_message"] == "crypto market evidence qualification failed"
+    assert result["failure_cause_type"] == "RuntimeError"
+    assert result["failure_cause_message"] == "coinbase checkpoint integrity failed"
+    assert result["retryable"] is False
+    assert result["retry_after"] is None
 
 
 def test_provider_budget_is_shared_without_blocking_unrelated_provider(tmp_path) -> None:
