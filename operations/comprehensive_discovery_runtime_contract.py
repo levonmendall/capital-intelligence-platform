@@ -158,6 +158,9 @@ def _install_lane_local_spool() -> None:
 def _install_dag_native_supervision() -> None:
     """Move the hard kill boundary from the aggregate coordinator to each DAG node."""
 
+    from operations.certification_failure_projection import (
+        install_certification_failure_projection,
+    )
     from operations.dag_native_comprehensive_supervision import (
         install_dag_native_comprehensive_supervision,
     )
@@ -173,6 +176,7 @@ def _install_dag_native_supervision() -> None:
     # Install after supervision wrappers so every clean-spawn node preserves the same
     # bounded direct-cause truth already retained by the nested lane subprocess boundary.
     install_dag_node_failure_transport()
+    install_certification_failure_projection()
 
 
 def _install_lane_exit_cache_reclamation() -> None:
