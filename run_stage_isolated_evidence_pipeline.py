@@ -97,6 +97,58 @@ def _safe_failure(
     )
 
 
+def _durably_completed_stage_exit(
+    latest: StageIsolatedEvidenceState | None,
+    *,
+    pipeline_id: str,
+    stage: str,
+    return_code: int,
+) -> bool:
+    """Accept only ordinary late exits after this exact stage was durably completed."""
+
+    return (
+        return_code > 0
+        and latest is not None
+        and latest.pipeline_id == pipeline_id
+        and latest.state in {"running", "completed"}
+        and stage in latest.completed_stages
+    )
+
+
+def _emit_stage_exit_reconciled(
+    *,
+    pipeline_id: str,
+    stage: str,
+    return_code: int,
+) -> None:
+    """Publish advisory reconciliation telemetry without creating a new failure path."""
+
+    try:
+        print(
+            json.dumps(
+                {
+                    "event": "stage_isolated_evidence_stage_exit_reconciled",
+                    "pipeline_id": pipeline_id,
+                    "stage": stage,
+                    "child_return_code": return_code,
+                    "durable_stage_completion": True,
+                    "reconciliation_authority": "exact_stage_journal",
+                    "decision_authority": False,
+                    "candidate_authority": False,
+                    "sizing_authority": False,
+                    "construction_authority": False,
+                    "execution_authority": False,
+                    "paper_only": True,
+                    "real_money_authorized": False,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    except Exception:
+        pass
+
+
 def _evidence_deadline(
     state: StageIsolatedEvidenceState,
     values: Mapping[str, str],
@@ -623,6 +675,22 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
             return _STAGE_FRESHNESS_EXPIRED_RETURN_CODE
 
         if return_code != 0:
+            # Once the exact same pipeline/stage is durably completed, a later ordinary
+            # positive process exit cannot revoke that checkpoint. This reconciles the
+            # narrow post-commit telemetry/shutdown race while signals, identity changes,
+            # failed journals, and every pre-completion exit remain fail-closed.
+            if _durably_completed_stage_exit(
+                latest,
+                pipeline_id=state.pipeline_id,
+                stage=stage,
+                return_code=return_code,
+            ):
+                _emit_stage_exit_reconciled(
+                    pipeline_id=state.pipeline_id,
+                    stage=stage,
+                    return_code=return_code,
+                )
+                continue
             _safe_failure(
                 pipeline_id=state.pipeline_id,
                 stage=stage,
