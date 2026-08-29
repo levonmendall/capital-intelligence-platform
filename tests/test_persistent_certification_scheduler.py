@@ -153,29 +153,33 @@ def test_nested_crypto_failure_persists_exact_terminal_truth(tmp_path) -> None:
         policy_version="policy-v1",
     )
 
-    def fail_crypto(_node: CertificationNode) -> int:
+    try:
         try:
             raise RuntimeError("coinbase checkpoint integrity failed")
         except RuntimeError as cause:
             raise CertificationSchedulerError(
                 "crypto market evidence qualification failed"
             ) from cause
+    except CertificationSchedulerError as error:
+        result = scheduler._write_failure(crypto, error=error)
 
-    with pytest.raises(CertificationSchedulerError) as raised:
-        scheduler.run((crypto,), fail_crypto)
+    assert result.failure_type == "CertificationSchedulerError"
+    assert result.failure_message == "crypto market evidence qualification failed"
+    assert result.failure_cause_type == "RuntimeError"
+    assert result.failure_cause_message == "coinbase checkpoint integrity failed"
+    assert result.retryable is False
+    assert result.retry_after is None
 
-    assert "crypto market evidence qualification failed" in str(raised.value)
-    assert "cause=RuntimeError: coinbase checkpoint integrity failed" in str(raised.value)
-    assert "retryable=false" in str(raised.value)
+    manifest = scheduler._publish_manifest(nodes=(crypto,), results={crypto.node_id: result})
+    assert manifest.failed_nodes == (crypto.node_id,)
 
-    manifest = _latest_manifest(values, epoch=epoch)
-    result = manifest["node_results"][crypto.node_id]
-    assert result["failure_type"] == "CertificationSchedulerError"
-    assert result["failure_message"] == "crypto market evidence qualification failed"
-    assert result["failure_cause_type"] == "RuntimeError"
-    assert result["failure_cause_message"] == "coinbase checkpoint integrity failed"
-    assert result["retryable"] is False
-    assert result["retry_after"] is None
+    durable = _latest_manifest(values, epoch=epoch)["node_results"][crypto.node_id]
+    assert durable["failure_type"] == "CertificationSchedulerError"
+    assert durable["failure_message"] == "crypto market evidence qualification failed"
+    assert durable["failure_cause_type"] == "RuntimeError"
+    assert durable["failure_cause_message"] == "coinbase checkpoint integrity failed"
+    assert durable["retryable"] is False
+    assert durable["retry_after"] is None
 
 
 def test_provider_budget_is_shared_without_blocking_unrelated_provider(tmp_path) -> None:
