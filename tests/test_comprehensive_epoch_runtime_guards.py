@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 from operations import bounded_comprehensive_discovery_spool as bounded
+from operations import cached_transactional_comprehensive_discovery_lane as cached
 from operations import comprehensive_discovery_input_spool as legacy
 from operations import epoch_scoped_provider_acquisition as fanout
 from operations import stage_isolated_evidence_pipeline as pipeline
@@ -239,3 +240,143 @@ def test_canonical_publication_budget_reuses_fanout_calculation(
     values = {"RENDER": "true", "UNCHANGED": "1"}
     assert bounded._provider_publication_timeout_seconds(request_path, values) == 123.0
     assert observed == [(epoch, values)]
+
+
+def _bind_cached_render_lane(monkeypatch, tmp_path, *, values: dict[str, str]) -> None:
+    monkeypatch.setattr(cached, "_ACTIVE_REQUEST_PATH", tmp_path / "request.json")
+    monkeypatch.setattr(cached, "_ACTIVE_VALUES", values)
+    monkeypatch.setattr(cached, "_ACTIVE_ASSET_CLASS", "international_equity")
+    monkeypatch.setattr(cached, "_ACTIVE_INDEX", 4)
+
+
+def test_transactional_render_publication_uses_existing_epoch_budget(
+    tmp_path, monkeypatch
+) -> None:
+    values = _values(tmp_path)
+    values["RENDER"] = "true"
+    epoch = datetime(2026, 8, 29, 2, 0, tzinfo=timezone.utc)
+    waits: list[float | None] = []
+    commands: list[tuple[str, ...]] = []
+
+    class CompletedProcess:
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            return 0
+
+        def poll(self):
+            return 0
+
+        def terminate(self):  # pragma: no cover - success path
+            raise AssertionError("completed publication must not be terminated")
+
+        def kill(self):  # pragma: no cover - success path
+            raise AssertionError("completed publication must not be killed")
+
+    class CleanResult:
+        limitations = ()
+
+    result = CleanResult()
+    _bind_cached_render_lane(monkeypatch, tmp_path, values=values)
+    monkeypatch.setattr(fanout, "_fanout_budget_seconds", lambda *_args, **_kwargs: 12.5)
+    monkeypatch.setattr(
+        fanout,
+        "_publication_command",
+        lambda **_kwargs: ("provider-child", "international_equity"),
+    )
+
+    def popen(command, **_kwargs):
+        commands.append(tuple(command))
+        return CompletedProcess()
+
+    monkeypatch.setattr(cached.subprocess, "Popen", popen)
+    monkeypatch.setattr(cached._canonical._publication, "_records_for_lane", lambda _catalogs: (object(),))
+    monkeypatch.setattr(cached._canonical._publication, "_streaming_catalog_fingerprint", lambda _records: "fingerprint")
+    monkeypatch.setattr(cached._canonical._publication._core, "_publication_path", lambda _policy: tmp_path / "provider.json")
+    monkeypatch.setattr(cached._canonical._publication, "_existing_result_bounded", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(
+        cached,
+        "_ORIGINAL_ENSURE_PROVIDER_PRESELECTION_PUBLICATION",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Render canonical fallback must stay in the bounded child")
+        ),
+    )
+
+    observed = cached._ensure_provider_preselection_publication(
+        {}, as_of=epoch, policy=object(), market_probe=object()
+    )
+
+    assert observed is result
+    assert waits == [12.5]
+    assert commands == [("provider-child", "international_equity")]
+
+
+def test_transactional_render_publication_timeout_terminates_child_and_fails_closed(
+    tmp_path, monkeypatch
+) -> None:
+    values = _values(tmp_path)
+    values["RENDER"] = "true"
+    epoch = datetime(2026, 8, 29, 2, 0, tzinfo=timezone.utc)
+
+    class TimedOutProcess:
+        def __init__(self) -> None:
+            self.terminated = False
+            self.killed = False
+            self.waits: list[float | None] = []
+
+        def wait(self, timeout=None):
+            self.waits.append(timeout)
+            if self.terminated:
+                return -15
+            if self.killed:
+                return -9
+            raise subprocess.TimeoutExpired("transactional-provider-publication", timeout)
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
+    child = TimedOutProcess()
+    _bind_cached_render_lane(monkeypatch, tmp_path, values=values)
+    monkeypatch.setattr(fanout, "_fanout_budget_seconds", lambda *_args, **_kwargs: 7.5)
+    monkeypatch.setattr(
+        fanout,
+        "_publication_command",
+        lambda **_kwargs: ("provider-child", "international_equity"),
+    )
+    monkeypatch.setattr(cached.subprocess, "Popen", lambda *_args, **_kwargs: child)
+
+    with pytest.raises(
+        cached._canonical._publication.ProviderPreselectionPublicationError,
+        match="exceeded the existing epoch-scoped provider acquisition window",
+    ):
+        cached._ensure_provider_preselection_publication({}, as_of=epoch, policy=object())
+
+    assert child.terminated is True
+    assert child.killed is False
+    assert child.waits == [7.5, cached._RENDER_PUBLICATION_TERMINATION_GRACE_SECONDS]
+
+
+def test_transactional_render_publication_refuses_to_start_inside_downstream_reserve(
+    tmp_path, monkeypatch
+) -> None:
+    values = _values(tmp_path)
+    values["RENDER"] = "true"
+    epoch = datetime(2026, 8, 29, 2, 0, tzinfo=timezone.utc)
+    _bind_cached_render_lane(monkeypatch, tmp_path, values=values)
+    monkeypatch.setattr(fanout, "_fanout_budget_seconds", lambda *_args, **_kwargs: 0.0)
+
+    def forbidden_spawn(*_args, **_kwargs):  # pragma: no cover - assertion helper
+        raise AssertionError("publication must not start inside the downstream reserve")
+
+    monkeypatch.setattr(cached.subprocess, "Popen", forbidden_spawn)
+
+    with pytest.raises(
+        cached._canonical._publication.ProviderPreselectionPublicationError,
+        match="has no provider-acquisition time beyond the downstream reserve",
+    ):
+        cached._ensure_provider_preselection_publication({}, as_of=epoch, policy=object())
