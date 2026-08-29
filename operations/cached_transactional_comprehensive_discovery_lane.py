@@ -2,13 +2,15 @@
 
 A warm evidence retry may reuse only the already-merged structural catalog produced by
 the same software release, policy version, bound reference manifest, and lane scheduling
-state. Provider preselection, terminal screening, certification-node construction,
-exact-epoch market evidence, and durable transaction state all remain owned by the
-unchanged canonical transaction and are rebuilt for the new evidence epoch.
+state. Provider preselection is owned by the bounded epoch-scoped acquisition layer; this
+serialized transaction may only validate and consume its canonical publication before
+terminal screening, certification-node construction, exact-epoch market evidence, and
+durable transaction completion.
 
 This wrapper cannot certify evidence or authorize an investment action. Cache misses,
 corruption, identity changes, schedule changes, and option catalogs fall through to the
-unchanged canonical reconstruction and merge path.
+unchanged canonical structural reconstruction and merge path. A missing or invalid
+provider publication fails closed here instead of starting a second late network fallback.
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ _ORIGINAL_LOAD_CATALOG_RECORDS = _canonical._load_catalog_records
 _ORIGINAL_MERGE_CERTIFIED_LANE = _canonical._bounded_lane._merge_certified_lane
 _ORIGINAL_RUN_LANE_TRANSACTION = _canonical.run_lane_transaction
 _ORIGINAL_BUILD_DEEP_LANE = _canonical._build_deep_lane
+_ORIGINAL_ENSURE_PROVIDER_PRESELECTION_PUBLICATION = (
+    _canonical._publication.ensure_provider_preselection_publication
+)
 _ACTIVE_POLICY_VERSION = ""
 _ACTIVE_REQUEST_PATH: Path | None = None
 _ACTIVE_VALUES: Mapping[str, str] | None = None
@@ -156,7 +161,7 @@ def _merge_certified_lane(core, raw: Sequence[object], *, asset_class, timestamp
     if isinstance(raw, _CachedMergedRecords):
         # The cache identity proves this merged structure came from the exact release,
         # policy, currently bound reference manifest, and compatible lane schedule. Do not
-        # reuse any publication/screening/market artifact from the source epoch.
+        # reuse screening/market artifacts from the source epoch.
         merged = raw.records
     else:
         merged = _ORIGINAL_MERGE_CERTIFIED_LANE(
@@ -179,9 +184,6 @@ def _merge_certified_lane(core, raw: Sequence[object], *, asset_class, timestamp
             # must never change the canonical current-epoch evidence result.
             pass
 
-    # The canonical transaction moves directly from merge into provider publication. The
-    # old transactional coordinator published only the initial catalog-lane start, leaving
-    # the parent watchdog pinned to the prior durable completion during long later phases.
     transition = _now()
     _record_lane_timing(
         structural_completed_at=transition,
@@ -189,6 +191,51 @@ def _merge_certified_lane(core, raw: Sequence[object], *, asset_class, timestamp
     )
     _record_watchdog_phase("publication-lane")
     return merged
+
+
+def _reuse_only_provider_preselection_publication(
+    catalogs,
+    *,
+    as_of,
+    policy=None,
+    **_ignored,
+):
+    """Consume the canonical epoch-scoped publication without any network fallback."""
+
+    publication = _canonical._publication
+    timestamp = publication._core._aware(as_of, field_name="as_of")
+    resolved = policy or publication.ComprehensiveMarketDiscoveryPolicy()
+    records = publication._records_for_lane(catalogs)
+    if not records:
+        raise publication.ProviderPreselectionPublicationError(
+            "provider preselection publication requires a nonempty catalog"
+        )
+    fingerprint = publication._streaming_catalog_fingerprint(records)
+    path = publication._core._publication_path(resolved)
+    freshness_days = int(getattr(resolved, "preselection_freshness_days", 3))
+    existing = publication._existing_result_bounded(
+        path,
+        as_of=timestamp,
+        fingerprint=fingerprint,
+        catalog_count=len(records),
+        freshness_days=freshness_days,
+    )
+    if existing is None:
+        raise publication.ProviderPreselectionPublicationError(
+            "epoch-scoped provider publication is unavailable or invalid; "
+            "serialized comprehensive lane refuses late provider reacquisition"
+        )
+    limitations = tuple(
+        str(item)
+        for item in getattr(existing, "limitations", ())
+        if str(item).strip()
+    )
+    if limitations:
+        raise publication.ProviderPreselectionPublicationError(
+            "epoch-scoped provider publication contains limitations; "
+            "serialized comprehensive lane refuses degraded provider evidence"
+        )
+    return existing
 
 
 def _build_deep_lane(*args, **kwargs):
@@ -248,10 +295,13 @@ def _run_lane_transaction(
 
 
 def install_cached_structural_lane_loader() -> None:
-    """Install structural-only reuse and exact advisory phase transitions in this child."""
+    """Install structural reuse, reuse-only provider input, and advisory phase timing."""
 
     _canonical._load_catalog_records = _load_catalog_records
     _canonical._bounded_lane._merge_certified_lane = _merge_certified_lane
+    _canonical._publication.ensure_provider_preselection_publication = (
+        _reuse_only_provider_preselection_publication
+    )
     _canonical._build_deep_lane = _build_deep_lane
     _canonical.run_lane_transaction = _run_lane_transaction
 
