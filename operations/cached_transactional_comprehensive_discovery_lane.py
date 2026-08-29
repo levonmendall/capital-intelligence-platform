@@ -13,6 +13,7 @@ unchanged canonical reconstruction and merge path.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -202,9 +203,13 @@ def _build_deep_lane(*args, **kwargs):
         screening_started_at=transition,
     )
     _record_watchdog_phase("screening-lane")
-    result = _ORIGINAL_BUILD_DEEP_LANE(*args, **kwargs)
-    _record_lane_timing(screening_completed_at=_now())
-    return result
+    try:
+        # Preserve the literal canonical delegation asserted by the structural-cache
+        # contract: instrumentation surrounds the call but never substitutes its result.
+        return _ORIGINAL_BUILD_DEEP_LANE(*args, **kwargs)
+    finally:
+        if sys.exc_info()[0] is None:
+            _record_lane_timing(screening_completed_at=_now())
 
 
 def _run_lane_transaction(
