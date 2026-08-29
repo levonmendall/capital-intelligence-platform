@@ -16,6 +16,7 @@ import json
 import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
+from functools import wraps
 from typing import Any
 
 from operations import persistent_certification_scheduler as _scheduler
@@ -115,6 +116,7 @@ def install_retryable_certification_node_requeue() -> None:
     if getattr(current, "_retryable_certification_node_requeue", False):
         return
 
+    @wraps(current)
     def run(self: Any, nodes: Sequence[object], runner: Any):
         ordered_nodes = tuple(nodes)
         while True:
