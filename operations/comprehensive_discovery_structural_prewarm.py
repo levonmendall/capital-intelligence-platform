@@ -19,10 +19,12 @@ certification-node construction, market-evidence qualification, durable transact
 and global certification. It may validate and consume an exact-epoch provider publication
 but must never start a second late provider-network fallback.
 
-The sidecar is advisory and bounded by the U.S.-equity stage lifetime. The caller always
-stops/reaps it before publishing the U.S.-equity stage result, so no overlap sidecar can
-outlive the stage that launched it. Neither this sidecar nor its provider fanout has
-evidence, candidate, sizing, construction, execution, CIO, or real-money authority.
+The sidecar is advisory and bounded by the same provider-acquisition window that existed
+before this overlap. The U.S.-equity stage may use otherwise idle time while the sidecar is
+running, then waits only until that original absolute acceleration deadline and always
+reaps the child before publishing its stage result. Neither this sidecar nor its provider
+fanout has evidence, candidate, sizing, construction, execution, CIO, or real-money
+authority.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from cio import CandidateAssetClass
 
 _MODULE = "operations.comprehensive_discovery_structural_prewarm"
 _STOP_GRACE_SECONDS = 1.0
+_COMPLETION_CLEANUP_RESERVE_SECONDS = 2.0 * _STOP_GRACE_SECONDS
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 
@@ -70,6 +73,7 @@ class StructuralPrewarmHandle:
     """Own one disposable advisory overlap sidecar and guarantee bounded cleanup."""
 
     process: subprocess.Popen[bytes] | None = None
+    deadline_monotonic: float | None = None
 
     def stop(self) -> None:
         process = self.process
@@ -95,6 +99,27 @@ class StructuralPrewarmHandle:
             # group, so the existing stage supervisor is still the final kill wall.
             pass
 
+    def finish(self) -> None:
+        """Let the sidecar finish only inside its original absolute acceleration window."""
+
+        process = self.process
+        if process is None:
+            return
+        if process.poll() is not None:
+            self.process = None
+            return
+        deadline = self.deadline_monotonic
+        if deadline is not None:
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining > 0.0:
+                try:
+                    process.wait(timeout=remaining)
+                    self.process = None
+                    return
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+        self.stop()
+
 
 def start_render_structural_prewarm(
     *,
@@ -110,6 +135,21 @@ def start_render_structural_prewarm(
         timestamp = _aware(evidence_as_of, field_name="structural_prewarm_evidence_as_of")
     except ValueError:
         return StructuralPrewarmHandle()
+
+    from operations.epoch_scoped_provider_acquisition import _fanout_budget_seconds
+
+    try:
+        budget = float(_fanout_budget_seconds(timestamp, resolved))
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return StructuralPrewarmHandle()
+    if budget <= 0.0:
+        return StructuralPrewarmHandle()
+    # Reserve the existing termination grace inside the original provider budget instead
+    # of borrowing from the unchanged downstream reserve.
+    usable_budget = max(0.0, budget - _COMPLETION_CLEANUP_RESERVE_SECONDS)
+    if usable_budget <= 0.0:
+        return StructuralPrewarmHandle()
+    deadline = time.monotonic() + usable_budget
 
     environment = dict(os.environ)
     environment.update({str(key): str(value) for key, value in resolved.items()})
@@ -134,7 +174,7 @@ def start_render_structural_prewarm(
         )
     except (OSError, ValueError):
         return StructuralPrewarmHandle()
-    return StructuralPrewarmHandle(process=process)
+    return StructuralPrewarmHandle(process=process, deadline_monotonic=deadline)
 
 
 def _same_lane_schedule(core, asset_class: CandidateAssetClass, source, requested) -> bool:
