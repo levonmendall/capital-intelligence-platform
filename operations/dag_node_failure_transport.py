@@ -56,7 +56,9 @@ def _node_worker(
     runner: Callable[[object], int],
     node: object,
 ) -> None:
-    """Run one clean-spawn node and return bounded causal metadata to its parent."""
+    """Run one clean-spawn node with progress plus bounded causal terminal metadata."""
+
+    from operations import progress_aware_release_certification as _progress
 
     process_group_ready = False
     try:
@@ -64,6 +66,9 @@ def _node_worker(
             os.setsid()
             process_group_ready = True
         connection.send(("ready", process_group_ready))
+        # Preserve the already-governed progress-aware stall contract. This transport is an
+        # additive terminal-truth extension, not a replacement for child heartbeat emission.
+        _progress._install_child_progress_emitters(connection, runner, node)
         try:
             result = int(runner(node))
         except BaseException as error:  # noqa: BLE001 - child reports provider failure.
@@ -241,6 +246,9 @@ def install_dag_node_failure_transport() -> None:
     """Install causal transport and exact terminal projection without changing scheduling."""
 
     if not getattr(_dag._node_worker, "_causal_failure_transport", False):
+        # Preserve any upstream worker capability markers (notably progress-aware
+        # supervision) because this worker implements that same contract plus causal truth.
+        _node_worker.__dict__.update(getattr(_dag._node_worker, "__dict__", {}))
         _node_worker._causal_failure_transport = True  # type: ignore[attr-defined]
         _remote_error._causal_failure_transport = True  # type: ignore[attr-defined]
         _dag._node_worker = _node_worker
