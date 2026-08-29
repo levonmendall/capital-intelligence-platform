@@ -157,6 +157,9 @@ def record_lane_phase(
         return
     request = Path(request_path).expanduser()
     request_id, decision_epoch = _request_identity(request)
+    incoming_epoch = _parse_timestamp(decision_epoch)
+    if incoming_epoch is None:
+        raise ValueError("comprehensive request telemetry epoch is invalid")
     release = _release(values)
     if release == "unknown":
         return
@@ -170,6 +173,17 @@ def record_lane_phase(
         raise ValueError("unsupported lane telemetry field")
 
     state = _load_state(path)
+    existing_epoch = _parse_timestamp(state.get("decision_epoch"))
+    if (
+        state.get("schema_version") == _SCHEMA_VERSION
+        and str(state.get("release") or "") == release
+        and existing_epoch is not None
+        and existing_epoch > incoming_epoch
+    ):
+        # A child from an expired evidence epoch can finish while the next retry has
+        # already started. Never let that stale advisory writer replace newer telemetry.
+        return
+
     if (
         state.get("schema_version") != _SCHEMA_VERSION
         or str(state.get("request_id") or "") != request_id
@@ -201,7 +215,7 @@ def record_lane_phase(
                 raise ValueError("lane telemetry timestamp is invalid")
             entry[name] = str(value)
         elif name == "structural_cache_hit":
-            if value not in (True, False, None):
+            if value is not True and value is not False and value is not None:
                 raise ValueError("structural_cache_hit must be boolean or null")
             entry[name] = value
         elif name == "error_type":
@@ -225,9 +239,13 @@ def load_public_lane_telemetry(
         return None
     state = _load_state(path)
     release = _release(resolved)
+    request_id = str(state.get("request_id") or "").strip()
+    decision_epoch = str(state.get("decision_epoch") or "").strip()
     if (
         state.get("schema_version") != _SCHEMA_VERSION
         or str(state.get("release") or "") != release
+        or not request_id
+        or _parse_timestamp(decision_epoch) is None
         or state.get("credential_safe") is not True
         or state.get("advisory_only") is not True
         or state.get("paper_only") is not True
@@ -260,12 +278,12 @@ def load_public_lane_telemetry(
             continue
         if not asset or index < 0:
             continue
+        raw_cache_hit = raw.get("structural_cache_hit")
+        cache_hit = raw_cache_hit if type(raw_cache_hit) is bool else None
         item: dict[str, object] = {
             "asset_class": asset,
             "index": index,
-            "structural_cache_hit": raw.get("structural_cache_hit")
-            if raw.get("structural_cache_hit") in (True, False)
-            else None,
+            "structural_cache_hit": cache_hit,
             "error_type": str(raw.get("error_type") or "")[:120] or None,
         }
         for field in _TIMESTAMP_FIELDS:
@@ -305,9 +323,9 @@ def load_public_lane_telemetry(
 
     return {
         "schema_version": _SCHEMA_VERSION,
-        "request_id": str(state.get("request_id") or "") or None,
+        "request_id": request_id,
         "release": release,
-        "decision_epoch": str(state.get("decision_epoch") or "") or None,
+        "decision_epoch": decision_epoch,
         "updated_at": str(state.get("updated_at") or "") or None,
         "structural_cache_hits": hits,
         "structural_cache_misses": misses,
