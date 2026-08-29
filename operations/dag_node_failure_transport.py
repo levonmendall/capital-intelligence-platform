@@ -25,6 +25,7 @@ from operations import supervised_component_execution as _supervision
 _DETAIL_MESSAGE = "message"
 _DETAIL_CAUSE_TYPE = "cause_type"
 _DETAIL_CAUSE_MESSAGE = "cause_message"
+_RESOURCE_BUSY_RETRY_SECONDS = 3.0
 
 
 def _direct_cause(error: BaseException) -> BaseException | None:
@@ -81,6 +82,18 @@ def _node_worker(
                 not math.isfinite(retry_seconds) or retry_seconds <= 0.0
             ):
                 retry_seconds = None
+            if retry_seconds is None:
+                cause = _direct_cause(error)
+                resource_detail = " ".join(
+                    item
+                    for item in (
+                        _supervision._safe_error(error),
+                        "" if cause is None else _supervision._safe_error(cause),
+                    )
+                    if item
+                ).lower()
+                if "resource_busy" in resource_detail:
+                    retry_seconds = _RESOURCE_BUSY_RETRY_SECONDS
             connection.send(
                 (
                     "error",

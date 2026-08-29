@@ -19,6 +19,13 @@ class _NestedFailureRunner:
             ) from cause
 
 
+class _ResourceBusyRunner:
+    def __call__(self, _node: scheduler.CertificationNode) -> int:
+        raise RuntimeError(
+            "comprehensive discovery spool unavailable (resource_busy) for provider alpaca"
+        )
+
+
 def _node(epoch: datetime) -> scheduler.CertificationNode:
     return scheduler.CertificationNode(
         node_id="deep-market-evidence:crypto",
@@ -27,6 +34,32 @@ def _node(epoch: datetime) -> scheduler.CertificationNode:
         input_fingerprint="crypto-fingerprint",
         deadline=epoch + timedelta(minutes=5),
         decision_eligible_count=8,
+    )
+
+
+def _instance(monkeypatch, tmp_path, epoch: datetime) -> scheduler.PersistentCertificationScheduler:
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-test",
+        "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING": "true",
+        "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "1",
+    }
+
+    monkeypatch.setattr(
+        scheduler.PersistentCertificationScheduler,
+        "run",
+        scheduler.PersistentCertificationScheduler.run,
+    )
+    monkeypatch.setattr(dag_native, "_node_worker", dag_native._node_worker)
+    monkeypatch.setattr(dag_native, "_remote_error", dag_native._remote_error)
+    dag_native._install_scheduler_supervision()
+    transport.install_dag_node_failure_transport()
+
+    return scheduler.PersistentCertificationScheduler(
+        values=values,
+        release_sha="release-test",
+        epoch=epoch,
+        policy_version="policy-v1",
     )
 
 
@@ -53,29 +86,8 @@ def test_remote_error_preserves_safe_direct_cause_and_retry() -> None:
 def test_dag_spawn_preserves_nested_crypto_terminal_cause(monkeypatch, tmp_path) -> None:
     epoch = datetime(2026, 8, 29, 5, 20, tzinfo=timezone.utc)
     node = _node(epoch)
-    values = {
-        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
-        "CAPITAL_INTELLIGENCE_RELEASE": "release-test",
-        "CAPITAL_INTELLIGENCE_EVIDENCE_PLANE_PREPARING": "true",
-        "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS": "1",
-    }
+    instance = _instance(monkeypatch, tmp_path, epoch)
 
-    monkeypatch.setattr(
-        scheduler.PersistentCertificationScheduler,
-        "run",
-        scheduler.PersistentCertificationScheduler.run,
-    )
-    monkeypatch.setattr(dag_native, "_node_worker", dag_native._node_worker)
-    monkeypatch.setattr(dag_native, "_remote_error", dag_native._remote_error)
-    dag_native._install_scheduler_supervision()
-    transport.install_dag_node_failure_transport()
-
-    instance = scheduler.PersistentCertificationScheduler(
-        values=values,
-        release_sha="release-test",
-        epoch=epoch,
-        policy_version="policy-v1",
-    )
     with pytest.raises(scheduler.CertificationSchedulerError) as raised:
         instance.run((node,), _NestedFailureRunner())
 
@@ -83,3 +95,17 @@ def test_dag_spawn_preserves_nested_crypto_terminal_cause(monkeypatch, tmp_path)
     assert "crypto market evidence qualification failed" in message
     assert "cause=RuntimeError: coinbase checkpoint integrity failed" in message
     assert "retryable=false" in message
+
+
+def test_dag_spawn_marks_resource_busy_retryable(monkeypatch, tmp_path) -> None:
+    epoch = datetime(2026, 8, 29, 9, 7, 50, tzinfo=timezone.utc)
+    node = _node(epoch)
+    instance = _instance(monkeypatch, tmp_path, epoch)
+
+    with pytest.raises(scheduler.CertificationSchedulerError) as raised:
+        instance.run((node,), _ResourceBusyRunner())
+
+    message = str(raised.value)
+    assert "resource_busy" in message
+    assert "retryable=true" in message
+    assert "retry_after=" in message
