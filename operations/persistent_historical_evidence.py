@@ -1,24 +1,11 @@
-"""Persistent point-in-time historical evidence shared by all executable asset lanes.
+"""Persistent point-in-time historical evidence shared by executable asset lanes.
 
-The store keeps already-observed daily history on the persistent service disk so a new
-CIO decision epoch does not have to redownload immutable history.  Reuse never grants
-freshness by itself: each cached scope records the request boundary that last refreshed
-it, and callers must refresh an overdue tail before the cache can satisfy a new epoch.
-
-The module installs two operational wrappers:
-
-* every non-option exact-instrument market-history candidate routed through
-  ``RedundantMarketHistoryRouter`` can reuse a recently refreshed persistent base; and
-* resumable options preserve the largest previously requested history horizon and, once
-  that horizon exists, refresh only a small overlapping tail instead of repeating a
-  365-day pull for every decision epoch.
-
-Rows are keyed by asset class, exact economic-instrument identity, provider scope, and
-observation timestamp.  Row payloads carry an integrity digest, future-dated writes are
-rejected, and the SQLite database uses bounded transactions.  Current quotes, spreads,
-liquidity, IV/Greeks, fundamentals, specialist analysis, CIO authority, construction,
-and execution remain outside this cache and must satisfy their existing decision-time
-freshness and governance contracts.
+Historical observations are retained as append-only row versions and each refresh creates
+an immutable snapshot boundary. Reads select the newest snapshot whose request boundary
+is at or before the decision epoch, so a later refresh cannot rewrite evidence lineage for
+an earlier decision. The legacy mutable projection is retained only for deploy/rollback
+compatibility and is conservatively imported at its recorded request boundary; it is never
+backdated.
 """
 
 from __future__ import annotations
@@ -39,6 +26,7 @@ from providers.redundant_market_history import (
 )
 
 _SCHEMA_VERSION = "persistent-historical-evidence.v1"
+_SNAPSHOT_SCHEMA_VERSION = "persistent-historical-evidence-snapshots.v1"
 _DEFAULT_MAX_AGE_HOURS = 18.0
 _MINIMUM_DELTA_DAYS = 7
 _DELTA_OVERLAP_DAYS = 3
@@ -142,7 +130,7 @@ def _normalize_mapping_rows(
 
 
 class PersistentHistoricalEvidenceStore:
-    """Small SQLite-backed append/replace store for immutable daily evidence bases."""
+    """SQLite store with immutable refresh snapshots and append-only row versions."""
 
     def __init__(self, values: Mapping[str, str] | None = None) -> None:
         self._values = dict(os.environ if values is None else values)
@@ -168,6 +156,7 @@ class PersistentHistoricalEvidenceStore:
         connection = sqlite3.connect(str(self.path), timeout=30.0)
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=NORMAL")
+        connection.execute("PRAGMA foreign_keys=ON")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS historical_evidence_meta (
@@ -176,6 +165,8 @@ class PersistentHistoricalEvidenceStore:
             )
             """
         )
+        # Keep the legacy v1 projection for rollback compatibility. New code never
+        # treats it as historical truth before its recorded requested_as_of boundary.
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS historical_evidence_rows (
@@ -210,6 +201,69 @@ class PersistentHistoricalEvidenceStore:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS historical_evidence_snapshots (
+                snapshot_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                asset_class TEXT NOT NULL,
+                instrument_identity TEXT NOT NULL,
+                provider_scope TEXT NOT NULL,
+                maximum_history_days INTEGER NOT NULL,
+                requested_as_of TEXT NOT NULL,
+                integrity_sha256 TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS historical_evidence_snapshots_scope_epoch
+            ON historical_evidence_snapshots(
+                asset_class,
+                instrument_identity,
+                provider_scope,
+                requested_as_of,
+                snapshot_sequence
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS historical_evidence_row_versions (
+                snapshot_sequence INTEGER NOT NULL,
+                asset_class TEXT NOT NULL,
+                instrument_identity TEXT NOT NULL,
+                provider_scope TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL,
+                provider_kind TEXT NOT NULL,
+                source_identifier TEXT NOT NULL,
+                integrity_sha256 TEXT NOT NULL,
+                PRIMARY KEY (
+                    snapshot_sequence,
+                    asset_class,
+                    instrument_identity,
+                    provider_scope,
+                    observed_at
+                ),
+                FOREIGN KEY(snapshot_sequence)
+                    REFERENCES historical_evidence_snapshots(snapshot_sequence)
+                    ON DELETE RESTRICT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS historical_evidence_row_versions_lookup
+            ON historical_evidence_row_versions(
+                asset_class,
+                instrument_identity,
+                provider_scope,
+                observed_at,
+                snapshot_sequence
+            )
+            """
+        )
         existing = connection.execute(
             "SELECT value FROM historical_evidence_meta WHERE key='schema_version'"
         ).fetchone()
@@ -223,8 +277,314 @@ class PersistentHistoricalEvidenceStore:
             raise PersistentHistoricalEvidenceError(
                 "persistent historical evidence schema mismatch"
             )
+        snapshot_schema = connection.execute(
+            "SELECT value FROM historical_evidence_meta WHERE key='snapshot_schema_version'"
+        ).fetchone()
+        if snapshot_schema is None:
+            connection.execute(
+                "INSERT INTO historical_evidence_meta(key, value) "
+                "VALUES('snapshot_schema_version', ?)",
+                (_SNAPSHOT_SCHEMA_VERSION,),
+            )
+        elif snapshot_schema[0] != _SNAPSHOT_SCHEMA_VERSION:
+            connection.close()
+            raise PersistentHistoricalEvidenceError(
+                "persistent historical evidence snapshot schema mismatch"
+            )
         connection.commit()
         return connection
+
+    @staticmethod
+    def _coverage_payload(
+        *,
+        asset_class: str,
+        instrument_identity: str,
+        provider_scope: str,
+        maximum_history_days: int,
+        requested_as_of: str,
+    ) -> dict[str, object]:
+        return {
+            "asset_class": asset_class,
+            "instrument_identity": instrument_identity,
+            "provider_scope": provider_scope,
+            "maximum_history_days": int(maximum_history_days),
+            "requested_as_of": str(requested_as_of),
+        }
+
+    @staticmethod
+    def _row_payload(
+        *,
+        asset_class: str,
+        instrument_identity: str,
+        provider_scope: str,
+        observed_at: str,
+        close: float,
+        volume: float,
+        provider_kind: str,
+        source_identifier: str,
+    ) -> dict[str, object]:
+        return {
+            "asset_class": asset_class,
+            "instrument_identity": instrument_identity,
+            "provider_scope": provider_scope,
+            "observed_at": str(observed_at),
+            "close": float(close),
+            "volume": float(volume),
+            "provider_kind": str(provider_kind),
+            "source_identifier": str(source_identifier),
+        }
+
+    def _append_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        asset_class: str,
+        instrument_identity: str,
+        provider_scope: str,
+        maximum_history_days: int,
+        requested_as_of: datetime,
+        rows: Sequence[Mapping[str, object]],
+    ) -> int:
+        timestamp = _aware(requested_as_of)
+        latest = connection.execute(
+            """
+            SELECT requested_as_of
+            FROM historical_evidence_snapshots
+            WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+            ORDER BY requested_as_of DESC, snapshot_sequence DESC
+            LIMIT 1
+            """,
+            (asset_class, instrument_identity, provider_scope),
+        ).fetchone()
+        if latest is not None:
+            latest_requested = _aware(datetime.fromisoformat(str(latest[0])))
+            if latest_requested > timestamp:
+                raise PersistentHistoricalEvidenceError(
+                    "cannot append persistent historical evidence before the latest "
+                    "persisted snapshot epoch"
+                )
+
+        coverage_payload = self._coverage_payload(
+            asset_class=asset_class,
+            instrument_identity=instrument_identity,
+            provider_scope=provider_scope,
+            maximum_history_days=maximum_history_days,
+            requested_as_of=timestamp.isoformat(),
+        )
+        cursor = connection.execute(
+            """
+            INSERT INTO historical_evidence_snapshots(
+                asset_class, instrument_identity, provider_scope,
+                maximum_history_days, requested_as_of, integrity_sha256
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                asset_class,
+                instrument_identity,
+                provider_scope,
+                int(maximum_history_days),
+                timestamp.isoformat(),
+                _digest(coverage_payload),
+            ),
+        )
+        snapshot_sequence = int(cursor.lastrowid)
+        for item in rows:
+            observed = _aware(item["t"])  # type: ignore[arg-type]
+            provider_kind = str(item.get("provider_kind") or "")
+            source_identifier = str(item.get("source_identifier") or "")
+            payload = self._row_payload(
+                asset_class=asset_class,
+                instrument_identity=instrument_identity,
+                provider_scope=provider_scope,
+                observed_at=observed.isoformat(),
+                close=float(item["c"]),
+                volume=float(item.get("v", 0.0)),
+                provider_kind=provider_kind,
+                source_identifier=source_identifier,
+            )
+            connection.execute(
+                """
+                INSERT INTO historical_evidence_row_versions(
+                    snapshot_sequence, asset_class, instrument_identity, provider_scope,
+                    observed_at, close, volume, provider_kind, source_identifier,
+                    integrity_sha256
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot_sequence,
+                    asset_class,
+                    instrument_identity,
+                    provider_scope,
+                    observed.isoformat(),
+                    float(item["c"]),
+                    float(item.get("v", 0.0)),
+                    provider_kind,
+                    source_identifier,
+                    _digest(payload),
+                ),
+            )
+        return snapshot_sequence
+
+    def _sync_legacy_scope(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        asset_class: str,
+        instrument_identity: str,
+        provider_scope: str,
+    ) -> None:
+        legacy = connection.execute(
+            """
+            SELECT maximum_history_days, requested_as_of, integrity_sha256
+            FROM historical_evidence_coverage
+            WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+            """,
+            (asset_class, instrument_identity, provider_scope),
+        ).fetchone()
+        if legacy is None:
+            return
+        maximum_days, requested_raw, integrity = legacy
+        coverage_payload = self._coverage_payload(
+            asset_class=asset_class,
+            instrument_identity=instrument_identity,
+            provider_scope=provider_scope,
+            maximum_history_days=int(maximum_days),
+            requested_as_of=str(requested_raw),
+        )
+        if integrity != _digest(coverage_payload):
+            raise PersistentHistoricalEvidenceError(
+                "persistent historical evidence coverage integrity mismatch"
+            )
+        requested = _aware(datetime.fromisoformat(str(requested_raw)))
+        latest = connection.execute(
+            """
+            SELECT requested_as_of
+            FROM historical_evidence_snapshots
+            WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+            ORDER BY requested_as_of DESC, snapshot_sequence DESC
+            LIMIT 1
+            """,
+            (asset_class, instrument_identity, provider_scope),
+        ).fetchone()
+        if latest is not None:
+            latest_requested = _aware(datetime.fromisoformat(str(latest[0])))
+            if latest_requested >= requested:
+                return
+
+        legacy_rows = connection.execute(
+            """
+            SELECT observed_at, close, volume, provider_kind, source_identifier,
+                   integrity_sha256
+            FROM historical_evidence_rows
+            WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+            ORDER BY observed_at
+            """,
+            (asset_class, instrument_identity, provider_scope),
+        ).fetchall()
+        material: list[dict[str, object]] = []
+        for observed_raw, close, volume, provider_kind, source_identifier, row_integrity in legacy_rows:
+            payload = self._row_payload(
+                asset_class=asset_class,
+                instrument_identity=instrument_identity,
+                provider_scope=provider_scope,
+                observed_at=str(observed_raw),
+                close=float(close),
+                volume=float(volume),
+                provider_kind=str(provider_kind),
+                source_identifier=str(source_identifier),
+            )
+            if row_integrity != _digest(payload):
+                raise PersistentHistoricalEvidenceError(
+                    "persistent historical evidence row integrity mismatch"
+                )
+            observed = _aware(datetime.fromisoformat(str(observed_raw)))
+            if observed > requested:
+                raise PersistentHistoricalEvidenceError(
+                    "legacy persistent historical evidence contains an observation "
+                    "after its recorded request boundary"
+                )
+            item: dict[str, object] = {
+                "t": observed,
+                "c": float(close),
+                "v": float(volume),
+            }
+            if provider_kind:
+                item["provider_kind"] = str(provider_kind)
+            if source_identifier:
+                item["source_identifier"] = str(source_identifier)
+            material.append(item)
+        self._append_snapshot(
+            connection,
+            asset_class=asset_class,
+            instrument_identity=instrument_identity,
+            provider_scope=provider_scope,
+            maximum_history_days=int(maximum_days),
+            requested_as_of=requested,
+            rows=tuple(material),
+        )
+
+    def _selected_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        asset_class: str,
+        instrument_identity: str,
+        provider_scope: str,
+        as_of: datetime,
+    ) -> tuple[int, int, datetime] | None:
+        timestamp = _aware(as_of)
+        selected = connection.execute(
+            """
+            SELECT snapshot_sequence, maximum_history_days, requested_as_of,
+                   integrity_sha256
+            FROM historical_evidence_snapshots
+            WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+              AND requested_as_of<=?
+            ORDER BY requested_as_of DESC, snapshot_sequence DESC
+            LIMIT 1
+            """,
+            (
+                asset_class,
+                instrument_identity,
+                provider_scope,
+                timestamp.isoformat(),
+            ),
+        ).fetchone()
+        if selected is None:
+            later = connection.execute(
+                """
+                SELECT requested_as_of
+                FROM historical_evidence_snapshots
+                WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+                ORDER BY requested_as_of ASC, snapshot_sequence ASC
+                LIMIT 1
+                """,
+                (asset_class, instrument_identity, provider_scope),
+            ).fetchone()
+            if later is not None:
+                raise PersistentHistoricalEvidenceError(
+                    "persistent historical evidence was refreshed after the decision epoch; "
+                    f"asset_class={asset_class}; "
+                    f"instrument_identity={instrument_identity}; "
+                    f"provider_scope={provider_scope}; "
+                    f"decision_epoch={timestamp.isoformat()}; "
+                    f"earliest_available_requested_as_of={later[0]}"
+                )
+            return None
+        snapshot_sequence, maximum_days, requested_raw, integrity = selected
+        payload = self._coverage_payload(
+            asset_class=asset_class,
+            instrument_identity=instrument_identity,
+            provider_scope=provider_scope,
+            maximum_history_days=int(maximum_days),
+            requested_as_of=str(requested_raw),
+        )
+        if integrity != _digest(payload):
+            raise PersistentHistoricalEvidenceError(
+                "persistent historical evidence snapshot integrity mismatch"
+            )
+        requested = _aware(datetime.fromisoformat(str(requested_raw)))
+        return int(snapshot_sequence), int(maximum_days), requested
 
     def load(
         self,
@@ -239,34 +599,64 @@ class PersistentHistoricalEvidenceStore:
         timestamp = _aware(as_of)
         connection = self._connect()
         try:
+            with connection:
+                self._sync_legacy_scope(
+                    connection,
+                    asset_class=asset_class,
+                    instrument_identity=instrument_identity,
+                    provider_scope=provider_scope,
+                )
+            selected = self._selected_snapshot(
+                connection,
+                asset_class=asset_class,
+                instrument_identity=instrument_identity,
+                provider_scope=provider_scope,
+                as_of=timestamp,
+            )
+            if selected is None:
+                return HistoricalEvidenceSlice((), 0, None)
+            snapshot_sequence, maximum_days, requested = selected
             rows = connection.execute(
                 """
-                SELECT observed_at, close, volume, provider_kind, source_identifier,
-                       integrity_sha256
-                FROM historical_evidence_rows
-                WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
-                  AND observed_at<=?
-                ORDER BY observed_at
+                SELECT versions.observed_at, versions.close, versions.volume,
+                       versions.provider_kind, versions.source_identifier,
+                       versions.integrity_sha256
+                FROM historical_evidence_row_versions AS versions
+                WHERE versions.asset_class=?
+                  AND versions.instrument_identity=?
+                  AND versions.provider_scope=?
+                  AND versions.observed_at<=?
+                  AND versions.snapshot_sequence=(
+                      SELECT MAX(candidate.snapshot_sequence)
+                      FROM historical_evidence_row_versions AS candidate
+                      WHERE candidate.asset_class=versions.asset_class
+                        AND candidate.instrument_identity=versions.instrument_identity
+                        AND candidate.provider_scope=versions.provider_scope
+                        AND candidate.observed_at=versions.observed_at
+                        AND candidate.snapshot_sequence<=?
+                  )
+                ORDER BY versions.observed_at
                 """,
                 (
                     asset_class,
                     instrument_identity,
                     provider_scope,
                     timestamp.isoformat(),
+                    snapshot_sequence,
                 ),
             ).fetchall()
             material: list[dict[str, object]] = []
             for observed_raw, close, volume, provider_kind, source_identifier, integrity in rows:
-                payload = {
-                    "asset_class": asset_class,
-                    "instrument_identity": instrument_identity,
-                    "provider_scope": provider_scope,
-                    "observed_at": observed_raw,
-                    "close": float(close),
-                    "volume": float(volume),
-                    "provider_kind": str(provider_kind),
-                    "source_identifier": str(source_identifier),
-                }
+                payload = self._row_payload(
+                    asset_class=asset_class,
+                    instrument_identity=instrument_identity,
+                    provider_scope=provider_scope,
+                    observed_at=str(observed_raw),
+                    close=float(close),
+                    volume=float(volume),
+                    provider_kind=str(provider_kind),
+                    source_identifier=str(source_identifier),
+                )
                 if integrity != _digest(payload):
                     raise PersistentHistoricalEvidenceError(
                         "persistent historical evidence row integrity mismatch"
@@ -282,35 +672,7 @@ class PersistentHistoricalEvidenceStore:
                 if source_identifier:
                     item["source_identifier"] = str(source_identifier)
                 material.append(item)
-
-            coverage = connection.execute(
-                """
-                SELECT maximum_history_days, requested_as_of, integrity_sha256
-                FROM historical_evidence_coverage
-                WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
-                """,
-                (asset_class, instrument_identity, provider_scope),
-            ).fetchone()
-            if coverage is None:
-                return HistoricalEvidenceSlice(tuple(material), 0, None)
-            maximum_days, requested_raw, integrity = coverage
-            payload = {
-                "asset_class": asset_class,
-                "instrument_identity": instrument_identity,
-                "provider_scope": provider_scope,
-                "maximum_history_days": int(maximum_days),
-                "requested_as_of": str(requested_raw),
-            }
-            if integrity != _digest(payload):
-                raise PersistentHistoricalEvidenceError(
-                    "persistent historical evidence coverage integrity mismatch"
-                )
-            requested = _aware(datetime.fromisoformat(str(requested_raw)))
-            if requested > timestamp:
-                raise PersistentHistoricalEvidenceError(
-                    "persistent historical evidence was refreshed after the decision epoch"
-                )
-            return HistoricalEvidenceSlice(tuple(material), int(maximum_days), requested)
+            return HistoricalEvidenceSlice(tuple(material), maximum_days, requested)
         finally:
             connection.close()
 
@@ -326,26 +688,71 @@ class PersistentHistoricalEvidenceStore:
     ) -> HistoricalEvidenceSlice:
         if not self.enabled:
             normalized = _normalize_mapping_rows(rows, as_of=requested_as_of)
-            return HistoricalEvidenceSlice(normalized, max(0, requested_history_days), _aware(requested_as_of))
+            return HistoricalEvidenceSlice(
+                normalized,
+                max(0, requested_history_days),
+                _aware(requested_as_of),
+            )
         timestamp = _aware(requested_as_of)
         normalized = _normalize_mapping_rows(rows, as_of=timestamp)
         connection = self._connect()
         try:
             with connection:
+                self._sync_legacy_scope(
+                    connection,
+                    asset_class=asset_class,
+                    instrument_identity=instrument_identity,
+                    provider_scope=provider_scope,
+                )
+                latest = connection.execute(
+                    """
+                    SELECT maximum_history_days, requested_as_of
+                    FROM historical_evidence_snapshots
+                    WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+                    ORDER BY requested_as_of DESC, snapshot_sequence DESC
+                    LIMIT 1
+                    """,
+                    (asset_class, instrument_identity, provider_scope),
+                ).fetchone()
+                if latest is not None:
+                    latest_requested = _aware(datetime.fromisoformat(str(latest[1])))
+                    if latest_requested > timestamp:
+                        raise PersistentHistoricalEvidenceError(
+                            "cannot backdate persistent historical evidence refresh; "
+                            f"instrument_identity={instrument_identity}; "
+                            f"requested_as_of={timestamp.isoformat()}; "
+                            f"latest_snapshot_requested_as_of={latest_requested.isoformat()}"
+                        )
+                maximum_days = max(
+                    int(latest[0]) if latest is not None else 0,
+                    max(0, int(requested_history_days)),
+                )
+                self._append_snapshot(
+                    connection,
+                    asset_class=asset_class,
+                    instrument_identity=instrument_identity,
+                    provider_scope=provider_scope,
+                    maximum_history_days=maximum_days,
+                    requested_as_of=timestamp,
+                    rows=normalized,
+                )
+
+                # Maintain the v1 projection for rollback compatibility. It is not used
+                # as point-in-time truth once a snapshot exists.
                 for item in normalized:
                     observed = _aware(item["t"])  # type: ignore[arg-type]
                     provider_kind = str(item.get("provider_kind") or "")
                     source_identifier = str(item.get("source_identifier") or "")
-                    payload = {
-                        "asset_class": asset_class,
-                        "instrument_identity": instrument_identity,
-                        "provider_scope": provider_scope,
-                        "observed_at": observed.isoformat(),
-                        "close": float(item["c"]),
-                        "volume": float(item.get("v", 0.0)),
-                        "provider_kind": provider_kind,
-                        "source_identifier": source_identifier,
-                    }
+                    payload = self._row_payload(
+                        asset_class=asset_class,
+                        instrument_identity=instrument_identity,
+                        provider_scope=provider_scope,
+                        observed_at=observed.isoformat(),
+                        close=float(item["c"]),
+                        volume=float(item.get("v", 0.0)),
+                        provider_kind=provider_kind,
+                        source_identifier=source_identifier,
+                    )
                     connection.execute(
                         """
                         INSERT INTO historical_evidence_rows(
@@ -371,26 +778,13 @@ class PersistentHistoricalEvidenceStore:
                             _digest(payload),
                         ),
                     )
-
-                existing = connection.execute(
-                    """
-                    SELECT maximum_history_days
-                    FROM historical_evidence_coverage
-                    WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
-                    """,
-                    (asset_class, instrument_identity, provider_scope),
-                ).fetchone()
-                maximum_days = max(
-                    int(existing[0]) if existing is not None else 0,
-                    max(0, int(requested_history_days)),
+                coverage_payload = self._coverage_payload(
+                    asset_class=asset_class,
+                    instrument_identity=instrument_identity,
+                    provider_scope=provider_scope,
+                    maximum_history_days=maximum_days,
+                    requested_as_of=timestamp.isoformat(),
                 )
-                coverage_payload = {
-                    "asset_class": asset_class,
-                    "instrument_identity": instrument_identity,
-                    "provider_scope": provider_scope,
-                    "maximum_history_days": maximum_days,
-                    "requested_as_of": timestamp.isoformat(),
-                }
                 connection.execute(
                     """
                     INSERT INTO historical_evidence_coverage(
