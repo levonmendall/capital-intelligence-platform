@@ -159,6 +159,11 @@ def test_us_equity_stage_runs_overlap_sidecar_through_snapshot_reuse(monkeypatch
         lambda *, evidence_as_of, values: events.append("load-snapshot") or snapshot,
     )
     monkeypatch.setattr(stage_runtime, "_base_universe_symbols", lambda: ("BASE",))
+    # The stage runner intentionally binds reference identity into process-global env for
+    # its finite child lifetime. Register the same keys with monkeypatch first so this unit
+    # test restores them at teardown and cannot poison unrelated discovery tests.
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID", "reference-1")
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH", "/tmp/reference.json")
 
     state = SimpleNamespace(
         evidence_as_of=_as_of(),
