@@ -510,30 +510,36 @@ def run_stage(
         )
         return 2
 
-    print(
-        json.dumps(
-            {
-                "event": "stage_isolated_evidence_stage_completed",
-                "pipeline_id": pipeline_id,
-                "stage": normalized,
-                "evidence_as_of": completed.evidence_as_of.isoformat(),
-                "generation_id": completed.generation_id,
-                "result": {
-                    key: value
-                    for key, value in result.items()
-                    if key not in {"evidence_as_of"}
+    # Durable stage completion is authoritative. Completion telemetry is strictly
+    # observational and must not retroactively convert a committed stage into a process
+    # failure when stdout is unavailable or a formatter/flush raises after the checkpoint.
+    try:
+        print(
+            json.dumps(
+                {
+                    "event": "stage_isolated_evidence_stage_completed",
+                    "pipeline_id": pipeline_id,
+                    "stage": normalized,
+                    "evidence_as_of": completed.evidence_as_of.isoformat(),
+                    "generation_id": completed.generation_id,
+                    "result": {
+                        key: value
+                        for key, value in result.items()
+                        if key not in {"evidence_as_of"}
+                    },
+                    "credential_safe": True,
+                    "decision_authority": False,
+                    "execution_authority": False,
+                    "paper_only": True,
+                    "real_money_authorized": False,
                 },
-                "credential_safe": True,
-                "decision_authority": False,
-                "execution_authority": False,
-                "paper_only": True,
-                "real_money_authorized": False,
-            },
-            sort_keys=True,
-            default=str,
-        ),
-        flush=True,
-    )
+                sort_keys=True,
+                default=str,
+            ),
+            flush=True,
+        )
+    except Exception:
+        pass
     return 0
 
 
