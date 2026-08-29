@@ -37,6 +37,19 @@ class _ConstantRunner:
         return self.evidence_count
 
 
+@dataclass(frozen=True, slots=True)
+class _NestedCryptoFailureRunner:
+    """Spawn-picklable production-shaped runner preserving an explicit direct cause."""
+
+    def __call__(self, _node: CertificationNode) -> int:
+        try:
+            raise RuntimeError("coinbase checkpoint integrity failed")
+        except RuntimeError as cause:
+            raise CertificationSchedulerError(
+                "crypto market evidence qualification failed"
+            ) from cause
+
+
 def _values(tmp_path):
     return {
         "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
@@ -153,16 +166,8 @@ def test_nested_crypto_failure_persists_exact_terminal_truth(tmp_path) -> None:
         policy_version="policy-v1",
     )
 
-    def fail_crypto(_node: CertificationNode) -> int:
-        try:
-            raise RuntimeError("coinbase checkpoint integrity failed")
-        except RuntimeError as cause:
-            raise CertificationSchedulerError(
-                "crypto market evidence qualification failed"
-            ) from cause
-
     with pytest.raises(CertificationSchedulerError) as raised:
-        scheduler.run((crypto,), fail_crypto)
+        scheduler.run((crypto,), _NestedCryptoFailureRunner())
 
     assert "crypto market evidence qualification failed" in str(raised.value)
     assert "cause=RuntimeError: coinbase checkpoint integrity failed" in str(raised.value)
