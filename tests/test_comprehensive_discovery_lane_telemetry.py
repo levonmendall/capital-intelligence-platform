@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from cio import CandidateAssetClass
 from operations import cached_transactional_comprehensive_discovery_lane as cached_lane
+from operations import comprehensive_discovery_input_spool as spool
 from operations import comprehensive_discovery_lane_telemetry as telemetry
 
 
@@ -17,21 +18,38 @@ def _timestamp(second: int) -> str:
 def _request(
     tmp_path: Path,
     *,
-    request_id: str = "request-1",
     decision_epoch: str = "2026-08-28T23:00:00+00:00",
     filename: str = "request.json",
+    release: str = "release-1",
 ) -> Path:
+    policy_sha256 = "a" * 64
+    identity = {
+        "schema_version": spool._REQUEST_SCHEMA,
+        "release": release,
+        "decision_epoch": decision_epoch,
+        "held_symbols": [],
+        "tracked_symbols": [],
+        "excluded_symbols": [],
+        "policy_sha256": policy_sha256,
+    }
+    body = {
+        **identity,
+        "request_id": spool._digest(identity),
+        "policy_blob": {
+            "relative_path": "policy.pkl",
+            "sha256": policy_sha256,
+            "byte_count": 0,
+        },
+        **spool._authority_fields(),
+    }
     path = tmp_path / filename
-    path.write_text(
-        json.dumps(
-            {
-                "request_id": request_id,
-                "decision_epoch": decision_epoch,
-            }
-        ),
-        encoding="utf-8",
-    )
+    spool._atomic_json(path, body)
     return path
+
+
+def _request_id(path: Path) -> str:
+    body = spool._load_json(path, schema=spool._REQUEST_SCHEMA)
+    return str(body["request_id"])
 
 
 def _values(tmp_path: Path) -> dict[str, str]:
@@ -126,9 +144,13 @@ def test_lane_telemetry_reports_cache_hits_and_post_hit_phase_timing(tmp_path) -
 
 def test_new_request_resets_prior_lane_telemetry(tmp_path) -> None:
     values = _values(tmp_path)
-    request = _request(tmp_path, request_id="request-1")
+    prior = _request(
+        tmp_path,
+        decision_epoch="2026-08-28T23:00:00+00:00",
+        filename="prior-request.json",
+    )
     telemetry.record_lane_phase(
-        request,
+        prior,
         values,
         asset_class="us_equity",
         index=0,
@@ -136,13 +158,13 @@ def test_new_request_resets_prior_lane_telemetry(tmp_path) -> None:
         structural_cache_hit=True,
     )
 
-    request = _request(
+    current = _request(
         tmp_path,
-        request_id="request-2",
         decision_epoch="2026-08-28T23:01:00+00:00",
+        filename="current-request.json",
     )
     telemetry.record_lane_phase(
-        request,
+        current,
         values,
         asset_class="future",
         index=9,
@@ -152,7 +174,7 @@ def test_new_request_resets_prior_lane_telemetry(tmp_path) -> None:
 
     public = telemetry.load_public_lane_telemetry(values)
     assert public is not None
-    assert public["request_id"] == "request-2"
+    assert public["request_id"] == _request_id(current)
     assert [item["asset_class"] for item in public["lanes"]] == ["future"]
 
 
@@ -160,13 +182,11 @@ def test_stale_epoch_writer_cannot_replace_newer_lane_telemetry(tmp_path) -> Non
     values = _values(tmp_path)
     stale = _request(
         tmp_path,
-        request_id="stale-request",
         decision_epoch="2026-08-28T23:00:00+00:00",
         filename="stale-request.json",
     )
     current = _request(
         tmp_path,
-        request_id="current-request",
         decision_epoch="2026-08-28T23:01:00+00:00",
         filename="current-request.json",
     )
@@ -190,11 +210,31 @@ def test_stale_epoch_writer_cannot_replace_newer_lane_telemetry(tmp_path) -> Non
 
     public = telemetry.load_public_lane_telemetry(values)
     assert public is not None
-    assert public["request_id"] == "current-request"
+    assert public["request_id"] == _request_id(current)
     assert public["decision_epoch"] == "2026-08-28T23:01:00+00:00"
     assert [item["asset_class"] for item in public["lanes"]] == ["future"]
     assert public["structural_cache_hits"] == 1
     assert public["structural_cache_misses"] == 0
+
+
+def test_canonical_request_release_mismatch_is_not_recorded(tmp_path) -> None:
+    request = _request(tmp_path, release="other-release")
+    values = _values(tmp_path)
+
+    try:
+        telemetry.record_lane_phase(
+            request,
+            values,
+            asset_class="us_equity",
+            index=0,
+            lane_started_at=_timestamp(0),
+        )
+    except ValueError as error:
+        assert "release mismatch" in str(error)
+    else:
+        raise AssertionError("release-mismatched telemetry request was accepted")
+
+    assert telemetry.load_public_lane_telemetry(values) is None
 
 
 def test_public_lane_telemetry_rejects_authority_tampering(tmp_path) -> None:
