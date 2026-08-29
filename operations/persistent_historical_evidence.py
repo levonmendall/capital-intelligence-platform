@@ -232,6 +232,29 @@ class PersistentHistoricalEvidenceStore:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS historical_evidence_row_epochs (
+                asset_class TEXT NOT NULL,
+                instrument_identity TEXT NOT NULL,
+                provider_scope TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                requested_as_of TEXT NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL,
+                provider_kind TEXT NOT NULL,
+                source_identifier TEXT NOT NULL,
+                integrity_sha256 TEXT NOT NULL,
+                PRIMARY KEY (
+                    asset_class,
+                    instrument_identity,
+                    provider_scope,
+                    observed_at,
+                    requested_as_of
+                )
+            )
+            """
+        )
         # Preserve the last pre-upgrade coverage row as the first known epoch. This is
         # idempotent and does not mutate or discard existing coverage.
         connection.execute(
@@ -243,6 +266,26 @@ class PersistentHistoricalEvidenceStore:
             SELECT asset_class, instrument_identity, provider_scope,
                    maximum_history_days, requested_as_of, integrity_sha256
             FROM historical_evidence_coverage
+            """
+        )
+        # Legacy rows predate explicit row-ingest epochs. Attribute them only to the
+        # latest trusted legacy coverage epoch for their scope. Earlier decision epochs
+        # remain fail-closed rather than inheriting data recorded later.
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO historical_evidence_row_epochs(
+                asset_class, instrument_identity, provider_scope, observed_at,
+                requested_as_of, close, volume, provider_kind, source_identifier,
+                integrity_sha256
+            )
+            SELECT rows.asset_class, rows.instrument_identity, rows.provider_scope,
+                   rows.observed_at, coverage.requested_as_of, rows.close, rows.volume,
+                   rows.provider_kind, rows.source_identifier, rows.integrity_sha256
+            FROM historical_evidence_rows AS rows
+            JOIN historical_evidence_coverage AS coverage
+              ON coverage.asset_class=rows.asset_class
+             AND coverage.instrument_identity=rows.instrument_identity
+             AND coverage.provider_scope=rows.provider_scope
             """
         )
         existing = connection.execute(
@@ -276,17 +319,32 @@ class PersistentHistoricalEvidenceStore:
         try:
             rows = connection.execute(
                 """
-                SELECT observed_at, close, volume, provider_kind, source_identifier,
-                       integrity_sha256
-                FROM historical_evidence_rows
-                WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
-                  AND observed_at<=?
-                ORDER BY observed_at
+                SELECT candidate.observed_at, candidate.close, candidate.volume,
+                       candidate.provider_kind, candidate.source_identifier,
+                       candidate.integrity_sha256
+                FROM historical_evidence_row_epochs AS candidate
+                WHERE candidate.asset_class=?
+                  AND candidate.instrument_identity=?
+                  AND candidate.provider_scope=?
+                  AND candidate.requested_as_of<=?
+                  AND candidate.observed_at<=?
+                  AND candidate.requested_as_of=(
+                      SELECT MAX(version.requested_as_of)
+                      FROM historical_evidence_row_epochs AS version
+                      WHERE version.asset_class=candidate.asset_class
+                        AND version.instrument_identity=candidate.instrument_identity
+                        AND version.provider_scope=candidate.provider_scope
+                        AND version.observed_at=candidate.observed_at
+                        AND version.requested_as_of<=?
+                  )
+                ORDER BY candidate.observed_at
                 """,
                 (
                     asset_class,
                     instrument_identity,
                     provider_scope,
+                    timestamp.isoformat(),
+                    timestamp.isoformat(),
                     timestamp.isoformat(),
                 ),
             ).fetchall()
@@ -409,6 +467,46 @@ class PersistentHistoricalEvidenceStore:
                         "provider_kind": provider_kind,
                         "source_identifier": source_identifier,
                     }
+                    row_values = (
+                        asset_class,
+                        instrument_identity,
+                        provider_scope,
+                        observed.isoformat(),
+                        float(item["c"]),
+                        float(item.get("v", 0.0)),
+                        provider_kind,
+                        source_identifier,
+                        _digest(payload),
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO historical_evidence_row_epochs(
+                            asset_class, instrument_identity, provider_scope, observed_at,
+                            requested_as_of, close, volume, provider_kind, source_identifier,
+                            integrity_sha256
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(
+                            asset_class, instrument_identity, provider_scope,
+                            observed_at, requested_as_of
+                        ) DO UPDATE SET close=excluded.close, volume=excluded.volume,
+                                        provider_kind=excluded.provider_kind,
+                                        source_identifier=excluded.source_identifier,
+                                        integrity_sha256=excluded.integrity_sha256
+                        """,
+                        (
+                            asset_class,
+                            instrument_identity,
+                            provider_scope,
+                            observed.isoformat(),
+                            timestamp.isoformat(),
+                            float(item["c"]),
+                            float(item.get("v", 0.0)),
+                            provider_kind,
+                            source_identifier,
+                            _digest(payload),
+                        ),
+                    )
+                    # Maintain the legacy latest-row table for rollback compatibility.
                     connection.execute(
                         """
                         INSERT INTO historical_evidence_rows(
@@ -422,17 +520,7 @@ class PersistentHistoricalEvidenceStore:
                                       source_identifier=excluded.source_identifier,
                                       integrity_sha256=excluded.integrity_sha256
                         """,
-                        (
-                            asset_class,
-                            instrument_identity,
-                            provider_scope,
-                            observed.isoformat(),
-                            float(item["c"]),
-                            float(item.get("v", 0.0)),
-                            provider_kind,
-                            source_identifier,
-                            _digest(payload),
-                        ),
+                        row_values,
                     )
 
                 existing = connection.execute(
