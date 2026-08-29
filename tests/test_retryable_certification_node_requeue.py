@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -10,13 +11,21 @@ from operations.retryable_certification_node_requeue import (
 )
 
 
+def _record_call(path: str) -> int:
+    marker = Path(path)
+    calls = int(marker.read_text(encoding="utf-8")) if marker.exists() else 0
+    calls += 1
+    marker.write_text(str(calls), encoding="utf-8")
+    return calls
+
+
 class _RetryOnceRunner:
-    def __init__(self) -> None:
-        self.calls = 0
+    def __init__(self, marker_path: str) -> None:
+        self.marker_path = marker_path
 
     def __call__(self, _node: scheduler.CertificationNode) -> int:
-        self.calls += 1
-        if self.calls == 1:
+        calls = _record_call(self.marker_path)
+        if calls == 1:
             error = RuntimeError("resource_busy")
             error.retry_after_seconds = 0.01
             raise error
@@ -24,23 +33,23 @@ class _RetryOnceRunner:
 
 
 class _AlwaysRetryableRunner:
-    def __init__(self, retry_after_seconds: float) -> None:
-        self.calls = 0
+    def __init__(self, marker_path: str, retry_after_seconds: float) -> None:
+        self.marker_path = marker_path
         self.retry_after_seconds = retry_after_seconds
 
     def __call__(self, _node: scheduler.CertificationNode) -> int:
-        self.calls += 1
+        _record_call(self.marker_path)
         error = RuntimeError("resource_busy")
         error.retry_after_seconds = self.retry_after_seconds
         raise error
 
 
 class _TerminalRunner:
-    def __init__(self) -> None:
-        self.calls = 0
+    def __init__(self, marker_path: str) -> None:
+        self.marker_path = marker_path
 
     def __call__(self, _node: scheduler.CertificationNode) -> int:
-        self.calls += 1
+        _record_call(self.marker_path)
         raise RuntimeError("malformed evidence")
 
 
@@ -79,15 +88,20 @@ def _install(monkeypatch) -> None:
     install_retryable_certification_node_requeue()
 
 
+def _calls(marker: Path) -> int:
+    return int(marker.read_text(encoding="utf-8"))
+
+
 def test_retryable_node_is_requeued_and_can_qualify(monkeypatch, tmp_path) -> None:
     _install(monkeypatch)
     epoch = datetime.now(timezone.utc)
     node = _node(epoch)
-    runner = _RetryOnceRunner()
+    marker = tmp_path / "retry-once-calls.txt"
+    runner = _RetryOnceRunner(str(marker))
 
     result = _instance(tmp_path, epoch).run((node,), runner)
 
-    assert runner.calls == 2
+    assert _calls(marker) == 2
     assert result.failed_nodes == ()
     assert result.completed_nodes == (node.node_id,)
 
@@ -96,21 +110,23 @@ def test_non_retryable_failure_remains_terminal(monkeypatch, tmp_path) -> None:
     _install(monkeypatch)
     epoch = datetime.now(timezone.utc)
     node = _node(epoch)
-    runner = _TerminalRunner()
+    marker = tmp_path / "terminal-calls.txt"
+    runner = _TerminalRunner(str(marker))
 
     with pytest.raises(scheduler.CertificationSchedulerError, match="retryable=false"):
         _instance(tmp_path, epoch).run((node,), runner)
 
-    assert runner.calls == 1
+    assert _calls(marker) == 1
 
 
 def test_retry_hint_beyond_existing_deadline_remains_terminal(monkeypatch, tmp_path) -> None:
     _install(monkeypatch)
     epoch = datetime.now(timezone.utc)
     node = _node(epoch, deadline_seconds=0.1)
-    runner = _AlwaysRetryableRunner(retry_after_seconds=3.0)
+    marker = tmp_path / "deadline-calls.txt"
+    runner = _AlwaysRetryableRunner(str(marker), retry_after_seconds=3.0)
 
     with pytest.raises(scheduler.CertificationSchedulerError, match="retryable=true"):
         _instance(tmp_path, epoch).run((node,), runner)
 
-    assert runner.calls == 1
+    assert _calls(marker) == 1
