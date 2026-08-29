@@ -60,6 +60,7 @@ _PROGRESS_METRICS = frozenset(
         "peak_rss_bytes",
     }
 )
+_RESOURCE_BUSY_RETRY_SECONDS = 3.0
 
 
 def _register_manual_diagnostic_contract() -> None:
@@ -108,6 +109,36 @@ def _install_spawn_safe_acquisition() -> None:
     )
 
     install_spawn_safe_authoritative_acquisition()
+
+
+def _install_resource_busy_retry_transport() -> None:
+    """Keep transient local lane contention retryable without changing provider policy."""
+
+    from operations import spawn_safe_authoritative_acquisition as spawn_safe
+
+    current = spawn_safe._load_lane_failure
+    if getattr(current, "_resource_busy_retry_transport", False):
+        return
+
+    def load_lane_failure(*args: Any, **kwargs: Any):
+        error = current(*args, **kwargs)
+        if getattr(error, "retry_after_seconds", None) is not None:
+            return error
+        cause = error.__cause__
+        details = " ".join(
+            item
+            for item in (
+                str(error),
+                "" if cause is None else str(cause),
+            )
+            if item
+        ).lower()
+        if "resource_busy" in details:
+            setattr(error, "retry_after_seconds", _RESOURCE_BUSY_RETRY_SECONDS)
+        return error
+
+    load_lane_failure._resource_busy_retry_transport = True  # type: ignore[attr-defined]
+    spawn_safe._load_lane_failure = load_lane_failure
 
 
 def _install_lane_local_spool() -> None:
@@ -209,6 +240,7 @@ def install_comprehensive_discovery_runtime_contract() -> None:
     _register_manual_diagnostic_contract()
     _install_finalizer_failure_boundary()
     _install_spawn_safe_acquisition()
+    _install_resource_busy_retry_transport()
     _install_lane_local_spool()
     _install_dag_native_supervision()
     _install_lane_exit_cache_reclamation()
