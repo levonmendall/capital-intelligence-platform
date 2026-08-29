@@ -424,6 +424,7 @@ def build_spool(
             "release": _legacy._release(resolved_values),
             "decision_epoch": str(request.get("decision_epoch") or ""),
             "policy_version": str(getattr(policy, "version", "")),
+            "policy_blob": _legacy._descriptor_dict(request_policy),
             # Kept under the established manifest key for finalizer compatibility.  These
             # descriptors now point only to merged finalizer shards; raw catalog shards are
             # never persisted by the transactional runtime.
