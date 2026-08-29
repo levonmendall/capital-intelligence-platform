@@ -169,6 +169,9 @@ def _install_dag_native_supervision() -> None:
         install_progress_aware_dag_node_supervision,
         install_resume_aware_release_dag_projection,
     )
+    from operations.retryable_certification_node_requeue import (
+        install_retryable_certification_node_requeue,
+    )
 
     install_dag_native_comprehensive_supervision()
     install_progress_aware_dag_node_supervision()
@@ -176,6 +179,9 @@ def _install_dag_native_supervision() -> None:
     # Install after supervision wrappers so every clean-spawn node preserves the same
     # bounded direct-cause truth already retained by the nested lane subprocess boundary.
     install_dag_node_failure_transport()
+    # Retry only exact durable failures already classified as retryable by the transport.
+    # Successful nodes remain reusable and provider leases are released before the wait.
+    install_retryable_certification_node_requeue()
     install_certification_failure_projection()
 
 
