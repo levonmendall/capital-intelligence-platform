@@ -26,6 +26,7 @@ from operations import comprehensive_discovery_structural_cache as _structural
 from operations import transactional_comprehensive_discovery_lane as _canonical
 from operations.reuse_only_provider_preselection import (
     install_reuse_only_provider_publication as _install_provider_guard,
+    reuse_only_provider_publication as _reuse_only_provider_preselection_publication,
 )
 
 
