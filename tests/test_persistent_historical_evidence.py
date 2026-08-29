@@ -52,6 +52,69 @@ def test_store_rejects_future_evidence(tmp_path) -> None:
         )
 
 
+def test_store_preserves_coverage_for_older_decision_epoch_after_newer_refresh(tmp_path) -> None:
+    first_epoch = datetime(2026, 8, 14, 12, tzinfo=timezone.utc)
+    newer_epoch = first_epoch + timedelta(hours=1)
+    store = PersistentHistoricalEvidenceStore(
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    )
+
+    first = store.merge(
+        asset_class="crypto",
+        instrument_identity="btc-usd",
+        provider_scope="coinbase:crypto_history:exchange-candles",
+        rows=_market_rows(first_epoch),
+        requested_as_of=first_epoch,
+        requested_history_days=365,
+    )
+    store.merge(
+        asset_class="crypto",
+        instrument_identity="btc-usd",
+        provider_scope="coinbase:crypto_history:exchange-candles",
+        rows=_market_rows(newer_epoch),
+        requested_as_of=newer_epoch,
+        requested_history_days=365,
+    )
+
+    older_reader = store.load(
+        asset_class="crypto",
+        instrument_identity="btc-usd",
+        provider_scope="coinbase:crypto_history:exchange-candles",
+        as_of=first_epoch,
+    )
+
+    assert older_reader.requested_as_of == first_epoch
+    assert older_reader.maximum_history_days == 365
+    assert older_reader.rows == first.rows
+    assert all(row["t"] <= first_epoch for row in older_reader.rows)
+
+
+def test_store_still_rejects_when_only_coverage_is_after_decision_epoch(tmp_path) -> None:
+    decision_epoch = datetime(2026, 8, 14, 12, tzinfo=timezone.utc)
+    store = PersistentHistoricalEvidenceStore(
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    )
+    store.merge(
+        asset_class="crypto",
+        instrument_identity="btc-usd",
+        provider_scope="coinbase:crypto_history:exchange-candles",
+        rows=_market_rows(decision_epoch),
+        requested_as_of=decision_epoch + timedelta(hours=1),
+        requested_history_days=365,
+    )
+
+    with pytest.raises(
+        PersistentHistoricalEvidenceError,
+        match="refreshed after the decision epoch",
+    ):
+        store.load(
+            asset_class="crypto",
+            instrument_identity="btc-usd",
+            provider_scope="coinbase:crypto_history:exchange-candles",
+            as_of=decision_epoch,
+        )
+
+
 def test_market_router_reuses_recent_exact_instrument_history(tmp_path, monkeypatch) -> None:
     install_persistent_historical_evidence()
     monkeypatch.setenv("CAPITAL_INTELLIGENCE_DATA_DIR", str(tmp_path))
