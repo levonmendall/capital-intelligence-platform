@@ -140,6 +140,23 @@ def _terminate_and_reap_provider_publication(process: subprocess.Popen[bytes]) -
             ) from error
 
 
+def _call_original_provider_publication(
+    catalogs,
+    *,
+    as_of,
+    policy,
+    http_get,
+    market_probe,
+):
+    return _ORIGINAL_ENSURE_PROVIDER_PRESELECTION_PUBLICATION(
+        catalogs,
+        as_of=as_of,
+        policy=policy,
+        http_get=http_get,
+        market_probe=market_probe,
+    )
+
+
 def _ensure_provider_preselection_publication(
     catalogs,
     *,
@@ -148,12 +165,12 @@ def _ensure_provider_preselection_publication(
     http_get=_canonical._publication._core.requests.get,
     market_probe=None,
 ):
-    """Keep Render's canonical per-lane provider acquisition inside the existing epoch budget."""
+    """Keep cacheable Render lane provider acquisition inside the existing epoch budget."""
 
     values = _ACTIVE_VALUES
     request_path = _ACTIVE_REQUEST_PATH
     if values is None or request_path is None or not _render_enabled(values):
-        return _ORIGINAL_ENSURE_PROVIDER_PRESELECTION_PUBLICATION(
+        return _call_original_provider_publication(
             catalogs,
             as_of=as_of,
             policy=policy,
@@ -165,6 +182,19 @@ def _ensure_provider_preselection_publication(
             "transactional provider publication has no active lane identity"
         )
 
+    asset_class = CandidateAssetClass(_ACTIVE_ASSET_CLASS)
+    if asset_class is CandidateAssetClass.OPTION:
+        # The existing provider-acquisition child deliberately excludes the timestamp-
+        # constructed option catalog. Preserve that unchanged canonical path rather than
+        # expanding this production-evidence repair beyond cacheable lanes.
+        return _call_original_provider_publication(
+            catalogs,
+            as_of=as_of,
+            policy=policy,
+            http_get=http_get,
+            market_probe=market_probe,
+        )
+
     from operations import epoch_scoped_provider_acquisition as fanout
 
     timeout = float(fanout._fanout_budget_seconds(as_of, values))
@@ -174,7 +204,6 @@ def _ensure_provider_preselection_publication(
             "epoch has no provider-acquisition time beyond the downstream reserve"
         )
 
-    asset_class = CandidateAssetClass(_ACTIVE_ASSET_CLASS)
     process = subprocess.Popen(
         fanout._publication_command(
             request_path=request_path,
