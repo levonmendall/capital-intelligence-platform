@@ -283,15 +283,27 @@ def _failure_detail(
     raw_result = node_results.get(node_id)
     result = raw_result if isinstance(raw_result, Mapping) else {}
     failure_type = str(result.get("failure_type") or type(error).__name__)
+    failure_message = str(result.get("failure_message") or "").strip()
+    failure_cause_type = str(result.get("failure_cause_type") or "").strip()
+    failure_cause_message = str(result.get("failure_cause_message") or "").strip()
+    retryable = bool(result.get("retryable", result.get("retry_after") is not None))
     retry_after = str(result.get("retry_after") or "none")
     asset_class = node.asset_class if node is not None else "unknown"
     decision_count = node.decision_eligible_count if node is not None else -1
-    return (
+    detail = (
         "comprehensive discovery lane acquisition failed; "
         f"node={node_id}; asset_class={asset_class}; failure_type={failure_type}; "
         f"decision_eligible_count={decision_count}; completed_nodes={completed_count}; "
-        f"required_nodes={len(nodes)}; reused_nodes={reused_count}; retry_after={retry_after}"
+        f"required_nodes={len(nodes)}; reused_nodes={reused_count}; "
+        f"retryable={str(retryable).lower()}; retry_after={retry_after}"
     )
+    if failure_message:
+        detail += f"; failure_message={failure_message}"
+    if failure_cause_type:
+        detail += f"; failure_cause_type={failure_cause_type}"
+    if failure_cause_message:
+        detail += f"; failure_cause_message={failure_cause_message}"
+    return detail[:4000]
 
 
 def _strict_checkpoint_market_probe(core: Any, values: Mapping[str, str]):
