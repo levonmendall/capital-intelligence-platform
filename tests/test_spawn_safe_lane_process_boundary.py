@@ -50,11 +50,14 @@ def test_lane_runner_launches_fresh_python_interpreter(tmp_path, monkeypatch) ->
     command, kwargs = calls[0]
     assert command[1:4] == (
         "-m",
-        "operations.spawn_safe_authoritative_acquisition",
+        "operations.spawn_safe_lane_terminal_transport",
         "run-lane",
     )
     assert "--manifest" in command
     assert "--node-id" in command
+    assert "--input-fingerprint" in command
+    fingerprint_index = command.index("--input-fingerprint") + 1
+    assert command[fingerprint_index] == node.input_fingerprint
     assert kwargs["start_new_session"] is False
     assert kwargs["env"]["CAPITAL_INTELLIGENCE_RELEASE"] == "release-test"
 
