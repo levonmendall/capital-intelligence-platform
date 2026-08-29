@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from types import MethodType
 
@@ -50,6 +51,114 @@ def test_store_rejects_future_evidence(tmp_path) -> None:
             requested_as_of=as_of,
             requested_history_days=365,
         )
+
+
+def test_store_preserves_t1_snapshot_after_t2_refresh(tmp_path) -> None:
+    t1 = datetime(2026, 8, 14, 12, tzinfo=timezone.utc)
+    t2 = t1 + timedelta(days=1)
+    observed = t1 - timedelta(days=1)
+    store = PersistentHistoricalEvidenceStore(
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    )
+
+    first = store.merge(
+        asset_class="crypto",
+        instrument_identity="btc-usd",
+        provider_scope="coinbase:crypto_history:exchange-candles",
+        rows=({"t": observed, "c": 100.0, "v": 1.0},),
+        requested_as_of=t1,
+        requested_history_days=365,
+    )
+    second = store.merge(
+        asset_class="crypto",
+        instrument_identity="btc-usd",
+        provider_scope="coinbase:crypto_history:exchange-candles",
+        rows=(
+            {"t": observed, "c": 200.0, "v": 2.0},
+            {"t": t2, "c": 300.0, "v": 3.0},
+        ),
+        requested_as_of=t2,
+        requested_history_days=365,
+    )
+    replay = store.load(
+        asset_class="crypto",
+        instrument_identity="btc-usd",
+        provider_scope="coinbase:crypto_history:exchange-candles",
+        as_of=t1,
+    )
+
+    assert first.requested_as_of == t1
+    assert second.requested_as_of == t2
+    assert second.rows[0]["c"] == 200.0
+    assert len(second.rows) == 2
+    assert replay.requested_as_of == t1
+    assert len(replay.rows) == 1
+    assert replay.rows[0]["c"] == 100.0
+    assert replay.rows[0]["v"] == 1.0
+
+
+def test_store_rejects_backdated_refresh_after_newer_snapshot(tmp_path) -> None:
+    t1 = datetime(2026, 8, 14, 12, tzinfo=timezone.utc)
+    t2 = t1 + timedelta(days=1)
+    store = PersistentHistoricalEvidenceStore(
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    )
+    store.merge(
+        asset_class="crypto",
+        instrument_identity="btc-usd",
+        provider_scope="coinbase:crypto_history:exchange-candles",
+        rows=({"t": t1, "c": 100.0, "v": 1.0},),
+        requested_as_of=t2,
+        requested_history_days=365,
+    )
+
+    with pytest.raises(PersistentHistoricalEvidenceError, match="cannot backdate"):
+        store.merge(
+            asset_class="crypto",
+            instrument_identity="btc-usd",
+            provider_scope="coinbase:crypto_history:exchange-candles",
+            rows=({"t": t1, "c": 99.0, "v": 1.0},),
+            requested_as_of=t1,
+            requested_history_days=365,
+        )
+
+
+def test_legacy_projection_is_not_backdated_during_snapshot_upgrade(tmp_path) -> None:
+    t1 = datetime(2026, 8, 14, 12, tzinfo=timezone.utc)
+    t2 = t1 + timedelta(days=1)
+    store = PersistentHistoricalEvidenceStore(
+        {"CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path)}
+    )
+    store.merge(
+        asset_class="crypto",
+        instrument_identity="btc-usd",
+        provider_scope="coinbase:crypto_history:exchange-candles",
+        rows=({"t": t1, "c": 100.0, "v": 1.0},),
+        requested_as_of=t2,
+        requested_history_days=365,
+    )
+    assert store.path is not None
+    connection = sqlite3.connect(str(store.path))
+    try:
+        with connection:
+            connection.execute("DELETE FROM historical_evidence_row_versions")
+            connection.execute("DELETE FROM historical_evidence_snapshots")
+    finally:
+        connection.close()
+
+    with pytest.raises(PersistentHistoricalEvidenceError) as failure:
+        store.load(
+            asset_class="crypto",
+            instrument_identity="btc-usd",
+            provider_scope="coinbase:crypto_history:exchange-candles",
+            as_of=t1,
+        )
+
+    message = str(failure.value)
+    assert "refreshed after the decision epoch" in message
+    assert "instrument_identity=btc-usd" in message
+    assert f"decision_epoch={t1.isoformat()}" in message
+    assert f"earliest_available_requested_as_of={t2.isoformat()}" in message
 
 
 def test_market_router_reuses_recent_exact_instrument_history(tmp_path, monkeypatch) -> None:
