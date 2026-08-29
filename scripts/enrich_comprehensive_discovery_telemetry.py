@@ -42,6 +42,17 @@ _GOVERNED_DEADLINE_FAILURE_TYPES = frozenset(
         "deadlineexceeded",
     }
 )
+_LANE_TELEMETRY_SCHEMA = "comprehensive-discovery-lane-telemetry.v1"
+_LANE_FALSE_AUTHORITY_FIELDS = (
+    "evidence_certified",
+    "decision_authority",
+    "candidate_authority",
+    "sizing_authority",
+    "construction_authority",
+    "execution_authority",
+    "real_money_authorized",
+    "watchdog_progress_authority",
+)
 
 
 def _nonnegative_int(value: object) -> int | None:
@@ -68,6 +79,36 @@ def _safe_failure_type(value: object) -> str | None:
 
 def _safe_lane(value: object) -> str | None:
     return _base._safe_identifier(value)
+
+
+def _safe_lane_telemetry(
+    value: object,
+    *,
+    expected_release: str,
+) -> dict[str, object] | None:
+    """Accept only the producer's advisory exact-release lane telemetry envelope."""
+
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("schema_version") != _LANE_TELEMETRY_SCHEMA:
+        return None
+    if str(value.get("release") or "") != expected_release:
+        return None
+    if value.get("credential_safe") is not True:
+        return None
+    if value.get("advisory_only") is not True:
+        return None
+    if value.get("paper_only") is not True:
+        return None
+    if any(value.get(field) is not False for field in _LANE_FALSE_AUTHORITY_FIELDS):
+        return None
+    if not isinstance(value.get("lanes"), list):
+        return None
+
+    # ``_base._assert_safe`` has already recursively rejected forbidden keys from the
+    # complete public diagnostic. Preserve the producer's validated operational shape
+    # without teaching this capture layer to reinterpret timing semantics.
+    return dict(value)
 
 
 def _failure_reason(*, unit: str, failure_type: str | None) -> str:
@@ -134,11 +175,23 @@ def enrich_snapshot(
     if str(public_payload.get("active_release") or "") != expected_release:
         return enriched
 
+    updated = dict(diagnostic)
+    lane_telemetry = _safe_lane_telemetry(
+        public_payload.get("comprehensive_discovery_lane_telemetry"),
+        expected_release=expected_release,
+    )
+    if lane_telemetry is not None:
+        updated["comprehensive_discovery_lane_telemetry"] = lane_telemetry
+        enriched["diagnostic"] = updated
+        enriched["enriched_from_comprehensive_discovery_lane_telemetry"] = True
+
+    # Lane timing is independent of the legacy failure-detail parser. Production can be
+    # actively prequalifying with no legacy node/finalizer token, and the exact timing
+    # envelope must still survive into the saved telemetry artifact in that case.
     progress = discovery_progress(public_payload)
     if progress is None:
         return enriched
 
-    updated = dict(diagnostic)
     updated["comprehensive_discovery_progress"] = progress
     unit = str(progress.get("blocking_unit") or "")
     failure_type = _safe_failure_type(progress.get("failure_type"))
