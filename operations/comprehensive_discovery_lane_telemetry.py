@@ -88,14 +88,38 @@ def _authority_fields() -> dict[str, bool]:
     }
 
 
-def _request_identity(request_path: Path) -> tuple[str, str]:
-    payload = json.loads(request_path.read_text(encoding="utf-8"))
-    if not isinstance(payload, Mapping):
-        raise ValueError("comprehensive request must be a mapping")
-    request_id = str(payload.get("request_id") or "").strip()
-    decision_epoch = str(payload.get("decision_epoch") or "").strip()
-    if not request_id or _parse_timestamp(decision_epoch) is None:
-        raise ValueError("comprehensive request telemetry identity is incomplete")
+def _request_identity(
+    request_path: Path,
+    values: Mapping[str, str],
+) -> tuple[str, str]:
+    """Validate the canonical small request envelope without loading the policy pickle."""
+
+    from operations import comprehensive_discovery_input_spool as spool
+
+    body = spool._load_json(request_path, schema=spool._REQUEST_SCHEMA)
+    expected = spool._digest(
+        {
+            "schema_version": spool._REQUEST_SCHEMA,
+            "release": body.get("release"),
+            "decision_epoch": body.get("decision_epoch"),
+            "held_symbols": body.get("held_symbols"),
+            "tracked_symbols": body.get("tracked_symbols"),
+            "excluded_symbols": body.get("excluded_symbols"),
+            "policy_sha256": body.get("policy_sha256"),
+        }
+    )
+    request_id = str(body.get("request_id") or "").strip()
+    decision_epoch = str(body.get("decision_epoch") or "").strip()
+    policy_sha256 = str(body.get("policy_sha256") or "").strip()
+    policy_descriptor = spool._descriptor(body.get("policy_blob"))
+    if request_id != expected:
+        raise ValueError("comprehensive request telemetry identifier mismatch")
+    if policy_descriptor.sha256 != policy_sha256:
+        raise ValueError("comprehensive request telemetry policy fingerprint mismatch")
+    if str(body.get("release") or "").strip() != _release(values):
+        raise ValueError("comprehensive request telemetry release mismatch")
+    if _parse_timestamp(decision_epoch) is None:
+        raise ValueError("comprehensive request telemetry epoch is invalid")
     return request_id, decision_epoch
 
 
@@ -156,7 +180,7 @@ def record_lane_phase(
     if path is None:
         return
     request = Path(request_path).expanduser()
-    request_id, decision_epoch = _request_identity(request)
+    request_id, decision_epoch = _request_identity(request, values)
     incoming_epoch = _parse_timestamp(decision_epoch)
     if incoming_epoch is None:
         raise ValueError("comprehensive request telemetry epoch is invalid")
