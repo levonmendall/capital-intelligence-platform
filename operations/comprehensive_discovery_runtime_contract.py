@@ -130,6 +130,7 @@ def _install_dag_native_supervision() -> None:
     from operations.dag_native_comprehensive_supervision import (
         install_dag_native_comprehensive_supervision,
     )
+    from operations.dag_node_failure_transport import install_dag_node_failure_transport
     from operations.progress_aware_release_certification import (
         install_progress_aware_dag_node_supervision,
         install_resume_aware_release_dag_projection,
@@ -138,6 +139,9 @@ def _install_dag_native_supervision() -> None:
     install_dag_native_comprehensive_supervision()
     install_progress_aware_dag_node_supervision()
     install_resume_aware_release_dag_projection()
+    # Install after supervision wrappers so every clean-spawn node preserves the same
+    # bounded direct-cause truth already retained by the nested lane subprocess boundary.
+    install_dag_node_failure_transport()
 
 
 def _install_lane_exit_cache_reclamation() -> None:
