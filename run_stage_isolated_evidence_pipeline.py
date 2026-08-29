@@ -44,6 +44,7 @@ _REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
 _STAGE_TERMINATION_GRACE_SECONDS = 5.0
 _STAGE_FRESHNESS_EXPIRED_RETURN_CODE = 124
 _STAGE_FRESHNESS_ERROR_TYPE = "EvidenceFreshnessExpired"
+_STAGE_WRAPPER_INTERNAL_ERROR_RETURN_CODE = 2
 _COMPREHENSIVE_DISCOVERY_RESTART_RESERVE_SECONDS = 480.0
 _PRECOMPREHENSIVE_CACHE_RECLAMATION_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
 _REFERENCE_CACHE_RECLAMATION_CODE = """
@@ -95,6 +96,58 @@ def _safe_failure(
         file=sys.stderr,
         flush=True,
     )
+
+
+def _durably_completed_stage_exit(
+    latest: StageIsolatedEvidenceState | None,
+    *,
+    pipeline_id: str,
+    stage: str,
+    return_code: int,
+) -> bool:
+    """Accept only the wrapper's late internal error after exact durable completion."""
+
+    return (
+        return_code == _STAGE_WRAPPER_INTERNAL_ERROR_RETURN_CODE
+        and latest is not None
+        and latest.pipeline_id == pipeline_id
+        and latest.state in {"running", "completed"}
+        and stage in latest.completed_stages
+    )
+
+
+def _emit_stage_exit_reconciled(
+    *,
+    pipeline_id: str,
+    stage: str,
+    return_code: int,
+) -> None:
+    """Publish advisory reconciliation telemetry without creating a new failure path."""
+
+    try:
+        print(
+            json.dumps(
+                {
+                    "event": "stage_isolated_evidence_stage_exit_reconciled",
+                    "pipeline_id": pipeline_id,
+                    "stage": stage,
+                    "child_return_code": return_code,
+                    "durable_stage_completion": True,
+                    "reconciliation_authority": "exact_stage_journal",
+                    "decision_authority": False,
+                    "candidate_authority": False,
+                    "sizing_authority": False,
+                    "construction_authority": False,
+                    "execution_authority": False,
+                    "paper_only": True,
+                    "real_money_authorized": False,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    except Exception:
+        pass
 
 
 def _evidence_deadline(
@@ -623,6 +676,21 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
             return _STAGE_FRESHNESS_EXPIRED_RETURN_CODE
 
         if return_code != 0:
+            # Only the wrapper's known generic internal-error exit may be reconciled after
+            # exact durable completion. All other positive exits, signals, identity changes,
+            # failed journals, and every pre-completion exit remain fail-closed.
+            if _durably_completed_stage_exit(
+                latest,
+                pipeline_id=state.pipeline_id,
+                stage=stage,
+                return_code=return_code,
+            ):
+                _emit_stage_exit_reconciled(
+                    pipeline_id=state.pipeline_id,
+                    stage=stage,
+                    return_code=return_code,
+                )
+                continue
             _safe_failure(
                 pipeline_id=state.pipeline_id,
                 stage=stage,
