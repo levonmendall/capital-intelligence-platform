@@ -267,7 +267,7 @@ def _configure_reuse_only_lane(monkeypatch, tmp_path, *, existing):
     timestamp = _as_of()
     request_path = tmp_path / "request.json"
     request_path.write_text("{}", encoding="utf-8")
-    policy = SimpleNamespace(version="policy-v1", preselection_freshness_days=3)
+    policy = facade._core.ComprehensiveMarketDiscoveryPolicy()
     records = (SimpleNamespace(symbol="A"),)
     canonical_path = tmp_path / "provider.json"
 
