@@ -101,6 +101,42 @@ def _cleanup_stale_spools(directory: Path, *, now: datetime) -> None:
             continue
 
 
+def _release_clean_file_cache(path: Path) -> None:
+    """Best-effort release of clean cache for one disposable spool file."""
+
+    try:
+        if not path.is_file() or path.is_symlink():
+            return
+    except OSError:
+        return
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return
+    try:
+        # The spool is disposable and append-only. Flush any dirty pages first so the
+        # kernel can honor DONTNEED for the exact file rather than retaining pages that
+        # were dirtied during provider collection.
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+        posix_fadvise = getattr(os, "posix_fadvise", None)
+        dontneed = getattr(os, "POSIX_FADV_DONTNEED", None)
+        if posix_fadvise is not None and dontneed is not None:
+            try:
+                posix_fadvise(fd, 0, 0, dontneed)
+            except OSError:
+                pass
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 class SQLiteEvidenceMapping(Mapping[str, object]):
     """Read-only lazy namespace view over one evidence spool."""
 
@@ -320,8 +356,10 @@ class SQLitePaperEvidenceSpool:
             return
         if remove:
             for suffix in ("", "-wal", "-shm", "-journal"):
+                path = Path(str(self.path) + suffix)
+                _release_clean_file_cache(path)
                 try:
-                    Path(str(self.path) + suffix).unlink(missing_ok=True)
+                    path.unlink(missing_ok=True)
                 except OSError:
                     continue
             self._removed = True
