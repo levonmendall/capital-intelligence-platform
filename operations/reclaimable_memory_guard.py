@@ -12,8 +12,8 @@ independent limits:
 A raw-only hard-ceiling crossing gets a tightly bounded cgroup-v2 reclaim/re-measure sequence
 before the child is terminated. The guard remeasures the exact same boundaries after every
 attempt and remains fail-closed: working-set pressure, unavailable reclaim, reclaim errors,
-or no meaningful progress still cause immediate termination. No threshold is raised and no
-investment/evidence authority changes.
+or exhaustion of the bounded recovery attempts still cause termination. No threshold is
+raised and no investment/evidence authority changes.
 
 If cgroup memory.stat is unavailable the guard falls back to raw accounting, preserving the
 previous fail-closed behavior. This module changes only operational resource supervision; it
@@ -39,10 +39,9 @@ _DEFAULT_HARD_RESERVE_MB = 192.0
 _DEFAULT_POLL_SECONDS = 0.10
 _RECLAIM_MARGIN_KIB = 32 * 1024
 _RECLAIM_MAX_KIB = 256 * 1024
-# Keep raw-only recovery synchronous and small: at most 768 MiB requested, and retry only
-# after an observable page-cache reduction large enough to exceed sampling noise.
+# Keep raw-only recovery synchronous and small: at most three 256 MiB requests, or 768 MiB
+# requested in total, before fail-closed termination.
 _RAW_RECLAIM_MAX_ATTEMPTS = 3
-_RAW_RECLAIM_MIN_PROGRESS_KIB = 8 * 1024
 _CGROUP_V2_RECLAIM_PATH = Path("/sys/fs/cgroup/memory.reclaim")
 _HARD_FRACTION_ENV = "CAPITAL_INTELLIGENCE_RENDER_MEMORY_HARD_WATER_FRACTION"
 _HARD_RESERVE_ENV = "CAPITAL_INTELLIGENCE_RENDER_MEMORY_HARD_RESERVE_MB"
@@ -606,7 +605,6 @@ def wait_with_reclaimable_resource_bounds(
                 not result.attempted
                 or not result.supported
                 or result.error_type is not None
-                or result.reclaimed_kib < _RAW_RECLAIM_MIN_PROGRESS_KIB
             ):
                 break
 

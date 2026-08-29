@@ -270,28 +270,34 @@ def test_raw_reclaim_sequence_stops_on_reclaim_error(monkeypatch) -> None:
     assert trigger["memory_reclaim_attempt_count"] == 1
 
 
-def test_raw_reclaim_sequence_stops_on_no_meaningful_progress(monkeypatch) -> None:
+def test_raw_reclaim_sequence_continues_after_low_immediate_progress(monkeypatch) -> None:
     before = _cgroup_v2_snapshot(raw=1_963_044, inactive=1_300_000, working=646_572)
-    after = _cgroup_v2_snapshot(raw=1_960_000, inactive=1_296_000, working=650_000)
-    _install_snapshots(monkeypatch, before, after)
+    after_first = _cgroup_v2_snapshot(raw=1_960_000, inactive=1_296_000, working=650_000)
+    after_second = _cgroup_v2_snapshot(raw=1_850_000, inactive=1_180_000, working=670_000)
+    _install_snapshots(monkeypatch, before, after_second)
     calls = []
 
-    def little_progress(snapshot, boundaries, *, values):
-        del boundaries, values
+    def little_then_effective_progress(snapshot, boundaries, *, values):
+        del values
         calls.append(snapshot)
+        after = after_first if len(calls) == 1 else after_second
         return (
             guard.MemoryReclaimResult(
-                attempted=True, supported=True, requested_kib=108_376,
+                attempted=True,
+                supported=True,
+                requested_kib=108_376,
                 raw_before_kib=snapshot.raw_current_kib,
                 raw_after_kib=after.raw_current_kib,
                 working_set_before_kib=snapshot.working_set_kib,
                 working_set_after_kib=after.working_set_kib,
-                reclaimed_kib=3_044, effective=False, error_type=None,
+                reclaimed_kib=max(0, snapshot.raw_current_kib - after.raw_current_kib),
+                effective=limit_reason(after, boundaries) is None,
+                error_type=None,
             ),
             after,
         )
 
-    monkeypatch.setattr(guard, "_attempt_cgroup_v2_reclaim", little_progress)
+    monkeypatch.setattr(guard, "_attempt_cgroup_v2_reclaim", little_then_effective_progress)
     monkeypatch.setattr(guard, "_signal_process_group", lambda *_args: None)
     events = []
     monkeypatch.setattr(guard, "_safe_log", lambda event, **details: events.append((event, details)))
@@ -301,11 +307,18 @@ def test_raw_reclaim_sequence_stops_on_no_meaningful_progress(monkeypatch) -> No
         values={"RENDER": "true"}, memory_reserve_kib=640 * 1024, poll_seconds=1.0,
     )
 
-    trigger = next(details for event, details in events if event == "reclaimable_memory_guard_triggered")
-    assert result[2] is True
-    assert len(calls) == 1
-    assert trigger["memory_reclaim_attempt_count"] == 1
-    assert trigger["memory_reclaim_reclaimed_kib"] == 3_044
+    attempts = [
+        details
+        for event, details in events
+        if event == "reclaimable_memory_guard_reclaim_attempted"
+    ]
+    assert result[2] is False
+    assert len(calls) == 2
+    assert len(attempts) == 2
+    assert attempts[0]["memory_reclaim_attempt_delta_kib"] == 3_044
+    assert attempts[-1]["memory_reclaim_attempt_count"] == 2
+    assert attempts[-1]["memory_reclaim_effective"] is True
+    assert not any(event == "reclaimable_memory_guard_triggered" for event, _ in events)
 
 
 def test_raw_reclaim_budget_exhaustion_remains_fail_closed(monkeypatch, tmp_path) -> None:
@@ -361,7 +374,7 @@ def test_terminal_report_distinguishes_effective_reclaim_then_raw_regrowth(
 
     trigger = next(details for event, details in events if event == "reclaimable_memory_guard_triggered")
     assert result[2] is True
-    assert trigger["memory_reclaim_attempt_count"] == 2
+    assert trigger["memory_reclaim_attempt_count"] == guard._RAW_RECLAIM_MAX_ATTEMPTS
     assert trigger["memory_reclaim_success_count"] == 1
     assert trigger["memory_reclaim_ever_effective"] is True
     assert trigger["memory_reclaim_effective"] is False
