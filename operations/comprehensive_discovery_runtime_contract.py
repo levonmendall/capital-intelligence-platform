@@ -110,6 +110,16 @@ def _install_spawn_safe_acquisition() -> None:
     install_spawn_safe_authoritative_acquisition()
 
 
+def _install_spawn_safe_lane_terminal_truth() -> None:
+    """Preserve the finite child lane's exact safe terminal exception across exit."""
+
+    from operations.spawn_safe_lane_terminal_transport import (
+        install_spawn_safe_lane_terminal_transport,
+    )
+
+    install_spawn_safe_lane_terminal_transport()
+
+
 def _install_lane_local_spool() -> None:
     """Keep every comprehensive lane as one compact, resumable transaction."""
 
@@ -205,6 +215,7 @@ def install_comprehensive_discovery_runtime_contract() -> None:
     _register_manual_diagnostic_contract()
     _install_finalizer_failure_boundary()
     _install_spawn_safe_acquisition()
+    _install_spawn_safe_lane_terminal_truth()
     _install_lane_local_spool()
     _install_dag_native_supervision()
     _install_lane_exit_cache_reclamation()
