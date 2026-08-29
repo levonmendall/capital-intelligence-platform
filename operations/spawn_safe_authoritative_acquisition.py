@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -36,6 +38,7 @@ from typing import Any, Mapping, Sequence
 from operations import authoritative_comprehensive_discovery as _authoritative
 from operations import comprehensive_discovery_input_spool as _spool
 from operations import persistent_certification_scheduler as _scheduler
+from operations import supervised_component_execution as _supervision
 from operations.bounded_comprehensive_discovery_spool import build_spool, load_finalizer_inputs
 from operations.comprehensive_discovery_input_spool import (
     ComprehensiveDiscoverySpoolError,
@@ -51,12 +54,154 @@ from operations.comprehensive_discovery_input_spool import (
 
 _MODULE = "operations.spawn_safe_authoritative_acquisition"
 _LANE_RESULT_SCHEMA = "spawn-safe-certification-lane-result.v1"
+_LANE_FAILURE_SCHEMA = "spawn-safe-certification-lane-failure.v1"
 _SERIAL_LANE_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
+_SAFE_FAILURE_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,119}$")
 
 
 def _lane_result_path(manifest_path: str | Path, node_id: str) -> Path:
     directory = Path(manifest_path).expanduser().parent
     return directory / f"lane-result-{_spool._safe_release(node_id)}.json"
+
+
+def _lane_failure_path(manifest_path: str | Path, node_id: str) -> Path:
+    directory = Path(manifest_path).expanduser().parent
+    return directory / f"lane-failure-{_spool._safe_release(node_id)}.json"
+
+
+def _unlink_if_present(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _retry_after_seconds(error: BaseException) -> float | None:
+    raw = getattr(error, "retry_after_seconds", None)
+    try:
+        retry = float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+    if retry is None or not math.isfinite(retry) or retry <= 0.0:
+        return None
+    return min(retry, 3600.0)
+
+
+def _direct_cause(error: BaseException) -> BaseException | None:
+    if error.__cause__ is not None:
+        return error.__cause__
+    if not error.__suppress_context__ and error.__context__ is not None:
+        return error.__context__
+    return None
+
+
+def _safe_failure_type(value: object, *, fallback: str) -> str:
+    name = str(value or "").strip()
+    if _SAFE_FAILURE_TYPE.fullmatch(name) is None:
+        return fallback
+    return name
+
+
+def _write_lane_failure(
+    manifest_path: str | Path,
+    *,
+    node: _scheduler.CertificationNode,
+    timestamp: datetime,
+    policy_version: str,
+    error: BaseException,
+) -> Path:
+    """Persist bounded credential-safe child failure truth before the process exits."""
+
+    cause = _direct_cause(error)
+    body: dict[str, object] = {
+        "schema_version": _LANE_FAILURE_SCHEMA,
+        "node_id": node.node_id,
+        "asset_class": node.asset_class,
+        "input_fingerprint": node.input_fingerprint,
+        "decision_epoch": timestamp.isoformat(),
+        "policy_version": str(policy_version),
+        "decision_eligible_count": int(node.decision_eligible_count),
+        "provider_groups": list(node.provider_groups),
+        "error_type": _safe_failure_type(
+            type(error).__name__, fallback="RemoteLaneExecutionError"
+        ),
+        "error_detail": _supervision._safe_error(error),
+        "cause_type": (
+            _safe_failure_type(type(cause).__name__, fallback="RemoteLaneCauseError")
+            if cause is not None
+            else None
+        ),
+        "cause_detail": _supervision._safe_error(cause) if cause is not None else None,
+        "retry_after_seconds": _retry_after_seconds(error),
+        **_spool._authority_fields(),
+    }
+    path = _lane_failure_path(manifest_path, node.node_id)
+    _spool._atomic_json(path, body)
+    return path
+
+
+def _load_lane_failure(
+    manifest_path: str | Path,
+    *,
+    node: _scheduler.CertificationNode,
+    timestamp: datetime,
+    policy_version: str,
+    return_code: int,
+    pid: object,
+) -> BaseException:
+    """Reconstruct exact safe child failure instead of collapsing it to exit code 2."""
+
+    body = _spool._load_json(
+        _lane_failure_path(manifest_path, node.node_id),
+        schema=_LANE_FAILURE_SCHEMA,
+    )
+    if str(body.get("node_id") or "") != node.node_id:
+        raise _scheduler.CertificationSchedulerError(
+            f"lane subprocess failure node identity changed for {node.node_id}"
+        )
+    if str(body.get("asset_class") or "") != node.asset_class:
+        raise _scheduler.CertificationSchedulerError(
+            f"lane subprocess failure asset class changed for {node.node_id}"
+        )
+    if str(body.get("input_fingerprint") or "") != node.input_fingerprint:
+        raise _scheduler.CertificationSchedulerError(
+            f"lane subprocess failure fingerprint changed for {node.node_id}"
+        )
+    if str(body.get("decision_epoch") or "") != timestamp.isoformat():
+        raise _scheduler.CertificationSchedulerError(
+            f"lane subprocess failure decision epoch changed for {node.node_id}"
+        )
+    if str(body.get("policy_version") or "") != str(policy_version):
+        raise _scheduler.CertificationSchedulerError(
+            f"lane subprocess failure policy version changed for {node.node_id}"
+        )
+
+    failure_type = _safe_failure_type(
+        body.get("error_type"), fallback="RemoteLaneExecutionError"
+    )
+    detail = str(body.get("error_detail") or "provider-facing certification lane failed")
+    error_type = type(failure_type, (RuntimeError,), {})
+    error = error_type(
+        f"{detail}; subprocess_return_code={int(return_code)}; subprocess_pid={pid}"
+    )
+
+    retry = body.get("retry_after_seconds")
+    try:
+        retry_seconds = float(retry) if retry is not None else None
+    except (TypeError, ValueError):
+        retry_seconds = None
+    if retry_seconds is not None and math.isfinite(retry_seconds) and retry_seconds > 0.0:
+        setattr(error, "retry_after_seconds", min(retry_seconds, 3600.0))
+
+    cause_type_name = str(body.get("cause_type") or "").strip()
+    cause_detail = str(body.get("cause_detail") or "").strip()
+    if cause_type_name or cause_detail:
+        cause_type_name = _safe_failure_type(
+            cause_type_name, fallback="RemoteLaneCauseError"
+        )
+        cause_type = type(cause_type_name, (RuntimeError,), {})
+        error.__cause__ = cause_type(cause_detail or "provider-facing lane cause unavailable")
+    return error
 
 
 def _write_lane_result(
@@ -188,10 +333,9 @@ class SpawnSafeSingleLaneRunner:
             )
 
         result_path = _lane_result_path(self.manifest_path, node.node_id)
-        try:
-            result_path.unlink()
-        except FileNotFoundError:
-            pass
+        failure_path = _lane_failure_path(self.manifest_path, node.node_id)
+        _unlink_if_present(result_path)
+        _unlink_if_present(failure_path)
 
         repository_root = Path(__file__).resolve().parents[1]
         command = (
@@ -220,10 +364,23 @@ class SpawnSafeSingleLaneRunner:
         )
         return_code = int(process.wait())
         if return_code != 0:
-            raise _scheduler.CertificationSchedulerError(
-                f"provider-facing certification lane subprocess failed for {node.node_id}; "
-                f"return_code={return_code}; pid={getattr(process, 'pid', 'unknown')}"
-            )
+            try:
+                error = _load_lane_failure(
+                    self.manifest_path,
+                    node=node,
+                    timestamp=self.timestamp,
+                    policy_version=self.policy_version,
+                    return_code=return_code,
+                    pid=getattr(process, "pid", "unknown"),
+                )
+            except (ComprehensiveDiscoverySpoolError, OSError, ValueError) as failure_error:
+                raise _scheduler.CertificationSchedulerError(
+                    f"provider-facing certification lane subprocess failed without durable "
+                    f"failure attribution for {node.node_id}; return_code={return_code}; "
+                    f"pid={getattr(process, 'pid', 'unknown')}; "
+                    f"failure_record_error={type(failure_error).__name__}: {failure_error}"
+                ) from failure_error
+            raise error
         try:
             return _load_lane_result(self.manifest_path, node=node)
         except (ComprehensiveDiscoverySpoolError, OSError, ValueError) as error:
@@ -443,6 +600,7 @@ def _run_lane_cli(
         timestamp=timestamp,
         policy_version=policy_version,
     )
+    _unlink_if_present(_lane_failure_path(manifest_path, node.node_id))
     _write_lane_result(
         manifest_path,
         node=node,
@@ -459,6 +617,7 @@ def _main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timestamp", required=True)
     parser.add_argument("--policy-version", required=True)
     args = parser.parse_args(argv)
+    timestamp: datetime | None = None
     try:
         timestamp = datetime.fromisoformat(str(args.timestamp).replace("Z", "+00:00"))
         if timestamp.tzinfo is None or timestamp.utcoffset() is None:
@@ -470,12 +629,33 @@ def _main(argv: Sequence[str] | None = None) -> int:
             policy_version=args.policy_version,
         )
     except BaseException as error:  # noqa: BLE001 - child boundary must fail closed.
+        failure_recorded = False
+        if timestamp is not None:
+            try:
+                manifest = _spool.load_manifest(args.manifest)
+                node = next(
+                    (item for item in nodes_from_manifest(manifest) if item.node_id == args.node_id),
+                    None,
+                )
+                if node is not None:
+                    _write_lane_failure(
+                        args.manifest,
+                        node=node,
+                        timestamp=timestamp,
+                        policy_version=args.policy_version,
+                        error=error,
+                    )
+                    failure_recorded = True
+            except BaseException:  # noqa: BLE001 - stderr remains secondary fail-closed truth.
+                failure_recorded = False
         print(
             json.dumps(
                 {
                     "event": "spawn_safe_certification_lane_failed",
                     "node_id": args.node_id,
                     "error_type": type(error).__name__,
+                    "error_detail": _supervision._safe_error(error),
+                    "failure_recorded": failure_recorded,
                     "credential_safe": True,
                     "paper_only": True,
                     "real_money_authorized": False,
