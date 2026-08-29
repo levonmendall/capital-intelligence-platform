@@ -13,8 +13,10 @@ unchanged canonical reconstruction and merge path.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cio import CandidateAssetClass
@@ -47,6 +49,35 @@ class _CachedMergedRecords(Sequence[object]):
 
     def __iter__(self) -> Iterator[object]:
         return iter(self.records)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _record_lane_timing(**updates: object) -> None:
+    """Persist advisory timing without affecting evidence or watchdog progress."""
+
+    if (
+        _ACTIVE_REQUEST_PATH is None
+        or _ACTIVE_VALUES is None
+        or not _ACTIVE_ASSET_CLASS
+        or _ACTIVE_INDEX < 0
+    ):
+        return
+    try:
+        from operations.comprehensive_discovery_lane_telemetry import record_lane_phase
+
+        record_lane_phase(
+            _ACTIVE_REQUEST_PATH,
+            _ACTIVE_VALUES,
+            asset_class=_ACTIVE_ASSET_CLASS,
+            index=_ACTIVE_INDEX,
+            **updates,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        # Telemetry is fail-soft and cannot change the canonical lane outcome.
+        pass
 
 
 def _record_watchdog_phase(action: str) -> None:
@@ -94,6 +125,7 @@ def _load_catalog_records(
     global _ACTIVE_POLICY_VERSION
     policy_version = str(getattr(policy, "version", ""))
     _ACTIVE_POLICY_VERSION = policy_version
+    _record_lane_timing(structural_started_at=_now())
     cached = _structural.load_structural_catalog(
         values,
         asset_class=asset_class,
@@ -103,8 +135,14 @@ def _load_catalog_records(
     if cached is not None and _same_lane_schedule(
         core, asset_class, cached.source_as_of, timestamp
     ):
+        _record_lane_timing(structural_cache_hit=True)
         return _CachedMergedRecords(cached.records, cached.raw_record_count)
 
+    _record_lane_timing(
+        structural_cache_hit=None
+        if asset_class is CandidateAssetClass.OPTION
+        else False
+    )
     return _ORIGINAL_LOAD_CATALOG_RECORDS(
         core=core,
         values=values,
@@ -144,18 +182,34 @@ def _merge_certified_lane(core, raw: Sequence[object], *, asset_class, timestamp
     # The canonical transaction moves directly from merge into provider publication. The
     # old transactional coordinator published only the initial catalog-lane start, leaving
     # the parent watchdog pinned to the prior durable completion during long later phases.
+    transition = _now()
+    _record_lane_timing(
+        structural_completed_at=transition,
+        publication_started_at=transition,
+    )
     _record_watchdog_phase("publication-lane")
     return merged
 
 
 def _build_deep_lane(*args, **kwargs):
-    """Mark screening active only at the canonical publication-to-screening handoff."""
+    """Mark and time the canonical publication-to-screening handoff."""
 
     # The canonical transaction persists publication-lane-### immediately before calling
     # this function. Publishing the marker here therefore cannot claim screening before
     # durable same-lane publication evidence exists.
+    transition = _now()
+    _record_lane_timing(
+        publication_completed_at=transition,
+        screening_started_at=transition,
+    )
     _record_watchdog_phase("screening-lane")
-    return _ORIGINAL_BUILD_DEEP_LANE(*args, **kwargs)
+    try:
+        # Preserve the literal canonical delegation asserted by the structural-cache
+        # contract: instrumentation surrounds the call but never substitutes its result.
+        return _ORIGINAL_BUILD_DEEP_LANE(*args, **kwargs)
+    finally:
+        if sys.exc_info()[0] is None:
+            _record_lane_timing(screening_completed_at=_now())
 
 
 def _run_lane_transaction(
@@ -165,20 +219,27 @@ def _run_lane_transaction(
     asset_class_value: str,
     index: int,
 ):
-    """Bind advisory phase-marker context to this one finite lane transaction."""
+    """Bind advisory phase-marker and timing context to one finite lane transaction."""
 
     global _ACTIVE_REQUEST_PATH, _ACTIVE_VALUES, _ACTIVE_ASSET_CLASS, _ACTIVE_INDEX
     _ACTIVE_REQUEST_PATH = Path(request_path).expanduser()
     _ACTIVE_VALUES = values
     _ACTIVE_ASSET_CLASS = str(asset_class_value or "").strip().lower()
     _ACTIVE_INDEX = int(index)
+    _record_lane_timing(lane_started_at=_now())
     try:
-        return _ORIGINAL_RUN_LANE_TRANSACTION(
+        result = _ORIGINAL_RUN_LANE_TRANSACTION(
             request_path,
             values,
             asset_class_value=asset_class_value,
             index=index,
         )
+    except BaseException as error:
+        _record_lane_timing(lane_failed_at=_now(), error_type=type(error).__name__)
+        raise
+    else:
+        _record_lane_timing(lane_completed_at=_now())
+        return result
     finally:
         _ACTIVE_REQUEST_PATH = None
         _ACTIVE_VALUES = None
