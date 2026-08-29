@@ -141,14 +141,14 @@ def start_render_structural_prewarm(
     try:
         budget = float(_fanout_budget_seconds(timestamp, resolved))
     except (OSError, RuntimeError, TypeError, ValueError):
-        return StructuralPrewarmHandle()
-    if budget <= 0.0:
-        return StructuralPrewarmHandle()
-    # Reserve the existing termination grace inside the original provider budget instead
-    # of borrowing from the unchanged downstream reserve.
+        budget = 0.0
+    # The child is the canonical owner of the provider budget and independently applies
+    # the unchanged evidence lifetime, 300-second ceiling, and 480-second downstream
+    # reserve before any provider I/O. Keep the launcher contract stable even when the
+    # current epoch has no spare acquisition time: the subordinate child may still start,
+    # observe a zero budget, and exit without provider work. The parent deadline never
+    # extends that budget and reserves cleanup time only when spare budget actually exists.
     usable_budget = max(0.0, budget - _COMPLETION_CLEANUP_RESERVE_SECONDS)
-    if usable_budget <= 0.0:
-        return StructuralPrewarmHandle()
     deadline = time.monotonic() + usable_budget
 
     environment = dict(os.environ)
