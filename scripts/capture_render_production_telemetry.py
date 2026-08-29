@@ -26,6 +26,8 @@ _EXIT_UNSAFE = 4
 _EXIT_RELEASE_MISMATCH = 5
 _EXIT_DIAGNOSTIC_FAILED = 6
 _EXIT_TIMEOUT = 7
+_MAX_LIMITATION_TYPES = 32
+_UNCLASSIFIED_LIMITATION = "unclassified_limitation"
 _FORBIDDEN_KEYS = frozenset(
     {
         "holdings",
@@ -281,6 +283,17 @@ def _safe_requirement_progress(value: object) -> dict[str, object] | None:
     return progress
 
 
+def _safe_limitation_types(value: object) -> list[str]:
+    """Return only stable identifier-shaped limitation types, never raw limitation detail."""
+    if not isinstance(value, list):
+        return []
+    safe_types: set[str] = set()
+    for item in value:
+        limitation_type = _safe_identifier(item.get("type")) if isinstance(item, Mapping) else None
+        safe_types.add(limitation_type or _UNCLASSIFIED_LIMITATION)
+    return sorted(safe_types)[:_MAX_LIMITATION_TYPES]
+
+
 def _elapsed_seconds(payload: Mapping[str, Any], *, captured_at: datetime) -> float | None:
     requested_at = _parse_datetime(payload.get("requested_at"))
     if requested_at is None:
@@ -291,8 +304,10 @@ def _elapsed_seconds(payload: Mapping[str, Any], *, captured_at: datetime) -> fl
     return round(max(0.0, elapsed), 3)
 
 
-def _limitation_summary(payload: Mapping[str, Any], *, state: str) -> tuple[int, str]:
-    """Expose limitations only after the active attempt has reached a terminal state.
+def _limitation_summary(
+    payload: Mapping[str, Any], *, state: str
+) -> tuple[int, str, list[str]]:
+    """Expose safe limitation identity only for the current terminal attempt.
 
     The public audit can retain discovery limitations from an earlier terminal attempt while
     the next exact-release request is still pending or in progress. Those historical records
@@ -300,14 +315,14 @@ def _limitation_summary(payload: Mapping[str, Any], *, state: str) -> tuple[int,
     incorrectly makes a fresh attempt look already failed. Until this request terminates,
     telemetry therefore reports zero active limitations and explicitly marks the suppression.
     """
-
     limitations = payload.get("comprehensive_discovery_limitations")
     if state in {_FINAL_SUCCESS_STATE, _FINAL_FAILURE_STATE}:
         return (
             len(limitations) if isinstance(limitations, list) else 0,
             "current_terminal_attempt",
+            _safe_limitation_types(limitations),
         )
-    return 0, "suppressed_while_active"
+    return 0, "suppressed_while_active", []
 
 
 def build_snapshot(
@@ -327,7 +342,7 @@ def build_snapshot(
     )
     direct_stage = _safe_stage(payload.get("stage"))
     state = str(payload.get("state") or "unknown")
-    limitation_count, limitation_scope = _limitation_summary(payload, state=state)
+    limitation_count, limitation_scope, limitation_types = _limitation_summary(payload, state=state)
     diagnostic: dict[str, object] = {
         "diagnostic_id": _safe_identifier(payload.get("diagnostic_id") or payload.get("request_id")),
         "state": state,
@@ -342,6 +357,7 @@ def build_snapshot(
         "context_attempt_state": _safe_identifier(payload.get("context_attempt_state")),
         "limitation_count": limitation_count,
         "limitation_scope": limitation_scope,
+        "limitation_types": limitation_types,
         "market_lanes": _safe_market_lanes(payload.get("market_lanes")),
         "progress_metrics": _safe_progress_metrics(payload.get("progress_metrics")),
         "public_live_requirement_progress": _safe_requirement_progress(
