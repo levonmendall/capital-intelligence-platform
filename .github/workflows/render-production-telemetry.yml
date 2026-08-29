@@ -130,6 +130,7 @@ jobs:
           discovery_enrichment_status=0
           stage_enrichment_status=0
           context_enrichment_status=0
+          certification_enrichment_status=0
           if [[ -f "$TELEMETRY_OUTPUT" ]]; then
             python scripts/enrich_render_production_telemetry.py \
               --url "$TELEMETRY_URL" \
@@ -155,6 +156,12 @@ jobs:
               --output "$TELEMETRY_OUTPUT" \
               --timeline-output "$TELEMETRY_TIMELINE" \
               || context_enrichment_status=$?
+            python scripts/enrich_certification_failure_telemetry.py \
+              --url "$TELEMETRY_URL" \
+              --expected-release "$EXPECTED_RELEASE" \
+              --output "$TELEMETRY_OUTPUT" \
+              --timeline-output "$TELEMETRY_TIMELINE" \
+              || certification_enrichment_status=$?
           fi
 
           if [[ "$capture_status" -ne 0 ]]; then
@@ -169,7 +176,10 @@ jobs:
           if [[ "$stage_enrichment_status" -ne 0 ]]; then
             exit "$stage_enrichment_status"
           fi
-          exit "$context_enrichment_status"
+          if [[ "$context_enrichment_status" -ne 0 ]]; then
+            exit "$context_enrichment_status"
+          fi
+          exit "$certification_enrichment_status"
 
       - name: Publish safe telemetry summary
         if: always()
