@@ -197,6 +197,10 @@ class PersistentHistoricalEvidenceStore:
             )
             """
         )
+        # Keep the original table for an in-place, non-destructive migration and for
+        # compatibility with already-deployed databases. New reads use the append-only
+        # epoch table below so a newer refresh cannot overwrite an older CIO epoch's
+        # coverage metadata.
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS historical_evidence_coverage (
@@ -208,6 +212,37 @@ class PersistentHistoricalEvidenceStore:
                 integrity_sha256 TEXT NOT NULL,
                 PRIMARY KEY (asset_class, instrument_identity, provider_scope)
             )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS historical_evidence_coverage_epochs (
+                asset_class TEXT NOT NULL,
+                instrument_identity TEXT NOT NULL,
+                provider_scope TEXT NOT NULL,
+                maximum_history_days INTEGER NOT NULL,
+                requested_as_of TEXT NOT NULL,
+                integrity_sha256 TEXT NOT NULL,
+                PRIMARY KEY (
+                    asset_class,
+                    instrument_identity,
+                    provider_scope,
+                    requested_as_of
+                )
+            )
+            """
+        )
+        # Preserve the last pre-upgrade coverage row as the first known epoch. This is
+        # idempotent and does not mutate or discard existing coverage.
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO historical_evidence_coverage_epochs(
+                asset_class, instrument_identity, provider_scope,
+                maximum_history_days, requested_as_of, integrity_sha256
+            )
+            SELECT asset_class, instrument_identity, provider_scope,
+                   maximum_history_days, requested_as_of, integrity_sha256
+            FROM historical_evidence_coverage
             """
         )
         existing = connection.execute(
@@ -286,13 +321,41 @@ class PersistentHistoricalEvidenceStore:
             coverage = connection.execute(
                 """
                 SELECT maximum_history_days, requested_as_of, integrity_sha256
-                FROM historical_evidence_coverage
+                FROM historical_evidence_coverage_epochs
                 WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+                  AND requested_as_of<=?
+                ORDER BY requested_as_of DESC
+                LIMIT 1
                 """,
-                (asset_class, instrument_identity, provider_scope),
+                (
+                    asset_class,
+                    instrument_identity,
+                    provider_scope,
+                    timestamp.isoformat(),
+                ),
             ).fetchone()
             if coverage is None:
+                future_coverage = connection.execute(
+                    """
+                    SELECT 1
+                    FROM historical_evidence_coverage_epochs
+                    WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+                      AND requested_as_of>?
+                    LIMIT 1
+                    """,
+                    (
+                        asset_class,
+                        instrument_identity,
+                        provider_scope,
+                        timestamp.isoformat(),
+                    ),
+                ).fetchone()
+                if future_coverage is not None:
+                    raise PersistentHistoricalEvidenceError(
+                        "persistent historical evidence was refreshed after the decision epoch"
+                    )
                 return HistoricalEvidenceSlice(tuple(material), 0, None)
+
             maximum_days, requested_raw, integrity = coverage
             payload = {
                 "asset_class": asset_class,
@@ -374,14 +437,20 @@ class PersistentHistoricalEvidenceStore:
 
                 existing = connection.execute(
                     """
-                    SELECT maximum_history_days
-                    FROM historical_evidence_coverage
+                    SELECT MAX(maximum_history_days)
+                    FROM historical_evidence_coverage_epochs
                     WHERE asset_class=? AND instrument_identity=? AND provider_scope=?
+                      AND requested_as_of<=?
                     """,
-                    (asset_class, instrument_identity, provider_scope),
+                    (
+                        asset_class,
+                        instrument_identity,
+                        provider_scope,
+                        timestamp.isoformat(),
+                    ),
                 ).fetchone()
                 maximum_days = max(
-                    int(existing[0]) if existing is not None else 0,
+                    int(existing[0]) if existing is not None and existing[0] is not None else 0,
                     max(0, int(requested_history_days)),
                 )
                 coverage_payload = {
@@ -391,6 +460,28 @@ class PersistentHistoricalEvidenceStore:
                     "maximum_history_days": maximum_days,
                     "requested_as_of": timestamp.isoformat(),
                 }
+                coverage_values = (
+                    asset_class,
+                    instrument_identity,
+                    provider_scope,
+                    maximum_days,
+                    timestamp.isoformat(),
+                    _digest(coverage_payload),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO historical_evidence_coverage_epochs(
+                        asset_class, instrument_identity, provider_scope,
+                        maximum_history_days, requested_as_of, integrity_sha256
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(asset_class, instrument_identity, provider_scope, requested_as_of)
+                    DO UPDATE SET maximum_history_days=excluded.maximum_history_days,
+                                  integrity_sha256=excluded.integrity_sha256
+                    """,
+                    coverage_values,
+                )
+                # Maintain the legacy latest-row table for compatibility with deployed
+                # databases and rollback safety. Point-in-time reads never depend on it.
                 connection.execute(
                     """
                     INSERT INTO historical_evidence_coverage(
@@ -401,15 +492,9 @@ class PersistentHistoricalEvidenceStore:
                     DO UPDATE SET maximum_history_days=excluded.maximum_history_days,
                                   requested_as_of=excluded.requested_as_of,
                                   integrity_sha256=excluded.integrity_sha256
+                    WHERE excluded.requested_as_of >= historical_evidence_coverage.requested_as_of
                     """,
-                    (
-                        asset_class,
-                        instrument_identity,
-                        provider_scope,
-                        maximum_days,
-                        timestamp.isoformat(),
-                        _digest(coverage_payload),
-                    ),
+                    coverage_values,
                 )
         finally:
             connection.close()
