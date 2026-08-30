@@ -91,33 +91,37 @@ def test_comprehensive_compaction_preserves_terminal_accounting_without_lane_gra
     assert heavy_ref() is None
 
 
-def test_installer_changes_only_production_context_discovery_seams(monkeypatch) -> None:
-    monkeypatch.delattr(subject._governed, subject._INSTALLED_ATTR, raising=False)
+def test_installer_changes_only_production_context_discovery_seams() -> None:
     original_equity = subject._governed.discover_us_equities
     original_comprehensive = subject._governed._discover_comprehensive_scope
+    had_installed = hasattr(subject._governed, subject._INSTALLED_ATTR)
+    prior_installed = getattr(subject._governed, subject._INSTALLED_ATTR, None)
+    if had_installed:
+        delattr(subject._governed, subject._INSTALLED_ATTR)
 
-    subject.install()
+    try:
+        subject.install()
 
-    assert subject._governed.discover_us_equities is subject._compact_discover_us_equities
-    assert (
-        subject._governed._discover_comprehensive_scope
-        is subject._compact_discover_comprehensive_scope
-    )
-    assert getattr(subject._governed, subject._INSTALLED_ATTR) is True
+        assert subject._governed.discover_us_equities is subject._compact_discover_us_equities
+        assert (
+            subject._governed._discover_comprehensive_scope
+            is subject._compact_discover_comprehensive_scope
+        )
+        assert getattr(subject._governed, subject._INSTALLED_ATTR) is True
 
-    subject.install()
-    assert subject._governed.discover_us_equities is subject._compact_discover_us_equities
-    assert (
-        subject._governed._discover_comprehensive_scope
-        is subject._compact_discover_comprehensive_scope
-    )
-
-    monkeypatch.setattr(subject._governed, "discover_us_equities", original_equity)
-    monkeypatch.setattr(
-        subject._governed,
-        "_discover_comprehensive_scope",
-        original_comprehensive,
-    )
+        subject.install()
+        assert subject._governed.discover_us_equities is subject._compact_discover_us_equities
+        assert (
+            subject._governed._discover_comprehensive_scope
+            is subject._compact_discover_comprehensive_scope
+        )
+    finally:
+        subject._governed.discover_us_equities = original_equity
+        subject._governed._discover_comprehensive_scope = original_comprehensive
+        if had_installed:
+            setattr(subject._governed, subject._INSTALLED_ATTR, prior_installed)
+        elif hasattr(subject._governed, subject._INSTALLED_ATTR):
+            delattr(subject._governed, subject._INSTALLED_ATTR)
 
 
 def test_compaction_does_not_change_resource_or_investment_policy() -> None:
