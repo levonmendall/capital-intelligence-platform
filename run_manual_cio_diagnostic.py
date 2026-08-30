@@ -9,8 +9,12 @@ initialization and historical replay consumption during worker initialization.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 
 import _manual_cio_diagnostic_core as _core
+
+
+_ORIGINAL_GOVERNED_NO_ACTION = _core._governed_no_action
 
 
 def _load_canonical_dependency() -> None:
@@ -39,13 +43,20 @@ def _load_worker_dependency() -> None:
 
 
 def _governed_no_action(briefing: object) -> bool:
-    """Use the canonical pending-transaction no-action classifier lazily.
+    """Recognize ranked non-transaction decisions without broadening terminal states.
 
-    Ranked CIO decisions can legitimately propose no executable portfolio change and
-    therefore have no construction artifact. Sharing the same strict classifier keeps the
-    diagnostic terminal handoff aligned with the pending-transaction report without
-    broadening execution eligibility or weakening exact-cycle checks.
+    The diagnostic retains its original explicit no-action statuses. Only a ``current``
+    ranked decision is delegated to the canonical pending-transaction classifier, which
+    requires complete decision identity and the explicit no-executable-change contract.
+    Operationally blocked briefings therefore remain fail-closed instead of being promoted
+    to diagnostic terminal success.
     """
+
+    if not isinstance(briefing, Mapping):
+        return False
+    status = str(briefing.get("status") or "").strip().lower()
+    if status != "current":
+        return bool(_ORIGINAL_GOVERNED_NO_ACTION(briefing))
 
     from cio_pending_transactions import _governed_no_action_briefing
 
