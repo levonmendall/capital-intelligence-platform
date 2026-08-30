@@ -130,7 +130,8 @@ def inject_certification_provenance(
     evidence_marker = '<div class="evidence-readonly">Read-only progress · thresholds unchanged</div>'
     if evidence_marker in refined:
         evidence_replacement = (
-            '<div class="evidence-readonly">Read-only progress · thresholds unchanged'
+            '<div class="evidence-readonly">'
+            '<span>Read-only progress · thresholds unchanged</span>'
             f'<br><span>{_esc(identity)}</span></div>'
         )
         refined = refined.replace(evidence_marker, evidence_replacement, 1)
