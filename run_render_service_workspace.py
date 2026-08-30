@@ -208,6 +208,16 @@ def main() -> int:
     # with the parent's finite stage/lane stall contract using a blind aggregate clock.
     install_release_prequalification_timeout_contract(memory_safe)
 
+    # Once discovery has materialized the exact governed instrument contracts, discard
+    # its detailed selected/excluded evidence graphs before raw paper evidence and final
+    # candidate construction overlap them. Compact views preserve every field consumed by
+    # production-context lineage and telemetry; governed resource limits stay unchanged.
+    from operations.production_context_discovery_compaction import (
+        install as install_production_context_discovery_compaction,
+    )
+
+    install_production_context_discovery_compaction()
+
     # Replace the duplicate preliminary full evidence graph with a held-symbol-only mark
     # pass, then retain exactly one complete governed evidence build. The canonical feature
     # path, evidence gates, and memory boundaries remain unchanged.
