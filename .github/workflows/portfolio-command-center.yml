@@ -5,13 +5,17 @@ on:
     paths:
       - "all_market_certification_ui.py"
       - "operations/all_market_certification_envelope.py"
+      - "operations/asset_class_evaluation_status.py"
       - "portfolio_only_runtime.py"
       - "portfolio_evidence_accumulation_ui.py"
+      - "ui_reporting_time.py"
       - "ui_runtime_composition.py"
       - "tests/test_all_market_certification_envelope.py"
       - "tests/test_all_market_certification_ui.py"
+      - "tests/test_asset_class_evaluation_status_scope.py"
       - "tests/test_crypto_style_portfolio_command_center.py"
       - "tests/test_portfolio_evidence_accumulation_ui.py"
+      - "tests/test_ui_reporting_time.py"
       - "tests/browser/test_portfolio_command_center_browser.py"
       - ".github/workflows/portfolio-command-center.yml"
   push:
@@ -19,13 +23,17 @@ on:
     paths:
       - "all_market_certification_ui.py"
       - "operations/all_market_certification_envelope.py"
+      - "operations/asset_class_evaluation_status.py"
       - "portfolio_only_runtime.py"
       - "portfolio_evidence_accumulation_ui.py"
+      - "ui_reporting_time.py"
       - "ui_runtime_composition.py"
       - "tests/test_all_market_certification_envelope.py"
       - "tests/test_all_market_certification_ui.py"
+      - "tests/test_asset_class_evaluation_status_scope.py"
       - "tests/test_crypto_style_portfolio_command_center.py"
       - "tests/test_portfolio_evidence_accumulation_ui.py"
+      - "tests/test_ui_reporting_time.py"
       - "tests/browser/test_portfolio_command_center_browser.py"
       - ".github/workflows/portfolio-command-center.yml"
 
@@ -65,11 +73,15 @@ jobs:
           python -m py_compile
           all_market_certification_ui.py
           operations/all_market_certification_envelope.py
+          operations/asset_class_evaluation_status.py
           portfolio_only_runtime.py
           portfolio_evidence_accumulation_ui.py
+          ui_reporting_time.py
           tests/test_all_market_certification_envelope.py
           tests/test_all_market_certification_ui.py
+          tests/test_asset_class_evaluation_status_scope.py
           tests/test_portfolio_evidence_accumulation_ui.py
+          tests/test_ui_reporting_time.py
           tests/browser/test_portfolio_command_center_browser.py
 
       - name: Locate preinstalled Chrome
@@ -84,8 +96,10 @@ jobs:
           pytest -q
           tests/test_all_market_certification_envelope.py
           tests/test_all_market_certification_ui.py
+          tests/test_asset_class_evaluation_status_scope.py
           tests/test_crypto_style_portfolio_command_center.py
           tests/test_portfolio_evidence_accumulation_ui.py
+          tests/test_ui_reporting_time.py
           tests/test_capability_scoped_runtime_v2.py
 
       - name: Run desktop and iPhone production command center browser gate

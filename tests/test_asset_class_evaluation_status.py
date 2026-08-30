@@ -236,7 +236,7 @@ def test_partial_terminal_evaluation_reports_successful_over_full_governed_scope
     assert rows["crypto"]["status"] == "Awaiting evaluation"
 
 
-def test_matching_terminal_certification_keeps_unreached_classes_visible(tmp_path: Path) -> None:
+def test_partial_certified_terminal_aggregate_remains_evaluation(tmp_path: Path) -> None:
     epoch = _write_dag_attempt(tmp_path)
     root = tmp_path / "all-market-certification"
     us_hash = _write_lane_artifact(
@@ -271,7 +271,7 @@ def test_matching_terminal_certification_keeps_unreached_classes_visible(tmp_pat
     assert status["total"] == _GOVERNED_CLASS_COUNT
     assert status["reached"] == 2
     assert status["successful"] == 2
-    assert status["source"] == "Current all-market certification"
+    assert status["source"] == "Current all-market evaluation"
     rows = _rows_by_key(status)
     assert len(rows) == _GOVERNED_CLASS_COUNT
     assert sum(row["status"] == "Evaluated" for row in rows.values()) == 2
