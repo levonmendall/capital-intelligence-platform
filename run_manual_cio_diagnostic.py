@@ -38,10 +38,25 @@ def _load_worker_dependency() -> None:
         _core.build_worker = implementation
 
 
+def _governed_no_action(briefing: object) -> bool:
+    """Use the canonical pending-transaction no-action classifier lazily.
+
+    Ranked CIO decisions can legitimately propose no executable portfolio change and
+    therefore have no construction artifact. Sharing the same strict classifier keeps the
+    diagnostic terminal handoff aligned with the pending-transaction report without
+    broadening execution eligibility or weakening exact-cycle checks.
+    """
+
+    from cio_pending_transactions import _governed_no_action_briefing
+
+    return _governed_no_action_briefing(briefing)
+
+
 # Replace core lazy loaders before execution. The adapter itself remains lightweight; neither
 # portfolio, operations, nor scheduler/application graphs are imported at process startup.
 _core._load_canonical_dependency = _load_canonical_dependency
 _core._load_worker_dependency = _load_worker_dependency
+_core._governed_no_action = _governed_no_action
 
 if __name__ == "__main__":
     raise SystemExit(_core.main())
