@@ -106,13 +106,23 @@ def _base_universe_symbols() -> tuple[str, ...]:
 
 def _stage_reference(values: dict[str, str], state) -> dict[str, object]:
     from operations import component_qualified_evidence_maintenance as maintenance
+    from operations.historical_evidence_epoch_floor import (
+        load_historical_evidence_epoch_floor,
+    )
 
-    # Preserve the existing release-independent reuse contract: if a still-fresh public
-    # component already established an evidence epoch, bind reference components to that
-    # epoch rather than silently moving downstream stages to a newer cutoff.
-    preparation_cutoff = maintenance._resumable_evidence_cutoff(
+    # Normal retries may bind to an older still-fresh public component. After a
+    # point-in-time historical conflict, however, that optimization must never drag the
+    # replacement attempt back below the snapshot boundary that caused the prior attempt
+    # to fail. The durable floor is release-scoped and carries no certification authority.
+    resumable_cutoff = maintenance._resumable_evidence_cutoff(
         values,
         requested=state.evidence_as_of,
+    )
+    retry_floor = load_historical_evidence_epoch_floor(values)
+    preparation_cutoff = (
+        resumable_cutoff
+        if retry_floor is None
+        else max(resumable_cutoff, retry_floor)
     )
     manifest, effective_cutoff = maintenance._bound_or_prepare_reference_manifest(
         values,
@@ -479,6 +489,22 @@ def run_stage(
         )
     except Exception as error:
         detail = _credential_safe_detail(error, resolved)
+        retry_floor = None
+        if normalized == "paper_evidence":
+            try:
+                from operations.historical_evidence_epoch_floor import (
+                    record_historical_evidence_epoch_floor,
+                )
+
+                retry_floor = record_historical_evidence_epoch_floor(
+                    detail,
+                    values=resolved,
+                )
+            except Exception:
+                # Never replace the substantive fail-closed stage error with advisory
+                # retry-floor telemetry. Without a durable floor the next attempt simply
+                # retains the existing conservative behavior.
+                retry_floor = None
         try:
             fail_evidence_stage(
                 resolved,
@@ -497,6 +523,9 @@ def run_stage(
                     "stage": normalized,
                     "error_type": type(error).__name__,
                     "error_detail": detail,
+                    "historical_evidence_retry_floor": (
+                        None if retry_floor is None else retry_floor.isoformat()
+                    ),
                     "credential_safe": True,
                     "decision_authority": False,
                     "execution_authority": False,
